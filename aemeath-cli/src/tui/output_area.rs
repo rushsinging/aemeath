@@ -458,20 +458,23 @@ impl OutputArea {
             }
         }
 
-        // Adjust scroll offset for new lines added (keep view stable when scrolled up)
-        if !self.auto_scroll {
-            let new_line_count = self.lines.len();
-            if new_line_count > old_line_count {
-                self.scroll_offset += new_line_count - old_line_count;
-            }
-        }
-
         // If buffer ends with newline, add empty line for next append
         if self.streaming_buffer.ends_with('\n') {
             self.lines.push_back(OutputLine {
                 content: String::new(),
                 style: LineStyle::Assistant,
             });
+        }
+
+        // Adjust scroll offset to keep view stable when scrolled up.
+        // Must be AFTER trailing newline line is added so we count all lines.
+        if !self.auto_scroll {
+            let new_line_count = self.lines.len();
+            if new_line_count > old_line_count {
+                self.scroll_offset += new_line_count - old_line_count;
+            } else if new_line_count < old_line_count {
+                self.scroll_offset = self.scroll_offset.saturating_sub(old_line_count - new_line_count);
+            }
         }
     }
 
@@ -533,8 +536,11 @@ impl OutputArea {
             }
         }
 
-        // Show result content with tree connectors (truncated to 5 lines)
-        if !result.trim().is_empty() {
+        // For task-related tools, skip verbose output (already shown in header)
+        let is_task_tool = matches!(tool_name, "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList");
+
+        if !is_task_tool && !result.trim().is_empty() {
+            // Show result content with tree connectors (truncated to 5 lines)
             let total = result.lines().count();
             let display_lines: Vec<&str> = result.lines().take(5).collect();
             let has_more = total > 5;

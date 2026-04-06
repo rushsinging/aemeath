@@ -43,9 +43,9 @@ pub struct Config {
 /// API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
-    /// LLM provider to use
+    /// LLM provider to use (None = unset, use base value; Some = explicitly set)
     #[serde(default)]
-    pub provider: Provider,
+    pub provider: Option<Provider>,
 
     /// API key (can also be set via provider-specific env var)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -71,7 +71,7 @@ pub struct ApiConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            provider: Provider::default(),
+            provider: None,
             key: None,
             base_url: None,
             user_agent: default_user_agent(),
@@ -341,12 +341,13 @@ impl ConfigManager {
         // Provider
         if let Ok(provider_str) = std::env::var("AEMEATH_PROVIDER") {
             if let Some(provider) = Provider::from_str(&provider_str) {
-                config.api.provider = provider;
+                config.api.provider = Some(provider);
             }
         }
 
         // API key - check provider-specific env var first
-        let provider_key_env = config.api.provider.api_key_env();
+        let effective_provider = config.api.provider.unwrap_or_default();
+        let provider_key_env = effective_provider.api_key_env();
         if let Ok(key) = std::env::var(provider_key_env) {
             config.api.key = Some(key);
         } else if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
@@ -411,12 +412,8 @@ impl ConfigManager {
     fn merge_config(base: Config, overlay: Config) -> Config {
         Config {
             api: ApiConfig {
-                // Only override provider if overlay explicitly set it (not default)
-                provider: if overlay.api.provider != Provider::default() {
-                    overlay.api.provider
-                } else {
-                    base.api.provider
-                },
+                // None = unset, use base value; Some = explicitly set
+                provider: overlay.api.provider.or(base.api.provider),
                 key: overlay.api.key.or(base.api.key),
                 base_url: overlay.api.base_url.or(base.api.base_url),
                 user_agent: if overlay.api.user_agent != default_user_agent() {

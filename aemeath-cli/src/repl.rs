@@ -137,6 +137,7 @@ pub async fn run_repl(
                 &session_id,
                 &cwd,
                 &pending_images,
+                resumed_session.as_ref(),
             ).await {
                 SlashResult::Continue => continue,
                 SlashResult::Exit => break,
@@ -269,6 +270,7 @@ pub async fn run_repl(
             read_files: read_files.clone(),
             agent_runner: agent_runner.clone(),
             plan_mode: None,
+            allow_all,
         };
         let agent = Agent {
             registry: &registry,
@@ -451,6 +453,7 @@ async fn handle_slash_command(
     session_id: &str,
     cwd: &Path,
     pending_images: &PendingImages,
+    resumed_session: Option<&Session>,
 ) -> SlashResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = *parts.first().unwrap_or(&"");
@@ -525,11 +528,22 @@ async fn handle_slash_command(
             SlashResult::Continue
         }
         "/save" => {
-            // Try loading existing session to preserve metadata, fallback to new
-            let mut s = session::load_session(session_id)
-                .unwrap_or_else(|_| Session::new(session_id.to_string(), cwd.to_string_lossy().to_string()));
-            s.messages = messages.clone();
-            s.updated_at = session::now_iso();
+            // Use resumed_session if available, otherwise create new session
+            let s: Session = if let Some(existing) = resumed_session {
+                Session {
+                    id: existing.id.clone(),
+                    cwd: existing.cwd.clone(),
+                    messages: messages.clone(),
+                    created_at: existing.created_at.clone(),
+                    updated_at: session::now_iso(),
+                    metadata: existing.metadata.clone(),
+                }
+            } else {
+                let mut s = Session::new(session_id.to_string(), cwd.to_string_lossy().to_string());
+                s.messages = messages.clone();
+                s.updated_at = session::now_iso();
+                s
+            };
             match session::save_session(&s) {
                 Ok(()) => println!("[session saved: {session_id}]"),
                 Err(e) => eprintln!("error: {e}"),

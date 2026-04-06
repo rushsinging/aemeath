@@ -47,7 +47,24 @@ impl<'a> Agent<'a> {
             }
         }
 
-        let mut results: Vec<ToolResultTuple> = Vec::with_capacity(tool_calls.len());
+        // Pre-allocate result slots and track original positions
+        // This ensures results are returned in original tool_calls order
+        let total_len = tool_calls.len();
+        let mut results: Vec<Option<ToolResultTuple>> = vec![None; total_len];
+        let mut concurrent_positions: Vec<usize> = Vec::new();
+        let mut sequential_positions: Vec<usize> = Vec::new();
+
+        // Track positions for each call
+        for (i, call) in tool_calls.iter().enumerate() {
+            match self.registry.get(&call.name) {
+                Some(tool) if tool.is_concurrency_safe() => {
+                    concurrent_positions.push(i);
+                }
+                _ => {
+                    sequential_positions.push(i);
+                }
+            }
+        }
 
         // Execute concurrent-safe tools in parallel using join_all
         if !concurrent_calls.is_empty() {
@@ -55,7 +72,8 @@ impl<'a> Agent<'a> {
 
             let futures: Vec<_> = concurrent_calls
                 .iter()
-                .filter_map(|call| {
+                .zip(concurrent_positions.iter())
+                .filter_map(|(call, &pos)| {
                     self.registry.get(&call.name).map(|tool| {
                         let input = call.input.clone();
                         let ctx = self.ctx.clone();
@@ -69,8 +87,8 @@ impl<'a> Agent<'a> {
                                 std::time::Duration::from_secs(120),
                                 tool.call(input, &ctx),
                             ).await {
-                                Ok(result) => (id, result.output, result.is_error, result.images),
-                                Err(_) => (id, format!("Tool {} timed out after 120s", name), true, Vec::new()),
+                                Ok(result) => (pos, id, result.output, result.is_error, result.images),
+                                Err(_) => (pos, id, format!("Tool {} timed out after 120s", name), true, Vec::new()),
                             }
                         }
                     })
@@ -78,25 +96,27 @@ impl<'a> Agent<'a> {
                 .collect();
 
             let concurrent_results = futures::future::join_all(futures).await;
-            results.extend(concurrent_results);
+            for (pos, id, output, is_error, images) in concurrent_results {
+                results[pos] = Some((id, output, is_error, images));
+            }
         }
 
         // Execute non-concurrent tools sequentially
-        for call in sequential_calls {
+        for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
             if let Some(tool) = self.registry.get(&call.name) {
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(120),
                     tool.call(call.input.clone(), &self.ctx),
                 ).await {
                     Ok(result) => {
-                        results.push((call.id.clone(), result.output, result.is_error, result.images));
+                        results[pos] = Some((call.id.clone(), result.output, result.is_error, result.images));
                     }
                     Err(_) => {
-                        results.push((call.id.clone(), format!("Tool {} timed out after 120s", call.name), true, Vec::new()));
+                        results[pos] = Some((call.id.clone(), format!("Tool {} timed out after 120s", call.name), true, Vec::new()));
                     }
                 }
             } else {
-                results.push((
+                results[pos] = Some((
                     call.id.clone(),
                     format!("unknown tool: {}", call.name),
                     true,
@@ -105,7 +125,8 @@ impl<'a> Agent<'a> {
             }
         }
 
-        results
+        // Unwrap results - all slots should be filled
+        results.into_iter().map(|r| r.unwrap()).collect()
     }
 
     /// Execute only the given tool calls (subset of all calls)

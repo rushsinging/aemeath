@@ -63,6 +63,8 @@ pub struct ToolContext {
     pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
     /// Whether we're in plan mode (simulated tool execution)
     pub plan_mode: Option<bool>,
+    /// Whether all tools are auto-approved (skip injection checks)
+    pub allow_all: bool,
 }
 
 #[async_trait]

@@ -4,6 +4,15 @@
 //! - Background execution of tasks
 //! - Task persistence and recovery
 //! - Task queue management
+//!
+//! # Lock ordering
+//!
+//! To prevent deadlocks, the following lock ordering must be observed:
+//! 1. `active_tasks` (RwLock) must be acquired BEFORE `task_queue` (Mutex)
+//! 2. Never acquire `task_queue` while holding `active_tasks` in a way that
+//!    could cause a circular wait with other tasks
+//!
+//! If you need both locks, always acquire `active_tasks` first, then `task_queue`.
 
 use crate::task::{TaskStatus, TaskStore};
 use serde::{Deserialize, Serialize};

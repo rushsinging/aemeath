@@ -159,12 +159,17 @@ fn fuzzy_find_in_content(content: &str, old_string: &str) -> Option<String> {
         }
 
         if all_match {
-            // Return the actual content lines (with original indentation)
-            return Some(
-                content_lines[i..i + old_lines.len()]
-                    .join("\n")
-            );
-        }
+                // Return the actual content lines (with original indentation)
+                // Preserve trailing newline if old_string had one
+                let has_trailing_newline = old_string.ends_with('\n');
+                let matched = content_lines[i..i + old_lines.len()]
+                    .join("\n");
+                return if has_trailing_newline {
+                    Some(format!("{}\n", matched))
+                } else {
+                    Some(matched)
+                };
+            }
     }
 
     None

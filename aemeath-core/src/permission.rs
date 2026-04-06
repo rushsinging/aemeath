@@ -273,14 +273,14 @@ mod tests {
 
     #[test]
     fn test_auto_all_mode() {
-        let mut mgr = PermissionManager::with_mode(PermissionMode::AutoAll);
+        let mgr = PermissionManager::with_mode(PermissionMode::AutoAll);
         let decision = mgr.check_permission_silent("Bash");
         assert_eq!(decision, PermissionDecision::Allow);
     }
 
     #[test]
     fn test_auto_read_mode() {
-        let mut mgr = PermissionManager::with_mode(PermissionMode::AutoRead);
+        let mgr = PermissionManager::with_mode(PermissionMode::AutoRead);
         let read_decision = mgr.check_permission_silent("Read");
         assert_eq!(read_decision, PermissionDecision::Allow);
 

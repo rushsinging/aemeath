@@ -1,11 +1,12 @@
 use crate::image::{ProcessedImage, is_image_file, process_image_file};
 use crate::tui::completion::{SuggestionContext, generate_suggestions, apply_suggestion};
 use super::{InputArea, OutputArea, StatusBar};
+use super::output_area::{LineStyle, OutputLine};
 use aemeath_core::agent::Agent;
 use aemeath_core::command::cmd;
 use aemeath_core::cost::format_tokens;
 use aemeath_core::message::Message;
-use aemeath_core::tool::{ToolContext, ToolRegistry};
+use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::stream::StreamHandler;
 use aemeath_llm::types::StopReason;
 use crossterm::{
@@ -32,7 +33,7 @@ enum UiEvent {
     TextBlockComplete(String),
     ToolCallStart(String),
     ToolCall { name: String, summary: String },
-    ToolResult { tool_name: String, output: String, is_error: bool },
+    ToolResult { tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
     Usage { input: u32, output: u32 },
     Error(String),
     Cancelled,
@@ -220,9 +221,11 @@ impl App {
 
                 // Wrap each render in catch_unwind to prevent ratatui buffer panics
                 let buf = f.buffer_mut();
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.output_area.render(chunks[0], buf);
-                }));
+                })).is_err() {
+                    self.status_bar.set_warning("Render error, try resizing");
+                }
                 self.input_area.set_pending_images(self.pending_images.len());
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.input_area.render(chunks[1], buf);
@@ -259,9 +262,20 @@ impl App {
                             UiEvent::ToolCall { name, summary } => {
                                 self.output_area.push_tool_call(&name, &summary);
                             }
-                            UiEvent::ToolResult { tool_name, output, is_error } => {
-                                self.output_area.push_tool_result_with_diff(&tool_name, &output, is_error);
-                            }
+                            UiEvent::ToolResult { tool_name, output, is_error, images } => {
+                                  let image_note = if images.is_empty() {
+                                      String::new()
+                                  } else {
+                                      format!("  │  [{} image(s) attached]\n", images.len())
+                                  };
+                                  self.output_area.push_tool_result_with_diff(&tool_name, &output, is_error);
+                                  if !image_note.is_empty() {
+                                      self.output_area.push_line(OutputLine {
+                                          content: image_note.trim().to_string(),
+                                          style: LineStyle::System,
+                                      });
+                                  }
+                              }
                             UiEvent::Usage { input, output } => {
                                 self.total_input_tokens += input as u64;
                                 self.total_output_tokens += output as u64;
@@ -577,12 +591,17 @@ impl App {
                             (KeyModifiers::SHIFT, KeyCode::End) => {
                                 self.output_area.scroll_to_bottom();
                             }
-                            (KeyModifiers::NONE, KeyCode::Char(c)) => {
-                                self.input_area.input(c);
-                                if !is_processing {
-                                    self.update_suggestions();
-                                }
-                            }
+                            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                                                              let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                                                  c.to_ascii_uppercase()
+                                                              } else {
+                                                                  c
+                                                              };
+                                                              self.input_area.input(ch);
+                                                              if !is_processing {
+                                                                  self.update_suggestions();
+                                                              }
+                                                          }
                             (KeyModifiers::NONE, KeyCode::Backspace) => {
                                 self.input_area.backspace();
                                 if !is_processing {
@@ -863,6 +882,7 @@ async fn process_in_background(
         read_files,
         agent_runner,
         plan_mode: None,
+        allow_all,
     };
     let agent = Agent {
         registry: &registry,
@@ -871,11 +891,17 @@ async fn process_in_background(
 
     const MAX_TURNS: usize = 100;
 
+    // Remember message count at start — on cancel, truncate back to this point
+    let messages_at_start = messages.len();
+
     for _ in 0..MAX_TURNS {
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
-            let _ = tx.send(UiEvent::Error("[interrupted]".into())).await;
-            break;
+            messages.truncate(messages_at_start);
+            let _ = tx.send(UiEvent::MessagesSync(messages)).await;
+            let _ = tx.send(UiEvent::Cancelled).await;
+            let _ = tx.send(UiEvent::Done).await;
+            return;
         }
 
         // Stream handler that sends events to UI
@@ -961,6 +987,7 @@ async fn process_in_background(
                             tool_name: call.name.clone(),
                             output: format!("Tool {} denied: use --allow-all to permit write operations", call.name),
                             is_error: true,
+                            images: Vec::new(),
                         }).await;
                     }
 
@@ -968,39 +995,43 @@ async fn process_in_background(
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
                     let results = agent.execute_tools(&approved_calls).await;
-                    for (i, (_id, output, is_error, _images)) in results.iter().enumerate() {
-                        let tool_name = tool_calls.get(i).map(|c| c.name.as_str()).unwrap_or("Unknown");
+                    // Build a map from tool_call id to name for correct indexing
+                    let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
+                        .iter()
+                        .map(|c| (c.id.as_str(), c.name.as_str()))
+                        .collect();
+                    for (_id, output, is_error, images) in results.iter() {
+                        let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
                         let _ = tx.send(UiEvent::ToolResult {
                             tool_name: tool_name.to_string(),
                             output: output.clone(),
                             is_error: *is_error,
+                            images: images.clone(),
                         }).await;
                     }
-                    // Build combined results (approved + denied)
-                    let mut all_results: Vec<(String, String, bool)> = results
+                    // Build combined results (approved + denied), preserving images for approved tools
+                    let mut all_results: Vec<(String, String, bool, Vec<ImageData>)> = results
                         .into_iter()
-                        .map(|(id, output, is_error, _)| (id, output, is_error))
+                        .map(|(id, output, is_error, images)| (id, output, is_error, images))
                         .collect();
                     for call in &denied {
                         all_results.push((
                             call.id.clone(),
                             format!("Tool {} denied: requires --allow-all", call.name),
                             true,
+                            Vec::new(),
                         ));
                     }
-                    messages.push(Message::tool_results(all_results));
+                    messages.push(Message::tool_results_rich(all_results));
                 }
             }
             Err(e) => {
                 let msg = format!("{e}");
                 if msg.contains("interrupted by user") {
-                    // Remove the dangling user message (no assistant reply)
-                    // to maintain user/assistant alternation
-                    if let Some(last) = messages.last() {
-                        if last.role == aemeath_core::message::Role::User {
-                            messages.pop();
-                        }
-                    }
+                    // Truncate back to the state before this turn started.
+                    // This removes the user message, any partial assistant reply,
+                    // and any tool results — maintaining clean message alternation.
+                    messages.truncate(messages_at_start);
                     let _ = tx.send(UiEvent::MessagesSync(messages)).await;
                     let _ = tx.send(UiEvent::Cancelled).await;
                     let _ = tx.send(UiEvent::Done).await;

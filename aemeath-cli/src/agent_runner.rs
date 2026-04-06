@@ -52,6 +52,7 @@ impl AgentRunner for CliAgentRunner {
             )),
             agent_runner: None, // No nested agents
             plan_mode: ctx.plan_mode.clone(),
+            allow_all: ctx.allow_all,
         };
         let agent = Agent {
             registry: &sub_registry,

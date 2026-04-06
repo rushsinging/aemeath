@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_session_creation() {
-        let session = Session::new(Path::new("/tmp"));
+        let session = InternalSession::new(Path::new("/tmp"));
         assert!(!session.id.is_empty());
         assert_eq!(session.cwd, "/tmp");
     }

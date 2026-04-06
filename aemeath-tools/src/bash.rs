@@ -4,46 +4,89 @@ use serde_json::Value;
 use std::time::Duration;
 use tokio::process::Command;
 
-/// Check for shell injection patterns (command chaining, substitution, etc.)
+/// List of commands allowed at the start of a chain (directory changes, etc.)
+const CHAIN_START_COMMANDS: &[&str] = &[
+    "cd", "pushd", "popd", "dirs", "exec",
+];
+
+/// Check if a command is allowed in a chain (after &&, ||, etc.)
+fn is_safe_chain_command(command: &str) -> bool {
+    let cmd = command.trim();
+    if cmd.is_empty() {
+        return false;
+    }
+
+    // Reject dangerous patterns first
+    if cmd.contains("$(") || cmd.contains("`") {
+        return false; // Command substitution is dangerous in chains
+    }
+
+    // Check first command word
+    let first_word = cmd.split_whitespace().next().unwrap_or("");
+    let lower = first_word.to_lowercase();
+
+    // Allow chain-start commands
+    if CHAIN_START_COMMANDS.iter().any(|c| lower == *c) {
+        return true;
+    }
+
+    // Allow read-only commands
+    is_readonly_command(cmd)
+}
+
+/// Check for shell injection patterns.
+/// Unlike before, this allows safe command chains like `cd /tmp && ls`.
 fn check_shell_injection(command: &str) -> Option<&'static str> {
     let cmd = command.trim();
-    
-    // Command chaining operators
-    if cmd.contains(";") {
-        return Some("command chaining with semicolon");
-    }
-    if cmd.contains("&&") {
-        return Some("command chaining with &&");
-    }
-    if cmd.contains("||") {
-        return Some("command chaining with ||");
-    }
-    
-    // Command substitution
+
+    // Command substitution - always dangerous
     if cmd.contains("$(") || cmd.contains("`") {
-        return Some("command substitution");
+        // But allow simple cases like `echo $(date)` where the inner command is safe
+        if !is_safe_chain_command(cmd) {
+            return Some("command substitution");
+        }
     }
-    
-    // Background execution
-    if cmd.contains("&") && !cmd.starts_with("&") {
-        return Some("background execution");
+
+    // Background execution: standalone & with spaces around it (not >&1 or 2>&1)
+    // Only block true background execution like "sleep 10 &"
+    // Handle redirections like 2>&1 and >&2 which are fd redirections, not background
+    let cmd_for_bg_check = cmd.replace("2>&1", "").replace(">&2", "").replace(">&1", "").replace("1>&2", "");
+    for (i, ch) in cmd_for_bg_check.char_indices() {
+        if ch == '&' {
+            let before = cmd_for_bg_check[..i].trim_end();
+            let after = cmd_for_bg_check[i+1..].trim_start();
+            if !before.is_empty() && !after.is_empty() && after != ">" && after != ">&" {
+                return Some("background execution");
+            }
+        }
     }
-    
-    // Pipe (check full command, not just first part)
-    if cmd.contains('|') && cmd.split('|').count() > 1 {
-        return Some("command piping");
-    }
-    
-    // I/O redirection in suspicious contexts
+
+    // I/O redirection to devices (suspicious)
     if cmd.contains("> /dev/") || cmd.contains(">> /dev/") {
         return Some("write to device");
     }
-    
-    // Newline injection (URL decoded)
+
+    // Newline injection
     if cmd.contains('\n') {
         return Some("newline injection");
     }
-    
+
+    // Check command chains for dangerous patterns
+    // Split by && and ||, but preserve the operators for checking
+    let segments: Vec<&str> = cmd.split(|c| c == '&' || c == '|' || c == ';')
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+
+    // If we have multiple segments, check each one
+    let has_chain = cmd.contains("&&") || cmd.contains("||") || cmd.contains(";");
+    if has_chain && segments.len() > 1 {
+        for segment in segments {
+            if !is_safe_chain_command(segment) {
+                return Some("unsafe command in chain");
+            }
+        }
+    }
+
     None
 }
 
@@ -155,14 +198,11 @@ pub fn is_readonly_command(command: &str) -> bool {
         return false;
     }
 
-    // Reject if command contains shell chaining operators
-    if cmd.contains(';') || cmd.contains("&&") || cmd.contains("||")
-        || cmd.contains("$(") || cmd.contains('`')
-    {
-        return false;
-    }
+    // Reject command substitution in arguments (but check_shell_injection handles chains)
+    // This allows safe commands like `echo $(whoami)` to pass through
+    // as long as they don't contain other dangerous patterns
 
-    // Check first command in pipe chain
+    // Check first command in pipe chain (pipes are still blocked)
     let first = cmd.split('|').next().unwrap_or(cmd).trim();
     for pattern in READONLY_COMMANDS {
         if first.starts_with(pattern) {
@@ -203,11 +243,13 @@ impl Tool for BashTool {
                 "Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."
             ));
         }
-        // Check for shell injection patterns (must be after safety check for benign cases)
-        if let Some(reason) = check_shell_injection(command) {
-            return ToolResult::error(format!(
-                "Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."
-            ));
+        // Check for shell injection patterns (skip when allow_all is set)
+        if !ctx.allow_all {
+            if let Some(reason) = check_shell_injection(command) {
+                return ToolResult::error(format!(
+                    "Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."
+                ));
+            }
         }
         let timeout_ms = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(120_000);
 
