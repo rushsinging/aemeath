@@ -1,0 +1,18 @@
+[package]
+name = "aemeath-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = "0.7"
+dirs = "6"
+rand = "0.9"
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+log = "0.4"
+parking_lot = "0.12"

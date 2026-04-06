@@ -1,0 +1,285 @@
+//! Token estimation service for context management
+//!
+//! Provides CJK-aware token estimation for messages and text content.
+//! Note: This uses estimation algorithms, not actual tokenizers.
+//! For more accurate results, consider integrating tiktoken.
+
+use crate::message::{ContentBlock, Message};
+
+/// Token estimation service
+pub struct TokenEstimation {
+    /// Context size limit
+    context_size: usize,
+    /// Warning threshold (percentage)
+    warning_threshold: u8,
+    /// Bytes per token ratio (default 4, varies by model)
+    bytes_per_token: f64,
+}
+
+impl TokenEstimation {
+    /// Create a new token estimation service
+    pub fn new(context_size: usize) -> Self {
+        Self {
+            context_size,
+            warning_threshold: 80,
+            bytes_per_token: 4.0, // Default for most models
+        }
+    }
+
+    /// Set warning threshold (percentage of context used)
+    pub fn with_warning_threshold(mut self, threshold: u8) -> Self {
+        self.warning_threshold = threshold.min(100);
+        self
+    }
+
+    /// Set bytes per token ratio based on model
+    /// Some models use different ratios (e.g., 3.5 for efficient models)
+    pub fn with_model_ratio(mut self, bytes_per_token: f64) -> Self {
+        self.bytes_per_token = bytes_per_token.max(2.0).min(6.0);
+        self
+    }
+
+    /// Estimate tokens for text content
+    pub fn estimate_text(&self, text: &str) -> usize {
+        estimate_tokens(text)
+    }
+
+    /// Estimate tokens for a message
+    pub fn estimate_message(&self, message: &Message) -> usize {
+        estimate_message_tokens(message)
+    }
+
+    /// Estimate tokens for a list of messages
+    pub fn estimate_messages(&self, messages: &[Message]) -> usize {
+        estimate_messages_tokens(messages)
+    }
+
+    /// Estimate tokens for JSON content
+    pub fn estimate_json(&self, json: &str) -> usize {
+        estimate_json_tokens(json)
+    }
+
+    /// Check if messages exceed warning threshold
+    pub fn is_near_limit(&self, messages: &[Message], system_prompt: &str) -> bool {
+        let total = self.total_tokens(messages, system_prompt);
+        total > self.context_size * self.warning_threshold as usize / 100
+    }
+
+    /// Get total tokens including system prompt
+    pub fn total_tokens(&self, messages: &[Message], system_prompt: &str) -> usize {
+        let system_tokens = self.estimate_text(system_prompt);
+        let message_tokens = self.estimate_messages(messages);
+        system_tokens + message_tokens
+    }
+
+    /// Get context usage statistics
+    pub fn usage_stats(&self, messages: &[Message], system_prompt: &str) -> ContextUsage {
+        let system_tokens = self.estimate_text(system_prompt);
+        let message_tokens = self.estimate_messages(messages);
+        let total = system_tokens + message_tokens;
+        let available = self.context_size.saturating_sub(total);
+        let percentage = (total as f64 / self.context_size as f64 * 100.0) as u8;
+
+        ContextUsage {
+            total_tokens: total,
+            system_tokens,
+            message_tokens,
+            context_size: self.context_size,
+            available_tokens: available,
+            usage_percentage: percentage,
+            needs_compaction: percentage >= self.warning_threshold,
+        }
+    }
+}
+
+impl Default for TokenEstimation {
+    fn default() -> Self {
+        Self::new(128000) // Default context size
+    }
+}
+
+/// Context usage statistics
+#[derive(Debug, Clone)]
+pub struct ContextUsage {
+    /// Total tokens used
+    pub total_tokens: usize,
+    /// Tokens in system prompt
+    pub system_tokens: usize,
+    /// Tokens in messages
+    pub message_tokens: usize,
+    /// Maximum context size
+    pub context_size: usize,
+    /// Available tokens remaining
+    pub available_tokens: usize,
+    /// Usage percentage
+    pub usage_percentage: u8,
+    /// Whether compaction is needed
+    pub needs_compaction: bool,
+}
+
+impl ContextUsage {
+    /// Format as human-readable string
+    pub fn format(&self) -> String {
+        let status = if self.needs_compaction {
+            "⚠️ Near limit"
+        } else {
+            "✓ OK"
+        };
+
+        format!(
+            "Context Usage: {} / {} tokens ({}%)\n  System: {} tokens\n  Messages: {} tokens\n  Available: {} tokens\n  Status: {}",
+            format_tokens(self.total_tokens),
+            format_tokens(self.context_size),
+            self.usage_percentage,
+            format_tokens(self.system_tokens),
+            format_tokens(self.message_tokens),
+            format_tokens(self.available_tokens),
+            status
+        )
+    }
+}
+
+/// Format token count with k/m suffix
+pub fn format_tokens(n: usize) -> String {
+    if n >= 1_000_000 {
+        let m = n as f64 / 1_000_000.0;
+        if m.fract() < 0.05 {
+            format!("{:.0}m", m)
+        } else {
+            format!("{:.1}m", m)
+        }
+    } else if n >= 1000 {
+        let k = n as f64 / 1000.0;
+        if k.fract() < 0.05 {
+            format!("{:.0}k", k)
+        } else {
+            format!("{:.1}k", k)
+        }
+    } else {
+        n.to_string()
+    }
+}
+
+/// Estimate token count for a string.
+/// Uses CJK-aware estimation: CJK characters average ~2 tokens each,
+/// while ASCII/Latin text averages ~4 characters per token.
+pub fn estimate_tokens(text: &str) -> usize {
+    estimate_tokens_with_ratio(text, 4.0)
+}
+
+/// Estimate tokens with custom bytes-per-token ratio
+pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
+    let mut cjk_chars = 0usize;
+    let mut other_bytes = 0usize;
+
+    for ch in text.chars() {
+        if is_cjk_char(ch) {
+            cjk_chars += 1;
+        } else {
+            other_bytes += ch.len_utf8();
+        }
+    }
+
+    // CJK: ~2 tokens per character; Other: ~N bytes per token (varies by model)
+    // Apply conservative safety margin
+    let cjk_tokens = cjk_chars * 2;
+    let ratio = bytes_per_token.max(2.0).min(6.0);
+    let other_tokens = (other_bytes as f64 / ratio).ceil() as usize;
+    let safety_margin = 4.0 / 3.0; // 1.33x safety margin
+    ((cjk_tokens + other_tokens) as f64 * safety_margin).ceil() as usize
+}
+
+/// Check if a character is in CJK Unicode ranges.
+fn is_cjk_char(ch: char) -> bool {
+    matches!(ch,
+        '\u{4E00}'..='\u{9FFF}'   // CJK Unified Ideographs
+        | '\u{3400}'..='\u{4DBF}' // CJK Unified Ideographs Extension A
+        | '\u{F900}'..='\u{FAFF}' // CJK Compatibility Ideographs
+        | '\u{3000}'..='\u{303F}' // CJK Symbols and Punctuation
+        | '\u{FF00}'..='\u{FFEF}' // Fullwidth Forms
+        | '\u{AC00}'..='\u{D7AF}' // Hangul Syllables
+        | '\u{3040}'..='\u{309F}' // Hiragana
+        | '\u{30A0}'..='\u{30FF}' // Katakana
+    )
+}
+
+/// Estimate tokens for JSON content (more dense, ~2 chars per token)
+pub fn estimate_json_tokens(text: &str) -> usize {
+    let base = (text.len() + 1) / 2;
+    base * 4 / 3
+}
+
+/// Estimate total tokens in a message list
+pub fn estimate_messages_tokens(messages: &[Message]) -> usize {
+    messages.iter().map(|m| estimate_message_tokens(m)).sum()
+}
+
+/// Estimate tokens for a single message
+pub fn estimate_message_tokens(message: &Message) -> usize {
+    // ~4 tokens overhead per message (role, formatting)
+    4 + message
+        .content
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text { text } => estimate_tokens(text),
+            ContentBlock::ToolUse { name, input, .. } => {
+                estimate_tokens(name) + estimate_json_tokens(&input.to_string())
+            }
+            ContentBlock::ToolResult { content, .. } => {
+                match content {
+                    serde_json::Value::String(s) => estimate_tokens(s),
+                    _ => estimate_tokens(&content.to_string()),
+                }
+            }
+            ContentBlock::Image { .. } => 85, // ~85 tokens overhead for image reference
+        })
+        .sum::<usize>()
+}
+
+/// Check if messages need compaction given a context size limit (in tokens)
+pub fn needs_compaction(messages: &[Message], system_prompt: &str, context_size: usize) -> bool {
+    let system_tokens = estimate_tokens(system_prompt);
+    let message_tokens = estimate_messages_tokens(messages);
+    let total = system_tokens + message_tokens;
+    // Compact when we've used 80% of context
+    total > context_size * 80 / 100
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_estimate_ascii() {
+        // ASCII: ~4 chars per token
+        let tokens = estimate_tokens("hello world");
+        assert!(tokens > 0);
+        // "hello world" is 11 chars, should be about 3 tokens
+        assert!(tokens >= 3 && tokens <= 5);
+    }
+
+    #[test]
+    fn test_estimate_cjk() {
+        // CJK: ~2 tokens per char
+        let tokens = estimate_tokens("你好世界");
+        assert!(tokens > 0);
+        // 4 CJK chars should be about 8 tokens (with safety margin)
+        assert!(tokens >= 8);
+    }
+
+    #[test]
+    fn test_context_usage() {
+        let est = TokenEstimation::new(1000);
+        let usage = est.usage_stats(&[], "Hello world");
+        assert!(usage.total_tokens > 0);
+        assert!(!usage.needs_compaction);
+    }
+
+    #[test]
+    fn test_format_tokens() {
+        assert_eq!(format_tokens(500), "500");
+        assert_eq!(format_tokens(1500), "1.5k");
+        assert_eq!(format_tokens(15000), "15k");
+        assert_eq!(format_tokens(1500000), "1.5m");
+    }
+}

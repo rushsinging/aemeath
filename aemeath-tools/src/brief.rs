@@ -1,0 +1,122 @@
+use aemeath_core::tool::{Tool, ToolContext, ToolResult};
+use async_trait::async_trait;
+use serde_json::Value;
+
+/// BriefTool generates a brief summary of the work done in the current session.
+pub struct BriefTool;
+
+#[async_trait]
+impl Tool for BriefTool {
+    fn name(&self) -> &str { "Brief" }
+    fn description(&self) -> &str {
+        "Generate a brief summary of work completed in this session. Useful for creating status updates, documenting progress, or preparing handoff notes."
+    }
+    fn input_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "description": "Output format for the brief",
+                    "enum": ["markdown", "text", "json"],
+                    "default": "markdown"
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["files_changed", "commands_run", "decisions", "pending_tasks", "errors"]
+                    },
+                    "description": "What to include in the brief (default: all)"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Custom title for the brief (optional)"
+                }
+            },
+            "required": []
+        })
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn is_concurrency_safe(&self) -> bool { true }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        let format = input["format"].as_str().unwrap_or("markdown");
+        let title = input["title"].as_str().unwrap_or("Session Brief");
+        let include: Vec<&str> = if let Some(arr) = input["include"].as_array() {
+            arr.iter().filter_map(|v| v.as_str()).collect()
+        } else {
+            vec!["files_changed", "commands_run", "decisions", "pending_tasks", "errors"]
+        };
+
+        // Collect session information from the state
+        let mut brief_content = String::new();
+
+        // Build brief based on format
+        match format {
+            "markdown" => {
+                brief_content.push_str(&format!("# {}\n\n", title));
+                brief_content.push_str(&format!("**Working Directory**: {}\n", ctx.cwd.display()));
+                brief_content.push_str(&format!("**Generated**: {}\n\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+
+                if include.contains(&"files_changed") {
+                    brief_content.push_str("## Files Changed\n\n");
+                    brief_content.push_str("Use `/status` or check git status for file changes.\n\n");
+                }
+
+                if include.contains(&"commands_run") {
+                    brief_content.push_str("## Commands Executed\n\n");
+                    brief_content.push_str("Check the conversation history for executed commands.\n\n");
+                }
+
+                if include.contains(&"decisions") {
+                    brief_content.push_str("## Key Decisions\n\n");
+                    brief_content.push_str("Review the conversation for decisions made.\n\n");
+                }
+
+                if include.contains(&"pending_tasks") {
+                    brief_content.push_str("## Pending Tasks\n\n");
+                    brief_content.push_str("Use `TaskList` tool to view pending tasks.\n\n");
+                }
+
+                if include.contains(&"errors") {
+                    brief_content.push_str("## Errors Encountered\n\n");
+                    brief_content.push_str("Check conversation history for any errors.\n\n");
+                }
+            }
+            "text" => {
+                brief_content.push_str(&format!("{}\n\n", title));
+                brief_content.push_str(&format!("Working Directory: {}\n", ctx.cwd.display()));
+                brief_content.push_str(&format!("Generated: {}\n\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+
+                if include.contains(&"files_changed") {
+                    brief_content.push_str("FILES CHANGED:\n");
+                    brief_content.push_str("  Check git status for details.\n\n");
+                }
+
+                if include.contains(&"pending_tasks") {
+                    brief_content.push_str("PENDING TASKS:\n");
+                    brief_content.push_str("  Use TaskList tool.\n\n");
+                }
+            }
+            "json" => {
+                let json_brief = serde_json::json!({
+                    "title": title,
+                    "working_directory": ctx.cwd.display().to_string(),
+                    "generated_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                    "includes": include,
+                    "note": "This is a brief template. Populate with actual session data from conversation history."
+                });
+                brief_content = serde_json::to_string_pretty(&json_brief).unwrap_or_default();
+            }
+            _ => {
+                return ToolResult::error(format!("Unknown format: {}. Use markdown, text, or json.", format));
+            }
+        }
+
+        brief_content.push_str("\n---\n");
+        brief_content.push_str("*This brief was generated by aemeath. Add specific details from your conversation.*\n");
+
+        ToolResult::success(brief_content)
+    }
+}

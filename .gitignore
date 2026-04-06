@@ -1,0 +1,37 @@
+/target/
+/UI_IMPROVEMENTS.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.rlib
+
+# Test coverage
+*.profraw
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
