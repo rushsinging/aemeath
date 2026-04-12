@@ -1,8 +1,9 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod provider;
 pub mod message;
 pub mod tool;
 pub mod agent;
-pub mod agent_lifecycle;
 pub mod compact;
 pub mod session;
 pub mod task;
@@ -17,3 +18,5 @@ pub mod cost;
 pub mod command;
 pub mod history;
 pub mod token_estimation;
+pub mod tool_result_storage;
+pub mod guidance;
