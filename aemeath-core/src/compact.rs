@@ -1,13 +1,179 @@
 //! Message compaction utilities
 //!
 //! Provides message history compression to reduce context usage.
+//!
+//! ## Context Management Strategy (3 layers)
+//!
+//! 1. **Tool result truncation** — Per-result size limit. Large results are truncated
+//!    with a preview before being added to conversation history.
+//! 2. **Microcompact** — Strips old tool result content from early messages.
+//! 3. **Full compaction** — LLM-based summarization of early conversation history.
 
 use crate::message::{ContentBlock, Message, Role};
 
 // Re-export token estimation functions for backwards compatibility
 pub use crate::token_estimation::{
-    estimate_json_tokens, estimate_messages_tokens, estimate_tokens, needs_compaction,
+    autocompact_threshold, compaction_urgency, effective_context_window, estimate_json_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, needs_compaction,
+    needs_compaction_actual, needs_compaction_full, needs_compaction_with_output,
 };
+
+// ---- Tool result size limits ----
+
+/// Maximum characters for a single tool result before truncation.
+/// Results exceeding this are truncated with a preview header + tail.
+const MAX_TOOL_RESULT_CHARS: usize = 50_000;
+
+/// How many characters to keep as preview from the beginning of a truncated result.
+const TRUNCATION_PREVIEW_HEAD: usize = 2_000;
+
+/// How many characters to keep from the end of a truncated result.
+const TRUNCATION_PREVIEW_TAIL: usize = 500;
+
+/// Maximum total characters for all tool results in a single message.
+/// When exceeded, the largest results are truncated first.
+const MAX_TOOL_RESULTS_PER_MESSAGE_CHARS: usize = 200_000;
+
+/// Truncate a single tool result string if it exceeds `MAX_TOOL_RESULT_CHARS`.
+/// Returns the (possibly truncated) string.
+pub fn truncate_tool_result(output: &str) -> String {
+    if output.len() <= MAX_TOOL_RESULT_CHARS {
+        return output.to_string();
+    }
+
+    let head = safe_slice(output, TRUNCATION_PREVIEW_HEAD);
+    let tail = safe_slice_tail(output, TRUNCATION_PREVIEW_TAIL);
+
+    format!(
+        "{head}\n\n[... truncated {} chars, showing first {} + last {} chars ...]\n\n{tail}",
+        output.len(),
+        head.len(),
+        tail.len(),
+    )
+}
+
+/// Apply per-message budget: if total tool result content exceeds the limit,
+/// truncate the largest results first until under budget.
+pub fn apply_tool_result_budget(message: &mut Message) {
+    // Collect sizes of tool result blocks
+    let mut result_sizes: Vec<(usize, usize)> = Vec::new(); // (index, size)
+    let mut total_chars = 0usize;
+
+    for (i, block) in message.content.iter().enumerate() {
+        if let ContentBlock::ToolResult { content, .. } = block {
+            let size = match content {
+                serde_json::Value::String(s) => s.len(),
+                _ => content.to_string().len(),
+            };
+            result_sizes.push((i, size));
+            total_chars += size;
+        }
+    }
+
+    if total_chars <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS {
+        return;
+    }
+
+    // Sort by size descending — truncate largest first
+    result_sizes.sort_by(|a, b| b.1.cmp(&a.1));
+
+    for (idx, _size) in result_sizes {
+        if total_chars <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS {
+            break;
+        }
+        if let ContentBlock::ToolResult { ref mut content, .. } = message.content[idx] {
+            let old_text = match content {
+                serde_json::Value::String(s) => s.clone(),
+                _ => content.to_string(),
+            };
+            if old_text.len() > MAX_TOOL_RESULT_CHARS {
+                let truncated = truncate_tool_result(&old_text);
+                total_chars -= old_text.len();
+                total_chars += truncated.len();
+                *content = serde_json::Value::String(truncated);
+            }
+        }
+    }
+}
+
+/// Truncate tool results in a list of (id, output, is_error, images) tuples
+/// before they are assembled into a Message.
+pub fn truncate_tool_results(
+    results: &mut Vec<(String, String, bool, Vec<crate::tool::ImageData>)>,
+) {
+    for (_id, output, _is_error, _images) in results.iter_mut() {
+        if output.len() > MAX_TOOL_RESULT_CHARS {
+            *output = truncate_tool_result(output);
+        }
+    }
+}
+
+/// Safe UTF-8 slice from the beginning, ensuring we don't split a char boundary.
+pub fn safe_slice(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Safe UTF-8 slice from the end.
+fn safe_slice_tail(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut start = s.len() - max_bytes;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
+// ---- Auto-compact circuit breaker ----
+
+/// Maximum consecutive autocompact failures before the circuit breaker trips.
+const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: u8 = 3;
+
+/// Tracks autocompact state across turns within a session.
+#[derive(Debug, Clone, Default)]
+pub struct AutoCompactState {
+    /// Number of times compaction has been performed this session.
+    pub compaction_count: u32,
+    /// Consecutive autocompact failures. Reset on success.
+    pub consecutive_failures: u8,
+    /// Whether the circuit breaker has tripped (no more retries).
+    pub circuit_broken: bool,
+}
+
+impl AutoCompactState {
+    /// Record a successful compaction — resets the failure counter.
+    pub fn record_success(&mut self) {
+        self.compaction_count += 1;
+        self.consecutive_failures = 0;
+        self.circuit_broken = false;
+    }
+
+    /// Record a failed compaction — increments the failure counter and
+    /// trips the circuit breaker after `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES`.
+    pub fn record_failure(&mut self) {
+        self.consecutive_failures += 1;
+        if self.consecutive_failures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES {
+            self.circuit_broken = true;
+            log::warn!(
+                "[autocompact] circuit breaker tripped after {} consecutive failures — skipping future attempts",
+                self.consecutive_failures
+            );
+        }
+    }
+
+    /// Returns true if autocompact should be attempted.
+    pub fn should_attempt(&self) -> bool {
+        !self.circuit_broken
+    }
+}
 
 /// Microcompact: strip old tool results to save tokens.
 /// Clears tool result content for old messages, keeping only recent ones.
@@ -74,20 +240,34 @@ pub fn compact_messages(
 // ---- LLM-based compaction ----
 
 /// The prompt template sent to the LLM when compacting conversation history.
-const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Your task is to create a detailed summary of the conversation so far.
+const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.
 
 <instructions>
-1. Analyze the conversation carefully and produce a summary in `<summary>` tags.
-2. The summary should capture:
-   - The user's original goal and requirements
-   - Key decisions made during the conversation
-   - What has been accomplished so far (files created/modified, commands run, etc.)
-   - Current state and any pending work
-   - Important context that would be lost without this summary
-3. Be specific: include file paths, function names, variable names, and other concrete details.
-4. Do NOT include tool call details or raw output — focus on the semantic meaning.
-5. Keep the summary concise but comprehensive. Aim for roughly 20-30% of the original content length.
-6. Write the summary as a narrative, not a list.
+Produce a summary using the EXACT structure below inside `<summary>` tags.
+
+## Goal
+The user's ultimate objective (one sentence).
+
+## Progress
+What has been accomplished so far. Include specific file paths, function names, and concrete details.
+
+## Key Decisions
+Important decisions made and their reasons.
+
+## Relevant Files
+List of key files involved (paths only).
+
+## Current State
+Where things stand right now — what's working, what's not.
+
+## Next Steps
+What needs to happen next to complete the goal.
+
+Rules:
+- Be specific: include file paths, function names, variable names.
+- Keep concise: aim for 20-30% of original content length.
+- Do NOT include raw tool output or tool call details — focus on semantic meaning.
+- Each section can be empty if not applicable, but include the heading.
 </instructions>
 
 Here is the conversation to summarize:
@@ -111,7 +291,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                     // Include tool name and a truncated input summary
                     let input_str = input.to_string();
                     let truncated = if input_str.len() > 500 {
-                        format!("{}...", &input_str[..500])
+                        format!("{}...", safe_slice(&input_str, 500))
                     } else {
                         input_str
                     };
@@ -127,7 +307,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                         _ => content.to_string(),
                     };
                     let truncated = if content_str.len() > 1000 {
-                        format!("{}...", &content_str[..1000])
+                        format!("{}...", safe_slice(&content_str, 1000))
                     } else {
                         content_str
                     };
@@ -160,21 +340,119 @@ pub fn parse_compact_response(response_text: &str) -> String {
     response_text.trim().to_string()
 }
 
+// ---- Post-compact file restoration ----
+
+/// Maximum number of recently-read files to restore after compaction.
+const POST_COMPACT_MAX_FILES: usize = 5;
+
+/// Maximum tokens per restored file.
+const POST_COMPACT_MAX_TOKENS_PER_FILE: usize = 5_000;
+
+/// Total token budget for all restored files.
+const POST_COMPACT_TOKEN_BUDGET: usize = 50_000;
+
+/// Build file restoration attachments from the set of recently-read file paths.
+/// Reads the most recently modified files (up to budget) and returns a summary
+/// message to inject after compaction.
+pub fn build_file_restoration(read_files: &std::collections::HashSet<String>) -> Option<String> {
+    if read_files.is_empty() {
+        return None;
+    }
+
+    // Collect files with their modification times, sorted by recency
+    let mut files_with_mtime: Vec<(String, std::time::SystemTime)> = read_files
+        .iter()
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(path).ok()?;
+            let mtime = metadata.modified().ok()?;
+            Some((path.clone(), mtime))
+        })
+        .collect();
+
+    files_with_mtime.sort_by(|a, b| b.1.cmp(&a.1)); // Most recent first
+
+    let mut restored_content = String::new();
+    let mut total_tokens = 0usize;
+    let mut file_count = 0usize;
+
+    for (path, _mtime) in files_with_mtime.iter().take(POST_COMPACT_MAX_FILES) {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let file_tokens = estimate_tokens(&content);
+        let truncated = if file_tokens > POST_COMPACT_MAX_TOKENS_PER_FILE {
+            // Truncate to approximate token budget
+            let max_chars = POST_COMPACT_MAX_TOKENS_PER_FILE * 4; // ~4 chars/token
+            let end = max_chars.min(content.len());
+            let mut boundary = end;
+            while boundary > 0 && !content.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            format!("{}...\n[truncated, {} total chars]", &content[..boundary], content.len())
+        } else {
+            content
+        };
+
+        let entry_tokens = estimate_tokens(&truncated) + 20; // overhead for tags
+        if total_tokens + entry_tokens > POST_COMPACT_TOKEN_BUDGET {
+            break;
+        }
+
+        restored_content.push_str(&format!(
+            "\n<file path=\"{path}\">\n{truncated}\n</file>\n"
+        ));
+        total_tokens += entry_tokens;
+        file_count += 1;
+    }
+
+    if file_count == 0 {
+        return None;
+    }
+
+    Some(format!(
+        "<system-reminder>\n[Post-compaction file restoration: {} recently-read files]\n{restored_content}\n</system-reminder>",
+        file_count
+    ))
+}
+
 /// Assemble final compacted messages from a summary + recent messages.
 pub fn assemble_compacted(
     summary: String,
     recent_messages: &[Message],
     original_early_count: usize,
 ) -> (Vec<Message>, bool) {
-    let mut compacted = Vec::with_capacity(recent_messages.len() + 2);
+    assemble_compacted_with_files(summary, recent_messages, original_early_count, None)
+}
+
+/// Assemble compacted messages with optional file restoration.
+pub fn assemble_compacted_with_files(
+    summary: String,
+    recent_messages: &[Message],
+    original_early_count: usize,
+    read_files: Option<&std::collections::HashSet<String>>,
+) -> (Vec<Message>, bool) {
+    let mut compacted = Vec::with_capacity(recent_messages.len() + 4);
+
+    // Summary message
+    let mut summary_text = format!(
+        "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
+        original_early_count, summary
+    );
+
+    // Append file restoration if available
+    if let Some(files) = read_files {
+        if let Some(restoration) = build_file_restoration(files) {
+            summary_text.push_str("\n\n");
+            summary_text.push_str(&restoration);
+        }
+    }
 
     compacted.push(Message {
         role: Role::User,
         content: vec![ContentBlock::Text {
-            text: format!(
-                "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
-                original_early_count, summary
-            ),
+            text: summary_text,
         }],
     });
 
@@ -205,7 +483,7 @@ fn build_summary_text(messages: &[Message]) -> String {
         let text = msg.text_content();
         if !text.is_empty() {
             let truncated = if text.len() > 200 {
-                format!("{}...", &text[..200])
+                format!("{}...", safe_slice(&text, 200))
             } else {
                 text
             };
