@@ -2,26 +2,43 @@
 //!
 //! Supports layered configuration from multiple sources:
 //! 1. Default values
-//! 2. Global config file (~/.config/aemeath/config.json)
+//! 2. Global config file (~/.aemeath/config.json)
 //! 3. Project config file (.aemeath/config.json)
 //! 4. Environment variables
 //! 5. Command line arguments
 
 use crate::provider::Provider;
 use serde::{Deserialize, Serialize};
+
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
 /// Main configuration structure
+///
+/// ## Configuration layers (priority: high → low)
+/// 1. Command line arguments
+/// 2. Environment variables (`AEMEATH_*`)
+/// 3. Project config file (`.aemeath/config.json`)
+/// 4. Global config file (`~/.aemeath/config.json`)
+/// 5. Built-in defaults
+///
+/// ## Legacy vs. new config
+/// The `api` and `model` fields are **legacy** and only kept for backward
+/// compatibility with older config files. New configurations should use the
+/// `models` field with the `"provider/model_id"` format.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
-    /// API configuration
+    /// **Legacy** — prefer `models` field. Still used by `/model`, `/config` commands.
     #[serde(default)]
     pub api: ApiConfig,
 
-    /// Model configuration
+    /// **Legacy** — prefer `models` field. Still used by `/model`, `/config` commands.
     #[serde(default)]
     pub model: ModelConfig,
+
+    /// Multi-provider model configuration (preferred).
+    #[serde(default)]
+    pub models: ModelsConfig,
 
     /// Tool configuration
     #[serde(default)]
@@ -40,7 +57,10 @@ pub struct Config {
     pub storage: StorageConfig,
 }
 
-/// API configuration
+/// **Legacy** API configuration. Prefer using `models.providers` instead.
+///
+/// This is kept for backward compatibility with existing config files and
+/// commands (`/model`, `/config`). New configurations should use `ModelsConfig`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
     /// LLM provider to use (None = unset, use base value; Some = explicitly set)
@@ -93,7 +113,10 @@ fn default_retries() -> u32 {
     3
 }
 
-/// Model configuration
+/// **Legacy** model configuration. Prefer using `models.providers[].models[]` instead.
+///
+/// This is kept for backward compatibility. New configurations should define
+/// models under `models.providers.<name>.models` in config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     /// Model name to use
@@ -149,6 +172,107 @@ fn default_max_tokens() -> u32 {
 
 fn default_context_size() -> usize {
     128000
+}
+
+/// Multi-provider model configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelsConfig {
+    /// Merge mode: "merge" to combine with env/CLI settings
+    #[serde(default)]
+    pub mode: String,
+
+    /// Default provider and model in "provider/model_id" format (e.g. "zhipu/glm-5.1")
+    /// Used when no --provider or AEMEATH_PROVIDER is set
+    #[serde(default)]
+    pub default: String,
+
+    /// Provider configurations keyed by provider name
+    #[serde(default)]
+    pub providers: std::collections::HashMap<String, ProviderModelsConfig>,
+
+    /// Guidance file overrides, keyed by glob pattern (e.g. "zhipu/*" → "~/.aemeath/guidance/glm.md")
+    #[serde(default)]
+    pub guidance: std::collections::HashMap<String, String>,
+}
+
+impl ModelsConfig {
+    /// List all available models as (provider_name, model_entry) pairs
+    pub fn list_models(&self) -> Vec<(String, ModelEntryConfig)> {
+        let mut result = Vec::new();
+        for (provider_name, provider_config) in &self.providers {
+            for model in &provider_config.models {
+                result.push((provider_name.clone(), model.clone()));
+            }
+        }
+        result.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+        result
+    }
+
+    /// Find a model by "provider/model_id" string
+    pub fn find_model(&self, query: &str) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
+        if let Some((provider_name, model_query)) = query.split_once('/') {
+            if let Some(provider_config) = self.providers.get(provider_name) {
+                // Match by id first, then by name
+                if let Some(model) = provider_config.models.iter().find(|m| m.id == model_query)
+                    .or_else(|| provider_config.models.iter().find(|m| m.name == model_query))
+                {
+                    return Some((
+                        provider_name.to_string(),
+                        provider_config.clone(),
+                        model.clone(),
+                    ));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Configuration for a single provider within models config
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderModelsConfig {
+    /// Base URL for the provider API
+    #[serde(default, rename = "baseUrl")]
+    pub base_url: String,
+
+    /// API key for this provider
+    #[serde(default, rename = "apiKey")]
+    pub api_key: String,
+
+    /// API type: "openai-completions" or "anthropic"
+    #[serde(default)]
+    pub api: String,
+
+    /// Available models for this provider
+    #[serde(default)]
+    pub models: Vec<ModelEntryConfig>,
+}
+
+/// A single model entry within a provider
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelEntryConfig {
+    /// Model ID (used in API calls)
+    pub id: String,
+
+    /// Display name
+    #[serde(default)]
+    pub name: String,
+
+    /// Whether this model supports reasoning/thinking
+    #[serde(default)]
+    pub reasoning: bool,
+
+    /// Supported input types (e.g. ["text", "image"])
+    #[serde(default)]
+    pub input: Vec<String>,
+
+    /// Context window size in tokens
+    #[serde(default, rename = "contextWindow")]
+    pub context_window: usize,
+
+    /// Maximum output tokens
+    #[serde(default, rename = "maxTokens")]
+    pub max_tokens: u32,
 }
 
 /// Tool configuration
@@ -238,7 +362,7 @@ pub enum PermissionModeConfig {
     /// Auto-approve read-only tools
     AutoRead,
     /// Auto-approve all tools (dangerous)
-    AutoAll,
+    AllowAll,
 }
 
 /// Storage configuration
@@ -295,7 +419,7 @@ impl ConfigManager {
     /// Create a new config manager
     pub fn new(project_dir: Option<&Path>) -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let global_path = home.join(".config").join("aemeath").join("config.json");
+        let global_path = home.join(".aemeath").join("config.json");
         let project_path = project_dir.map(|p| p.join(".aemeath").join("config.json"));
 
         Self {
@@ -350,19 +474,16 @@ impl ConfigManager {
         let provider_key_env = effective_provider.api_key_env();
         if let Ok(key) = std::env::var(provider_key_env) {
             config.api.key = Some(key);
-        } else if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            // Legacy support
-            config.api.key = Some(key);
         } else if let Ok(key) = std::env::var("LLM_API_KEY") {
-            // Generic fallback
+            // Generic fallback (provider-agnostic)
             config.api.key = Some(key);
         }
 
-        // Base URL
+        // Base URL - check provider-specific env var first
+        let provider_base_env = effective_provider.base_url_env();
         if let Ok(url) = std::env::var("AEMEATH_BASE_URL") {
             config.api.base_url = Some(url);
-        } else if let Ok(url) = std::env::var("ANTHROPIC_BASE_URL") {
-            // Legacy support
+        } else if let Ok(url) = std::env::var(provider_base_env) {
             config.api.base_url = Some(url);
         }
 
@@ -390,7 +511,7 @@ impl ConfigManager {
             match mode.to_lowercase().as_str() {
                 "ask" => config.permissions.mode = PermissionModeConfig::Ask,
                 "auto_read" | "autoread" => config.permissions.mode = PermissionModeConfig::AutoRead,
-                "auto_all" | "autoall" => config.permissions.mode = PermissionModeConfig::AutoAll,
+                "allow_all" | "auto_all" | "autoall" => config.permissions.mode = PermissionModeConfig::AllowAll,
                 _ => {}
             }
         }
@@ -456,6 +577,24 @@ impl ConfigManager {
                 } else {
                     base.model.stop_sequences
                 },
+            },
+            models: {
+                // Merge providers from both configs
+                let mut providers = base.models.providers;
+                for (k, v) in overlay.models.providers {
+                    providers.insert(k, v);
+                }
+                // Merge guidance from both configs
+                let mut guidance = base.models.guidance;
+                for (k, v) in overlay.models.guidance {
+                    guidance.insert(k, v);
+                }
+                ModelsConfig {
+                    mode: if overlay.models.mode.is_empty() { base.models.mode } else { overlay.models.mode },
+                    default: if overlay.models.default.is_empty() { base.models.default } else { overlay.models.default },
+                    providers,
+                    guidance,
+                }
             },
             tools: ToolsConfig {
                 enabled: if !overlay.tools.enabled.is_empty() {

@@ -14,12 +14,12 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "aemeath", about = "A Rust-based AI coding agent")]
 struct Args {
-    /// LLM provider to use (anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, openai-compatible)
+    /// LLM provider to use (anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible)
     #[arg(long, env = "AEMEATH_PROVIDER", default_value = "anthropic")]
     provider: String,
 
     /// API key (overrides provider-specific env var)
-    #[arg(long)]
+    #[arg(long, env = "AEMEATH_API_KEY")]
     api_key: Option<String>,
 
     /// API base URL (overrides provider-specific default)
@@ -101,6 +101,30 @@ async fn build_system_prompt_parts(cwd: &PathBuf) -> SystemPromptParts {
  - Do not create files unless they're absolutely necessary for achieving your goal.
  - Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection.
  - Don't add features, refactor code, or make improvements beyond what was asked.
+
+# Using Agent tool — MANDATORY two-phase approach
+Sub-agents have a small context window (~128K tokens) and max 10 tool rounds. They CANNOT review an entire crate or directory.
+When a task requires understanding a large codebase (review, refactor, audit, etc.):
+ Phase 1 — YOU do the overview:
+  - Use Glob to list files
+  - Use Read(limit: 30) to skim key files
+  - Use Grep to find specific patterns
+  - Identify which specific files need deeper analysis
+ Phase 2 — Launch FOCUSED agents:
+  - Each agent reviews 1-3 SPECIFIC files (give exact paths)
+  - Give each agent a SPECIFIC question to answer
+  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
+ NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
+
+# Todo workflow — MANDATORY
+When you use TodoWrite to create todos, you MUST call TodoRun once for EACH pending todo by its ID.
+NEVER execute todos yourself by launching Agent calls or using other tools directly.
+TodoRun handles sub-task decomposition, parallel execution, error handling, and retries.
+
+BAD:  TodoWrite(3 todos) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")
+BAD:  TodoWrite(3 todos) → TodoRun() (no todo_id)
+GOOD: TodoWrite(3 todos) → TodoRun(todo_id: "1") → TodoRun(todo_id: "2") → TodoRun(todo_id: "3")
 
 # Tone and style
  - Your responses should be short and concise.
@@ -269,9 +293,13 @@ async fn collect_git_context(cwd: &PathBuf) -> String {
     }
 
     let result = parts.join("\n");
-    // Truncate to 2000 chars like TS version
+    // Truncate to ~2000 bytes, respecting UTF-8 char boundaries
     if result.len() > 2000 {
-        result[..2000].to_string()
+        let mut end = 2000;
+        while end > 0 && !result.is_char_boundary(end) {
+            end -= 1;
+        }
+        result[..end].to_string()
     } else {
         result
     }
@@ -286,11 +314,11 @@ async fn load_mcp_tools(
 
     let mut clients = Vec::new();
 
-    // Look for MCP config in .mcp.json or ~/.claude/mcp.json
+    // Look for MCP config in .mcp.json or ~/.aemeath/mcp.json
     let config_paths = [
         cwd.join(".mcp.json"),
         dirs::home_dir()
-            .map(|h| h.join(".claude").join("mcp.json"))
+            .map(|h| h.join(".aemeath").join("mcp.json"))
             .unwrap_or_default(),
     ];
 
@@ -307,8 +335,8 @@ async fn load_mcp_tools(
         let config: serde_json::Value = match serde_json::from_str(&content) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!(
-                    "warning: invalid MCP config {}: {e}",
+                log::warn!(
+                    "invalid MCP config {}: {e}",
                     config_path.display()
                 );
                 continue;
@@ -325,12 +353,12 @@ async fn load_mcp_tools(
             let mcp_config: McpServerConfig = match serde_json::from_value(server_config.clone()) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("warning: invalid MCP server config '{}': {e}", name);
+                    log::warn!("invalid MCP server config '{}': {e}", name);
                     continue;
                 }
             };
 
-            eprintln!("[MCP] connecting to {}...", name);
+            log::info!("[MCP] connecting to {}...", name);
             match McpClient::connect(name, &mcp_config).await {
                 Ok(client) => {
                     let client =
@@ -339,7 +367,7 @@ async fn load_mcp_tools(
                     // Fetch and register tools
                     match client.lock().await.list_tools().await {
                         Ok(tools) => {
-                            eprintln!("[MCP] {} registered {} tools", name, tools.len());
+                            log::info!("[MCP] {} registered {} tools", name, tools.len());
                             for tool_def in tools {
                                 let qualified =
                                     format!("mcp__{}_{}", name, tool_def.name);
@@ -352,12 +380,12 @@ async fn load_mcp_tools(
                                 }));
                             }
                         }
-                        Err(e) => eprintln!("[MCP] {} failed to list tools: {e}", name),
+                        Err(e) => log::warn!("[MCP] {} failed to list tools: {e}", name),
                     }
 
                     clients.push(client);
                 }
-                Err(e) => eprintln!("[MCP] failed to connect to {}: {e}", name),
+                Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
             }
         }
     }
@@ -367,29 +395,148 @@ async fn load_mcp_tools(
 
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
+    // Initialize structured logging — route to ~/.aemeath/aemeath.log so that
+    // log::warn! / log::error! from library crates (e.g. aemeath-tools) do not
+    // corrupt the TUI rendering. Set AEMEATH_LOG_STDERR=1 to get the old
+    // stderr behavior when debugging with `--no-tui` / CLI mode.
+    {
+        let mut builder = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("warn"),
+        );
+        let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !use_stderr {
+            let log_path = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".aemeath")
+                .join("aemeath.log");
+            if let Some(parent) = log_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                builder.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+        }
+        builder.init();
+    }
+
+    let mut args = Args::parse();
+
+    // Check AEMEATH_PERMISSION_MODE env var for allow-all
+    if !args.allow_all {
+        if let Ok(mode) = std::env::var("AEMEATH_PERMISSION_MODE") {
+            if mode == "allow_all" {
+                args.allow_all = true;
+            }
+        }
+    }
+
+    // Load config.json for provider defaults (apiKey, baseUrl, model)
+    // Priority: CLI args > env vars > config.json > built-in defaults
+    let config_file = {
+        let paths = [
+            dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+            std::path::PathBuf::from(".aemeath/config.json"),
+        ];
+        let mut cfg: Option<aemeath_core::config::Config> = None;
+        for path in &paths {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(c) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
+                        cfg = Some(c);
+                        break;
+                    }
+                }
+            }
+        }
+        cfg
+    };
+
+    // Apply permissions.mode from config.json (CLI --allow-all and env var take precedence)
+    if !args.allow_all {
+        if let Some(ref cfg) = config_file {
+            if matches!(
+                cfg.permissions.mode,
+                aemeath_core::config::PermissionModeConfig::AllowAll
+            ) {
+                args.allow_all = true;
+            }
+        }
+    }
+
+    // Apply config.json defaults where CLI/env didn't specify
+    // Provider + model: only override if CLI has defaults and env vars aren't set
+    // Stores the resolved ModelEntryConfig so we can get both id and reasoning flag
+    let mut config_default_model: Option<(String, aemeath_core::config::ModelEntryConfig)> = None;
+    if args.provider == "anthropic" && std::env::var("AEMEATH_PROVIDER").is_err() {
+        if let Some(ref cfg) = config_file {
+            if !cfg.models.default.is_empty() {
+                // Parse "provider/model_query" format — find_model matches by id then name
+                if let Some((provider_name, _model_query)) = cfg.models.default.split_once('/') {
+                    args.provider = provider_name.to_string();
+                    if args.model.is_none() && std::env::var("AEMEATH_MODEL").is_err() {
+                        if let Some((_pn, _pc, model_entry)) = cfg.models.find_model(&cfg.models.default) {
+                            config_default_model = Some((model_entry.id.clone(), model_entry));
+                        } else {
+                            // Fallback: use the raw query as model id
+                            config_default_model = Some((_model_query.to_string(), Default::default()));
+                        }
+                    }
+                } else {
+                    // Just a provider name without model
+                    args.provider = cfg.models.default.clone();
+                }
+            } else {
+                // Fallback: use the first provider that has models
+                for (name, pcfg) in &cfg.models.providers {
+                    if !pcfg.models.is_empty() {
+                        args.provider = name.clone();
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     // Parse provider
     let provider = Provider::from_str(&args.provider).unwrap_or_else(|| {
-        eprintln!("error: Unknown provider '{}'. Use one of: anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, openai-compatible", args.provider);
+        log::error!("Unknown provider '{}'. Use one of: anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible", args.provider);
         std::process::exit(1);
     });
 
-    // Get API key from args or environment
+    // Get API key: CLI args > env vars > config.json
     let api_key = args.api_key.unwrap_or_else(|| {
-        // Try provider-specific env var first
         let env_key = provider.api_key_env();
         std::env::var(env_key).unwrap_or_else(|_| {
-            // Legacy fallback for anthropic
+            // Fallback: try ANTHROPIC_API_KEY for legacy
             if provider == Provider::Anthropic {
-                std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| {
-                    eprintln!("error: API key not set. Use --api-key or set {}.", env_key);
-                    std::process::exit(1);
-                })
-            } else {
-                eprintln!("error: API key not set. Use --api-key or set {}.", env_key);
-                std::process::exit(1);
+                if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                    return key;
+                }
             }
+            // Fallback: try config.json for matching provider
+            if let Some(ref cfg) = config_file {
+                // Try exact provider name match
+                let provider_name = args.provider.to_lowercase();
+                if let Some(pcfg) = cfg.models.providers.get(&provider_name) {
+                    if !pcfg.api_key.is_empty() {
+                        return pcfg.api_key.clone();
+                    }
+                }
+                // Try any provider (if there's only one or first match)
+                for (_, pcfg) in &cfg.models.providers {
+                    if !pcfg.api_key.is_empty() {
+                        return pcfg.api_key.clone();
+                    }
+                }
+            }
+            log::error!("API key not set. Use --api-key, set {}, or configure in ~/.aemeath/config.json", env_key);
+            std::process::exit(1);
         })
     });
 
@@ -398,15 +545,68 @@ async fn main() {
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // Get model from args or provider default
-    let model = args.model.unwrap_or_else(|| provider.default_model().to_string());
+    // Get model: CLI args > env var > config.json default > config.json provider > provider default
+    let model = args.model.unwrap_or_else(|| {
+        // 1. From models.default (resolved via find_model)
+        if let Some((ref model_id, _)) = config_default_model {
+            return model_id.clone();
+        }
+        // 2. From config.json provider's first model
+        let provider_name = args.provider.to_lowercase();
+        if let Some(ref cfg) = config_file {
+            if let Some(pcfg) = cfg.models.providers.get(&provider_name) {
+                if let Some(first_model) = pcfg.models.first() {
+                    return first_model.id.clone();
+                }
+            }
+        }
+        // 3. Built-in default
+        provider.default_model().to_string()
+    });
+
+    // Get base_url: CLI args > env var > config.json > provider default
+    if args.base_url.is_none() && std::env::var("AEMEATH_BASE_URL").is_err() {
+        let provider_name = args.provider.to_lowercase();
+        if let Some(ref cfg) = config_file {
+            if let Some(pcfg) = cfg.models.providers.get(&provider_name) {
+                if !pcfg.base_url.is_empty() {
+                    args.base_url = Some(pcfg.base_url.clone());
+                }
+            }
+        }
+    }
+
+    // Clamp max_tokens to provider limit if set
+    let max_tokens = {
+        let limit = provider.max_output_tokens();
+        if limit > 0 && args.max_tokens > limit {
+            log::info!("max_tokens {} exceeds provider limit, clamped to {}", args.max_tokens, limit);
+            limit
+        } else {
+            args.max_tokens
+        }
+    };
+
+    // Resolve reasoning flag: from config_default_model if available, otherwise lookup by model id
+    let reasoning = config_default_model
+        .as_ref()
+        .map(|(_, entry)| entry.reasoning)
+        .unwrap_or_else(|| {
+            let provider_name = args.provider.to_lowercase();
+            config_file.as_ref().and_then(|cfg| {
+                cfg.models.providers.get(&provider_name).and_then(|pcfg| {
+                    pcfg.models.iter().find(|m| m.id == model).map(|m| m.reasoning)
+                })
+            }).unwrap_or(false)
+        });
 
     let client = LlmClient::with_provider(
         provider,
         api_key,
         args.base_url,
         Some(model.clone()),
-        args.max_tokens,
+        max_tokens,
+        reasoning,
     );
 
     let client = std::sync::Arc::new(client);
@@ -416,7 +616,7 @@ async fn main() {
     // Load skills
     let skills_map = aemeath_core::skill::load_all_skills(&cwd);
     if !skills_map.is_empty() {
-        eprintln!("[Skills] loaded {} skills", skills_map.len());
+        log::info!("[Skills] loaded {} skills", skills_map.len());
     }
     let skills = std::sync::Arc::new(tokio::sync::Mutex::new(skills_map));
 
@@ -434,14 +634,37 @@ async fn main() {
     // Skills list goes into the static part (changes only at startup)
     let static_prompt = {
         let skills_guard = skills.lock().await;
-        if skills_guard.is_empty() {
-            prompt_parts.static_part
-        } else {
+
+        // Resolve model-specific guidance
+        let guidance_config = config_file
+            .as_ref()
+            .map(|c| c.models.guidance.clone())
+            .unwrap_or_default();
+        let provider_name = args.provider.to_lowercase();
+        let model_guidance = aemeath_core::guidance::resolve_guidance(
+            &provider_name,
+            &model,
+            &guidance_config,
+        );
+
+        // Assemble: static_part + universal discipline + model guidance + skills
+        let mut prompt = prompt_parts.static_part;
+        prompt.push_str("\n\n");
+        prompt.push_str(aemeath_core::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+        if !model_guidance.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&model_guidance);
+        }
+        if !skills_guard.is_empty() {
             let skill_list: Vec<String> = skills_guard.values()
                 .map(|s| format!("- {}: {}", s.name, s.description))
                 .collect();
-            format!("{}\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n{}", prompt_parts.static_part, skill_list.join("\n"))
+            prompt.push_str(&format!(
+                "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n{}",
+                skill_list.join("\n")
+            ));
         }
+        prompt
     };
 
     // Build SystemBlock array for prompt caching
@@ -462,12 +685,32 @@ async fn main() {
 
     // Run in TUI mode or legacy REPL mode
     if args.no_tui {
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all).await;
+        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone()).await;
     } else {
-        let mut app = tui::App::new(session_id, cwd, model);
-        if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all).await {
-            eprintln!("TUI error: {e}");
-            std::process::exit(1);
+        // Build display name: provider/name (from config) or just model id
+        let model_display = {
+            let provider_name = args.provider.to_lowercase();
+            let display_name = config_default_model
+                .as_ref()
+                .and_then(|(_, entry)| {
+                    if entry.name.is_empty() { None } else { Some(entry.name.as_str()) }
+                })
+                .or_else(|| {
+                    config_file.as_ref().and_then(|cfg| {
+                        cfg.models.providers.get(&provider_name).and_then(|pcfg| {
+                            pcfg.models.iter().find(|m| m.id == model)
+                                .and_then(|m| if m.name.is_empty() { None } else { Some(m.name.as_str()) })
+                        })
+                    })
+                })
+                .unwrap_or(&model);
+            format!("{}/{}", provider_name, display_name)
+        };
+        let mut app = tui::App::new(session_id.clone(), cwd, model_display);
+            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store).await {
+                log::error!("TUI error: {e}");
+                std::process::exit(1);
+            }
+            println!("aemeath --resume {}", session_id);
         }
     }
-}
