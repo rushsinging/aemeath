@@ -227,14 +227,43 @@ pub fn compact_messages(
         return (result, true);
     }
 
-    // Step 2: Full compaction — summarize early messages
-    let keep_recent = (total * 40 / 100).max(4).min(total - 1);
+    // Step 2: Full compaction — head/tail protection
+    // Head: protect first 2 messages (initial conversation turn)
+    let head_protect = 2usize.min(total);
+    // Tail: keep ~30% of messages as recent context
+    let tail_budget = total * 30 / 100;
+    let keep_recent = tail_budget.max(4).min(total - head_protect);
     let split_point = total - keep_recent;
 
-    let early_messages = &result[..split_point];
+    // Never compress into the head-protected zone
+    let split_point = split_point.max(head_protect);
+
+    if split_point <= head_protect {
+        // Not enough messages to compress
+        return (result, false);
+    }
+
+    let early_messages = &result[head_protect..split_point];
     let summary = build_summary_text(early_messages);
 
-    assemble_compacted(summary, &result[split_point..], split_point)
+    // Reassemble: head + summary + recent
+    let mut compacted = Vec::with_capacity(head_protect + keep_recent + 3);
+    compacted.extend_from_slice(&result[..head_protect]);
+
+    let summary_text = format!(
+        "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
+        early_messages.len(), summary
+    );
+    compacted.push(Message::user(summary_text));
+    compacted.push(Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "I understand. I'll continue from where we left off.".to_string(),
+        }],
+    });
+    compacted.extend_from_slice(&result[split_point..]);
+
+    (compacted, true)
 }
 
 // ---- LLM-based compaction ----
