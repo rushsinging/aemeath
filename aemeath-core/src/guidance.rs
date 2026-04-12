@@ -115,7 +115,18 @@ fn find_matching_guidance(
     if let Some((_, path, _)) = matches.first() {
         let expanded = expand_tilde(path);
         match std::fs::read_to_string(&expanded) {
-            Ok(content) => return Some(content),
+            Ok(content) => {
+                let warnings = crate::security::scan_content(path, &content);
+                if !warnings.is_empty() {
+                    for w in &warnings {
+                        log::warn!("[Security] {} in {} line {}: {}", w.threat_type, w.filename, w.line_number, w.matched_text);
+                    }
+                    if let Some(prefix) = crate::security::format_warnings(&warnings) {
+                        return Some(format!("{}\n\n{}", prefix, content));
+                    }
+                }
+                return Some(content);
+            }
             Err(e) => {
                 log::warn!("Failed to read guidance file {}: {}", expanded, e);
             }

@@ -216,7 +216,20 @@ async fn load_claude_md(cwd: &PathBuf) -> String {
         }
     }
 
-    parts.join("\n\n")
+    let mut claude_md = parts.join("\n\n");
+
+    // Scan CLAUDE.md for prompt injection
+    let warnings = aemeath_core::security::scan_content("CLAUDE.md", &claude_md);
+    if !warnings.is_empty() {
+        for w in &warnings {
+            log::warn!("[Security] {} in {} line {}: {}", w.threat_type, w.filename, w.line_number, w.matched_text);
+        }
+        if let Some(prefix) = aemeath_core::security::format_warnings(&warnings) {
+            claude_md = format!("{}\n\n{}", prefix, claude_md);
+        }
+    }
+
+    claude_md
 }
 
 async fn collect_git_context(cwd: &PathBuf) -> String {
