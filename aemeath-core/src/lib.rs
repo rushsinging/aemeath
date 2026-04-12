@@ -20,3 +20,4 @@ pub mod history;
 pub mod token_estimation;
 pub mod tool_result_storage;
 pub mod guidance;
+pub mod security;
