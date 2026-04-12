@@ -417,6 +417,62 @@ pub fn build_file_restoration(read_files: &std::collections::HashSet<String>) ->
     ))
 }
 
+/// Fix orphaned tool-use / tool-result pairs after compaction.
+pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
+    let mut tool_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut tool_result_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for msg in messages.iter() {
+        for block in &msg.content {
+            match block {
+                ContentBlock::ToolUse { id, .. } => {
+                    tool_use_ids.insert(id.clone());
+                }
+                ContentBlock::ToolResult { tool_use_id, .. } => {
+                    tool_result_ids.insert(tool_use_id.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Remove orphan ToolResults (no matching ToolUse)
+    let orphan_results: std::collections::HashSet<&String> =
+        tool_result_ids.difference(&tool_use_ids).collect();
+    if !orphan_results.is_empty() {
+        for msg in messages.iter_mut() {
+            msg.content.retain(|block| {
+                if let ContentBlock::ToolResult { tool_use_id, .. } = block {
+                    !orphan_results.contains(tool_use_id)
+                } else {
+                    true
+                }
+            });
+        }
+    }
+
+    // Add placeholder results for ToolUse blocks without results
+    let missing_results: Vec<String> = tool_use_ids
+        .difference(&tool_result_ids)
+        .cloned()
+        .collect();
+    if !missing_results.is_empty() {
+        let placeholder_msg = Message {
+            role: Role::User,
+            content: missing_results
+                .into_iter()
+                .map(|id| ContentBlock::ToolResult {
+                    tool_use_id: id,
+                    content: serde_json::json!("[result removed during compaction]"),
+                    is_error: false,
+                })
+                .collect(),
+        };
+        let insert_pos = if messages.is_empty() { 0 } else { messages.len() - 1 };
+        messages.insert(insert_pos, placeholder_msg);
+    }
+}
+
 /// Assemble final compacted messages from a summary + recent messages.
 pub fn assemble_compacted(
     summary: String,
@@ -469,6 +525,7 @@ pub fn assemble_compacted_with_files(
     }
 
     fix_role_alternation(&mut compacted);
+    sanitize_tool_pairs(&mut compacted);
     (compacted, true)
 }
 
