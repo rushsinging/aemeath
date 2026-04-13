@@ -292,9 +292,14 @@ impl App {
             // Update task status lines for display below spinner
             {
                 let tasks = task_store.list().await;
-                let active: Vec<_> = tasks.iter()
+                let mut active: Vec<_> = tasks.iter()
                     .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
                     .collect();
+                // Sort by ID for stable display order
+                active.sort_by(|a, b| {
+                    a.id.parse::<u64>().unwrap_or(u64::MAX)
+                        .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
+                });
                 if active.is_empty() {
                     self.output_area.set_task_status(Vec::new());
                 } else {
