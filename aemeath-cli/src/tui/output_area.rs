@@ -1015,10 +1015,12 @@ impl OutputArea {
 
     /// Add a system message
     pub fn push_system(&mut self, msg: &str) {
-        self.push_line(OutputLine {
-            content: msg.to_string(),
-            style: LineStyle::System,
-        });
+        for line in msg.lines() {
+            self.push_line(OutputLine {
+                content: line.to_string(),
+                style: LineStyle::System,
+            });
+        }
     }
 
     /// Scroll up by the given number of lines
