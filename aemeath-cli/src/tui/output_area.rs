@@ -1307,7 +1307,7 @@ impl OutputArea {
                 if matches!(output_line.style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
                     let rest = &output_line.content[3..]; // ● is 3 bytes in UTF-8
                     // Blink: alternate between bright white and dim gray
-                    let blink_on = (spinner_frame_idx / 5) % 2 == 0; // ~200ms per phase at 50ms tick
+                    let blink_on = (spinner_frame_idx / 15) % 2 == 0; // ~750ms per phase at 50ms tick
                     let dot_color = if blink_on {
                         Color::White
                     } else {
