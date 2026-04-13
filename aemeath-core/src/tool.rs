@@ -52,6 +52,15 @@ pub trait AgentRunner: Send + Sync {
         tool_schemas: &[serde_json::Value],
         registry: &ToolRegistry,
         ctx: &ToolContext,
+        max_turns: Option<u32>,
+    ) -> String;
+
+    /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
+    async fn complete(
+        &self,
+        prompt: &str,
+        system: &str,
+        ctx: &ToolContext,
     ) -> String;
 }
 
@@ -79,6 +88,11 @@ pub trait Tool: Send + Sync {
 
     fn is_concurrency_safe(&self) -> bool {
         true
+    }
+
+    /// Timeout for this tool in seconds (default 120s, override for long-running tools)
+    fn timeout_secs(&self) -> u64 {
+        120
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult;

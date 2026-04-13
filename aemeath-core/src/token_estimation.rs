@@ -236,13 +236,100 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
         .sum::<usize>()
 }
 
-/// Check if messages need compaction given a context size limit (in tokens)
+// ---- Autocompact threshold constants ----
+// Following Claude Code TS's formula:
+// effective_window = context_window - reserved_output
+// threshold = effective_window - buffer
+
+/// Reserved tokens for compaction summary output (p99.99 ≈ 17.4K, use 20K).
+const MAX_OUTPUT_TOKENS_FOR_SUMMARY: usize = 20_000;
+
+/// Safety buffer below the effective window before triggering compaction.
+const AUTOCOMPACT_BUFFER_TOKENS: usize = 13_000;
+
+/// Calculate the effective context window size (after reserving output tokens).
+pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
+    let reserved = max_output_tokens.min(MAX_OUTPUT_TOKENS_FOR_SUMMARY);
+    context_size.saturating_sub(reserved)
+}
+
+/// Calculate the autocompact trigger threshold.
+/// Formula: (context_size - min(max_output, 20K)) - 13K
+pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
+    effective_context_window(context_size, max_output_tokens)
+        .saturating_sub(AUTOCOMPACT_BUFFER_TOKENS)
+}
+
+/// Estimate the token overhead of tool schemas.
+/// Tool schemas are JSON objects sent with every API call.
+/// This is a significant fixed cost that must be accounted for.
+pub fn estimate_tool_schemas_tokens(tool_schemas: &[serde_json::Value]) -> usize {
+    tool_schemas
+        .iter()
+        .map(|s| estimate_json_tokens(&s.to_string()))
+        .sum()
+}
+
+/// Check if messages need compaction given a context size limit (in tokens).
+/// Uses the TS-style threshold formula that reserves output + buffer tokens.
+/// Includes a fixed overhead estimate for tool schemas (~15K tokens for 25 tools).
 pub fn needs_compaction(messages: &[Message], system_prompt: &str, context_size: usize) -> bool {
+    needs_compaction_full(messages, system_prompt, context_size, 0)
+}
+
+/// Check compaction with explicit tool schema token count.
+pub fn needs_compaction_full(
+    messages: &[Message],
+    system_prompt: &str,
+    context_size: usize,
+    tool_schema_tokens: usize,
+) -> bool {
+    let system_tokens = estimate_tokens(system_prompt);
+    let message_tokens = estimate_messages_tokens(messages);
+    let total = system_tokens + message_tokens + tool_schema_tokens;
+    total > autocompact_threshold(context_size, 8192)
+}
+
+/// Check if messages need compaction with explicit max_output_tokens.
+pub fn needs_compaction_with_output(
+    messages: &[Message],
+    system_prompt: &str,
+    context_size: usize,
+    max_output_tokens: usize,
+) -> bool {
     let system_tokens = estimate_tokens(system_prompt);
     let message_tokens = estimate_messages_tokens(messages);
     let total = system_tokens + message_tokens;
-    // Compact when we've used 80% of context
-    total > context_size * 80 / 100
+    total > autocompact_threshold(context_size, max_output_tokens)
+}
+
+/// Check if compaction is needed using actual API-reported token count.
+pub fn needs_compaction_actual(
+    last_input_tokens: u64,
+    last_output_tokens: u64,
+    context_size: usize,
+) -> bool {
+    let total = last_input_tokens + last_output_tokens;
+    let threshold = autocompact_threshold(context_size, 8192) as u64;
+    total > threshold
+}
+
+/// Determine the compaction urgency level based on actual token usage.
+/// Uses effective_context_window for percentage calculation.
+/// Returns a level from 0-3:
+/// - 0: No compaction needed (< 70% of effective window)
+/// - 1: Approaching limit, microcompact recommended (70-80%)
+/// - 2: At limit, full compaction needed (80-90%)
+/// - 3: Critical, blocking — must compact before next query (> 90%)
+pub fn compaction_urgency(last_input_tokens: u64, context_size: usize) -> u8 {
+    let effective = effective_context_window(context_size, 8192) as u64;
+    let pct = last_input_tokens * 100 / effective.max(1);
+    match pct {
+        0..=69 => 0,
+        70..=79 => 1,
+        80..=89 => 2,
+        _ => 3,
+    }
 }
 
 #[cfg(test)]

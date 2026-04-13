@@ -2,6 +2,8 @@
 //!
 //! Supports multiple LLM providers through a unified interface.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod client;
 pub mod provider;
 pub mod providers;

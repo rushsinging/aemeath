@@ -3,6 +3,8 @@
 use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction};
 use crate::session;
 use crate::config::PermissionModeConfig;
+use std::future::Future;
+use std::pin::Pin;
 
 // ==================== Core Commands ====================
 
@@ -234,21 +236,60 @@ pub fn status_command() -> Command {
 }
 
 fn status_execute(_args: &str, ctx: &mut CommandContext) -> CommandResult {
-    // Use ctx.config directly since it's already loaded
+    // Format permission mode with emoji
+    let permission_emoji = match ctx.config.permissions.mode {
+        PermissionModeConfig::Ask => "🔔",
+        PermissionModeConfig::AutoRead => "📖",
+        PermissionModeConfig::AllowAll => "🔓",
+    };
+    let permission_text = match ctx.config.permissions.mode {
+        PermissionModeConfig::Ask => "ask",
+        PermissionModeConfig::AutoRead => "auto-read",
+        PermissionModeConfig::AllowAll => "allow-all",
+    };
+
+    // Format markdown and TUI status
+    let markdown_icon = if ctx.config.ui.markdown { "✅" } else { "❌" };
+    let tui_icon = if ctx.config.ui.tui { "✅" } else { "❌" };
+
+    // Get base URL with fallback
+    let base_url = ctx.config.api.base_url.as_deref().unwrap_or("https://api.anthropic.com");
+
     let output = format!(
-        "Session Status:\n  Session ID: {}\n  Working directory: {}\n  Model: {}\n  Max tokens: {}\n  Permission mode: {}\n\nConfiguration:\n  Base URL: {}\n  Markdown: {}\n  TUI: {}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         📊 Session Status\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         🆔 Session ID\n\
+         │ {}\n\
+         📁 Working directory\n\
+         │ {}\n\
+         🤖 Model\n\
+         │ {}\n\
+         📏 Max tokens\n\
+         │ {}\n\
+         🔐 Permission mode {}\n\
+         │ {}\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         ⚙️ Configuration\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         🌐 Base URL\n\
+         │ {}\n\
+         📝 Markdown {}\n\
+         │ {}\n\
+         🖥️  TUI {}\n\
+         │ {}\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         ctx.session_id,
         ctx.cwd,
         ctx.config.model.name,
         ctx.config.model.max_tokens,
-        match ctx.config.permissions.mode {
-            PermissionModeConfig::Ask => "ask",
-            PermissionModeConfig::AutoRead => "auto-read",
-            PermissionModeConfig::AutoAll => "auto-all",
-        },
-        ctx.config.api.base_url.as_deref().unwrap_or("https://api.anthropic.com"),
-        ctx.config.ui.markdown,
-        ctx.config.ui.tui,
+        permission_emoji,
+        permission_text,
+        base_url,
+        markdown_icon,
+        if ctx.config.ui.markdown { "enabled" } else { "disabled" },
+        tui_icon,
+        if ctx.config.ui.tui { "enabled" } else { "disabled" },
     );
 
     CommandResult::Success(output)
@@ -308,7 +349,7 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
             match ctx.config.permissions.mode {
                 PermissionModeConfig::Ask => "ask",
                 PermissionModeConfig::AutoRead => "auto-read",
-                PermissionModeConfig::AutoAll => "auto-all",
+                PermissionModeConfig::AllowAll => "allow-all",
             },
             ctx.config.storage.persist_sessions,
         );
@@ -354,7 +395,7 @@ fn get_config_value(config: &crate::config::Config, key: &str) -> String {
         "permission_mode" => match config.permissions.mode {
             PermissionModeConfig::Ask => "ask".to_string(),
             PermissionModeConfig::AutoRead => "auto-read".to_string(),
-            PermissionModeConfig::AutoAll => "auto-all".to_string(),
+            PermissionModeConfig::AllowAll => "allow-all".to_string(),
         },
         _ => "unknown key".to_string(),
     }
@@ -370,24 +411,72 @@ pub fn model_command() -> Command {
     )
     .with_usage(vec![
         "/model - Show current model".to_string(),
-        "/model <name> - Change model".to_string(),
-        "/model list - List available models".to_string(),
+        "/model list - List available models from config".to_string(),
+        "/model <provider/model_id> - Switch to a different model".to_string(),
     ])
 }
 
 fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
-    let arg = args.trim().to_lowercase();
+    let arg = args.trim();
 
     if arg.is_empty() {
-        CommandResult::Success(format!("Current model: {}", ctx.config.model.name))
-    } else if arg == "list" {
-        CommandResult::Success(
-            "Available models:\n  claude-sonnet-4-6 (default)\n  claude-opus-4\n  claude-sonnet-4\n  claude-3-5-sonnet\n".to_string()
-        )
-    } else {
-        // Change model
-        // TODO: Actually change the model in config
-        CommandResult::Success(format!("Model changed to: {} (restart required)", arg))
+        return CommandResult::Success(format!("Current model: {}", ctx.current_model));
+    }
+
+    if arg == "list" {
+        let models = ctx.models_config.list_models();
+        if models.is_empty() {
+            return CommandResult::Success(
+                "No models configured. Add models to ~/.aemeath/config.json under \"models.providers\"".to_string()
+            );
+        }
+
+        let mut output = String::from("Available models:\n");
+        let mut current_provider = String::new();
+        for (provider_name, model) in &models {
+            if *provider_name != current_provider {
+                output.push_str(&format!("\n  [{}]\n", provider_name));
+                current_provider = provider_name.clone();
+            }
+            let display_name = if model.name.is_empty() { &model.id } else { &model.name };
+            let marker = if format!("{}/{}", provider_name, display_name) == ctx.current_model {
+                " ←"
+            } else {
+                ""
+            };
+            output.push_str(&format!(
+                "    {}/{} ctx:{}k max:{}k{}\n",
+                provider_name,
+                display_name,
+                model.context_window / 1000,
+                model.max_tokens / 1000,
+                marker,
+            ));
+        }
+        return CommandResult::Success(output);
+    }
+
+    // Switch model: expect "provider/model_id" format
+    match ctx.models_config.find_model(arg) {
+        Some((_provider_name, provider_config, model)) => {
+            CommandResult::Action(CommandAction::SwitchModel {
+                provider_name: _provider_name,
+                model_id: model.id.clone(),
+                model_name: model.name.clone(),
+                base_url: provider_config.base_url.clone(),
+                api_key: provider_config.api_key.clone(),
+                api_type: provider_config.api.clone(),
+                max_tokens: model.max_tokens,
+                context_window: model.context_window,
+                reasoning: model.reasoning,
+            })
+        }
+        None => {
+            CommandResult::Error(format!(
+                "Model '{}' not found. Use /model list to see available models.\nFormat: /model <provider>/<model_id>",
+                arg
+            ))
+        }
     }
 }
 
@@ -395,7 +484,7 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
 
 /// Resume command - resume a previous session
 pub fn resume_command() -> Command {
-    Command::new(
+    Command::new_async(
         "resume".to_string(),
         "Resume a previous session".to_string(),
         CommandCategory::Session,
@@ -408,33 +497,33 @@ pub fn resume_command() -> Command {
     .with_aliases(vec!["r".to_string()])
 }
 
-fn resume_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
+fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+    Box::pin(async move {
     let arg = args.trim();
 
     if arg.is_empty() {
         // List recent sessions
-        let sessions = session::list_sessions();
+        let sessions = session::list_sessions().await;
         if sessions.is_empty() {
-            CommandResult::Success("No saved sessions found".to_string())
-        } else {
-            let mut output = String::from("Recent Sessions:\n\n");
-            for (i, sess) in sessions.iter().take(10).enumerate() {
-                output.push_str(&format!(
-                    "{}. {} - {} messages - {}\n",
-                    i + 1,
-                    sess.id,
-                    sess.messages.len(),
-                    sess.updated_at
-                ));
-            }
-            output.push_str("\nUse /resume <id> to resume a session\n");
-            CommandResult::Success(output)
+            return CommandResult::Success("No saved sessions found".to_string());
         }
+        let mut output = String::from("Recent Sessions:\n\n");
+        for (i, sess) in sessions.iter().take(10).enumerate() {
+            output.push_str(&format!(
+                "{}. {} - {} messages - {}\n",
+                i + 1,
+                sess.id,
+                sess.messages.len(),
+                sess.updated_at
+            ));
+        }
+        output.push_str("\nUse /resume <id> to resume a session\n");
+        CommandResult::Success(output)
     } else {
         // Resume specific session
         let session_id = if arg.chars().all(|c| c.is_ascii_digit()) {
             // User provided an index number
-            let sessions = session::list_sessions();
+            let sessions = session::list_sessions().await;
             let idx: usize = arg.parse().unwrap_or(0);
             if idx == 0 || idx > sessions.len() {
                 return CommandResult::Error(format!("Invalid session index: {}", idx));
@@ -447,11 +536,12 @@ fn resume_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
 
         CommandResult::Action(CommandAction::ResumeSession(session_id))
     }
+    })
 }
 
 /// Session command - manage sessions
 pub fn session_command() -> Command {
-    Command::new(
+    Command::new_async(
         "session".to_string(),
         "Manage sessions".to_string(),
         CommandCategory::Session,
@@ -470,19 +560,21 @@ pub fn session_command() -> Command {
         "/session notes <notes> - Add notes".to_string(),
         "/session search <query> - Search sessions".to_string(),
     ])
+    .with_aliases(vec!["sessions".to_string()])
 }
 
-fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
+fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+    let session_id = ctx.session_id.clone();
+    Box::pin(async move {
     let parts: Vec<&str> = args.trim().split_whitespace().collect();
 
     if parts.is_empty() {
         // Show current session info with metadata
-        let sessions = session::list_sessions();
-        let current = sessions.iter().find(|s| s.id == ctx.session_id);
+        let sessions = session::list_sessions().await;
+        let current = sessions.iter().find(|s| s.id == session_id);
         let mut output = format!(
-            "Current Session:\n  ID: {}\n  CWD: {}\n  Messages: {}\n",
-            ctx.session_id,
-            ctx.cwd,
+            "Current Session:\n  ID: {}\n  Messages: {}\n",
+            session_id,
             current.map(|s| s.messages.len()).unwrap_or(0)
         );
 
@@ -507,7 +599,7 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
         match parts[0] {
             "new" => CommandResult::Action(CommandAction::NewSession),
             "list" => {
-                let sessions = session::list_sessions();
+                let sessions = session::list_sessions().await;
                 let mut output = String::from("Saved Sessions:\n\n");
                 for sess in sessions.iter().take(20) {
                     let favorite_marker = if sess.metadata.is_favorite { "★ " } else { "  " };
@@ -540,14 +632,14 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 }
             }
             "save" => {
-                CommandResult::Success(format!("Session {} saved", ctx.session_id))
+                CommandResult::Success(format!("Session {} saved", session_id))
             }
             "title" => {
                 if parts.len() < 2 {
                     return CommandResult::Error("Usage: /session title <title>".to_string());
                 }
                 let title = parts[1..].join(" ");
-                match session::update_session_metadata(&ctx.session_id, Some(title), None, None, None) {
+                match session::update_session_metadata(&session_id, Some(title), None, None, None).await {
                     Ok(sess) => CommandResult::Success(format!("Session title set to: {}", sess.metadata.title.unwrap_or_default())),
                     Err(e) => CommandResult::Error(e),
                 }
@@ -557,10 +649,10 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                     return CommandResult::Error("Usage: /session tag <tag>".to_string());
                 }
                 let tag = parts[1];
-                match session::load_session(&ctx.session_id) {
+                match session::load_session(&session_id).await {
                     Ok(mut sess) => {
                         sess.add_tag(tag.to_string());
-                        if let Err(e) = session::save_session(&sess) {
+                        if let Err(e) = session::save_session(&sess).await {
                             return CommandResult::Error(e);
                         }
                         CommandResult::Success(format!("Tag '{}' added to session", tag))
@@ -573,10 +665,10 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                     return CommandResult::Error("Usage: /session untag <tag>".to_string());
                 }
                 let tag = parts[1];
-                match session::load_session(&ctx.session_id) {
+                match session::load_session(&session_id).await {
                     Ok(mut sess) => {
                         sess.remove_tag(tag);
-                        if let Err(e) = session::save_session(&sess) {
+                        if let Err(e) = session::save_session(&sess).await {
                             return CommandResult::Error(e);
                         }
                         CommandResult::Success(format!("Tag '{}' removed from session", tag))
@@ -585,13 +677,13 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 }
             }
             "favorite" => {
-                match session::update_session_metadata(&ctx.session_id, None, None, None, Some(true)) {
+                match session::update_session_metadata(&session_id, None, None, None, Some(true)).await {
                     Ok(_) => CommandResult::Success("Session marked as favorite".to_string()),
                     Err(e) => CommandResult::Error(e),
                 }
             }
             "unfavorite" => {
-                match session::update_session_metadata(&ctx.session_id, None, None, None, Some(false)) {
+                match session::update_session_metadata(&session_id, None, None, None, Some(false)).await {
                     Ok(_) => CommandResult::Success("Session removed from favorites".to_string()),
                     Err(e) => CommandResult::Error(e),
                 }
@@ -601,7 +693,7 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                     return CommandResult::Error("Usage: /session notes <notes>".to_string());
                 }
                 let notes = parts[1..].join(" ");
-                match session::update_session_metadata(&ctx.session_id, None, None, Some(notes), None) {
+                match session::update_session_metadata(&session_id, None, None, Some(notes), None).await {
                     Ok(sess) => CommandResult::Success(format!("Notes updated: {}", sess.metadata.notes.unwrap_or_default())),
                     Err(e) => CommandResult::Error(e),
                 }
@@ -616,7 +708,7 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                     project: Some(query.clone()),
                     ..Default::default()
                 };
-                let results = session::search_sessions(&filter);
+                let results = session::search_sessions(&filter).await;
                 if results.is_empty() {
                     CommandResult::Success("No matching sessions found".to_string())
                 } else {
@@ -630,6 +722,7 @@ fn session_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
             _ => CommandResult::Error(format!("Unknown session command: {}", parts[0])),
         }
     }
+    })
 }
 
 // ==================== Task Commands ====================
@@ -753,7 +846,7 @@ pub fn permissions_command() -> Command {
         "/permissions - Show current mode".to_string(),
         "/permissions ask - Set to ask mode".to_string(),
         "/permissions auto-read - Set to auto-read mode".to_string(),
-        "/permissions auto-all - Set to auto-all mode".to_string(),
+        "/permissions allow-all - Set to allow-all mode".to_string(),
     ])
     .with_aliases(vec!["perm".to_string()])
 }
@@ -764,17 +857,17 @@ fn permissions_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
     match arg.as_str() {
         "" => {
             CommandResult::Success(format!(
-                "Current permission mode: {}\n\nModes:\n  ask - Ask for every tool\n  auto-read - Auto-approve read-only tools\n  auto-all - Auto-approve all tools",
+                "Current permission mode: {}\n\nModes:\n  ask - Ask for every tool\n  auto-read - Auto-approve read-only tools\n  allow-all - Auto-approve all tools",
                 match ctx.config.permissions.mode {
                     PermissionModeConfig::Ask => "ask",
                     PermissionModeConfig::AutoRead => "auto-read",
-                    PermissionModeConfig::AutoAll => "auto-all",
+                    PermissionModeConfig::AllowAll => "allow-all",
                 }
             ))
         }
         "ask" => CommandResult::Success("Permission mode set to: ask".to_string()),
         "auto-read" | "autoread" => CommandResult::Success("Permission mode set to: auto-read".to_string()),
-        "auto-all" | "autoall" => CommandResult::Success("Permission mode set to: auto-all (warning: all tools will be auto-approved)".to_string()),
+        "allow-all" | "auto-all" | "autoall" => CommandResult::Success("Permission mode set to: allow-all (warning: all tools will be auto-approved)".to_string()),
         _ => CommandResult::Error(format!("Unknown permission mode: {}", arg)),
     }
 }
@@ -946,11 +1039,13 @@ pub fn review_command() -> Command {
         review_execute,
     )
     .with_usage(vec![
-        "/review - Review current changes".to_string(),
-        "/review <file> - Review specific file".to_string(),
-        "/review diff - Review git diff".to_string(),
-        "/review last - Review last commit".to_string(),
-    ])
+          "/review - Review current changes (staged + unstaged)".to_string(),
+          "/review diff - Review current diff".to_string(),
+          "/review staged - Review staged changes only".to_string(),
+          "/review last - Review last commit".to_string(),
+          "/review <file> - Review changes in a specific file".to_string(),
+          "/review HEAD~3..HEAD - Review a commit range".to_string(),
+      ])
     .with_aliases(vec!["rev".to_string()])
 }
 
@@ -961,38 +1056,86 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     }
 
     let arg = args.trim().to_lowercase();
+    let cwd = std::env::current_dir().unwrap_or_default();
 
-    match arg.as_str() {
-        "" | "changes" => {
-            CommandResult::Success(
-                "Code Review: Current Changes\n\nUse the following approach:\n1. Run `git status` to see changed files\n2. Run `git diff` to see the changes\n3. Ask me to review specific files or the entire diff\n\nExample: \"Please review the changes in src/main.rs\"".to_string()
-            )
+    let diff_text = match arg.as_str() {
+        "" | "changes" | "diff" => {
+            // Get staged + unstaged changes
+            run_git(&cwd, &["diff", "HEAD"])
+                .unwrap_or_else(|| run_git(&cwd, &["diff"]).unwrap_or_default())
         }
-        "diff" => {
-            CommandResult::Success(
-                "Review Git Diff:\n\nRun `git diff` using Bash tool, then ask me to:\n- Check for potential bugs\n- Review code style\n- Suggest improvements\n- Identify security issues".to_string()
-            )
+        "staged" => {
+            run_git(&cwd, &["diff", "--cached"]).unwrap_or_default()
         }
         "last" | "last-commit" => {
-            CommandResult::Success(
-                "Review Last Commit:\n\nRun `git show HEAD` using Bash tool to see the last commit, then ask for a review.".to_string()
-            )
+            run_git(&cwd, &["show", "HEAD", "--format=fuller", "--patch"]).unwrap_or_default()
         }
         _ => {
-            // Assume it's a file path
-            CommandResult::Success(format!(
-                "Review File: {}\n\nUse FileRead tool to read the file, then ask for a code review.",
-                arg
-            ))
+            // Assume it's a file or commit range
+            if arg.contains("..") {
+                // Commit range like HEAD~3..HEAD
+                run_git(&cwd, &["diff", &arg]).unwrap_or_default()
+            } else {
+                // Specific file
+                let original_arg = args.trim();
+                run_git(&cwd, &["diff", "HEAD", "--", original_arg])
+                    .or_else(|| run_git(&cwd, &["diff", "--", original_arg]))
+                    .unwrap_or_default()
+            }
         }
+    };
+
+    if diff_text.trim().is_empty() {
+        return CommandResult::Success("No changes to review. Working tree is clean.".to_string());
     }
+
+    // Get status for context
+    let status_text = run_git(&cwd, &["status", "--short"]).unwrap_or_default();
+
+    let mut review_prompt = String::from("请对以下代码变更进行 code review。\n\n");
+    review_prompt.push_str("请关注以下方面：\n");
+    review_prompt.push_str("1. **正确性**：逻辑错误、边界条件、潜在的 bug\n");
+    review_prompt.push_str("2. **安全性**：注入漏洞、敏感信息泄露\n");
+    review_prompt.push_str("3. **代码质量**：可读性、命名、重复代码\n");
+    review_prompt.push_str("4. **性能**：不必要的开销、N+1 查询等\n");
+    review_prompt.push_str("5. **设计**：职责分离、耦合度\n\n");
+
+    if !status_text.is_empty() {
+        review_prompt.push_str("## Changed files\n```\n");
+        review_prompt.push_str(&status_text);
+        review_prompt.push_str("\n```\n\n");
+    }
+
+    review_prompt.push_str("## Diff\n```diff\n");
+    // Truncate if too large (keep last ~50k chars)
+    let max_diff = 50_000;
+    if diff_text.len() > max_diff {
+        review_prompt.push_str(&diff_text[diff_text.len() - max_diff..]);
+        review_prompt.push_str("\n```\n\n(truncated — showing last ~50k characters)");
+    } else {
+        review_prompt.push_str(&diff_text);
+        review_prompt.push_str("\n```");
+    }
+
+    CommandResult::Action(CommandAction::Review(review_prompt))
+}
+
+/// Run a git command and return its stdout output
+fn run_git(cwd: &std::path::Path, args: &[&str]) -> Option<String> {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
 }
 
 // ==================== Stats Commands ====================
 
 /// Stats command - show statistics
 pub fn stats_command() -> Command {
-    Command::new(
+    Command::new_async(
         "stats".to_string(),
         "Show session and usage statistics".to_string(),
         CommandCategory::Utility,
@@ -1007,12 +1150,17 @@ pub fn stats_command() -> Command {
     .with_aliases(vec!["statistics".to_string()])
 }
 
-fn stats_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
+fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+    let session_id = ctx.session_id.clone();
+    let model_name = ctx.config.model.name.clone();
+    let max_tokens = ctx.config.model.max_tokens;
+    let context_size = ctx.config.model.context_size;
+    Box::pin(async move {
     let arg = args.trim().to_lowercase();
 
     match arg.as_str() {
         "" | "all" => {
-            let sessions = crate::session::list_sessions();
+            let sessions = crate::session::list_sessions().await;
             let total_sessions = sessions.len();
             let total_messages: usize = sessions.iter().map(|s| s.messages.len()).sum();
 
@@ -1023,16 +1171,16 @@ fn stats_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 Cost Tracking:\n  Use /cost for detailed cost information\n\n\
                 Tokens:\n  Use /stats tokens for token estimate",
                 total_sessions,
-                ctx.session_id,
+                session_id,
                 total_messages,
-                ctx.config.model.name,
-                ctx.config.model.max_tokens,
-                ctx.config.model.context_size
+                model_name,
+                max_tokens,
+                context_size
             );
             CommandResult::Success(output)
         }
         "session" => {
-            let sessions = crate::session::list_sessions();
+            let sessions = crate::session::list_sessions().await;
             let mut output = String::from("Session Statistics:\n\n");
             for sess in sessions.iter().take(10) {
                 output.push_str(&format!(
@@ -1065,8 +1213,8 @@ fn stats_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
         }
         "tokens" => {
             // Estimate tokens from current session
-            let sessions = crate::session::list_sessions();
-            let current_session = sessions.iter().find(|s| s.id == ctx.session_id);
+            let sessions = crate::session::list_sessions().await;
+            let current_session = sessions.iter().find(|s| s.id == session_id);
 
             let token_estimate = if let Some(sess) = current_session {
                 crate::compact::estimate_messages_tokens(&sess.messages)
@@ -1082,11 +1230,12 @@ fn stats_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 Note: This is an estimate based on message content.\n\
                 Actual token counts may vary based on the model's tokenizer.",
                 token_estimate,
-                ctx.config.model.context_size,
-                (token_estimate as f64 / ctx.config.model.context_size as f64) * 100.0
+                context_size,
+                (token_estimate as f64 / context_size as f64) * 100.0
             );
             CommandResult::Success(output)
         }
         _ => CommandResult::Error(format!("Unknown stats type: {}", arg))
     }
+    })
 }

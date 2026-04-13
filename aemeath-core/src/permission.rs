@@ -2,6 +2,7 @@
 //!
 //! Provides configurable permission control for tool calls.
 
+use crate::compact::safe_slice;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
@@ -16,7 +17,7 @@ pub enum PermissionMode {
     /// Auto-approve read-only tools
     AutoRead,
     /// Auto-approve all tools (dangerous)
-    AutoAll,
+    AllowAll,
 }
 
 /// Permission decision
@@ -140,7 +141,7 @@ impl PermissionManager {
 
         // Check mode
         match self.mode {
-            PermissionMode::AutoAll => PermissionDecision::Allow,
+            PermissionMode::AllowAll => PermissionDecision::Allow,
             PermissionMode::AutoRead => {
                 if self.is_read_only(tool_name) {
                     PermissionDecision::Allow
@@ -152,7 +153,12 @@ impl PermissionManager {
         }
     }
 
-    /// Prompt user for permission
+    /// Prompt user for permission.
+    ///
+    /// NOTE: Uses `println!`/`print!` directly because this is an interactive
+    /// CLI/REPL prompt that takes over stdout. Must never be called from TUI
+    /// mode — the TUI renders its own permission dialog via `UiEvent`.
+    #[allow(clippy::print_stdout, clippy::print_stderr)]
     fn prompt_user(&mut self, tool_name: &str, input: &serde_json::Value) -> PermissionDecision {
         if !self.interactive {
             // Non-interactive mode: default to deny unless explicitly allowed
@@ -162,7 +168,7 @@ impl PermissionManager {
         // Format input for display
         let input_str = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
         let input_preview = if input_str.len() > 500 {
-            format!("{}...\n(truncated)", &input_str[..500])
+            format!("{}...\n(truncated)", safe_slice(&input_str, 500))
         } else {
             input_str.clone()
         };
@@ -198,7 +204,7 @@ impl PermissionManager {
                     return PermissionDecision::AllowTool;
                 }
                 "all" | "auto" => {
-                    self.mode = PermissionMode::AutoAll;
+                    self.mode = PermissionMode::AllowAll;
                     return PermissionDecision::AllowAlways;
                 }
                 "d" | "details" => {
@@ -230,7 +236,7 @@ impl PermissionManager {
         }
 
         match self.mode {
-            PermissionMode::AutoAll => PermissionDecision::Allow,
+            PermissionMode::AllowAll => PermissionDecision::Allow,
             PermissionMode::AutoRead => {
                 if self.is_read_only(tool_name) {
                     PermissionDecision::Allow
@@ -272,8 +278,8 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_all_mode() {
-        let mgr = PermissionManager::with_mode(PermissionMode::AutoAll);
+    fn test_allow_all_mode() {
+        let mgr = PermissionManager::with_mode(PermissionMode::AllowAll);
         let decision = mgr.check_permission_silent("Bash");
         assert_eq!(decision, PermissionDecision::Allow);
     }
@@ -298,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_deny_tool() {
-        let mut mgr = PermissionManager::with_mode(PermissionMode::AutoAll);
+        let mut mgr = PermissionManager::with_mode(PermissionMode::AllowAll);
         mgr.deny_tool("Bash");
         let decision = mgr.check_permission_silent("Bash");
         assert_eq!(decision, PermissionDecision::Deny);

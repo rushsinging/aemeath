@@ -9,6 +9,44 @@ use crate::provider::{LlmProvider, StreamHandler};
 use crate::stream::parse_stream;
 use crate::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 
+/// Handler wrapper that tracks whether any user-visible content was emitted.
+/// Used to decide if a non-stream fallback is safe on stream errors — if any
+/// text/tool_use was already shown, falling back would duplicate it.
+struct TrackingHandler<'a> {
+    inner: &'a mut dyn StreamHandler,
+    emitted: bool,
+}
+
+impl<'a> TrackingHandler<'a> {
+    fn new(inner: &'a mut dyn StreamHandler) -> Self {
+        Self { inner, emitted: false }
+    }
+}
+
+impl<'a> StreamHandler for TrackingHandler<'a> {
+    fn on_text(&mut self, text: &str) {
+        self.emitted = true;
+        self.inner.on_text(text);
+    }
+    fn on_tool_use_start(&mut self, name: &str) {
+        self.emitted = true;
+        self.inner.on_tool_use_start(name);
+    }
+    fn on_error(&mut self, error: &str) {
+        self.inner.on_error(error);
+    }
+    fn on_raw_line(&mut self, line: &str) {
+        self.inner.on_raw_line(line);
+    }
+    fn on_text_block_complete(&mut self, full_text: &str) {
+        self.inner.on_text_block_complete(full_text);
+    }
+    fn on_thinking(&mut self, text: &str) {
+        self.emitted = true;
+        self.inner.on_thinking(text);
+    }
+}
+
 pub struct AnthropicProvider {
     api_key: String,
     base_url: String,
@@ -30,9 +68,12 @@ impl AnthropicProvider {
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             max_tokens,
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
-            http: reqwest::Client::new(),
-            max_retries: 3,
-            timeout_secs: 60,
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .expect("failed to create HTTP client"),
+            max_retries: 10,
+            timeout_secs: 120,
         }
     }
 
@@ -83,14 +124,25 @@ impl AnthropicProvider {
 
         let headers = self.build_headers()?;
 
+        let url = format!("{}/v1/messages", self.base_url);
         let response = self
             .http
-            .post(format!("{}/v1/messages", self.base_url))
+            .post(&url)
             .headers(headers)
             .json(&request)
             .send()
             .await
-            .map_err(|e| crate::LlmError::Network(e.to_string()))?;
+            .map_err(|e| {
+                let mut msg = format!("{}\n  URL: {}", e, url);
+                let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+                let mut depth = 1;
+                while let Some(cause) = source {
+                    msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                    source = cause.source();
+                    depth += 1;
+                }
+                crate::LlmError::Network(msg)
+            })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -182,7 +234,7 @@ impl LlmProvider for AnthropicProvider {
             }
 
             if attempt > 0 {
-                let delay = std::time::Duration::from_millis(1000 * 2u64.pow(attempt as u32));
+                let delay = std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
@@ -205,12 +257,56 @@ impl LlmProvider for AnthropicProvider {
                     return Err(crate::LlmError::Stream("interrupted by user".to_string()));
                 }
                 result = send_fut => {
-                    result.map_err(|e| crate::LlmError::Network(e.to_string()))?
+                    match result {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            let url = format!("{}/v1/messages", self.base_url);
+                            let detail = if e.is_connect() {
+                                "connection failed"
+                            } else if e.is_timeout() {
+                                "request timed out"
+                            } else if e.is_redirect() {
+                                "too many redirects"
+                            } else if e.is_request() {
+                                "request build error"
+                            } else if e.is_body() {
+                                "request body error"
+                            } else if e.is_decode() {
+                                "response decode error"
+                            } else {
+                                "unknown"
+                            };
+                            let mut msg = format!("{} ({})\n  URL: {}", e, detail, url);
+                            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+                            let mut depth = 1;
+                            while let Some(cause) = source {
+                                msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                                source = cause.source();
+                                depth += 1;
+                            }
+                            let remaining = self.max_retries.saturating_sub(attempt + 1);
+                            if remaining > 0 {
+                                handler.on_error(&format!(
+                                    "network error ({detail}), retrying ({}/{})...",
+                                    attempt + 2, self.max_retries
+                                ));
+                            }
+                            last_error = Some(crate::LlmError::Network(msg));
+                            continue;
+                        }
+                    }
                 }
             };
 
             let status = response.status();
             if status == 429 {
+                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                if remaining > 0 {
+                    handler.on_error(&format!(
+                        "rate limited (429), retrying ({}/{})...",
+                        attempt + 2, self.max_retries
+                    ));
+                }
                 last_error = Some(crate::LlmError::RateLimited);
                 continue;
             }
@@ -218,11 +314,17 @@ impl LlmProvider for AnthropicProvider {
             // Retry 5xx errors (server-side issues may be transient)
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
+                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                if remaining > 0 {
+                    handler.on_error(&format!(
+                        "server error ({}), retrying ({}/{})...",
+                        status, attempt + 2, self.max_retries
+                    ));
+                }
                 last_error = Some(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: error_body,
                 });
-                eprintln!("[warn] Server error {}, will retry", status);
                 continue;
             }
 
@@ -238,13 +340,23 @@ impl LlmProvider for AnthropicProvider {
                 });
             }
 
-            match parse_stream(response, handler, cancel).await {
+            let mut tracking = TrackingHandler::new(handler);
+            let stream_result = parse_stream(response, &mut tracking, cancel).await;
+            let emitted = tracking.emitted;
+            match stream_result {
                 Ok(resp) => return Ok(resp),
                 Err(crate::LlmError::Stream(ref msg)) if msg.contains("interrupted") => {
                     return Err(crate::LlmError::Stream(msg.clone()));
                 }
-                Err(crate::LlmError::Stream(_)) => {
-                    // Streaming failed for non-cancel reason, fall back to non-streaming
+                Err(crate::LlmError::Stream(msg)) => {
+                    // Streaming failed for non-cancel reason.
+                    // Only fall back to non-streaming if no partial output was emitted;
+                    // otherwise retrying would duplicate already-rendered text in the UI.
+                    if emitted {
+                        return Err(crate::LlmError::Stream(format!(
+                            "stream interrupted after partial output: {msg}"
+                        )));
+                    }
                     return self.send_message_non_stream(system, messages, tool_schemas, handler).await;
                 }
                 Err(e) => return Err(e),

@@ -1,3 +1,4 @@
+use rand::prelude::IndexedRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -13,6 +14,51 @@ const MAX_LINES: usize = 10000;
 
 /// Default terminal width for pre-wrapping
 const DEFAULT_WIDTH: usize = 120;
+
+/// Spinner glyph frames — forward then reverse for a breathing effect
+const SPINNER_FRAMES: &[char] = &[
+    '·', '✢', '✳', '✶', '✻', '✽',
+    '✻', '✶', '✳', '✢', '·',
+];
+
+/// Fun verbs shown while the LLM is thinking
+const SPINNER_VERBS: &[&str] = &[
+    "Thinking",    "Pondering",    "Crafting",     "Computing",
+    "Brewing",     "Weaving",      "Conjuring",    "Forging",
+    "Hatching",    "Cooking",      "Channeling",   "Ruminating",
+    "Composing",   "Imagining",    "Processing",   "Puzzling",
+    "Mulling",     "Noodling",     "Tinkering",    "Crystallizing",
+    "Synthesizing","Architecting", "Orchestrating","Incubating",
+    "Fermenting",  "Simmering",    "Percolating",  "Cogitating",
+    "Meandering",  "Harmonizing",
+];
+
+/// Spinner colors (warm orange theme, like Claude Code)
+const SPINNER_BASE: Color = Color::Rgb(204, 152, 87);
+const SPINNER_HIGHLIGHT: Color = Color::Rgb(255, 210, 140);
+const SPINNER_DIM: Color = Color::Rgb(140, 105, 60);
+
+/// Linear interpolation between two RGB colors
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (a, b) {
+        let r = (r1 as f32 + (r2 as f32 - r1 as f32) * t) as u8;
+        let g = (g1 as f32 + (g2 as f32 - g1 as f32) * t) as u8;
+        let b = (b1 as f32 + (b2 as f32 - b1 as f32) * t) as u8;
+        Color::Rgb(r, g, b)
+    } else {
+        a
+    }
+}
+
+/// Animated spinner state for the output area
+struct SpinnerState {
+    /// Animation frame counter
+    frame: u64,
+    /// Current verb text
+    verb: String,
+    /// When this spinner started
+    start: std::time::Instant,
+}
 
 /// A line in the output with styling information
 #[derive(Clone, Debug)]
@@ -67,6 +113,21 @@ impl LineStyle {
 
 /// Format a tool call for human-friendly display.
 /// Returns (header_line, detail_lines) where header is "● ToolName(target)" and details are indented.
+fn debug_log(msg: &str) {
+    use std::io::Write;
+    let path = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".aemeath")
+        .join("debug.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     // Try parsing the JSON input
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(raw_json);
@@ -145,8 +206,8 @@ fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
             if let Ok(v) = &parsed {
                 let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("sub-task");
                 let prompt = v.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
-                let preview = if prompt.len() > 80 {
-                    format!("{}...", &prompt[..prompt.char_indices().take_while(|(i, _)| *i < 80).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(80)])
+                let preview = if prompt.len() > 300 {
+                    format!("{}...", &prompt[..prompt.char_indices().take_while(|(i, _)| *i < 300).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(300)])
                 } else {
                     prompt.to_string()
                 };
@@ -189,6 +250,7 @@ fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
             }
         }
         "TodoWrite" => {
+            debug_log(&format!("TodoWrite raw_json: {raw_json}"));
             if let Ok(v) = &parsed {
                 if let Some(todos) = v.get("todos").and_then(|t| t.as_array()) {
                     let count = todos.len();
@@ -206,8 +268,33 @@ fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
                     if count > 3 {
                         details.push(format!("... +{} more", count - 3));
                     }
+                    debug_log(&format!("TodoWrite header: ● TodoWrite ({count} items)"));
+                    for d in &details {
+                        debug_log(&format!("TodoWrite detail: {d}"));
+                    }
                     return (format!("● TodoWrite ({count} items)"), details);
+                } else {
+                    debug_log(&format!("TodoWrite: parsed Value has no 'todos' array. Value: {v}"));
                 }
+            } else {
+                debug_log(&format!("TodoWrite: parse failed: {:?}", parsed.as_ref().err()));
+            }
+        }
+        "TodoRun" => {
+            if let Ok(v) = &parsed {
+                // Show pending todo list if injected by TUI
+                if let Some(pending) = v.get("_pending").and_then(|p| p.as_array()) {
+                    let mut details = Vec::new();
+                    for item in pending {
+                        if let Some(s) = item.as_str() {
+                            details.push(format!("○ {}", s));
+                        }
+                    }
+                    if !details.is_empty() {
+                        return (format!("● TodoRun ({} todo{})", details.len(), if details.len() > 1 { "s" } else { "" }), details);
+                    }
+                }
+                return ("● TodoRun".to_string(), vec!["execute all pending todos".to_string()]);
             }
         }
         _ => {}
@@ -250,6 +337,30 @@ fn sanitize_for_display(text: &str) -> String {
         }
     }
     result
+}
+
+/// Convert a screen column position (display column) to a char index within the string.
+/// CJK characters occupy 2 display columns but only 1 char index.
+/// Returns the char index that best maps to the given screen column.
+/// If `screen_col` lands in the middle of a wide char, returns that char's index.
+fn screen_col_to_char_idx(text: &str, screen_col: usize) -> usize {
+    let mut display_width = 0usize;
+    for (i, ch) in text.char_indices() {
+        let ch_w = ch.width().unwrap_or(1) as usize;
+        if display_width + ch_w > screen_col {
+            // screen_col falls within this character
+            return i;
+        }
+        display_width += ch_w;
+    }
+    // Past the end — return char count (one past last index)
+    text.chars().count()
+}
+
+/// Get the display width (screen columns) of a string, accounting for CJK wide chars.
+#[allow(dead_code)]
+fn display_width(text: &str) -> usize {
+    text.chars().map(|c| c.width().unwrap_or(1) as usize).sum()
 }
 
 /// Split a string into lines that fit within `max_width` display columns,
@@ -295,12 +406,25 @@ pub struct OutputArea {
     streaming_buffer: String,
     /// Index in `lines` where the current streaming block starts
     streaming_start: Option<usize>,
+    /// True if the currently-open `<think>` block was synthetically injected by
+    /// `append_thinking_text` (from a `reasoning_content` field). Only synthetic
+    /// blocks get auto-closed when normal content arrives — real `<think>` tags
+    /// embedded in the `content` field (e.g. MiniMax-M2) must not be force-closed.
+    synthetic_think_open: bool,
+    /// Number of queued user message lines (added while streaming)
+    queued_line_count: usize,
     /// Whether mouse is currently dragging (selecting)
     is_selecting: bool,
     /// Selection start in absolute line coordinates
     selection_start: Option<(usize, usize)>,
     /// Selection end in absolute line coordinates
     selection_end: Option<(usize, usize)>,
+    /// Active spinner animation (shown as last line when Some)
+    spinner: Option<SpinnerState>,
+    /// Cached visible height from last render
+    last_visible_height: usize,
+    /// Cache of todo id -> subject, so updates that only carry id+status can still show the subject
+    todo_subject_cache: std::collections::HashMap<String, String>,
 }
 
 impl Default for OutputArea {
@@ -325,9 +449,14 @@ impl OutputArea {
             term_width,
             streaming_buffer: String::new(),
             streaming_start: None,
+            synthetic_think_open: false,
+            queued_line_count: 0,
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            spinner: None,
+            last_visible_height: 0,
+            todo_subject_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -372,6 +501,10 @@ impl OutputArea {
                 content: format!("{}{}", prefix, line),
                 style: LineStyle::User,
             });
+            // Track lines added while streaming (for queue display)
+            if self.streaming_start.is_some() {
+                self.queued_line_count += 1;
+            }
         }
         // If text ends with newline or is empty, add an empty line for spacing
         if text.is_empty() || text.ends_with('\n') {
@@ -379,6 +512,9 @@ impl OutputArea {
                 content: String::new(),
                 style: LineStyle::User,
             });
+            if self.streaming_start.is_some() {
+                self.queued_line_count += 1;
+            }
         }
     }
 
@@ -388,11 +524,53 @@ impl OutputArea {
         self.push_text(text, LineStyle::Assistant);
     }
 
+    /// Track whether we're currently inside a thinking block (open <think> without close)
+    fn has_unclosed_think(&self) -> bool {
+        let opens = self.streaming_buffer.matches("<think>").count();
+        let closes = self.streaming_buffer.matches("</think>").count();
+        opens > closes
+    }
+
+    /// Append reasoning/thinking text to the streaming block.
+    /// Wraps in `<think>` tags so the existing parser renders it dimmed/italic.
+    /// However, if the text already contains `<think>` tags (e.g. from MiniMax),
+    /// we append it directly without additional wrapping.
+    pub fn append_thinking_text(&mut self, text: &str) {
+        // If the incoming text already contains thinking tags, just append it directly
+        // (avoid double-wrapping which breaks parsing)
+        if text.contains("<think>") || text.contains("</think>") {
+            self.streaming_buffer.push_str(text);
+        } else {
+            if !self.has_unclosed_think() {
+                // Inject opening tag — append_assistant_text will auto-close it
+                // when the next normal-content chunk arrives.
+                self.streaming_buffer.push_str("<think>");
+                self.synthetic_think_open = true;
+            }
+            self.streaming_buffer.push_str(text);
+        }
+        self.do_rerender();
+    }
+
     /// Append text to the streaming assistant block.
     /// Accumulates in a buffer and re-renders all lines from the block start.
     /// Supports `<think>...</think>` tags — thinking content is displayed dimmed/italic.
     pub fn append_assistant_text(&mut self, text: &str) {
+        // Only auto-close thinking blocks that WE synthetically injected via
+        // `append_thinking_text`. Real `<think>` tags arriving in the content
+        // stream (e.g. MiniMax-M2) will be closed by their own matching
+        // `</think>` from the same stream — don't force-close them here, or
+        // the trailing real `</think>` will leak as literal text.
+        if self.synthetic_think_open && self.has_unclosed_think() {
+            self.streaming_buffer.push_str("</think>\n");
+            self.synthetic_think_open = false;
+        }
         self.streaming_buffer.push_str(text);
+        self.do_rerender();
+    }
+
+    /// Core re-render logic for the streaming block
+    fn do_rerender(&mut self) {
 
         // Record where the streaming block starts (first call)
         if self.streaming_start.is_none() {
@@ -401,13 +579,19 @@ impl OutputArea {
 
         let start_idx = self.streaming_start.unwrap_or(0);
 
-        // Track line count before re-render to adjust scroll offset
-        let old_line_count = self.lines.len();
+            // Track line count before re-render to adjust scroll offset
+            let old_line_count = self.lines.len();
 
-        // Remove all lines from the streaming block
-        while self.lines.len() > start_idx {
-            self.lines.pop_back();
-        }
+            // Save queued message lines (added while streaming)
+            let queued_lines: Vec<OutputLine> = (0..self.queued_line_count)
+                .filter_map(|_| self.lines.pop_back())
+                .collect();
+            self.queued_line_count = 0;
+
+            // Remove all lines from the streaming block
+            while self.lines.len() > start_idx {
+                self.lines.pop_back();
+            }
 
         // Parse buffer into segments: thinking vs normal content
         let buf = &self.streaming_buffer;
@@ -466,6 +650,12 @@ impl OutputArea {
             });
         }
 
+        // Restore queued message lines (they were saved before clearing the block)
+        for line in queued_lines.into_iter().rev() {
+            self.lines.push_back(line);
+            self.queued_line_count += 1;
+        }
+
         // Adjust scroll offset to keep view stable when scrolled up.
         // Must be AFTER trailing newline line is added so we count all lines.
         if !self.auto_scroll {
@@ -482,27 +672,152 @@ impl OutputArea {
     pub fn finish_streaming(&mut self) {
         self.streaming_buffer.clear();
         self.streaming_start = None;
+        self.synthetic_think_open = false;
+        self.queued_line_count = 0;
+    }
+
+    /// Start the animated spinner in the output area
+    pub fn start_spinner(&mut self) {
+        if self.spinner.is_some() {
+            return; // already running
+        }
+        let mut rng = rand::rng();
+        self.spinner = Some(SpinnerState {
+            frame: 0,
+            verb: SPINNER_VERBS.choose(&mut rng).unwrap_or(&"Thinking").to_string(),
+            start: std::time::Instant::now(),
+        });
+    }
+
+    /// Stop the animated spinner
+    pub fn stop_spinner(&mut self) {
+        self.spinner = None;
+    }
+
+    /// Build the animated spinner line (called during render)
+    fn build_spinner_line(&self) -> Option<Line<'static>> {
+        let s = self.spinner.as_ref()?;
+
+        let mut spans = Vec::new();
+
+        // 1. Rotating glyph — changes every ~3 frames (150ms at 50ms tick)
+        let glyph = SPINNER_FRAMES[(s.frame / 3) as usize % SPINNER_FRAMES.len()];
+        spans.push(Span::styled(
+            format!(" {} ", glyph),
+            Style::default().fg(SPINNER_BASE).add_modifier(Modifier::BOLD),
+        ));
+
+        // 2. Shimmer text — a highlight band sweeps across the verb
+        let text = format!("{}…", s.verb);
+        let text_len = text.chars().count() as i32;
+        let cycle_len = text_len + 16;
+        let glimmer_pos = ((s.frame / 2) as i32) % cycle_len - 8;
+
+        for (i, ch) in text.chars().enumerate() {
+            let dist = (i as i32 - glimmer_pos).abs();
+            let color = if dist == 0 {
+                SPINNER_HIGHLIGHT
+            } else if dist <= 2 {
+                lerp_color(SPINNER_HIGHLIGHT, SPINNER_BASE, dist as f32 / 3.0)
+            } else if dist <= 4 {
+                SPINNER_BASE
+            } else {
+                SPINNER_DIM
+            };
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+        }
+
+        // 3. Elapsed time
+        let elapsed = s.start.elapsed().as_secs();
+        if elapsed >= 1 {
+            spans.push(Span::styled(
+                format!("  {}s", elapsed),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+
+        Some(Line::from(spans))
     }
 
     /// Add a tool call with human-friendly formatting.
     /// Shows header with status dot and indented details.
     pub fn push_tool_call(&mut self, name: &str, summary: &str) {
-        let (header, details) = format_tool_call(name, summary);
-        
+        // For TodoWrite, use the cache to resolve subjects on status-only updates
+        let (header, details) = if name == "TodoWrite" {
+            self.format_todowrite(summary)
+        } else {
+            format_tool_call(name, summary)
+        };
+
         // Push header line with ToolCallRunning style (yellow dot)
         self.push_line(OutputLine {
             content: header,
             style: LineStyle::ToolCallRunning,
         });
-        
-        // Push detail lines with tree connectors
-        for (i, detail) in details.iter().enumerate() {
-            let connector = if i < details.len() - 1 { "├─" } else { "├─" };
+
+        // Push detail lines indented under the header
+        for detail in details.iter() {
             self.push_line(OutputLine {
-                content: format!("  {connector} {detail}"),
+                content: format!("    {detail}"),
                 style: LineStyle::System,
             });
         }
+
+        // Blank line to visually separate consecutive tool calls
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::System,
+        });
+    }
+
+    /// Format TodoWrite tool call, maintaining a subject cache so that
+    /// status-only updates (id + status, no subject) still display correctly.
+    fn format_todowrite(&mut self, raw_json: &str) -> (String, Vec<String>) {
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(raw_json);
+        debug_log(&format!("TodoWrite raw_json: {raw_json}"));
+
+        if let Ok(v) = parsed {
+            if let Some(todos) = v.get("todos").and_then(|t| t.as_array()) {
+                let count = todos.len();
+                let mut details: Vec<String> = Vec::new();
+
+                // Update cache with any subjects present in this call
+                for todo in todos.iter() {
+                    if let (Some(id), Some(subject)) = (
+                        todo.get("id").and_then(|s| s.as_str()),
+                        todo.get("subject").and_then(|s| s.as_str()),
+                    ) {
+                        self.todo_subject_cache.insert(id.to_string(), subject.to_string());
+                    }
+                }
+
+                for todo in todos.iter().take(3) {
+                    // Try direct subject first, then fall back to cache via id
+                    let subject = todo.get("subject").and_then(|s| s.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            todo.get("id").and_then(|s| s.as_str())
+                                .and_then(|id| self.todo_subject_cache.get(id).cloned())
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+
+                    let status = todo.get("status").and_then(|s| s.as_str()).unwrap_or("pending");
+                    let icon = match status {
+                        "completed" => "✓",
+                        "in_progress" => "◐",
+                        _ => "○",
+                    };
+                    details.push(format!("{icon} {subject}"));
+                }
+                if count > 3 {
+                    details.push(format!("... +{} more", count - 3));
+                }
+                return (format!("● TodoWrite ({count} items)"), details);
+            }
+        }
+
+        // Fallback
+        format_tool_call("TodoWrite", raw_json)
     }
 
     /// Add a tool result with diff support.
@@ -540,10 +855,10 @@ impl OutputArea {
         let is_task_tool = matches!(tool_name, "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList");
 
         if !is_task_tool && !result.trim().is_empty() {
-            // Show result content with tree connectors (truncated to 5 lines)
+            // Show result content with tree connectors (truncated to 3 lines)
             let total = result.lines().count();
-            let display_lines: Vec<&str> = result.lines().take(5).collect();
-            let has_more = total > 5;
+            let display_lines: Vec<&str> = result.lines().take(3).collect();
+            let has_more = total > 3;
 
             for line in &display_lines {
                 self.push_line(OutputLine {
@@ -553,7 +868,7 @@ impl OutputArea {
             }
             if has_more {
                 self.push_line(OutputLine {
-                    content: format!("  │  ... ({} lines omitted)", total - 5),
+                    content: format!("  │  ... ({} lines omitted)", total - 3),
                     style: LineStyle::System,
                 });
             }
@@ -694,7 +1009,14 @@ impl OutputArea {
     /// Scroll up by the given number of lines
     pub fn scroll_up(&mut self, amount: usize) {
         self.auto_scroll = false;
-        self.scroll_offset = self.scroll_offset.saturating_add(amount);
+        let visible_height = self.last_visible_height;
+        let max_offset = self.lines.len().saturating_sub(visible_height);
+        self.scroll_offset = (self.scroll_offset.saturating_add(amount)).min(max_offset);
+        if max_offset == 0 {
+            // Not enough content to scroll; stay at bottom
+            self.scroll_offset = 0;
+            self.auto_scroll = true;
+        }
     }
 
     /// Scroll down by the given number of lines
@@ -717,37 +1039,37 @@ impl OutputArea {
     }
 
     /// Start text selection at given screen position (column, row relative to visible area)
-    /// visible_height is the height of the output area in rows
+    /// visible_height is the height of the output area in rows.
+    /// `col` is a screen/display column (accounts for CJK wide chars).
     pub fn start_selection_at(&mut self, col: usize, visible_row: usize, visible_height: usize) {
         // Convert visible row to absolute line index
         let (start_line_idx, _) = self.get_visible_range(visible_height);
         let absolute_line = start_line_idx + visible_row;
-        
-        // Clamp column to line length
-        let line_len = self.lines.get(absolute_line)
-            .map(|l| l.content.chars().count())
+
+        // Convert screen column to char index, respecting wide characters
+        let char_idx = self.lines.get(absolute_line)
+            .map(|l| screen_col_to_char_idx(&l.content, col))
             .unwrap_or(0);
-        let clamped_col = col.min(line_len);
-        
+
         self.is_selecting = true;
-        self.selection_start = Some((absolute_line, clamped_col));
-        self.selection_end = Some((absolute_line, clamped_col));
+        self.selection_start = Some((absolute_line, char_idx));
+        self.selection_end = Some((absolute_line, char_idx));
     }
 
-    /// Update selection end position during drag
+    /// Update selection end position during drag.
+    /// `col` is a screen/display column (accounts for CJK wide chars).
     pub fn update_selection_at(&mut self, col: usize, visible_row: usize, visible_height: usize) {
         if self.is_selecting {
             // Convert visible row to absolute line index
             let (start_line_idx, _) = self.get_visible_range(visible_height);
             let absolute_line = start_line_idx + visible_row;
-            
-            // Clamp column to line length
-            let line_len = self.lines.get(absolute_line)
-                .map(|l| l.content.chars().count())
+
+            // Convert screen column to char index, respecting wide characters
+            let char_idx = self.lines.get(absolute_line)
+                .map(|l| screen_col_to_char_idx(&l.content, col))
                 .unwrap_or(0);
-            let clamped_col = col.min(line_len);
-            
-            self.selection_end = Some((absolute_line, clamped_col));
+
+            self.selection_end = Some((absolute_line, char_idx));
         }
     }
 
@@ -757,7 +1079,8 @@ impl OutputArea {
         self.get_selected_text()
     }
 
-    /// Select the word at the given position (for double-click)
+    /// Select the word at the given position (for double-click).
+    /// `col` is a screen/display column (accounts for CJK wide chars).
     pub fn select_word_at(&mut self, col: usize, visible_row: usize, visible_height: usize) {
         let (start_line_idx, _) = self.get_visible_range(visible_height);
         let absolute_line = start_line_idx + visible_row;
@@ -767,29 +1090,31 @@ impl OutputArea {
             None => return,
         };
 
+        // Convert screen column to char index
+        let char_idx = screen_col_to_char_idx(content, col);
         let chars: Vec<char> = content.chars().collect();
-        if col >= chars.len() {
+        if char_idx >= chars.len() {
             return;
         }
 
         // Find word boundaries: a "word" is a sequence of alphanumeric/underscore chars
         let is_word_char = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
 
-        if !is_word_char(chars[col]) {
+        if !is_word_char(chars[char_idx]) {
             // Clicked on a non-word char, select just that char
-            self.selection_start = Some((absolute_line, col));
-            self.selection_end = Some((absolute_line, col + 1));
+            self.selection_start = Some((absolute_line, char_idx));
+            self.selection_end = Some((absolute_line, char_idx + 1));
             return;
         }
 
         // Scan left for word start
-        let mut start = col;
+        let mut start = char_idx;
         while start > 0 && is_word_char(chars[start - 1]) {
             start -= 1;
         }
 
         // Scan right for word end
-        let mut end = col;
+        let mut end = char_idx;
         while end < chars.len() && is_word_char(chars[end]) {
             end += 1;
         }
@@ -918,10 +1243,20 @@ impl OutputArea {
             return;
         }
 
+        // Advance spinner frame
+        if let Some(ref mut s) = self.spinner {
+            s.frame = s.frame.wrapping_add(1);
+        }
+
         // Update width on render (handles resize)
         self.term_width = (area.width as usize).saturating_sub(2);
 
-        let visible_lines = area.height as usize;
+        // Build spinner line (if active) — reserves 1 row at bottom
+        let spinner_line = self.build_spinner_line();
+        let reserved = if spinner_line.is_some() { 1 } else { 0 };
+
+        let visible_lines = (area.height as usize).saturating_sub(reserved);
+        self.last_visible_height = visible_lines;
         let total_lines = self.lines.len();
 
         // Calculate which lines to show
@@ -943,7 +1278,7 @@ impl OutputArea {
         }
 
         // Build lines with selection highlighting
-        let lines: Vec<Line> = self.lines
+        let mut lines: Vec<Line> = self.lines
             .iter()
             .enumerate()
             .skip(start)
@@ -958,6 +1293,11 @@ impl OutputArea {
                 }
             })
             .collect();
+
+        // Append spinner line at the bottom
+        if let Some(sl) = spinner_line {
+            lines.push(sl);
+        }
 
         // Truncate lines to area height to prevent buffer overflow
         let lines: Vec<Line> = lines.into_iter().take(area.height as usize).collect();
@@ -1057,5 +1397,57 @@ impl OutputArea {
         }
 
         spans
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn todowrite_real_input_from_session() {
+        let raw = r#"{"todos":[{"activeForm":"Reviewing aemeath-core","description":"Read","id":"1","status":"in_progress","subject":"Review aemeath-core (核心逻辑)"},{"activeForm":"Reviewing aemeath-llm","description":"Read","id":"2","status":"pending","subject":"Review aemeath-llm (LLM 抽象层)"},{"activeForm":"Reviewing aemeath-tools","description":"Read","id":"3","status":"pending","subject":"Review aemeath-tools (工具实现)"}]}"#;
+        let (header, details) = format_tool_call("TodoWrite", raw);
+        println!("HEADER: {header}");
+        for d in &details {
+            println!("DETAIL: {d}");
+        }
+        assert!(header.contains("3 items"), "header was: {header}");
+        assert!(details[0].contains("核心"), "detail[0]: {}", details[0]);
+        assert!(details[0].starts_with("◐"), "detail[0] icon: {}", details[0]);
+        assert!(details[1].starts_with("○"), "detail[1] icon: {}", details[1]);
+    }
+
+    #[test]
+    fn todowrite_via_value_to_string_roundtrip() {
+        // Simulate the full path: Value -> to_string -> format_tool_call
+        let v: serde_json::Value = serde_json::from_str(r#"{"todos":[{"subject":"Review aemeath-core (核心逻辑)","status":"in_progress"},{"subject":"T2","status":"pending"}]}"#).unwrap();
+        let s = v.to_string();
+        println!("ROUNDTRIP STRING: {s}");
+        let (header, details) = format_tool_call("TodoWrite", &s);
+        println!("HEADER: {header}");
+        for d in &details {
+            println!("DETAIL: {d}");
+        }
+        assert!(details[0].contains("核心"), "detail[0]: {}", details[0]);
+        assert!(details[0].starts_with("◐"));
+    }
+
+    #[test]
+    fn todorun_with_max_turns() {
+        let raw = r#"{"max_turns_per_todo": 100}"#;
+        let (header, details) = format_tool_call("TodoRun", raw);
+        assert_eq!(header, "● TodoRun");
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0], "max turns per todo: 100");
+    }
+
+    #[test]
+    fn todorun_without_max_turns() {
+        let raw = "{}";
+        let (header, details) = format_tool_call("TodoRun", raw);
+        assert_eq!(header, "● TodoRun");
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0], "execute all pending todos");
     }
 }

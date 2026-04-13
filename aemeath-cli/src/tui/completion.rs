@@ -21,6 +21,7 @@ pub enum SuggestionType {
     Command,
     File,
     Directory,
+    Model,
 }
 
 /// Context for generating suggestions
@@ -32,6 +33,8 @@ pub struct SuggestionContext {
     pub cursor_offset: usize,
     /// Current working directory
     pub cwd: PathBuf,
+    /// Available models for /model completion: list of (provider_name, model_id)
+    pub models: Vec<(String, String)>,
 }
 
 /// Slash command definition
@@ -110,6 +113,17 @@ pub fn get_slash_commands() -> Vec<SlashCommand> {
             description: "Clear pending images".to_string(),
             aliases: vec![],
         },
+        SlashCommand {
+            name: "review".to_string(),
+            description: "Review code changes (git diff)".to_string(),
+            aliases: vec!["rev".to_string()],
+        },
+        // Model-related commands
+        SlashCommand {
+            name: "model".to_string(),
+            description: "Show/switch model (use /model list to see available)".to_string(),
+            aliases: vec![],
+        },
     ]
 }
 
@@ -139,6 +153,46 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
     }
 
     let before_cursor = &input[..cursor_offset];
+
+    // Check for /model <arg> trigger (model name completion)
+    if input.starts_with("/model ") && cursor_offset >= 7 {
+        let arg_start = 7; // length of "/model "
+        let after_cmd = &input[arg_start..];
+        // Don't trigger for "/model list" or "/model list ..."
+        if after_cmd.starts_with("list") && (after_cmd.len() == 4 || after_cmd.as_bytes()[4] == b' ') {
+            // fall through to other triggers
+        } else {
+            let arg_part = &input[arg_start..cursor_offset];
+            // Include text after cursor until whitespace for matching
+            let after_cursor = &input[cursor_offset..];
+            let after_until_space: String = after_cursor
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .collect();
+            let full_arg = format!("{}{}", arg_part, after_until_space);
+            return Some((full_arg, arg_start, TriggerType::ModelArg));
+        }
+    }
+
+    // Check for /model subcommand completion (e.g., /model l -> /model list)
+    if input.starts_with("/model") && cursor_offset > 6 {
+        // Check if there's no space yet (partial command)
+        if input.len() > 6 && !input.chars().nth(6).map_or(false, |c| c.is_whitespace()) {
+            // Still typing "/model..." command
+        } else {
+            // "/model " with potential subcommand
+            let _after_model = if input.len() > 6 {
+                &input[6..]  // skip "/model"
+            } else {
+                ""
+            };
+            // Return as ModelSubCommand if it looks like a subcommand (not a full model name)
+            let arg_part = &input[7..cursor_offset].trim_start(); // skip "/model "
+            if !arg_part.is_empty() {
+                return Some((arg_part.to_string(), 7, TriggerType::ModelSubCommand));
+            }
+        }
+    }
 
     // Check for @ trigger (file/path completion)
     if let Some(at_pos) = before_cursor.rfind('@') {
@@ -182,6 +236,8 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
 pub enum TriggerType {
     SlashCommand,
     AtSymbol,
+    ModelArg,
+    ModelSubCommand,
 }
 
 /// Generate slash command suggestions based on partial input
@@ -220,6 +276,52 @@ pub fn generate_command_suggestions(partial: &str) -> Vec<Suggestion> {
             suggestion_type: SuggestionType::Command,
         })
         .collect()
+}
+
+/// Generate model suggestions based on partial input for /model command
+pub fn generate_model_suggestions(partial: &str, models: &[(String, String)]) -> Vec<Suggestion> {
+    if models.is_empty() {
+        return Vec::new();
+    }
+
+    let partial_lower = partial.to_lowercase();
+
+    models
+        .iter()
+        .filter(|(provider, model_id)| {
+            let full = format!("{}/{}", provider, model_id);
+            full.to_lowercase().starts_with(&partial_lower)
+                || provider.to_lowercase().starts_with(&partial_lower)
+        })
+        .map(|(provider, model_id)| {
+            Suggestion {
+                _id: format!("model-{}/{}", provider, model_id),
+                display_text: format!("{}/{}", provider, model_id),
+                _description: None,
+                suggestion_type: SuggestionType::Model,
+            }
+        })
+        .collect()
+}
+
+/// Generate model subcommand suggestions for /model command
+pub fn generate_model_subcommand_suggestions(partial: &str) -> Vec<Suggestion> {
+  let subcommands = vec![
+      ("list", "List available models from config"),
+  ];
+    
+  let partial_lower = partial.to_lowercase();
+    
+  subcommands
+      .iter()
+      .filter(|(name, _desc)| name.to_lowercase().starts_with(&partial_lower))
+      .map(|(name, desc)| Suggestion {
+          _id: format!("model-subcmd-{}", name),
+          display_text: format!("list"),
+          _description: Some(desc.to_string()),
+          suggestion_type: SuggestionType::Command,
+      })
+      .collect()
 }
 
 /// Generate file/directory suggestions based on partial path
@@ -362,6 +464,8 @@ pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
         match trigger_type {
             TriggerType::SlashCommand => generate_command_suggestions(&token),
             TriggerType::AtSymbol => generate_file_suggestions(&token, &ctx.cwd),
+            TriggerType::ModelArg => generate_model_suggestions(&token, &ctx.models),
+            TriggerType::ModelSubCommand => generate_model_subcommand_suggestions(&token),
         }
     } else {
         Vec::new()
@@ -396,6 +500,14 @@ pub fn apply_suggestion(
                         format!("@{} ", suggestion.display_text)
                     }
                 }
+            },
+            TriggerType::ModelArg => {
+                // For model args, just insert the text
+                suggestion.display_text.clone()
+            },
+            TriggerType::ModelSubCommand => {
+                // For model subcommands, add the subcommand after "/model "
+                format!("{}", suggestion.display_text)
             },
         };
 

@@ -118,7 +118,7 @@ impl Tool for ListMcpResourcesTool {
                 }
                 Err(e) => {
                     // Log error but continue with other servers
-                    eprintln!("Warning: Failed to list resources from {}: {}", server_name, e);
+                    log::warn!("Failed to list resources from {}: {}", server_name, e);
                 }
             }
         }

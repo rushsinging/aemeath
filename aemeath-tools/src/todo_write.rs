@@ -14,7 +14,7 @@ pub struct TodoWriteTool {
 impl Tool for TodoWriteTool {
     fn name(&self) -> &str { "TodoWrite" }
     fn description(&self) -> &str {
-        "Create a todo list to track progress on multi-step work. Use this to plan and track tasks during complex operations.\n\nUsage:\n- Create todos at the start of complex tasks\n- Update status as you progress (pending → in_progress → completed)\n- Use 'activeForm' to show current action (e.g., \"Running tests\")\n- Delete completed todos when done"
+        "Create a todo list to track progress on multi-step work. Use this to plan and track tasks during complex operations.\n\nUsage:\n- Create todos at the start of complex tasks\n- Use 'blocked_by' to set dependencies between todos (e.g. todo #3 blocked by #1 and #2)\n- Use 'activeForm' to show current action (e.g., \"Running tests\")\n\nAfter creating todos, call TodoRun once — it will automatically handle dependency ordering and parallel execution.\n\nIMPORTANT: Do NOT call Agent or other tools to execute todos yourself. TodoRun handles everything."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -45,9 +45,14 @@ impl Tool for TodoWriteTool {
                             "activeForm": {
                                 "type": "string",
                                 "description": "Present continuous form shown when in_progress (e.g., \"Running tests\")"
+                            },
+                            "blocked_by": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "IDs of todos that must complete before this one can start"
                             }
                         },
-                        "required": ["subject"]
+                    "required": ["subject"]
                     },
                     "description": "List of todos to create or update"
                 }
@@ -83,6 +88,18 @@ impl Tool for TodoWriteTool {
             let description = todo["description"].as_str().unwrap_or("");
             let status_str = todo["status"].as_str().unwrap_or("pending");
             let active_form = todo["activeForm"].as_str();
+            let blocked_by: Vec<String> = todo["blocked_by"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            if let Some(s) = v.as_str() { Some(s.to_string()) }
+                            else if let Some(n) = v.as_u64() { Some(n.to_string()) }
+                            else { None }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
 
             if subject.is_empty() {
                 results.push("Skipped todo with empty subject".to_string());
@@ -98,12 +115,16 @@ impl Tool for TodoWriteTool {
 
             if let Some(id_str) = id {
                 // Update existing todo
+                let blocked_by_clone = blocked_by.clone();
                 if self.store.update(id_str, |t| {
                     t.subject = subject.to_string();
                     t.description = description.to_string();
                     t.status = status.clone();
                     if let Some(af) = active_form {
                         t.active_form = Some(af.to_string());
+                    }
+                    if !blocked_by_clone.is_empty() {
+                        t.blocked_by = blocked_by_clone;
                     }
                 }).await.is_some() {
                     results.push(format!("Updated todo #{}: {}", id_str, subject));
@@ -114,9 +135,11 @@ impl Tool for TodoWriteTool {
                         description.to_string(),
                         active_form.map(|s| s.to_string()),
                     ).await;
-                    // Update status
+                    // Update status and blocked_by
+                    let blocked_by_clone = blocked_by.clone();
                     self.store.update(&task.id, |t| {
                         t.status = status;
+                        t.blocked_by = blocked_by_clone;
                     }).await;
                     results.push(format!("Created todo #{}: {}", task.id, subject));
                 }
@@ -128,14 +151,21 @@ impl Tool for TodoWriteTool {
                     active_form.map(|s| s.to_string()),
                 ).await;
 
-                // Update status if not pending
-                if status != TaskStatus::Pending {
+                // Update status and blocked_by if needed
+                if status != TaskStatus::Pending || !blocked_by.is_empty() {
+                    let blocked_by_clone = blocked_by.clone();
                     self.store.update(&task.id, |t| {
                         t.status = status;
+                        t.blocked_by = blocked_by_clone;
                     }).await;
                 }
 
-                results.push(format!("Created todo #{}: {}", task.id, subject));
+                let dep_info = if blocked_by.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (blocked by #{})", blocked_by.join(", #"))
+                };
+                results.push(format!("Created todo #{}: {}{}", task.id, subject, dep_info));
             }
         }
 
@@ -150,6 +180,12 @@ impl Tool for TodoWriteTool {
             pending, in_progress, completed
         );
 
-        ToolResult::success(results.join("\n") + &summary)
+        let hint = if pending > 0 {
+            "\n\nNext step: Call TodoRun to execute all pending todos. It will handle dependency ordering and parallel execution automatically."
+        } else {
+            ""
+        };
+
+        ToolResult::success(results.join("\n") + &summary + hint)
     }
 }

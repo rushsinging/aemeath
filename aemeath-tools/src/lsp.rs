@@ -1,3 +1,4 @@
+use aemeath_core::compact::safe_slice;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -144,7 +145,7 @@ async fn get_diagnostics(
 
             // Truncate very long output
             if combined.len() > 10000 {
-                ToolResult::success(format!("{}...\n[truncated]", &combined[..10000]))
+                ToolResult::success(format!("{}...\n[truncated]", safe_slice(&combined, 10000)))
             } else {
                 ToolResult::success(combined)
             }

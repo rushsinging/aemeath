@@ -1,11 +1,14 @@
 use crate::image::{ProcessedImage, is_image_file, process_image_file};
 use crate::tui::completion::{SuggestionContext, generate_suggestions, apply_suggestion};
+use crate::tui::dialog::Dialog;
 use super::{InputArea, OutputArea, StatusBar};
 use super::output_area::{LineStyle, OutputLine};
 use aemeath_core::agent::Agent;
-use aemeath_core::command::cmd;
+use aemeath_core::command::{cmd, CommandContext, CommandRegistry, CommandResult};
 use aemeath_core::cost::format_tokens;
 use aemeath_core::message::Message;
+use aemeath_core::session;
+use aemeath_core::state::AppState;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::stream::StreamHandler;
 use aemeath_llm::types::StopReason;
@@ -30,13 +33,17 @@ use tokio_util::sync::CancellationToken;
 /// Events sent from background task to UI
 enum UiEvent {
     Text(String),
+    /// Reasoning/thinking content — displayed in a dimmed style
+    Thinking(String),
     TextBlockComplete(String),
     ToolCallStart(String),
     ToolCall { name: String, summary: String },
     ToolResult { tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
-    Usage { input: u32, output: u32 },
+    Usage { input: u32, output: u32, last_input: u32 },
     Error(String),
     Cancelled,
+    /// Update status bar processing message directly
+    StatusUpdate(String),
     /// Sync messages back from background task to main thread
     MessagesSync(Vec<Message>),
     Done,
@@ -53,9 +60,12 @@ pub struct App {
     status_bar: StatusBar,
     messages: Vec<Message>,
     cwd: PathBuf,
+    session_id: String,
     total_input_tokens: u64,
     total_output_tokens: u64,
     total_api_calls: u64,
+    /// Last API call's input_tokens (current context size)
+    last_input_tokens: u64,
     should_exit: bool,
     pending_images: Vec<ProcessedImage>,
     /// Stores the output area rect for mouse coordinate conversion
@@ -70,6 +80,20 @@ pub struct App {
     system_prompt_text: String,
     /// Context size for compaction threshold
     context_size: usize,
+    /// Current LLM client (replaceable via /model command)
+    client: Option<Arc<aemeath_llm::client::LlmClient>>,
+    /// Models configuration for /model command
+    models_config: aemeath_core::config::ModelsConfig,
+    /// Original created_at timestamp (preserved across resume)
+    session_created_at: Option<String>,
+    /// Active modal dialog (e.g. model selection)
+    active_dialog: Option<Dialog>,
+    /// Model options for dialog selection (provider/name keys)
+    dialog_model_keys: Vec<String>,
+    /// Current model display name (provider/name) for UI
+    current_model_display: String,
+    /// Time of last Ctrl+C in idle state (for double-press-to-exit)
+    last_ctrlc: Option<std::time::Instant>,
 }
 
 impl App {
@@ -90,9 +114,11 @@ impl App {
             status_bar,
             messages: Vec::new(),
             cwd,
+            session_id,
             total_input_tokens: 0,
             total_output_tokens: 0,
             total_api_calls: 0,
+            last_input_tokens: 0,
             should_exit: false,
             pending_images: Vec::new(),
             output_area_rect: Rect::default(),
@@ -101,6 +127,13 @@ impl App {
             last_click: None,
             system_prompt_text: String::new(),
             context_size: 200_000,
+            client: None,
+            models_config: aemeath_core::config::ModelsConfig::default(),
+            session_created_at: None,
+            active_dialog: None,
+            dialog_model_keys: Vec::new(),
+            current_model_display: model,
+            last_ctrlc: None,
         }
     }
 
@@ -117,10 +150,53 @@ impl App {
         use_markdown: bool,
         agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
         allow_all: bool,
+        resume_id: Option<String>,
+        task_store: Arc<aemeath_core::task::TaskStore>,
     ) -> io::Result<()> {
-        // Store for compaction
+        // Store client and config for runtime switching
+        self.client = Some(client.clone());
         self.system_prompt_text = system_prompt_text.clone();
         self.context_size = context_size;
+        self.status_bar.set_context_size(context_size as u64);
+
+        // Resume existing session if requested
+        if let Some(ref id) = resume_id {
+            match aemeath_core::session::load_session(id).await {
+                Ok(s) => {
+                    let msg_count = s.messages.len();
+                    self.session_created_at = Some(s.created_at);
+                    self.messages = s.messages;
+                    self.output_area.push_system(&format!(
+                        "[resumed session {} ({} messages)]",
+                        id, msg_count
+                    ));
+                }
+                Err(e) => {
+                    self.output_area.push_system(&format!(
+                        "[warning: failed to resume session {}: {}, starting new]",
+                        id, e
+                    ));
+                }
+            }
+        }
+
+        // Load models config from config files
+        let config_paths = [
+            dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+            std::path::PathBuf::from(".aemeath/config.json"),
+        ];
+        for path in &config_paths {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(config) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
+                        if !config.models.providers.is_empty() {
+                            self.models_config = config.models;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -149,7 +225,24 @@ impl App {
             agent_runner,
             allow_all,
             interrupted,
+            task_store,
         ).await;
+
+        // Auto-save session on exit
+        if !self.messages.is_empty() {
+            use aemeath_core::session::{self, Session, now_iso};
+            let s = Session {
+                id: self.session_id.clone(),
+                cwd: self.cwd.to_string_lossy().to_string(),
+                messages: self.messages.clone(),
+                created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+                updated_at: now_iso(),
+                metadata: Default::default(),
+            };
+            if let Err(e) = session::save_session(&s).await {
+                log::warn!("failed to auto-save session: {e}");
+            }
+        }
 
         disable_raw_mode()?;
         execute!(
@@ -169,14 +262,15 @@ impl App {
         client: Arc<aemeath_llm::client::LlmClient>,
         registry: Arc<ToolRegistry>,
         system_blocks: Vec<aemeath_llm::types::SystemBlock>,
-        _system_prompt_text: String,
+        system_prompt_text: String,
         user_context: String,
-        _context_size: usize,
+        context_size: usize,
         _verbose: bool,
         _use_markdown: bool,
         agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
         allow_all: bool,
         interrupted: Arc<AtomicBool>,
+        task_store: Arc<aemeath_core::task::TaskStore>,
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
@@ -193,7 +287,12 @@ impl App {
             let mut output_rect = Rect::default();
             terminal.draw(|f| {
                 let size = f.area();
-                
+
+                // Skip rendering if terminal is too small to avoid buffer panics
+                if size.height < 8 || size.width < 20 {
+                    return;
+                }
+
                 // Calculate suggestions height
                 let suggestions_height = if self.input_area.is_showing_suggestions() {
                     let count = self.input_area.get_suggestions().len().min(5) as u16;
@@ -235,11 +334,16 @@ impl App {
                         self.input_area.render_suggestions_in_area(chunks[2], buf);
                     }));
                 }
-                self.status_bar.set_tokens(self.total_input_tokens, self.total_output_tokens);
+                self.status_bar.set_tokens(self.total_input_tokens, self.total_output_tokens, self.last_input_tokens);
                 self.status_bar.set_api_calls(self.total_api_calls);
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.status_bar.render(chunks[3], buf);
                 }));
+
+                // Render modal dialog on top if active
+                if let Some(ref dialog) = self.active_dialog {
+                    dialog.render(size, buf);
+                }
             })?;
             self.output_area_rect = output_rect;
 
@@ -251,12 +355,20 @@ impl App {
                     // Process background events inline with event loop
                     if let Some(ev) = ev {
                         match ev {
-                            UiEvent::Text(text) => self.output_area.append_assistant_text(&text),
+                            UiEvent::Text(text) => {
+                                self.output_area.stop_spinner();
+                                self.output_area.append_assistant_text(&text);
+                            }
+                            UiEvent::Thinking(text) => {
+                                self.output_area.stop_spinner();
+                                self.output_area.append_thinking_text(&text);
+                            }
                             UiEvent::TextBlockComplete(_text) => {
                                 self.output_area.finish_streaming();
                                 self.output_area.push_system("");
                             }
                             UiEvent::ToolCallStart(name) => {
+                                self.output_area.start_spinner();
                                 self.status_bar.set_processing(&format!("Calling {}...", name));
                             }
                             UiEvent::ToolCall { name, summary } => {
@@ -276,18 +388,28 @@ impl App {
                                       });
                                   }
                               }
-                            UiEvent::Usage { input, output } => {
+                            UiEvent::Usage { input, output, last_input } => {
                                 self.total_input_tokens += input as u64;
                                 self.total_output_tokens += output as u64;
                                 self.total_api_calls += 1;
+                                self.last_input_tokens = last_input as u64;
+                            }
+                            UiEvent::StatusUpdate(msg) => {
+                                self.status_bar.set_processing(&msg);
+                                // Any status update means we're still working — keep the
+                                // spinner turning. Text/Thinking handlers stop it while
+                                // content is actively streaming to avoid overlap.
+                                self.output_area.start_spinner();
                             }
                             UiEvent::Error(msg) => {
                                 self.output_area.push_error(&msg);
+                                self.output_area.stop_spinner();
                                 is_processing = false;
                                 self.status_bar.clear_processing();
                             }
                             UiEvent::Cancelled => {
                                 self.output_area.push_cancelled();
+                                self.output_area.stop_spinner();
                                 is_processing = false;
                                 self.status_bar.clear_processing();
                             }
@@ -303,20 +425,26 @@ impl App {
                             }
                             UiEvent::Done => {
                                 self.output_area.finish_streaming();
+                                self.output_area.stop_spinner();
                                 is_processing = false;
                                 self.status_bar.clear_processing();
                                 self.status_bar.set_success("Ready");
 
                                 // Process queued input immediately
                                 if let Some(queued) = self.queued_input.take() {
+                                    // Ensure interrupted flag is clear before starting a new run
+                                    interrupted.store(false, Ordering::Relaxed);
+
                                     self.messages.push(Message::user(&queued));
                                     self.status_bar.set_processing("Thinking...");
+                                    self.output_area.start_spinner();
                                     is_processing = true; // Sync with StatusBar
 
                                     let tx = ui_tx.clone();
-                                    let client = client.clone();
+                                    let client = self.client.as_ref().unwrap_or(&client).clone();
                                     let registry = registry.clone();
                                     let system_blocks = system_blocks.clone();
+                                    let system_prompt_text = system_prompt_text.clone();
                                     let user_context = user_context.clone();
                                     let messages = self.messages.clone();
                                     let cwd = self.cwd.clone();
@@ -327,11 +455,15 @@ impl App {
                                     if let Ok(mut guard) = active_cancel.lock() {
                                         *guard = Some(cancel.clone());
                                     }
+                                    let sid = self.session_id.clone();
+                                    let task_store = task_store.clone();
                                     tokio::spawn(async move {
                                         process_in_background(
                                             tx, client, registry, system_blocks,
-                                            user_context, messages, cwd, read_files,
+                                            system_prompt_text, user_context, messages,
+                                            context_size, cwd, sid, read_files,
                                             agent_runner, allow_all, interrupted, cancel,
+                                            task_store,
                                         ).await;
                                     });
                                 }
@@ -461,6 +593,37 @@ impl App {
                         }
                     }
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        // If a dialog is active, handle dialog keys first
+                        if self.active_dialog.is_some() {
+                            match key.code {
+                                KeyCode::Up => {
+                                    if let Some(ref mut d) = self.active_dialog { d.select_prev(); }
+                                }
+                                KeyCode::Down => {
+                                    if let Some(ref mut d) = self.active_dialog { d.select_next(); }
+                                }
+                                KeyCode::Enter => {
+                                    let selected = self.active_dialog.as_ref()
+                                        .and_then(|d| d.get_selected());
+                                    if let Some(idx) = selected {
+                                        if idx < self.dialog_model_keys.len() {
+                                            let model_key = self.dialog_model_keys[idx].clone();
+                                            // Execute model switch
+                                            let _ = self.handle_slash_command_str(&format!("/model {}", model_key)).await;
+                                        }
+                                    }
+                                    self.active_dialog = None;
+                                    self.dialog_model_keys.clear();
+                                }
+                                KeyCode::Esc => {
+                                    self.active_dialog = None;
+                                    self.dialog_model_keys.clear();
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
+
                         // Shift+Enter / Alt+Enter: insert newline.
                         // Handle before main match because some terminals report
                         // Shift+Enter as Enter+SHIFT, Char('\n')+SHIFT, or even just Char('\n').
@@ -484,7 +647,18 @@ impl App {
                                     // Dismiss suggestions on Ctrl+C
                                     self.input_area.clear_suggestions();
                                 } else {
-                                    self.should_exit = true;
+                                    let now = std::time::Instant::now();
+                                    if let Some(last) = self.last_ctrlc {
+                                        if now.duration_since(last).as_secs_f64() < 3.0 {
+                                            self.should_exit = true;
+                                        } else {
+                                            self.last_ctrlc = Some(now);
+                                            self.status_bar.set_warning("Press Ctrl+C again to exit");
+                                        }
+                                    } else {
+                                        self.last_ctrlc = Some(now);
+                                        self.status_bar.set_warning("Press Ctrl+C again to exit");
+                                    }
                                 }
                             }
                             // Tab to accept suggestion or trigger autocomplete
@@ -520,8 +694,45 @@ impl App {
                                     let input = self.input_area.get_text();
 
                                     if input.starts_with('/') {
-                                        self.handle_slash_command(&input);
+                                        let review_prompt = self.handle_slash_command(&input).await;
                                         self.input_area.clear();
+
+                                        // If the command returned a review prompt, send it to the LLM
+                                        if let Some(prompt) = review_prompt {
+                                            self.messages.push(Message::user(&prompt));
+
+                                            interrupted.store(false, Ordering::Relaxed);
+                                            self.status_bar.set_processing("Thinking...");
+                                            self.output_area.start_spinner();
+                                            is_processing = true;
+
+                                            let tx = ui_tx.clone();
+                                            let client = self.client.as_ref().unwrap_or(&client).clone();
+                                            let registry = registry.clone();
+                                            let system_blocks = system_blocks.clone();
+                                            let system_prompt_text = system_prompt_text.clone();
+                                            let user_context = user_context.clone();
+                                            let messages = self.messages.clone();
+                                            let cwd = self.cwd.clone();
+                                            let read_files = read_files.clone();
+                                            let agent_runner = agent_runner.clone();
+                                            let interrupted = interrupted.clone();
+                                            let cancel = CancellationToken::new();
+                                            if let Ok(mut guard) = active_cancel.lock() {
+                                                *guard = Some(cancel.clone());
+                                            }
+                                            let sid = self.session_id.clone();
+                                            let task_store = task_store.clone();
+                                            tokio::spawn(async move {
+                                                process_in_background(
+                                                    tx, client, registry, system_blocks,
+                                                    system_prompt_text, user_context, messages,
+                                                    context_size, cwd, sid, read_files,
+                                                    agent_runner, allow_all, interrupted, cancel,
+                                                    task_store,
+                                                ).await;
+                                            });
+                                        }
                                     } else {
                                         self.output_area.push_user_message(&input);
                                         // Add to history before clearing
@@ -540,13 +751,18 @@ impl App {
                                         }
 
                                         // Spawn background task
+                                        // Ensure interrupted flag is clear before starting a new run
+                                        interrupted.store(false, Ordering::Relaxed);
+
                                         self.status_bar.set_processing("Thinking...");
+                                        self.output_area.start_spinner();
                                         is_processing = true; // Sync with StatusBar
 
                                         let tx = ui_tx.clone();
-                                        let client = client.clone();
+                                        let client = self.client.as_ref().unwrap_or(&client).clone();
                                         let registry = registry.clone();
                                         let system_blocks = system_blocks.clone();
+                                        let system_prompt_text = system_prompt_text.clone();
                                         let user_context = user_context.clone();
                                         let messages = self.messages.clone();
                                         let cwd = self.cwd.clone();
@@ -560,11 +776,15 @@ impl App {
                                             *guard = Some(cancel.clone());
                                         }
 
+                                        let sid = self.session_id.clone();
+                                        let task_store = task_store.clone();
                                         tokio::spawn(async move {
                                             process_in_background(
                                                 tx, client, registry, system_blocks,
-                                                user_context, messages, cwd, read_files,
+                                                system_prompt_text, user_context, messages,
+                                                context_size, cwd, sid, read_files,
                                                 agent_runner, allow_all, interrupted, cancel,
+                                                task_store,
                                             ).await;
                                         });
                                     }
@@ -749,19 +969,57 @@ impl App {
             .map(|(i, _)| i)
             .unwrap_or(input.len());
         
+        let models: Vec<(String, String)> = self.models_config.list_models()
+            .into_iter()
+            .map(|(p, m)| (p, if m.name.is_empty() { m.id } else { m.name }))
+            .collect();
+        
         let ctx = SuggestionContext {
             input,
             cursor_offset,
             cwd: self.cwd.clone(),
+            models,
         };
         
         let suggestions = generate_suggestions(&ctx);
         self.input_area.set_suggestions(suggestions);
     }
 
-    fn handle_slash_command(&mut self, input: &str) {
+    /// Called from dialog Enter handler to dispatch /model switch
+    async fn handle_slash_command_str(&mut self, input: &str) -> Option<String> {
+        self.handle_slash_command(input).await
+    }
+
+    /// Handle slash commands. Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
+    async fn handle_slash_command(&mut self, input: &str) -> Option<String> {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let cmd = *parts.first().unwrap_or(&"");
+        let has_args = parts.len() > 1;
+
+        // /model with no args → open selection dialog
+        if cmd == "/model" && !has_args {
+            let models = self.models_config.list_models();
+            if models.is_empty() {
+                self.output_area.push_system("No models configured. Add models to ~/.aemeath/config.json");
+                return None;
+            }
+            let current = self.current_model_display.clone();
+            let mut options = Vec::new();
+            let mut keys = Vec::new();
+            for (provider_name, model) in &models {
+                let display_name = if model.name.is_empty() { &model.id } else { &model.name };
+                let key = format!("{}/{}", provider_name, display_name);
+                let marker = if key == current { " ←" } else { "" };
+                options.push(format!(
+                    "{}/{} ctx:{}k{}", provider_name, display_name,
+                    model.context_window / 1000, marker,
+                ));
+                keys.push(key);
+            }
+            self.active_dialog = Some(Dialog::select("Select Model", options));
+            self.dialog_model_keys = keys;
+            return None;
+        }
 
         match cmd {
             cmd if cmd == format!("/{}", cmd::EXIT) || cmd == format!("/{}", cmd::QUIT) => self.should_exit = true,
@@ -791,7 +1049,8 @@ impl App {
             }
             cmd if cmd == format!("/{}", cmd::HELP) => {
                 self.output_area.push_system("Commands:");
-                self.output_area.push_system("  /help  /exit  /clear  /compact  /usage  /paste  /images  /clear-images");
+                self.output_area.push_system("  /help  /exit  /clear  /compact  /usage  /save  /sessions");
+                self.output_area.push_system("  /paste  /images  /clear-images  /context  /review");
                 self.output_area.push_system("");
                 self.output_area.push_system("Scrolling:");
                 self.output_area.push_system("  Mouse wheel     - scroll 3 lines");
@@ -816,6 +1075,56 @@ impl App {
                     format_tokens(self.total_output_tokens),
                     format_tokens(total)
                 ));
+            }
+            "/sessions" => {
+                let sessions = session::list_sessions().await;
+                if sessions.is_empty() {
+                    self.output_area.push_system("No saved sessions.");
+                } else {
+                    self.output_area.push_system(&format!("Saved sessions ({}):", sessions.len()));
+                    for (i, s) in sessions.iter().take(10).enumerate() {
+                        self.output_area.push_system(&format!(
+                            "  {}. {} ({} msgs, {})",
+                            i + 1,
+                            s.id,
+                            s.messages.len(),
+                            s.updated_at
+                        ));
+                    }
+                    self.output_area.push_system("");
+                    self.output_area.push_system("Resume with: aemeath --resume <session-id>");
+                }
+            }
+            "/save" => {
+                use aemeath_core::session::{Session, now_iso};
+                let s = Session {
+                    id: self.session_id.clone(),
+                    cwd: self.cwd.to_string_lossy().to_string(),
+                    messages: self.messages.clone(),
+                    created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+                    updated_at: now_iso(),
+                    metadata: Default::default(),
+                };
+                match session::save_session(&s).await {
+                    Ok(()) => self.output_area.push_system(&format!("[session saved: {}]", self.session_id)),
+                    Err(e) => self.output_area.push_error(&format!("Failed to save session: {e}")),
+                }
+            }
+            "/context" => {
+                use aemeath_core::compact;
+                let estimated = compact::estimate_messages_tokens(&self.messages)
+                    + compact::estimate_tokens(&self.system_prompt_text);
+                let pct = estimated * 100 / self.context_size.max(1);
+                self.output_area.push_system(&format!(
+                    "Context window: ~{} / {} tokens ({}%)",
+                    estimated,
+                    self.context_size,
+                    pct
+                ));
+                self.output_area.push_system(&format!("Messages: {}", self.messages.len()));
+                if pct > 80 {
+                    self.output_area.push_system("[auto-compaction will trigger at 80%]");
+                }
             }
             "/paste" => {
                 // block_in_place allows async call from non-async context in tokio runtime
@@ -852,35 +1161,133 @@ impl App {
                 self.input_area.set_pending_images(0);
                 self.output_area.push_system("[pending images cleared]");
             }
+            // Try to execute via CommandRegistry
             _ => {
-                self.output_area.push_error(&format!("Unknown command: {cmd}"));
+                let cmd_name = cmd.trim_start_matches('/');
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+
+                // Try to find command in registry
+                let registry = CommandRegistry::with_defaults();
+                if let Some(cmd_obj) = registry.find(cmd_name) {
+                    // Create minimal context for command execution
+                    let state = AppState::default();
+                    let config = aemeath_core::config::Config::default();
+                    let mut ctx = CommandContext::new(
+                        Arc::new(state),
+                        config,
+                        self.cwd.to_string_lossy().to_string(),
+                        self.session_id.clone(),
+                    );
+                    ctx.models_config = self.models_config.clone();
+                    ctx.current_model = self.current_model_display.clone();
+
+                    match cmd_obj.execute(&args, &mut ctx).await {
+                        CommandResult::Success(msg) => self.output_area.push_system(&msg),
+                        CommandResult::Error(msg) => self.output_area.push_error(&msg),
+                        CommandResult::Action(action) => {
+                            match action {
+                                aemeath_core::command::CommandAction::Exit => self.should_exit = true,
+                                aemeath_core::command::CommandAction::Clear => {
+                                    self.messages.clear();
+                                    self.output_area.push_system("[cleared]");
+                                }
+                                aemeath_core::command::CommandAction::Compact => {
+                                    use aemeath_core::compact;
+                                    let (compacted, was_compacted) = compact::compact_messages(
+                                        &mut self.messages,
+                                        &self.system_prompt_text,
+                                        self.context_size,
+                                    );
+                                    if was_compacted {
+                                        self.messages = compacted;
+                                        self.output_area.push_system("[compacted]");
+                                    } else {
+                                        self.output_area.push_system("[no compaction needed]");
+                                    }
+                                }
+                                aemeath_core::command::CommandAction::SwitchModel {
+                                    provider_name, model_id, model_name, base_url, api_key, api_type, max_tokens, context_window, reasoning,
+                                } => {
+                                    // Determine provider type from api_type and provider_name
+                                    let provider = match api_type.as_str() {
+                                        "anthropic" => aemeath_core::provider::Provider::Anthropic,
+                                        "ollama" => aemeath_core::provider::Provider::Ollama,
+                                        _ => {
+                                            // Try to match known providers by name for correct URL suffix
+                                            aemeath_core::provider::Provider::from_str(&provider_name)
+                                                .unwrap_or(aemeath_core::provider::Provider::OpenAICompatible)
+                                        }
+                                    };
+
+                                    let new_client = aemeath_llm::client::LlmClient::with_provider(
+                                        provider,
+                                        api_key,
+                                        Some(base_url),
+                                        Some(model_id.clone()),
+                                        max_tokens,
+                                        reasoning,
+                                    );
+
+                                    self.client = Some(Arc::new(new_client));
+                                    if context_window > 0 {
+                                        self.context_size = context_window;
+                                        self.status_bar.set_context_size(context_window as u64);
+                                    }
+                                    let display_name = if model_name.is_empty() { &model_id } else { &model_name };
+                                    let display = format!("{}/{}", provider_name, display_name);
+                                    self.current_model_display = display.clone();
+                                    self.status_bar.set_model(&display);
+                                    self.output_area.push_system(&format!("[switched to {}]", display));
+                                }
+                                aemeath_core::command::CommandAction::Review(prompt) => {
+                                    self.output_area.push_system("[reviewing code changes...]");
+                                    return Some(prompt);
+                                }
+                                _ => self.output_area.push_system(&format!("[action: {:?}]", action)),
+                            }
+                        }
+                        CommandResult::Confirm { message, .. } => {
+                            self.output_area.push_system(&format!("[confirm: {}]", message));
+                        }
+                    }
+                } else {
+                    self.output_area.push_error(&format!("Unknown command: {cmd}"));
+                }
             }
         }
+        None
     }
 }
 
 /// Background task: runs the agent loop and sends UI events via channel
+#[allow(unused_assignments)]
 async fn process_in_background(
     tx: mpsc::Sender<UiEvent>,
     client: Arc<aemeath_llm::client::LlmClient>,
     registry: Arc<ToolRegistry>,
     system_blocks: Vec<aemeath_llm::types::SystemBlock>,
+    system_prompt_text: String,
     user_context: String,
     mut messages: Vec<Message>,
+    context_size: usize,
     cwd: PathBuf,
+    session_id: String,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
     allow_all: bool,
     interrupted: Arc<AtomicBool>,
     cancel: CancellationToken,
+    _task_store: Arc<aemeath_core::task::TaskStore>,
 ) {
     let tool_schemas = registry.schemas();
+    // Pre-compute fixed token overhead from tool schemas (sent with every API call)
+    let tool_schema_tokens = aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
     let ctx = ToolContext {
-        cwd,
+        cwd: cwd.clone(),
         cancel: cancel.clone(),
-        read_files,
-        agent_runner,
+        read_files: read_files.clone(),
+        agent_runner: agent_runner.clone(),
         plan_mode: None,
         allow_all,
     };
@@ -893,6 +1300,9 @@ async fn process_in_background(
 
     // Remember message count at start — on cancel, truncate back to this point
     let messages_at_start = messages.len();
+
+    #[allow(unused_assignments)]
+    let mut last_api_input_tokens: u64 = 0;
 
     for _ in 0..MAX_TURNS {
         if interrupted.load(Ordering::Relaxed) {
@@ -916,10 +1326,44 @@ async fn process_in_background(
                 let _ = self.tx.try_send(UiEvent::ToolCallStart(name.to_string()));
             }
             fn on_error(&mut self, error: &str) {
-                let _ = self.tx.try_send(UiEvent::Error(error.to_string()));
+                // Use SystemMessage for non-fatal warnings from the LLM layer
+                // (streaming retries, fallbacks, idle timeouts).
+                // UiEvent::Error would stop processing and reset status bar.
+                let _ = self.tx.try_send(UiEvent::SystemMessage(format!("[warn] {}", error)));
             }
             fn on_text_block_complete(&mut self, text: &str) {
                 let _ = self.tx.try_send(UiEvent::TextBlockComplete(text.to_string()));
+            }
+            fn on_thinking(&mut self, text: &str) {
+                let _ = self.tx.try_send(UiEvent::Thinking(text.to_string()));
+            }
+        }
+
+        // Auto-compact if approaching context limit
+        // Use actual API token count when available, fall back to estimation (including tool schema overhead)
+        {
+            use aemeath_core::compact;
+            let should_compact = if last_api_input_tokens > 0 {
+                compact::needs_compaction_actual(last_api_input_tokens, 0, context_size)
+            } else {
+                compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+            };
+            if should_compact && messages.len() > 4 {
+                let old_len = messages.len();
+                compact::microcompact(&mut messages, 10);
+                // Re-check after microcompact
+                if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+                    || (last_api_input_tokens > 0 && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
+                {
+                    let (compacted, was_compacted) = compact::compact_messages(&messages, &system_prompt_text, context_size);
+                    if was_compacted {
+                        messages = compacted;
+                        last_api_input_tokens = 0;
+                        let _ = tx.send(UiEvent::SystemMessage(
+                            format!("[auto-compacted: {} → {} messages]", old_len, messages.len()),
+                        )).await;
+                    }
+                }
             }
         }
 
@@ -942,9 +1386,11 @@ async fn process_in_background(
 
         match response {
             Ok(resp) => {
+                last_api_input_tokens = resp.usage.input_tokens as u64;
                 let _ = tx.send(UiEvent::Usage {
                     input: resp.usage.input_tokens,
                     output: resp.usage.output_tokens,
+                    last_input: resp.usage.input_tokens,
                 }).await;
 
                 messages.push(resp.assistant_message.clone());
@@ -954,13 +1400,37 @@ async fn process_in_background(
                     break;
                 }
 
-                // Execute tools
+                // Execute tools — show tool calls before execution
+                // For TodoRun: enrich with pending todo subjects from TaskStore
                 for call in &tool_calls {
+                    let summary = if call.name == "TodoRun" {
+                        // Inject pending todo subjects for display
+                        use aemeath_core::task::TaskStatus;
+                        let pending_subjects: Vec<String> = _task_store.list().await
+                            .iter()
+                            .filter(|t| t.status == TaskStatus::Pending)
+                            .map(|t| {
+                                let dep = if t.blocked_by.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" (blocked by #{})", t.blocked_by.join(", #"))
+                                };
+                                format!("#{} {}{}", t.id, t.subject, dep)
+                            })
+                            .collect();
+                        let mut enriched = call.input.clone();
+                        enriched.as_object_mut().map(|m| {
+                            m.insert("_pending".to_string(), serde_json::json!(pending_subjects));
+                        });
+                        enriched.to_string()
+                    } else {
+                        call.input.to_string()
+                    };
                     let _ = tx.send(UiEvent::ToolCall {
                         name: call.name.clone(),
-                        summary: call.input.to_string(),
-                    }).await;
-                }
+                        summary,
+                        }).await;
+                    }
 
                 {
                     // Filter out non-safe tools if allow_all is not set
@@ -994,7 +1464,74 @@ async fn process_in_background(
                     let approved_calls: Vec<aemeath_core::agent::ToolCall> = approved.into_iter().map(|c| {
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
+
+                    // Show elapsed time and TodoRun progress while tools are running
+                    let tool_names: Vec<String> = approved_calls.iter().map(|c| c.name.clone()).collect();
+                    let has_long_running = tool_names.iter().any(|n| n == "Agent" || n == "TodoRun");
+                    let has_todo_run = tool_names.iter().any(|n| n == "TodoRun");
+                    let timer_tx = tx.clone();
+                    let timer_cancel = cancel.clone();
+                    let timer_store = _task_store.clone();
+                    let timer_handle = if has_long_running {
+                        let names = tool_names.clone();
+                        Some(tokio::spawn(async move {
+                            use aemeath_core::task::TaskStatus;
+                            let start = std::time::Instant::now();
+                            let mut last_statuses: std::collections::HashMap<String, TaskStatus> =
+                                std::collections::HashMap::new();
+                            // Initialize with current statuses
+                            if has_todo_run {
+                                for t in timer_store.list().await {
+                                    last_statuses.insert(t.id.clone(), t.status.clone());
+                                }
+                            }
+                            loop {
+                                tokio::select! {
+                                    _ = timer_cancel.cancelled() => break,
+                                    _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                                        let elapsed = start.elapsed().as_secs();
+                                        // Poll TodoRun progress
+                                        if has_todo_run {
+                                            let current_todos = timer_store.list().await;
+                                            for t in &current_todos {
+                                                let prev = last_statuses.get(&t.id);
+                                                let changed = match prev {
+                                                    Some(prev_status) => *prev_status != t.status,
+                                                    None => true,
+                                                };
+                                                if changed {
+                                                    let msg = match t.status {
+                                                        TaskStatus::InProgress => {
+                                                            let action = t.active_form.as_deref().unwrap_or("Processing");
+                                                            format!("  ◐ {} — {}", t.subject, action)
+                                                        }
+                                                        TaskStatus::Completed => {
+                                                            format!("  ✓ {}", t.subject)
+                                                        }
+                                                        _ => continue,
+                                                    };
+                                                    let _ = timer_tx.send(UiEvent::SystemMessage(msg)).await;
+                                                    last_statuses.insert(t.id.clone(), t.status.clone());
+                                                }
+                                            }
+                                        }
+                                        let _ = timer_tx.send(UiEvent::StatusUpdate(
+                                            format!("Running {} tool(s)... {}s", names.len(), elapsed)
+                                        )).await;
+                                    }
+                                }
+                            }
+                        }))
+                    } else {
+                        None
+                    };
+
                     let results = agent.execute_tools(&approved_calls).await;
+
+                    // Stop the timer
+                    if let Some(handle) = timer_handle {
+                        handle.abort();
+                    }
                     // Build a map from tool_call id to name for correct indexing
                     let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
                         .iter()
@@ -1022,8 +1559,62 @@ async fn process_in_background(
                             Vec::new(),
                         ));
                     }
+
+                    // Persist oversized tool results to disk, replace with preview reference
+                    let persisted = aemeath_core::tool_result_storage::persist_oversized_results(
+                        &session_id, &mut all_results,
+                    );
+                    if persisted > 0 {
+                        let _ = tx.send(UiEvent::SystemMessage(
+                            format!("[{persisted} tool result(s) persisted to disk]"),
+                        )).await;
+                    }
+
                     messages.push(Message::tool_results_rich(all_results));
+
+                    // [Plan A disabled] Auto-trigger TodoRun is available but currently
+                    // disabled in favor of Plan B (Agent tool interception).
+                    // To re-enable, uncomment the block in the TUI auto_trigger section.
                 }
+
+                // Inner-loop auto-compact: use actual API token count for accurate decision
+                {
+                    use aemeath_core::compact;
+                    let urgency = if last_api_input_tokens > 0 {
+                        let new_tokens = messages.last()
+                            .map(|m| compact::estimate_messages_tokens(std::slice::from_ref(m)))
+                            .unwrap_or(0) as u64;
+                        compact::compaction_urgency(last_api_input_tokens + new_tokens, context_size)
+                    } else if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens) {
+                        2
+                    } else {
+                        0
+                    };
+
+                    if urgency >= 1 && messages.len() > 4 {
+                        let old_len = messages.len();
+                        compact::microcompact(&mut messages, 6);
+                        if urgency >= 2 {
+                            let (compacted, was_compacted) = compact::compact_messages(
+                                &messages, &system_prompt_text, context_size,
+                            );
+                            if was_compacted {
+                                messages = compacted;
+                                last_api_input_tokens = 0;
+                                let _ = tx.send(UiEvent::SystemMessage(
+                                    format!("[auto-compacted: {} → {} messages]", old_len, messages.len()),
+                                )).await;
+                            }
+                        } else {
+                            let _ = tx.send(UiEvent::SystemMessage(
+                                format!("[microcompacted: {} messages]", messages.len()),
+                            )).await;
+                        }
+                    }
+                }
+
+                // Update status bar before next LLM call
+                let _ = tx.send(UiEvent::StatusUpdate("Thinking...".to_string())).await;
             }
             Err(e) => {
                 let msg = format!("{e}");

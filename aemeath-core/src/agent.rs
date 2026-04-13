@@ -80,15 +80,16 @@ impl<'a> Agent<'a> {
                         let id = call.id.clone();
                         let name = call.name.clone();
                         let sem = semaphore.clone();
+                        let timeout = tool.timeout_secs();
 
                         async move {
                             let _permit = sem.acquire().await.expect("semaphore closed");
                             match tokio::time::timeout(
-                                std::time::Duration::from_secs(120),
+                                std::time::Duration::from_secs(timeout),
                                 tool.call(input, &ctx),
                             ).await {
                                 Ok(result) => (pos, id, result.output, result.is_error, result.images),
-                                Err(_) => (pos, id, format!("Tool {} timed out after 120s", name), true, Vec::new()),
+                                Err(_) => (pos, id, format!("Tool {} timed out after {}s", name, timeout), true, Vec::new()),
                             }
                         }
                     })
@@ -103,16 +104,27 @@ impl<'a> Agent<'a> {
 
         // Execute non-concurrent tools sequentially
         for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
+            // Check for cancellation between sequential tool calls
+            if self.ctx.cancel.is_cancelled() {
+                results[pos] = Some((
+                    call.id.clone(),
+                    "Cancelled by user".to_string(),
+                    true,
+                    Vec::new(),
+                ));
+                continue;
+            }
             if let Some(tool) = self.registry.get(&call.name) {
+                let timeout = tool.timeout_secs();
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(timeout),
                     tool.call(call.input.clone(), &self.ctx),
                 ).await {
                     Ok(result) => {
                         results[pos] = Some((call.id.clone(), result.output, result.is_error, result.images));
                     }
                     Err(_) => {
-                        results[pos] = Some((call.id.clone(), format!("Tool {} timed out after 120s", call.name), true, Vec::new()));
+                        results[pos] = Some((call.id.clone(), format!("Tool {} timed out after {}s", call.name, timeout), true, Vec::new()));
                     }
                 }
             } else {
@@ -125,8 +137,15 @@ impl<'a> Agent<'a> {
             }
         }
 
-        // Unwrap results - all slots should be filled
-        results.into_iter().map(|r| r.unwrap()).collect()
+        // All slots should be filled by either concurrent or sequential execution.
+        // Use expect with a clear message instead of bare unwrap for debuggability.
+        results
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| r.unwrap_or_else(|| {
+                panic!("agent::execute_tools: result slot {i} was not filled — this is a bug")
+            }))
+            .collect()
     }
 
     /// Execute only the given tool calls (subset of all calls)

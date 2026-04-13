@@ -60,9 +60,45 @@ impl TerminalRenderer {
         let _ = stdout.execute(ResetColor);
     }
 
+    /// Check if output looks like a TodoRun result
+    fn is_todorun_output(output: &str) -> bool {
+        output.contains("TodoRun:") && output.contains("━━━")
+    }
+
+    /// Print TodoRun results with friendly colored formatting (no truncation)
+    pub fn print_todorun_result(output: &str) {
+        use console::style;
+        for line in output.lines() {
+            let trimmed = line.trim();
+            let formatted = if trimmed.is_empty() {
+                String::new()
+            } else if trimmed.contains('✓') {
+                format!("  {}", style(trimmed).green())
+            } else if trimmed.contains('✗') {
+                format!("  {}", style(trimmed).red())
+            } else if trimmed.contains("━━━ Summary") {
+                format!("  {}", style(trimmed).yellow().bold())
+            } else if trimmed.contains("━━━ [") {
+                format!("  {}", ST::highlight(trimmed))
+            } else if trimmed.contains("Sub ") || trimmed.contains("Sub-task") {
+                format!("    {}", style(trimmed).dim())
+            } else if trimmed.contains("Error:") {
+                format!("  {}", style(trimmed).red())
+            } else {
+                format!("  {}", style(trimmed).dim())
+            };
+            println!("{}", formatted);
+        }
+    }
+
     pub fn print_tool_result_with_diff(tool_name: &str, output: &str, is_error: bool) {
         if is_error {
             println!("{}", ST::error(output));
+            return;
+        }
+
+        if tool_name == "TodoRun" && Self::is_todorun_output(output) {
+            Self::print_todorun_result(output);
             return;
         }
 
@@ -192,10 +228,7 @@ impl StreamHandler for TerminalStreamHandler {
 
     fn on_raw_line(&mut self, line: &str) {
         if self.verbose {
-            let mut stdout = io::stdout();
-            let _ = stdout.execute(SetForegroundColor(Color::DarkYellow));
-            eprintln!("[SSE] {line}");
-            let _ = stdout.execute(ResetColor);
+            log::debug!("[SSE] {line}");
         }
     }
 }

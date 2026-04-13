@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod bash;
 pub mod file_read;
 pub mod file_write;
@@ -15,6 +17,7 @@ pub mod task_get;
 pub mod task_stop;
 pub mod task_output;
 pub mod todo_write;
+pub mod todo_run;
 pub mod mcp_tool;  // McpTool is dynamically created, not statically registered
 pub mod skill_tool;
 pub mod config_tool;
@@ -55,7 +58,7 @@ pub fn register_all_tools(
     registry.register(Box::new(web_search::WebSearchTool));
     
     // Agent tools
-    registry.register(Box::new(agent_tool::AgentTool));
+    registry.register(Box::new(agent_tool::AgentTool { store: task_store.clone() }));
     
     // Task management tools
     registry.register(Box::new(task_create::TaskCreateTool { store: task_store.clone() }));
@@ -64,7 +67,8 @@ pub fn register_all_tools(
     registry.register(Box::new(task_get::TaskGetTool { store: task_store.clone() }));
     registry.register(Box::new(task_stop::TaskStopTool { store: task_store.clone() }));
     registry.register(Box::new(task_output::TaskOutputTool { store: task_store.clone() }));
-    registry.register(Box::new(todo_write::TodoWriteTool { store: task_store }));
+    registry.register(Box::new(todo_write::TodoWriteTool { store: task_store.clone() }));
+    registry.register(Box::new(todo_run::TodoRunTool { store: task_store }));
     
     // Skill tool (MCP tools are dynamically registered)
     registry.register(Box::new(skill_tool::SkillTool { skills }));

@@ -17,6 +17,8 @@ pub enum Provider {
     MiniMax,
     /// Generic OpenAI-compatible provider
     OpenAICompatible,
+    /// Ollama local inference server
+    Ollama,
 }
 
 impl Provider {
@@ -32,6 +34,7 @@ impl Provider {
             "dashscope" | "qwen" | "tongyi" => Some(Provider::DashScope),
             "minimax" => Some(Provider::MiniMax),
             "openai-compatible" | "compatible" => Some(Provider::OpenAICompatible),
+            "ollama" => Some(Provider::Ollama),
             _ => None,
         }
     }
@@ -48,6 +51,7 @@ impl Provider {
             Provider::DashScope => "https://dashscope.aliyuncs.com/compatible-mode",
             Provider::MiniMax => "https://api.minimaxi.com",
             Provider::OpenAICompatible => "",
+            Provider::Ollama => "http://localhost:11434",
         }
     }
 
@@ -63,6 +67,7 @@ impl Provider {
             Provider::DashScope => "qwen-plus",
             Provider::MiniMax => "MiniMax-M1",
             Provider::OpenAICompatible => "",
+            Provider::Ollama => "llama3.2",
         }
     }
 
@@ -78,6 +83,49 @@ impl Provider {
             Provider::DashScope => "DASHSCOPE_API_KEY",
             Provider::MiniMax => "MINIMAX_API_KEY",
             Provider::OpenAICompatible => "LLM_API_KEY",
+            Provider::Ollama => "LLM_API_KEY",
+        }
+    }
+
+    /// Get environment variable name for base URL
+    pub fn base_url_env(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "ANTHROPIC_BASE_URL",
+            Provider::OpenAI => "OPENAI_BASE_URL",
+            Provider::OpenRouter => "OPENROUTER_BASE_URL",
+            Provider::DeepSeek => "DEEPSEEK_BASE_URL",
+            Provider::Moonshot => "MOONSHOT_BASE_URL",
+            Provider::Zhipu => "ZHIPU_BASE_URL",
+            Provider::DashScope => "DASHSCOPE_BASE_URL",
+            Provider::MiniMax => "MINIMAX_BASE_URL",
+            Provider::OpenAICompatible => "LLM_BASE_URL",
+            Provider::Ollama => "LLM_BASE_URL",
+        }
+    }
+
+    /// Get the maximum output tokens supported by this provider (0 = no limit / use as-is)
+    pub fn max_output_tokens(&self) -> u32 {
+        match self {
+            Provider::Anthropic => 8192,     // Claude models default max output
+            Provider::OpenAI => 16384,       // GPT-4o max output
+            Provider::OpenRouter => 4096,    // conservative default across many models
+            Provider::DeepSeek => 8192,      // DeepSeek V3 max output
+            Provider::Moonshot => 8192,      // Moonshot max output
+            Provider::Zhipu => 4096,         // GLM-4 max output
+            Provider::DashScope => 8192,     // Qwen max output
+            Provider::MiniMax => 4096,       // MiniMax max output
+            Provider::Ollama => 0,           // model-dependent, no hard limit
+            Provider::OpenAICompatible => 0, // unknown, let config decide
+        }
+    }
+
+    /// Get the chat completions API path suffix for OpenAI-compatible providers
+    /// Some providers (like Zhipu) use different paths than the standard /v1/chat/completions
+    pub fn chat_api_suffix(&self) -> &'static str {
+        match self {
+            Provider::Zhipu => "/chat/completions",
+            Provider::Ollama => "/v1/chat/completions",
+            _ => "/v1/chat/completions",
         }
     }
 }
@@ -94,6 +142,7 @@ impl std::fmt::Display for Provider {
             Provider::DashScope => write!(f, "dashscope"),
             Provider::MiniMax => write!(f, "minimax"),
             Provider::OpenAICompatible => write!(f, "openai-compatible"),
+            Provider::Ollama => write!(f, "ollama"),
         }
     }
 }

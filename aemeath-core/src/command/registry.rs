@@ -91,11 +91,11 @@ impl CommandRegistry {
     }
 
     /// Execute a command
-    pub fn execute(&self, name: &str, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        if let Some(command) = self.commands.get(name) {
-            command.execute(args, ctx)
+    pub async fn execute(&self, name: &str, args: &str, ctx: &mut CommandContext) -> CommandResult {
+        if let Some(command) = self.find(name) {
+            command.execute(args, ctx).await
         } else {
-            CommandResult::Error(format!("Unknown command: /{}", name))
+            CommandResult::Error(format!("Unknown command: /{}", name.trim_start_matches('/')))
         }
     }
 

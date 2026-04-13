@@ -4,9 +4,13 @@ use serde_json::Value;
 use std::time::Duration;
 use tokio::process::Command;
 
+/// Maximum bytes to capture from a single pipe (stdout or stderr).
+/// Prevents OOM from commands that produce massive output.
+const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+
 /// List of commands allowed at the start of a chain (directory changes, etc.)
 const CHAIN_START_COMMANDS: &[&str] = &[
-    "cd", "pushd", "popd", "dirs", "exec",
+    "cd", "pushd", "popd", "dirs",
 ];
 
 /// Check if a command is allowed in a chain (after &&, ||, etc.)
@@ -14,11 +18,6 @@ fn is_safe_chain_command(command: &str) -> bool {
     let cmd = command.trim();
     if cmd.is_empty() {
         return false;
-    }
-
-    // Reject dangerous patterns first
-    if cmd.contains("$(") || cmd.contains("`") {
-        return false; // Command substitution is dangerous in chains
     }
 
     // Check first command word
@@ -34,16 +33,89 @@ fn is_safe_chain_command(command: &str) -> bool {
     is_readonly_command(cmd)
 }
 
+/// Extract the inner command strings from $(…) and backtick command substitutions.
+/// Handles nested $() by tracking parenthesis depth.
+/// Returns a (possibly empty) list of inner command strings found.
+fn extract_command_substitution_contents(command: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let chars: Vec<char> = command.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for $(…) with nesting support
+        if i + 1 < len && chars[i] == '$' && chars[i + 1] == '(' {
+            let start = i + 2; // start of inner content
+            let mut depth = 1i32;
+            i += 2;
+            while i < len && depth > 0 {
+                if chars[i] == '(' {
+                    depth += 1;
+                } else if chars[i] == ')' {
+                    depth -= 1;
+                }
+                i += 1;
+            }
+            // depth == 0 means we found the matching closing ')'
+            // inner content is chars[start..i-1] (the char before the closing ')')
+            if depth == 0 {
+                let inner: String = chars[start..i - 1].iter().collect();
+                let inner = inner.trim().to_string();
+                if !inner.is_empty() {
+                    results.push(inner);
+                }
+              }
+            } else if chars[i] == '`' {
+        // Look for backtick substitution (no nesting in standard backticks;
+        // backticks cannot be nested in bash, so we just find the next closing backtick)
+            let start = i + 1;
+            i += 1;
+            while i < len && chars[i] != '`' {
+                i += 1;
+            }
+            if i < len {
+                // Found closing backtick
+                let inner: String = chars[start..i].iter().collect();
+                let inner = inner.trim().to_string();
+                if !inner.is_empty() {
+                    results.push(inner);
+                }
+                i += 1; // skip closing backtick
+            }
+            // else: unterminated backtick, skip
+        } else {
+            i += 1;
+        }
+    }
+
+    results
+}
+
 /// Check for shell injection patterns.
 /// Unlike before, this allows safe command chains like `cd /tmp && ls`.
 fn check_shell_injection(command: &str) -> Option<&'static str> {
     let cmd = command.trim();
 
-    // Command substitution - always dangerous
+    // Command substitution: extract inner commands and validate each one
     if cmd.contains("$(") || cmd.contains("`") {
-        // But allow simple cases like `echo $(date)` where the inner command is safe
-        if !is_safe_chain_command(cmd) {
+        let inner_cmds = extract_command_substitution_contents(cmd);
+        if inner_cmds.is_empty() {
+            // Unterminated or empty substitution — block it
             return Some("command substitution");
+        }
+        for inner in &inner_cmds {
+            // Recursively check the inner command for shell injection patterns
+            if let Some(reason) = check_shell_injection(inner) {
+                return Some(reason);
+            }
+            // Also check if the inner command itself is a destructive/dangerous command
+            if check_command_safety(inner).is_some() {
+                return Some("dangerous command in substitution");
+            }
+            // The inner command must be a safe command (read-only or chain-safe)
+            if !is_safe_chain_command(inner) {
+                return Some("command substitution");
+            }
         }
     }
 
@@ -170,22 +242,29 @@ fn check_command_safety(command: &str) -> Option<&'static str> {
 
 /// List of commands considered read-only / safe to auto-approve.
 /// Aligned with Claude Code TS READONLY_COMMANDS.
+///
+/// NOTE: Commands that can execute arbitrary code or modify state are NOT included
+/// here and will go through normal approval flow. Removed dangerous entries:
+/// - `python -c`, `node -e`, `ruby -e`: can execute arbitrary code
+/// - `curl -s`, `wget -q`: can download content, access internal networks
+/// - `xargs`: takes arbitrary commands as arguments
+/// - `tee`: writes to files
+/// - `gh api`: can make POST/PUT/DELETE requests
+/// - `command`: shell builtin that can bypass command lookup
 const READONLY_COMMANDS: &[&str] = &[
     "ls", "cat", "head", "tail", "wc", "nl", "stat", "file", "du", "df",
     "pwd", "whoami", "hostname", "uname", "date", "uptime", "env", "printenv",
-    "echo", "printf", "which", "where", "type", "command",
+    "echo", "printf", "which", "where", "type",
     "find", "locate", "tree",
     "grep", "rg", "ag", "ack",
     "git status", "git log", "git diff", "git show", "git branch",
     "git remote", "git tag", "git blame", "git stash list",
     "cargo check", "cargo test", "cargo clippy", "cargo doc",
     "npm test", "npm run lint", "npx tsc --noEmit",
-    "python -c", "node -e", "ruby -e",
-    "jq", "yq", "xargs", "sort", "uniq", "cut", "tr", "tee",
-    "curl -s", "wget -q",
+    "jq", "yq", "sort", "uniq", "cut", "tr",
     "docker ps", "docker images", "docker logs",
     "kubectl get", "kubectl describe", "kubectl logs",
-    "gh pr view", "gh issue view", "gh api",
+    "gh pr view", "gh issue view",
     "man", "help", "less", "more",
 ];
 
@@ -273,14 +352,37 @@ impl Tool for BashTool {
         let stdout_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
             if let Some(ref mut pipe) = stdout_pipe {
-                tokio::io::AsyncReadExt::read_to_end(pipe, &mut buf).await.ok();
+                let mut tmp = [0u8; 8192];
+                loop {
+                    match tokio::io::AsyncReadExt::read(pipe, &mut tmp).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if buf.len() + n <= MAX_CAPTURE_BYTES {
+                                buf.extend_from_slice(&tmp[..n]);
+                            }
+                            // If over limit, keep reading (to drain the pipe) but don't store
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
             buf
         });
         let stderr_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
             if let Some(ref mut pipe) = stderr_pipe {
-                tokio::io::AsyncReadExt::read_to_end(pipe, &mut buf).await.ok();
+                let mut tmp = [0u8; 8192];
+                loop {
+                    match tokio::io::AsyncReadExt::read(pipe, &mut tmp).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if buf.len() + n <= MAX_CAPTURE_BYTES {
+                                buf.extend_from_slice(&tmp[..n]);
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
             buf
         });

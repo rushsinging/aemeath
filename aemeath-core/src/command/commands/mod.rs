@@ -5,6 +5,8 @@ pub mod builtin;
 use crate::state::AppState;
 use crate::config::Config;
 use crate::cost::CostTracker;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// Result of executing a command
@@ -38,6 +40,21 @@ pub enum CommandAction {
     NewSession,
     /// Change mode
     ChangeMode(String),
+    /// Switch to a different model
+    SwitchModel {
+        provider_name: String,
+        model_id: String,
+        /// Display name for UI (falls back to model_id if empty)
+        model_name: String,
+        base_url: String,
+        api_key: String,
+        api_type: String,
+        max_tokens: u32,
+        context_window: usize,
+        reasoning: bool,
+    },
+    /// Review code changes — injects a user message into the conversation
+    Review(String),
 }
 
 /// Actions that require confirmation
@@ -67,6 +84,10 @@ pub struct CommandContext {
     pub verbose: bool,
     /// Cost tracker
     pub cost_tracker: CostTracker,
+    /// Multi-model configuration
+    pub models_config: crate::config::ModelsConfig,
+    /// Current model name (for display)
+    pub current_model: String,
 }
 
 impl CommandContext {
@@ -83,6 +104,8 @@ impl CommandContext {
             session_id,
             verbose: false,
             cost_tracker,
+            models_config: crate::config::ModelsConfig::default(),
+            current_model: String::new(),
         }
     }
 
@@ -92,6 +115,9 @@ impl CommandContext {
         self
     }
 }
+
+/// Type alias for the async execute function stored in Command.
+type AsyncExecuteFn = Box<dyn Fn(&str, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> + Send + Sync>;
 
 /// A command definition
 pub struct Command {
@@ -105,8 +131,8 @@ pub struct Command {
     pub aliases: Vec<String>,
     /// Command category
     pub category: CommandCategory,
-    /// Execute function (sync)
-    execute_fn: fn(&str, &mut CommandContext) -> CommandResult,
+    /// Execute function (async)
+    execute_fn: AsyncExecuteFn,
 }
 
 /// Command category for grouping
@@ -131,7 +157,7 @@ pub enum CommandCategory {
 }
 
 impl Command {
-    /// Create a new command
+    /// Create a new command from a sync execute function
     pub fn new(
         name: String,
         description: String,
@@ -144,7 +170,30 @@ impl Command {
             usage: Vec::new(),
             aliases: Vec::new(),
             category,
-            execute_fn: execute,
+            execute_fn: Box::new(move |args: &str, ctx: &mut CommandContext| {
+                let result = execute(args, ctx);
+                Box::pin(async move { result })
+            }),
+        }
+    }
+
+    /// Create a new command from an async execute function.
+    /// The closure receives owned `String` args and `&mut CommandContext`.
+    pub fn new_async(
+        name: String,
+        description: String,
+        category: CommandCategory,
+        execute: impl Fn(String, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            usage: Vec::new(),
+            aliases: Vec::new(),
+            category,
+            execute_fn: Box::new(move |args: &str, ctx: &mut CommandContext| {
+                execute(args.to_string(), ctx)
+            }),
         }
     }
 
@@ -160,9 +209,9 @@ impl Command {
         self
     }
 
-    /// Execute the command
-    pub fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        (self.execute_fn)(args, ctx)
+    /// Execute the command (async)
+    pub async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
+        (self.execute_fn)(args, ctx).await
     }
 
     /// Get help text for this command

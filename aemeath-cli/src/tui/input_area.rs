@@ -35,7 +35,7 @@ impl Default for InputArea {
 impl InputArea {
     pub fn new() -> Self {
         let mut textarea = TextArea::default();
-        textarea.set_placeholder_text("Type a message... (Enter to send, Shift+Enter for new line)");
+        textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
         textarea.set_cursor_line_style(Style::default().bg(Color::Reset));
         textarea.set_cursor_style(Style::default().bg(Color::Cyan));
         
@@ -193,7 +193,7 @@ impl InputArea {
     /// Clear the input
     pub fn clear(&mut self) {
         self.textarea = TextArea::default();
-        self.textarea.set_placeholder_text("Type a message... (Enter to send, Shift+Enter for new line)");
+        self.textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
         self.textarea.set_cursor_line_style(Style::default().bg(Color::Reset));
         self.textarea.set_cursor_style(Style::default().bg(Color::Cyan));
         self.clear_suggestions();
@@ -369,6 +369,7 @@ impl InputArea {
                 SuggestionType::Command => "/",
                 SuggestionType::File => "📄",
                 SuggestionType::Directory => "📁",
+                SuggestionType::Model => "🤖",
             };
 
             // Render the suggestion text

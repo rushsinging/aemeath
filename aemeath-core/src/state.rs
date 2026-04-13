@@ -20,6 +20,20 @@ pub fn new_session_id() -> SessionId {
     format!("{:016x}{:08x}", timestamp, random)
 }
 
+/// Validate a session ID to prevent path traversal attacks.
+/// Only allows alphanumeric characters, hyphens, and underscores.
+pub fn validate_session_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("session ID must not be empty".to_string());
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!(
+            "invalid session ID: {id:?} — only alphanumeric characters, hyphens, and underscores are allowed"
+        ));
+    }
+    Ok(())
+}
+
 /// Application settings that persist across sessions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -112,7 +126,7 @@ pub enum PermissionMode {
     /// Auto-approve read-only tools
     AutoRead,
     /// Auto-approve all tools (dangerous)
-    AutoAll,
+    AllowAll,
 }
 
 /// A single message in a session
@@ -238,7 +252,7 @@ impl AppState {
     /// Create a new state manager
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let config_dir = home.join(".config").join("aemeath");
+        let config_dir = home.join(".aemeath");
         let sessions_dir = config_dir.join("sessions");
 
         Self {
@@ -318,6 +332,8 @@ impl AppState {
 
     /// Load a session from disk
     pub async fn load_session(&self, session_id: &str) -> Option<InternalSession> {
+        validate_session_id(session_id).ok()?;
+
         // Check in-memory first
         {
             let sessions = self.sessions.read().await;
@@ -346,6 +362,8 @@ impl AppState {
 
     /// Save a session to disk
     pub async fn save_session(&self, session: &InternalSession) -> Result<(), String> {
+        validate_session_id(&session.id)?;
+
         // Ensure sessions directory exists
         tokio::fs::create_dir_all(&self.sessions_dir)
             .await
@@ -399,6 +417,8 @@ impl AppState {
 
     /// Delete a session
     pub async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        validate_session_id(session_id)?;
+
         // Remove from memory
         self.sessions.write().await.remove(session_id);
 

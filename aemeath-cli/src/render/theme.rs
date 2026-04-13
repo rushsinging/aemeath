@@ -56,4 +56,8 @@ impl StyledText {
     pub fn separator() -> String {
         format!("{}", style("─".repeat(60)).dim())
     }
+
+    pub fn highlight(text: &str) -> String {
+        format!("{}", style(text).cyan().bold())
+    }
 }

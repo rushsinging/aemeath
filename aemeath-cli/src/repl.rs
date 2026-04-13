@@ -1,10 +1,12 @@
 use crate::image::{is_image_file, process_image_file, ProcessedImage};
 use crate::render::{TerminalRenderer, TerminalStreamHandler, ThinkingIndicator};
 use aemeath_core::agent::Agent;
-use aemeath_core::command::cmd;
+use aemeath_core::command::{cmd, CommandContext, CommandRegistry, CommandResult};
 use aemeath_core::compact;
 use aemeath_core::message::Message;
 use aemeath_core::session::{self, Session};
+use aemeath_core::state::AppState;
+use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{ToolContext, ToolRegistry};
 use aemeath_llm::client::LlmClient;
 use aemeath_llm::stream::StreamHandler;
@@ -40,6 +42,7 @@ fn build_user_context_message(claude_md: &str) -> Option<Message> {
     )))
 }
 
+#[allow(unused_assignments)]
 pub async fn run_repl(
     client: std::sync::Arc<LlmClient>,
     registry: ToolRegistry,
@@ -53,6 +56,7 @@ pub async fn run_repl(
     resume_id: Option<String>,
     agent_runner: Option<std::sync::Arc<dyn aemeath_core::tool::AgentRunner>>,
     allow_all: bool,
+    _task_store: Arc<TaskStore>,
 ) {
     let mut rl = match DefaultEditor::new() {
         Ok(rl) => rl,
@@ -64,9 +68,11 @@ pub async fn run_repl(
 
     let mut messages: Vec<Message> = Vec::new();
     let tool_schemas = registry.schemas();
+    let tool_schema_tokens = compact::estimate_tool_schemas_tokens(&tool_schemas);
     let mut total_input_tokens: u64 = 0;
     let mut total_output_tokens: u64 = 0;
     let mut total_api_calls: u64 = 0;
+    let mut compact_state = compact::AutoCompactState::default();
 
     let mut session_id = session::new_session_id();
     // Keep the original session object when resuming, to preserve metadata
@@ -74,7 +80,7 @@ pub async fn run_repl(
 
     // Resume existing session if requested
     if let Some(ref id) = resume_id {
-        match session::load_session(id) {
+        match session::load_session(id).await {
             Ok(s) => {
                 messages = s.messages.clone();
                 session_id = s.id.clone();
@@ -96,8 +102,12 @@ pub async fn run_repl(
 
     // Pending images for next message
     let pending_images: PendingImages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut skip_message_build = false;
 
     loop {
+        // Reset skip flag at the start of each iteration
+        skip_message_build = false;
+
         // Show pending images indicator
         {
             let images = pending_images.lock().unwrap();
@@ -145,6 +155,13 @@ pub async fn run_repl(
                     eprintln!("unknown command: {input}. Type /help for available commands.");
                     continue;
                 }
+                SlashResult::Review(prompt) => {
+                    // Treat the review prompt as user input and let the normal agent loop handle it
+                    // by falling through to the agent processing below
+                    messages.push(Message::user(&prompt));
+                    skip_message_build = true;
+                    // fall through to agent processing
+                }
             }
         }
 
@@ -182,41 +199,45 @@ pub async fn run_repl(
             pending.extend(inline_images);
         }
 
-        // Build message with any pending images
-        let images = pending_images.lock().unwrap().drain(..).collect::<Vec<_>>();
-        let msg_text = if clean_input.is_empty() { &input } else { &clean_input };
-        if images.is_empty() {
-            messages.push(Message::user(msg_text));
-        } else {
-            let image_data: Vec<(String, String)> = images
-                .iter()
-                .map(|img| (img.base64.clone(), img.media_type.clone()))
-                .collect();
-            messages.push(Message::user_with_images(msg_text, image_data));
+        // Build message with any pending images (skip if message was already built by /review)
+        if !skip_message_build {
+            let images = pending_images.lock().unwrap().drain(..).collect::<Vec<_>>();
+            let msg_text = if clean_input.is_empty() { &input } else { &clean_input };
+            if images.is_empty() {
+                messages.push(Message::user(msg_text));
+            } else {
+                let image_data: Vec<(String, String)> = images
+                    .iter()
+                    .map(|img| (img.base64.clone(), img.media_type.clone()))
+                    .collect();
+                messages.push(Message::user_with_images(msg_text, image_data));
 
-            // Print summary of attached images
-            for (i, img) in images.iter().enumerate() {
-                println!(
-                    "[sent image {}: {} bytes]",
-                    i + 1, img.final_size
-                );
+                // Print summary of attached images
+                for (i, img) in images.iter().enumerate() {
+                    println!(
+                        "[sent image {}: {} bytes]",
+                        i + 1, img.final_size
+                    );
+                }
             }
         }
 
-        // Auto-compact before sending to API
-        if compact::needs_compaction(&messages, &system_prompt_text, context_size) && messages.len() > 4 {
+        // Auto-compact before sending to API (guarded by circuit breaker)
+        if compact_state.should_attempt()
+            && compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+            && messages.len() > 4
+        {
             let old_len = messages.len();
 
             // Step 1: Try microcompact first
             compact::microcompact(&mut messages, 10);
 
-            if compact::needs_compaction(&messages, &system_prompt_text, context_size) {
+            if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens) {
                 // Step 2: LLM-based compaction
                 let keep_recent = (old_len * 40 / 100).max(4).min(old_len - 1);
                 let split_point = old_len - keep_recent;
                 let early_messages = &messages[..split_point];
 
-                // Call LLM to generate a high-quality summary
                 let compact_request = compact::build_compact_request(early_messages);
                 let compact_system = vec![SystemBlock::dynamic(
                     "You are a conversation summarizer. Respond only with the summary.".to_string(),
@@ -230,12 +251,15 @@ pub async fn run_repl(
                     Ok(resp) => {
                         let summary = compact::parse_compact_response(&resp.assistant_message.text_content());
                         let recent = messages[split_point..].to_vec();
+                        let files = read_files.lock().unwrap().clone();
                         let (compacted, _) =
-                            compact::assemble_compacted(summary, &recent, split_point);
+                            compact::assemble_compacted_with_files(summary, &recent, split_point, Some(&files));
                         messages = compacted;
+                        compact_state.record_success();
                         TerminalRenderer::print_compaction(old_len, messages.len());
                     }
                     Err(_) => {
+                        compact_state.record_failure();
                         // Fallback to local compaction
                         let (compacted, was_compacted) =
                             compact::compact_messages(&messages, &system_prompt_text, context_size);
@@ -256,12 +280,9 @@ pub async fn run_repl(
 
         // Ctrl+C during API call cancels the current request
         let ctrlc_handle = tokio::spawn(async move {
-            loop {
-                tokio::signal::ctrl_c().await.ok();
-                interrupted_clone.store(true, Ordering::Relaxed);
-                cancel_clone.cancel();
-                break;
-            }
+            tokio::signal::ctrl_c().await.ok();
+            interrupted_clone.store(true, Ordering::Relaxed);
+            cancel_clone.cancel();
         });
 
         let ctx = ToolContext {
@@ -278,6 +299,7 @@ pub async fn run_repl(
         };
 
         let mut turns = 0;
+        let mut last_api_input_tokens: u64 = 0;
         loop {
             if turns >= MAX_TURNS {
                 eprintln!("max turns ({MAX_TURNS}) reached");
@@ -320,7 +342,8 @@ pub async fn run_repl(
             match response {
                 Ok(resp) => {
                     println!();
-                    total_input_tokens += resp.usage.input_tokens as u64;
+                    last_api_input_tokens = resp.usage.input_tokens as u64;
+                    total_input_tokens += last_api_input_tokens;
                     total_output_tokens += resp.usage.output_tokens as u64;
                     total_api_calls += 1;
                     TerminalRenderer::print_usage(resp.usage.input_tokens, resp.usage.output_tokens);
@@ -336,10 +359,34 @@ pub async fn run_repl(
                     let mut approved_calls: Vec<&aemeath_core::agent::ToolCall> = Vec::new();
                     let mut denied_results: Vec<aemeath_core::agent::ToolResultTuple> = Vec::new();
 
+                    // Show tool calls
                     for call in &tool_calls {
-                        let summary = call.input.to_string();
+                        let summary = if call.name == "TodoRun" {
+                            // Enrich with pending todo subjects
+                            let pending: Vec<String> = _task_store.list().await
+                                .iter()
+                                .filter(|t| t.status == aemeath_core::task::TaskStatus::Pending)
+                                .map(|t| {
+                                    let dep = if t.blocked_by.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!(" (blocked by #{})", t.blocked_by.join(", #"))
+                                    };
+                                    format!("  ○ #{} {}{}", t.id, t.subject, dep)
+                                })
+                                .collect();
+                            if pending.is_empty() {
+                                format_tool_summary(&call.name, &call.input)
+                            } else {
+                                format!("{} todo(s)\n{}", pending.len(), pending.join("\n"))
+                            }
+                        } else {
+                            format_tool_summary(&call.name, &call.input)
+                        };
                         TerminalRenderer::print_tool_call(&call.name, &summary);
+                    }
 
+                    for call in &tool_calls {
                         let is_safe = if call.name == "Bash" {
                             // For Bash, check the actual command content
                             call.input.get("command")
@@ -371,8 +418,66 @@ pub async fn run_repl(
                         }
                     }
 
+                    // Spawn TodoRun progress poller if there are TodoRun calls
+                    let has_todo_run = approved_calls.iter().any(|c| c.name == "TodoRun");
+                    let progress_handle = if has_todo_run {
+                        let store = _task_store.clone();
+                        let cancel_token = cancel.clone();
+                        Some(tokio::spawn(async move {
+                            use aemeath_core::task::TaskStatus;
+                            let mut last_statuses: std::collections::HashMap<String, TaskStatus> =
+                                std::collections::HashMap::new();
+                            for t in store.list().await {
+                                last_statuses.insert(t.id.clone(), t.status.clone());
+                            }
+                            loop {
+                                tokio::select! {
+                                    _ = cancel_token.cancelled() => break,
+                                    _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                                        let current = store.list().await;
+                                        for t in &current {
+                                            let prev = last_statuses.get(&t.id);
+                                            let changed = match prev {
+                                                Some(ps) => *ps != t.status,
+                                                None => true,
+                                            };
+                                            if changed {
+                                                match t.status {
+                                                    TaskStatus::InProgress => {
+                                                        let action = t.active_form.as_deref().unwrap_or("Processing");
+                                                        eprintln!("  ◐ {} — {}", t.subject, action);
+                                                    }
+                                                    TaskStatus::Completed => {
+                                                        eprintln!("  ✓ {}", t.subject);
+                                                    }
+                                                    _ => {}
+                                                }
+                                                last_statuses.insert(t.id.clone(), t.status.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }))
+                    } else {
+                        None
+                    };
+
                     let mut results = agent.execute_tools_filtered(&approved_calls).await;
                     results.extend(denied_results);
+
+                    // Stop progress poller
+                    if let Some(handle) = progress_handle {
+                        handle.abort();
+                    }
+
+                    // Persist oversized tool results to disk, replace with preview reference
+                    let persisted = aemeath_core::tool_result_storage::persist_oversized_results(
+                        &session_id, &mut results,
+                    );
+                    if persisted > 0 {
+                        println!("[{persisted} tool result(s) persisted to disk]");
+                    }
 
                     for (_id, output, is_error, _images) in results.iter() {
                         // Find tool name by matching id
@@ -393,6 +498,72 @@ pub async fn run_repl(
                             .map(|(id, output, is_error, _)| (id, output, is_error))
                             .collect();
                         messages.push(Message::tool_results(simple));
+                    }
+
+                    // [Plan A disabled] Auto-trigger TodoRun is available but currently
+                    // disabled in favor of Plan B (Agent tool interception).
+                    // To re-enable, uncomment the block in auto_trigger_todorun().
+                    // See also: tui/app.rs process_in_background() for the TUI equivalent.
+
+                    // Inner-loop auto-compact: use API-reported token count when available,
+                    // fall back to estimation. Urgency levels determine action:
+                    // 0 = ok, 1 = microcompact, 2 = full compact, 3 = critical
+                    let urgency = if last_api_input_tokens > 0 {
+                        // Estimate new tokens added since last API call (tool results)
+                        let new_tokens = messages.last()
+                            .map(|m| compact::estimate_messages_tokens(std::slice::from_ref(m)))
+                            .unwrap_or(0) as u64;
+                        compact::compaction_urgency(last_api_input_tokens + new_tokens, context_size)
+                    } else if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens) {
+                        2 // fallback to estimation-based
+                    } else {
+                        0
+                    };
+
+                    if urgency >= 1 && messages.len() > 4 {
+                        let old_len = messages.len();
+                        compact::microcompact(&mut messages, 6);
+
+                        if urgency >= 2 && compact_state.should_attempt() {
+                            // Full compaction needed
+                            let keep_recent = (old_len * 40 / 100).max(4).min(old_len - 1);
+                            let split_point = old_len - keep_recent;
+                            let early_messages = &messages[..split_point];
+                            let compact_request = compact::build_compact_request(early_messages);
+                            let compact_system = vec![SystemBlock::dynamic(
+                                "You are a conversation summarizer. Respond only with the summary.".to_string(),
+                            )];
+                            let mut silent_handler = SilentCompactHandler;
+                            let compact_cancel = CancellationToken::new();
+                            match client
+                                .stream_message(&compact_system, &compact_request, &[], &mut silent_handler, &compact_cancel)
+                                .await
+                            {
+                                Ok(compact_resp) => {
+                                    let summary = compact::parse_compact_response(&compact_resp.assistant_message.text_content());
+                                    let recent = messages[split_point..].to_vec();
+                                    let files = read_files.lock().unwrap().clone();
+                                    let (compacted, _) =
+                                        compact::assemble_compacted_with_files(summary, &recent, split_point, Some(&files));
+                                    messages = compacted;
+                                    last_api_input_tokens = 0;
+                                    compact_state.record_success();
+                                    TerminalRenderer::print_compaction(old_len, messages.len());
+                                }
+                                Err(_) => {
+                                    compact_state.record_failure();
+                                    let (compacted, was_compacted) =
+                                        compact::compact_messages(&messages, &system_prompt_text, context_size);
+                                    if was_compacted {
+                                        messages = compacted;
+                                        last_api_input_tokens = 0;
+                                        TerminalRenderer::print_compaction(old_len, messages.len());
+                                    }
+                                }
+                            }
+                        } else {
+                            TerminalRenderer::print_compaction(old_len, messages.len());
+                        }
                     }
                 }
                 Err(e) => {
@@ -426,7 +597,7 @@ pub async fn run_repl(
             new_s.messages = messages.clone();
             new_s
         };
-        if let Err(e) = session::save_session(&s) {
+        if let Err(e) = session::save_session(&s).await {
             eprintln!("warning: failed to save session: {e}");
         } else {
             TerminalRenderer::print_session_saved(&session_id);
@@ -440,6 +611,8 @@ enum SlashResult {
     Continue,
     Exit,
     NotFound,
+    /// Inject a user message into the conversation and process it with the LLM
+    Review(String),
 }
 
 async fn handle_slash_command(
@@ -544,14 +717,14 @@ async fn handle_slash_command(
                 s.updated_at = session::now_iso();
                 s
             };
-            match session::save_session(&s) {
+            match session::save_session(&s).await {
                 Ok(()) => println!("[session saved: {session_id}]"),
                 Err(e) => eprintln!("error: {e}"),
             }
             SlashResult::Continue
         }
         "/sessions" => {
-            let sessions = session::list_sessions();
+            let sessions = session::list_sessions().await;
             if sessions.is_empty() {
                 println!("No saved sessions.");
             } else {
@@ -633,7 +806,80 @@ async fn handle_slash_command(
             }
             SlashResult::Continue
         }
-        _ => SlashResult::NotFound,
+        // Try to execute via CommandRegistry
+        _ => {
+            let cmd_name = cmd.trim_start_matches('/');
+            let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+
+            // Try to find command in registry
+            let registry = CommandRegistry::with_defaults();
+            if let Some(cmd_obj) = registry.find(cmd_name) {
+                let state = AppState::default();
+                let config = aemeath_core::config::Config::default();
+                let mut ctx = CommandContext::new(
+                    Arc::new(state),
+                    config,
+                    cwd.to_string_lossy().to_string(),
+                    session_id.to_string(),
+                );
+
+                match cmd_obj.execute(&args, &mut ctx).await {
+                    CommandResult::Success(msg) => println!("{}", msg),
+                    CommandResult::Error(msg) => eprintln!("error: {}", msg),
+                    CommandResult::Action(action) => {
+                        match action {
+                            aemeath_core::command::CommandAction::Exit => return SlashResult::Exit,
+                            aemeath_core::command::CommandAction::Clear => {
+                                messages.clear();
+                                println!("[cleared]");
+                            }
+                            aemeath_core::command::CommandAction::Review(prompt) => {
+                                println!("[reviewing code changes...]");
+                                return SlashResult::Review(prompt);
+                            }
+                            _ => println!("[action: {:?}]", action),
+                        }
+                    }
+                    CommandResult::Confirm { message, .. } => {
+                        println!("[confirm: {}]", message);
+                    }
+                }
+                SlashResult::Continue
+            } else {
+                SlashResult::NotFound
+            }
+        }
+    }
+}
+
+/// Generate a human-friendly summary for a tool call input.
+/// Falls back to the raw JSON string for unrecognized tools.
+fn format_tool_summary(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "TodoRun" => {
+            "execute all pending todos".to_string()
+        }
+        "TodoWrite" => {
+            if let Some(todos) = input.get("todos").and_then(|t| t.as_array()) {
+                let count = todos.len();
+                let first = todos.first()
+                    .and_then(|t| t.get("subject").and_then(|s| s.as_str()))
+                    .unwrap_or("?");
+                if count == 1 {
+                    format!("{} todo: {}", count, first)
+                } else if count <= 3 {
+                    let subjects: Vec<&str> = todos.iter()
+                        .filter_map(|t| t.get("subject").and_then(|s| s.as_str()))
+                        .collect();
+                    format!("{} todos: {}", count, subjects.join(", "))
+                } else {
+                    format!("{} todos: {}, ... +{} more", count, first, count - 1)
+                }
+            } else {
+                input.to_string()
+            }
+        }
+        _ => input.to_string(),
     }
 }
 

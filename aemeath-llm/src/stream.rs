@@ -29,7 +29,6 @@ pub async fn parse_stream(
     const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
     const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
     let mut last_event_time: Option<std::time::Instant> = None;
-    let mut stall_count: u32 = 0;
 
     let byte_stream = response
         .bytes_stream()
@@ -44,7 +43,7 @@ pub async fn parse_stream(
                 return Err(crate::LlmError::Stream("interrupted by user".to_string()));
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
-                eprintln!("[warn] Stream idle timeout: no data for {}s, aborting", STREAM_IDLE_TIMEOUT.as_secs());
+                handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
                 return Err(crate::LlmError::Stream(format!(
                     "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
                 )));
@@ -62,8 +61,7 @@ pub async fn parse_stream(
         if let Some(last) = last_event_time {
             let gap = now.duration_since(last);
             if gap > STALL_THRESHOLD {
-                stall_count += 1;
-                eprintln!("[warn] Stream stall #{}: {:.1}s gap between events", stall_count, gap.as_secs_f64());
+                // Stream stall detected — silently ignored
             }
         }
         last_event_time = Some(now);

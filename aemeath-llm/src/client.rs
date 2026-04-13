@@ -15,7 +15,7 @@ pub struct LlmClient {
 impl LlmClient {
     /// Create a new LLM client with Anthropic provider (default)
     pub fn new(api_key: String) -> Self {
-        Self::with_provider(Provider::Anthropic, api_key, None, None, 200000)
+        Self::with_provider(Provider::Anthropic, api_key, None, None, 200000, false)
     }
 
     /// Create a new LLM client with specified provider
@@ -25,10 +25,19 @@ impl LlmClient {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
+        reasoning: bool,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> = match provider {
             Provider::Anthropic => {
                 Arc::new(crate::providers::AnthropicProvider::new(
+                    api_key,
+                    base_url,
+                    model,
+                    max_tokens,
+                ))
+            }
+            Provider::Ollama => {
+                Arc::new(crate::providers::OllamaProvider::new(
                     api_key,
                     base_url,
                     model,
@@ -49,6 +58,7 @@ impl LlmClient {
                     base_url,
                     model,
                     max_tokens,
+                    reasoning,
                 ))
             }
         };
@@ -64,8 +74,9 @@ impl LlmClient {
         base_url: Option<String>,
         model: String,
         max_tokens: u32,
+        reasoning: bool,
     ) -> Self {
-        Self::with_provider(provider, api_key, base_url, Some(model), max_tokens)
+        Self::with_provider(provider, api_key, base_url, Some(model), max_tokens, reasoning)
     }
 
     /// Stream a message with tool support

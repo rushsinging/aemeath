@@ -13,9 +13,11 @@ pub struct StatusBar {
     status: String,
     /// Status type for coloring
     status_type: StatusType,
-    /// Token usage
+    /// Cumulative token usage across all API calls
     input_tokens: u64,
     output_tokens: u64,
+    /// Last API call's input_tokens (= current context window usage)
+    last_input_tokens: u64,
     /// Session ID
     session_id: Option<String>,
     /// LLM API call count
@@ -26,6 +28,8 @@ pub struct StatusBar {
     processing_msg: String,
     /// Current model name
     model: Option<String>,
+    /// Context window size
+    context_size: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -50,11 +54,13 @@ impl StatusBar {
             status_type: StatusType::Normal,
             input_tokens: 0,
             output_tokens: 0,
+            last_input_tokens: 0,
             session_id: None,
             api_calls: 0,
             is_processing: false,
             processing_msg: String::new(),
             model: None,
+            context_size: 0,
         }
     }
 
@@ -84,10 +90,11 @@ impl StatusBar {
         self.status_type = StatusType::Normal;
     }
 
-    /// Update token usage
-    pub fn set_tokens(&mut self, input: u64, output: u64) {
+    /// Update token usage (cumulative totals + last call's input for Ctx%)
+    pub fn set_tokens(&mut self, input: u64, output: u64, last_input: u64) {
         self.input_tokens = input;
         self.output_tokens = output;
+        self.last_input_tokens = last_input;
     }
 
     /// Set session ID
@@ -98,6 +105,11 @@ impl StatusBar {
     /// Set model name
     pub fn set_model(&mut self, model: &str) {
         self.model = Some(model.to_string());
+    }
+
+    /// Set context window size
+    pub fn set_context_size(&mut self, size: u64) {
+        self.context_size = size;
     }
 
     /// Set message count
@@ -132,9 +144,8 @@ impl StatusBar {
 
         // Processing status or regular status
         if self.is_processing {
-            let spinner = Self::get_spinner_char();
             spans.push(Span::styled(
-                format!(" {} {} ", spinner, self.processing_msg),
+                format!(" {} ", self.processing_msg),
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
         } else {
@@ -142,7 +153,6 @@ impl StatusBar {
                 StatusType::Normal => Style::default().fg(Color::White),
                 StatusType::Success => Style::default().fg(Color::Green),
                 StatusType::Warning => Style::default().fg(Color::Yellow),
-                // Error uses Warning style
                 StatusType::Processing => Style::default().fg(Color::Yellow),
             };
             spans.push(Span::styled(
@@ -151,48 +161,48 @@ impl StatusBar {
             ));
         }
 
-        // Token usage
-        let token_text = format!("Tokens: {} in / {} out", format_tokens(self.input_tokens), format_tokens(self.output_tokens));
-        spans.push(Span::styled(
-            format!(" {} │", token_text),
-            Style::default().fg(Color::DarkGray),
-        ));
+        // Token usage: in/out + context window usage
+        {
+            let in_out = format!("In: {} / Out: {}", format_tokens(self.input_tokens), format_tokens(self.output_tokens));
+            spans.push(Span::styled(
+                format!(" {} ", in_out),
+                Style::default().fg(Color::Gray),
+            ));
+
+            if self.context_size > 0 {
+                let pct = if self.last_input_tokens > 0 {
+                    self.last_input_tokens * 100 / self.context_size
+                } else {
+                    0
+                };
+                let pct_color = if pct >= 80 {
+                    Color::Red
+                } else if pct >= 50 {
+                    Color::Yellow
+                } else {
+                    Color::Gray
+                };
+                spans.push(Span::styled(
+                    format!("Ctx: {}% │", pct),
+                    Style::default().fg(pct_color),
+                ));
+            } else {
+                spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            }
+        }
 
         // Session info
         if let Some(ref id) = self.session_id {
-            let short_id: String = id.chars().take(8).collect();
             spans.push(Span::styled(
-                format!(" Session: {} │ Calls: {} ", short_id, self.api_calls),
-                Style::default().fg(Color::DarkGray),
+                format!(" Session: {} │ Calls: {} ", id, self.api_calls),
+                Style::default().fg(Color::Gray),
             ));
         }
-
-        // Key hints
-        spans.push(Span::styled(
-            " Ctrl+C: interrupt | /help: commands ",
-            Style::default().fg(Color::DarkGray),
-        ));
 
         let line = Line::from(spans);
         let paragraph = Paragraph::new(line)
             .style(Style::default().bg(Color::Black));
 
         paragraph.render(area, buf);
-    }
-
-    /// Get a simple spinner character
-    fn get_spinner_char() -> char {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        match (ms / 100) % 4 {
-            0 => '⠋',
-            1 => '⠙',
-            2 => '⠹',
-            3 => '⠸',
-            _ => '⠋',
-        }
     }
 }
