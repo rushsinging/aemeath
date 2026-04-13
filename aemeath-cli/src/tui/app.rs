@@ -289,6 +289,32 @@ impl App {
         let mut event_stream = EventStream::new();
 
         loop {
+            // Update task status lines for display below spinner
+            {
+                let tasks = task_store.list().await;
+                let active: Vec<_> = tasks.iter()
+                    .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
+                    .collect();
+                if active.is_empty() {
+                    self.output_area.set_task_status(Vec::new());
+                } else {
+                    let completed = active.iter().filter(|t| t.status == aemeath_core::task::TaskStatus::Completed).count();
+                    let total = active.len();
+                    let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed, total)];
+                    for t in &active {
+                        let icon = match t.status {
+                            aemeath_core::task::TaskStatus::Completed => "✓",
+                            aemeath_core::task::TaskStatus::InProgress => "■",
+                            aemeath_core::task::TaskStatus::Pending => "□",
+                            _ => continue,
+                        };
+                        let owner = t.owner.as_deref().map(|o| format!(" (@{})", o)).unwrap_or_default();
+                        lines.push(format!("{} #{} {}{}", icon, t.id, t.subject, owner));
+                    }
+                    self.output_area.set_task_status(lines);
+                }
+            }
+
             // Draw UI
             let mut output_rect = Rect::default();
             terminal.draw(|f| {

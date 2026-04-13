@@ -425,6 +425,8 @@ pub struct OutputArea {
     last_visible_height: usize,
     /// Cache of todo id -> subject, so updates that only carry id+status can still show the subject
     todo_subject_cache: std::collections::HashMap<String, String>,
+    /// Task status lines shown below the spinner (updated externally)
+    task_status_lines: Vec<String>,
 }
 
 impl Default for OutputArea {
@@ -457,6 +459,7 @@ impl OutputArea {
             spinner: None,
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
+            task_status_lines: Vec::new(),
         }
     }
 
@@ -692,6 +695,11 @@ impl OutputArea {
     /// Stop the animated spinner
     pub fn stop_spinner(&mut self) {
         self.spinner = None;
+    }
+
+    /// Update the task status lines shown below the spinner
+    pub fn set_task_status(&mut self, lines: Vec<String>) {
+        self.task_status_lines = lines;
     }
 
     /// Build the animated spinner line (called during render)
@@ -1268,9 +1276,10 @@ impl OutputArea {
         // Update width on render (handles resize)
         self.term_width = (area.width as usize).saturating_sub(2);
 
-        // Build spinner line (if active) — reserves 1 row at bottom
+        // Build spinner line (if active) and task status lines — reserve rows at bottom
         let spinner_line = self.build_spinner_line();
-        let reserved = if spinner_line.is_some() { 1 } else { 0 };
+        let task_line_count = if self.spinner.is_some() { self.task_status_lines.len() } else { 0 };
+        let reserved = if spinner_line.is_some() { 1 + task_line_count } else { 0 };
 
         let visible_lines = (area.height as usize).saturating_sub(reserved);
         self.last_visible_height = visible_lines;
@@ -1362,9 +1371,16 @@ impl OutputArea {
             })
             .collect();
 
-        // Append spinner line at the bottom
+        // Append spinner line at the bottom, then task status lines below it
         if let Some(sl) = spinner_line {
             lines.push(sl);
+            // Render task status lines below spinner
+            for task_line in &self.task_status_lines {
+                lines.push(Line::styled(
+                    format!("  {task_line}"),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
         }
 
         // Truncate lines to area height to prevent buffer overflow
