@@ -1466,14 +1466,6 @@ async fn process_in_background(
                     break;
                 }
 
-                // Show tool calls before execution
-                for call in &tool_calls {
-                    let _ = tx.send(UiEvent::ToolCall {
-                        name: call.name.clone(),
-                        summary: call.input.to_string(),
-                    }).await;
-                }
-
                 {
                     // Filter out non-safe tools if allow_all is not set
                     let (approved, denied): (Vec<_>, Vec<_>) = if allow_all {
@@ -1503,24 +1495,60 @@ async fn process_in_background(
                         }).await;
                     }
 
-                    let approved_calls: Vec<aemeath_core::agent::ToolCall> = approved.into_iter().map(|c| {
+                    // Separate Agent calls from non-Agent calls for batched execution
+                    let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) = approved
+                        .into_iter()
+                        .partition(|c| c.name == "Agent");
+
+                    // Show and execute non-Agent tools immediately
+                    for call in &non_agent_approved {
+                        let _ = tx.send(UiEvent::ToolCall {
+                            name: call.name.clone(),
+                            summary: call.input.to_string(),
+                        }).await;
+                    }
+
+                    let non_agent_calls: Vec<aemeath_core::agent::ToolCall> = non_agent_approved.into_iter().map(|c| {
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
 
-                    // Show elapsed time and poll task status changes while tools are running
-                    let tool_names: Vec<String> = approved_calls.iter().map(|c| c.name.clone()).collect();
-                    let has_long_running = tool_names.iter().any(|n| n == "Agent");
+                    let non_agent_results = if !non_agent_calls.is_empty() {
+                        agent.execute_tools(&non_agent_calls).await
+                    } else {
+                        Vec::new()
+                    };
+
+                    // Send non-agent results
+                    let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
+                        .iter()
+                        .map(|c| (c.id.as_str(), c.name.as_str()))
+                        .collect();
+                    for (_id, output, is_error, images) in non_agent_results.iter() {
+                        let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
+                        let _ = tx.send(UiEvent::ToolResult {
+                            tool_name: tool_name.to_string(),
+                            output: output.clone(),
+                            is_error: *is_error,
+                            images: images.clone(),
+                        }).await;
+                    }
+
+                    // Execute Agent calls in batches of max_agent_concurrency
+                    let mut agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
+                    let batch_size = max_tool_concurrency.max(1); // Use tool concurrency as batch size for agents
+
+                    // Start task status polling timer
                     let has_active_tasks = {
                         let tasks = _task_store.list().await;
                         tasks.iter().any(|t| t.status == aemeath_core::task::TaskStatus::Pending
                             || t.status == aemeath_core::task::TaskStatus::InProgress)
                     };
-                    let should_poll = has_long_running || has_active_tasks;
+                    let should_poll = !agent_approved.is_empty() || has_active_tasks;
                     let timer_tx = tx.clone();
                     let timer_cancel = cancel.clone();
                     let timer_store = _task_store.clone();
+                    let agent_count = agent_approved.len();
                     let timer_handle = if should_poll {
-                        let names = tool_names.clone();
                         Some(tokio::spawn(async move {
                             use aemeath_core::task::TaskStatus;
                             let start = std::time::Instant::now();
@@ -1534,7 +1562,6 @@ async fn process_in_background(
                                     _ = timer_cancel.cancelled() => break,
                                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
                                         let elapsed = start.elapsed().as_secs();
-                                        // Poll task status changes
                                         let current_tasks = timer_store.list().await;
                                         for t in &current_tasks {
                                             let prev = last_statuses.get(&t.id);
@@ -1551,7 +1578,7 @@ async fn process_in_background(
                                             }
                                         }
                                         let _ = timer_tx.send(UiEvent::StatusUpdate(
-                                            format!("Running {} tool(s)... {}s", names.len(), elapsed)
+                                            format!("Running {} agent(s)... {}s", agent_count, elapsed)
                                         )).await;
                                     }
                                 }
@@ -1561,31 +1588,45 @@ async fn process_in_background(
                         None
                     };
 
-                    let results = agent.execute_tools(&approved_calls).await;
+                    for batch in agent_approved.chunks(batch_size) {
+                        // Show ToolCall events for this batch
+                        for call in batch {
+                            let _ = tx.send(UiEvent::ToolCall {
+                                name: call.name.clone(),
+                                summary: call.input.to_string(),
+                            }).await;
+                        }
+
+                        let batch_calls: Vec<aemeath_core::agent::ToolCall> = batch.iter().map(|c| {
+                            aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
+                        }).collect();
+
+                        let batch_results = agent.execute_tools(&batch_calls).await;
+
+                        // Send results for this batch
+                        for (_id, output, is_error, images) in batch_results.iter() {
+                            let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
+                            let _ = tx.send(UiEvent::ToolResult {
+                                tool_name: tool_name.to_string(),
+                                output: output.clone(),
+                                is_error: *is_error,
+                                images: images.clone(),
+                            }).await;
+                        }
+
+                        agent_results.extend(batch_results);
+                    }
 
                     // Stop the timer
                     if let Some(handle) = timer_handle {
                         handle.abort();
                     }
-                    // Build a map from tool_call id to name for correct indexing
-                    let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
-                        .iter()
-                        .map(|c| (c.id.as_str(), c.name.as_str()))
-                        .collect();
-                    for (_id, output, is_error, images) in results.iter() {
-                        let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
-                        let _ = tx.send(UiEvent::ToolResult {
-                            tool_name: tool_name.to_string(),
-                            output: output.clone(),
-                            is_error: *is_error,
-                            images: images.clone(),
-                        }).await;
-                    }
+
                     // Insert task snapshot if TaskCreate or TaskUpdate(completed) was called
                     {
                         let has_task_create = tool_name_map.values().any(|n| *n == "TaskCreate");
                         let has_task_update_completed = tool_name_map.values().any(|n| *n == "TaskUpdate")
-                            && results.iter().any(|(_, output, is_err, _)| !is_err && output.contains("Completed"));
+                            && non_agent_results.iter().any(|(_, output, is_err, _)| !is_err && output.contains("Completed"));
 
                         if has_task_create || has_task_update_completed {
                             let tasks = _task_store.list().await;
@@ -1596,10 +1637,10 @@ async fn process_in_background(
                         }
                     }
 
-                    // Build combined results (approved + denied), preserving images for approved tools
-                    let mut all_results: Vec<(String, String, bool, Vec<ImageData>)> = results
+                    // Build combined results (non-agent + agent + denied)
+                    let mut all_results: Vec<(String, String, bool, Vec<ImageData>)> = non_agent_results
                         .into_iter()
-                        .map(|(id, output, is_error, images)| (id, output, is_error, images))
+                        .chain(agent_results.into_iter())
                         .collect();
                     for call in &denied {
                         all_results.push((
