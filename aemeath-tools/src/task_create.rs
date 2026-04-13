@@ -12,7 +12,13 @@ pub struct TaskCreateTool {
 impl Tool for TaskCreateTool {
     fn name(&self) -> &str { "TaskCreate" }
     fn description(&self) -> &str {
-        "Create a task to track progress on multi-step work.\n\nUsage:\n- subject: A brief, actionable title\n- description: What needs to be done\n- activeForm: Present continuous form shown when in_progress (e.g., \"Running tests\")\n- priority: Task priority (low, normal, high, urgent)\n- sessionId: Session ID to associate with this task"
+        "Create a task to track progress on multi-step work.\n\n\
+         After creating tasks, use TaskUpdate to:\n\
+         - Set dependencies (addBlockedBy/addBlocks) between tasks\n\
+         - Mark as in_progress before starting work\n\
+         - Mark as completed when done — the system will show which tasks are unblocked\n\n\
+         Use TaskList to discover pending tasks with no unresolved dependencies.\n\
+         Launch Agent for independent tasks that can run in parallel."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({

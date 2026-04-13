@@ -12,7 +12,11 @@ pub struct TaskUpdateTool {
 impl Tool for TaskUpdateTool {
     fn name(&self) -> &str { "TaskUpdate" }
     fn description(&self) -> &str {
-        "Update a task's status, subject, description, or dependencies.\n\nStatus workflow: pending → in_progress → completed. Use 'deleted' to remove."
+        "Update a task's status, subject, description, or dependencies.\n\n\
+         Status workflow: pending → in_progress → completed. Use 'deleted' to remove.\n\n\
+         When you mark a task as completed, the system will show which downstream tasks \
+         are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
+         After completing a task, check the unblocked list or call TaskList to find the next available task."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -133,10 +137,52 @@ impl Tool for TaskUpdateTool {
                 } else {
                     "".to_string()
                 };
-                ToolResult::success(format!(
+                let mut output = format!(
                     "Updated task #{}: {} [{}]{}\nStatus: {:?}",
                     task.id, task.subject, task.priority.as_str(), progress_str, task.status
-                ))
+                );
+
+                // When a task is completed, show which downstream tasks are now unblocked
+                if task.status == TaskStatus::Completed {
+                    let all_tasks = self.store.list().await;
+                    // Collect all completed task IDs for dependency resolution
+                    let completed_ids: std::collections::HashSet<&str> = all_tasks.iter()
+                        .filter(|t| t.status == TaskStatus::Completed)
+                        .map(|t| t.id.as_str())
+                        .collect();
+
+                    let newly_unblocked: Vec<_> = all_tasks.iter()
+                        .filter(|t| {
+                            t.status == TaskStatus::Pending
+                                && !t.blocked_by.is_empty()
+                                && t.blocked_by.iter().any(|dep| dep == &task_id)
+                                && t.blocked_by.iter().all(|dep| completed_ids.contains(dep.as_str()))
+                        })
+                        .collect();
+
+                    if !newly_unblocked.is_empty() {
+                        output.push_str("\n\nUnblocked tasks now ready:");
+                        for t in &newly_unblocked {
+                            let deps = t.blocked_by.iter()
+                                .map(|d| format!("#{d}"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            output.push_str(&format!("\n  → #{} \"{}\" (was blocked by {})", t.id, t.subject, deps));
+                        }
+                    }
+
+                    // Also show remaining pending tasks count
+                    let remaining_pending = all_tasks.iter()
+                        .filter(|t| t.status == TaskStatus::Pending)
+                        .count();
+                    if remaining_pending > 0 {
+                        output.push_str(&format!("\n\n{} task(s) still pending.", remaining_pending));
+                    } else {
+                        output.push_str("\n\nAll tasks completed!");
+                    }
+                }
+
+                ToolResult::success(output)
             }
             None => ToolResult::error(format!("task not found: {task_id}")),
         }

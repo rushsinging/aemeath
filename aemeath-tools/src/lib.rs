@@ -16,8 +16,6 @@ pub mod task_list;
 pub mod task_get;
 pub mod task_stop;
 pub mod task_output;
-pub mod todo_write;
-pub mod todo_run;
 pub mod mcp_tool;  // McpTool is dynamically created, not statically registered
 pub mod skill_tool;
 pub mod config_tool;
@@ -67,8 +65,6 @@ pub fn register_all_tools(
     registry.register(Box::new(task_get::TaskGetTool { store: task_store.clone() }));
     registry.register(Box::new(task_stop::TaskStopTool { store: task_store.clone() }));
     registry.register(Box::new(task_output::TaskOutputTool { store: task_store.clone() }));
-    registry.register(Box::new(todo_write::TodoWriteTool { store: task_store.clone() }));
-    registry.register(Box::new(todo_run::TodoRunTool { store: task_store }));
     
     // Skill tool (MCP tools are dynamically registered)
     registry.register(Box::new(skill_tool::SkillTool { skills }));

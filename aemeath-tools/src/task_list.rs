@@ -12,7 +12,11 @@ pub struct TaskListTool {
 impl Tool for TaskListTool {
     fn name(&self) -> &str { "TaskList" }
     fn description(&self) -> &str {
-        "List all tasks and their status. Use to check progress and find available work."
+        "List all tasks and their status. Use to discover available work.\n\n\
+         Look for tasks that are pending with no unresolved blocked_by dependencies — \
+         these are ready to execute. You can work on them directly or launch Agent \
+         for tasks that can run in parallel.\n\n\
+         Call this after completing a task to find the next one to work on."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({

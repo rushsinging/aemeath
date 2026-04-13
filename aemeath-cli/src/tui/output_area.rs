@@ -851,14 +851,17 @@ impl OutputArea {
             }
         }
 
-        // For task-related tools, skip verbose output (already shown in header)
-        let is_task_tool = matches!(tool_name, "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList");
+        if !result.trim().is_empty() {
+            // Task tools get more lines to show the task list summary
+            let max_lines = if matches!(tool_name, "TaskList") {
+                20
+            } else {
+                3
+            };
 
-        if !is_task_tool && !result.trim().is_empty() {
-            // Show result content with tree connectors (truncated to 3 lines)
             let total = result.lines().count();
-            let display_lines: Vec<&str> = result.lines().take(3).collect();
-            let has_more = total > 3;
+            let display_lines: Vec<&str> = result.lines().take(max_lines).collect();
+            let has_more = total > max_lines;
 
             for line in &display_lines {
                 self.push_line(OutputLine {
@@ -868,7 +871,7 @@ impl OutputArea {
             }
             if has_more {
                 self.push_line(OutputLine {
-                    content: format!("  │  ... ({} lines omitted)", total - 3),
+                    content: format!("  │  ... ({} lines omitted)", total - max_lines),
                     style: LineStyle::System,
                 });
             }

@@ -1,4 +1,4 @@
-use aemeath_core::task::{TaskStatus, TaskStore};
+use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -58,20 +58,6 @@ impl Tool for AgentTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        // Block Agent calls when there are pending todos — force TodoRun workflow
-        let pending: Vec<String> = self.store.list().await
-            .iter()
-            .filter(|t| t.status == TaskStatus::Pending)
-            .map(|t| t.subject.clone())
-            .collect();
-        if !pending.is_empty() {
-            return ToolResult::error(format!(
-                "There are {} pending todo(s). Call TodoRun to execute them before launching Agent calls.\nPending: {}",
-                pending.len(),
-                pending.join(", ")
-            ));
-        }
-
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: prompt"),

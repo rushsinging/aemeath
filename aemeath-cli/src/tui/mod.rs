@@ -4,6 +4,7 @@ pub mod dialog;
 pub mod input_area;
 pub mod output_area;
 pub mod status_bar;
+pub mod task_display;
 
 pub use app::App;
 pub use input_area::InputArea;

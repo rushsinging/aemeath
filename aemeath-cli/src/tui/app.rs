@@ -421,6 +421,21 @@ impl App {
                             }
                             UiEvent::MessagesSync(msgs) => {
                                 self.messages = msgs;
+                                // Auto-save session on every sync so that /save and exit always have up-to-date data
+                                if !self.messages.is_empty() {
+                                    use aemeath_core::session::{self as sess, Session, now_iso};
+                                    let s = Session {
+                                        id: self.session_id.clone(),
+                                        cwd: self.cwd.to_string_lossy().to_string(),
+                                        messages: self.messages.clone(),
+                                        created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+                                        updated_at: now_iso(),
+                                        metadata: Default::default(),
+                                    };
+                                    if let Err(e) = sess::save_session(&s).await {
+                                        log::warn!("failed to auto-save session on sync: {e}");
+                                    }
+                                }
                             }
                             UiEvent::ClipboardImage(img) => {
                                 self.pending_images.push(img);
@@ -1412,42 +1427,21 @@ async fn process_in_background(
 
                 messages.push(resp.assistant_message.clone());
 
+                // Sync messages to main thread after every assistant response (real-time persistence)
+                let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                     break;
                 }
 
-                // Execute tools — show tool calls before execution
-                // For TodoRun: enrich with pending todo subjects from TaskStore
+                // Show tool calls before execution
                 for call in &tool_calls {
-                    let summary = if call.name == "TodoRun" {
-                        // Inject pending todo subjects for display
-                        use aemeath_core::task::TaskStatus;
-                        let pending_subjects: Vec<String> = _task_store.list().await
-                            .iter()
-                            .filter(|t| t.status == TaskStatus::Pending)
-                            .map(|t| {
-                                let dep = if t.blocked_by.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" (blocked by #{})", t.blocked_by.join(", #"))
-                                };
-                                format!("#{} {}{}", t.id, t.subject, dep)
-                            })
-                            .collect();
-                        let mut enriched = call.input.clone();
-                        enriched.as_object_mut().map(|m| {
-                            m.insert("_pending".to_string(), serde_json::json!(pending_subjects));
-                        });
-                        enriched.to_string()
-                    } else {
-                        call.input.to_string()
-                    };
                     let _ = tx.send(UiEvent::ToolCall {
                         name: call.name.clone(),
-                        summary,
-                        }).await;
-                    }
+                        summary: call.input.to_string(),
+                    }).await;
+                }
 
                 {
                     // Filter out non-safe tools if allow_all is not set
@@ -1482,54 +1476,47 @@ async fn process_in_background(
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
 
-                    // Show elapsed time and TodoRun progress while tools are running
+                    // Show elapsed time and poll task status changes while tools are running
                     let tool_names: Vec<String> = approved_calls.iter().map(|c| c.name.clone()).collect();
-                    let has_long_running = tool_names.iter().any(|n| n == "Agent" || n == "TodoRun");
-                    let has_todo_run = tool_names.iter().any(|n| n == "TodoRun");
+                    let has_long_running = tool_names.iter().any(|n| n == "Agent");
+                    let has_active_tasks = {
+                        let tasks = _task_store.list().await;
+                        tasks.iter().any(|t| t.status == aemeath_core::task::TaskStatus::Pending
+                            || t.status == aemeath_core::task::TaskStatus::InProgress)
+                    };
+                    let should_poll = has_long_running || has_active_tasks;
                     let timer_tx = tx.clone();
                     let timer_cancel = cancel.clone();
                     let timer_store = _task_store.clone();
-                    let timer_handle = if has_long_running {
+                    let timer_handle = if should_poll {
                         let names = tool_names.clone();
                         Some(tokio::spawn(async move {
                             use aemeath_core::task::TaskStatus;
                             let start = std::time::Instant::now();
                             let mut last_statuses: std::collections::HashMap<String, TaskStatus> =
                                 std::collections::HashMap::new();
-                            // Initialize with current statuses
-                            if has_todo_run {
-                                for t in timer_store.list().await {
-                                    last_statuses.insert(t.id.clone(), t.status.clone());
-                                }
+                            for t in timer_store.list().await {
+                                last_statuses.insert(t.id.clone(), t.status.clone());
                             }
                             loop {
                                 tokio::select! {
                                     _ = timer_cancel.cancelled() => break,
                                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
                                         let elapsed = start.elapsed().as_secs();
-                                        // Poll TodoRun progress
-                                        if has_todo_run {
-                                            let current_todos = timer_store.list().await;
-                                            for t in &current_todos {
-                                                let prev = last_statuses.get(&t.id);
-                                                let changed = match prev {
-                                                    Some(prev_status) => *prev_status != t.status,
-                                                    None => true,
-                                                };
-                                                if changed {
-                                                    let msg = match t.status {
-                                                        TaskStatus::InProgress => {
-                                                            let action = t.active_form.as_deref().unwrap_or("Processing");
-                                                            format!("  ◐ {} — {}", t.subject, action)
-                                                        }
-                                                        TaskStatus::Completed => {
-                                                            format!("  ✓ {}", t.subject)
-                                                        }
-                                                        _ => continue,
-                                                    };
+                                        // Poll task status changes
+                                        let current_tasks = timer_store.list().await;
+                                        for t in &current_tasks {
+                                            let prev = last_statuses.get(&t.id);
+                                            let changed = match prev {
+                                                Some(prev_status) => *prev_status != t.status,
+                                                None => t.status == TaskStatus::InProgress || t.status == TaskStatus::Completed,
+                                            };
+                                            if changed {
+                                                let msg = crate::tui::task_display::format_task_change(t);
+                                                if !msg.is_empty() {
                                                     let _ = timer_tx.send(UiEvent::SystemMessage(msg)).await;
-                                                    last_statuses.insert(t.id.clone(), t.status.clone());
                                                 }
+                                                last_statuses.insert(t.id.clone(), t.status.clone());
                                             }
                                         }
                                         let _ = timer_tx.send(UiEvent::StatusUpdate(
@@ -1563,6 +1550,21 @@ async fn process_in_background(
                             images: images.clone(),
                         }).await;
                     }
+                    // Insert task snapshot if TaskCreate or TaskUpdate(completed) was called
+                    {
+                        let has_task_create = tool_name_map.values().any(|n| *n == "TaskCreate");
+                        let has_task_update_completed = tool_name_map.values().any(|n| *n == "TaskUpdate")
+                            && results.iter().any(|(_, output, is_err, _)| !is_err && output.contains("Completed"));
+
+                        if has_task_create || has_task_update_completed {
+                            let tasks = _task_store.list().await;
+                            let snapshot = crate::tui::task_display::format_task_snapshot(&tasks);
+                            if !snapshot.is_empty() {
+                                let _ = tx.send(UiEvent::SystemMessage(snapshot)).await;
+                            }
+                        }
+                    }
+
                     // Build combined results (approved + denied), preserving images for approved tools
                     let mut all_results: Vec<(String, String, bool, Vec<ImageData>)> = results
                         .into_iter()
@@ -1589,9 +1591,8 @@ async fn process_in_background(
 
                     messages.push(Message::tool_results_rich(all_results));
 
-                    // [Plan A disabled] Auto-trigger TodoRun is available but currently
-                    // disabled in favor of Plan B (Agent tool interception).
-                    // To re-enable, uncomment the block in the TUI auto_trigger section.
+                    // Sync messages after tool results (real-time persistence)
+                    let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
                 }
 
                 // Inner-loop auto-compact: use actual API token count for accurate decision
