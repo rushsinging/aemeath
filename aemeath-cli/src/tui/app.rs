@@ -152,6 +152,8 @@ impl App {
         allow_all: bool,
         resume_id: Option<String>,
         task_store: Arc<aemeath_core::task::TaskStore>,
+        max_tool_concurrency: usize,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         // Store client and config for runtime switching
         self.client = Some(client.clone());
@@ -226,6 +228,8 @@ impl App {
             allow_all,
             interrupted,
             task_store,
+            max_tool_concurrency,
+            agent_semaphore,
         ).await;
 
         // Auto-save session on exit
@@ -271,6 +275,8 @@ impl App {
         allow_all: bool,
         interrupted: Arc<AtomicBool>,
         task_store: Arc<aemeath_core::task::TaskStore>,
+        max_tool_concurrency: usize,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
@@ -457,6 +463,7 @@ impl App {
                                     }
                                     let sid = self.session_id.clone();
                                     let task_store = task_store.clone();
+                                    let agent_sem = agent_semaphore.clone();
                                     tokio::spawn(async move {
                                         process_in_background(
                                             tx, client, registry, system_blocks,
@@ -464,6 +471,7 @@ impl App {
                                             context_size, cwd, sid, read_files,
                                             agent_runner, allow_all, interrupted, cancel,
                                             task_store,
+                                            max_tool_concurrency, agent_sem,
                                         ).await;
                                     });
                                 }
@@ -723,6 +731,7 @@ impl App {
                                             }
                                             let sid = self.session_id.clone();
                                             let task_store = task_store.clone();
+                                            let agent_sem = agent_semaphore.clone();
                                             tokio::spawn(async move {
                                                 process_in_background(
                                                     tx, client, registry, system_blocks,
@@ -730,6 +739,7 @@ impl App {
                                                     context_size, cwd, sid, read_files,
                                                     agent_runner, allow_all, interrupted, cancel,
                                                     task_store,
+                                                    max_tool_concurrency, agent_sem,
                                                 ).await;
                                             });
                                         }
@@ -778,6 +788,7 @@ impl App {
 
                                         let sid = self.session_id.clone();
                                         let task_store = task_store.clone();
+                                        let agent_sem = agent_semaphore.clone();
                                         tokio::spawn(async move {
                                             process_in_background(
                                                 tx, client, registry, system_blocks,
@@ -785,6 +796,7 @@ impl App {
                                                 context_size, cwd, sid, read_files,
                                                 agent_runner, allow_all, interrupted, cancel,
                                                 task_store,
+                                                max_tool_concurrency, agent_sem,
                                             ).await;
                                         });
                                     }
@@ -1278,6 +1290,8 @@ async fn process_in_background(
     interrupted: Arc<AtomicBool>,
     cancel: CancellationToken,
     _task_store: Arc<aemeath_core::task::TaskStore>,
+    max_tool_concurrency: usize,
+    agent_semaphore: Arc<tokio::sync::Semaphore>,
 ) {
     let tool_schemas = registry.schemas();
     // Pre-compute fixed token overhead from tool schemas (sent with every API call)
@@ -1290,6 +1304,9 @@ async fn process_in_background(
         agent_runner: agent_runner.clone(),
         plan_mode: None,
         allow_all,
+        max_tool_concurrency,
+        max_agent_concurrency: 0,
+        agent_semaphore,
     };
     let agent = Agent {
         registry: &registry,

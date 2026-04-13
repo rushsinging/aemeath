@@ -57,6 +57,8 @@ pub async fn run_repl(
     agent_runner: Option<std::sync::Arc<dyn aemeath_core::tool::AgentRunner>>,
     allow_all: bool,
     _task_store: Arc<TaskStore>,
+    max_tool_concurrency: usize,
+    agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 ) {
     let mut rl = match DefaultEditor::new() {
         Ok(rl) => rl,
@@ -292,6 +294,9 @@ pub async fn run_repl(
             agent_runner: agent_runner.clone(),
             plan_mode: None,
             allow_all,
+            max_tool_concurrency,
+            max_agent_concurrency: 0, // not used directly here
+            agent_semaphore: agent_semaphore.clone(),
         };
         let agent = Agent {
             registry: &registry,

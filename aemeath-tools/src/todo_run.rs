@@ -162,15 +162,21 @@ impl Tool for TodoRunTool {
                 let plan_mode = ctx.plan_mode;
                 let allow_all = ctx.allow_all;
                 let todo_id = todo.id.clone();
+                let max_tool_concurrency = ctx.max_tool_concurrency;
+                let max_agent_concurrency = ctx.max_agent_concurrency;
+                let agent_semaphore = ctx.agent_semaphore.clone();
 
                 let handle = tokio::spawn(async move {
                     let sub_ctx = ToolContext {
                         cwd: cwd_buf,
-                        cancel,
+                        cancel: cancel.clone(),
                         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
                         agent_runner: None,
                         plan_mode,
                         allow_all,
+                        max_tool_concurrency,
+                        max_agent_concurrency,
+                        agent_semaphore,
                     };
                     let result = runner
                         .run_agent(

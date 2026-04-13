@@ -149,6 +149,9 @@ Instructions:
 - Do not ask questions — make reasonable decisions and proceed"#
         );
 
+        // Acquire agent concurrency permit — blocks if max_agent_concurrency agents are already running
+        let _agent_permit = ctx.agent_semaphore.acquire().await.expect("agent semaphore closed");
+
         let result = runner
             .run_agent(
                 prompt,

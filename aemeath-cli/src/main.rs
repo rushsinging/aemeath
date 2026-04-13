@@ -65,6 +65,14 @@ struct Args {
     /// Disable TUI mode and use legacy REPL
     #[arg(long)]
     no_tui: bool,
+
+    /// Maximum number of concurrent tool executions (default: 10)
+    #[arg(long, env = "AEMEATH_MAX_TOOL_CONCURRENCY")]
+    max_tool_concurrency: Option<usize>,
+
+    /// Maximum number of concurrent sub-agent executions (default: 4)
+    #[arg(long, env = "AEMEATH_MAX_AGENT_CONCURRENCY")]
+    max_agent_concurrency: Option<usize>,
 }
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
@@ -699,9 +707,22 @@ async fn main() {
     // Determine session ID
     let session_id = args.resume.clone().unwrap_or_else(|| aemeath_core::session::new_session_id());
 
+    // Resolve concurrency limits: CLI args > config file > defaults
+    let max_tool_concurrency = args.max_tool_concurrency
+        .filter(|&v| v > 0)
+        .or_else(|| config_file.as_ref().map(|c| c.tools.max_concurrency).filter(|&v| v > 0))
+        .unwrap_or(10);
+    let max_agent_concurrency = args.max_agent_concurrency
+        .filter(|&v| v > 0)
+        .or_else(|| config_file.as_ref().map(|c| c.agents.max_concurrency).filter(|&v| v > 0))
+        .unwrap_or(4);
+    let agent_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
+
+    log::info!("concurrency limits: max_tool={}, max_agent={}", max_tool_concurrency, max_agent_concurrency);
+
     // Run in TUI mode or legacy REPL mode
     if args.no_tui {
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone()).await;
+        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone()).await;
     } else {
         // Build display name: provider/name (from config) or just model id
         let model_display = {
@@ -723,7 +744,7 @@ async fn main() {
             format!("{}/{}", provider_name, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
-            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store).await {
+            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, agent_semaphore).await {
                 log::error!("TUI error: {e}");
                 std::process::exit(1);
             }

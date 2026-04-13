@@ -1,8 +1,6 @@
 use crate::message::{ContentBlock, Message};
 use crate::tool::{ImageData, ToolContext, ToolRegistry};
 
-const MAX_CONCURRENCY: usize = 10;
-
 /// (tool_use_id, output_text, is_error, images)
 pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);
 
@@ -68,7 +66,7 @@ impl<'a> Agent<'a> {
 
         // Execute concurrent-safe tools in parallel using join_all
         if !concurrent_calls.is_empty() {
-            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENCY));
+            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(self.ctx.max_tool_concurrency));
 
             let futures: Vec<_> = concurrent_calls
                 .iter()

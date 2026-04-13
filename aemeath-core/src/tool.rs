@@ -74,6 +74,12 @@ pub struct ToolContext {
     pub plan_mode: Option<bool>,
     /// Whether all tools are auto-approved (skip injection checks)
     pub allow_all: bool,
+    /// Maximum number of concurrent tool executions (from tools.maxConcurrency)
+    pub max_tool_concurrency: usize,
+    /// Maximum number of concurrent sub-agent executions (from agents.maxConcurrency)
+    pub max_agent_concurrency: usize,
+    /// Semaphore to limit concurrent sub-agent executions (shared across tool calls)
+    pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 #[async_trait]

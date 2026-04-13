@@ -55,6 +55,9 @@ impl AgentRunner for CliAgentRunner {
             agent_runner: None, // No nested agents
             plan_mode: ctx.plan_mode,
             allow_all: ctx.allow_all,
+            max_tool_concurrency: ctx.max_tool_concurrency,
+            max_agent_concurrency: ctx.max_agent_concurrency,
+            agent_semaphore: ctx.agent_semaphore.clone(),
         };
         let agent = Agent {
             registry: &sub_registry,
