@@ -1294,16 +1294,8 @@ impl OutputArea {
             }
         }
 
-        // Build lines with selection highlighting and spinner animation
+        // Build lines with selection highlighting and animated dots
         let spinner_frame_idx = self.spinner.as_ref().map(|s| s.frame).unwrap_or(0);
-        let spinner_char = SPINNER_FRAMES[(spinner_frame_idx as usize) % SPINNER_FRAMES.len()];
-        // Cycle spinner color: interpolate between dim → highlight → dim
-        let spinner_t = ((spinner_frame_idx % 20) as f32) / 20.0;
-        let spinner_color = if spinner_t < 0.5 {
-            lerp_color(SPINNER_DIM, SPINNER_HIGHLIGHT, spinner_t * 2.0)
-        } else {
-            lerp_color(SPINNER_HIGHLIGHT, SPINNER_DIM, (spinner_t - 0.5) * 2.0)
-        };
 
         let mut lines: Vec<Line> = self.lines
             .iter()
@@ -1311,18 +1303,53 @@ impl OutputArea {
             .skip(start)
             .take(end - start)
             .map(|(idx, output_line)| {
-                // For ToolCallRunning lines, animate the ● into a spinning character
+                // For ToolCallRunning lines, show a blinking white dot ●
                 if matches!(output_line.style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
                     let rest = &output_line.content[3..]; // ● is 3 bytes in UTF-8
-                    let spinner_span = Span::styled(
-                        format!("{spinner_char}"),
-                        Style::default().fg(spinner_color),
+                    // Blink: alternate between bright white and dim gray
+                    let blink_on = (spinner_frame_idx / 5) % 2 == 0; // ~200ms per phase at 50ms tick
+                    let dot_color = if blink_on {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    };
+                    let dot_span = Span::styled(
+                        "●".to_string(),
+                        Style::default().fg(dot_color),
                     );
                     let text_span = Span::styled(
                         rest.to_string(),
                         output_line.style.to_style(),
                     );
-                    return Line::from(vec![spinner_span, text_span]);
+                    return Line::from(vec![dot_span, text_span]);
+                }
+
+                // For completed ToolCall lines (✓), show green dot ●
+                if matches!(output_line.style, LineStyle::ToolCallSuccess) && output_line.content.starts_with('✓') {
+                    let rest = &output_line.content[3..]; // ✓ is 3 bytes in UTF-8
+                    let dot_span = Span::styled(
+                        "●".to_string(),
+                        Style::default().fg(Color::Green),
+                    );
+                    let text_span = Span::styled(
+                        rest.to_string(),
+                        output_line.style.to_style(),
+                    );
+                    return Line::from(vec![dot_span, text_span]);
+                }
+
+                // For failed ToolCall lines (✗), show red dot ●
+                if matches!(output_line.style, LineStyle::ToolCallError) && output_line.content.starts_with('✗') {
+                    let rest = &output_line.content[3..]; // ✗ is 3 bytes in UTF-8
+                    let dot_span = Span::styled(
+                        "●".to_string(),
+                        Style::default().fg(Color::Red),
+                    );
+                    let text_span = Span::styled(
+                        rest.to_string(),
+                        output_line.style.to_style(),
+                    );
+                    return Line::from(vec![dot_span, text_span]);
                 }
 
                 // Check if this line has any selection
