@@ -823,6 +823,18 @@ impl OutputArea {
     /// Add a tool result with diff support.
     /// For Edit tool results containing diff information, displays with red/green backgrounds.
     pub fn push_tool_result_with_diff(&mut self, tool_name: &str, result: &str, is_error: bool) {
+        // Update the most recent ToolCallRunning header line to completed/error state
+        // This stops the spinner animation for this tool
+        let done_icon = if is_error { "✗" } else { "✓" };
+        let done_style = if is_error { LineStyle::ToolCallError } else { LineStyle::ToolCallSuccess };
+        for line in self.lines.iter_mut().rev() {
+            if matches!(line.style, LineStyle::ToolCallRunning) {
+                line.content = line.content.replacen('●', done_icon, 1);
+                line.style = done_style;
+                break;
+            }
+        }
+
         if is_error {
             self.push_line(OutputLine {
                 content: format!("  └─ ✗ {result}"),
@@ -1280,13 +1292,37 @@ impl OutputArea {
             }
         }
 
-        // Build lines with selection highlighting
+        // Build lines with selection highlighting and spinner animation
+        let spinner_frame_idx = self.spinner.as_ref().map(|s| s.frame).unwrap_or(0);
+        let spinner_char = SPINNER_FRAMES[(spinner_frame_idx as usize) % SPINNER_FRAMES.len()];
+        // Cycle spinner color: interpolate between dim → highlight → dim
+        let spinner_t = ((spinner_frame_idx % 20) as f32) / 20.0;
+        let spinner_color = if spinner_t < 0.5 {
+            lerp_color(SPINNER_DIM, SPINNER_HIGHLIGHT, spinner_t * 2.0)
+        } else {
+            lerp_color(SPINNER_HIGHLIGHT, SPINNER_DIM, (spinner_t - 0.5) * 2.0)
+        };
+
         let mut lines: Vec<Line> = self.lines
             .iter()
             .enumerate()
             .skip(start)
             .take(end - start)
             .map(|(idx, output_line)| {
+                // For ToolCallRunning lines, animate the ● into a spinning character
+                if matches!(output_line.style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
+                    let rest = &output_line.content[3..]; // ● is 3 bytes in UTF-8
+                    let spinner_span = Span::styled(
+                        format!("{spinner_char}"),
+                        Style::default().fg(spinner_color),
+                    );
+                    let text_span = Span::styled(
+                        rest.to_string(),
+                        output_line.style.to_style(),
+                    );
+                    return Line::from(vec![spinner_span, text_span]);
+                }
+
                 // Check if this line has any selection
                 if self.selection_start.is_some() && self.selection_end.is_some() {
                     let line_spans = self.render_line_with_selection(idx, &output_line.content, output_line.style.to_style());
