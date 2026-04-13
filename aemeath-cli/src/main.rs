@@ -718,6 +718,16 @@ async fn main() {
         .unwrap_or(4);
     let agent_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
 
+    // Log concurrency limits to debug.log for diagnostics
+    {
+        use std::io::Write;
+        let debug_path = dirs::home_dir().unwrap_or_default().join(".aemeath").join("debug.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&debug_path) {
+            let _ = writeln!(f, "[{}] concurrency limits: max_tool={}, max_agent={}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                max_tool_concurrency, max_agent_concurrency);
+        }
+    }
     log::info!("concurrency limits: max_tool={}, max_agent={}", max_tool_concurrency, max_agent_concurrency);
 
     // Run in TUI mode or legacy REPL mode
