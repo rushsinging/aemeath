@@ -402,6 +402,13 @@ impl TaskStore {
         self.update(id, |t| t.status = TaskStatus::Deleted).await.is_some()
     }
 
+    /// Clear all tasks
+    pub async fn clear(&self) {
+        let mut tasks = self.tasks.lock().await;
+        tasks.clear();
+        *self.next_id.lock().await = 1;
+    }
+
     /// Clear all deleted tasks from memory (async for auto-save)
     pub async fn purge_deleted(&self) {
         let mut tasks = self.tasks.lock().await;

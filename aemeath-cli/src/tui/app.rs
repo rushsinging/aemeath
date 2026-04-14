@@ -1339,6 +1339,9 @@ async fn process_in_background(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
 ) {
+    // Clear tasks from previous conversation turn
+    _task_store.clear().await;
+
     let tool_schemas = registry.schemas();
     // Pre-compute fixed token overhead from tool schemas (sent with every API call)
     let tool_schema_tokens = aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
