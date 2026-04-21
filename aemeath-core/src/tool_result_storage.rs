@@ -67,6 +67,12 @@ pub fn persist_tool_result(
         return None;
     }
 
+    // Validate tool_use_id to prevent path traversal
+    if tool_use_id.contains('/') || tool_use_id.contains('\\') || tool_use_id.contains("..") {
+        log::warn!("rejecting tool_use_id with path separators: {}", tool_use_id);
+        return None;
+    }
+
     let dir = tool_results_dir(session_id);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::warn!("failed to create tool-results dir: {e}");

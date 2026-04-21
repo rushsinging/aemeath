@@ -323,11 +323,8 @@ impl CostTracker {
             cost,
         });
 
-        // Auto-save
-        if let Err(e) = self.save() {
-            log::warn!("Failed to save cost history: {}", e);
-        }
-
+        // NOTE: Do NOT auto-save on every record — high-frequency API calls
+        // would cause excessive I/O. Call save() explicitly at shutdown instead.
         cost
     }
 

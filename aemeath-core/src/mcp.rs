@@ -63,16 +63,95 @@ pub struct McpClient {
     next_id: Mutex<u64>,
 }
 
+/// Environment variable keys that are too dangerous to allow MCP servers to override.
+const BLOCKED_ENV_KEYS: &[&str] = &[
+    "PATH",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "HOME",
+    "USER",
+    "SHELL",
+    "IFS",
+    "CDPATH",
+    "ENV",
+    "BASH_ENV",
+    "TERMINFO",
+    "TERMINFO_DIRS",
+    "LOCPATH",
+    "NLSPATH",
+];
+
+/// Validate that the MCP server command is safe to execute.
+///
+/// Rejects:
+/// - Relative paths (must be absolute)
+/// - Shell metacharacters (`|`, `&`, `;`, `$`, backticks, `>`, `<`, `(`, `)`)
+/// - Known shell names (sh, bash, zsh, fish, etc.)
+fn validate_command(command: &str) -> Result<(), String> {
+    if command.contains('|')
+        || command.contains('&')
+        || command.contains(';')
+        || command.contains('$')
+        || command.contains('`')
+        || command.contains('>')
+        || command.contains('<')
+        || command.contains('(')
+        || command.contains(')')
+    {
+        return Err(format!(
+            "MCP command '{}' contains shell metacharacters — rejected for security",
+            command
+        ));
+    }
+
+    if !command.starts_with('/') {
+        return Err(format!(
+            "MCP command '{}' must be an absolute path — rejected for security",
+            command
+        ));
+    }
+
+    // Block obvious shell invocations
+    let basename = command.rsplit('/').next().unwrap_or(command);
+    let blocked_commands = ["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "python", "python3", "node", "ruby", "perl", "lua"];
+    if blocked_commands.contains(&basename) {
+        return Err(format!(
+            "MCP command '{}' is a shell/interpreter — use the actual executable path instead",
+            command
+        ));
+    }
+
+    Ok(())
+}
+
+/// Filter out dangerous environment variables from the MCP server config.
+fn filter_env(env: &std::collections::HashMap<String, String>) -> std::collections::HashMap<String, String> {
+    env.iter()
+        .filter(|(k, _)| {
+            let upper = k.to_uppercase();
+            !BLOCKED_ENV_KEYS.contains(&upper.as_str())
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 impl McpClient {
     /// Connect to an MCP server via stdio
     pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+        // Validate command safety
+        validate_command(&config.command)?;
+
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped()); // Capture stderr for debugging instead of discarding
 
-        for (k, v) in &config.env {
+        // Filter dangerous environment variables
+        let safe_env = filter_env(&config.env);
+        for (k, v) in &safe_env {
             cmd.env(k, v);
         }
 
@@ -82,6 +161,16 @@ impl McpClient {
 
         let stdin = child.stdin.take().ok_or("failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("failed to get stdout")?;
+        let stderr = child.stderr.take().ok_or("failed to get stderr")?;
+
+        // Spawn a background task to log stderr output
+        let server_name = name.to_string();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                log::warn!("[MCP:{}:stderr] {}", server_name, line);
+            }
+        });
 
         let client = Self {
             name: name.to_string(),

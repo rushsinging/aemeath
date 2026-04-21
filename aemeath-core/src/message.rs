@@ -27,6 +27,10 @@ pub enum ContentBlock {
         #[serde(default)]
         is_error: bool,
     },
+    Thinking {
+        #[serde(default)]
+        thinking: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

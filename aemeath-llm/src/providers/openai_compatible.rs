@@ -180,6 +180,9 @@ impl OpenAICompatibleProvider {
                             // Error is already included in content for most providers
                         }
                     }
+                    ContentBlock::Thinking { .. } => {
+                        // Thinking blocks are not supported in OpenAI format, skip
+                    }
                 }
             }
             

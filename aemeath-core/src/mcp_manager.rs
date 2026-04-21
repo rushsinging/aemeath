@@ -247,23 +247,23 @@ impl McpConnectionManager {
 
     /// Toggle server enabled/disabled
     pub async fn toggle_server(&self, name: &str) -> Result<(), String> {
-        let connections = self.connections.lock().await;
-        
-        let connection = connections.get(name).cloned();
-        if connection.is_none() {
-            return Err(format!("Server '{}' not found", name));
-        }
-        
-        let connection = connection?;
+        // Read state while holding the lock, then release before calling
+        // other methods that need the same lock.
+        let should_enable = {
+            let connections = self.connections.lock().await;
+            let connection = connections.get(name).cloned();
+            match connection {
+                None => return Err(format!("Server '{}' not found", name)),
+                Some(c) => c.state == ConnectionState::Disabled,
+            }
+        }; // lock released here
 
-        if connection.state == ConnectionState::Disabled {
-            // Enable: reconnect
+        if should_enable {
             self.reconnect_server(name).await?;
         } else {
-            // Disable: disconnect
             self.disconnect_server(name).await?;
         }
-        
+
         Ok(())
     }
 

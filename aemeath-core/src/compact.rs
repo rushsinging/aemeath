@@ -345,6 +345,9 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                 ContentBlock::Image { .. } => {
                     conversation_text.push_str(&format!("[{role}]: [image]\n\n"));
                 }
+                ContentBlock::Thinking { .. } => {
+                    // Thinking blocks are internal, skip in compaction summary
+                }
             }
         }
     }

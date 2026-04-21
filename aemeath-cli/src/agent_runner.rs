@@ -131,16 +131,19 @@ impl AgentRunner for CliAgentRunner {
                         return resp.assistant_message.text_content();
                     }
 
-                    // Report which tools the sub-agent is calling with inputs
-                    for call in &tool_calls {
-                        let input_summary = call.input.to_string();
-                        let input_short = if input_summary.len() > 200 {
-                            format!("{}...", safe_slice(&input_summary, 200))
-                        } else {
-                            input_summary
-                        };
-                        progress(&format!("  → {}({})", call.name, input_short));
-                    }
+                    // Build a lookup from tool_use_id to tool call info
+                    let call_info: std::collections::HashMap<String, (String, String)> = tool_calls
+                        .iter()
+                        .map(|c| {
+                            let input_summary = c.input.to_string();
+                            let input_short = if input_summary.len() > 200 {
+                                format!("{}...", safe_slice(&input_summary, 200))
+                            } else {
+                                input_summary
+                            };
+                            (c.id.clone(), (c.name.clone(), input_short))
+                        })
+                        .collect();
 
                     let mut results = agent.execute_tools(&tool_calls).await;
                     progress(&format!(
@@ -148,17 +151,19 @@ impl AgentRunner for CliAgentRunner {
                         start_time.elapsed().as_secs(), results.len()
                     ));
 
-                    // Log each tool result summary
+                    // Log each call followed by its result (interleaved)
                     for (id, output, is_error, _) in results.iter() {
                         let label = if *is_error { "ERR" } else { "OK" };
+                        if let Some((name, input_short)) = call_info.get(id.as_str()) {
+                            progress(&format!("  → {}({})", name, input_short));
+                        }
                         let out_short = if output.len() > 300 {
                             format!("{}...[{} chars]", safe_slice(output, 300), output.len())
                         } else {
                             output.clone()
                         };
-                        let tool_name = tool_calls.iter()
-                            .find(|c| c.id == *id)
-                            .map(|c| c.name.as_str())
+                        let tool_name = call_info.get(id.as_str())
+                            .map(|(n, _)| n.as_str())
                             .unwrap_or("?");
                         progress(&format!("  ← {}[{}]: {}", tool_name, label, out_short));
                     }

@@ -35,6 +35,7 @@ pub fn format_task_snapshot(tasks: &[Task]) -> String {
 }
 
 /// 格式化单条任务状态变更
+#[allow(dead_code)]
 pub fn format_task_change(task: &Task) -> String {
     match task.status {
         TaskStatus::InProgress => {

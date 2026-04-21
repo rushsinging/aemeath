@@ -368,8 +368,10 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 if parts.len() < 3 {
                     return CommandResult::Error("Usage: /config set <key> <value>".to_string());
                 }
-                // TODO: Implement config setting
-                CommandResult::Success(format!("Set {} = {} (not persisted yet)", parts[1], parts[2]))
+                // TODO: Implement config setting with persistence
+                CommandResult::Error(format!(
+                    "/config set is not yet implemented. Edit ~/.aemeath/config.json directly."
+                ))
             }
             "reset" => {
                 CommandResult::Confirm {
@@ -378,7 +380,10 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 }
             }
             "save" => {
-                CommandResult::Success("Configuration saved to ~/.config/aemeath/config.json".to_string())
+                // TODO: Implement config save with ConfigManager
+                CommandResult::Error(
+                    "/config save is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string()
+                )
             }
             _ => CommandResult::Error(format!("Unknown config command: {}", parts[0])),
         }
@@ -865,9 +870,9 @@ fn permissions_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 }
             ))
         }
-        "ask" => CommandResult::Success("Permission mode set to: ask".to_string()),
-        "auto-read" | "autoread" => CommandResult::Success("Permission mode set to: auto-read".to_string()),
-        "allow-all" | "auto-all" | "autoall" => CommandResult::Success("Permission mode set to: allow-all (warning: all tools will be auto-approved)".to_string()),
+        "ask" => CommandResult::Action(CommandAction::ChangeMode("ask".to_string())),
+        "auto-read" | "autoread" => CommandResult::Action(CommandAction::ChangeMode("auto-read".to_string())),
+        "allow-all" | "auto-all" | "autoall" => CommandResult::Action(CommandAction::ChangeMode("allow-all".to_string())),
         _ => CommandResult::Error(format!("Unknown permission mode: {}", arg)),
     }
 }
@@ -1072,12 +1077,20 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         }
         _ => {
             // Assume it's a file or commit range
-            if arg.contains("..") {
+            let original_arg = args.trim();
+            // Reject arguments that look like git flags (prevent injection of
+            // --upload-pack, --ext-diff, etc.)
+            if original_arg.starts_with('-') {
+                return CommandResult::Error(format!(
+                    "Invalid argument: {:?}. Flags are not allowed here.",
+                    original_arg
+                ));
+            }
+            if original_arg.contains("..") {
                 // Commit range like HEAD~3..HEAD
-                run_git(&cwd, &["diff", &arg]).unwrap_or_default()
+                run_git(&cwd, &["diff", original_arg]).unwrap_or_default()
             } else {
                 // Specific file
-                let original_arg = args.trim();
                 run_git(&cwd, &["diff", "HEAD", "--", original_arg])
                     .or_else(|| run_git(&cwd, &["diff", "--", original_arg]))
                     .unwrap_or_default()
@@ -1110,7 +1123,12 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     // Truncate if too large (keep last ~50k chars)
     let max_diff = 50_000;
     if diff_text.len() > max_diff {
-        review_prompt.push_str(&diff_text[diff_text.len() - max_diff..]);
+        // Use char-based truncation to avoid splitting multi-byte UTF-8
+        let start_byte = diff_text.char_indices()
+            .nth(diff_text.chars().count().saturating_sub(max_diff))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        review_prompt.push_str(&diff_text[start_byte..]);
         review_prompt.push_str("\n```\n\n(truncated — showing last ~50k characters)");
     } else {
         review_prompt.push_str(&diff_text);

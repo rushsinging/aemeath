@@ -351,6 +351,21 @@ async fn load_mcp_tools(
             continue;
         }
 
+        // Warn if loading from a project-level config (may contain untrusted commands)
+        let is_project_level = config_path == &cwd.join(".mcp.json");
+        if is_project_level {
+            eprintln!(
+                "⚠️  SECURITY: Loading MCP servers from project config {}.\n\
+                 These servers can execute arbitrary commands on your system.\n\
+                 Review the commands before proceeding. Use --no-tui and Ctrl+C to abort if needed.",
+                config_path.display()
+            );
+            log::warn!(
+                "Loading MCP servers from project-level config {} — commands may be untrusted.",
+                config_path.display()
+            );
+        }
+
         let content = match tokio::fs::read_to_string(config_path).await {
             Ok(c) => c,
             Err(_) => continue,
@@ -754,7 +769,7 @@ async fn main() {
             format!("{}/{}", provider_name, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
-            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, agent_semaphore).await {
+            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
                 log::error!("TUI error: {e}");
                 std::process::exit(1);
             }

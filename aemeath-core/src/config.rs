@@ -216,9 +216,12 @@ impl ModelsConfig {
     pub fn find_model(&self, query: &str) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
         if let Some((provider_name, model_query)) = query.split_once('/') {
             if let Some(provider_config) = self.providers.get(provider_name) {
-                // Match by id first, then by name
-                if let Some(model) = provider_config.models.iter().find(|m| m.id == model_query)
-                    .or_else(|| provider_config.models.iter().find(|m| m.name == model_query))
+                // Match by name first (exact), then fall back to id.
+                // Rationale: multiple entries may share the same id but differ
+                // by name (e.g. reasoning-on vs reasoning-off variants); since
+                // `/model list` prints name as the switch key, name must win.
+                if let Some(model) = provider_config.models.iter().find(|m| m.name == model_query)
+                    .or_else(|| provider_config.models.iter().find(|m| m.id == model_query))
                 {
                     return Some((
                         provider_name.to_string(),
@@ -709,6 +712,8 @@ impl ConfigManager {
             },
             storage: StorageConfig {
                 sessions_dir: overlay.storage.sessions_dir.or(base.storage.sessions_dir),
+                // For boolean/numeric fields we cannot distinguish "unset" from "set to default"
+                // using serde defaults. Use overlay directly — the user chose these values.
                 persist_sessions: overlay.storage.persist_sessions,
                 max_sessions: overlay.storage.max_sessions,
                 history: overlay.storage.history,

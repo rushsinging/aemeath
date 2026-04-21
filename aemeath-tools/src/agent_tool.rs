@@ -16,7 +16,7 @@ impl Tool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nThe Agent tool launches sub-agents that have their own conversation context and can use all available tools. Each sub-agent has a LIMITED context window (~128K tokens) and default 50 tool-call rounds.\n\nTask scoping guidelines:\n- For large tasks (e.g. 'review this project'), use a two-phase approach:\n  Phase 1: YOU (the main agent) do the overview — use Glob/Grep to list files and understand structure.\n  Phase 2: Launch focused agents for specific files or concerns.\n- Give each agent specific file paths and specific questions to answer.\n\nWhen NOT to use the Agent tool:\n- Simple file reads, searches, or single-step tasks — use Read/Grep/Glob directly.\n\nUsage notes:\n- Launch multiple agents concurrently for independent tasks.\n- Brief the agent with specific file paths and what to look for.\n- Do NOT set max_turns unless you have a reason — the default (50) works well for most tasks.\n- If you need a short response, say so."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nThe Agent tool launches sub-agents that have their own conversation context and can use all available tools. Each sub-agent has a LIMITED context window (~128K tokens) and default 50 tool-call rounds.\n\nTask scoping guidelines:\n- For large tasks (e.g. 'review this project'), use a two-phase approach:\n  Phase 1: YOU (the main agent) do the overview — use Glob/Grep to list files and understand structure.\n  Phase 2: Launch focused agents for specific files or concerns.\n- Give each agent specific file paths and specific questions to answer.\n\nWhen NOT to use the Agent tool:\n- Simple file reads, searches, or single-step tasks — use Read/Grep/Glob directly.\n\nTask coupling (IMPORTANT):\n- If you created tasks with TaskCreate and want to dispatch agents for them, pass the task's ID via `taskId`.\n- When you pass `taskId`, the dispatcher automatically manages task status: Pending → InProgress (when the agent actually starts running, respecting the concurrency limit) → Completed (on success) or Pending (on failure).\n- Do NOT call TaskUpdate to set status=in_progress or status=completed for tasks you've bound to an Agent — the dispatcher owns those transitions. Manual status writes will be overwritten.\n\nUsage notes:\n- Launch multiple agents concurrently for independent tasks.\n- Brief the agent with specific file paths and what to look for.\n- Do NOT set max_turns unless you have a reason — the default (50) works well for most tasks.\n- If you need a short response, say so."
     }
 
     fn input_schema(&self) -> Value {
@@ -39,6 +39,10 @@ impl Tool for AgentTool {
                 "max_turns": {
                     "type": "integer",
                     "description": "Maximum number of tool-call rounds (default 50, max 100)"
+                },
+                "taskId": {
+                    "type": "string",
+                    "description": "Optional task ID from TaskCreate. When provided, the dispatcher manages this task's status automatically (InProgress when the agent actually starts, Completed on success). Do NOT manually set task status to in_progress/completed if you pass taskId."
                 }
             },
             "required": ["prompt", "description"]

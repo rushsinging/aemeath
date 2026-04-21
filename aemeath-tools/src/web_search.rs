@@ -1,5 +1,6 @@
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC, percent_decode_str};
 use serde_json::Value;
 
 pub struct WebSearchTool;
@@ -39,11 +40,10 @@ impl Tool for WebSearchTool {
             return ToolResult::error("Search query is required");
         }
         
-        // 使用 DuckDuckGo 的 HTML 搜索页面作为简单的搜索源
-        // 这是一个基础实现，不依赖外部 API key
+        let encoded_query = utf8_percent_encode(query, NON_ALPHANUMERIC).to_string();
         let url = format!(
             "https://html.duckduckgo.com/html/?q={}",
-            urlencoding::encode(query)
+            encoded_query
         );
         
         let client = match reqwest::Client::builder()
@@ -63,7 +63,6 @@ impl Tool for WebSearchTool {
                 
                 match resp.text().await {
                     Ok(html_content) => {
-                        // 解析简单的 HTML 结果
                         let results = parse_duckduckgo_html(&html_content, limit);
                         
                         if results.is_empty() {
@@ -101,12 +100,28 @@ struct SearchResult {
     snippet: String,
 }
 
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+        .replace("&#x27;", "'")
+        .replace("&#x2F;", "/")
+        .replace("&mdash;", "—")
+        .replace("&ndash;", "–")
+        .replace("&hellip;", "…")
+        .replace("&copy;", "©")
+        .replace("&reg;", "®")
+        .replace("&trade;", "™")
+        .trim()
+        .to_string()
+}
+
 fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
     let mut results = Vec::new();
-
-    // 简单的 HTML 解析 - DuckDuckGo HTML 结果在 class="result" 的 div 中
-    // 查找 <a class="result__a" href="..."> 标题 </a>
-    // 和 <a class="result__snippet"> 摘要 </a>
 
     let title_pattern = "<a class=\"result__a\"";
     let url_pattern = "href=\"";
@@ -114,13 +129,11 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
 
     let mut pos = 0;
     while results.len() < limit {
-        // 查找下一个结果块
         let result_start = match html[pos..].find("<div class=\"result") {
             Some(s) => s + pos,
             None => break,
         };
 
-        // 查找结果块结束
         let result_end = match html[result_start..].find("</div>") {
             Some(e) => result_start + e.min(result_start + 5000),
             None => break,
@@ -128,7 +141,6 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
 
         let block = &html[result_start..result_end];
 
-        // 提取标题和 URL
         let title_start = match block.find(title_pattern) {
             Some(s) => s,
             None => {
@@ -137,7 +149,6 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
             }
         };
 
-        // 找 href
         let href_start_in_block = match block[title_start..].find(url_pattern) {
             Some(s) => s + url_pattern.len(),
             None => {
@@ -154,13 +165,18 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let url = &block[href_start..href_start + href_end];
+        let raw_url = &block[href_start..href_start + href_end];
 
-        // DuckDuckGo URL 可能需要解码
-        let url = url.replace("uddg=", "");
-        let url = urlencoding::decode(&url).unwrap_or_default().to_string();
+        // DuckDuckGo wraps URLs: extract the actual URL from uddg= parameter
+        let decoded_url = percent_decode_str(raw_url)
+            .decode_utf8_lossy()
+            .to_string();
+        let actual_url = if let Some(idx) = decoded_url.find("uddg=") {
+            &decoded_url[idx + 5..]
+        } else {
+            &decoded_url
+        };
 
-        // 找标题文本（在 > 和 </a> 之间）
         let title_text_start = match block[href_start + href_end..].find('>') {
             Some(s) => href_start + href_end + s + 1,
             None => {
@@ -176,50 +192,15 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let title = block[title_text_start..title_text_start + title_text_end]
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-            .replace("&#39;", "'")
-            .replace("&nbsp;", " ")
-            .replace("&#x27;", "'")
-            .replace("&#x2F;", "/")
-            .replace("&mdash;", "—")
-            .replace("&ndash;", "–")
-            .replace("&hellip;", "…")
-            .replace("&copy;", "©")
-            .replace("&reg;", "®")
-            .replace("&trade;", "™")
-            .trim()
-            .to_string();
+        let title = decode_html_entities(
+            &block[title_text_start..title_text_start + title_text_end]
+        );
 
-        // 提取摘要
         let snippet = if let Some(snippet_pos) = block.find(snippet_pattern) {
             if let Some(text_pos) = block[snippet_pos..].find('>') {
                 let start = snippet_pos + text_pos + 1;
                 if let Some(end_pos) = block[start..].find("</a>") {
-                    let raw_snippet = &block[start..start + end_pos];
-                    // 应用相同的 HTML 实体解码
-                    raw_snippet
-                        .replace("&amp;", "&")
-                        .replace("&lt;", "<")
-                        .replace("&gt;", ">")
-                        .replace("&quot;", "\"")
-                        .replace("&apos;", "'")
-                        .replace("&#39;", "'")
-                        .replace("&nbsp;", " ")
-                        .replace("&#x27;", "'")
-                        .replace("&#x2F;", "/")
-                        .replace("&mdash;", "—")
-                        .replace("&ndash;", "–")
-                        .replace("&hellip;", "…")
-                        .replace("&copy;", "©")
-                        .replace("&reg;", "®")
-                        .replace("&trade;", "™")
-                        .trim()
-                        .to_string()
+                    decode_html_entities(&block[start..start + end_pos])
                 } else {
                     String::new()
                 }
@@ -230,10 +211,10 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
             String::new()
         };
 
-        if !url.is_empty() && !title.is_empty() {
+        if !actual_url.is_empty() && !title.is_empty() {
             results.push(SearchResult {
                 title,
-                url,
+                url: actual_url.to_string(),
                 snippet,
             });
         }
@@ -242,44 +223,4 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
     }
 
     results
-}
-
-// 简单的 URL 编码模块
-mod urlencoding {
-    pub fn encode(s: &str) -> String {
-        s.chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                    c.to_string()
-                } else {
-                    format!("%{:02X}", c as u32)
-                }
-            })
-            .collect()
-    }
-    
-    pub fn decode(s: &str) -> Result<String, ()> {
-        let mut result = String::new();
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '%' {
-                let hex = chars.next().and_then(|c1| chars.next().map(|c2| (c1, c2)));
-                if let Some((c1, c2)) = hex {
-                    let hex_str = format!("{}{}", c1, c2);
-                    if let Ok(byte) = u8::from_str_radix(&hex_str, 16) {
-                        result.push(byte as char);
-                    } else {
-                        result.push('%');
-                        result.push(c1);
-                        result.push(c2);
-                    }
-                } else {
-                    result.push('%');
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        Ok(result)
-    }
 }

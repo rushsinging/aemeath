@@ -64,14 +64,12 @@ impl Tool for ListMcpResourcesTool {
 
         let clients = self.clients.lock().await;
 
-        // Collect client info first (name and arc) without holding locks in closures
-        let client_info: Vec<(String, Arc<Mutex<McpClient>>)> = clients
-            .iter()
-            .map(|c| {
-                let client = c.blocking_lock();
-                (client.name().to_string(), c.clone())
-            })
-            .collect();
+        // Collect client info first (name and arc) without blocking_lock
+        let mut client_info: Vec<(String, Arc<Mutex<McpClient>>)> = Vec::new();
+        for c in clients.iter() {
+            let client = c.lock().await;
+            client_info.push((client.name().to_string(), c.clone()));
+        }
 
         // Filter by server name if provided
         let clients_to_process: Vec<(String, Arc<Mutex<McpClient>>)> = if let Some(server_name) = server_filter {
@@ -85,13 +83,11 @@ impl Tool for ListMcpResourcesTool {
 
         if let Some(filter) = server_filter {
             if clients_to_process.is_empty() {
-                let available_servers: Vec<String> = clients
-                    .iter()
-                    .map(|c| {
-                        let client = c.blocking_lock();
-                        client.name().to_string()
-                    })
-                    .collect();
+                let mut available_servers = Vec::new();
+                for c in clients.iter() {
+                    let client = c.lock().await;
+                    available_servers.push(client.name().to_string());
+                }
                 return ToolResult::error(format!(
                     "Server '{}' not found. Available servers: {}",
                     filter,

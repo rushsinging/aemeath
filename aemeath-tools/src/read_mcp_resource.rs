@@ -84,22 +84,24 @@ impl Tool for ReadMcpResourceTool {
 
         let clients = self.clients.lock().await;
 
-        // Find client by server name using blocking_lock
-        let client_arc = clients
-            .iter()
-            .find(|c| {
-                let client = c.blocking_lock();
-                client.name() == server_name
-            });
+        // Find client by server name — use lock().await instead of blocking_lock()
+        // to avoid deadlocking the tokio runtime.
+        let mut client_arc: Option<Arc<Mutex<McpClient>>> = None;
+        for c in clients.iter() {
+            let client = c.lock().await;
+            if client.name() == server_name {
+                drop(client);
+                client_arc = Some(c.clone());
+                break;
+            }
+        }
 
         if client_arc.is_none() {
-            let available_servers: Vec<String> = clients
-                .iter()
-                .map(|c| {
-                    let client = c.blocking_lock();
-                    client.name().to_string()
-                })
-                .collect();
+            let mut available_servers = Vec::new();
+            for c in clients.iter() {
+                let client = c.lock().await;
+                available_servers.push(client.name().to_string());
+            }
             return ToolResult::error(format!(
                 "Server '{}' not found. Available servers: {}",
                 server_name,

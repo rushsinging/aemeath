@@ -55,7 +55,7 @@ pub async fn run_repl(
     context_size: usize,
     resume_id: Option<String>,
     agent_runner: Option<std::sync::Arc<dyn aemeath_core::tool::AgentRunner>>,
-    allow_all: bool,
+    mut allow_all: bool,
     _task_store: Arc<TaskStore>,
     max_tool_concurrency: usize,
     agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
@@ -150,6 +150,7 @@ pub async fn run_repl(
                 &cwd,
                 &pending_images,
                 resumed_session.as_ref(),
+                &mut allow_all,
             ).await {
                 SlashResult::Continue => continue,
                 SlashResult::Exit => break,
@@ -283,7 +284,7 @@ pub async fn run_repl(
         // Ctrl+C during API call cancels the current request
         let ctrlc_handle = tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
-            interrupted_clone.store(true, Ordering::Relaxed);
+            interrupted_clone.store(true, Ordering::Release);
             cancel_clone.cancel();
         });
 
@@ -313,8 +314,8 @@ pub async fn run_repl(
             turns += 1;
 
             // Check if interrupted
-            if interrupted.load(Ordering::Relaxed) {
-                interrupted.store(false, Ordering::Relaxed);
+            if interrupted.load(Ordering::Acquire) {
+                              interrupted.store(false, Ordering::Release);
                 TerminalRenderer::print_interrupted();
                 break;
             }
@@ -338,8 +339,8 @@ pub async fn run_repl(
             indicator.stop();
 
             // Check if interrupted during API call
-            if interrupted.load(Ordering::Relaxed) {
-                interrupted.store(false, Ordering::Relaxed);
+            if interrupted.load(Ordering::Acquire) {
+                              interrupted.store(false, Ordering::Release);
                 TerminalRenderer::print_interrupted();
                 break;
             }
@@ -364,32 +365,36 @@ pub async fn run_repl(
                     let mut approved_calls: Vec<&aemeath_core::agent::ToolCall> = Vec::new();
                     let mut denied_results: Vec<aemeath_core::agent::ToolResultTuple> = Vec::new();
 
-                    // Show tool calls
-                    for call in &tool_calls {
-                        let summary = if call.name == "TodoRun" {
-                            // Enrich with pending todo subjects
-                            let pending: Vec<String> = _task_store.list().await
-                                .iter()
-                                .filter(|t| t.status == aemeath_core::task::TaskStatus::Pending)
-                                .map(|t| {
-                                    let dep = if t.blocked_by.is_empty() {
-                                        String::new()
-                                    } else {
-                                        format!(" (blocked by #{})", t.blocked_by.join(", #"))
-                                    };
-                                    format!("  ○ #{} {}{}", t.id, t.subject, dep)
-                                })
-                                .collect();
-                            if pending.is_empty() {
-                                format_tool_summary(&call.name, &call.input)
+                    // Build call info lookup for interleaved display (call → result)
+                    // Pre-fetch pending tasks outside the closure (can't .await in map())
+                    let pending_tasks: Vec<String> = _task_store.list().await
+                        .iter()
+                        .filter(|t| t.status == aemeath_core::task::TaskStatus::Pending)
+                        .map(|t| {
+                            let dep = if t.blocked_by.is_empty() {
+                                String::new()
                             } else {
-                                format!("{} todo(s)\n{}", pending.len(), pending.join("\n"))
-                            }
-                        } else {
-                            format_tool_summary(&call.name, &call.input)
-                        };
-                        TerminalRenderer::print_tool_call(&call.name, &summary);
-                    }
+                                format!(" (blocked by #{})", t.blocked_by.join(", #"))
+                            };
+                            format!("  ○ #{} {}{}", t.id, t.subject, dep)
+                        })
+                        .collect();
+
+                    let call_summaries: std::collections::HashMap<String, (String, String)> = tool_calls
+                        .iter()
+                        .map(|call| {
+                            let summary = if call.name == "TodoRun" {
+                                if pending_tasks.is_empty() {
+                                    format_tool_summary(&call.name, &call.input)
+                                } else {
+                                    format!("{} todo(s)\n{}", pending_tasks.len(), pending_tasks.join("\n"))
+                                }
+                            } else {
+                                format_tool_summary(&call.name, &call.input)
+                            };
+                            (call.id.clone(), (call.name.clone(), summary))
+                        })
+                        .collect();
 
                     for call in &tool_calls {
                         let is_safe = if call.name == "Bash" {
@@ -485,10 +490,12 @@ pub async fn run_repl(
                     }
 
                     for (_id, output, is_error, _images) in results.iter() {
-                        // Find tool name by matching id
-                        let tool_name = tool_calls.iter()
-                            .find(|c| c.id == *_id)
-                            .map(|c| c.name.as_str())
+                        // Show tool call header then its result (interleaved)
+                        if let Some((name, summary)) = call_summaries.get(_id) {
+                            TerminalRenderer::print_tool_call(name, summary);
+                        }
+                        let tool_name = call_summaries.get(_id)
+                            .map(|(n, _): &(String, String)| n.as_str())
                             .unwrap_or("");
                         TerminalRenderer::print_tool_result_with_diff(tool_name, output, *is_error);
                     }
@@ -585,7 +592,7 @@ pub async fn run_repl(
 
         // Clean up Ctrl+C handler
         ctrlc_handle.abort();
-        interrupted.store(false, Ordering::Relaxed);
+        interrupted.store(false, Ordering::Release);
 
         TerminalRenderer::print_newline();
     }
@@ -621,17 +628,18 @@ enum SlashResult {
 }
 
 async fn handle_slash_command(
-    input: &str,
-    messages: &mut Vec<Message>,
-    system_prompt: &str,
-    context_size: usize,
-    total_input: u64,
-    total_output: u64,
-    total_calls: u64,
-    session_id: &str,
-    cwd: &Path,
-    pending_images: &PendingImages,
-    resumed_session: Option<&Session>,
+      input: &str,
+      messages: &mut Vec<Message>,
+      system_prompt: &str,
+      context_size: usize,
+      total_input: u64,
+      total_output: u64,
+      total_calls: u64,
+      session_id: &str,
+      cwd: &Path,
+      pending_images: &PendingImages,
+      resumed_session: Option<&Session>,
+      allow_all: &mut bool,
 ) -> SlashResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = *parts.first().unwrap_or(&"");
@@ -841,6 +849,23 @@ async fn handle_slash_command(
                             aemeath_core::command::CommandAction::Review(prompt) => {
                                 println!("[reviewing code changes...]");
                                 return SlashResult::Review(prompt);
+                            }
+                            aemeath_core::command::CommandAction::ChangeMode(mode) => {
+                                match mode.as_str() {
+                                    "ask" => {
+                                        *allow_all = false;
+                                        println!("Permission mode set to: ask");
+                                    }
+                                    "auto-read" => {
+                                        *allow_all = false;
+                                        println!("Permission mode set to: auto-read");
+                                    }
+                                    "allow-all" => {
+                                        *allow_all = true;
+                                        println!("Permission mode set to: allow-all (warning: all tools will be auto-approved)");
+                                    }
+                                    _ => eprintln!("Unknown permission mode: {}", mode),
+                                }
                             }
                             _ => println!("[action: {:?}]", action),
                         }

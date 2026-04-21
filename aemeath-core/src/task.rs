@@ -404,9 +404,15 @@ impl TaskStore {
 
     /// Clear all tasks
     pub async fn clear(&self) {
-        let mut tasks = self.tasks.lock().await;
-        tasks.clear();
-        *self.next_id.lock().await = 1;
+        {
+            let mut tasks = self.tasks.lock().await;
+            tasks.clear();
+        }
+        // Release tasks lock before acquiring next_id lock
+        {
+            let mut next_id = self.next_id.lock().await;
+            *next_id = 1;
+        }
     }
 
     /// Clear all deleted tasks from memory (async for auto-save)

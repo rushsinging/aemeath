@@ -1,19 +1,12 @@
 use crate::message::Message;
+use crate::state;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Validate a session ID to prevent path traversal attacks.
-/// Only allows alphanumeric characters, hyphens, and underscores.
-fn validate_session_id(id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("session ID must not be empty".to_string());
-    }
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return Err(format!(
-            "invalid session ID: {id:?} — only alphanumeric characters, hyphens, and underscores are allowed"
-        ));
-    }
-    Ok(())
+/// Validate a session ID — delegates to state::validate_session_id
+pub fn validate_session_id(id: &str) -> Result<(), String> {
+    state::validate_session_id(id)
 }
 
 /// Session metadata for organizing and filtering sessions
@@ -295,44 +288,12 @@ pub async fn update_session_metadata(
     Ok(session)
 }
 
-/// Generate a new session ID (timestamp in millis)
+/// Generate a new session ID — delegates to state::new_session_id for consistency
 pub fn new_session_id() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis().to_string())
-        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
+    crate::state::new_session_id()
 }
 
 /// Get current ISO timestamp
 pub fn now_iso() -> String {
-    // Simple UTC timestamp without chrono dependency
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let secs_per_day = 86400u64;
-    let days = now / secs_per_day;
-    let rem = now % secs_per_day;
-    let hours = rem / 3600;
-    let mins = (rem % 3600) / 60;
-    let secs = rem % 60;
-
-    // Days since 1970-01-01
-    let mut y = 1970i64;
-    let mut d = days as i64;
-    loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < days_in_year { break; }
-        d -= days_in_year;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0usize;
-    for days_in_month in &month_days {
-        if d < *days_in_month as i64 { break; }
-        d -= *days_in_month as i64;
-        m += 1;
-    }
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m + 1, d + 1, hours, mins, secs)
+    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }

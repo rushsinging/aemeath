@@ -177,6 +177,9 @@ impl OllamaProvider {
                             }
                         }));
                     }
+                    ContentBlock::Thinking { .. } => {
+                        // Thinking blocks are not supported in Ollama format, skip
+                    }
                 }
             }
 

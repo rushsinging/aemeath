@@ -18,6 +18,7 @@ use crate::task::{TaskStatus, TaskStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, Notify};
 use std::time::Duration;
 
@@ -105,7 +106,7 @@ pub struct TaskScheduler {
     /// Notification for new tasks
     task_available: Arc<Notify>,
     /// Shutdown flag
-    shutdown: Arc<Mutex<bool>>,
+    shutdown: Arc<AtomicBool>,
     /// Execution history
     execution_history: Arc<Mutex<HashMap<String, Vec<TaskExecutionResult>>>>,
 }
@@ -119,11 +120,11 @@ impl TaskScheduler {
             task_queue: Arc::new(Mutex::new(Vec::new())),
             config: SchedulerConfig::default(),
             task_available: Arc::new(Notify::new()),
-            shutdown: Arc::new(Mutex::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
             execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-
+  
     /// Create with custom configuration
     pub fn with_config(task_store: Arc<TaskStore>, config: SchedulerConfig) -> Self {
         Self {
@@ -132,7 +133,7 @@ impl TaskScheduler {
             task_queue: Arc::new(Mutex::new(Vec::new())),
             config,
             task_available: Arc::new(Notify::new()),
-            shutdown: Arc::new(Mutex::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
             execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -158,30 +159,34 @@ impl TaskScheduler {
 
     /// Get the next task from queue
     pub async fn get_next_task(&self) -> Option<String> {
-        let mut queue = self.task_queue.lock().await;
-        if queue.is_empty() {
-            return None;
-        }
-        
-        // Find a task that's not blocked
-        for i in 0..queue.len() {
-            let task_id = queue[i].clone();
-            if let Some(task) = self.task_store.get(&task_id).await {
-                // Check if all blocking tasks are completed
-                let mut all_blockers_done = true;
-                for b in &task.blocked_by {
-                    if let Some(blocker) = self.task_store.get(b).await {
-                        if blocker.status != TaskStatus::Completed {
-                            all_blockers_done = false;
-                            break;
-                        }
+        // Phase 1: Clone the queue so we don't hold the lock during await
+        let queue_snapshot: Vec<String>;
+        {
+            let queue = self.task_queue.lock().await;
+            queue_snapshot = queue.clone();
+        } // task_queue lock released
+
+        // Phase 2: Find an unblocked task (can safely await task_store)
+        for (i, task_id) in queue_snapshot.iter().enumerate() {
+            let task = self.task_store.get(task_id).await;
+            let Some(task) = task else { continue };
+
+            // Check if all blocking tasks are completed
+            let mut all_blockers_done = true;
+            for b in &task.blocked_by {
+                if let Some(blocker) = self.task_store.get(b).await {
+                    if blocker.status != TaskStatus::Completed {
+                        all_blockers_done = false;
+                        break;
                     }
                 }
-                
-                if all_blockers_done {
-                    queue.remove(i);
-                    return Some(task_id);
-                }
+            }
+            
+            if all_blockers_done {
+                // Remove from queue and return
+                let mut queue = self.task_queue.lock().await;
+                queue.remove(i);
+                return Some(task_id.clone());
             }
         }
         
@@ -190,31 +195,36 @@ impl TaskScheduler {
 
     /// Start executing a task in background
     pub async fn start_task(&self, task_id: String, agent_id: Option<String>) -> Result<BackgroundTaskContext, String> {
-        let mut active = self.active_tasks.lock().await;
+        // Phase 1: Check capacity and compute context while holding active_tasks
+        let context = {
+            let mut active = self.active_tasks.lock().await;
         
-        if active.len() >= self.config.max_concurrent {
-            return Err("Maximum concurrent tasks reached".to_string());
-        }
+            if active.len() >= self.config.max_concurrent {
+                return Err("Maximum concurrent tasks reached".to_string());
+            }
 
-        // Update task status
-        self.task_store.update(&task_id, |t| {
+            let now = current_timestamp();
+            let context = BackgroundTaskContext {
+                task_id: task_id.clone(),
+                agent_id,
+                started_at: now,
+                last_heartbeat: now,
+                progress: 0.0,
+                status_message: "Starting".to_string(),
+                interruptible: true,
+                retry_count: 0,
+                max_retries: 3,
+            };
+
+            active.insert(task_id, context.clone());
+            context
+        }; // active_tasks lock released
+
+        // Phase 2: Update task store WITHOUT holding active_tasks
+        self.task_store.update(&context.task_id, |t| {
             t.status = TaskStatus::InProgress;
         }).await;
 
-        let now = current_timestamp();
-        let context = BackgroundTaskContext {
-            task_id: task_id.clone(),
-            agent_id,
-            started_at: now,
-            last_heartbeat: now,
-            progress: 0.0,
-            status_message: "Starting".to_string(),
-            interruptible: true,
-            retry_count: 0,
-            max_retries: 3,
-        };
-
-        active.insert(task_id, context.clone());
         Ok(context)
     }
 
@@ -230,60 +240,85 @@ impl TaskScheduler {
 
     /// Complete a task
     pub async fn complete_task(&self, task_id: &str, result: TaskExecutionResult) {
-        let mut active = self.active_tasks.lock().await;
-
-        // Update task status
-        if result.success {
-            active.remove(task_id);
-            self.task_store.update(task_id, |t| {
-                t.status = TaskStatus::Completed;
-            }).await;
-        } else {
-            // Check retry BEFORE removing from active
-            let should_retry = if let Some(ctx) = active.get(task_id) {
-                ctx.retry_count < ctx.max_retries
-            } else {
-                false
-            };
-            
-            if should_retry {
-                // Increment retry count and re-queue
-                if let Some(ctx) = active.get_mut(task_id) {
-                    ctx.retry_count += 1;
-                }
-                let mut queue = self.task_queue.lock().await;
-                queue.push(task_id.to_string());
-            } else {
-                // No more retries — remove from active and mark failed
+        // --- Phase 1: Collect action under active_tasks lock, then release ---
+        enum PostAction {
+            Requeue,
+            MarkCompleted,
+            MarkFailed,
+        }
+        let post_action = {
+            let mut active = self.active_tasks.lock().await;
+  
+            if result.success {
                 active.remove(task_id);
+                Some(PostAction::MarkCompleted)
+            } else {
+                // Check retry BEFORE removing from active
+                let should_retry = if let Some(ctx) = active.get(task_id) {
+                    ctx.retry_count < ctx.max_retries
+                } else {
+                    false
+                };
+  
+                if should_retry {
+                    if let Some(ctx) = active.get_mut(task_id) {
+                        ctx.retry_count += 1;
+                    }
+                    Some(PostAction::Requeue)
+                } else {
+                    active.remove(task_id);
+                    Some(PostAction::MarkFailed)
+                }
+            }
+        }; // active_tasks lock released here
+
+        // --- Phase 2: Update task store WITHOUT holding active_tasks ---
+        match post_action {
+            Some(PostAction::MarkCompleted) => {
                 self.task_store.update(task_id, |t| {
-                    t.status = TaskStatus::Pending; // Reset to pending (failed)
+                    t.status = TaskStatus::Completed;
                 }).await;
             }
+            Some(PostAction::MarkFailed) => {
+                self.task_store.update(task_id, |t| {
+                    t.status = TaskStatus::Pending;
+                }).await;
+            }
+            _ => {}
         }
 
+        // --- Phase 3: Operate on other locks ---
+        if let Some(PostAction::Requeue) = post_action {
+            let mut queue = self.task_queue.lock().await;
+            queue.push(task_id.to_string());
+        }
+  
         // Record in history
         let mut history = self.execution_history.lock().await;
         history.entry(task_id.to_string())
             .or_insert_with(Vec::new)
             .push(result);
-
+  
         // Notify for next task
         self.task_available.notify_one();
     }
 
     /// Cancel a running task
     pub async fn cancel_task(&self, task_id: &str) -> Result<(), String> {
-        let mut active = self.active_tasks.lock().await;
+        // Phase 1: Check and remove from active_tasks
+        {
+            let mut active = self.active_tasks.lock().await;
         
-        if let Some(ctx) = active.get(task_id) {
-            if !ctx.interruptible {
-                return Err("Task is not interruptible".to_string());
+            if let Some(ctx) = active.get(task_id) {
+                if !ctx.interruptible {
+                    return Err("Task is not interruptible".to_string());
+                }
             }
-        }
 
-        active.remove(task_id);
-        
+            active.remove(task_id);
+        } // active_tasks lock released
+
+        // Phase 2: Update task store WITHOUT holding active_tasks
         self.task_store.update(task_id, |t| {
             t.status = TaskStatus::Deleted;
         }).await;
@@ -324,10 +359,15 @@ impl TaskScheduler {
         let path = self.config.persistence_path.clone()
             .unwrap_or_else(|| "task_scheduler_state.json".to_string());
 
+        // Acquire locks one at a time and clone data, then release
+        let active_tasks = self.active_tasks.lock().await.clone();
+        let task_queue = self.task_queue.lock().await.clone();
+        let execution_history = self.execution_history.lock().await.clone();
+
         let state = SchedulerState {
-            active_tasks: self.active_tasks.lock().await.clone(),
-            task_queue: self.task_queue.lock().await.clone(),
-            execution_history: self.execution_history.lock().await.clone(),
+            active_tasks,
+            task_queue,
+            execution_history,
         };
 
         let json = serde_json::to_string(&state)
@@ -364,9 +404,13 @@ impl TaskScheduler {
         *self.task_queue.lock().await = state.task_queue;
         *self.execution_history.lock().await = state.execution_history;
 
-        // Re-queue active tasks that were interrupted
-        let active = self.active_tasks.lock().await;
-        for task_id in active.keys() {
+        // Collect task IDs to re-queue, then update task store without holding locks
+        let task_ids: Vec<String> = {
+            let active = self.active_tasks.lock().await;
+            active.keys().cloned().collect()
+        }; // active_tasks lock released
+
+        for task_id in &task_ids {
             self.task_store.update(task_id, |t| {
                 t.status = TaskStatus::Pending;
             }).await;
@@ -379,7 +423,7 @@ impl TaskScheduler {
     pub async fn run(&self) {
         loop {
             // Check for shutdown
-            if *self.shutdown.lock().await {
+            if self.shutdown.load(Ordering::Relaxed) {
                 break;
             }
 
@@ -406,7 +450,7 @@ impl TaskScheduler {
 
     /// Shutdown the scheduler
     pub async fn shutdown(&self) {
-        *self.shutdown.lock().await = true;
+        self.shutdown.store(true, Ordering::Relaxed);
         self.task_available.notify_one();
         
         // Persist final state

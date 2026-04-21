@@ -327,6 +327,12 @@ impl AppState {
 
         // Create new session
         let session = InternalSession::new(cwd);
+
+        // Persist to disk and cache in memory
+        if let Err(e) = self.save_session(&session).await {
+            log::warn!("failed to persist new session {}: {e}", session.id);
+        }
+
         session
     }
 
@@ -334,12 +340,12 @@ impl AppState {
     pub async fn load_session(&self, session_id: &str) -> Option<InternalSession> {
         validate_session_id(session_id).ok()?;
 
-        // Check in-memory first
-        {
-            let sessions = self.sessions.read().await;
-            if let Some(session) = sessions.get(session_id) {
-                return Some(session.clone());
-            }
+        // Use write lock directly to avoid TOCTOU race between read and write
+        let mut sessions = self.sessions.write().await;
+
+        // Check in-memory cache first
+        if let Some(session) = sessions.get(session_id) {
+            return Some(session.clone());
         }
 
         // Try to load from disk
@@ -352,10 +358,7 @@ impl AppState {
         let session: InternalSession = serde_json::from_str(&content).ok()?;
 
         // Cache in memory
-        self.sessions
-            .write()
-            .await
-            .insert(session_id.to_string(), session.clone());
+        sessions.insert(session_id.to_string(), session.clone());
 
         Some(session)
     }
@@ -369,13 +372,7 @@ impl AppState {
             .await
             .map_err(|e| format!("Failed to create sessions directory: {e}"))?;
 
-        // Cache in memory
-        self.sessions
-            .write()
-            .await
-            .insert(session.id.clone(), session.clone());
-
-        // Save to disk
+        // Save to disk first — if this fails, memory stays consistent with disk
         let session_path = self.sessions_dir.join(format!("{}.json", session.id));
         let content = serde_json::to_string_pretty(session)
             .map_err(|e| format!("Failed to serialize session: {e}"))?;
@@ -383,6 +380,12 @@ impl AppState {
         tokio::fs::write(&session_path, content)
             .await
             .map_err(|e| format!("Failed to write session: {e}"))?;
+
+        // Cache in memory only after disk write succeeds
+        self.sessions
+            .write()
+            .await
+            .insert(session.id.clone(), session.clone());
 
         Ok(())
     }
@@ -398,9 +401,18 @@ impl AppState {
             .map_err(|e| format!("Failed to read sessions directory: {e}"))?;
 
         let mut sessions = Vec::new();
+        let mem_cache = self.sessions.read().await;
+
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().map(|e| e == "json").unwrap_or(false) {
+                // Extract session ID from filename to check in-memory cache first
+                let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if let Some(cached) = mem_cache.get(file_stem) {
+                    sessions.push(cached.clone());
+                    continue;
+                }
+                // Not in cache — load from disk
                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
                     if let Ok(session) = serde_json::from_str::<InternalSession>(&content) {
                         sessions.push(session);

@@ -19,12 +19,28 @@ pub struct Skill {
     pub fallback_for: Vec<String>,
 }
 
+/// Intermediate struct for deserializing YAML frontmatter
+#[derive(Debug, Deserialize, Default)]
+struct SkillFrontmatter {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    requires_tools: Vec<String>,
+    #[serde(default)]
+    fallback_for: Vec<String>,
+}
+
 /// Parse a skill from a markdown file with YAML frontmatter
 /// Format:
 /// ```ignore
 /// ---
 /// name: skill-name
 /// description: What this skill does
+/// requires_tools:
+///   - tool1
+///   - tool2
 /// ---
 /// Content here...
 /// ```
@@ -37,40 +53,34 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
 
     let rest = &text[3..];
     let end = rest.find("---")?;
-    let frontmatter = &rest[..end].trim();
+    let frontmatter_str = &rest[..end].trim();
     let content = rest[end + 3..].trim().to_string();
 
-    // Simple YAML parsing for name, description, requires_tools, fallback_for
-    let mut name = String::new();
-    let mut description = String::new();
-    let mut requires_tools = Vec::new();
-    let mut fallback_for = Vec::new();
-
-    for line in frontmatter.lines() {
-        let line = line.trim();
-        if let Some(val) = line.strip_prefix("name:") {
-            name = val.trim().trim_matches('"').trim_matches('\'').to_string();
-        } else if let Some(val) = line.strip_prefix("description:") {
-            description = val.trim().trim_matches('"').trim_matches('\'').to_string();
-        } else if let Some(val) = line.strip_prefix("requires_tools:") {
-            requires_tools = parse_yaml_list(val);
-        } else if let Some(val) = line.strip_prefix("fallback_for:") {
-            fallback_for = parse_yaml_list(val);
+    // Parse YAML using serde_yml — handles standard YAML lists, multi-line values, etc.
+    let fm: SkillFrontmatter = match serde_yml::from_str(frontmatter_str) {
+        Ok(fm) => fm,
+        Err(e) => {
+            log::warn!(
+                "failed to parse YAML frontmatter in {}: {e}",
+                path.display()
+            );
+            return None;
         }
-    }
+    };
 
-    if name.is_empty() {
-        // Use filename as name
-        name = path.file_stem()?.to_string_lossy().to_string();
-    }
+    let name = if fm.name.is_empty() {
+        path.file_stem()?.to_string_lossy().to_string()
+    } else {
+        fm.name
+    };
 
     Some(Skill {
         name,
-        description,
+        description: fm.description,
         content,
         source_path: path.to_path_buf(),
-        requires_tools,
-        fallback_for,
+        requires_tools: fm.requires_tools,
+        fallback_for: fm.fallback_for,
     })
 }
 
@@ -114,17 +124,6 @@ pub fn load_all_skills(cwd: &Path) -> HashMap<String, Skill> {
     }
 
     map
-}
-
-/// Parse a simple inline YAML list like `[a, b, c]` or comma-separated values.
-fn parse_yaml_list(val: &str) -> Vec<String> {
-    let val = val.trim();
-    let val = val.strip_prefix('[').unwrap_or(val);
-    let val = val.strip_suffix(']').unwrap_or(val);
-    val.split(',')
-        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
 }
 
 /// Load skills and filter based on available tools and other skills.

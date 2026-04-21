@@ -153,6 +153,7 @@ impl App {
         resume_id: Option<String>,
         task_store: Arc<aemeath_core::task::TaskStore>,
         max_tool_concurrency: usize,
+        max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         // Store client and config for runtime switching
@@ -229,6 +230,7 @@ impl App {
             interrupted,
             task_store,
             max_tool_concurrency,
+            max_agent_concurrency,
             agent_semaphore,
         ).await;
 
@@ -276,6 +278,7 @@ impl App {
         interrupted: Arc<AtomicBool>,
         task_store: Arc<aemeath_core::task::TaskStore>,
         max_tool_concurrency: usize,
+        max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
@@ -300,6 +303,14 @@ impl App {
                     a.id.parse::<u64>().unwrap_or(u64::MAX)
                         .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
                 });
+                // While there is any active (non-Deleted, non-Completed) task,
+                // ensure the spinner is on — agents are running in the background
+                let any_active = active.iter().any(|t|
+                    t.status == aemeath_core::task::TaskStatus::InProgress
+                    || t.status == aemeath_core::task::TaskStatus::Pending);
+                if any_active && is_processing {
+                    self.output_area.start_spinner();
+                }
                 if active.is_empty() {
                     self.output_area.set_task_status(Vec::new());
                 } else {
@@ -410,6 +421,7 @@ impl App {
                             }
                             UiEvent::ToolCall { name, summary } => {
                                 self.output_area.push_tool_call(&name, &summary);
+                                self.output_area.start_spinner();
                             }
                             UiEvent::ToolResult { tool_name, output, is_error, images } => {
                                   let image_note = if images.is_empty() {
@@ -517,7 +529,7 @@ impl App {
                                             context_size, cwd, sid, read_files,
                                             agent_runner, allow_all, interrupted, cancel,
                                             task_store,
-                                            max_tool_concurrency, agent_sem,
+                                            max_tool_concurrency, max_agent_concurrency, agent_sem,
                                         ).await;
                                     });
                                 }
@@ -785,7 +797,7 @@ impl App {
                                                     context_size, cwd, sid, read_files,
                                                     agent_runner, allow_all, interrupted, cancel,
                                                     task_store,
-                                                    max_tool_concurrency, agent_sem,
+                                                    max_tool_concurrency, max_agent_concurrency, agent_sem,
                                                 ).await;
                                             });
                                         }
@@ -842,7 +854,7 @@ impl App {
                                                 context_size, cwd, sid, read_files,
                                                 agent_runner, allow_all, interrupted, cancel,
                                                 task_store,
-                                                max_tool_concurrency, agent_sem,
+                                                max_tool_concurrency, max_agent_concurrency, agent_sem,
                                             ).await;
                                         });
                                     }
@@ -1337,6 +1349,7 @@ async fn process_in_background(
     cancel: CancellationToken,
     _task_store: Arc<aemeath_core::task::TaskStore>,
     max_tool_concurrency: usize,
+    max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
 ) {
     // Clear tasks from previous conversation turn
@@ -1354,7 +1367,7 @@ async fn process_in_background(
         plan_mode: None,
         allow_all,
         max_tool_concurrency,
-        max_agent_concurrency: 0,
+        max_agent_concurrency,
         agent_semaphore,
     };
     let agent = Agent {
@@ -1503,13 +1516,8 @@ async fn process_in_background(
                         .into_iter()
                         .partition(|c| c.name == "Agent");
 
-                    // Show and execute non-Agent tools immediately
-                    for call in &non_agent_approved {
-                        let _ = tx.send(UiEvent::ToolCall {
-                            name: call.name.clone(),
-                            summary: call.input.to_string(),
-                        }).await;
-                    }
+                    // Suppress UI for TaskCreate/TaskUpdate — the bottom task panel already reflects state
+                    let is_task_tool = |name: &str| name == "TaskCreate" || name == "TaskUpdate";
 
                     let non_agent_calls: Vec<aemeath_core::agent::ToolCall> = non_agent_approved.into_iter().map(|c| {
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
@@ -1521,24 +1529,55 @@ async fn process_in_background(
                         Vec::new()
                     };
 
-                    // Send non-agent results
+                    // Build tool name lookup for interleaved call→result display
                     let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
                         .iter()
                         .map(|c| (c.id.as_str(), c.name.as_str()))
                         .collect();
+
+                    // Send non-agent results with interleaved ToolCall→ToolResult events
                     for (_id, output, is_error, images) in non_agent_results.iter() {
                         let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
-                        let _ = tx.send(UiEvent::ToolResult {
-                            tool_name: tool_name.to_string(),
-                            output: output.clone(),
-                            is_error: *is_error,
-                            images: images.clone(),
-                        }).await;
+                        if !is_task_tool(tool_name) {
+                            // Show tool call header before each result
+                            let summary = tool_calls.iter()
+                                .find(|c| c.id == *_id.as_str())
+                                .map(|c| c.input.to_string())
+                                .unwrap_or_default();
+                            let _ = tx.send(UiEvent::ToolCall {
+                                name: tool_name.to_string(),
+                                summary,
+                            }).await;
+                            let _ = tx.send(UiEvent::ToolResult {
+                                tool_name: tool_name.to_string(),
+                                output: output.clone(),
+                                is_error: *is_error,
+                                images: images.clone(),
+                            }).await;
+                        }
                     }
 
                     // Execute Agent calls in batches of max_agent_concurrency
                     let mut agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
-                    let batch_size = max_tool_concurrency.max(1); // Use tool concurrency as batch size for agents
+                    let batch_size = max_agent_concurrency.max(1);
+
+                    // Extract taskId binding from each Agent call (call.id -> task.id)
+                    let call_to_task: std::collections::HashMap<String, String> = agent_approved
+                        .iter()
+                        .filter_map(|c| {
+                            c.input.get("taskId")
+                                .and_then(|v| v.as_str())
+                                .map(|t| (c.id.clone(), t.to_string()))
+                        })
+                        .collect();
+                    // Reset all bound tasks to Pending so only the active batch shows InProgress
+                    for tid in call_to_task.values() {
+                        _task_store.update(tid, |t| {
+                            if t.status == aemeath_core::task::TaskStatus::InProgress {
+                                t.status = aemeath_core::task::TaskStatus::Pending;
+                            }
+                        }).await;
+                    }
 
                     // Start task status polling timer
                     let has_active_tasks = {
@@ -1566,23 +1605,26 @@ async fn process_in_background(
                                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
                                         let elapsed = start.elapsed().as_secs();
                                         let current_tasks = timer_store.list().await;
+                                        // Only emit a message when a task completes — started/running is in status line
                                         for t in &current_tasks {
                                             let prev = last_statuses.get(&t.id);
-                                            let changed = match prev {
-                                                Some(prev_status) => *prev_status != t.status,
-                                                None => t.status == TaskStatus::InProgress || t.status == TaskStatus::Completed,
-                                            };
-                                            if changed {
-                                                let msg = crate::tui::task_display::format_task_change(t);
-                                                if !msg.is_empty() {
-                                                    let _ = timer_tx.send(UiEvent::SystemMessage(msg)).await;
-                                                }
-                                                last_statuses.insert(t.id.clone(), t.status.clone());
+                                            let became_completed = t.status == TaskStatus::Completed
+                                                && prev.map(|p| *p != TaskStatus::Completed).unwrap_or(true);
+                                            if became_completed {
+                                                let _ = timer_tx.send(UiEvent::SystemMessage(
+                                                    format!("  ✓ #{} {} — completed", t.id, t.subject)
+                                                )).await;
                                             }
+                                            last_statuses.insert(t.id.clone(), t.status.clone());
                                         }
-                                        let _ = timer_tx.send(UiEvent::StatusUpdate(
-                                            format!("Running {} agent(s)... {}s", agent_count, elapsed)
-                                        )).await;
+                                        let running_count = current_tasks.iter()
+                                            .filter(|t| t.status == TaskStatus::InProgress)
+                                            .count();
+                                        let status_msg = format!(
+                                            "Running {}/{} agent(s)... {}s",
+                                            running_count, agent_count, elapsed
+                                        );
+                                        let _ = timer_tx.send(UiEvent::StatusUpdate(status_msg)).await;
                                     }
                                 }
                             }
@@ -1592,12 +1634,13 @@ async fn process_in_background(
                     };
 
                     for batch in agent_approved.chunks(batch_size) {
-                        // Show ToolCall events for this batch
+                        // Mark bound tasks InProgress before batch starts
                         for call in batch {
-                            let _ = tx.send(UiEvent::ToolCall {
-                                name: call.name.clone(),
-                                summary: call.input.to_string(),
-                            }).await;
+                            if let Some(tid) = call_to_task.get(&call.id) {
+                                _task_store.update(tid, |t| {
+                                    t.status = aemeath_core::task::TaskStatus::InProgress;
+                                }).await;
+                            }
                         }
 
                         let batch_calls: Vec<aemeath_core::agent::ToolCall> = batch.iter().map(|c| {
@@ -1606,9 +1649,32 @@ async fn process_in_background(
 
                         let batch_results = agent.execute_tools(&batch_calls).await;
 
-                        // Send results for this batch
+                        // Update task status based on result
+                        for (call_id, _output, is_error, _images) in batch_results.iter() {
+                            if let Some(tid) = call_to_task.get(call_id) {
+                                let new_status = if *is_error {
+                                    aemeath_core::task::TaskStatus::Pending
+                                } else {
+                                    aemeath_core::task::TaskStatus::Completed
+                                };
+                                _task_store.update(tid, |t| {
+                                    t.status = new_status.clone();
+                                }).await;
+                            }
+                        }
+
+                        // Send interleaved ToolCall→ToolResult for this batch
                         for (_id, output, is_error, images) in batch_results.iter() {
                             let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
+                            // Show tool call header before each result
+                            let summary = batch.iter()
+                                .find(|c| c.id == *_id.as_str())
+                                .map(|c| c.input.to_string())
+                                .unwrap_or_default();
+                            let _ = tx.send(UiEvent::ToolCall {
+                                name: tool_name.to_string(),
+                                summary,
+                            }).await;
                             let _ = tx.send(UiEvent::ToolResult {
                                 tool_name: tool_name.to_string(),
                                 output: output.clone(),

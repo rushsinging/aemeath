@@ -20,6 +20,7 @@ pub async fn parse_stream(
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
+    let mut current_thinking = String::new();
     let mut current_tool_id = String::new();
     let mut current_tool_name = String::new();
     let mut current_tool_json = String::new();
@@ -37,12 +38,19 @@ pub async fn parse_stream(
     let mut lines = reader.lines();
 
     loop {
+        // Calculate remaining idle timeout based on time since last event
+        let idle_deadline = match last_event_time {
+            Some(last) => last + STREAM_IDLE_TIMEOUT,
+            None => std::time::Instant::now() + STREAM_IDLE_TIMEOUT,
+        };
+        let remaining = idle_deadline.saturating_duration_since(std::time::Instant::now());
+
         let line = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
                 return Err(crate::LlmError::Stream("interrupted by user".to_string()));
             }
-            _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
+            _ = tokio::time::sleep(remaining) => {
                 handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
                 return Err(crate::LlmError::Stream(format!(
                     "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
@@ -100,8 +108,11 @@ pub async fn parse_stream(
                         current_tool_json.clear();
                         handler.on_tool_use_start(&name);
                     }
-                    ContentBlockPayload::Thinking { .. } | ContentBlockPayload::Unknown => {
-                        // thinking blocks and unknown types are ignored
+                    ContentBlockPayload::Thinking { thinking } => {
+                        current_thinking = thinking;
+                    }
+                    ContentBlockPayload::Unknown => {
+                        // ignore unknown block types
                     }
                 }
             }
@@ -114,8 +125,10 @@ pub async fn parse_stream(
                     DeltaPayload::InputJsonDelta { partial_json } => {
                         current_tool_json.push_str(&partial_json);
                     }
-                    DeltaPayload::ThinkingDelta { .. }
-                    | DeltaPayload::SignatureDelta { .. }
+                    DeltaPayload::ThinkingDelta { thinking } => {
+                        current_thinking.push_str(&thinking);
+                    }
+                    DeltaPayload::SignatureDelta { .. }
                     | DeltaPayload::Unknown => {
                         // ignored
                     }
@@ -131,6 +144,10 @@ pub async fn parse_stream(
                         input,
                     });
                     current_tool_json.clear();
+                } else if !current_thinking.is_empty() {
+                    content_blocks.push(ContentBlock::Thinking {
+                        thinking: std::mem::take(&mut current_thinking),
+                    });
                 } else if !current_text.is_empty() {
                     handler.on_text_block_complete(&current_text);
                     content_blocks.push(ContentBlock::Text {

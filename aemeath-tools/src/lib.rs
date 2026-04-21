@@ -26,6 +26,7 @@ pub mod list_mcp_resources;
 pub mod read_mcp_resource;
 pub mod plan_mode;
 pub mod brief;
+pub mod path_security;
 
 // Re-export McpTool for dynamic creation
 pub use mcp_tool::McpTool;

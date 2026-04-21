@@ -105,9 +105,9 @@ impl HistoryManager {
             session_id: session_id.to_string(),
         });
 
-        // Trim if exceeds max
+        // Trim if exceeds max — use drain(0..1) instead of remove(0) to avoid O(n) shift
         if self.entries.len() > self.max_entries {
-            self.entries.remove(0);
+            self.entries.drain(0..self.entries.len() - self.max_entries);
         }
     }
 
