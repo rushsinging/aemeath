@@ -35,6 +35,8 @@ pub struct SuggestionContext {
     pub cwd: PathBuf,
     /// Available models for /model completion: list of (provider_name, model_id)
     pub models: Vec<(String, String)>,
+    /// Available skills: list of (name, description, aliases)
+    pub skills: Vec<(String, String, Vec<String>)>,
 }
 
 /// Slash command definition
@@ -240,8 +242,9 @@ pub enum TriggerType {
     ModelSubCommand,
 }
 
-/// Generate slash command suggestions based on partial input
-pub fn generate_command_suggestions(partial: &str) -> Vec<Suggestion> {
+/// Generate slash command suggestions based on partial input.
+/// Also includes skill names/aliases as suggestions.
+pub fn generate_command_suggestions(partial: &str, skills: &[(String, String, Vec<String>)]) -> Vec<Suggestion> {
     let commands = get_slash_commands();
     let partial_lower = partial.to_lowercase();
     
@@ -252,30 +255,58 @@ pub fn generate_command_suggestions(partial: &str) -> Vec<Suggestion> {
         &partial_lower
     };
 
+    let mut results = Vec::new();
+
     if search_term.is_empty() {
-        // Return all commands
-        return commands.iter().map(|cmd| Suggestion {
-            _id: format!("cmd-{}", cmd.name),
-            display_text: format!("/{}", cmd.name),
-            _description: Some(cmd.description.clone()),
-            suggestion_type: SuggestionType::Command,
-        }).collect();
+        // Return all commands + all skills
+        for cmd in &commands {
+            results.push(Suggestion {
+                _id: format!("cmd-{}", cmd.name),
+                display_text: format!("/{}", cmd.name),
+                _description: Some(cmd.description.clone()),
+                suggestion_type: SuggestionType::Command,
+            });
+        }
+        for (name, desc, _aliases) in skills {
+            results.push(Suggestion {
+                _id: format!("skill-{}", name),
+                display_text: format!("/{}", name),
+                _description: Some(desc.clone()),
+                suggestion_type: SuggestionType::Command,
+            });
+        }
+        return results;
     }
 
-    // Filter by partial match on name or aliases
-    commands
-        .iter()
-        .filter(|cmd| {
-            cmd.name.starts_with(search_term) ||
+    // Filter commands by partial match on name or aliases
+    for cmd in &commands {
+        if cmd.name.starts_with(search_term) ||
             cmd.aliases.iter().any(|a| a.starts_with(search_term))
-        })
-        .map(|cmd| Suggestion {
-            _id: format!("cmd-{}", cmd.name),
-            display_text: format!("/{}", cmd.name),
-            _description: Some(cmd.description.clone()),
-            suggestion_type: SuggestionType::Command,
-        })
-        .collect()
+        {
+            results.push(Suggestion {
+                _id: format!("cmd-{}", cmd.name),
+                display_text: format!("/{}", cmd.name),
+                _description: Some(cmd.description.clone()),
+                suggestion_type: SuggestionType::Command,
+            });
+        }
+    }
+
+    // Filter skills by partial match on name or aliases
+    for (name, desc, aliases) in skills {
+        if name.starts_with(search_term) ||
+            aliases.iter().any(|a| a.starts_with(search_term))
+        {
+            results.push(Suggestion {
+                _id: format!("skill-{}", name),
+                display_text: format!("/{}", name),
+                _description: Some(desc.clone()),
+                suggestion_type: SuggestionType::Command,
+            });
+        }
+    }
+
+    results
 }
 
 /// Generate model suggestions based on partial input for /model command
@@ -462,7 +493,7 @@ fn list_and_filter_directory(dir: &PathBuf, prefix: &str, base_dir: &PathBuf) ->
 pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
     if let Some((token, _start_pos, trigger_type)) = extract_completion_token(&ctx.input, ctx.cursor_offset) {
         match trigger_type {
-            TriggerType::SlashCommand => generate_command_suggestions(&token),
+            TriggerType::SlashCommand => generate_command_suggestions(&token, &ctx.skills),
             TriggerType::AtSymbol => generate_file_suggestions(&token, &ctx.cwd),
             TriggerType::ModelArg => generate_model_suggestions(&token, &ctx.models),
             TriggerType::ModelSubCommand => generate_model_subcommand_suggestions(&token),
@@ -547,14 +578,35 @@ mod tests {
 
     #[test]
     fn test_generate_command_suggestions() {
-        let suggestions = generate_command_suggestions("/hel");
+        let suggestions = generate_command_suggestions("/hel", &[]);
         assert!(!suggestions.is_empty());
         assert_eq!(suggestions[0].display_text, "/help");
     }
 
     #[test]
     fn test_generate_command_suggestions_empty() {
-        let suggestions = generate_command_suggestions("");
+        let suggestions = generate_command_suggestions("", &[]);
         assert!(suggestions.len() > 5); // Should return all commands
+    }
+
+    #[test]
+    fn test_generate_command_suggestions_with_skills() {
+        let skills = vec![
+            ("cm".to_string(), "commit message".to_string(), vec!["commit".to_string()]),
+            ("review".to_string(), "code review".to_string(), vec!["cr".to_string()]),
+        ];
+        // Empty partial → all commands + all skills
+        let suggestions = generate_command_suggestions("", &skills);
+        assert!(suggestions.iter().any(|s| s.display_text == "/cm"));
+        assert!(suggestions.iter().any(|s| s.display_text == "/review"));
+        assert!(suggestions.iter().any(|s| s.display_text == "/help"));
+
+        // Partial "c" → matches /cm (name), /clear (command), /commit (command), /context (command)
+        let suggestions = generate_command_suggestions("/c", &skills);
+        assert!(suggestions.iter().any(|s| s.display_text == "/cm"));
+
+        // Partial "cr" → matches skill alias "cr" → skill "review"
+        let suggestions = generate_command_suggestions("/cr", &skills);
+        assert!(suggestions.iter().any(|s| s.display_text == "/review"));
     }
 }

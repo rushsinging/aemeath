@@ -1060,11 +1060,16 @@ impl App {
             .map(|(p, m)| (p, if m.name.is_empty() { m.id } else { m.name }))
             .collect();
         
+        let skills: Vec<(String, String, Vec<String>)> = self.skills.values()
+            .map(|s| (s.name.clone(), s.description.clone(), s.aliases.clone()))
+            .collect();
+
         let ctx = SuggestionContext {
             input,
             cursor_offset,
             cwd: self.cwd.clone(),
             models,
+            skills,
         };
         
         let suggestions = generate_suggestions(&ctx);
