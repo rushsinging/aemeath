@@ -653,12 +653,15 @@ async fn main() {
     let task_store = std::sync::Arc::new(aemeath_core::task::TaskStore::new());
 
     // Load skills
-    let skills_map = aemeath_core::skill::load_all_skills(&cwd);
+    let skill_dirs = config_file
+        .as_ref()
+        .map(|c| c.skills.dirs.clone())
+        .unwrap_or_default();
+    let skills_map = aemeath_core::skill::load_all_skills(&cwd, &skill_dirs);
     if !skills_map.is_empty() {
         log::info!("[Skills] loaded {} skills", skills_map.len());
     }
-    let skills = std::sync::Arc::new(tokio::sync::Mutex::new(skills_map));
-
+    let skills = std::sync::Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let mut registry = ToolRegistry::new();
     aemeath_tools::register_all_tools(&mut registry, task_store.clone(), skills.clone());
 
@@ -696,7 +699,14 @@ async fn main() {
         }
         if !skills_guard.is_empty() {
             let skill_list: Vec<String> = skills_guard.values()
-                .map(|s| format!("- {}: {}", s.name, s.description))
+                .map(|s| {
+                    let alias_str = if s.aliases.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (aliases: /{})", s.aliases.join(", /"))
+                    };
+                    format!("- `{}{}`: {}", s.name, alias_str, s.description)
+                })
                 .collect();
             prompt.push_str(&format!(
                 "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n{}",
@@ -747,7 +757,7 @@ async fn main() {
 
     // Run in TUI mode or legacy REPL mode
     if args.no_tui {
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone()).await;
+        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone()).await;
     } else {
         // Build display name: provider/name (from config) or just model id
         let model_display = {
@@ -769,6 +779,7 @@ async fn main() {
             format!("{}/{}", provider_name, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
+        app.set_skills(skills_map);
             if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
                 log::error!("TUI error: {e}");
                 std::process::exit(1);

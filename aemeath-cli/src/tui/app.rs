@@ -8,6 +8,7 @@ use aemeath_core::command::{cmd, CommandContext, CommandRegistry, CommandResult}
 use aemeath_core::cost::format_tokens;
 use aemeath_core::message::Message;
 use aemeath_core::session;
+use aemeath_core::skill::Skill;
 use aemeath_core::state::AppState;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::stream::StreamHandler;
@@ -94,6 +95,8 @@ pub struct App {
     current_model_display: String,
     /// Time of last Ctrl+C in idle state (for double-press-to-exit)
     last_ctrlc: Option<std::time::Instant>,
+    /// Loaded skills (name → Skill), used for slash command alias lookup
+    skills: std::collections::HashMap<String, Skill>,
 }
 
 impl App {
@@ -134,8 +137,21 @@ impl App {
             dialog_model_keys: Vec::new(),
             current_model_display: model,
             last_ctrlc: None,
+            skills: std::collections::HashMap::new(),
         }
     }
+
+      /// Set loaded skills for slash command alias lookup
+      pub fn set_skills(&mut self, skills: std::collections::HashMap<String, Skill>) {
+          self.skills = skills;
+      }
+
+      /// Find a skill by its name or alias (e.g. "cm" matches a skill named "cm" or with aliases: ["cm"])
+      fn find_skill_by_alias(&self, alias: &str) -> Option<&Skill> {
+          self.skills.values().find(|s| {
+              s.name == alias || s.aliases.iter().any(|a| a == alias)
+          })
+      }
 
     /// Run the TUI event loop
     pub async fn run(
@@ -1320,6 +1336,15 @@ impl App {
                             self.output_area.push_system(&format!("[confirm: {}]", message));
                         }
                     }
+                } else if let Some(skill) = self.find_skill_by_alias(cmd_name) {
+                    // Match skill alias — inject skill content as user message
+                    let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                    let mut content = skill.content.clone();
+                    if !args.is_empty() {
+                        content = format!("{content}\n\nArguments: {args}");
+                    }
+                    self.output_area.push_system(&format!("[skill: {}]", skill.name));
+                    return Some(content);
                 } else {
                     self.output_area.push_error(&format!("Unknown command: {cmd}"));
                 }

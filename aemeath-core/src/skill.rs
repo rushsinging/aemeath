@@ -17,6 +17,9 @@ pub struct Skill {
     /// If these skills are available, hide this one (it's a fallback)
     #[serde(default)]
     pub fallback_for: Vec<String>,
+    /// Slash command aliases (e.g. ["cm"] means /cm invokes this skill)
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// Intermediate struct for deserializing YAML frontmatter
@@ -30,6 +33,8 @@ struct SkillFrontmatter {
     requires_tools: Vec<String>,
     #[serde(default)]
     fallback_for: Vec<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 /// Parse a skill from a markdown file with YAML frontmatter
@@ -44,6 +49,12 @@ struct SkillFrontmatter {
 /// ---
 /// Content here...
 /// ```
+/// Parse a skill from a markdown file with YAML frontmatter.
+///
+/// If the frontmatter does not specify a `name`, the stem of the **parent
+/// directory** is used (so `cm/SKILL.md` gets name `cm`).  When the inferred
+/// name differs from the file stem, the directory name is also automatically
+/// added as an alias so that `/cm` resolves to this skill.
 pub fn parse_skill(path: &Path) -> Option<Skill> {
     let text = std::fs::read_to_string(path).ok()?;
 
@@ -68,11 +79,32 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
         }
     };
 
-    let name = if fm.name.is_empty() {
-        path.file_stem()?.to_string_lossy().to_string()
-    } else {
+    // Name resolution priority: frontmatter name > file stem
+    // Special case: when the file is named "SKILL.md" (case-insensitive),
+    // use the parent directory name instead (e.g. cm/SKILL.md → name "cm").
+    let dir_name = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string());
+    let file_stem = path.file_stem()?.to_string_lossy().to_string();
+    let is_generic_name = file_stem.eq_ignore_ascii_case("skill")
+        || file_stem.eq_ignore_ascii_case("index")
+        || file_stem.eq_ignore_ascii_case("README");
+
+    let name = if !fm.name.is_empty() {
         fm.name
+    } else if is_generic_name {
+        // Generic filename → use parent directory name
+        dir_name.clone().unwrap_or(file_stem.clone())
+    } else {
+        file_stem.clone()
     };
+
+    // Auto-add directory name as alias when the skill lives in a sub-directory
+    // AND the directory name is not already the skill name or an existing alias.
+    let mut aliases = fm.aliases;
+    if let Some(ref dir) = dir_name {
+        if dir.as_str() != name && !aliases.contains(dir) {
+            aliases.push(dir.clone());
+        }
+    }
 
     Some(Skill {
         name,
@@ -81,10 +113,15 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
         source_path: path.to_path_buf(),
         requires_tools: fm.requires_tools,
         fallback_for: fm.fallback_for,
+        aliases,
     })
 }
 
-/// Load all skills from a directory (non-recursive)
+/// Load all skills from a directory.
+///
+/// Scans `.md` files directly in the directory **and** recursively inside
+/// immediate sub-directories (supports the `<skill-name>/SKILL.md` layout
+/// used by Claude Code / gstack).
 pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
     if !dir.exists() {
         return Vec::new();
@@ -95,8 +132,21 @@ pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
+                // Direct .md file in the skills directory
                 if let Some(skill) = parse_skill(&path) {
                     skills.push(skill);
+                }
+            } else if path.is_dir() {
+                // Sub-directory: look for .md files inside (e.g. cm/SKILL.md)
+                if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                    for sub_entry in sub_entries.flatten() {
+                        let sub_path = sub_entry.path();
+                        if sub_path.extension().is_some_and(|e| e == "md") {
+                            if let Some(skill) = parse_skill(&sub_path) {
+                                skills.push(skill);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -105,8 +155,11 @@ pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
     skills
 }
 
-/// Load skills from all standard locations
-pub fn load_all_skills(cwd: &Path) -> HashMap<String, Skill> {
+/// Load skills from all standard locations, plus any extra directories.
+///
+/// Extra directories are scanned after standard locations, so their skills
+/// take lower priority (won't override same-name skills from project/global).
+pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Skill> {
     let mut map = HashMap::new();
 
     // Project-level skills: .claude/skills/
@@ -115,10 +168,27 @@ pub fn load_all_skills(cwd: &Path) -> HashMap<String, Skill> {
         map.insert(skill.name.clone(), skill);
     }
 
-    // Global skills: ~/.claude/skills/
+    // Global skills: ~/.aemeath/skills/
     if let Some(home) = dirs::home_dir() {
-        let global_dir = home.join(".claude").join("skills");
+        let global_dir = home.join(".aemeath").join("skills");
         for skill in load_skills_from_dir(&global_dir) {
+            map.entry(skill.name.clone()).or_insert(skill);
+        }
+    }
+
+    // Extra skill directories from config.json
+    for dir in extra_dirs {
+        // Expand `~` to home directory
+        let expanded = if dir.starts_with("~") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(dir.strip_prefix("~").unwrap_or(dir).strip_prefix("/").unwrap_or(dir))
+            } else {
+                dir.clone()
+            }
+        } else {
+            dir.clone()
+        };
+        for skill in load_skills_from_dir(&expanded) {
             map.entry(skill.name.clone()).or_insert(skill);
         }
     }
@@ -130,8 +200,9 @@ pub fn load_all_skills(cwd: &Path) -> HashMap<String, Skill> {
 pub fn load_and_filter_skills(
     cwd: &Path,
     available_tools: &std::collections::HashSet<String>,
+    extra_dirs: &[PathBuf],
 ) -> HashMap<String, Skill> {
-    let all_skills = load_all_skills(cwd);
+    let all_skills = load_all_skills(cwd, extra_dirs);
     let skill_names: std::collections::HashSet<String> =
         all_skills.keys().cloned().collect();
 
@@ -161,7 +232,7 @@ struct SkillsCache {
 static SKILLS_CACHE: Mutex<Option<SkillsCache>> = Mutex::new(None);
 
 /// Load skills with caching. Re-scans only if files changed.
-pub fn load_all_skills_cached(cwd: &Path) -> HashMap<String, Skill> {
+pub fn load_all_skills_cached(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Skill> {
     let mut cache = SKILLS_CACHE.lock().unwrap();
 
     if let Some(ref cached) = *cache {
@@ -176,7 +247,7 @@ pub fn load_all_skills_cached(cwd: &Path) -> HashMap<String, Skill> {
         }
     }
 
-    let skills = load_all_skills(cwd);
+    let skills = load_all_skills(cwd, extra_dirs);
 
     let mtimes: HashMap<PathBuf, std::time::SystemTime> = skills
         .values()
@@ -192,4 +263,70 @@ pub fn load_all_skills_cached(cwd: &Path) -> HashMap<String, Skill> {
     });
 
     skills
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_parse_skill_dir_name_as_name() {
+        // Simulate real layout: <skills-dir>/cm/SKILL.md
+        let base = std::env::temp_dir().join("aemeath_test_skill_1");
+        let dir = base.join("cm");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("SKILL.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        write!(f, "---\ndescription: test skill\n---\ncontent here").unwrap();
+
+        let skill = parse_skill(&path).unwrap();
+        assert_eq!(skill.name, "cm", "expected name from parent dir");
+        // dir name == skill name, so no auto-alias needed
+        assert!(skill.aliases.is_empty());
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_parse_skill_alias_from_dir() {
+        // frontmatter specifies a different name than the dir name
+        let base = std::env::temp_dir().join("aemeath_test_skill_2");
+        let dir = base.join("my-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("SKILL.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        write!(f, "---\nname: my-skill\ndescription: test\n---\ncontent").unwrap();
+
+        let skill = parse_skill(&path).unwrap();
+        assert_eq!(skill.name, "my-skill");
+        // dir name ("my-dir") differs from skill name ("my-skill"), auto-added as alias
+        assert_eq!(skill.aliases, vec!["my-dir"]);
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_load_skills_from_subdir() {
+        let base = std::env::temp_dir().join("aemeath_test_skill_3");
+        let sub = base.join("review");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Direct .md file
+        let direct = base.join("hello.md");
+        let mut f = std::fs::File::create(&direct).unwrap();
+        write!(f, "---\ndescription: hello skill\n---\nhello").unwrap();
+
+        // Sub-dir .md file
+        let sub_file = sub.join("SKILL.md");
+        let mut f = std::fs::File::create(&sub_file).unwrap();
+        write!(f, "---\ndescription: review skill\n---\nreview").unwrap();
+
+        let skills = load_skills_from_dir(&base);
+        assert_eq!(skills.len(), 2, "should load both direct and sub-dir skills");
+        assert!(skills.iter().any(|s| s.name == "hello"), "direct skill");
+        assert!(skills.iter().any(|s| s.name == "review"), "sub-dir skill");
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

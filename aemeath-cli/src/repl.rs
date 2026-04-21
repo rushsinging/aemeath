@@ -5,6 +5,7 @@ use aemeath_core::command::{cmd, CommandContext, CommandRegistry, CommandResult}
 use aemeath_core::compact;
 use aemeath_core::message::Message;
 use aemeath_core::session::{self, Session};
+use aemeath_core::skill::Skill;
 use aemeath_core::state::AppState;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{ToolContext, ToolRegistry};
@@ -59,6 +60,7 @@ pub async fn run_repl(
     _task_store: Arc<TaskStore>,
     max_tool_concurrency: usize,
     agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    skills: std::collections::HashMap<String, Skill>,
 ) {
     let mut rl = match DefaultEditor::new() {
         Ok(rl) => rl,
@@ -151,6 +153,7 @@ pub async fn run_repl(
                 &pending_images,
                 resumed_session.as_ref(),
                 &mut allow_all,
+                &skills,
             ).await {
                 SlashResult::Continue => continue,
                 SlashResult::Exit => break,
@@ -640,6 +643,7 @@ async fn handle_slash_command(
       pending_images: &PendingImages,
       resumed_session: Option<&Session>,
       allow_all: &mut bool,
+      skills: &std::collections::HashMap<String, Skill>,
 ) -> SlashResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = *parts.first().unwrap_or(&"");
@@ -875,6 +879,15 @@ async fn handle_slash_command(
                     }
                 }
                 SlashResult::Continue
+            } else if let Some(skill) = skills.values().find(|s| s.name == cmd_name || s.aliases.iter().any(|a| a == cmd_name)) {
+                // Match skill alias — inject skill content as user message
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                let mut content = skill.content.clone();
+                if !args.is_empty() {
+                    content = format!("{content}\n\nArguments: {args}");
+                }
+                println!("[skill: {}]", skill.name);
+                SlashResult::Review(content)
             } else {
                 SlashResult::NotFound
             }

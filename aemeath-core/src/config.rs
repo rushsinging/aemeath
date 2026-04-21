@@ -56,10 +56,14 @@ pub struct Config {
     #[serde(default)]
     pub permissions: PermissionConfig,
 
+    /// Skill configuration
+    #[serde(default)]
+    pub skills: SkillsConfig,
+
     /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
-}
+  }
 
 /// **Legacy** API configuration. Prefer using `models.providers` instead.
 ///
@@ -411,6 +415,15 @@ pub enum PermissionModeConfig {
     AllowAll,
 }
 
+/// Skill configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SkillsConfig {
+    /// Additional directories to load skills from (in addition to .claude/skills/ and ~/.claude/skills/)
+    /// Supports `~` expansion for home directory.
+    #[serde(default)]
+  pub dirs: Vec<PathBuf>,
+}
+
 /// Storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
@@ -718,6 +731,13 @@ impl ConfigManager {
                 max_sessions: overlay.storage.max_sessions,
                 history: overlay.storage.history,
                 history_file: overlay.storage.history_file.or(base.storage.history_file),
+            },
+            skills: SkillsConfig {
+                dirs: if !overlay.skills.dirs.is_empty() {
+                    overlay.skills.dirs
+                } else {
+                    base.skills.dirs
+                },
             },
         }
     }
