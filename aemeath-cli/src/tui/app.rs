@@ -153,6 +153,68 @@ impl App {
           })
       }
 
+  /// Render a historical message into the output area (for session resume).
+  /// Shows a compact representation of each message suitable for browsing history.
+  fn render_history_message(&mut self, msg: &aemeath_core::message::Message) {
+      use aemeath_core::message::{ContentBlock, Role};
+      match msg.role {
+          Role::User => {
+              for block in &msg.content {
+                  match block {
+                      ContentBlock::Text { text } => {
+                          self.output_area.push_user_message(text);
+                      }
+                      ContentBlock::ToolResult { content, is_error, .. } => {
+                          let text = match content {
+                              serde_json::Value::String(s) => s.clone(),
+                              other => {
+                                  // For complex tool results, show a truncated summary
+                                  truncate_utf8(&other.to_string(), 200)
+                              }
+                          };
+                          if *is_error {
+                              self.output_area.push_error(&text);
+                          } else {
+                              // Tool results are user-role but shown as system-style
+                              // Truncate long results for history view
+                              let display = if text.len() > 500 {
+                                  let truncated = truncate_utf8(&text, 500);
+                                  format!("{}\n[output truncated, {} chars total]", truncated, text.len())
+                              } else {
+                                  text
+                              };
+                              self.output_area.push_system(&display);
+                          }
+                      }
+                      _ => {} // skip images in history
+                  }
+              }
+          }
+          Role::Assistant => {
+              for block in &msg.content {
+                  match block {
+                      ContentBlock::Text { text } => {
+                          self.output_area.push_assistant_message(text);
+                      }
+                      ContentBlock::Thinking { thinking } => {
+                          if !thinking.is_empty() {
+                              self.output_area.push_system(&format!(
+                                  "[thinking: {}]",
+                                  truncate_utf8(thinking, 100)
+                              ));
+                          }
+                      }
+                      ContentBlock::ToolUse { name, input, .. } => {
+                          let summary = format_tool_history_summary(name, input);
+                          self.output_area.push_system(&format!("[tool: {}({})]", name, summary));
+                      }
+                      _ => {}
+                  }
+              }
+          }
+      }
+  }
+
     /// Run the TUI event loop
     pub async fn run(
         &mut self,
@@ -184,6 +246,10 @@ impl App {
                 Ok(s) => {
                     let msg_count = s.messages.len();
                     self.session_created_at = Some(s.created_at);
+                    // Render history into output_area
+                    for msg in &s.messages {
+                        self.render_history_message(msg);
+                    }
                     self.messages = s.messages;
                     self.output_area.push_system(&format!(
                         "[resumed session {} ({} messages)]",
@@ -1334,6 +1400,33 @@ impl App {
                                     self.output_area.push_system("[reviewing code changes...]");
                                     return Some(prompt);
                                 }
+                                aemeath_core::command::CommandAction::ResumeSession(session_id) => {
+                                    match aemeath_core::session::load_session(&session_id).await {
+                                        Ok(s) => {
+                                            let msg_count = s.messages.len();
+                                            self.session_created_at = Some(s.created_at);
+                                            self.session_id = session_id.clone();
+                                            self.status_bar.set_session_id(&session_id);
+                                            self.messages.clear();
+                                            self.pending_images.clear();
+                                            // Render history into output_area
+                                            for msg in &s.messages {
+                                                self.render_history_message(msg);
+                                            }
+                                            self.messages = s.messages;
+                                            self.output_area.push_system(&format!(
+                                                "[resumed session {} ({} messages)]",
+                                                session_id, msg_count
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            self.output_area.push_error(&format!(
+                                                "Failed to resume session {}: {}",
+                                                session_id, e
+                                            ));
+                                        }
+                                    }
+                                }
                                 _ => self.output_area.push_system(&format!("[action: {:?}]", action)),
                             }
                         }
@@ -1827,4 +1920,43 @@ async fn process_in_background(
     // Sync messages back to main thread before signaling done
     let _ = tx.send(UiEvent::MessagesSync(messages)).await;
     let _ = tx.send(UiEvent::Done).await;
+}
+
+/// Truncate `s` to at most `max_bytes`, snapping back to the nearest char boundary
+/// so we never split a multi-byte UTF-8 character mid-way.
+fn truncate_utf8(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &s[..end])
+}
+
+/// Generate a one-line summary for a tool call input (for history rendering).
+fn format_tool_history_summary(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "Read" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "Edit" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "Write" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "Bash" => input.get("command").and_then(|v| v.as_str()).map(|s| truncate_utf8(s, 80)).unwrap_or_default(),
+        "Glob" => input.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "Grep" => input.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "Agent" => {
+            let desc = input.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            format!("\"{}\"", desc)
+        }
+        "TaskCreate" => input.get("subject").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        "TaskUpdate" => {
+            let id = input.get("taskId").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = input.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            format!("{} → {}", id, status)
+        }
+        "Skill" => input.get("skill").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+        _ => {
+            truncate_utf8(&input.to_string(), 60)
+        }
+    }
 }

@@ -68,6 +68,7 @@ dependencies = [
  "aemeath-core",
  "async-trait",
  "futures-util",
+ "log",
  "reqwest",
  "reqwest-eventsource",
  "serde",

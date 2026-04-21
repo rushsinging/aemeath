@@ -440,7 +440,7 @@ async fn main() {
     // stderr behavior when debugging with `--no-tui` / CLI mode.
     {
         let mut builder = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("warn"),
+            env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug"),
         );
         let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
