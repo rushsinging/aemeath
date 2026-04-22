@@ -764,12 +764,18 @@ impl OutputArea {
         });
 
         // Push detail lines indented under the header
-        for detail in details.iter() {
-            self.push_line(OutputLine {
-                content: format!("    {detail}"),
-                style: LineStyle::System,
-            });
-        }
+            // Bash detail lines (the $ command) use white, others gray
+            let detail_style = if name == "Bash" {
+                LineStyle::Normal
+            } else {
+                LineStyle::System
+            };
+            for detail in details.iter() {
+                self.push_line(OutputLine {
+                    content: format!("    {detail}"),
+                    style: detail_style,
+                });
+            }
 
         // Blank line to visually separate consecutive tool calls
         self.push_line(OutputLine {
@@ -840,10 +846,16 @@ impl OutputArea {
             style: LineStyle::ToolCallSuccess,
         });
 
+        // Bash detail lines (the $ command) use white, others gray
+        let detail_style = if name == "Bash" {
+            LineStyle::Normal
+        } else {
+            LineStyle::System
+        };
         for detail in details.iter() {
             self.push_line(OutputLine {
                 content: format!("    {detail}"),
-                style: LineStyle::System,
+                style: detail_style,
             });
         }
 
@@ -857,8 +869,8 @@ impl OutputArea {
     /// Add a tool result with diff support.
     /// For Edit tool results containing diff information, displays with red/green backgrounds.
     pub fn push_tool_result_with_diff(&mut self, tool_name: &str, result: &str, is_error: bool) {
-        // Update the most recent ToolCallRunning header line to completed/error state
-        // This stops the spinner animation for this tool
+          // Update the most recent ToolCallRunning header line to completed/error state
+          // This stops the spinner animation for this tool
         let done_icon = if is_error { "✗" } else { "✓" };
         let done_style = if is_error { LineStyle::ToolCallError } else { LineStyle::ToolCallSuccess };
         for line in self.lines.iter_mut().rev() {
@@ -909,17 +921,10 @@ impl OutputArea {
             let display_lines: Vec<&str> = result.lines().take(max_lines).collect();
             let has_more = total > max_lines;
 
-            for (i, line) in display_lines.iter().enumerate() {
-                // First line of Bash output (the command starting with $) in white,
-                // everything else in gray
-                let style = if tool_name == "Bash" && i == 0 && line.starts_with("$ ") {
-                    LineStyle::Normal
-                } else {
-                    LineStyle::System
-                };
+            for line in display_lines.iter() {
                 self.push_line(OutputLine {
                     content: format!("    {line}"),
-                    style,
+                    style: LineStyle::System,
                 });
             }
             if has_more {
