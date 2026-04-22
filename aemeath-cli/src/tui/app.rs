@@ -175,7 +175,6 @@ impl App {
                           if *is_error {
                               self.output_area.push_error(&text);
                           } else {
-                              // Tool results are user-role but shown as system-style
                               // Truncate long results for history view
                               let display = if text.len() > 500 {
                                   let truncated = truncate_utf8(&text, 500);
@@ -183,7 +182,21 @@ impl App {
                               } else {
                                   text
                               };
-                              self.output_area.push_system(&display);
+                              // Show result lines with ToolResult style, then completion marker
+                              let lines: Vec<&str> = display.lines().take(3).collect();
+                              let total = display.lines().count();
+                              for line in &lines {
+                                  self.output_area.push_line(OutputLine {
+                                      content: format!("  │  {line}"),
+                                      style: LineStyle::ToolResult,
+                                  });
+                              }
+                              if total > 3 {
+                                  self.output_area.push_line(OutputLine {
+                                      content: format!("  │  ... ({} lines omitted)", total - 3),
+                                      style: LineStyle::ToolResult,
+                                  });
+                              }
                           }
                       }
                       _ => {} // skip images in history
@@ -205,8 +218,8 @@ impl App {
                           }
                       }
                       ContentBlock::ToolUse { name, input, .. } => {
-                          let summary = format_tool_history_summary(name, input);
-                          self.output_area.push_system(&format!("[tool: {}({})]", name, summary));
+                          let input_str = input.to_string();
+                          self.output_area.push_completed_tool_call(name, &input_str);
                       }
                       _ => {}
                   }
@@ -1938,28 +1951,4 @@ fn truncate_utf8(s: &str, max_bytes: usize) -> String {
     format!("{}...", &s[..end])
 }
 
-/// Generate a one-line summary for a tool call input (for history rendering).
-fn format_tool_history_summary(name: &str, input: &serde_json::Value) -> String {
-    match name {
-        "Read" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "Edit" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "Write" => input.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "Bash" => input.get("command").and_then(|v| v.as_str()).map(|s| truncate_utf8(s, 80)).unwrap_or_default(),
-        "Glob" => input.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "Grep" => input.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "Agent" => {
-            let desc = input.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            format!("\"{}\"", desc)
-        }
-        "TaskCreate" => input.get("subject").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        "TaskUpdate" => {
-            let id = input.get("taskId").and_then(|v| v.as_str()).unwrap_or("?");
-            let status = input.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            format!("{} → {}", id, status)
-        }
-        "Skill" => input.get("skill").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-        _ => {
-            truncate_utf8(&input.to_string(), 60)
-        }
-    }
-}
+

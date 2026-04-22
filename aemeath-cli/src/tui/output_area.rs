@@ -828,6 +828,26 @@ impl OutputArea {
         format_tool_call("TodoWrite", raw_json)
     }
 
+    /// Push a completed tool call (for history rendering on session resume).
+    /// Uses green ✓ icon instead of yellow ● spinner.
+    pub fn push_completed_tool_call(&mut self, name: &str, input_json: &str) {
+        let (header, details) = format_tool_call(name, input_json);
+
+        // Replace the yellow ● with green ✓ to indicate completion
+        let header = header.replacen("●", "✓", 1);
+        self.push_line(OutputLine {
+            content: header,
+            style: LineStyle::ToolCallSuccess,
+        });
+
+        for detail in details.iter() {
+            self.push_line(OutputLine {
+                content: format!("    {detail}"),
+                style: LineStyle::System,
+            });
+        }
+    }
+
     /// Add a tool result with diff support.
     /// For Edit tool results containing diff information, displays with red/green backgrounds.
     pub fn push_tool_result_with_diff(&mut self, tool_name: &str, result: &str, is_error: bool) {
