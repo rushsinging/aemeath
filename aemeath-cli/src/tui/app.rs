@@ -188,13 +188,13 @@ impl App {
                               for line in &lines {
                                   self.output_area.push_line(OutputLine {
                                       content: format!("    {line}"),
-                                      style: LineStyle::ToolResult,
+                                      style: LineStyle::System,
                                   });
                               }
                               if total > 3 {
                                   self.output_area.push_line(OutputLine {
                                       content: format!("    ... ({} lines omitted)", total - 3),
-                                      style: LineStyle::ToolResult,
+                                      style: LineStyle::System,
                                   });
                               }
                               // Blank line after tool result
