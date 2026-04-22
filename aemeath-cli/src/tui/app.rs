@@ -518,6 +518,9 @@ impl App {
                                           style: LineStyle::System,
                                       });
                                   }
+                                  // Add blank line after tool result to separate from
+                                  // subsequent assistant text or the next tool call.
+                                  self.output_area.push_system("");
                               }
                             UiEvent::Usage { input, output, last_input } => {
                                 self.total_input_tokens += input as u64;
