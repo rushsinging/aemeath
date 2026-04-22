@@ -865,7 +865,7 @@ impl OutputArea {
 
         if is_error {
             self.push_line(OutputLine {
-                content: format!("  └─ ✗ {result}"),
+                content: format!("  ✗ {result}"),
                 style: LineStyle::ToolCallError,
             });
             return;
@@ -882,9 +882,9 @@ impl OutputArea {
                 // Show diff with line-by-line coloring
                 self.push_diff_lines(old_content, new_content);
 
-                // Show summary last with tree end
+                // Show summary last
                 self.push_line(OutputLine {
-                    content: format!("  └─ ✓ {summary}"),
+                    content: format!("  ✓ {summary}"),
                     style: LineStyle::ToolCallSuccess,
                 });
                 return;
@@ -905,21 +905,21 @@ impl OutputArea {
 
             for line in &display_lines {
                 self.push_line(OutputLine {
-                    content: format!("  │  {line}"),
+                    content: format!("    {line}"),
                     style: LineStyle::System,
                 });
             }
             if has_more {
                 self.push_line(OutputLine {
-                    content: format!("  │  ... ({} lines omitted)", total - max_lines),
+                    content: format!("    ... ({} lines omitted)", total - max_lines),
                     style: LineStyle::System,
                 });
             }
         }
 
-        // Show success indicator last with tree end connector
+        // Show success indicator last
         self.push_line(OutputLine {
-            content: format!("  └─ ✓ {tool_name} completed"),
+            content: format!("  ✓ {tool_name} completed"),
             style: LineStyle::ToolCallSuccess,
         });
     }

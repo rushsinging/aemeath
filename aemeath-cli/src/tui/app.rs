@@ -187,13 +187,13 @@ impl App {
                               let total = display.lines().count();
                               for line in &lines {
                                   self.output_area.push_line(OutputLine {
-                                      content: format!("  │  {line}"),
+                                      content: format!("    {line}"),
                                       style: LineStyle::ToolResult,
                                   });
                               }
                               if total > 3 {
                                   self.output_area.push_line(OutputLine {
-                                      content: format!("  │  ... ({} lines omitted)", total - 3),
+                                      content: format!("    ... ({} lines omitted)", total - 3),
                                       style: LineStyle::ToolResult,
                                   });
                               }
