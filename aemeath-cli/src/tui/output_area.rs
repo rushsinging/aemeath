@@ -1056,6 +1056,14 @@ impl OutputArea {
 
     /// Add a system message
     pub fn push_system(&mut self, msg: &str) {
+        if msg.is_empty() {
+            // Empty string produces no lines via .lines(), push blank line directly
+            self.push_line(OutputLine {
+                content: String::new(),
+                style: LineStyle::System,
+            });
+            return;
+        }
         for line in msg.lines() {
             self.push_line(OutputLine {
                 content: line.to_string(),
