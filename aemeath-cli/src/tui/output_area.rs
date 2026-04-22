@@ -15,6 +15,9 @@ const MAX_LINES: usize = 10000;
 /// Default terminal width for pre-wrapping
 const DEFAULT_WIDTH: usize = 120;
 
+/// Indent for detail and result lines under a tool call header
+const INDENT: &str = "  ";
+
 /// Spinner glyph frames — forward then reverse for a breathing effect
 const SPINNER_FRAMES: &[char] = &[
     '·', '✢', '✳', '✶', '✻', '✽',
@@ -772,7 +775,7 @@ impl OutputArea {
             };
             for detail in details.iter() {
                 self.push_line(OutputLine {
-                    content: format!("    {detail}"),
+                    content: format!("{INDENT}{detail}"),
                     style: detail_style,
                 });
             }
@@ -854,7 +857,7 @@ impl OutputArea {
         };
         for detail in details.iter() {
             self.push_line(OutputLine {
-                content: format!("    {detail}"),
+                content: format!("{INDENT}{detail}"),
                 style: detail_style,
             });
         }
@@ -883,7 +886,7 @@ impl OutputArea {
 
         if is_error {
             self.push_line(OutputLine {
-                content: format!("  ✗ {result}"),
+                content: format!("{INDENT}✗ {result}"),
                 style: LineStyle::ToolCallError,
             });
             return;
@@ -902,7 +905,7 @@ impl OutputArea {
 
                 // Show summary last
                 self.push_line(OutputLine {
-                    content: format!("  ✓ {summary}"),
+                    content: format!("{INDENT}✓ {summary}"),
                     style: LineStyle::ToolCallSuccess,
                 });
                 return;
@@ -923,13 +926,13 @@ impl OutputArea {
 
             for line in display_lines.iter() {
                 self.push_line(OutputLine {
-                    content: format!("    {line}"),
+                    content: format!("{INDENT}{line}"),
                     style: LineStyle::System,
                 });
             }
             if has_more {
                 self.push_line(OutputLine {
-                    content: format!("    ... ({} lines omitted)", total - max_lines),
+                    content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
                     style: LineStyle::System,
                 });
             }
@@ -937,7 +940,7 @@ impl OutputArea {
 
         // Show success indicator last
         self.push_line(OutputLine {
-            content: format!("  ✓ {tool_name} completed"),
+            content: format!("{INDENT}✓ {tool_name} completed"),
             style: LineStyle::ToolCallSuccess,
         });
     }
@@ -963,7 +966,7 @@ impl OutputArea {
                 }
                 ChangeTag::Equal => {
                     self.push_line(OutputLine {
-                        content: format!("    {}", change),
+                        content: format!("{INDENT}{change}"),
                         style: LineStyle::System,
                     });
                 }
