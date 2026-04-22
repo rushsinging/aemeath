@@ -197,6 +197,8 @@ impl App {
                                       style: LineStyle::ToolResult,
                                   });
                               }
+                              // Blank line after tool result
+                              self.output_area.push_system("");
                           }
                       }
                       _ => {} // skip images in history
