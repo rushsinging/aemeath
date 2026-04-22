@@ -496,23 +496,17 @@ impl OutputArea {
 
     /// Add a line, pre-wrapping if it's wider than terminal
     pub fn push_line(&mut self, line: OutputLine) {
-        let wrapped = wrap_line(&line.content, self.term_width);
-        for chunk in wrapped {
-            if self.lines.len() >= MAX_LINES {
-                self.lines.pop_front();
-                // When popping old lines, adjust scroll_offset to stay in place
-                if self.scroll_offset > 0 {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                }
+        if self.lines.len() >= MAX_LINES {
+            self.lines.pop_front();
+            // When popping old lines, adjust scroll_offset to stay in place
+            if self.scroll_offset > 0 {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
-            self.lines.push_back(OutputLine {
-                content: chunk,
-                style: line.style,
-            });
-            // When user has scrolled up, increase offset to keep view stable
-            if !self.auto_scroll {
-                self.scroll_offset += 1;
-            }
+        }
+        self.lines.push_back(line);
+        // When user has scrolled up, increase offset to keep view stable
+        if !self.auto_scroll {
+            self.scroll_offset += 1;
         }
     }
 
@@ -666,13 +660,10 @@ impl OutputArea {
                 } else {
                     text_line.to_string()
                 };
-                let wrapped = wrap_line(&display_line, self.term_width);
-                for chunk in wrapped {
-                    self.lines.push_back(OutputLine {
-                        content: chunk,
-                        style,
-                    });
-                }
+                self.lines.push_back(OutputLine {
+                    content: display_line,
+                    style,
+                });
             }
         }
 
@@ -1389,63 +1380,67 @@ impl OutputArea {
             .skip(start)
             .take(end - start)
             .map(|(idx, output_line)| {
+                // Wrap the line content to current terminal width
+                let wrapped = wrap_line(&output_line.content, self.term_width);
+                let style = output_line.style;
+
                 // For ToolCallRunning lines, show a blinking white dot ●
-                if matches!(output_line.style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
-                    let rest = &output_line.content[3..]; // ● is 3 bytes in UTF-8
-                    // Blink: alternate between bright white and dim gray
+                if matches!(style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
                     let blink_on = (spinner_frame_idx / 10) % 2 == 0; // ~500ms per phase at 50ms tick
-                    let dot_color = if blink_on {
-                        Color::White
-                    } else {
-                        Color::DarkGray
-                    };
-                    let dot_span = Span::styled(
-                        "●".to_string(),
-                        Style::default().fg(dot_color),
-                    );
-                    let text_span = Span::styled(
-                        rest.to_string(),
-                        output_line.style.to_style(),
-                    );
-                    return Line::from(vec![dot_span, text_span]);
+                    let dot_color = if blink_on { Color::White } else { Color::DarkGray };
+                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
+                        if i == 0 {
+                            let dot_span = Span::styled("●".to_string(), Style::default().fg(dot_color));
+                            let rest = &chunk[3..]; // skip ●
+                            let text_span = Span::styled(rest.to_string(), style.to_style());
+                            Line::from(vec![dot_span, text_span])
+                        } else {
+                            Line::styled(chunk, style.to_style())
+                        }
+                    }).collect::<Vec<_>>()
                 }
 
                 // For completed ToolCall lines (✓), show green dot ●
-                if matches!(output_line.style, LineStyle::ToolCallSuccess) && output_line.content.starts_with('✓') {
-                    let rest = &output_line.content[3..]; // ✓ is 3 bytes in UTF-8
-                    let dot_span = Span::styled(
-                        "●".to_string(),
-                        Style::default().fg(Color::Green),
-                    );
-                    let text_span = Span::styled(
-                        rest.to_string(),
-                        output_line.style.to_style(),
-                    );
-                    return Line::from(vec![dot_span, text_span]);
+                if matches!(style, LineStyle::ToolCallSuccess) && output_line.content.starts_with('✓') {
+                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
+                        if i == 0 {
+                            let dot_span = Span::styled("●".to_string(), Style::default().fg(Color::Green));
+                            let rest = &chunk[3..]; // skip ✓
+                            let text_span = Span::styled(rest.to_string(), style.to_style());
+                            Line::from(vec![dot_span, text_span])
+                        } else {
+                            Line::styled(chunk, style.to_style())
+                        }
+                    }).collect::<Vec<_>>()
                 }
 
                 // For failed ToolCall lines (✗), show red dot ●
-                if matches!(output_line.style, LineStyle::ToolCallError) && output_line.content.starts_with('✗') {
-                    let rest = &output_line.content[3..]; // ✗ is 3 bytes in UTF-8
-                    let dot_span = Span::styled(
-                        "●".to_string(),
-                        Style::default().fg(Color::Red),
-                    );
-                    let text_span = Span::styled(
-                        rest.to_string(),
-                        output_line.style.to_style(),
-                    );
-                    return Line::from(vec![dot_span, text_span]);
+                if matches!(style, LineStyle::ToolCallError) && output_line.content.starts_with('✗') {
+                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
+                        if i == 0 {
+                            let dot_span = Span::styled("●".to_string(), Style::default().fg(Color::Red));
+                            let rest = &chunk[3..]; // skip ✗
+                            let text_span = Span::styled(rest.to_string(), style.to_style());
+                            Line::from(vec![dot_span, text_span])
+                        } else {
+                            Line::styled(chunk, style.to_style())
+                        }
+                    }).collect::<Vec<_>>()
                 }
 
                 // Check if this line has any selection
                 if self.selection_start.is_some() && self.selection_end.is_some() {
-                    let line_spans = self.render_line_with_selection(idx, &output_line.content, output_line.style.to_style());
-                    Line::from(line_spans)
+                    wrapped.into_iter().map(|chunk| {
+                        let line_spans = self.render_line_with_selection(idx, &chunk, style.to_style());
+                        Line::from(line_spans)
+                    }).collect::<Vec<_>>()
                 } else {
-                    Line::styled(&output_line.content, output_line.style.to_style())
+                    wrapped.into_iter().map(|chunk| {
+                        Line::styled(chunk, style.to_style())
+                    }).collect::<Vec<_>>()
                 }
             })
+            .flatten()
             .collect();
 
         // Append spinner line at the bottom, then task status lines below it
