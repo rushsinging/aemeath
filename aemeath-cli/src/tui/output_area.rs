@@ -903,10 +903,17 @@ impl OutputArea {
             let display_lines: Vec<&str> = result.lines().take(max_lines).collect();
             let has_more = total > max_lines;
 
-            for line in &display_lines {
+            for (i, line) in display_lines.iter().enumerate() {
+                // First line of Bash output (the command starting with $) in white,
+                // everything else in gray
+                let style = if tool_name == "Bash" && i == 0 && line.starts_with("$ ") {
+                    LineStyle::Normal
+                } else {
+                    LineStyle::System
+                };
                 self.push_line(OutputLine {
                     content: format!("    {line}"),
-                    style: LineStyle::System,
+                    style,
                 });
             }
             if has_more {
