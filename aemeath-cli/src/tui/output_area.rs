@@ -131,6 +131,31 @@ fn debug_log(msg: &str) {
     }
 }
 
+/// Truncate a string to fit within `max_width` Unicode display columns,
+/// appending "..." if truncated.
+fn truncate_unicode_width(s: &str, max_width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let width = s.width();
+    if width <= max_width {
+        return s.to_string();
+    }
+    if max_width <= 3 {
+        return "...".chars().take(max_width).collect();
+    }
+    let target = max_width - 3; // reserve space for "..."
+    let mut end = 0;
+    let mut w = 0;
+    for (i, ch) in s.char_indices() {
+        let cw = ch.width().unwrap_or(0);
+        if w + cw > target {
+            break;
+        }
+        w += cw;
+        end = i + ch.len_utf8();
+    }
+    format!("{}...", &s[..end])
+}
+
 fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     // Try parsing the JSON input
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(raw_json);
@@ -140,7 +165,10 @@ fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
             if let Ok(v) = &parsed {
                 let cmd = v.get("command").and_then(|c| c.as_str()).unwrap_or("?");
                 let timeout = v.get("timeout").and_then(|t| t.as_u64());
-                let mut detail = format!("$ {cmd}");
+                // Truncate command to avoid line wrapping that breaks indentation
+                let max_cmd_width = DEFAULT_WIDTH.saturating_sub(INDENT.len() + 2); // 2 for "$ "
+                let truncated = truncate_unicode_width(cmd, max_cmd_width);
+                let mut detail = format!("$ {truncated}");
                 if let Some(t) = timeout {
                     if t != 120_000 {
                         detail.push_str(&format!("  (timeout: {}s)", t / 1000));
