@@ -846,6 +846,12 @@ impl OutputArea {
                 style: LineStyle::System,
             });
         }
+
+        // Blank line to visually separate consecutive tool calls
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::System,
+        });
     }
 
     /// Add a tool result with diff support.
