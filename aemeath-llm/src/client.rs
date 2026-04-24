@@ -55,6 +55,7 @@ impl LlmClient {
                     base_url,
                     model,
                     max_tokens,
+                    reasoning,
                 ))
             }
             Provider::OpenAI

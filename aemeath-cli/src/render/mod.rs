@@ -118,6 +118,45 @@ impl TerminalRenderer {
         println!();
     }
 
+    /// Print a random "done" message with elapsed time, e.g. "✻ Sautéed for 1m 4s"
+    pub fn print_done(elapsed: std::time::Duration) {
+        let verbs = [
+            "Sautéed",
+            "Baked",
+            "Grilled",
+            "Simmered",
+            "Roasted",
+            "Brewed",
+            "Toasted",
+            "Stewed",
+            "Marinated",
+            "Charred",
+            "Poached",
+            "Steamed",
+            "Smoked",
+            "Brûléed",
+            "Flambéed",
+            "Fermented",
+            "Pickled",
+            "Cured",
+            "Seared",
+            "Blanched",
+        ];
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let idx = COUNTER.fetch_add(1, Ordering::Relaxed) % verbs.len();
+        let verb = verbs[idx];
+
+        let secs = elapsed.as_secs();
+        let duration = if secs >= 60 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}s", secs)
+        };
+
+        println!("{}", ST::done_message(&format!("✻ {verb} for {duration}")));
+    }
+
     pub fn print_usage(input_tokens: u32, output_tokens: u32) {
         println!(
             "{}",

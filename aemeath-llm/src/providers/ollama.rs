@@ -19,6 +19,9 @@ pub struct OllamaProvider {
     base_url: String,
     model: String,
     max_tokens: u32,
+    /// If false, send `think: false` to disable reasoning mode for models
+    /// that support it (qwen3, deepseek-r1, gpt-oss, etc.)
+    reasoning: bool,
     user_agent: String,
     http: reqwest::Client,
     max_retries: u32,
@@ -29,8 +32,6 @@ pub struct OllamaProvider {
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 /// Stream idle timeout: abort if no data for 3 minutes (Ollama may stall during generation)
 const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
-/// Stall warning threshold
-const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl OllamaProvider {
     pub fn new(
@@ -38,6 +39,7 @@ impl OllamaProvider {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
+        reasoning: bool,
     ) -> Self {
         Self {
             base_url: {
@@ -47,6 +49,7 @@ impl OllamaProvider {
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
             max_tokens,
+            reasoning,
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -90,7 +93,7 @@ impl OllamaProvider {
         Ok(headers)
     }
 
-    /// Convert Anthropic-style system blocks to OpenAI-style system message
+    /// Convert Anthropic-style system blocks to native ollama system message
     fn convert_system_to_message(system: &[SystemBlock]) -> serde_json::Value {
         let system_text: String = system
             .iter()
@@ -104,86 +107,110 @@ impl OllamaProvider {
         })
     }
 
-    /// Convert messages from Anthropic format to OpenAI format
+    /// Convert messages from Anthropic format to native ollama /api/chat format.
+    ///
+    /// Key differences vs OpenAI-compat:
+    /// - Images live in a sibling `images: [base64]` array (no `data:` URL prefix)
+    /// - Tool calls: `function.arguments` is a JSON **object**, not a string
+    /// - Tool result: role `"tool"` with plain `content`; ollama correlates by order
+    ///   (no `tool_call_id` / `tool_name` fields required)
     fn convert_messages(
         &self,
         system: &[SystemBlock],
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {
-        let mut openai_messages = Vec::new();
+        let mut ollama_messages = Vec::new();
 
-        if !system.is_empty() {
-            openai_messages.push(Self::convert_system_to_message(system));
+        // Collect <system-reminder> content from leading user messages to merge
+        // into the system message — Ollama models follow system instructions
+        // much more reliably than user-message-wrapped XML tags.
+        let mut system_extras: Vec<String> = Vec::new();
+        let mut first_non_reminder = 0;
+        for msg in messages {
+            if msg.role != Role::User { break; }
+            let all_text: String = msg.content.iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if all_text.trim().starts_with("<system-reminder>") {
+                system_extras.push(all_text);
+                first_non_reminder += 1;
+            } else {
+                break;
+            }
         }
 
-        for msg in messages {
-            let mut content_parts = Vec::new();
+        // Build system message: original system blocks + extracted reminders
+        let mut system_parts: Vec<String> = system.iter()
+            .map(|b| b.text.as_str().to_string())
+            .collect();
+        system_parts.extend(system_extras);
+
+        if !system_parts.is_empty() {
+            let system_text = system_parts.join("\n\n");
+            ollama_messages.push(serde_json::json!({
+                "role": "system",
+                "content": system_text
+            }));
+        }
+
+        // Process remaining messages (skip the leading system-reminder ones)
+        for msg in &messages[first_non_reminder..] {
+            let mut text_parts: Vec<String> = Vec::new();
+            let mut images: Vec<String> = Vec::new();
             let mut tool_calls: Vec<serde_json::Value> = Vec::new();
 
             for block in &msg.content {
                 match block {
                     ContentBlock::Text { text } => {
-                        content_parts.push(serde_json::json!({
-                            "type": "text",
-                            "text": text
-                        }));
+                        text_parts.push(text.clone());
                     }
                     ContentBlock::Image { source } => match source {
                         aemeath_core::message::ImageSource::Base64 {
-                            media_type,
+                            media_type: _,
                             data,
                         } => {
-                            content_parts.push(serde_json::json!({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": format!("data:{};base64,{}", media_type, data)
-                                }
-                            }));
+                            // ollama native format: bare base64 string, no data: prefix
+                            images.push(data.clone());
                         }
                     },
-                    ContentBlock::ToolUse { id, name, input } => {
-                        let args = serde_json::to_string(input).map_err(|e| {
-                            crate::LlmError::Config(format!(
-                                "Failed to serialize tool input: {}",
-                                e
-                            ))
-                        })?;
+                    ContentBlock::ToolUse { id: _, name, input } => {
+                        // Native format: arguments is a JSON object, not a string
                         tool_calls.push(serde_json::json!({
-                            "id": id,
-                            "type": "function",
                             "function": {
                                 "name": name,
-                                "arguments": args
+                                "arguments": input
                             }
                         }));
                     }
                     ContentBlock::ToolResult {
-                        tool_use_id,
+                        tool_use_id: _,
                         content,
                         is_error: _,
                     } => {
-                        openai_messages.push(serde_json::json!({
+                        let text = match content {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Array(parts) => parts
+                                .iter()
+                                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join(""),
+                            _ => content.to_string(),
+                        };
+                        ollama_messages.push(serde_json::json!({
                             "role": "tool",
-                            "tool_call_id": tool_use_id,
-                            "content": match content {
-                                serde_json::Value::String(s) => s.clone(),
-                                serde_json::Value::Array(parts) => {
-                                    parts.iter()
-                                        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                                        .collect::<Vec<_>>()
-                                        .join("")
-                                }
-                                _ => content.to_string()
-                            }
+                            "content": text
                         }));
                     }
                     ContentBlock::Thinking { .. } => {
-                        // Thinking blocks are not supported in Ollama format, skip
+                        // Thinking blocks are internal; not re-sent to ollama
                     }
                 }
             }
 
-            if content_parts.is_empty() && tool_calls.is_empty() {
+            if text_parts.is_empty() && images.is_empty() && tool_calls.is_empty() {
                 continue;
             }
 
@@ -192,34 +219,28 @@ impl OllamaProvider {
                 Role::Assistant => "assistant",
             };
 
-            let mut message = serde_json::json!({ "role": role });
+            let mut message = serde_json::json!({
+                "role": role,
+                "content": text_parts.join("")
+            });
 
-            if !content_parts.is_empty() {
-                if content_parts.len() == 1
-                    && content_parts[0]
-                        .get("type")
-                        .and_then(|t| t.as_str())
-                        == Some("text")
-                {
-                    message["content"] = content_parts[0]["text"].clone();
-                } else {
-                    message["content"] = serde_json::Value::Array(content_parts);
-                }
-            } else {
-                message["content"] = serde_json::Value::Null;
+            if !images.is_empty() {
+                message["images"] = serde_json::Value::Array(
+                    images.into_iter().map(serde_json::Value::String).collect()
+                );
             }
 
             if !tool_calls.is_empty() {
                 message["tool_calls"] = serde_json::Value::Array(tool_calls);
             }
 
-            openai_messages.push(message);
+            ollama_messages.push(message);
         }
 
-        Ok(openai_messages)
+        Ok(ollama_messages)
     }
 
-    /// Convert tool schemas from Anthropic format to OpenAI format
+    /// Convert tool schemas to native ollama format (same shape as OpenAI-compat)
     fn convert_tools(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value> {
         tool_schemas
             .iter()
@@ -243,6 +264,40 @@ impl OllamaProvider {
             .collect()
     }
 
+    /// Build a native `/api/chat` request body. Shared between streaming
+    /// and non-streaming paths; toggle `stream` accordingly.
+    fn build_request_body(
+        &self,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        stream: bool,
+    ) -> Result<serde_json::Value, crate::LlmError> {
+        let ollama_messages = self.convert_messages(system, messages)?;
+        let tools = Self::convert_tools(tool_schemas);
+
+        let mut request_body = serde_json::json!({
+            "model": self.model,
+            "messages": ollama_messages,
+            "stream": stream,
+            // think toggles reasoning mode natively (qwen3, deepseek-r1, gpt-oss...)
+            "think": self.reasoning,
+        });
+
+        // ollama uses `options.num_predict` for max tokens
+        if self.max_tokens > 0 && self.max_tokens <= 128000 {
+            request_body["options"] = serde_json::json!({
+                "num_predict": self.max_tokens
+            });
+        }
+
+        if !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools);
+        }
+
+        Ok(request_body)
+    }
+
     async fn send_message_non_stream(
         &self,
         system: &[SystemBlock],
@@ -250,26 +305,19 @@ impl OllamaProvider {
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let openai_messages = self.convert_messages(system, messages)?;
-        let tools = Self::convert_tools(tool_schemas);
-
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "stream": false
-        });
-
-        // Only set max_tokens if reasonable (some Ollama models ignore it)
-        if self.max_tokens > 0 && self.max_tokens <= 128000 {
-            request_body["max_tokens"] = serde_json::json!(self.max_tokens);
-        }
-
-        if !tools.is_empty() {
-            request_body["tools"] = serde_json::Value::Array(tools);
-        }
-
+        let request_body = self.build_request_body(system, messages, tool_schemas, false)?;
         let headers = self.build_headers()?;
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let url = format!("{}/api/chat", self.base_url);
+
+        log::debug!(
+            "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
+            url,
+            self.model,
+            self.reasoning,
+            messages.len(),
+            tool_schemas.len(),
+            serde_json::to_string(&request_body).map(|s| s.len()).unwrap_or(0),
+        );
 
         let response = self
             .http
@@ -314,76 +362,75 @@ impl OllamaProvider {
             .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
 
         let mut content_blocks = Vec::new();
-        let mut input_tokens = 0u32;
-        let mut output_tokens = 0u32;
+        // ollama native usage: prompt_eval_count / eval_count at top level
+        let input_tokens = body
+            .get("prompt_eval_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        let output_tokens = body
+            .get("eval_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
         let mut stop_reason = crate::types::StopReason::EndTurn;
 
-        if let Some(usage) = body.get("usage") {
-            input_tokens = usage
-                .get("prompt_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            output_tokens = usage
-                .get("completion_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
+        if let Some(done_reason) = body.get("done_reason").and_then(|v| v.as_str()) {
+            stop_reason = match done_reason {
+                "stop" => crate::types::StopReason::EndTurn,
+                "length" => crate::types::StopReason::MaxTokens,
+                _ => crate::types::StopReason::EndTurn,
+            };
         }
 
-        if let Some(choices) = body.get("choices").and_then(|c| c.as_array()) {
-            if let Some(choice) = choices.first() {
-                if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-                    stop_reason = match finish {
-                        "stop" => crate::types::StopReason::EndTurn,
-                        "tool_calls" => crate::types::StopReason::ToolUse,
-                        "length" => crate::types::StopReason::MaxTokens,
-                        _ => crate::types::StopReason::EndTurn,
-                    };
+        if let Some(message) = body.get("message") {
+            // Thinking (reasoning) content — native field is `thinking`
+            if let Some(thinking) = message.get("thinking").and_then(|v| v.as_str()) {
+                if !thinking.is_empty() {
+                    handler.on_thinking(thinking);
                 }
+            }
 
-                if let Some(message) = choice.get("message") {
-                    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-                        if !content.is_empty() {
-                            handler.on_text(content);
-                            handler.on_text_block_complete(content);
-                            content_blocks.push(ContentBlock::Text {
-                                text: content.to_string(),
+            if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                if !content.is_empty() {
+                    handler.on_text(content);
+                    handler.on_text_block_complete(content);
+                    content_blocks.push(ContentBlock::Text {
+                        text: content.to_string(),
+                    });
+                }
+            }
+
+            if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
+                if !tool_calls.is_empty() {
+                    stop_reason = crate::types::StopReason::ToolUse;
+                }
+                for (idx, tool_call) in tool_calls.iter().enumerate() {
+                    if let Some(function) = tool_call.get("function") {
+                        let id = tool_call
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("call_{}", idx));
+                        let name = function
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        // Native format: arguments is already a JSON object
+                        let input = function
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                serde_json::Value::Object(serde_json::Map::new())
                             });
-                        }
-                    }
 
-                    if let Some(tool_calls) =
-                        message.get("tool_calls").and_then(|t| t.as_array())
-                    {
-                        for tool_call in tool_calls {
-                            if let Some(function) = tool_call.get("function") {
-                                let id = tool_call
-                                    .get("id")
-                                    .and_then(|i| i.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let name = function
-                                    .get("name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let arguments = function
-                                    .get("arguments")
-                                    .and_then(|a| a.as_str())
-                                    .unwrap_or("{}");
-                                let input: serde_json::Value = serde_json::from_str(arguments)
-                                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-
-                                handler.on_tool_use_start(&name);
-                                content_blocks.push(ContentBlock::ToolUse { id, name, input });
-                            }
-                        }
+                        handler.on_tool_use_start(&name);
+                        content_blocks.push(ContentBlock::ToolUse { id, name, input });
                     }
                 }
             }
         }
 
         if content_blocks.is_empty() {
-            // Ollama non-streaming response returned no content
             return Err(crate::LlmError::Stream(
                 "Ollama returned empty response (no text or tool calls)".to_string(),
             ));
@@ -413,29 +460,20 @@ impl LlmProvider for OllamaProvider {
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let openai_messages = self.convert_messages(system, messages)?;
-        let tools = Self::convert_tools(tool_schemas);
-
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "stream": true
-        });
-
-        // Only set max_tokens if reasonable
-        if self.max_tokens > 0 && self.max_tokens <= 128000 {
-            request_body["max_tokens"] = serde_json::json!(self.max_tokens);
-        }
-
-        // NOTE: Do NOT send stream_options — Ollama does not support it
-        // and may return errors or empty responses when it's present.
-
-        if !tools.is_empty() {
-            request_body["tools"] = serde_json::Value::Array(tools);
-        }
-
+        let request_body = self.build_request_body(system, messages, tool_schemas, true)?;
         let headers = self.build_headers()?;
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let url = format!("{}/api/chat", self.base_url);
+
+        let body_bytes = serde_json::to_string(&request_body).map(|s| s.len()).unwrap_or(0);
+        log::debug!(
+            "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
+            url,
+            self.model,
+            self.reasoning,
+            messages.len(),
+            tool_schemas.len(),
+            body_bytes,
+        );
 
         let mut last_error = None;
         for attempt in 0..self.max_retries {
@@ -445,7 +483,10 @@ impl LlmProvider for OllamaProvider {
 
             if attempt > 0 {
                 let delay = std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
-                // Retry silently — attempt {attempt+1}/{max_retries}
+                log::debug!(
+                    "[ollama stream] retry {}/{} after {:?}",
+                    attempt, self.max_retries, delay
+                );
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
@@ -494,6 +535,14 @@ impl LlmProvider for OllamaProvider {
             };
 
             let status = response.status();
+            log::debug!(
+                "[ollama stream] attempt={} HTTP {} content-type={:?}",
+                attempt,
+                status,
+                response.headers().get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+            );
+
             if status == 429 {
                 last_error = Some(crate::LlmError::RateLimited);
                 continue;
@@ -501,16 +550,17 @@ impl LlmProvider for OllamaProvider {
 
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
+                log::debug!("[ollama stream] 5xx body: {}", error_body);
                 last_error = Some(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: error_body,
                 });
-                // Ollama server error — will retry
                 continue;
             }
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
+                log::debug!("[ollama stream] non-success body: {}", body);
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,
@@ -556,7 +606,11 @@ impl LlmProvider for OllamaProvider {
     }
 }
 
-/// Parse Ollama's OpenAI-compatible SSE stream
+/// Parse ollama's native `/api/chat` NDJSON stream.
+///
+/// Stream format: one JSON object per line, no `data:` prefix, no `[DONE]`.
+/// Each chunk: `{message:{role,content,thinking?,tool_calls?}, done, done_reason?, prompt_eval_count?, eval_count?}`.
+/// Tool calls typically arrive in the final `done:true` chunk for qwen3-style models.
 async fn parse_ollama_stream(
     response: reqwest::Response,
     handler: &mut dyn StreamHandler,
@@ -564,15 +618,12 @@ async fn parse_ollama_stream(
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
-    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String)> =
-        std::collections::HashMap::new();
+    let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
     let mut usage = crate::types::Usage {
         input_tokens: 0,
         output_tokens: 0,
     };
     let mut stop_reason = crate::types::StopReason::EndTurn;
-
-    let mut last_event_time: Option<std::time::Instant> = None;
 
     let byte_stream = response
         .bytes_stream()
@@ -600,122 +651,99 @@ async fn parse_ollama_stream(
             }
         };
 
-        // Stall detection
-        let now = std::time::Instant::now();
-        if let Some(last) = last_event_time {
-            let gap = now.duration_since(last);
-            if gap > STALL_THRESHOLD {
-                // Stream stall detected — silently ignored
-            }
+        if line.trim().is_empty() {
+            continue;
         }
-        last_event_time = Some(now);
+        log::trace!("[ollama stream] <- {}", line);
         handler.on_raw_line(&line);
 
-        // Parse SSE format
-        let data = if line.starts_with("data: ") {
-            &line[6..]
-        } else if line.starts_with("data:") {
-            &line[5..]
-        } else {
-            continue;
-        };
-
-        if data == "[DONE]" {
-            break;
-        }
-
-        let chunk: serde_json::Value = match serde_json::from_str(data) {
+        // Native NDJSON: parse each non-empty line as a JSON object
+        let chunk: serde_json::Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                log::debug!("[ollama stream] unparseable line ({}): {}", e, line);
+                continue;
+            }
         };
 
-        // Check for error in stream
-        if let Some(error) = chunk.get("error") {
-            let error_msg = error
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown Ollama error");
-            handler.on_error(error_msg);
+        // Stream-level error (ollama surfaces errors with an "error" key)
+        if let Some(error) = chunk.get("error").and_then(|e| e.as_str()) {
+            handler.on_error(error);
             return Err(crate::LlmError::Api {
                 error_type: "ollama_error".to_string(),
-                message: error_msg.to_string(),
+                message: error.to_string(),
             });
         }
 
-        // Extract usage if present
-        if let Some(usage_obj) = chunk.get("usage") {
-            if !usage_obj.is_null() {
-                let in_tok = usage_obj
-                    .get("prompt_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let out_tok = usage_obj
-                    .get("completion_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                if in_tok > 0 || out_tok > 0 {
-                    usage.input_tokens = in_tok;
-                    usage.output_tokens = out_tok;
+        if let Some(message) = chunk.get("message") {
+            // Thinking delta
+            if let Some(thinking) = message.get("thinking").and_then(|v| v.as_str()) {
+                if !thinking.is_empty() {
+                    handler.on_thinking(thinking);
                 }
             }
-        }
 
-        // Process choices
-        if let Some(choices) = chunk.get("choices").and_then(|c| c.as_array()) {
-            for choice in choices {
-                if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-                    stop_reason = match finish {
-                        "stop" => crate::types::StopReason::EndTurn,
-                        "tool_calls" => crate::types::StopReason::ToolUse,
-                        "length" => crate::types::StopReason::MaxTokens,
-                        _ => crate::types::StopReason::EndTurn,
-                    };
+            // Content delta
+            if let Some(content) = message.get("content").and_then(|v| v.as_str()) {
+                if !content.is_empty() {
+                    handler.on_text(content);
+                    current_text.push_str(content);
                 }
+            }
 
-                if let Some(delta) = choice.get("delta") {
-                    // Text content
-                    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                        handler.on_text(content);
-                        current_text.push_str(content);
-                    }
-
-                    // Tool calls
-                    if let Some(tool_calls) =
-                        delta.get("tool_calls").and_then(|t| t.as_array())
-                    {
-                        for tc in tool_calls {
-                            let index =
-                                tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-
-                            let entry = current_tool_calls
-                                .entry(index)
-                                .or_insert_with(|| (String::new(), String::new(), String::new()));
-
-                            if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
-                                entry.0 = id.to_string();
-                            }
-
-                            if let Some(function) = tc.get("function") {
-                                if let Some(name) =
-                                    function.get("name").and_then(|n| n.as_str())
-                                {
-                                    entry.1 = name.to_string();
-                                    if entry.0.is_empty() {
-                                        entry.0 = format!("call_{}", index);
-                                    }
-                                }
-                                if let Some(args) =
-                                    function.get("arguments").and_then(|a| a.as_str())
-                                {
-                                    entry.2.push_str(args);
-                                }
-                            }
+            // Tool calls (typically in the final done:true chunk)
+            if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
+                for (idx, tc) in tool_calls.iter().enumerate() {
+                    if let Some(function) = tc.get("function") {
+                        let id = tc
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("call_{}", idx));
+                        let name = function
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let input = function
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                serde_json::Value::Object(serde_json::Map::new())
+                            });
+                        if !name.is_empty() {
+                            final_tool_calls.push((id, name, input));
                         }
                     }
                 }
             }
         }
+
+        // Final chunk: done=true carries usage + done_reason
+        if chunk.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if let Some(reason) = chunk.get("done_reason").and_then(|v| v.as_str()) {
+                stop_reason = match reason {
+                    "stop" => crate::types::StopReason::EndTurn,
+                    "length" => crate::types::StopReason::MaxTokens,
+                    _ => crate::types::StopReason::EndTurn,
+                };
+            }
+            if let Some(n) = chunk.get("prompt_eval_count").and_then(|v| v.as_u64()) {
+                usage.input_tokens = n as u32;
+            }
+            if let Some(n) = chunk.get("eval_count").and_then(|v| v.as_u64()) {
+                usage.output_tokens = n as u32;
+            }
+            // Tool calls override the stop reason
+            if !final_tool_calls.is_empty() {
+                stop_reason = crate::types::StopReason::ToolUse;
+            }
+            break;
+        }
     }
+
+    let text_len = current_text.len();
+    let tool_count = final_tool_calls.len();
 
     // Build final content blocks
     if !current_text.is_empty() {
@@ -725,17 +753,15 @@ async fn parse_ollama_stream(
         });
     }
 
-    let mut sorted_tool_calls: Vec<_> = current_tool_calls.into_iter().collect();
-    sorted_tool_calls.sort_by_key(|(i, _)| *i);
-
-    for (_, (id, name, arguments)) in sorted_tool_calls {
-        if !name.is_empty() {
-            handler.on_tool_use_start(&name);
-            let input: serde_json::Value = serde_json::from_str(&arguments)
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-            content_blocks.push(ContentBlock::ToolUse { id, name, input });
-        }
+    for (id, name, input) in final_tool_calls {
+        handler.on_tool_use_start(&name);
+        content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
+
+    log::debug!(
+        "[ollama stream] done text_bytes={} tool_calls={} stop={:?} in_tok={} out_tok={}",
+        text_len, tool_count, stop_reason, usage.input_tokens, usage.output_tokens
+    );
 
     Ok(StreamResponse {
         assistant_message: Message {

@@ -309,6 +309,7 @@ pub async fn run_repl(
 
         let mut turns = 0;
         let mut last_api_input_tokens: u64 = 0;
+        let turn_start = std::time::Instant::now();
         loop {
             if turns >= MAX_TURNS {
                 eprintln!("max turns ({MAX_TURNS}) reached");
@@ -597,6 +598,7 @@ pub async fn run_repl(
         ctrlc_handle.abort();
         interrupted.store(false, Ordering::Release);
 
+        TerminalRenderer::print_done(turn_start.elapsed());
         TerminalRenderer::print_newline();
     }
 

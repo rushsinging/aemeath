@@ -38,8 +38,8 @@ enum UiEvent {
     Thinking(String),
     TextBlockComplete(String),
     ToolCallStart(String),
-    ToolCall { name: String, summary: String },
-    ToolResult { tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
+    ToolCall { id: String, name: String, summary: String },
+    ToolResult { id: String, tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
     Usage { input: u32, output: u32, last_input: u32 },
     Error(String),
     Cancelled,
@@ -48,6 +48,8 @@ enum UiEvent {
     /// Sync messages back from background task to main thread
     MessagesSync(Vec<Message>),
     Done,
+    /// Conversation completed with elapsed duration for done message
+    DoneWithDuration(std::time::Duration),
     /// Clipboard image loaded from background task
     ClipboardImage(ProcessedImage),
     /// System message (non-error)
@@ -189,12 +191,14 @@ impl App {
                                   self.output_area.push_line(OutputLine {
                                       content: format!("    {line}"),
                                       style: LineStyle::System,
+                                      ..Default::default()
                                   });
                               }
                               if total > 3 {
                                   self.output_area.push_line(OutputLine {
                                       content: format!("    ... ({} lines omitted)", total - 3),
                                       style: LineStyle::System,
+                                      ..Default::default()
                                   });
                               }
                               // Blank line after tool result
@@ -516,26 +520,17 @@ impl App {
                                 self.output_area.start_spinner();
                                 self.status_bar.set_processing(&format!("Calling {}...", name));
                             }
-                            UiEvent::ToolCall { name, summary } => {
-                                self.output_area.push_tool_call(&name, &summary);
+                            UiEvent::ToolCall { id, name, summary } => {
+                                self.output_area.push_tool_call(&id, &name, &summary);
                                 self.output_area.start_spinner();
                             }
-                            UiEvent::ToolResult { tool_name, output, is_error, images } => {
+                            UiEvent::ToolResult { id, tool_name, output, is_error, images } => {
                                   let image_note = if images.is_empty() {
                                       String::new()
                                   } else {
                                       format!("  │  [{} image(s) attached]\n", images.len())
                                   };
-                                  self.output_area.push_tool_result_with_diff(&tool_name, &output, is_error);
-                                  if !image_note.is_empty() {
-                                      self.output_area.push_line(OutputLine {
-                                          content: image_note.trim().to_string(),
-                                          style: LineStyle::System,
-                                      });
-                                  }
-                                  // Add blank line after tool result to separate from
-                                  // subsequent assistant text or the next tool call.
-                                  self.output_area.push_system("");
+                                  self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
                               }
                             UiEvent::Usage { input, output, last_input } => {
                                 self.total_input_tokens += input as u64;
@@ -603,6 +598,53 @@ impl App {
                                     self.status_bar.set_processing("Thinking...");
                                     self.output_area.start_spinner();
                                     is_processing = true; // Sync with StatusBar
+
+                                    let tx = ui_tx.clone();
+                                    let client = self.client.as_ref().unwrap_or(&client).clone();
+                                    let registry = registry.clone();
+                                    let system_blocks = system_blocks.clone();
+                                    let system_prompt_text = system_prompt_text.clone();
+                                    let user_context = user_context.clone();
+                                    let messages = self.messages.clone();
+                                    let cwd = self.cwd.clone();
+                                    let read_files = read_files.clone();
+                                    let agent_runner = agent_runner.clone();
+                                    let interrupted = interrupted.clone();
+                                    let cancel = CancellationToken::new();
+                                    if let Ok(mut guard) = active_cancel.lock() {
+                                        *guard = Some(cancel.clone());
+                                    }
+                                    let sid = self.session_id.clone();
+                                    let task_store = task_store.clone();
+                                    let agent_sem = agent_semaphore.clone();
+                                    tokio::spawn(async move {
+                                        process_in_background(
+                                            tx, client, registry, system_blocks,
+                                            system_prompt_text, user_context, messages,
+                                            context_size, cwd, sid, read_files,
+                                            agent_runner, allow_all, interrupted, cancel,
+                                            task_store,
+                                            max_tool_concurrency, max_agent_concurrency, agent_sem,
+                                        ).await;
+                                    });
+                                }
+                            }
+                            UiEvent::DoneWithDuration(elapsed) => {
+                                self.output_area.push_done(elapsed);
+                                // Now delegate to Done logic
+                                self.output_area.finish_streaming();
+                                self.output_area.stop_spinner();
+                                is_processing = false;
+                                self.status_bar.clear_processing();
+                                self.status_bar.set_success("Ready");
+
+                                if let Some(queued) = self.queued_input.take() {
+                                    interrupted.store(false, Ordering::Relaxed);
+
+                                    self.messages.push(Message::user(&queued));
+                                    self.status_bar.set_processing("Thinking...");
+                                    self.output_area.start_spinner();
+                                    is_processing = true;
 
                                     let tx = ui_tx.clone();
                                     let client = self.client.as_ref().unwrap_or(&client).clone();
@@ -861,10 +903,15 @@ impl App {
 
                                     if input.starts_with('/') {
                                         let review_prompt = self.handle_slash_command(&input).await;
+                                        self.input_area.add_history(&input);
                                         self.input_area.clear();
 
                                         // If the command returned a review prompt, send it to the LLM
                                         if let Some(prompt) = review_prompt {
+                                            // Echo the raw slash input into the output area so the
+                                            // user sees what they submitted immediately (otherwise
+                                            // nothing shows until the assistant reply arrives).
+                                            self.output_area.push_user_message(&input);
                                             self.messages.push(Message::user(&prompt));
 
                                             interrupted.store(false, Ordering::Relaxed);
@@ -1523,6 +1570,7 @@ async fn process_in_background(
 
     #[allow(unused_assignments)]
     let mut last_api_input_tokens: u64 = 0;
+    let turn_start = std::time::Instant::now();
 
     for _ in 0..MAX_TURNS {
         if interrupted.load(Ordering::Relaxed) {
@@ -1540,22 +1588,32 @@ async fn process_in_background(
         }
         impl StreamHandler for TuiStreamHandler {
             fn on_text(&mut self, text: &str) {
-                let _ = self.tx.try_send(UiEvent::Text(text.to_string()));
+                if let Err(e) = self.tx.try_send(UiEvent::Text(text.to_string())) {
+                    log::warn!("UI channel full, dropped Text event ({} bytes): {e}", text.len());
+                }
             }
             fn on_tool_use_start(&mut self, name: &str) {
-                let _ = self.tx.try_send(UiEvent::ToolCallStart(name.to_string()));
+                if let Err(e) = self.tx.try_send(UiEvent::ToolCallStart(name.to_string())) {
+                    log::warn!("UI channel full, dropped ToolCallStart({name}): {e}");
+                }
             }
             fn on_error(&mut self, error: &str) {
                 // Use SystemMessage for non-fatal warnings from the LLM layer
                 // (streaming retries, fallbacks, idle timeouts).
                 // UiEvent::Error would stop processing and reset status bar.
-                let _ = self.tx.try_send(UiEvent::SystemMessage(format!("[warn] {}", error)));
+                if let Err(e) = self.tx.try_send(UiEvent::SystemMessage(format!("[warn] {}", error))) {
+                    log::warn!("UI channel full, dropped SystemMessage: {e}");
+                }
             }
             fn on_text_block_complete(&mut self, text: &str) {
-                let _ = self.tx.try_send(UiEvent::TextBlockComplete(text.to_string()));
+                if let Err(e) = self.tx.try_send(UiEvent::TextBlockComplete(text.to_string())) {
+                    log::warn!("UI channel full, dropped TextBlockComplete ({} bytes): {e}", text.len());
+                }
             }
             fn on_thinking(&mut self, text: &str) {
-                let _ = self.tx.try_send(UiEvent::Thinking(text.to_string()));
+                if let Err(e) = self.tx.try_send(UiEvent::Thinking(text.to_string())) {
+                    log::warn!("UI channel full, dropped Thinking event ({} bytes): {e}", text.len());
+                }
             }
         }
 
@@ -1645,6 +1703,7 @@ async fn process_in_background(
                     // Report denied tools
                     for call in &denied {
                         let _ = tx.send(UiEvent::ToolResult {
+                            id: call.id.clone(),
                             tool_name: call.name.clone(),
                             output: format!("Tool {} denied: use --allow-all to permit write operations", call.name),
                             is_error: true,
@@ -1664,39 +1723,65 @@ async fn process_in_background(
                         aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
 
-                    let non_agent_results = if !non_agent_calls.is_empty() {
-                        agent.execute_tools(&non_agent_calls).await
-                    } else {
-                        Vec::new()
-                    };
-
-                    // Build tool name lookup for interleaved call→result display
+                    // Build tool name lookup (used for the later assistant message build)
                     let tool_name_map: std::collections::HashMap<&str, &str> = tool_calls
                         .iter()
                         .map(|c| (c.id.as_str(), c.name.as_str()))
                         .collect();
+                    let _ = &tool_name_map; // keep for downstream use
 
-                    // Send non-agent results with interleaved ToolCall→ToolResult events
-                    for (_id, output, is_error, images) in non_agent_results.iter() {
-                        let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
-                        if !is_task_tool(tool_name) {
-                            // Show tool call header before each result
-                            let summary = tool_calls.iter()
-                                .find(|c| c.id == *_id.as_str())
-                                .map(|c| c.input.to_string())
-                                .unwrap_or_default();
+                    // 1) Emit all ToolCall headers upfront so the user sees
+                    //    every about-to-run tool immediately, in call order.
+                    //    Results are later paired to the correct header via
+                    //    tool_use_id (see push_tool_result_with_diff).
+                    for call in &non_agent_calls {
+                        if !is_task_tool(&call.name) {
                             let _ = tx.send(UiEvent::ToolCall {
-                                name: tool_name.to_string(),
-                                summary,
-                            }).await;
-                            let _ = tx.send(UiEvent::ToolResult {
-                                tool_name: tool_name.to_string(),
-                                output: output.clone(),
-                                is_error: *is_error,
-                                images: images.clone(),
+                                id: call.id.clone(),
+                                name: call.name.clone(),
+                                summary: call.input.to_string(),
                             }).await;
                         }
                     }
+
+                    // 2) Execute tools in parallel. Each single-tool future
+                    //    sends its ToolResult as soon as it finishes, so
+                    //    faster tools light up green (under their own header)
+                    //    while slower ones still spin.
+                    use futures::future::join_all;
+                    let per_tool_futures = non_agent_calls.iter().map(|call| {
+                        let call = aemeath_core::agent::ToolCall {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            input: call.input.clone(),
+                        };
+                        let tx = tx.clone();
+                        let agent_ref = &agent;
+                        async move {
+                            let skip_ui = is_task_tool(&call.name);
+                            let results = agent_ref
+                                .execute_tools(std::slice::from_ref(&call))
+                                .await;
+                            let mut collected = Vec::with_capacity(results.len());
+                            for (id, output, is_error, images) in results {
+                                if !skip_ui {
+                                    let _ = tx.send(UiEvent::ToolResult {
+                                        id: id.clone(),
+                                        tool_name: call.name.clone(),
+                                        output: output.clone(),
+                                        is_error,
+                                        images: images.clone(),
+                                    }).await;
+                                }
+                                collected.push((id, output, is_error, images));
+                            }
+                            collected
+                        }
+                    });
+                    let collected_per_tool: Vec<Vec<(String, String, bool, Vec<aemeath_core::tool::ImageData>)>> =
+                        join_all(per_tool_futures).await;
+                    let non_agent_results: Vec<(String, String, bool, Vec<aemeath_core::tool::ImageData>)> =
+                        collected_per_tool.into_iter().flatten().collect();
 
                     // Execute Agent calls in batches of max_agent_concurrency
                     let mut agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
@@ -1788,6 +1873,16 @@ async fn process_in_background(
                             aemeath_core::agent::ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                         }).collect();
 
+                        // Emit Agent ToolCall headers BEFORE execution so the
+                        // user sees each sub-agent spinning up immediately.
+                        for call in &batch_calls {
+                            let _ = tx.send(UiEvent::ToolCall {
+                                id: call.id.clone(),
+                                name: call.name.clone(),
+                                summary: call.input.to_string(),
+                            }).await;
+                        }
+
                         let batch_results = agent.execute_tools(&batch_calls).await;
 
                         // Update task status based on result
@@ -1804,19 +1899,13 @@ async fn process_in_background(
                             }
                         }
 
-                        // Send interleaved ToolCall→ToolResult for this batch
+                        // Emit only ToolResult events — headers already shown
+                        // before execute_tools above. Results are routed back
+                        // to their header via tool_use_id (id).
                         for (_id, output, is_error, images) in batch_results.iter() {
                             let tool_name = tool_name_map.get(_id.as_str()).unwrap_or(&"Unknown");
-                            // Show tool call header before each result
-                            let summary = batch.iter()
-                                .find(|c| c.id == *_id.as_str())
-                                .map(|c| c.input.to_string())
-                                .unwrap_or_default();
-                            let _ = tx.send(UiEvent::ToolCall {
-                                name: tool_name.to_string(),
-                                summary,
-                            }).await;
                             let _ = tx.send(UiEvent::ToolResult {
+                                id: _id.clone(),
                                 tool_name: tool_name.to_string(),
                                 output: output.clone(),
                                 is_error: *is_error,
@@ -1832,13 +1921,13 @@ async fn process_in_background(
                         handle.abort();
                     }
 
-                    // Insert task snapshot if TaskCreate or TaskUpdate(completed) was called
+                    // Insert task snapshot only when a task is completed — skip
+                    // during pure creation phases to avoid redundant incremental lists.
                     {
-                        let has_task_create = tool_name_map.values().any(|n| *n == "TaskCreate");
                         let has_task_update_completed = tool_name_map.values().any(|n| *n == "TaskUpdate")
                             && non_agent_results.iter().any(|(_, output, is_err, _)| !is_err && output.contains("Completed"));
 
-                        if has_task_create || has_task_update_completed {
+                        if has_task_update_completed {
                             let tasks = _task_store.list().await;
                             let snapshot = crate::tui::task_display::format_task_snapshot(&tasks);
                             if !snapshot.is_empty() {
@@ -1937,7 +2026,7 @@ async fn process_in_background(
 
     // Sync messages back to main thread before signaling done
     let _ = tx.send(UiEvent::MessagesSync(messages)).await;
-    let _ = tx.send(UiEvent::Done).await;
+    let _ = tx.send(UiEvent::DoneWithDuration(turn_start.elapsed())).await;
 }
 
 /// Truncate `s` to at most `max_bytes`, snapping back to the nearest char boundary

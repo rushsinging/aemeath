@@ -64,10 +64,15 @@ struct SpinnerState {
 }
 
 /// A line in the output with styling information
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct OutputLine {
     pub content: String,
     pub style: LineStyle,
+    /// Identifier tying this line to a specific tool_use block.
+    /// Set on the tool-call header and all its detail/result lines so that
+    /// parallel tool executions can be correctly paired when results arrive
+    /// out of call order.
+    pub tool_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -154,6 +159,44 @@ fn truncate_unicode_width(s: &str, max_width: usize) -> String {
         end = i + ch.len_utf8();
     }
     format!("{}...", &s[..end])
+}
+
+/// Build diff lines between `old_content` and `new_content` as OutputLines.
+/// All lines are tagged with the given `id_tag` so they stay with the
+/// originating tool block.
+fn build_diff_lines(
+    old_content: &str,
+    new_content: &str,
+    id_tag: &Option<String>,
+    out: &mut Vec<OutputLine>,
+) {
+    use similar::{ChangeTag, TextDiff};
+    let diff = TextDiff::from_lines(old_content, new_content);
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Delete => {
+                out.push(OutputLine {
+                    content: format!("  - {}", change),
+                    style: LineStyle::DiffRemove,
+                    tool_id: id_tag.clone(),
+                });
+            }
+            ChangeTag::Insert => {
+                out.push(OutputLine {
+                    content: format!("  + {}", change),
+                    style: LineStyle::DiffAdd,
+                    tool_id: id_tag.clone(),
+                });
+            }
+            ChangeTag::Equal => {
+                out.push(OutputLine {
+                    content: format!("{INDENT}{change}"),
+                    style: LineStyle::System,
+                    tool_id: id_tag.clone(),
+                });
+            }
+        }
+    }
 }
 
 fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
@@ -494,6 +537,38 @@ impl OutputArea {
         }
     }
 
+    /// Insert a batch of lines at a specific index. Keeps `streaming_start`
+    /// and `scroll_offset` consistent so that the visible content doesn't
+    /// jump when results are spliced mid-buffer (parallel tool results).
+    fn insert_lines_at(&mut self, idx: usize, lines: Vec<OutputLine>) {
+        let n = lines.len();
+        if n == 0 {
+            return;
+        }
+        let idx = idx.min(self.lines.len());
+        for (offset, line) in lines.into_iter().enumerate() {
+            self.lines.insert(idx + offset, line);
+        }
+        if let Some(start) = self.streaming_start {
+            if start >= idx {
+                self.streaming_start = Some(start + n);
+            }
+        }
+        if !self.auto_scroll {
+            self.scroll_offset += n;
+        }
+        // Prune excess from front (symmetric to push_line)
+        while self.lines.len() > MAX_LINES {
+            self.lines.pop_front();
+            if self.scroll_offset > 0 {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+            }
+            if let Some(start) = self.streaming_start {
+                self.streaming_start = Some(start.saturating_sub(1));
+            }
+        }
+    }
+
     /// Add a line, pre-wrapping if it's wider than terminal
     pub fn push_line(&mut self, line: OutputLine) {
         if self.lines.len() >= MAX_LINES {
@@ -516,6 +591,7 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: line.to_string(),
                 style,
+                ..Default::default()
             });
         }
     }
@@ -528,6 +604,7 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: format!("{}{}", prefix, line),
                 style: LineStyle::User,
+                ..Default::default()
             });
             // Track lines added while streaming (for queue display)
             if self.streaming_start.is_some() {
@@ -539,6 +616,7 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: String::new(),
                 style: LineStyle::User,
+                ..Default::default()
             });
             if self.streaming_start.is_some() {
                 self.queued_line_count += 1;
@@ -663,6 +741,7 @@ impl OutputArea {
                 self.lines.push_back(OutputLine {
                     content: display_line,
                     style,
+                    ..Default::default()
                 });
             }
         }
@@ -672,6 +751,7 @@ impl OutputArea {
             self.lines.push_back(OutputLine {
                 content: String::new(),
                 style: LineStyle::Assistant,
+                ..Default::default()
             });
         }
 
@@ -771,7 +851,14 @@ impl OutputArea {
 
     /// Add a tool call with human-friendly formatting.
     /// Shows header with status dot and indented details.
-    pub fn push_tool_call(&mut self, name: &str, summary: &str) {
+    /// `tool_id` is the tool_use_id; it's stamped on the header and every
+    /// detail line so `push_tool_result_with_diff` can later locate this
+    /// tool's block even when multiple tools run in parallel.
+    pub fn push_tool_call(&mut self, tool_id: &str, name: &str, summary: &str) {
+        // Defensive: close any open streaming block so the upcoming tool-call
+        // lines aren't wiped by a later do_rerender. This protects against a
+        // dropped TextBlockComplete event (mpsc try_send under load).
+        self.finish_streaming();
         // For TodoWrite, use the cache to resolve subjects on status-only updates
         let (header, details) = if name == "TodoWrite" {
             self.format_todowrite(summary)
@@ -783,6 +870,7 @@ impl OutputArea {
         self.push_line(OutputLine {
             content: header,
             style: LineStyle::ToolCallRunning,
+            tool_id: Some(tool_id.to_string()),
         });
 
         // Push detail lines indented under the header
@@ -796,14 +884,12 @@ impl OutputArea {
                 self.push_line(OutputLine {
                     content: format!("{INDENT}{detail}"),
                     style: detail_style,
+                    tool_id: Some(tool_id.to_string()),
                 });
             }
-
-        // Blank line to visually separate consecutive tool calls
-        self.push_line(OutputLine {
-            content: String::new(),
-            style: LineStyle::System,
-        });
+        // Note: no trailing blank line here. The blank separator is appended
+        // after the tool result (see app.rs UiEvent::ToolResult handler), so
+        // the header sits flush with its own result lines.
     }
 
     /// Format TodoWrite tool call, maintaining a subject cache so that
@@ -866,6 +952,7 @@ impl OutputArea {
         self.push_line(OutputLine {
             content: header,
             style: LineStyle::ToolCallSuccess,
+            ..Default::default()
         });
 
         // Bash detail lines (the $ command) use white, others gray
@@ -878,6 +965,7 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: format!("{INDENT}{detail}"),
                 style: detail_style,
+                ..Default::default()
             });
         }
 
@@ -885,112 +973,146 @@ impl OutputArea {
         self.push_line(OutputLine {
             content: String::new(),
             style: LineStyle::System,
+            ..Default::default()
         });
     }
 
-    /// Add a tool result with diff support.
-    /// For Edit tool results containing diff information, displays with red/green backgrounds.
-    pub fn push_tool_result_with_diff(&mut self, tool_name: &str, result: &str, is_error: bool) {
-          // Update the most recent ToolCallRunning header line to completed/error state
-          // This stops the spinner animation for this tool
+    /// Add a tool result with diff support, routed under the matching
+    /// tool-call header by `tool_id`. For parallel tool execution each
+    /// result is spliced right after its own `● Name` block, so the
+    /// header and result stay visually paired regardless of completion
+    /// order. `image_note` is an optional system-style line appended after
+    /// the result.
+    pub fn push_tool_result_with_diff(
+        &mut self,
+        tool_id: &str,
+        tool_name: &str,
+        result: &str,
+        is_error: bool,
+        image_note: &str,
+    ) {
+        self.finish_streaming();
+
         let done_icon = if is_error { "✗" } else { "✓" };
-        let done_style = if is_error { LineStyle::ToolCallError } else { LineStyle::ToolCallSuccess };
-        for line in self.lines.iter_mut().rev() {
-            if matches!(line.style, LineStyle::ToolCallRunning) {
+        let done_style = if is_error {
+            LineStyle::ToolCallError
+        } else {
+            LineStyle::ToolCallSuccess
+        };
+
+        // 1) Locate this tool's running header by id, flip its icon/style.
+        //    Fallback to "any latest running header" keeps behavior sane for
+        //    legacy callers (denied tools, MCP flows) that didn't push a
+        //    header tagged with this id.
+        let mut header_idx: Option<usize> = None;
+        for (idx, line) in self.lines.iter_mut().enumerate() {
+            if matches!(line.style, LineStyle::ToolCallRunning)
+                && line.tool_id.as_deref() == Some(tool_id)
+            {
                 line.content = line.content.replacen('●', done_icon, 1);
                 line.style = done_style;
+                header_idx = Some(idx);
                 break;
             }
         }
-
-        if is_error {
-            self.push_line(OutputLine {
-                content: format!("{INDENT}✗ {result}"),
-                style: LineStyle::ToolCallError,
-            });
-            return;
+        if header_idx.is_none() {
+            for (idx, line) in self.lines.iter_mut().enumerate().rev() {
+                if matches!(line.style, LineStyle::ToolCallRunning) {
+                    line.content = line.content.replacen('●', done_icon, 1);
+                    line.style = done_style;
+                    header_idx = Some(idx);
+                    break;
+                }
+            }
         }
 
-        // Special handling for Edit tool with diff output
-        if tool_name == "Edit" && result.contains("---DIFF---\n") {
+        // 2) Build the full result block as a Vec<OutputLine>, all tagged
+        //    with this tool_id so the block boundary is discoverable later
+        //    (e.g. if another result inserts into the same region).
+        let id_tag = Some(tool_id.to_string());
+        let mut result_lines: Vec<OutputLine> = Vec::new();
+
+        if is_error {
+            result_lines.push(OutputLine {
+                content: format!("{INDENT}✗ {result}"),
+                style: LineStyle::ToolCallError,
+                tool_id: id_tag.clone(),
+            });
+        } else if tool_name == "Edit" && result.contains("---DIFF---\n") {
             let parts: Vec<&str> = result.splitn(3, "---DIFF---\n").collect();
             if parts.len() == 3 {
                 let summary = parts[0].trim();
-                let old_content = parts[1];
-                let new_content = parts[2];
-                
-                // Show diff with line-by-line coloring
-                self.push_diff_lines(old_content, new_content);
-
-                // Show summary last
-                self.push_line(OutputLine {
+                build_diff_lines(parts[1], parts[2], &id_tag, &mut result_lines);
+                result_lines.push(OutputLine {
                     content: format!("{INDENT}✓ {summary}"),
                     style: LineStyle::ToolCallSuccess,
+                    tool_id: id_tag.clone(),
                 });
-                return;
-            }
-        }
-
-        if !result.trim().is_empty() {
-            // Task tools get more lines to show the task list summary
-            let max_lines = if matches!(tool_name, "TaskList") {
-                20
             } else {
-                3
-            };
-
-            let total = result.lines().count();
-            let display_lines: Vec<&str> = result.lines().take(max_lines).collect();
-            let has_more = total > max_lines;
-
-            for line in display_lines.iter() {
-                self.push_line(OutputLine {
-                    content: format!("{INDENT}{line}"),
-                    style: LineStyle::System,
+                result_lines.push(OutputLine {
+                    content: format!("{INDENT}✓ {tool_name} completed"),
+                    style: LineStyle::ToolCallSuccess,
+                    tool_id: id_tag.clone(),
                 });
             }
-            if has_more {
-                self.push_line(OutputLine {
-                    content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
-                    style: LineStyle::System,
-                });
-            }
-        }
-
-        // Show success indicator last
-        self.push_line(OutputLine {
-            content: format!("{INDENT}✓ {tool_name} completed"),
-            style: LineStyle::ToolCallSuccess,
-        });
-    }
-
-    /// Render diff between old and new content with colored lines.
-    fn push_diff_lines(&mut self, old_content: &str, new_content: &str) {
-        use similar::{ChangeTag, TextDiff};
-        let diff = TextDiff::from_lines(old_content, new_content);
-        
-        for change in diff.iter_all_changes() {
-            match change.tag() {
-                ChangeTag::Delete => {
-                    self.push_line(OutputLine {
-                        content: format!("  - {}", change),
-                        style: LineStyle::DiffRemove,
-                    });
-                }
-                ChangeTag::Insert => {
-                    self.push_line(OutputLine {
-                        content: format!("  + {}", change),
-                        style: LineStyle::DiffAdd,
-                    });
-                }
-                ChangeTag::Equal => {
-                    self.push_line(OutputLine {
-                        content: format!("{INDENT}{change}"),
+        } else {
+            if !result.trim().is_empty() {
+                let max_lines = if matches!(tool_name, "TaskList") { 20 } else { 3 };
+                let total = result.lines().count();
+                for line in result.lines().take(max_lines) {
+                    result_lines.push(OutputLine {
+                        content: format!("{INDENT}{line}"),
                         style: LineStyle::System,
+                        tool_id: id_tag.clone(),
+                    });
+                }
+                if total > max_lines {
+                    result_lines.push(OutputLine {
+                        content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
+                        style: LineStyle::System,
+                        tool_id: id_tag.clone(),
                     });
                 }
             }
+            result_lines.push(OutputLine {
+                content: format!("{INDENT}✓ {tool_name} completed"),
+                style: LineStyle::ToolCallSuccess,
+                tool_id: id_tag.clone(),
+            });
         }
+
+        if !image_note.is_empty() {
+            result_lines.push(OutputLine {
+                content: image_note.trim().to_string(),
+                style: LineStyle::System,
+                tool_id: id_tag.clone(),
+            });
+        }
+
+        // Trailing blank separator — previously emitted by app.rs, now
+        // folded in so the entire block stays together when inserted.
+        result_lines.push(OutputLine {
+            content: String::new(),
+            style: LineStyle::System,
+            tool_id: id_tag.clone(),
+        });
+
+        // 3) Splice the result right after this tool's block. The block is
+        //    header + consecutive lines sharing the same tool_id. If the
+        //    header couldn't be located, fall back to buffer tail.
+        let insert_at = if let Some(start) = header_idx {
+            let mut end = start;
+            while end + 1 < self.lines.len()
+                && self.lines[end + 1].tool_id.as_deref() == Some(tool_id)
+            {
+                end += 1;
+            }
+            end + 1
+        } else {
+            self.lines.len()
+        };
+
+        self.insert_lines_at(insert_at, result_lines);
     }
 
     /// Add a tool result with smart truncation.
@@ -1029,6 +1151,7 @@ impl OutputArea {
                 self.push_line(OutputLine {
                     content: line.clone(),
                     style: LineStyle::ToolResult,
+                    ..Default::default()
                 });
             }
         } else {
@@ -1037,6 +1160,7 @@ impl OutputArea {
                 self.push_line(OutputLine {
                     content: line.clone(),
                     style: LineStyle::ToolResult,
+                    ..Default::default()
                 });
             }
             // Collapse indicator with visual separator
@@ -1044,20 +1168,24 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: format!("  ┌─ {} lines hidden ({} total) ─┐", hidden, total),
                 style: LineStyle::System,
+                ..Default::default()
             });
             self.push_line(OutputLine {
                 content: "  │     Press Shift+End to scroll to bottom     │".to_string(),
                 style: LineStyle::System,
+                ..Default::default()
             });
             self.push_line(OutputLine {
                 content: "  └─────────────────────────────────────────────┘".to_string(),
                 style: LineStyle::System,
+                ..Default::default()
             });
             // Show tail
             for line in &truncated_lines[total - KEEP_TAIL..] {
                 self.push_line(OutputLine {
                     content: line.clone(),
                     style: LineStyle::ToolResult,
+                    ..Default::default()
                 });
             }
         }
@@ -1065,9 +1193,11 @@ impl OutputArea {
 
     /// Add an error message
     pub fn push_error(&mut self, error: &str) {
+        self.finish_streaming();
         self.push_line(OutputLine {
             content: format!("Error: {}", error),
             style: LineStyle::Error,
+            ..Default::default()
         });
     }
 
@@ -1078,16 +1208,19 @@ impl OutputArea {
         self.push_line(OutputLine {
             content: "Cancelled".to_string(),
             style: LineStyle::Error,
+            ..Default::default()
         });
     }
 
     /// Add a system message
     pub fn push_system(&mut self, msg: &str) {
+        self.finish_streaming();
         if msg.is_empty() {
             // Empty string produces no lines via .lines(), push blank line directly
             self.push_line(OutputLine {
                 content: String::new(),
                 style: LineStyle::System,
+                ..Default::default()
             });
             return;
         }
@@ -1095,8 +1228,41 @@ impl OutputArea {
             self.push_line(OutputLine {
                 content: line.to_string(),
                 style: LineStyle::System,
+                ..Default::default()
             });
         }
+    }
+
+    /// Add a "done" message with random cooking verb and elapsed time
+    pub fn push_done(&mut self, elapsed: std::time::Duration) {
+        let verbs = [
+            "Sautéed", "Baked", "Grilled", "Simmered", "Roasted",
+            "Brewed", "Toasted", "Stewed", "Marinated", "Charred",
+            "Poached", "Steamed", "Smoked", "Brûléed", "Flambéed",
+            "Fermented", "Pickled", "Cured", "Seared", "Blanched",
+        ];
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let idx = COUNTER.fetch_add(1, Ordering::Relaxed) % verbs.len();
+        let verb = verbs[idx];
+
+        let secs = elapsed.as_secs();
+        let duration = if secs >= 60 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}s", secs)
+        };
+
+        self.push_line(OutputLine {
+            content: format!("✻ {verb} for {duration}"),
+            style: LineStyle::System,
+            ..Default::default()
+        });
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::System,
+            ..Default::default()
+        });
     }
 
     /// Scroll up by the given number of lines
@@ -1595,7 +1761,7 @@ mod tests {
         let (header, details) = format_tool_call("TodoRun", raw);
         assert_eq!(header, "● TodoRun");
         assert_eq!(details.len(), 1);
-        assert_eq!(details[0], "max turns per todo: 100");
+        assert_eq!(details[0], "execute all pending todos");
     }
 
     #[test]

@@ -60,4 +60,8 @@ impl StyledText {
     pub fn highlight(text: &str) -> String {
         format!("{}", style(text).cyan().bold())
     }
+
+    pub fn done_message(text: &str) -> String {
+        format!("{}", style(text).dim())
+    }
 }
