@@ -94,6 +94,7 @@ impl OllamaProvider {
     }
 
     /// Convert Anthropic-style system blocks to native ollama system message
+    #[allow(dead_code)]
     fn convert_system_to_message(system: &[SystemBlock]) -> serde_json::Value {
         let system_text: String = system
             .iter()

@@ -73,6 +73,7 @@ const GUIDANCE_MINIMAX: &str = r#"# MiniMax Model Guidance
 const GUIDANCE_OLLAMA: &str = r#"# Local Model Guidance
 - This is a local model — response may be slower. Avoid requesting very large tool outputs.
 - Keep tool result sizes small: use Read with limit parameter, use Grep instead of reading entire files.
+- The user's language and style preferences are included in the <system-reminder> context within the system message above. Follow them strictly — e.g. if the user prefers Chinese replies, respond in Chinese.
 "#;
 
 /// Resolve the guidance text for a given provider/model pair.
