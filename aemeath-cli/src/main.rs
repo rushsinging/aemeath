@@ -61,6 +61,10 @@ async fn main() {
 
     // 加载 config.json 以获取 provider 默认值 (apiKey, baseUrl, model)
     // 优先级: CLI args > env vars > config.json > built-in defaults
+
+    // 初始化 guidance 目录（首次运行时生成默认 guidance 文件）
+    aemeath_core::guidance::init_guidance_dir();
+
     let config_file = {
         let paths = [
             dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
@@ -199,7 +203,14 @@ async fn main() {
                 }
             }
         }
-        // 3. 内置默认值
+        // 3. 硬编码默认值（仅当用户没有显式指定 provider 且无 config 时）
+        if args.provider != "anthropic" {
+            log::error!(
+                "No model configured for provider '{}'. Add a model configuration to ~/.aemeath/config.json, or specify --model.",
+                args.provider
+            );
+            std::process::exit(1);
+        }
         provider.default_model().to_string()
     });
 
@@ -298,10 +309,11 @@ async fn main() {
             .as_ref()
             .map(|c| c.models.guidance.clone())
             .unwrap_or_default();
+        let reasoning = !args.no_think;
         let model_guidance = aemeath_core::guidance::resolve_guidance(
-            &args.provider,
             &model,
             &guidance_config,
+            reasoning,
         );
 
         // 组装: static_part + universal discipline + skills + model guidance (末尾锚定语言)

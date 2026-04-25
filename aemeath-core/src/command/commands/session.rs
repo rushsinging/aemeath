@@ -28,11 +28,28 @@ fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future
             }
             let mut output = String::from("Recent Sessions:\n\n");
             for (i, sess) in sessions.iter().take(10).enumerate() {
+                // 构建摘要
+                let summary = if let Some(title) = &sess.metadata.title {
+                    let trunc: String = title.chars().take(40).collect();
+                    trunc
+                } else if let Some(first_user) = sess.messages.iter().find(|m| m.role == crate::message::Role::User) {
+                    let text = first_user.text_content();
+                    let first_line = text.lines().next().unwrap_or("").trim();
+                    let trunc: String = first_line.chars().take(50).collect();
+                    if trunc.is_empty() {
+                        sess.metadata.project.as_deref().unwrap_or("unknown").to_string()
+                    } else {
+                        trunc
+                    }
+                } else {
+                    sess.metadata.project.as_deref().unwrap_or("unknown").to_string()
+                };
                 output.push_str(&format!(
-                    "{}. {} - {} messages - {}\n",
+                    "{}. {} - {} msgs - {} - {}\n",
                     i + 1,
                     sess.id,
                     sess.messages.len(),
+                    summary,
                     sess.updated_at
                 ));
             }
@@ -63,7 +80,8 @@ pub fn session_command() -> Command {
         session_execute,
     )
     .with_usage(vec![
-        "/session - Show session info".to_string(),
+        "/session - List all sessions".to_string(),
+        "/session info - Show current session info".to_string(),
         "/session new - Start new session".to_string(),
         "/session list - List all sessions".to_string(),
         "/session delete <id> - Delete a session".to_string(),
@@ -82,58 +100,62 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
     let session_id = ctx.session_id.clone();
     Box::pin(async move {
         let parts: Vec<&str> = args.trim().split_whitespace().collect();
-        if parts.is_empty() {
-            let sessions = session::list_sessions().await;
-            let current = sessions.iter().find(|s| s.id == session_id);
-            let mut output = format!(
-                "Current Session:\n  ID: {}\n  Messages: {}\n",
-                session_id,
-                current.map(|s| s.messages.len()).unwrap_or(0)
-            );
-            if let Some(sess) = current {
-                if let Some(title) = &sess.metadata.title {
-                    output.push_str(&format!("  Title: {}\n", title));
+            if parts.is_empty() || parts[0] == "list" {
+                let sessions = session::list_sessions().await;
+                if sessions.is_empty() {
+                    return CommandResult::Success("No saved sessions found".to_string());
                 }
-                if !sess.metadata.tags.is_empty() {
-                    output.push_str(&format!("  Tags: {}\n", sess.metadata.tags.join(", ")));
+                let mut output = format!("Saved Sessions ({}):\n\n", sessions.len());
+                for sess in sessions.iter().take(20) {
+                    let favorite_marker = if sess.metadata.is_favorite { "★ " } else { "  " };
+                    output.push_str(&format!(
+                        "{}{} {}\n  Messages: {} | Project: {} | Updated: {}\n",
+                        favorite_marker,
+                        sess.id,
+                        sess.display_title(),
+                        sess.messages.len(),
+                        sess.metadata.project.as_deref().unwrap_or("unknown"),
+                        sess.updated_at
+                    ));
+                    if !sess.metadata.tags.is_empty() {
+                        output.push_str(&format!("  Tags: {}\n", sess.metadata.tags.join(", ")));
+                    }
+                    output.push_str("\n");
                 }
-                if sess.metadata.is_favorite {
-                    output.push_str("  Favorite: yes\n");
+                if sessions.len() > 20 {
+                    output.push_str(&format!("... and {} more sessions\n", sessions.len() - 20));
                 }
-                if let Some(notes) = &sess.metadata.notes {
-                    output.push_str(&format!("  Notes: {}\n", notes));
-                }
-            }
-            output.push_str(&format!("\nSaved sessions: {}", sessions.len()));
-            CommandResult::Success(output)
-        } else {
-            match parts[0] {
-                "new" => CommandResult::Action(CommandAction::NewSession),
-                "list" => {
-                    let sessions = session::list_sessions().await;
-                    let mut output = String::from("Saved Sessions:\n\n");
-                    for sess in sessions.iter().take(20) {
-                        let favorite_marker = if sess.metadata.is_favorite { "★ " } else { "  " };
-                        output.push_str(&format!(
-                            "{}{} {}\n  Messages: {} | Project: {} | Updated: {}\n",
-                            favorite_marker,
-                            sess.id,
-                            sess.display_title(),
-                            sess.messages.len(),
-                            sess.metadata.project.as_deref().unwrap_or("unknown"),
-                            sess.updated_at
-                        ));
-                        if !sess.metadata.tags.is_empty() {
-                            output.push_str(&format!("  Tags: {}\n", sess.metadata.tags.join(", ")));
+                output.push_str("\nUse /resume <id> to resume a session\n");
+                CommandResult::Success(output)
+            } else {
+                match parts[0] {
+                    "info" => {
+                        let sessions = session::list_sessions().await;
+                        let current = sessions.iter().find(|s| s.id == session_id);
+                        let mut output = format!(
+                            "Current Session:\n  ID: {}\n  Messages: {}\n",
+                            session_id,
+                            current.map(|s| s.messages.len()).unwrap_or(0)
+                        );
+                        if let Some(sess) = current {
+                            if let Some(title) = &sess.metadata.title {
+                                output.push_str(&format!("  Title: {}\n", title));
+                            }
+                            if !sess.metadata.tags.is_empty() {
+                                output.push_str(&format!("  Tags: {}\n", sess.metadata.tags.join(", ")));
+                            }
+                            if sess.metadata.is_favorite {
+                                output.push_str("  Favorite: yes\n");
+                            }
+                            if let Some(notes) = &sess.metadata.notes {
+                                output.push_str(&format!("  Notes: {}\n", notes));
+                            }
                         }
-                        output.push_str("\n");
+                        output.push_str(&format!("\nSaved sessions: {}", sessions.len()));
+                        CommandResult::Success(output)
                     }
-                    if sessions.len() > 20 {
-                        output.push_str(&format!("... and {} more sessions\n", sessions.len() - 20));
-                    }
-                    CommandResult::Success(output)
-                }
-                "delete" => {
+                    "new" => CommandResult::Action(CommandAction::NewSession),
+                    "delete" => {
                     if parts.len() < 2 {
                         return CommandResult::Error("Usage: /session delete <id>".to_string());
                     }
