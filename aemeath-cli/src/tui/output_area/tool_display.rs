@@ -196,8 +196,25 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
 }
 
 impl super::OutputArea {
+    /// 流式过程中 tool_use_start 时推送预占 header，立刻让用户看到 tool 被调用
+    pub fn push_tool_call_start(&mut self, name: &str) {
+        self.finish_streaming();
+        self.push_line(OutputLine {
+            content: format!("● {name}..."),
+            style: LineStyle::ToolCallRunning,
+            tool_id: Some(format!("pending:{name}")),
+        });
+    }
+
     pub fn push_tool_call(&mut self, tool_id: &str, name: &str, summary: &str) {
         self.finish_streaming();
+
+        // 清除该 tool 的预占 header（如果有）
+        let pending_id = format!("pending:{name}");
+        if let Some(pos) = self.lines.iter().position(|l| l.tool_id.as_deref() == Some(&pending_id)) {
+            self.lines.remove(pos);
+        }
+
         let (header, details) = if name == "TodoWrite" {
             self.format_todowrite(summary)
         } else {

@@ -30,7 +30,7 @@ impl super::App {
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
-                self.output_area.start_spinner();
+                self.output_area.push_tool_call_start(&name);
                 self.status_bar.set_processing(&format!("Calling {}...", name));
             }
             UiEvent::ToolCall { id, name, summary } => {
@@ -52,8 +52,11 @@ impl super::App {
                 self.last_input_tokens = last_input as u64;
                 let tps = if elapsed_secs > 0.0 { output as f64 / elapsed_secs } else { 0.0 };
                 self.status_bar.set_tps(tps);
-                }
-                UiEvent::Error(msg) => {
+            }
+            UiEvent::LiveTps(tps) => {
+                self.status_bar.set_tps(tps);
+            }
+            UiEvent::Error(msg) => {
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
                 *is_processing = false;
