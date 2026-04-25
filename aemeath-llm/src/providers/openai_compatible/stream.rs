@@ -23,7 +23,8 @@ pub(crate) async fn parse_openai_stream(
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
     let mut current_reasoning = String::new();
-    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String)> = std::collections::HashMap::new();
+    // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
+    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> = std::collections::HashMap::new();
     let mut usage = crate::types::Usage { input_tokens: 0, output_tokens: 0 };
     let mut stop_reason = crate::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
@@ -141,7 +142,7 @@ pub(crate) async fn parse_openai_stream(
 
                             // 获取或创建 tool call 条目
                             let entry = current_tool_calls.entry(index).or_insert_with(|| {
-                                (String::new(), String::new(), String::new())
+                                (String::new(), String::new(), String::new(), 0)
                             });
 
                             // 如果存在则更新 ID
@@ -160,6 +161,7 @@ pub(crate) async fn parse_openai_stream(
                                 }
                                 if let Some(args) = function.get("arguments").and_then(|a| a.as_str()) {
                                     entry.2.push_str(args);
+                                    entry.3 += 1;
                                 }
                             }
                         }
@@ -188,29 +190,51 @@ pub(crate) async fn parse_openai_stream(
     let mut sorted_tool_calls: Vec<_> = current_tool_calls.into_iter().collect();
     sorted_tool_calls.sort_by_key(|(i, _)| *i);
 
-    for (_, (id, name, arguments)) in sorted_tool_calls {
+    let mut truncated_tool: Option<(String, String, usize, u32)> = None;
+    for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if !name.is_empty() {
             handler.on_tool_use_start(&name);
             let input: serde_json::Value = if arguments.is_empty() {
                 log::warn!(
-                    "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta — model emitted name only. Falling back to {{}}.",
-                    name, id
+                    "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
+                    name, id, delta_count
                 );
                 serde_json::Value::Object(serde_json::Map::new())
             } else {
                 match serde_json::from_str(&arguments) {
                     Ok(v) => v,
                     Err(e) => {
+                        let is_eof = matches!(e.classify(), serde_json::error::Category::Eof);
                         log::warn!(
-                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed: {}. Raw ({} bytes): {}",
-                            name, id, e, arguments.len(), arguments
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — likely upstream truncated the SSE stream mid-tool_call.",
+                            name, id, delta_count, arguments.len(), e
                         );
+                        log::warn!(
+                            "[openai-compat stream] truncated args head: {}",
+                            arguments.chars().take(300).collect::<String>()
+                        );
+                        log::warn!(
+                            "[openai-compat stream] truncated args tail: {}",
+                            arguments.chars().rev().take(200).collect::<String>().chars().rev().collect::<String>()
+                        );
+                        if is_eof && truncated_tool.is_none() {
+                            truncated_tool = Some((id.clone(), name.clone(), arguments.len(), delta_count));
+                        }
                         serde_json::Value::Object(serde_json::Map::new())
                     }
                 }
             };
             content_blocks.push(ContentBlock::ToolUse { id, name, input });
         }
+    }
+
+    // 如果 args 因 EOF 截断（典型上游断流症状），向上抛错让 client 层重试，
+    // 而不是给模型送 {} 让它陷入"missing required parameter"重试死循环。
+    if let Some((tid, tname, raw_len, delta_count)) = truncated_tool {
+        return Err(crate::LlmError::Stream(format!(
+            "upstream truncated tool_call '{}' (id={}) mid-arguments: {} bytes accumulated across {} delta chunks but JSON ended inside an open string. The provider closed the SSE stream early.",
+            tname, tid, raw_len, delta_count
+        )));
     }
 
     Ok(StreamResponse {

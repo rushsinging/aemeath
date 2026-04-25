@@ -1,6 +1,7 @@
 use std::io::Write;
 
-#[allow(dead_code)]
+use aemeath_core::string_idx::{char_to_byte, CharIdx, StrSlice};
+
 impl super::OutputArea {
     /// Start a selection at the given screen position
     /// row/col 是相对于输出区域 rect 的偏移
@@ -13,11 +14,12 @@ impl super::OutputArea {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
             if logic_idx < self.lines.len() {
                 let line = &self.lines[logic_idx].content;
+                let byte_start = char_to_byte(line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-                    &line[char_start..], rel_col,
+                    line.bslice_from(byte_start), rel_col,
                 );
-                self.selection_start = Some((rel_row, char_start + char_col));
-                self.selection_end = Some((rel_row, char_start + char_col));
+                self.selection_start = Some((rel_row, char_start.add(char_col.as_usize())));
+                self.selection_end = Some((rel_row, char_start.add(char_col.as_usize())));
             }
         }
         self.is_selecting = true;
@@ -35,10 +37,11 @@ impl super::OutputArea {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
             if logic_idx < self.lines.len() {
                 let line = &self.lines[logic_idx].content;
+                let byte_start = char_to_byte(line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-                    &line[char_start..], rel_col,
+                    line.bslice_from(byte_start), rel_col,
                 );
-                self.selection_end = Some((rel_row, char_start + char_col));
+                self.selection_end = Some((rel_row, char_start.add(char_col.as_usize())));
             }
         } else {
             // 超出可见范围时，选到最后一个屏幕行的末尾
@@ -73,17 +76,18 @@ impl super::OutputArea {
         }
 
         let line = &self.lines[logic_idx].content;
+        let byte_start = char_to_byte(line, char_start);
         let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-            &line[char_start..], rel_col,
+            line.bslice_from(byte_start), rel_col,
         );
-        let abs_char_idx = char_start + char_col;
+        let abs_char_idx = char_start.add(char_col.as_usize());
 
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {
             return;
         }
 
-        let idx = abs_char_idx.min(chars.len() - 1);
+        let idx = abs_char_idx.as_usize().min(chars.len() - 1);
         let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
 
         let mut start = idx;
@@ -98,8 +102,8 @@ impl super::OutputArea {
             }
         }
 
-        self.selection_start = Some((rel_row, start));
-        self.selection_end = Some((rel_row, end + 1));
+        self.selection_start = Some((rel_row, CharIdx::new(start)));
+        self.selection_end = Some((rel_row, CharIdx::new(end + 1)));
         self.is_selecting = true;
 
         if let Some(text) = self.get_selected_text() {
@@ -146,12 +150,12 @@ impl super::OutputArea {
 
             let chars: Vec<char> = self.lines[logic_idx].content.chars().collect();
             let from = if screen_idx == start_screen {
-                start_col.max(chunk_start)
+                start_col.max(chunk_start).as_usize()
             } else {
-                chunk_start
+                chunk_start.as_usize()
             };
             let to = if screen_idx == end_screen {
-                end_col.min(chars.len())
+                end_col.as_usize().min(chars.len())
             } else {
                 chars.len()
             };
@@ -167,7 +171,9 @@ impl super::OutputArea {
 
     /// Copy text to system clipboard
     fn copy_to_clipboard(&self, text: &str) {
-        if let Ok(mut child) = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn() {
+        if let Ok(mut child) = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped()).spawn()
+        {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }

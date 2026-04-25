@@ -6,6 +6,7 @@
 use crate::message::{ContentBlock, Message, Role};
 use crate::compact::truncate::safe_slice;
 use crate::compact::micro::microcompact;
+use crate::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
 
 // 向后兼容的 re-export
 pub use crate::token_estimation::needs_compaction;
@@ -102,6 +103,9 @@ pub fn compact_messages(
         }],
     });
     compacted.extend_from_slice(&result[split_point..]);
+
+    fix_role_alternation(&mut compacted);
+    sanitize_tool_pairs(&mut compacted);
 
     (compacted, true)
 }

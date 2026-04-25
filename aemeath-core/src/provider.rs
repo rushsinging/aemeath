@@ -136,7 +136,7 @@ impl std::fmt::Display for Provider {
             Provider::Anthropic => write!(f, "anthropic"),
             Provider::OpenAI => write!(f, "openai"),
             Provider::OpenRouter => write!(f, "openrouter"),
-            Provider::DeepSeek => write!(f, "deepseek"),
+            Provider::DeepSeek => write!(f, "DeepSeek"),
             Provider::Moonshot => write!(f, "moonshot"),
             Provider::Zhipu => write!(f, "zhipu"),
             Provider::DashScope => write!(f, "dashscope"),

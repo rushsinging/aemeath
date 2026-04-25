@@ -1,4 +1,5 @@
 use super::types::{LineStyle, OutputLine};
+use aemeath_core::string_idx::{ByteIdx, StrSlice};
 
 /// 思考块的开/闭标记。这两个常量是 ASCII 字符串，长度计算是字节安全的。
 /// **不要** 替换为多字节中文/emoji 字符串——`do_rerender` 里的偏移依赖
@@ -62,27 +63,28 @@ impl super::OutputArea {
 
         // 将缓冲区解析为片段：思考内容 vs 普通内容
         let buf = &self.streaming_buffer;
-        let mut pos = 0;
+        let mut pos = ByteIdx::ZERO;
         let mut segments: Vec<(&str, bool)> = Vec::new();
 
-        while pos < buf.len() {
-            if let Some(think_start) = buf[pos..].find(THINK_OPEN) {
-                let abs_start = pos + think_start;
+        while pos.as_usize() < buf.len() {
+            if let Some(think_start) = buf[pos.as_usize()..].find(THINK_OPEN) {
+                let abs_start = ByteIdx::new(pos.as_usize() + think_start);
                 if abs_start > pos {
-                    segments.push((&buf[pos..abs_start], false));
+                    segments.push((buf.bslice(pos..abs_start), false));
                 }
-                let content_start = abs_start + THINK_OPEN.len();
-                if let Some(think_end) = buf[content_start..].find(THINK_CLOSE) {
-                    let abs_end = content_start + think_end;
-                    segments.push((&buf[content_start..abs_end], true));
-                    pos = abs_end + THINK_CLOSE.len();
+                // 使用 ByteIdx::after_str 防止字面量长度硬编码
+                let content_start = abs_start.after_str(THINK_OPEN);
+                if let Some(think_end) = buf[content_start.as_usize()..].find(THINK_CLOSE) {
+                    let abs_end = ByteIdx::new(content_start.as_usize() + think_end);
+                    segments.push((buf.bslice(content_start..abs_end), true));
+                    pos = abs_end.after_str(THINK_CLOSE);
                 } else {
-                    segments.push((&buf[content_start..], true));
-                    pos = buf.len();
+                    segments.push((buf.bslice_from(content_start), true));
+                    pos = ByteIdx::end_of(buf);
                 }
             } else {
-                segments.push((&buf[pos..], false));
-                pos = buf.len();
+                segments.push((buf.bslice_from(pos), false));
+                pos = ByteIdx::end_of(buf);
             }
         }
 

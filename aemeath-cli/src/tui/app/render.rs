@@ -23,11 +23,13 @@ impl super::App {
                 for block in &msg.content {
                     match block {
                         aemeath_core::message::ContentBlock::Text { text } => {
-                            self.output_area.push_line(OutputLine {
-                                content: text.clone(),
-                                style: LineStyle::Assistant,
-                                ..Default::default()
-                            });
+                            for text_line in text.lines() {
+                                self.output_area.push_line(OutputLine {
+                                    content: text_line.to_string(),
+                                    style: LineStyle::Assistant,
+                                    ..Default::default()
+                                });
+                            }
                         }
                         aemeath_core::message::ContentBlock::ToolUse { name, input, .. } => {
                             let input_json = input.to_string();

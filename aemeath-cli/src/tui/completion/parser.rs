@@ -29,6 +29,19 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
 
     let before_cursor = &input[..cursor_offset];
 
+    // 检查 /resume <arg> 触发器（session 补全）
+    if input.starts_with("/resume ") && cursor_offset >= 8 {
+        let arg_start = 8; // "/resume " 的长度
+        let arg_part = &input[arg_start..cursor_offset];
+        let after_cursor = &input[cursor_offset..];
+        let after_until_space: String = after_cursor
+            .chars()
+            .take_while(|c| !c.is_whitespace())
+            .collect();
+        let full_arg = format!("{}{}", arg_part, after_until_space);
+        return Some((full_arg, arg_start, TriggerType::ResumeArg));
+    }
+
     // 检查 /model <arg> 触发器（模型名称补全）
     if input.starts_with("/model ") && cursor_offset >= 7 {
         let arg_start = 7; // "/model " 的长度
@@ -88,7 +101,13 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
 
     // 检查 / 触发器（斜杠命令补全）
     if input.starts_with('/') {
-        let end = input.find(' ').unwrap_or(input.len()).min(cursor_offset);
+        // 如果光标在第一个空格之后（参数区域），不再显示命令名补全
+        if let Some(space_pos) = input.find(' ') {
+            if cursor_offset > space_pos {
+                return None;
+            }
+        }
+        let end = cursor_offset.min(input.len());
         let token = &before_cursor[..end];
         return Some((token.to_string(), 0, TriggerType::SlashCommand));
     }

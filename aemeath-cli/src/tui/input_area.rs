@@ -1,34 +1,37 @@
 use crate::tui::completion::{Suggestion, SuggestionType};
 use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, Borders, Widget},
+      buffer::Buffer,
+      layout::Rect,
+      style::{Color, Style},
+      widgets::{Block, Borders, Widget},
 };
 use tui_textarea::{CursorMove, TextArea};
+use unicode_width::UnicodeWidthChar;
 
 /// The input area with a multi-line text editor and autocomplete
 pub struct InputArea {
-      textarea: TextArea<'static>,
-      focused: bool,
-      pending_images: usize,
-      /// Active suggestions for autocomplete
-      suggestions: Vec<Suggestion>,
-      /// Currently selected suggestion index (-1 means none)
-      selected_suggestion: i32,
-      /// Whether suggestions are visible
-      show_suggestions: bool,
-      /// Command history
-      history: Vec<String>,
-      /// Current position in history (None means not browsing history)
-      history_index: Option<usize>,
-      /// Saved input before browsing history (to restore when navigating back)
-      saved_input: String,
-      /// 鼠标选中状态
-      is_selecting: bool,
-      selection_start: Option<(usize, usize)>, // (row, col) in textarea
-      selection_end: Option<(usize, usize)>,   // (row, col) in textarea
-}
+        textarea: TextArea<'static>,
+        focused: bool,
+        pending_images: usize,
+        /// Active suggestions for autocomplete
+        suggestions: Vec<Suggestion>,
+        /// Currently selected suggestion index (-1 means none)
+        selected_suggestion: i32,
+        /// Whether suggestions are visible
+        show_suggestions: bool,
+        /// Command history
+        history: Vec<String>,
+        /// Current position in history (None means not browsing history)
+        history_index: Option<usize>,
+        /// Saved input before browsing history (to restore when navigating back)
+        saved_input: String,
+        /// 鼠标选中状态
+        is_selecting: bool,
+        selection_start: Option<(usize, usize)>, // (row, col) in textarea
+        selection_end: Option<(usize, usize)>,   // (row, col) in textarea
+        /// textarea 渲染区域宽度（用于自动换行）
+        content_width: u16,
+  }
 
 impl Default for InputArea {
     fn default() -> Self {
@@ -56,6 +59,7 @@ impl InputArea {
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            content_width: 0,
         }
     }
 
@@ -212,6 +216,96 @@ impl InputArea {
         self.textarea.insert_char(c);
         self.show_suggestions = false; // Hide suggestions while typing
         self.reset_history_nav(); // Reset history navigation when typing
+        self.auto_wrap_current_line();
+    }
+
+    /// 当前行超过视觉宽度时，在合适位置插入换行符
+    fn auto_wrap_current_line(&mut self) {
+        let max_w = self.content_width as usize;
+        if max_w < 10 {
+            // 宽度太小不折行
+            return;
+        }
+        let (row, col) = self.textarea.cursor();
+        let lines = self.textarea.lines();
+        if row >= lines.len() {
+            return;
+        }
+        let line = &lines[row];
+        let chars: Vec<char> = line.chars().collect();
+        let display_width: usize = chars.iter()
+            .map(|c| if *c == '\t' { 4 } else { c.width().unwrap_or(1) })
+            .sum();
+        if display_width <= max_w {
+            return;
+        }
+
+        // 找最佳折行点：最后一个不超过 max_w 的空格
+        let mut best_break = 0;
+        let mut current_width = 0;
+        for (i, ch) in chars.iter().enumerate() {
+            let w = if *ch == '\t' { 4 } else { ch.width().unwrap_or(1) };
+            if current_width + w > max_w {
+                break;
+            }
+            if *ch == ' ' {
+                best_break = i + 1;
+            }
+            current_width += w;
+        }
+
+        if best_break == 0 {
+            // 没有空格，硬折行
+            let mut w = 0;
+            for (i, ch) in chars.iter().enumerate() {
+                w += if *ch == '\t' { 4 } else { ch.width().unwrap_or(1) };
+                if w > max_w {
+                    best_break = i;
+                    break;
+                }
+            }
+            if best_break == 0 {
+                return;
+            }
+        }
+
+        // 用文本操作实现折行：
+        // 1. 移到行首
+        // 2. 右移 best_break 个字符（选中 before 部分）
+        // 3. 删除行尾
+        // 4. 输入换行
+        // 5. 输入 after 部分
+        // 6. 恢复光标
+        self.textarea.move_cursor(CursorMove::Head);
+
+        // 选中从行首到 best_break 位置的文本，删掉行尾
+        // 先移到 best_break 位置
+        for _ in 0..best_break {
+            self.textarea.move_cursor(CursorMove::Forward);
+        }
+        // 删掉光标到行尾的内容（保存到 after）
+        let after: String = chars[best_break..].iter().collect();
+        self.textarea.delete_line_by_end();
+        // 插入换行和 after
+        self.textarea.insert_newline();
+        self.textarea.insert_str(&after);
+
+        // 恢复光标位置
+        if col >= best_break {
+            // 光标在 after 部分：移到新行的 col - best_break 位置
+            let new_col = col - best_break;
+            self.textarea.move_cursor(CursorMove::Head);
+            for _ in 0..new_col {
+                self.textarea.move_cursor(CursorMove::Forward);
+            }
+        } else {
+            // 光标在 before 部分：回到上一行的 col 位置
+            self.textarea.move_cursor(CursorMove::Up);
+            self.textarea.move_cursor(CursorMove::Head);
+            for _ in 0..col {
+                self.textarea.move_cursor(CursorMove::Forward);
+            }
+        }
     }
 
     /// Handle a backspace
@@ -346,6 +440,7 @@ impl InputArea {
             .border_style(border_style);
 
         let inner_area = block.inner(area);
+        self.content_width = inner_area.width;
         block.render(area, buf);
 
         // Render textarea
@@ -356,11 +451,11 @@ impl InputArea {
         if let Some(((start_row, start_col), (end_row, end_col))) = self.get_normalized_selection() {
             let lines = self.textarea.lines();
             let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
-
+  
             for (row, line_text) in lines.iter().enumerate() {
                 let line_chars: Vec<char> = line_text.chars().collect();
                 let line_len = line_chars.len();
-
+  
                 // 计算本行的选中列范围
                 if row < start_row || row > end_row {
                     continue;
@@ -368,10 +463,10 @@ impl InputArea {
                 if row == start_row && row == end_row && start_col == end_col {
                     continue;
                 }
-
+  
                 let col_from = if row == start_row { start_col } else { 0 };
                 let col_to = if row == end_row { end_col.min(line_len) } else { line_len };
-
+  
                 // 在 buf 上设置选中高亮
                 let screen_y = inner_area.y + row as u16;
                 if screen_y >= inner_area.bottom() {
@@ -385,7 +480,6 @@ impl InputArea {
                     if let Some(cell) = buf.cell_mut((screen_x, screen_y)) {
                         let ch = cell.symbol().to_string();
                         cell.set_style(selection_style);
-                        // 保留原来的字符
                         if !ch.is_empty() {
                             cell.set_symbol(&ch);
                         }
@@ -419,6 +513,7 @@ impl InputArea {
                 SuggestionType::File => "📄",
                 SuggestionType::Directory => "📁",
                 SuggestionType::Model => "🤖",
+                SuggestionType::Session => ">",
             };
 
             // Render the suggestion text

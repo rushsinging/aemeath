@@ -22,6 +22,7 @@ pub enum SuggestionType {
     File,
     Directory,
     Model,
+    Session,
 }
 
 /// 生成建议所需的上下文
@@ -37,14 +38,10 @@ pub struct SuggestionContext {
     pub models: Vec<(String, String)>,
     /// 可用技能列表（name, description, aliases）
     pub skills: Vec<(String, String, Vec<String>)>,
-}
-
-/// 斜杠命令定义
-#[derive(Debug, Clone)]
-pub struct SlashCommand {
-    pub name: String,
-    pub description: String,
-    pub aliases: Vec<String>,
+    /// 可用命令列表（name, description, aliases）— 从 CommandRegistry 动态获取
+    pub commands: Vec<(String, String, Vec<String>)>,
+    /// 最近 session 列表（id, summary）— 用于 /resume 补全
+    pub sessions: Vec<(String, String)>,
 }
 
 /// 补全触发类型
@@ -54,4 +51,5 @@ pub enum TriggerType {
     AtSymbol,
     ModelArg,
     ModelSubCommand,
+    ResumeArg,
 }

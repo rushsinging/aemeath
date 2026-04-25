@@ -1,3 +1,4 @@
+use aemeath_core::string_idx::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
 /// Truncate a string to fit within `max_width` Unicode display columns,
@@ -53,16 +54,16 @@ pub fn sanitize_for_display(text: &str) -> String {
 }
 
 /// Convert a screen column position (display column) to a char index within the string.
-pub fn screen_col_to_char_idx(text: &str, screen_col: usize) -> usize {
+pub fn screen_col_to_char_idx(text: &str, screen_col: usize) -> CharIdx {
     let mut display_width = 0usize;
-    for (i, ch) in text.char_indices() {
+    for (char_idx, ch) in text.chars().enumerate() {
         let ch_w = ch.width().unwrap_or(1) as usize;
         if display_width + ch_w > screen_col {
-            return i;
+            return CharIdx::new(char_idx);
         }
         display_width += ch_w;
     }
-    text.chars().count()
+    CharIdx::new(text.chars().count())
 }
 
 /// Split a string into lines that fit within `max_width` display columns.

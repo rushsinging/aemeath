@@ -1,11 +1,13 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 use std::collections::VecDeque;
+
+use aemeath_core::string_idx::CharIdx;
 
 use crate::tui::output_area::display::wrap_line;
 use crate::tui::output_area::types::DEFAULT_WIDTH;
@@ -42,13 +44,13 @@ pub struct OutputArea {
     pub queued_line_count: usize,
     /// 鼠标是否正在拖拽选择
     pub is_selecting: bool,
-    /// 选择起始点：(屏幕行索引, 列)
-    pub selection_start: Option<(usize, usize)>,
-    /// 选择结束点：(屏幕行索引, 列)
-    pub selection_end: Option<(usize, usize)>,
+    /// 选择起始点：(屏幕行索引, char 偏移)
+    pub selection_start: Option<(usize, CharIdx)>,
+    /// 选择结束点：(屏幕行索引, char 偏移)
+    pub selection_end: Option<(usize, CharIdx)>,
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
     /// 由 render() 构建，供 selection 使用
-    pub screen_line_map: Vec<(usize, usize, usize)>,
+    pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
     /// 活跃的 spinner 动画（显示为最后一行）
     pub spinner: Option<SpinnerState>,
     /// 上次渲染时的可见高度缓存
@@ -152,9 +154,8 @@ impl OutputArea {
         }
         // 如果代码块未闭合，包含 fence 行
         let code_style = Style::default()
-            .bg(Color::DarkGray)
-            .fg(Color::White)
-            .add_modifier(Modifier::DIM);
+            .bg(Color::Rgb(40, 44, 52))
+            .fg(Color::Rgb(171, 178, 191));
 
         let mut lines: Vec<Line> = self.lines
             .iter()
@@ -164,6 +165,18 @@ impl OutputArea {
             .map(|(idx, output_line)| {
                 let wrapped = wrap_line(&output_line.content, self.term_width);
                 let style = output_line.style;
+
+                // 构建屏幕行映射：先于所有渲染分支，确保 tool call 行也被记录
+                let sanitized = display::sanitize_for_display(&output_line.content);
+                let char_offsets = compute_char_offsets(&sanitized, self.term_width);
+                for (chunk_idx, _) in wrapped.iter().enumerate() {
+                    let (char_start, char_end) = if chunk_idx < char_offsets.len() {
+                        char_offsets[chunk_idx]
+                    } else {
+                        (CharIdx::ZERO, CharIdx::ZERO)
+                    };
+                    new_screen_map.push((idx, char_start, char_end));
+                }
 
                 // 运行中的工具调用闪烁圆点
                 if matches!(style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
@@ -207,18 +220,6 @@ impl OutputArea {
                             Line::styled(chunk, style.to_style())
                         }
                     }).collect::<Vec<_>>()
-                }
-
-                // 构建屏幕行映射：计算每个 chunk 在原始文本中的 char 偏移
-                let sanitized = display::sanitize_for_display(&output_line.content);
-                let char_offsets = compute_char_offsets(&sanitized, self.term_width);
-                for (chunk_idx, _) in wrapped.iter().enumerate() {
-                    let (char_start, char_end) = if chunk_idx < char_offsets.len() {
-                        char_offsets[chunk_idx]
-                    } else {
-                        (0, 0)
-                    };
-                    new_screen_map.push((idx, char_start, char_end));
                 }
 
                 // 选择高亮
@@ -325,19 +326,19 @@ impl OutputArea {
         let chars: Vec<char> = content.chars().collect();
         let chars_len = chars.len();
 
-        // 计算本行的选中起止列
-        let line_start = if screen_idx == start_screen {
-            // 通过 screen_line_map 获取本 chunk 的 char 偏移
-            start_col.saturating_sub(if screen_idx < self.screen_line_map.len() {
-                self.screen_line_map[screen_idx].1
-            } else { 0 })
+        // 计算本行的选中起止列（转为 usize 以索引 chars vec）
+        let chunk_start = if screen_idx < self.screen_line_map.len() {
+            self.screen_line_map[screen_idx].1
+        } else {
+            CharIdx::ZERO
+        };
+        let line_start: usize = if screen_idx == start_screen {
+            start_col.saturating_sub(chunk_start)
         } else {
             0
         };
-        let line_end = if screen_idx == end_screen {
-            end_col.saturating_sub(if screen_idx < self.screen_line_map.len() {
-                self.screen_line_map[screen_idx].1
-            } else { 0 }).min(chars_len)
+        let line_end: usize = if screen_idx == end_screen {
+            end_col.saturating_sub(chunk_start).min(chars_len)
         } else {
             chars_len
         };
@@ -370,29 +371,29 @@ impl OutputArea {
 }
   
 /// 计算 wrap 后每个 chunk 在原始文本中的 char 偏移 (start, end)
-fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(usize, usize)> {
+fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(CharIdx, CharIdx)> {
     use unicode_width::UnicodeWidthChar;
     if max_width == 0 {
         let len = text.chars().count();
-        return vec![(0, len)];
+        return vec![(CharIdx::ZERO, CharIdx::new(len))];
     }
-  
+
     let mut result = Vec::new();
     let mut current_width = 0usize;
-    let mut chunk_start = 0usize;
-  
-    for (i, ch) in text.char_indices() {
+    let mut chunk_start = 0usize; // char count
+
+    for (char_idx, ch) in text.chars().enumerate() {
         let ch_width = ch.width().unwrap_or(1) as usize;
         if current_width + ch_width > max_width {
-            result.push((chunk_start, i));
-            chunk_start = i;
+            result.push((CharIdx::new(chunk_start), CharIdx::new(char_idx)));
+            chunk_start = char_idx;
             current_width = 0;
         }
         current_width += ch_width;
     }
-  
-    let end = text.len();
-    result.push((chunk_start, end));
+
+    let end = text.chars().count();
+    result.push((CharIdx::new(chunk_start), CharIdx::new(end)));
     result
 }
 

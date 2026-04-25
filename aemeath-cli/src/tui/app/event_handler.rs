@@ -18,10 +18,19 @@ impl super::App {
     ) {
         match ev {
             UiEvent::Text(text) => {
+                if self.tool_call_active {
+                    self.tool_call_active = false;
+                    self.status_bar.set_processing("Generating...");
+                }
                 self.output_area.stop_spinner();
                 self.output_area.append_assistant_text(&text);
             }
             UiEvent::Thinking(text) => {
+                if self.tool_call_active {
+                    // tool call 完成后模型重新开始 thinking，同步状态
+                    self.tool_call_active = false;
+                    self.status_bar.set_processing("Thinking...");
+                }
                 self.output_area.stop_spinner();
                 self.output_area.append_thinking_text(&text);
             }
@@ -30,6 +39,7 @@ impl super::App {
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
+                self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
                 self.status_bar.set_processing(&format!("Calling {}...", name));
             }
@@ -44,6 +54,7 @@ impl super::App {
                     format!("  │  [{} image(s) attached]\n", images.len())
                 };
                 self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
+                self.tool_call_active = false;
             }
             UiEvent::Usage { input, output, last_input, elapsed_secs } => {
                 self.total_input_tokens += input as u64;
@@ -59,12 +70,14 @@ impl super::App {
             UiEvent::Error(msg) => {
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
+                self.tool_call_active = false;
                 *is_processing = false;
                 self.status_bar.clear_processing();
             }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
+                self.tool_call_active = false;
                 *is_processing = false;
                 self.status_bar.clear_processing();
             }
@@ -95,6 +108,7 @@ impl super::App {
             UiEvent::Done => {
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
+                self.tool_call_active = false;
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
@@ -106,6 +120,7 @@ impl super::App {
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
+                self.tool_call_active = false;
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");

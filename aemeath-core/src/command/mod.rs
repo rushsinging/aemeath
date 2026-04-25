@@ -39,6 +39,7 @@ pub mod cmd {
     
     /// Tool commands
     pub const TASKS: &str = "tasks";
+    pub const TODO: &str = "todo";
     pub const MCP: &str = "mcp";
     pub const SKILLS: &str = "skills";
     

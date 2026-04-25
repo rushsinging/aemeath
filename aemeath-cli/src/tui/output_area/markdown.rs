@@ -65,7 +65,7 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                     flush_plain(&mut spans, &mut buf, base_style);
                     spans.push(Span::styled(
                         inner.clone(),
-                        base_style.bg(Color::DarkGray).add_modifier(Modifier::DIM),
+                        base_style.bg(Color::Rgb(40, 44, 52)).fg(Color::Rgb(171, 178, 191)),
                     ));
                     advance_chars(&mut chars, inner.chars().count() + 1);
                 }

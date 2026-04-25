@@ -72,11 +72,34 @@ pub async fn process_in_background(
 
         struct TuiStreamHandler {
             tx: mpsc::Sender<UiEvent>,
+            first_text_time: Option<std::time::Instant>,
+            total_chars: usize,
+            last_tps_update: std::time::Instant,
         }
         impl StreamHandler for TuiStreamHandler {
             fn on_text(&mut self, text: &str) {
                 if let Err(e) = self.tx.try_send(UiEvent::Text(text.to_string())) {
                     log::warn!("UI channel full, dropped Text event ({} bytes): {e}", text.len());
+                }
+                let now = std::time::Instant::now();
+                if self.first_text_time.is_none() {
+                    self.first_text_time = Some(now);
+                    self.last_tps_update = now;
+                }
+                self.total_chars += text.len();
+                // Update t/s every 200ms to avoid flooding
+                if now.duration_since(self.last_tps_update).as_millis() >= 200 {
+                    self.last_tps_update = now;
+                    if let Some(start) = self.first_text_time {
+                        let elapsed = now.duration_since(start).as_secs_f64();
+                        if elapsed > 0.0 {
+                            // Rough estimate: 1 token ≈ 4 chars for English, ~2 chars for Chinese.
+                            // Use 3 as a middle ground.
+                            let estimated_tokens = self.total_chars as f64 / 3.0;
+                            let tps = estimated_tokens / elapsed;
+                            let _ = self.tx.try_send(UiEvent::LiveTps(tps));
+                        }
+                    }
                 }
             }
             fn on_tool_use_start(&mut self, name: &str) {
@@ -138,7 +161,12 @@ pub async fn process_in_background(
             api_msgs
         };
 
-        let mut handler = TuiStreamHandler { tx: tx.clone() };
+        let mut handler = TuiStreamHandler {
+            tx: tx.clone(),
+            first_text_time: None,
+            total_chars: 0,
+            last_tps_update: std::time::Instant::now(),
+        };
         let api_start = std::time::Instant::now();
         let response = client
             .stream_message(&system_blocks, &messages_for_api, &tool_schemas, &mut handler, &cancel)
@@ -181,13 +209,21 @@ pub async fn process_in_background(
                         })
                     };
 
+                    let mut denied_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     for call in &denied {
+                        let result = (
+                            call.id.clone(),
+                            format!("Tool {} denied: use --allow-all to permit write operations", call.name),
+                            true,
+                            Vec::new(),
+                        );
+                        denied_results.push(result.clone());
                         let _ = tx.send(UiEvent::ToolResult {
-                            id: call.id.clone(),
+                            id: result.0,
                             tool_name: call.name.clone(),
-                            output: format!("Tool {} denied: use --allow-all to permit write operations", call.name),
-                            is_error: true,
-                            images: Vec::new(),
+                            output: result.1.clone(),
+                            is_error: result.2,
+                            images: result.3.clone(),
                         }).await;
                     }
 
@@ -302,6 +338,7 @@ pub async fn process_in_background(
                     let all_results: Vec<(String, String, bool, Vec<ImageData>)> = non_agent_results
                         .into_iter()
                         .chain(agent_results.into_iter())
+                        .chain(denied_results.into_iter())
                         .collect();
 
                     // Build tool result message for API
