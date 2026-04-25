@@ -75,10 +75,29 @@ pub async fn run_repl(
     if let Some(ref id) = resume_id {
         match session::load_session(id).await {
             Ok(s) => {
+                let msg_count = s.messages.len();
                 messages = s.messages.clone();
+                aemeath_core::message::sanitize_messages(&mut messages);
+                let trimmed = msg_count - messages.len();
+                // Check for deeper integrity issues
+                let integrity = aemeath_core::message::check_message_integrity(&messages);
+                let auto_repaired = if integrity.has_issues() {
+                    aemeath_core::message::deep_clean_messages(&mut messages)
+                } else {
+                    0
+                };
                 session_id = s.id.clone();
                 resumed_session = Some(s);
-                TerminalRenderer::print_resumed_session(&session_id, messages.len());
+                TerminalRenderer::print_resumed_session(&session_id, msg_count);
+                if trimmed > 0 {
+                    eprintln!("  [trimmed {} incomplete tool-call message(s)]", trimmed);
+                }
+                if auto_repaired > 0 {
+                    eprintln!(
+                        "  [repaired {} message(s): removed orphaned tool results and fixed role ordering]",
+                        auto_repaired
+                    );
+                }
             }
             Err(e) => {
                 eprintln!("warning: {e}, starting new session");

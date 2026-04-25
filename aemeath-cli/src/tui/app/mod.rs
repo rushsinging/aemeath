@@ -72,6 +72,8 @@ pub struct App {
     pub skills: std::collections::HashMap<String, Skill>,
     /// Cached session list for /resume autocomplete (id, summary)
     pub cached_sessions: Vec<(String, String)>,
+    /// Whether a tool call is currently active (suppresses thinking output)
+    pub tool_call_active: bool,
 }
 
 impl App {
@@ -116,6 +118,7 @@ impl App {
             last_ctrlc: None,
             skills: std::collections::HashMap::new(),
             cached_sessions: Vec::new(),
+            tool_call_active: false,
         }
     }
 
@@ -161,15 +164,39 @@ impl App {
             match aemeath_core::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
-                    self.session_created_at = Some(s.created_at);
-                    for msg in &s.messages {
-                        self.render_history_message(msg);
-                    }
-                    self.messages = s.messages;
-                    self.output_area.push_system(&format!(
-                        "[resumed session {} ({} messages)]",
-                        id, msg_count
-                    ));
+                        self.session_created_at = Some(s.created_at);
+                        let mut msgs = s.messages;
+                        aemeath_core::message::sanitize_messages(&mut msgs);
+                        let trimmed = msg_count - msgs.len();
+                        // Check for deeper integrity issues (orphaned tool results
+                        // in the middle, role order violations, etc.)
+                        let integrity = aemeath_core::message::check_message_integrity(&msgs);
+                        let auto_repaired = if integrity.has_issues() {
+                            let n = aemeath_core::message::deep_clean_messages(&mut msgs);
+                            n
+                        } else {
+                            0
+                        };
+                        for msg in &msgs {
+                            self.render_history_message(msg);
+                        }
+                        self.messages = msgs;
+                        self.output_area.push_system(&format!(
+                            "[resumed session {} ({} messages)]",
+                            id, msg_count
+                        ));
+                        if trimmed > 0 {
+                            self.output_area.push_system(&format!(
+                                "[trimmed {} incomplete tool-call message(s)]",
+                                trimmed
+                            ));
+                        }
+                        if auto_repaired > 0 {
+                            self.output_area.push_system(&format!(
+                                "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
+                                auto_repaired
+                            ));
+                        }
                 }
                 Err(e) => {
                     self.output_area.push_system(&format!(

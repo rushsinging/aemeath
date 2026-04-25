@@ -77,7 +77,7 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::HELP) => {
                 self.output_area.push_system("Commands:");
                 self.output_area
-                    .push_system("  /help  /exit  /clear  /compact  /usage  /save  /sessions");
+                    .push_system("  /help  /exit  /clear  /compact  /usage  /save  /session");
                 self.output_area
                     .push_system("  /paste  /images  /clear-images  /context  /review  /think");
                 self.output_area.push_system("");
@@ -105,27 +105,6 @@ impl super::App {
                     format_tokens(self.total_output_tokens),
                     format_tokens(total)
                 ));
-            }
-            "/sessions" => {
-                let sessions = session::list_sessions().await;
-                if sessions.is_empty() {
-                    self.output_area.push_system("No saved sessions.");
-                } else {
-                    self.output_area
-                        .push_system(&format!("Saved sessions ({}):", sessions.len()));
-                    for (i, s) in sessions.iter().take(10).enumerate() {
-                        self.output_area.push_system(&format!(
-                            "  {}. {} ({} msgs, {})",
-                            i + 1,
-                            s.id,
-                            s.messages.len(),
-                            s.updated_at
-                        ));
-                    }
-                    self.output_area.push_system("");
-                    self.output_area
-                        .push_system("Resume with: aemeath --resume <session-id>");
-                }
             }
             "/save" => {
                 use aemeath_core::session::{Session, now_iso};
@@ -331,15 +310,37 @@ impl super::App {
                                             self.status_bar.set_session_id(&session_id);
                                             self.messages.clear();
                                             self.pending_images.clear();
+                                            let mut msgs = s.messages;
+                                            aemeath_core::message::sanitize_messages(&mut msgs);
+                                            let trimmed = msg_count - msgs.len();
+                                            // Check for deeper integrity issues
+                                            let integrity = aemeath_core::message::check_message_integrity(&msgs);
+                                            let auto_repaired = if integrity.has_issues() {
+                                                aemeath_core::message::deep_clean_messages(&mut msgs)
+                                            } else {
+                                                0
+                                            };
                                             // Render history into output_area
-                                            for msg in &s.messages {
+                                            for msg in &msgs {
                                                 self.render_history_message(msg);
                                             }
-                                            self.messages = s.messages;
+                                            self.messages = msgs;
                                             self.output_area.push_system(&format!(
                                                 "[resumed session {} ({} messages)]",
                                                 session_id, msg_count
                                             ));
+                                            if trimmed > 0 {
+                                                self.output_area.push_system(&format!(
+                                                    "[trimmed {} incomplete tool-call message(s)]",
+                                                    trimmed
+                                                ));
+                                            }
+                                            if auto_repaired > 0 {
+                                                self.output_area.push_system(&format!(
+                                                    "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
+                                                    auto_repaired
+                                                ));
+                                            }
                                         }
                                         Err(e) => {
                                             self.output_area.push_error(&format!(
@@ -402,12 +403,22 @@ impl super::App {
             .map(|s| (s.name.clone(), s.description.clone(), s.aliases.clone()))
             .collect();
 
+        // Build command list from CommandRegistry (single source of truth)
+        let registry = CommandRegistry::with_defaults();
+        let commands: Vec<(String, String, Vec<String>)> = registry
+            .list()
+            .into_iter()
+            .map(|cmd| (cmd.name.clone(), cmd.description.clone(), cmd.aliases.clone()))
+            .collect();
+
         let ctx = SuggestionContext {
             input,
             cursor_offset,
             cwd: self.cwd.clone(),
             models,
             skills,
+            commands,
+            sessions: self.cached_sessions.clone(),
         };
 
         let suggestions = generate_suggestions(&ctx);
