@@ -9,23 +9,6 @@ impl super::OutputArea {
         let rel_row = row.saturating_sub(rect.y) as usize;
         let rel_col = col.saturating_sub(rect.x) as usize;
 
-        // debug: log screen_line_map and click position
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true).append(true)
-                .open(dirs::home_dir().unwrap_or_default().join(".aemeath/debug.log"))
-            {
-                let _ = writeln!(f, "start_selection: rel_row={}, rel_col={}, map_len={}", rel_row, rel_col, self.screen_line_map.len());
-                if rel_row < self.screen_line_map.len() {
-                    let (li, cs, ce) = self.screen_line_map[rel_row];
-                    let _ = writeln!(f, "  map[{}]: logic_idx={}, char_start={}, char_end={}, content={}",
-                        rel_row, li, cs.as_usize(), ce.as_usize(),
-                        if li < self.lines.len() { &self.lines[li].content } else { "?" });
-                }
-            }
-        }
-
         // 将屏幕行映射到逻辑行+char偏移
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];

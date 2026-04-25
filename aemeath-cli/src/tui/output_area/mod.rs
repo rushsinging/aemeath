@@ -178,50 +178,8 @@ impl OutputArea {
                     new_screen_map.push((idx, char_start, char_end));
                 }
 
-                // 运行中的工具调用闪烁圆点
-                if matches!(style, LineStyle::ToolCallRunning) && output_line.content.starts_with('●') {
-                    let blink_on = (spinner_frame_idx / 10) % 2 == 0;
-                    let dot_color = if blink_on { Color::White } else { Color::DarkGray };
-                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
-                        if i == 0 {
-                            let dot_span = Span::styled("●".to_string(), Style::default().fg(dot_color));
-                            let rest = &chunk[3..];
-                            let text_span = Span::styled(rest.to_string(), style.to_style());
-                            Line::from(vec![dot_span, text_span])
-                        } else {
-                            Line::styled(chunk, style.to_style())
-                        }
-                    }).collect::<Vec<_>>()
-                }
-
-                // 已完成的工具调用绿色圆点 (✓ → ●)
-                if matches!(style, LineStyle::ToolCallSuccess) && output_line.content.starts_with('✓') {
-                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
-                        if i == 0 {
-                            let dot_span = Span::styled("●".to_string(), Style::default().fg(Color::Green));
-                            let rest = &chunk[3..];
-                            let text_span = Span::styled(rest.to_string(), style.to_style());
-                            Line::from(vec![dot_span, text_span])
-                        } else {
-                            Line::styled(chunk, style.to_style())
-                        }
-                    }).collect::<Vec<_>>()
-                }
-
-                // 失败的工具调用红色圆点 (✗ → ●)
-                if matches!(style, LineStyle::ToolCallError) && output_line.content.starts_with('✗') {
-                    return wrapped.into_iter().enumerate().map(move |(i, chunk)| {
-                        if i == 0 {
-                            let dot_span = Span::styled("●".to_string(), Style::default().fg(Color::Red));
-                            let rest = &chunk[3..];
-                            let text_span = Span::styled(rest.to_string(), style.to_style());
-                            Line::from(vec![dot_span, text_span])
-                        } else {
-                            Line::styled(chunk, style.to_style())
-                        }
-                    }).collect::<Vec<_>>()
-                }
-
+                // 运行中的工具调用闪烁圆点 — 先用普通样式渲染，后处理改 dot 颜色
+                // 已完成/失败的 tool call 同理
                 // 选择高亮
                 if self.selection_start.is_some() && self.selection_end.is_some() {
                     let screen_start = new_screen_map.len() - wrapped.len();
@@ -235,7 +193,6 @@ impl OutputArea {
                     let is_code_block = code_block_lines.contains(&idx);
                     wrapped.into_iter().map(|chunk| {
                         if is_code_block {
-                            // 代码块行：简单背景色
                             Line::styled(chunk, code_style)
                         } else if is_markdown {
                             Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
@@ -271,6 +228,42 @@ impl OutputArea {
             let paragraph = Paragraph::new(lines);
             paragraph.render(area, buf);
         }));
+
+        // 后处理：tool call 行的 dot 颜色
+        // 遍历 self.lines 中可见范围内的 tool call 行，修改 buf 上 dot 字符的颜色
+        {
+            let blink_on = (spinner_frame_idx / 10) % 2 == 0;
+            for (si, &(li, _, _)) in self.screen_line_map.iter().enumerate() {
+                if li >= self.lines.len() { continue; }
+                let line = &self.lines[li];
+                let content = &line.content;
+                // 计算屏幕 y 坐标
+                let visible_offset = total_rendered.saturating_sub(area.height as usize);
+                let screen_y = si.saturating_sub(visible_offset);
+                if screen_y >= area.height as usize { continue; }
+                let buf_y = area.y + screen_y as u16;
+
+                let dot_color = match line.style {
+                    LineStyle::ToolCallRunning if content.starts_with('●') => {
+                        Some(if blink_on { Color::White } else { Color::DarkGray })
+                    }
+                    LineStyle::ToolCallSuccess if content.starts_with('✓') => Some(Color::Green),
+                    LineStyle::ToolCallError if content.starts_with('✗') => Some(Color::Red),
+                    _ => None,
+                };
+
+                if let Some(color) = dot_color {
+                    // 修改第一个字符（dot）的颜色
+                    if let Some(cell) = buf.cell_mut((area.x, buf_y)) {
+                        let _ch = cell.symbol().to_string();
+                        cell.set_char('●');
+                        let mut s = cell.style();
+                        s.fg = Some(color);
+                        cell.set_style(s);
+                    }
+                }
+            }
+        }
 
         // 渲染滚动条
         if total_lines > visible_lines {
