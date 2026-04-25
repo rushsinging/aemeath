@@ -31,7 +31,7 @@ impl Tool for FileEditTool {
         };
 
         // Validate path is within workspace boundary (includes traversal check)
-        let path = match validate_and_normalize_path(file_path, &ctx.cwd) {
+        let path = match validate_and_normalize_path(file_path, &ctx.cwd, ctx.allow_all) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };

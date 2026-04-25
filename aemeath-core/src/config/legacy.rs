@@ -1,0 +1,123 @@
+//! 旧版 API 与模型配置
+//!
+//! 仅保留向后兼容。新配置应使用 `models` 字段。
+
+use crate::provider::Provider;
+use serde::{Deserialize, Serialize};
+
+/// **Legacy** API configuration. Prefer using `models.providers` instead.
+///
+/// This is kept for backward compatibility with existing config files and
+/// commands (`/model`, `/config`). New configurations should use `ModelsConfig`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiConfig {
+    /// LLM provider to use (None = unset, use base value; Some = explicitly set)
+    #[serde(default)]
+    pub provider: Option<Provider>,
+
+    /// API key (can also be set via provider-specific env var)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+
+    /// API base URL (default: provider-specific)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+
+    /// User agent string
+    #[serde(default = "default_user_agent")]
+    pub user_agent: String,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+
+    /// Number of retries for failed requests
+    #[serde(default = "default_retries")]
+    pub retries: u32,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            key: None,
+            base_url: None,
+            user_agent: default_user_agent(),
+            timeout: default_timeout(),
+            retries: default_retries(),
+        }
+    }
+}
+
+pub(crate) fn default_user_agent() -> String {
+    format!("aemeath/{}", env!("CARGO_PKG_VERSION"))
+}
+
+pub(crate) fn default_timeout() -> u64 {
+    300
+}
+
+pub(crate) fn default_retries() -> u32 {
+    3
+}
+
+/// **Legacy** model configuration. Prefer using `models.providers[].models[]` instead.
+///
+/// This is kept for backward compatibility. New configurations should define
+/// models under `models.providers.<name>.models` in config.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    /// Model name to use
+    #[serde(default = "default_model")]
+    pub name: String,
+
+    /// Maximum output tokens
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+
+    /// Context window size
+    #[serde(default = "default_context_size")]
+    pub context_size: usize,
+
+    /// Temperature (0.0 - 1.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+
+    /// Top-K sampling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+
+    /// Top-P sampling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+
+    /// Stop sequences
+    #[serde(default)]
+    pub stop_sequences: Vec<String>,
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            name: default_model(),
+            max_tokens: default_max_tokens(),
+            context_size: default_context_size(),
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            stop_sequences: Vec::new(),
+        }
+    }
+}
+
+pub(crate) fn default_model() -> String {
+    "claude-sonnet-4-6".to_string()
+}
+
+pub(crate) fn default_max_tokens() -> u32 {
+    200000
+}
+
+pub(crate) fn default_context_size() -> usize {
+    128000
+}

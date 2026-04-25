@@ -79,7 +79,7 @@ pub fn is_image_file(path: &str) -> bool {
 }
 
 /// Result of image processing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProcessedImage {
     pub base64: String,
     pub media_type: String,
@@ -266,8 +266,6 @@ pub enum ImageError {
         base64_size: usize,
     },
     ResizeError(String),
-    #[allow(dead_code)]
-    UnsupportedFormat(String),
 }
 
 impl std::fmt::Display for ImageError {
@@ -282,7 +280,6 @@ impl std::fmt::Display for ImageError {
                     original_size, base64_size, API_IMAGE_MAX_BASE64_SIZE)
             }
             ImageError::ResizeError(e) => write!(f, "Failed to resize image: {}", e),
-            ImageError::UnsupportedFormat(fmt) => write!(f, "Unsupported image format: {}", fmt),
         }
     }
 }

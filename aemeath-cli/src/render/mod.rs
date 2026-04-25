@@ -157,10 +157,20 @@ impl TerminalRenderer {
         println!("{}", ST::done_message(&format!("✻ {verb} for {duration}")));
     }
 
-    pub fn print_usage(input_tokens: u32, output_tokens: u32) {
+    pub fn print_usage(input_tokens: u32, output_tokens: u32, elapsed: std::time::Duration) {
+        let tps = if elapsed.as_secs_f64() > 0.0 {
+            output_tokens as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
         println!(
             "{}",
-            ST::info(&format!("[tokens: {} in / {} out]", format_tokens(input_tokens as u64), format_tokens(output_tokens as u64)))
+            ST::info(&format!(
+                "[tokens: {} in / {} out  |  {:.0} t/s]",
+                format_tokens(input_tokens as u64),
+                format_tokens(output_tokens as u64),
+                tps,
+            ))
         );
     }
 
@@ -216,6 +226,8 @@ pub struct TerminalStreamHandler {
     pub verbose: bool,
     pub use_markdown: bool,
     text_buffer: String,
+    /// Track whether we are currently inside a thinking block
+    in_thinking: bool,
 }
 
 impl TerminalStreamHandler {
@@ -224,12 +236,21 @@ impl TerminalStreamHandler {
             verbose,
             use_markdown,
             text_buffer: String::new(),
+            in_thinking: false,
         }
     }
 }
 
 impl StreamHandler for TerminalStreamHandler {
     fn on_text(&mut self, text: &str) {
+        // Close thinking block if we were in one
+        if self.in_thinking {
+            self.in_thinking = false;
+            // Print a separator before normal text
+            let mut stdout = io::stdout();
+            let _ = stdout.execute(ResetColor);
+            println!();
+        }
         if self.use_markdown {
             self.text_buffer.push_str(text);
         } else {
@@ -238,7 +259,28 @@ impl StreamHandler for TerminalStreamHandler {
         }
     }
 
+    fn on_thinking(&mut self, text: &str) {
+        if !self.in_thinking {
+            self.in_thinking = true;
+            let mut stdout = io::stdout();
+            let _ = stdout.execute(SetForegroundColor(Color::DarkGrey));
+            // Flush buffered text if any (markdown mode)
+            if self.use_markdown && !self.text_buffer.is_empty() {
+                markdown::render_markdown(&self.text_buffer);
+                self.text_buffer.clear();
+            }
+        }
+        print!("{text}");
+        let _ = io::stdout().flush();
+    }
+
     fn on_text_block_complete(&mut self, full_text: &str) {
+        if self.in_thinking {
+            self.in_thinking = false;
+            let mut stdout = io::stdout();
+            let _ = stdout.execute(ResetColor);
+            println!();
+        }
         if self.use_markdown {
             self.text_buffer.clear();
             println!();
@@ -247,6 +289,12 @@ impl StreamHandler for TerminalStreamHandler {
     }
 
     fn on_tool_use_start(&mut self, name: &str) {
+        if self.in_thinking {
+            self.in_thinking = false;
+            let mut stdout = io::stdout();
+            let _ = stdout.execute(ResetColor);
+            println!();
+        }
         if self.use_markdown && !self.text_buffer.is_empty() {
             markdown::render_markdown(&self.text_buffer);
             self.text_buffer.clear();
@@ -259,6 +307,12 @@ impl StreamHandler for TerminalStreamHandler {
     }
 
     fn on_error(&mut self, error: &str) {
+        if self.in_thinking {
+            self.in_thinking = false;
+            let mut stdout = io::stdout();
+            let _ = stdout.execute(ResetColor);
+            println!();
+        }
         let mut stdout = io::stdout();
         let _ = stdout.execute(SetForegroundColor(Color::Red));
         let _ = stdout.execute(Print(format!("Error: {error}\n")));

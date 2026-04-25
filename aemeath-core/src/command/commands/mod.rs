@@ -1,6 +1,31 @@
 //! Command definitions
 
-pub mod builtin;
+pub mod help;
+pub mod misc;
+pub mod session;
+pub mod model;
+pub mod config_cmd;
+pub mod tasks;
+pub mod tools;
+pub mod git;
+pub mod debug;
+pub mod stats;
+
+// Re-export all command constructors for backward compatibility
+// (CommandRegistry uses `use crate::command::commands::builtin::*`)
+pub mod builtin {
+    pub use super::help::help_command;
+    pub use super::misc::{exit_command, clear_command, compact_command};
+    pub use super::misc::{cost_command, usage_command, status_command, version_command};
+    pub use super::session::{resume_command, session_command, rewind_command};
+    pub use super::model::model_command;
+    pub use super::config_cmd::{config_command, permissions_command};
+    pub use super::tasks::tasks_command;
+    pub use super::tools::{mcp_command, skills_command};
+    pub use super::git::{init_command, commit_command, review_command};
+    pub use super::debug::doctor_command;
+    pub use super::stats::stats_command;
+}
 
 use crate::state::AppState;
 use crate::config::Config;

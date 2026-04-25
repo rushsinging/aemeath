@@ -83,17 +83,23 @@ impl Tool for TaskListTool {
         );
 
         for task in &tasks {
-            let status = match task.status {
-                TaskStatus::Pending => "⏳ pending",
-                TaskStatus::InProgress => "🔄 in_progress",
-                TaskStatus::Completed => "✅ completed",
-                TaskStatus::Deleted => "🗑️ deleted",
+            let icon = match task.status {
+                TaskStatus::Pending => "□",
+                TaskStatus::InProgress => "■",
+                TaskStatus::Completed => "✓",
+                TaskStatus::Deleted => "✗",
             };
-            let priority = match task.priority {
-                TaskPriority::Urgent => "🔴",
-                TaskPriority::High => "🟠",
-                TaskPriority::Normal => "🟢",
-                TaskPriority::Low => "⚪",
+            let status_label = match task.status {
+                TaskStatus::Pending => "pending",
+                TaskStatus::InProgress => "in_progress",
+                TaskStatus::Completed => "completed",
+                TaskStatus::Deleted => "deleted",
+            };
+            let priority_label = match task.priority {
+                TaskPriority::Urgent => " [urgent]",
+                TaskPriority::High => " [high]",
+                TaskPriority::Normal => "",
+                TaskPriority::Low => " [low]",
             };
             let progress = if task.progress > 0 {
                 format!(" [{}%]", task.progress)
@@ -101,17 +107,17 @@ impl Tool for TaskListTool {
                 "".to_string()
             };
             let blocked = if task.is_blocked(&self.store).await {
-                " 🚫 blocked"
+                " blocked"
             } else if !task.blocked_by.is_empty() {
-                " ⏸️ waiting"
+                " waiting"
             } else {
                 ""
             };
             let owner = task.owner.as_deref().map(|o| format!(" (@{})", o)).unwrap_or_default();
 
             output.push_str(&format!(
-                "{} #{} {}{} [{}]{}{}{}\n   {}\n",
-                priority, task.id, task.subject, progress, status, owner, blocked,
+                "{} #{} {}{}{} [{}]{}{}{}\n   {}\n",
+                icon, task.id, task.subject, priority_label, progress, status_label, owner, blocked,
                 if !task.tags.is_empty() { format!(" [{}]", task.tags.join(", ")) } else { "".to_string() },
                 task.description
             ));

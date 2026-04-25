@@ -85,10 +85,10 @@ impl Tool for AgentTool {
 
         // Hard block: prompt is far too large for a sub-agent
         if scope.level == ScopeLevel::Block {
-            return ToolResult::error(format!(
-                "Task is too large for a sub-agent. Please break it down:\n{}",
-                scope.warnings.join("\n")
-            ));
+              return ToolResult::error(format!(
+                  "Task is too large for a sub-agent. Please break it down:\n{}",
+                  scope.warnings.join("\n")
+              ));
         }
 
         let _model = input
@@ -238,24 +238,7 @@ fn analyze_task_scope(prompt: &str, cwd: &Path) -> ScopeResult {
 
   // --- 1. Prompt size check ---
   // Very long prompt consumes too much of the sub-agent's context window
-  let char_count = prompt.chars().count();
-  if char_count > 8000 {
-      level = ScopeLevel::Block;
-      warnings.push(format!(
-          "Prompt is very long ({} chars, ~{} tokens). This alone consumes a large portion of the sub-agent's ~128K context window. Split into smaller, focused tasks.",
-          char_count,
-          char_count / 4
-      ));
-  } else if char_count > 4000 {
-      if level != ScopeLevel::Block {
-          level = ScopeLevel::Warn;
-      }
-      warnings.push(format!(
-          "Prompt is somewhat long ({} chars, ~{} tokens). Consider being more concise.",
-          char_count,
-          char_count / 4
-      ));
-  }
+  // No size limit on prompt — the calling agent may need to pass full file contents
 
   // --- 2. File path enumeration ---
   let file_paths = extract_file_paths(prompt);

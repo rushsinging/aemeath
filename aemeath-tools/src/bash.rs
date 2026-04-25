@@ -13,6 +13,41 @@ const CHAIN_START_COMMANDS: &[&str] = &[
     "cd", "pushd", "popd", "dirs",
 ];
 
+/// Detect redirection to a real device path (excluding the safe sinks
+/// `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/*`, `/dev/tty`).
+/// Writes to these are universally safe; writes to e.g. `/dev/sda` are
+/// genuinely destructive and must be blocked.
+fn is_suspicious_dev_write(cmd: &str) -> bool {
+    const SAFE_DEVS: &[&str] = &[
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+    ];
+    let mut rest = cmd;
+    loop {
+        let Some(pos) = rest.find("/dev/") else { return false };
+        // Look backwards to check this is a `>` or `>>` redirection target
+        let before = &rest[..pos];
+        let is_redirect = before
+            .trim_end_matches(|c: char| c == ' ' || c == '\t')
+            .ends_with('>');
+        if is_redirect {
+            // Check the specific device path
+            let after = &rest[pos..];
+            let end = after.find(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == ')')
+                .unwrap_or(after.len());
+            let dev_path = &after[..end];
+            let is_safe = SAFE_DEVS.iter().any(|s| dev_path == *s)
+                || dev_path.starts_with("/dev/fd/");
+            if !is_safe {
+                return true;
+            }
+        }
+        rest = &rest[pos + 5..];
+    }
+}
+
 /// Check if a command is allowed in a chain (after &&, ||, etc.)
 fn is_safe_chain_command(command: &str) -> bool {
     let cmd = command.trim();
@@ -133,13 +168,15 @@ fn check_shell_injection(command: &str) -> Option<&'static str> {
         }
     }
 
-    // I/O redirection to devices (suspicious)
-    if cmd.contains("> /dev/") || cmd.contains(">> /dev/") {
+    // I/O redirection to devices — only block non-standard ones.
+    // /dev/null, /dev/stdout, /dev/stderr are universally safe sinks.
+    if is_suspicious_dev_write(cmd) {
         return Some("write to device");
     }
 
-    // Newline injection
-    if cmd.contains('\n') {
+    // Newline injection — allow newlines inside heredoc bodies, since
+    // `cmd << MARKER ... MARKER` is a common, safe idiom.
+    if cmd.contains('\n') && !cmd.contains("<<") {
         return Some("newline injection");
     }
 
@@ -174,7 +211,7 @@ fn check_command_safety(command: &str) -> Option<&'static str> {
     }
     if lower.contains("mkfs") { return Some("format filesystem"); }
     if lower.contains("dd if=") { return Some("raw disk write"); }
-    if lower.contains("> /dev/") { return Some("write to device"); }
+    if is_suspicious_dev_write(cmd) { return Some("write to device"); }
 
     // === Git dangerous operations ===
     if lower.contains("git reset --hard") { return Some("discard all changes"); }

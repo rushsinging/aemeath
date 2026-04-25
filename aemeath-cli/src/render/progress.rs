@@ -1,8 +1,9 @@
 use indicatif::{ProgressBar, ProgressStyle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct ThinkingIndicator {
     progress: ProgressBar,
+    start_time: Instant,
 }
 
 impl ThinkingIndicator {
@@ -18,7 +19,15 @@ impl ThinkingIndicator {
         progress.set_style(style);
         progress.set_message(message.to_string());
         
-        Self { progress }
+        Self {
+            progress,
+            start_time: Instant::now(),
+        }
+    }
+
+    /// Return elapsed time since start, for t/s calculation.
+    pub fn elapsed(&self) -> Duration {
+        self.start_time.elapsed()
     }
 
     pub fn stop(self) {

@@ -23,9 +23,10 @@ const MAX_PATH_DEPTH: usize = 64;
 pub fn validate_and_normalize_path(
     file_path: &str,
     workspace_root: &Path,
+    allow_outside: bool,
 ) -> Result<PathBuf, String> {
     // --- Reject obvious traversal attempts early ---
-    if file_path.contains("..") {
+    if !allow_outside && file_path.contains("..") {
         return Err(format!(
             "Path '{}' contains '..' which is not allowed. Only files within the workspace are permitted.",
             file_path
@@ -67,7 +68,7 @@ pub fn validate_and_normalize_path(
         })?;
 
     // Path-aware containment check
-    if !normalized.starts_with(&workspace_abs) {
+    if !allow_outside && !normalized.starts_with(&workspace_abs) {
         return Err(format!(
             "Path '{}' escapes workspace '{}'. Only files within the workspace are allowed.",
             normalized.display(),

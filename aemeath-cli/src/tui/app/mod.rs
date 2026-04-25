@@ -1,0 +1,508 @@
+use crate::tui::{InputArea, OutputArea, StatusBar};
+use aemeath_core::message::Message;
+use aemeath_core::skill::Skill;
+use aemeath_core::tool::{ImageData, ToolRegistry};
+use crossterm::{
+    event::{Event, EventStream},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use futures::StreamExt;
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    Terminal,
+};
+use std::io;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+/// Events sent from background task to UI
+#[derive(Clone, Debug)]
+pub enum UiEvent {
+    Text(String),
+    Thinking(String),
+    TextBlockComplete(String),
+    ToolCallStart(String),
+    ToolCall { id: String, name: String, summary: String },
+    ToolResult { id: String, tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
+    Usage { input: u32, output: u32, last_input: u32, elapsed_secs: f64 },
+    Error(String),
+    Cancelled,
+    MessagesSync(Vec<Message>),
+    Done,
+    DoneWithDuration(std::time::Duration),
+    ClipboardImage(crate::image::ProcessedImage),
+    SystemMessage(String),
+}
+
+/// Main TUI application
+pub struct App {
+    pub output_area: OutputArea,
+    pub input_area: InputArea,
+    pub status_bar: StatusBar,
+    pub messages: Vec<Message>,
+    pub cwd: PathBuf,
+    pub session_id: String,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_api_calls: u64,
+    pub last_input_tokens: u64,
+    pub should_exit: bool,
+    pub pending_images: Vec<crate::image::ProcessedImage>,
+    pub output_area_rect: Rect,
+    pub input_area_rect: Rect,
+    pub status_bar_rect: Rect,
+    pub just_pasted: bool,
+    pub queued_input: Option<String>,
+    pub last_click: Option<(std::time::Instant, u16, u16)>,
+    pub system_prompt_text: String,
+    pub context_size: usize,
+    pub client: Option<Arc<aemeath_llm::client::LlmClient>>,
+    pub models_config: aemeath_core::config::ModelsConfig,
+    pub session_created_at: Option<String>,
+    pub active_dialog: Option<crate::tui::dialog::Dialog>,
+    pub dialog_model_keys: Vec<String>,
+    pub current_model_display: String,
+    pub last_ctrlc: Option<std::time::Instant>,
+    pub skills: std::collections::HashMap<String, Skill>,
+}
+
+impl App {
+    pub fn new(session_id: String, cwd: PathBuf, model: String) -> Self {
+        let mut status_bar = StatusBar::new();
+        status_bar.set_session_id(&session_id);
+        status_bar.set_model(&model);
+
+        let mut output_area = OutputArea::new();
+        output_area.push_system("Aemeath - AI Agent");
+        output_area.push_system("");
+        output_area.push_system("Type /help for available commands");
+        output_area.push_system("");
+
+        Self {
+            output_area,
+            input_area: InputArea::new(),
+            status_bar,
+            messages: Vec::new(),
+            cwd,
+            session_id,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_api_calls: 0,
+            last_input_tokens: 0,
+            should_exit: false,
+            pending_images: Vec::new(),
+            output_area_rect: Rect::default(),
+            input_area_rect: Rect::default(),
+            status_bar_rect: Rect::default(),
+            just_pasted: false,
+            queued_input: None,
+            last_click: None,
+            system_prompt_text: String::new(),
+            context_size: 200_000,
+            client: None,
+            models_config: aemeath_core::config::ModelsConfig::default(),
+            session_created_at: None,
+            active_dialog: None,
+            dialog_model_keys: Vec::new(),
+            current_model_display: model,
+            last_ctrlc: None,
+            skills: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Set loaded skills for slash command alias lookup
+    pub fn set_skills(&mut self, skills: std::collections::HashMap<String, Skill>) {
+        self.skills = skills;
+    }
+
+    /// Find a skill by its name or alias
+    fn find_skill_by_alias(&self, alias: &str) -> Option<&Skill> {
+        self.skills.values().find(|s| {
+            s.name == alias || s.aliases.iter().any(|a| a == alias)
+        })
+    }
+
+    /// Run the TUI event loop
+    pub async fn run(
+        &mut self,
+        client: Arc<aemeath_llm::client::LlmClient>,
+        registry: ToolRegistry,
+        system_blocks: Vec<aemeath_llm::types::SystemBlock>,
+        system_prompt_text: String,
+        user_context: String,
+        context_size: usize,
+        verbose: bool,
+        use_markdown: bool,
+        agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
+        allow_all: bool,
+        resume_id: Option<String>,
+        task_store: Arc<aemeath_core::task::TaskStore>,
+        max_tool_concurrency: usize,
+        max_agent_concurrency: usize,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
+    ) -> io::Result<()> {
+        self.client = Some(client.clone());
+        self.system_prompt_text = system_prompt_text.clone();
+        self.context_size = context_size;
+        self.status_bar.set_context_size(context_size as u64);
+
+        // Resume existing session if requested
+        if let Some(ref id) = resume_id {
+            match aemeath_core::session::load_session(id).await {
+                Ok(s) => {
+                    let msg_count = s.messages.len();
+                    self.session_created_at = Some(s.created_at);
+                    for msg in &s.messages {
+                        self.render_history_message(msg);
+                    }
+                    self.messages = s.messages;
+                    self.output_area.push_system(&format!(
+                        "[resumed session {} ({} messages)]",
+                        id, msg_count
+                    ));
+                }
+                Err(e) => {
+                    self.output_area.push_system(&format!(
+                        "[warning: failed to resume session {}: {}, starting new]",
+                        id, e
+                    ));
+                }
+            }
+        }
+
+        // Load models config from config files
+        let config_paths = [
+            dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+            std::path::PathBuf::from(".aemeath/config.json"),
+        ];
+        for path in &config_paths {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(config) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
+                        if !config.models.providers.is_empty() {
+                            self.models_config = config.models;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            crossterm::event::EnableBracketedPaste,
+            crossterm::event::EnableMouseCapture,
+        )?;
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let registry = Arc::new(registry);
+
+        let result = self.run_loop(
+            &mut terminal,
+            client,
+            registry,
+            system_blocks,
+            system_prompt_text,
+            user_context,
+            context_size,
+            verbose,
+            use_markdown,
+            agent_runner,
+            allow_all,
+            interrupted,
+            task_store,
+            max_tool_concurrency,
+            max_agent_concurrency,
+            agent_semaphore,
+        ).await;
+
+        // Auto-save session on exit
+        if !self.messages.is_empty() {
+            use aemeath_core::session::{self as sess, Session, now_iso};
+            let s = Session {
+                id: self.session_id.clone(),
+                cwd: self.cwd.to_string_lossy().to_string(),
+                messages: self.messages.clone(),
+                created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+                updated_at: now_iso(),
+                metadata: Default::default(),
+            };
+            if let Err(e) = sess::save_session(&s).await {
+                log::warn!("failed to auto-save session: {e}");
+            }
+        }
+
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::event::DisableBracketedPaste,
+            LeaveAlternateScreen,
+        )?;
+        terminal.show_cursor()?;
+
+        result
+    }
+
+    async fn run_loop(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        client: Arc<aemeath_llm::client::LlmClient>,
+        registry: Arc<ToolRegistry>,
+        system_blocks: Vec<aemeath_llm::types::SystemBlock>,
+        system_prompt_text: String,
+        user_context: String,
+        context_size: usize,
+        _verbose: bool,
+        _use_markdown: bool,
+        agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
+        allow_all: bool,
+        interrupted: Arc<AtomicBool>,
+        task_store: Arc<aemeath_core::task::TaskStore>,
+        max_tool_concurrency: usize,
+        max_agent_concurrency: usize,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
+    ) -> io::Result<()> {
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
+        let mut is_processing = self.status_bar.is_processing();
+        let active_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let mut event_stream = EventStream::new();
+
+        loop {
+            // Update task status lines
+            self.update_task_status(&task_store, is_processing).await;
+
+            // Draw UI
+            self.draw(terminal)?;
+
+            // Build spawn context refs for handlers
+            let spawn_refs = processing::SpawnContextRefs {
+                client: &client,
+                registry: &registry,
+                system_blocks: &system_blocks,
+                system_prompt_text: &system_prompt_text,
+                user_context: &user_context,
+                context_size,
+                read_files: &read_files,
+                agent_runner: &agent_runner,
+                allow_all,
+                interrupted: &interrupted,
+                task_store: &task_store,
+                max_tool_concurrency,
+                max_agent_concurrency,
+                agent_semaphore: &agent_semaphore,
+            };
+
+            // Handle events
+            let maybe_event = tokio::select! {
+                biased;
+                ev = ui_rx.recv() => {
+                    if let Some(ev) = ev {
+                        self.handle_ui_event(
+                            ev, &mut is_processing, &ui_tx, &active_cancel, &spawn_refs,
+                        ).await;
+                    }
+                    continue;
+                }
+                ev = event_stream.next() => ev,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                    continue;
+                }
+            };
+
+            if let Some(Ok(event)) = maybe_event {
+                match event {
+                    Event::Paste(text) if !is_processing => {
+                        self.handle_paste_event(text, &ui_tx);
+                    }
+                    Event::Mouse(mouse) => {
+                        let area = self.output_area_rect;
+                        self.handle_mouse_event(mouse, area);
+                    }
+                    Event::Key(key) => {
+                        use input_handler::KeyResult;
+                        match self.handle_key_event(
+                            key, &mut is_processing, &ui_tx, &active_cancel, &spawn_refs,
+                        ) {
+                            KeyResult::SlashCommand => {
+                                // Slash command needs async handling
+                                if let Some(input) = self.queued_input.take() {
+                                    let review_prompt = self.handle_slash_command(&input).await;
+                                    if let Some(prompt) = review_prompt {
+                                        self.output_area.push_user_message(&input);
+                                        self.messages.push(Message::user(&prompt));
+                                        interrupted.store(false, Ordering::Relaxed);
+                                        self.status_bar.set_processing("Thinking...");
+                                        self.output_area.start_spinner();
+                                        is_processing = true;
+                                        let cancel = CancellationToken::new();
+                                        if let Ok(mut guard) = active_cancel.lock() {
+                                            *guard = Some(cancel.clone());
+                                        }
+                                        processing::spawn_processing(processing::SpawnContext {
+                                            tx: ui_tx.clone(),
+                                            client: client.clone(),
+                                            registry: registry.clone(),
+                                            system_blocks: system_blocks.clone(),
+                                            system_prompt_text: system_prompt_text.clone(),
+                                            user_context: user_context.clone(),
+                                            messages: self.messages.clone(),
+                                            context_size,
+                                            cwd: self.cwd.clone(),
+                                            session_id: self.session_id.clone(),
+                                            read_files: read_files.clone(),
+                                            agent_runner: agent_runner.clone(),
+                                            allow_all,
+                                            interrupted: interrupted.clone(),
+                                            cancel,
+                                            task_store: task_store.clone(),
+                                            max_tool_concurrency,
+                                            max_agent_concurrency,
+                                            agent_semaphore: agent_semaphore.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                            KeyResult::DialogModelSwitch => {
+                                if let Some(input) = self.queued_input.take() {
+                                    let _ = self.handle_slash_command_str(&input).await;
+                                }
+                            }
+                            KeyResult::None => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            self.just_pasted = false;
+            if self.should_exit { break; }
+        }
+        Ok(())
+    }
+
+    /// Update task status display in output area.
+    async fn update_task_status(
+        &mut self,
+        task_store: &Arc<aemeath_core::task::TaskStore>,
+        is_processing: bool,
+    ) {
+        let tasks = task_store.list().await;
+        let mut active: Vec<_> = tasks.iter()
+            .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
+            .collect();
+        active.sort_by(|a, b| {
+            a.id.parse::<u64>().unwrap_or(u64::MAX)
+                .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
+        });
+        let any_active = active.iter().any(|t|
+            t.status == aemeath_core::task::TaskStatus::InProgress
+            || t.status == aemeath_core::task::TaskStatus::Pending);
+        if any_active && is_processing {
+            self.output_area.start_spinner();
+        }
+        if active.is_empty() {
+            self.output_area.set_task_status(Vec::new());
+        } else {
+            let completed = active.iter().filter(|t| t.status == aemeath_core::task::TaskStatus::Completed).count();
+            let total = active.len();
+            let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed, total)];
+            for t in &active {
+                let icon = match t.status {
+                    aemeath_core::task::TaskStatus::Completed => "✓",
+                    aemeath_core::task::TaskStatus::InProgress => "■",
+                    aemeath_core::task::TaskStatus::Pending => "□",
+                    _ => continue,
+                };
+                let owner = t.owner.as_deref().map(|o| format!(" (@{})", o)).unwrap_or_default();
+                lines.push(format!("{} #{} {}{}", icon, t.id, t.subject, owner));
+            }
+            self.output_area.set_task_status(lines);
+        }
+    }
+
+    /// Draw the TUI frame.
+    fn draw(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> io::Result<()> {
+        let mut output_rect = Rect::default();
+        let mut input_rect = Rect::default();
+        let mut status_rect = Rect::default();
+        terminal.draw(|f| {
+            let size = f.area();
+            if size.height < 8 || size.width < 20 { return; }
+
+            let suggestions_height = if self.input_area.is_showing_suggestions() {
+                let count = self.input_area.get_suggestions().len().min(5) as u16;
+                if count > 0 { count + 1 } else { 0 }
+            } else { 0 };
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(10),
+                    Constraint::Length(5),
+                    Constraint::Length(suggestions_height),
+                    Constraint::Length(1),
+                ])
+                .split(size);
+
+            output_rect = chunks[0];
+            input_rect = chunks[1];
+            status_rect = chunks[3];
+            if chunks.iter().any(|c| c.height == 0 && c.width == 0) { return; }
+
+            let buf = f.buffer_mut();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.output_area.render(chunks[0], buf);
+            })).is_err() {
+                self.status_bar.set_warning("Render error, try resizing");
+            }
+            self.input_area.set_pending_images(self.pending_images.len());
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.input_area.render(chunks[1], buf);
+            }));
+            if suggestions_height > 0 {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    self.input_area.render_suggestions_in_area(chunks[2], buf);
+                }));
+            }
+            self.status_bar.set_tokens(self.total_input_tokens, self.total_output_tokens, self.last_input_tokens);
+            self.status_bar.set_api_calls(self.total_api_calls);
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.status_bar.render(chunks[3], buf);
+            }));
+            if let Some(ref dialog) = self.active_dialog {
+                dialog.render(size, buf);
+            }
+        })?;
+        self.output_area_rect = output_rect;
+        self.input_area_rect = input_rect;
+        self.status_bar_rect = status_rect;
+        Ok(())
+    }
+}
+
+pub mod event_handler;
+pub mod input_handler;
+pub mod mouse_handler;
+pub mod paste_handler;
+pub mod processing;
+pub mod render;
+pub mod slash;
+pub mod stream;
+pub mod util;

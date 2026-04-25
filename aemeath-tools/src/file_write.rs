@@ -26,14 +26,20 @@ impl Tool for FileWriteTool {
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: file_path"),
+            None => return ToolResult::error(format!(
+                "missing required parameter: file_path. Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{}]",
+                input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
+            )),
         };
         let content = match input.get("content").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::error("missing required parameter: content"),
+            None => return ToolResult::error(format!(
+                "missing required parameter: content. Write takes both `file_path` and `content` (string). Received keys: [{}]",
+                input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
+            )),
         };
         // Validate path is within workspace boundary
-        let path = match validate_and_normalize_path(file_path, &ctx.cwd) {
+        let path = match validate_and_normalize_path(file_path, &ctx.cwd, ctx.allow_all) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };
