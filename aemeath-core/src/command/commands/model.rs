@@ -63,7 +63,6 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 api_type: provider_config.api.clone(),
                 max_tokens: model.max_tokens,
                 context_window: model.context_window,
-                reasoning: model.reasoning,
             })
         }
         None => {

@@ -129,10 +129,6 @@ pub struct ModelEntryConfig {
     #[serde(default)]
     pub name: String,
 
-    /// Whether this model supports reasoning/thinking
-    #[serde(default)]
-    pub reasoning: bool,
-
     /// Supported input types (e.g. ["text", "image"])
     #[serde(default)]
     pub input: Vec<String>,

@@ -24,7 +24,7 @@ pub struct OllamaProvider {
     pub(crate) max_tokens: u32,
     /// If false, send `think: false` to disable reasoning mode for models
     /// that support it (qwen3, deepseek-r1, gpt-oss, etc.)
-    pub(crate) reasoning: bool,
+    pub(crate) reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(crate) user_agent: String,
     pub(crate) http: reqwest::Client,
     pub(crate) max_retries: u32,
@@ -52,7 +52,7 @@ impl OllamaProvider {
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
             max_tokens,
-            reasoning,
+            reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -116,7 +116,7 @@ impl LlmProvider for OllamaProvider {
             "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             self.model,
-            self.reasoning,
+            self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
             messages.len(),
             tool_schemas.len(),
             body_bytes,
@@ -250,5 +250,13 @@ impl LlmProvider for OllamaProvider {
 
     fn provider_name(&self) -> &str {
         "ollama"
+    }
+
+    fn set_reasoning(&self, enabled: bool) {
+        self.reasoning.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn is_reasoning(&self) -> bool {
+        self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
     }
 }

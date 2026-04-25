@@ -150,6 +150,7 @@ impl App {
         self.system_prompt_text = system_prompt_text.clone();
         self.context_size = context_size;
         self.status_bar.set_context_size(context_size as u64);
+        self.status_bar.set_thinking(client.is_reasoning());
 
         // Resume existing session if requested
         if let Some(ref id) = resume_id {

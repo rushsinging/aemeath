@@ -1,9 +1,11 @@
 use aemeath_core::agent::Agent;
 use aemeath_core::compact::safe_slice;
+use aemeath_core::config::{AgentRoleConfig, AgentsConfig};
 use aemeath_core::message::Message;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{AgentRunner, ToolContext, ToolRegistry};
 use aemeath_llm::client::LlmClient;
+use aemeath_llm::pool::LlmClientPool;
 use aemeath_llm::stream::StreamHandler;
 use aemeath_llm::types::{StopReason, SystemBlock};
 use async_trait::async_trait;
@@ -19,7 +21,52 @@ impl StreamHandler for SilentHandler {
 }
 
 pub struct CliAgentRunner {
+    /// Default LLM client (used when no model_spec is provided).
     pub client: Arc<LlmClient>,
+    /// Client pool for multi-LLM routing. `None` if only one model is configured.
+    pub pool: Option<Arc<LlmClientPool>>,
+    /// Agent config for role resolution.
+    pub agents_config: Arc<AgentsConfig>,
+}
+
+impl CliAgentRunner {
+    /// Resolve a model spec to a concrete `"provider/model_id"` string.
+    ///
+    /// The `model_spec` passed in is already resolved by AgentTool:
+    ///   - If the user set `model="deepseek/deepseek-chat"`, that comes through directly.
+    ///   - If the user set `role="coder"`, that comes through as the role name.
+    ///   - If neither was set, it's `None`.
+    ///
+    /// Resolution order:
+    /// 1. If `model_spec` matches a role name in `agents.roles` → use the role's `model` field.
+    /// 2. If `model_spec` contains `/` → treat as `"provider/model_id"` directly.
+    /// 3. If `model_spec` is `None` → use `agents.default_model` if set.
+    fn resolve_model_spec(&self, model_spec: Option<&str>) -> Option<String> {
+        match model_spec {
+            Some(spec) => {
+                // 1. Check if it's a role name
+                if let Some(role) = self.agents_config.roles.get(spec) {
+                    if !role.model.is_empty() {
+                        return Some(role.model.clone());
+                    }
+                }
+                // 2. Already a "provider/model" spec or bare model name
+                Some(spec.to_string())
+            }
+            None => {
+                // 3. Use default_model if configured
+                if !self.agents_config.default_model.is_empty() {
+                    return Some(self.agents_config.default_model.clone());
+                }
+                None
+            }
+        }
+    }
+
+    /// Get the resolved role config (if any) for a model spec.
+    fn resolve_role(&self, model_spec: Option<&str>) -> Option<&AgentRoleConfig> {
+        model_spec.and_then(|spec| self.agents_config.roles.get(spec))
+    }
 }
 
 #[async_trait]
@@ -32,7 +79,25 @@ impl AgentRunner for CliAgentRunner {
         _registry: &ToolRegistry,
         ctx: &ToolContext,
         max_turns_override: Option<u32>,
+        model_spec: Option<&str>,
     ) -> String {
+        // Resolve role and model
+        let role = self.resolve_role(model_spec);
+        let resolved_spec = self.resolve_model_spec(model_spec);
+
+        // Pick the right client
+        let client = match (&self.pool, &resolved_spec) {
+            (Some(pool), Some(spec)) => pool.get_client(Some(spec.as_str())).await,
+            (Some(pool), None) => pool.get_client(None).await,
+            _ => self.client.clone(),
+        };
+
+        // Append role-specific system suffix if configured
+        let system = match role.and_then(|r| r.system_suffix.as_ref()) {
+            Some(suffix) => format!("{}\n\n{}", system, suffix),
+            None => system.to_string(),
+        };
+
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
         let sub_task_store = std::sync::Arc::new(TaskStore::new());
         let sub_skills = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
@@ -44,7 +109,7 @@ impl AgentRunner for CliAgentRunner {
         let mut handler = SilentHandler;
 
         // For sub-agents, use the system prompt as a single cached block
-        let system_blocks = vec![SystemBlock::cached(system.to_string())];
+        let system_blocks = vec![SystemBlock::cached(system.clone())];
 
         let sub_ctx = ToolContext {
             cwd: ctx.cwd.clone(),
@@ -84,6 +149,9 @@ impl AgentRunner for CliAgentRunner {
             }
         };
 
+        let model_display = resolved_spec.as_deref().unwrap_or("default");
+        progress(&format!("Sub-agent started with model: {}", model_display));
+
         // Sub-agents use a conservative context size for compaction decisions
         let ctx_context_size: usize = 128_000;
         let max_turns = max_turns_override.unwrap_or(50) as usize;
@@ -111,8 +179,7 @@ impl AgentRunner for CliAgentRunner {
                 turn + 1, max_turns, messages.len(), msg_tokens
             ));
 
-            let response = self
-                .client
+            let response = client
                 .stream_message(&system_blocks, &messages, &sub_schemas, &mut handler, &ctx.cancel)
                 .await;
 
@@ -190,7 +257,7 @@ impl AgentRunner for CliAgentRunner {
                         // Full local compaction — aggressively trim old messages
                         let old_len = messages.len();
                         let (compacted, was_compacted) = aemeath_core::compact::compact_messages(
-                            &messages, system, ctx_context_size,
+                            &messages, &system, ctx_context_size,
                         );
                         if was_compacted {
                             messages = compacted;

@@ -36,6 +36,8 @@ pub struct StatusBar {
       is_selecting: bool,
       selection_start: Option<usize>,
       selection_end: Option<usize>,
+      /// Thinking/reasoning mode
+      thinking: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -71,6 +73,7 @@ impl StatusBar {
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            thinking: true,
         }
     }
 
@@ -132,6 +135,11 @@ impl StatusBar {
         self.tps = tps;
     }
 
+    /// Set thinking/reasoning mode
+    pub fn set_thinking(&mut self, enabled: bool) {
+        self.thinking = enabled;
+    }
+
     /// Check if processing
     pub fn is_processing(&self) -> bool {
         self.is_processing
@@ -154,6 +162,16 @@ impl StatusBar {
             spans.push(Span::styled(
                 "│",
                 Style::default().fg(Color::DarkGray),
+            ));
+        }
+
+        // Thinking mode indicator
+        {
+            let label = if self.thinking { "ON" } else { "OFF" };
+            let color = if self.thinking { Color::Green } else { Color::DarkGray };
+            spans.push(Span::styled(
+                format!(" Think:{} │", label),
+                Style::default().fg(color),
             ));
         }
 
@@ -270,6 +288,10 @@ impl StatusBar {
         if let Some(ref model) = self.model {
             parts.push(format!(" {} ", model));
             parts.push("│".to_string());
+        }
+        {
+            let label = if self.thinking { "ON" } else { "OFF" };
+            parts.push(format!(" Think:{} │", label));
         }
         if self.is_processing {
             parts.push(format!(" {} ", self.processing_msg));

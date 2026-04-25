@@ -138,7 +138,7 @@ impl OpenAICompatibleProvider {
             // DeepSeek 拒绝省略该字段的历史记录（"thinking 模式下的
             // `reasoning_content` 必须回传给 API"），即使模型未输出推理内容的轮次也是如此。
             // 空字符串可以接受。其他 OpenAI 兼容 provider 会静默忽略未知字段。
-            if msg.role == Role::Assistant && self.reasoning {
+            if msg.role == Role::Assistant && self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
                 let rc = reasoning_content.unwrap_or_default();
                 message["reasoning_content"] = serde_json::Value::String(rc);
             }

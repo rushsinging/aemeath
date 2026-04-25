@@ -59,4 +59,10 @@ pub trait LlmProvider: Send + Sync {
 
     /// Get the provider name
     fn provider_name(&self) -> &str;
+
+    /// Set reasoning/thinking mode at runtime
+    fn set_reasoning(&self, enabled: bool);
+
+    /// Get current reasoning/thinking mode
+    fn is_reasoning(&self) -> bool;
 }

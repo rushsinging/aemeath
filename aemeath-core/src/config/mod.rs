@@ -23,7 +23,7 @@ pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
-pub use tools::{AgentsConfig, ToolsConfig};
+pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};
 pub use ui::UiConfig;
 
 use serde::{Deserialize, Serialize};

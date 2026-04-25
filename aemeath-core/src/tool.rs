@@ -53,6 +53,7 @@ pub trait AgentRunner: Send + Sync {
         registry: &ToolRegistry,
         ctx: &ToolContext,
         max_turns: Option<u32>,
+        model_spec: Option<&str>,
     ) -> String;
 
     /// Single-turn LLM completion (no tool loop). Used for analysis/planning.

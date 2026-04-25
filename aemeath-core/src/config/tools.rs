@@ -1,6 +1,7 @@
 //! 工具与代理配置
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub(crate) fn default_max_tool_concurrency() -> usize {
     10
@@ -23,11 +24,34 @@ pub struct ToolsConfig {
 
     /// Tool-specific configurations
     #[serde(default)]
-    pub settings: std::collections::HashMap<String, serde_json::Value>,
+    pub settings: HashMap<String, serde_json::Value>,
 
     /// Maximum number of concurrent tool executions (default: 10)
     #[serde(default = "default_max_tool_concurrency", rename = "maxConcurrency")]
     pub max_concurrency: usize,
+}
+
+/// Agent role configuration — binds a named agent role to a specific LLM.
+///
+/// Example in config.json:
+/// ```json
+/// { "agents": { "roles": { "coder": { "model": "deepseek/deepseek-chat", "description": "Writes and edits code" } } } }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentRoleConfig {
+    /// LLM to use for this role, in "provider/model_id" format (e.g. "deepseek/deepseek-chat").
+    /// Resolved via ModelsConfig::find_model at runtime.
+    #[serde(default, rename = "model")]
+    pub model: String,
+
+    /// Human-readable description of what this role does.
+    /// Used to build the main LLM's system prompt so it knows which roles are available.
+    #[serde(default, rename = "description")]
+    pub description: String,
+
+    /// Appended to the sub-agent system prompt for role-specific instructions.
+    #[serde(default, rename = "systemSuffix")]
+    pub system_suffix: Option<String>,
 }
 
 /// Agent configuration
@@ -36,6 +60,19 @@ pub struct AgentsConfig {
     /// Maximum number of concurrent sub-agent executions (default: 4)
     #[serde(default = "default_max_agent_concurrency", rename = "maxConcurrency")]
     pub max_concurrency: usize,
+
+    /// Named agent roles, each optionally bound to a different LLM.
+    ///
+    /// When the `Agent` tool is called with `model` matching a role name,
+    /// the role's LLM config is used. Otherwise `model` is treated as a
+    /// "provider/model_id" spec directly.
+    #[serde(default)]
+    pub roles: HashMap<String, AgentRoleConfig>,
+
+    /// Default LLM for sub-agents when no model is specified.
+    /// Format: "provider/model_id". Falls back to the main agent's client if empty.
+    #[serde(default, rename = "defaultModel")]
+    pub default_model: String,
 }
 
 impl Default for ToolsConfig {
@@ -43,7 +80,7 @@ impl Default for ToolsConfig {
         Self {
             enabled: Vec::new(),
             disabled: Vec::new(),
-            settings: std::collections::HashMap::new(),
+            settings: HashMap::new(),
             max_concurrency: default_max_tool_concurrency(),
         }
     }
@@ -53,6 +90,8 @@ impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
             max_concurrency: default_max_agent_concurrency(),
+            roles: HashMap::new(),
+            default_model: String::new(),
         }
     }
 }

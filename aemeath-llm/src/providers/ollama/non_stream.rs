@@ -32,7 +32,7 @@ impl OllamaProviderNonStream for OllamaProvider {
             "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             self.model,
-            self.reasoning,
+            self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
             messages.len(),
             tool_schemas.len(),
             serde_json::to_string(&request_body).map(|s| s.len()).unwrap_or(0),

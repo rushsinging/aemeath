@@ -191,8 +191,24 @@ pub(crate) async fn parse_openai_stream(
     for (_, (id, name, arguments)) in sorted_tool_calls {
         if !name.is_empty() {
             handler.on_tool_use_start(&name);
-            let input: serde_json::Value = serde_json::from_str(&arguments)
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            let input: serde_json::Value = if arguments.is_empty() {
+                log::warn!(
+                    "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta — model emitted name only. Falling back to {{}}.",
+                    name, id
+                );
+                serde_json::Value::Object(serde_json::Map::new())
+            } else {
+                match serde_json::from_str(&arguments) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::warn!(
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed: {}. Raw ({} bytes): {}",
+                            name, id, e, arguments.len(), arguments
+                        );
+                        serde_json::Value::Object(serde_json::Map::new())
+                    }
+                }
+            };
             content_blocks.push(ContentBlock::ToolUse { id, name, input });
         }
     }

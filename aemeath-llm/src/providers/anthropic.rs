@@ -373,4 +373,12 @@ impl LlmProvider for AnthropicProvider {
     fn provider_name(&self) -> &str {
         "anthropic"
     }
+
+    fn set_reasoning(&self, _enabled: bool) {
+        // Anthropic has its own extended thinking; not controlled here
+    }
+
+    fn is_reasoning(&self) -> bool {
+        true // Anthropic always supports thinking
+    }
 }

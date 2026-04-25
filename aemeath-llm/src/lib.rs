@@ -5,12 +5,14 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod client;
+pub mod pool;
 pub mod provider;
 pub mod providers;
 pub mod stream;
 pub mod types;
 
 pub use client::LlmClient;
+pub use pool::LlmClientPool;
 pub use provider::{CallbackHandler, LlmProvider, Provider, StreamHandler};
 pub use providers::{AnthropicProvider, OpenAICompatibleProvider};
 

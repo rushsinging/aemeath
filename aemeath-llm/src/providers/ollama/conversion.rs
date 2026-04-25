@@ -196,7 +196,7 @@ impl OllamaProviderConversion for OllamaProvider {
             "messages": ollama_messages,
             "stream": stream,
             // think toggles reasoning mode natively (qwen3, deepseek-r1, gpt-oss...)
-            "think": self.reasoning,
+            "think": self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
         });
 
         // ollama uses `options.num_predict` for max tokens

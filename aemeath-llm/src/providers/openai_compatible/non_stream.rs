@@ -24,7 +24,7 @@ impl OpenAICompatibleProvider {
         });
 
         // 根据 config 控制 reasoning/thinking 模式
-        if !self.reasoning {
+        if !self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
             request_body["enable_thinking"] = serde_json::json!(false);
         }
 

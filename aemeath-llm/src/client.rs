@@ -234,4 +234,14 @@ impl LlmClient {
     pub fn provider_name(&self) -> &str {
         self.provider.provider_name()
     }
+
+    /// Set reasoning/thinking mode at runtime
+    pub fn set_reasoning(&self, enabled: bool) {
+        self.provider.set_reasoning(enabled);
+    }
+
+    /// Get current reasoning/thinking mode
+    pub fn is_reasoning(&self) -> bool {
+        self.provider.is_reasoning()
+    }
 }

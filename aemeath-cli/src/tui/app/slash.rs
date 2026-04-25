@@ -79,7 +79,7 @@ impl super::App {
                 self.output_area
                     .push_system("  /help  /exit  /clear  /compact  /usage  /save  /sessions");
                 self.output_area
-                    .push_system("  /paste  /images  /clear-images  /context  /review");
+                    .push_system("  /paste  /images  /clear-images  /context  /review  /think");
                 self.output_area.push_system("");
                 self.output_area.push_system("Scrolling:");
                 self.output_area.push_system("  Mouse wheel     - scroll 3 lines");
@@ -146,6 +146,21 @@ impl super::App {
                         .output_area
                         .push_error(&format!("Failed to save session: {e}")),
                 }
+            }
+            "/think" => {
+                let current = self.client.as_ref().map(|c| c.is_reasoning()).unwrap_or(true);
+                let arg = parts.get(1).map(|s| *s).unwrap_or("");
+                let new_state = match arg {
+                    "on" => true,
+                    "off" => false,
+                    _ => !current, // toggle
+                };
+                if let Some(ref client) = self.client {
+                    client.set_reasoning(new_state);
+                }
+                let label = if new_state { "ON" } else { "OFF" };
+                self.output_area.push_system(&format!("[thinking mode: {}]", label));
+                self.status_bar.set_thinking(new_state);
             }
             "/context" => {
                 use aemeath_core::compact;
@@ -259,7 +274,6 @@ impl super::App {
                                     api_type,
                                     max_tokens,
                                     context_window,
-                                    reasoning,
                                 } => {
                                     // Determine provider type from api_type and provider_name
                                     let provider = match api_type.as_str() {
@@ -273,6 +287,12 @@ impl super::App {
                                                 )
                                         }
                                     };
+
+                                    // Preserve current reasoning state when switching models
+                                    let reasoning = self.client
+                                        .as_ref()
+                                        .map(|c| c.is_reasoning())
+                                        .unwrap_or(true);
 
                                     let new_client = aemeath_llm::client::LlmClient::with_provider(
                                         provider,

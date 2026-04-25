@@ -225,25 +225,13 @@ async fn main() {
         }
     };
 
-    // 解析 reasoning 标志: 优先使用 config_default_model，否则按 model id 查找
-    let reasoning = config_default_model
-        .as_ref()
-        .map(|(_, entry)| entry.reasoning)
-        .unwrap_or_else(|| {
-            config_file.as_ref().and_then(|cfg| {
-                cfg.models.provider_ci(&args.provider).and_then(|pcfg| {
-                    pcfg.models.iter().find(|m| m.id == model).map(|m| m.reasoning)
-                })
-            }).unwrap_or(false)
-        });
-
     let client = LlmClient::with_provider(
         provider,
         api_key,
         args.base_url,
         Some(model.clone()),
         max_tokens,
-        reasoning,
+        !args.no_think, // reasoning defaults to on, --no-think disables it
     );
 
     let client = std::sync::Arc::new(client);
@@ -265,9 +253,39 @@ async fn main() {
 
     let _mcp_clients = load_mcp_tools(&mut registry, &cwd).await;
 
-    let agent_runner = std::sync::Arc::new(agent_runner::CliAgentRunner {
-        client: client.clone(),
-    });
+    let agent_runner = {
+        // Build LlmClientPool if there are multiple providers configured
+        let models_config_arc = std::sync::Arc::new(
+            config_file
+                .as_ref()
+                .map(|c| c.models.clone())
+                .unwrap_or_default()
+        );
+        let has_multi_providers = models_config_arc.providers.len() > 1
+            || !config_file.as_ref().map(|c| c.agents.roles.is_empty()).unwrap_or(true);
+
+        let pool = if has_multi_providers {
+            Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
+                client.clone(),
+                models_config_arc,
+            )))
+        } else {
+            None
+        };
+
+        let agents_config = std::sync::Arc::new(
+            config_file
+                .as_ref()
+                .map(|c| c.agents.clone())
+                .unwrap_or_default()
+        );
+
+        std::sync::Arc::new(agent_runner::CliAgentRunner {
+            client: client.clone(),
+            pool,
+            agents_config,
+        })
+    };
 
     let prompt_parts = build_system_prompt_parts(&cwd).await;
 
@@ -280,21 +298,15 @@ async fn main() {
             .as_ref()
             .map(|c| c.models.guidance.clone())
             .unwrap_or_default();
-        let provider_name = args.provider.to_lowercase();
         let model_guidance = aemeath_core::guidance::resolve_guidance(
-            &provider_name,
+            &args.provider,
             &model,
             &guidance_config,
         );
 
-        // 组装: static_part + universal discipline + model guidance + skills
+        // 组装: static_part + universal discipline + skills + model guidance (末尾锚定语言)
         let mut prompt = prompt_parts.static_part;
-        prompt.push_str("\n\n");
         prompt.push_str(aemeath_core::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
-        if !model_guidance.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&model_guidance);
-        }
         if !skills_guard.is_empty() {
             let skill_list: Vec<String> = skills_guard.values()
                 .map(|s| {
@@ -310,6 +322,37 @@ async fn main() {
                 "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n{}",
                 skill_list.join("\n")
             ));
+        }
+
+        // Inject agent roles into system prompt so the main LLM knows what's available
+        if let Some(ref cfg) = config_file {
+            if !cfg.agents.roles.is_empty() {
+                let role_lines: Vec<String> = cfg.agents.roles.iter()
+                    .map(|(name, role)| {
+                        let desc = if role.description.is_empty() {
+                            String::new()
+                        } else {
+                            format!(": {}", role.description)
+                        };
+                        let model_info = if role.model.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (model: {})", role.model)
+                        };
+                        format!("- `{}`{}{}", name, desc, model_info)
+                    })
+                    .collect();
+                prompt.push_str(&format!(
+                    "\n\n# Available Agent Roles\nThe following agent roles are available for the Agent tool's `role` parameter. Choose the most appropriate role for each task:\n{}\nWhen no role fits, omit the `role` parameter to use the default model.",
+                    role_lines.join("\n")
+                ));
+            }
+        }
+
+        // model guidance 放在末尾，离推理最近，最大化对 reasoning 语言的影响
+        if !model_guidance.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&model_guidance);
         }
         prompt
     };

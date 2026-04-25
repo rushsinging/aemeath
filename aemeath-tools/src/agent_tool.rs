@@ -20,34 +20,37 @@ impl Tool for AgentTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "The task for the agent to perform"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "A short (3-5 word) description of the task"
-                },
-                "model": {
-                    "type": "string",
-                    "enum": ["sonnet", "opus", "haiku"],
-                    "description": "Optional model override for this agent"
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "description": "Maximum number of tool-call rounds (default 50, max 100)"
-                },
-                "taskId": {
-                    "type": "string",
-                    "description": "Optional task ID from TaskCreate. When provided, the dispatcher manages this task's status automatically (InProgress when the agent actually starts, Completed on success). Do NOT manually set task status to in_progress/completed if you pass taskId."
-                }
-            },
-            "required": ["prompt", "description"]
-        })
-    }
+          serde_json::json!({
+              "type": "object",
+              "properties": {
+                  "prompt": {
+                      "type": "string",
+                      "description": "The task for the agent to perform"
+                  },
+                  "description": {
+                      "type": "string",
+                      "description": "A short (3-5 word) description of the task"
+                  },
+                  "role": {
+                      "type": "string",
+                      "description": "Agent role name defined in config (e.g. 'coder', 'reviewer'). Resolves to the model and settings configured for that role."
+                  },
+                  "model": {
+                      "type": "string",
+                      "description": "Direct model override in 'provider/model_id' format (e.g. 'deepseek/deepseek-chat', 'ollama/llama3.2'). Takes precedence over 'role' if both are specified."
+                  },
+                  "max_turns": {
+                      "type": "integer",
+                      "description": "Maximum number of tool-call rounds (default 50, max 100)"
+                  },
+                  "taskId": {
+                      "type": "string",
+                      "description": "Optional task ID from TaskCreate. When provided, the dispatcher manages this task's status automatically (InProgress when the agent actually starts, Completed on success). Do NOT manually set task status to in_progress/completed if you pass taskId."
+                  }
+              },
+              "required": ["prompt", "description"]
+          })
+      }
 
     fn is_read_only(&self) -> bool {
         false
@@ -94,7 +97,7 @@ impl Tool for AgentTool {
         let _model = input
             .get("model")
             .and_then(|v| v.as_str())
-            .unwrap_or("sonnet");
+            .unwrap_or("");
 
         let max_turns = input
             .get("max_turns")
@@ -108,6 +111,14 @@ impl Tool for AgentTool {
 
         let cwd_str = ctx.cwd.to_string_lossy();
         let turns = max_turns.unwrap_or(50);
+
+        // Resolve role and model:
+        //   - `model` takes precedence: a direct "provider/model_id" spec
+        //   - `role` is resolved by CliAgentRunner via AgentsConfig::roles
+        //   - If neither is set, the runner uses the default model
+        let role = input.get("role").and_then(|v| v.as_str());
+        let model = input.get("model").and_then(|v| v.as_str());
+        let model_spec = if model.is_some() { model } else { role };
 
         // Prepend scope warnings as guidance so the sub-agent can adjust its strategy
         let scope_hint = if scope.warnings.is_empty() {
@@ -147,6 +158,7 @@ Instructions:
                 &aemeath_core::tool::ToolRegistry::new(),
                 ctx,
                 max_turns,
+                model_spec,
             )
             .await;
 

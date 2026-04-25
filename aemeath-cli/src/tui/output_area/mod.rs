@@ -232,7 +232,12 @@ impl OutputArea {
             }
         }
 
-        let lines: Vec<Line> = lines.into_iter().take(area.height as usize).collect();
+        let total_rendered = lines.len();
+        let lines: Vec<Line> = if total_rendered > area.height as usize {
+            lines.into_iter().skip(total_rendered - area.height as usize).collect()
+        } else {
+            lines
+        };
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(lines);
             paragraph.render(area, buf);

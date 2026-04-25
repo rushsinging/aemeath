@@ -63,4 +63,8 @@ pub struct Args {
     /// Maximum number of concurrent sub-agent executions (default: 4)
     #[arg(long, env = "AEMEATH_MAX_AGENT_CONCURRENCY")]
     pub max_agent_concurrency: Option<usize>,
+
+    /// Disable reasoning/thinking mode (default: enabled)
+    #[arg(long)]
+    pub no_think: bool,
 }

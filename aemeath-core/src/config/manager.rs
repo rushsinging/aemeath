@@ -238,6 +238,18 @@ impl ConfigManager {
                 } else {
                     base.agents.max_concurrency
                 },
+                roles: {
+                    let mut roles = base.agents.roles;
+                    for (k, v) in overlay.agents.roles {
+                        roles.insert(k, v);
+                    }
+                    roles
+                },
+                default_model: if !overlay.agents.default_model.is_empty() {
+                    overlay.agents.default_model
+                } else {
+                    base.agents.default_model
+                },
             },
             ui: UiConfig {
                 markdown: overlay.ui.markdown,

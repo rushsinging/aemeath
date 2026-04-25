@@ -28,8 +28,8 @@ pub struct OpenAICompatibleProvider {
     max_retries: u32,
     /// 请求超时秒数（默认 120）
     timeout_secs: u64,
-    /// 是否使用 reasoning/thinking 模式
-    reasoning: bool,
+    /// 是否使用 reasoning/thinking 模式（运行时可切换）
+    reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl OpenAICompatibleProvider {
@@ -58,8 +58,13 @@ impl OpenAICompatibleProvider {
                 .expect("failed to create HTTP client"),
             max_retries: 10,
             timeout_secs: 120,
-            reasoning,
+            reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
         }
+    }
+
+    /// Get a handle to toggle reasoning at runtime
+    pub fn reasoning_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.reasoning.clone()
     }
 
     /// 设置最大重试次数
@@ -123,7 +128,7 @@ impl LlmProvider for OpenAICompatibleProvider {
         });
 
         // 根据 config 控制 reasoning/thinking 模式
-        if !self.reasoning {
+        if !self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
             request_body["enable_thinking"] = serde_json::json!(false);
         }
 
@@ -332,5 +337,13 @@ impl LlmProvider for OpenAICompatibleProvider {
             Provider::Anthropic => "anthropic", // 不应发生，作为兜底
             Provider::Ollama => "ollama", // 不应发生 — 应使用 OllamaProvider
         }
+    }
+
+    fn set_reasoning(&self, enabled: bool) {
+        self.reasoning.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn is_reasoning(&self) -> bool {
+        self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
     }
 }

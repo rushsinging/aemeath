@@ -9,16 +9,24 @@ pub struct FileWriteTool;
 impl Tool for FileWriteTool {
     fn name(&self) -> &str { "Write" }
     fn description(&self) -> &str {
-        "Writes a file to the local filesystem.\n\nUsage:\n- This tool will overwrite the existing file if there is one at the provided path.\n- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.\n- Prefer the Edit tool for modifying existing files -- it only sends the diff. Only use this tool to create new files or for complete rewrites.\n- NEVER create documentation files (*.md) or README files unless explicitly requested by the User."
+        "Writes a file to the local filesystem.\n\nRequired arguments (BOTH must be present):\n- `file_path`: absolute or workspace-relative path of the file to create or overwrite\n- `content`: the full text to write into that file\n\nExample call:\n  Write({\"file_path\": \"src/foo.rs\", \"content\": \"fn main() {}\\n\"})\n\nRules:\n- Overwrites the existing file at `file_path` if it exists.\n- For existing files you MUST call Read first; this tool fails otherwise.\n- Prefer the Edit tool for modifying existing files — it only sends the diff. Use Write only for new files or complete rewrites.\n- NEVER create documentation files (*.md) or README files unless explicitly requested by the user.\n- DO NOT call Write with empty arguments — both `file_path` and `content` are required strings."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file to write" },
-                "content": { "type": "string", "description": "The content to write" }
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute or workspace-relative path of the file to create or overwrite. Required.",
+                    "minLength": 1
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full text content to write into the file. Required (use empty string for an empty file)."
+                }
             },
-            "required": ["file_path", "content"]
+            "required": ["file_path", "content"],
+            "additionalProperties": false
         })
     }
     fn is_concurrency_safe(&self) -> bool { false }
