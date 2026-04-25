@@ -28,28 +28,12 @@ fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future
             }
             let mut output = String::from("Recent Sessions:\n\n");
             for (i, sess) in sessions.iter().take(10).enumerate() {
-                // 构建摘要
-                let summary = if let Some(title) = &sess.metadata.title {
-                    let trunc: String = title.chars().take(40).collect();
-                    trunc
-                } else if let Some(first_user) = sess.messages.iter().find(|m| m.role == crate::message::Role::User) {
-                    let text = first_user.text_content();
-                    let first_line = text.lines().next().unwrap_or("").trim();
-                    let trunc: String = first_line.chars().take(50).collect();
-                    if trunc.is_empty() {
-                        sess.metadata.project.as_deref().unwrap_or("unknown").to_string()
-                    } else {
-                        trunc
-                    }
-                } else {
-                    sess.metadata.project.as_deref().unwrap_or("unknown").to_string()
-                };
                 output.push_str(&format!(
                     "{}. {} - {} msgs - {} - {}\n",
                     i + 1,
                     sess.id,
                     sess.messages.len(),
-                    summary,
+                    sess.summary(),
                     sess.updated_at
                 ));
             }
@@ -112,7 +96,7 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
                         "{}{} {}\n  Messages: {} | Project: {} | Updated: {}\n",
                         favorite_marker,
                         sess.id,
-                        sess.display_title(),
+                        sess.summary(),
                         sess.messages.len(),
                         sess.metadata.project.as_deref().unwrap_or("unknown"),
                         sess.updated_at

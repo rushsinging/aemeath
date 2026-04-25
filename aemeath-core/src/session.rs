@@ -103,6 +103,28 @@ impl Session {
             format!("Session {}", self.id)
         }
     }
+
+    /// Build a one-line content summary for display in session lists.
+    ///
+    /// Priority:
+    ///   1. User-set title (truncated to 40 chars)
+    ///   2. First user message content (truncated to 50 chars)
+    ///   3. Project name fallback
+    pub fn summary(&self) -> String {
+        if let Some(title) = &self.metadata.title {
+            return title.chars().take(40).collect();
+        }
+        let first_user = self.messages.iter().find(|m| m.role == crate::message::Role::User);
+        if let Some(msg) = first_user {
+            let text = msg.text_content();
+            let first_line = text.lines().next().unwrap_or("").trim();
+            let trunc: String = first_line.chars().take(50).collect();
+            if !trunc.is_empty() {
+                return trunc;
+            }
+        }
+        self.metadata.project.as_deref().unwrap_or("unknown").to_string()
+    }
 }
 
 /// Extract project name from cwd path

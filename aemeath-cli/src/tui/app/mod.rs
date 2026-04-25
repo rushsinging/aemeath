@@ -35,6 +35,7 @@ pub enum UiEvent {
     MessagesSync(Vec<Message>),
     Done,
     DoneWithDuration(std::time::Duration),
+    LiveTps(f64),
     ClipboardImage(crate::image::ProcessedImage),
     SystemMessage(String),
 }
@@ -69,6 +70,8 @@ pub struct App {
     pub current_model_display: String,
     pub last_ctrlc: Option<std::time::Instant>,
     pub skills: std::collections::HashMap<String, Skill>,
+    /// Cached session list for /resume autocomplete (id, summary)
+    pub cached_sessions: Vec<(String, String)>,
 }
 
 impl App {
@@ -112,6 +115,7 @@ impl App {
             current_model_display: model,
             last_ctrlc: None,
             skills: std::collections::HashMap::new(),
+            cached_sessions: Vec::new(),
         }
     }
 
@@ -193,6 +197,9 @@ impl App {
                 }
             }
         }
+
+        // Pre-load session list for /resume autocomplete
+        self.refresh_session_cache().await;
 
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -435,6 +442,19 @@ impl App {
         }
     }
 
+    /// Refresh the cached session list for /resume autocomplete
+    pub async fn refresh_session_cache(&mut self) {
+        let sessions = aemeath_core::session::list_sessions().await;
+        self.cached_sessions = sessions
+            .iter()
+            .take(20)
+            .map(|s| {
+                let summary = build_session_summary(s);
+                (s.id.clone(), summary)
+            })
+            .collect();
+    }
+
     /// Draw the TUI frame.
     fn draw(
         &mut self,
@@ -499,6 +519,11 @@ impl App {
 }
 
 pub mod event_handler;
+/// Build a one-line summary for a session, shown in /resume autocomplete
+fn build_session_summary(session: &aemeath_core::session::Session) -> String {
+    format!("{} [{}msg]", session.summary(), session.messages.len())
+}
+
 pub mod input_handler;
 pub mod mouse_handler;
 pub mod paste_handler;
