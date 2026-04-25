@@ -1,7 +1,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
@@ -15,6 +15,7 @@ pub mod diff;
 pub mod streaming;
 pub mod content;
 pub mod scroll;
+pub mod markdown;
 pub mod spinner;
 pub mod display;
 pub mod selection;
@@ -137,6 +138,24 @@ impl OutputArea {
         // 构建 screen_line_map：记录每个屏幕行对应的 (逻辑行索引, char起始, char结束)
         let mut new_screen_map = Vec::new();
 
+        // 预扫描 fenced code blocks（只对 assistant/thinking/system 内容生效）
+        let mut in_code_block = false;
+        let mut code_block_lines = std::collections::HashSet::new();
+        for (i, line) in self.lines.iter().enumerate().skip(start).take(end - start) {
+            let is_markdown_style = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+            if is_markdown_style && line.content.trim().starts_with("```") {
+                in_code_block = !in_code_block;
+                code_block_lines.insert(i);
+            } else if in_code_block && is_markdown_style {
+                code_block_lines.insert(i);
+            }
+        }
+        // 如果代码块未闭合，包含 fence 行
+        let code_style = Style::default()
+            .bg(Color::DarkGray)
+            .fg(Color::White)
+            .add_modifier(Modifier::DIM);
+
         let mut lines: Vec<Line> = self.lines
             .iter()
             .enumerate()
@@ -211,8 +230,17 @@ impl OutputArea {
                         Line::from(line_spans)
                     }).collect::<Vec<_>>()
                 } else {
+                    let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                    let is_code_block = code_block_lines.contains(&idx);
                     wrapped.into_iter().map(|chunk| {
-                        Line::styled(chunk, style.to_style())
+                        if is_code_block {
+                            // 代码块行：简单背景色
+                            Line::styled(chunk, code_style)
+                        } else if is_markdown {
+                            Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
+                        } else {
+                            Line::styled(chunk, style.to_style())
+                        }
                     }).collect::<Vec<_>>()
                 }
             })
