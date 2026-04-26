@@ -2,7 +2,6 @@
 
 | # | 标题 | 优先级 | 状态 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|
-| 2 | 代码块灰色背景导致内容不可读 | 中 | 待确认 | 2026-04 | 样式对比度 |
 | 3 | Tool call 状态栏卡住 + 长时间 tool call 无流式输出 | 高 | 待确认 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
 | 4 | Output Area panic 导致进程卡死 | 高 | 活动中 | 2026-04 | catch_unwind 外 panic / 状态不一致 |
 | 9 | 鼠标选中时高亮区不在鼠标位置（#5 回归） | 中 | 待确认 | 2026-04 | render 时 selection 高亮查旧 screen_line_map |
@@ -11,13 +10,13 @@
 
 ## 详情
 
-### #1 Resume 时 Markdown 渲染换行丢失（已归档）
+### #1 Resume 时 Markdown 渲染换行丢失（已修复）
 **症状**：Session resume 后 assistant 多段落文本连成一块，streaming 路径正常。
 **根因**：`render_history_message` 未 split `\n`，`sanitize_for_display` strip 了换行符。
 **修复**：`text.lines()` 逐行 push。
 **关联**：路径不一致——streaming 做了 split，resume 没做。
 
-### #2 代码块灰色背景导致内容不可读
+### #2 代码块灰色背景导致内容不可读（已修复）
 **症状**：代码块 `bg(DarkGray) + fg(White) + Dim`，深色终端上看不清。
 **根因**：之前 fence 扫描器从未成功触发（整块文本 `trim().starts_with("```")` 返回 false），#1 修复后首次触发，暴露了样式问题。
 **修复**：改为 `bg(Rgb(40,44,52)) + fg(Rgb(171,178,191))`（One Dark 色系）。

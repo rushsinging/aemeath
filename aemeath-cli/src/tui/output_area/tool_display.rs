@@ -91,6 +91,8 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
         "Agent" => {
             if let Ok(v) = &parsed {
                 let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("sub-task");
+                let role = v.get("role").and_then(|r| r.as_str());
+                let model = v.get("model").and_then(|m| m.as_str());
                 let prompt = v.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
                 let preview = if prompt.len() > 300 {
                     let end = prompt.char_indices()
@@ -102,7 +104,14 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
                 } else {
                     prompt.to_string()
                 };
-                return (format!("● Agent({desc})"), vec![preview]);
+                let mut details = vec![preview];
+                if let Some(r) = role {
+                    details.push(format!("role: {}", r));
+                }
+                if let Some(m) = model {
+                    details.push(format!("model: {}", m));
+                }
+                return (format!("● Agent({desc})"), details);
             }
         }
         "WebFetch" => {

@@ -143,16 +143,23 @@ impl OutputArea {
         // 预扫描 fenced code blocks（只对 assistant/thinking/system 内容生效）
         let mut in_code_block = false;
         let mut code_block_lines = std::collections::HashSet::new();
+        let mut code_fence_lines = std::collections::HashSet::new(); // opening/closing fence 行
+        let mut code_lang_label: std::collections::HashMap<usize, String> = std::collections::HashMap::new(); // opening fence idx -> lang
         for (i, line) in self.lines.iter().enumerate().skip(start).take(end - start) {
             let is_markdown_style = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
             if is_markdown_style && line.content.trim().starts_with("```") {
+                if !in_code_block {
+                    // opening fence: 提取语言标签
+                    let lang = line.content.trim().strip_prefix("```").unwrap_or("").trim().to_string();
+                    code_lang_label.insert(i, lang);
+                }
                 in_code_block = !in_code_block;
+                code_fence_lines.insert(i);
                 code_block_lines.insert(i);
             } else if in_code_block && is_markdown_style {
                 code_block_lines.insert(i);
             }
         }
-        // 如果代码块未闭合，包含 fence 行
         let code_style = Style::default()
             .bg(Color::Rgb(40, 44, 52))
             .fg(Color::Rgb(171, 178, 191));
@@ -303,7 +310,35 @@ impl OutputArea {
 
             let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
             let is_code_block = code_block_lines.contains(&idx);
+            let is_fence = code_fence_lines.contains(&idx);
             let has_real_selection = self.has_real_selection();
+
+            // fence 行：隐藏原始 ``` 文本，显示语言标签
+            if is_fence {
+                let is_opening = code_lang_label.contains_key(&idx);
+                if is_opening {
+                    let lang = code_lang_label.get(&idx).map(|s| s.as_str()).unwrap_or("");
+                    let border_style = Style::default().fg(Color::DarkGray);
+                    let label = if lang.is_empty() {
+                        "─".repeat(self.term_width.max(1))
+                    } else {
+                        format!("── {} ", lang)
+                    };
+                    let label = display::truncate_unicode_width(&label, self.term_width);
+                    new_screen_map.push((idx, CharIdx::ZERO, CharIdx::new(label.chars().count())));
+                    lines.push(Line::styled(label, border_style));
+                }
+                // closing fence: 底部分隔线
+                else {
+                    let border_style = Style::default().fg(Color::DarkGray);
+                    let bottom = "─".repeat(self.term_width.max(1));
+                    let bottom = display::truncate_unicode_width(&bottom, self.term_width);
+                    new_screen_map.push((idx, CharIdx::ZERO, CharIdx::new(bottom.chars().count())));
+                    lines.push(Line::styled(bottom, border_style));
+                }
+                vi += 1;
+                continue;
+            }
 
             let rendered: Vec<Line> = if has_real_selection {
                 let screen_start = new_screen_map.len() - wrapped.len();
