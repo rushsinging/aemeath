@@ -33,6 +33,7 @@ pub async fn process_in_background(
     max_tool_concurrency: usize,
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
+    hook_runner: aemeath_core::hook::HookRunner,
 ) {
     _task_store.clear().await;
 
@@ -59,8 +60,10 @@ pub async fn process_in_background(
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
+    let mut turn_count: usize = 0;
 
     for _ in 0..MAX_TURNS {
+        turn_count += 1;
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
             messages.truncate(messages_at_start);
@@ -248,6 +251,7 @@ pub async fn process_in_background(
                     }
 
                     use futures::future::join_all;
+                    let hook_runner_ref = &hook_runner;
                     let per_tool_futures = non_agent_calls.iter().map(|call| {
                         let call = ToolCall {
                             id: call.id.clone(),
@@ -256,13 +260,37 @@ pub async fn process_in_background(
                         };
                         let tx = tx.clone();
                         let agent_ref = &agent;
+                        let hook_runner = hook_runner_ref.clone();
                         async move {
                             let skip_ui = is_task_tool(&call.name);
+
+                            // PreToolUse hook: 检查是否应阻止执行
+                            let (blocked, _hook_results) = hook_runner
+                                .pre_tool_use(&call.name, call.input.clone())
+                                .await;
+                            if blocked {
+                                if !skip_ui {
+                                    let _ = tx.send(UiEvent::ToolResult {
+                                        id: call.id.clone(),
+                                        tool_name: call.name.clone(),
+                                        output: format!("Blocked by PreToolUse hook"),
+                                        is_error: true,
+                                        images: Vec::new(),
+                                    }).await;
+                                }
+                                return vec![(call.id.clone(), "Blocked by PreToolUse hook".to_string(), true, Vec::new())];
+                            }
+
                             let results = agent_ref
                                 .execute_tools(std::slice::from_ref(&call))
                                 .await;
                             let mut collected = Vec::with_capacity(results.len());
                             for (id, output, is_error, images) in results {
+                                // PostToolUse hook
+                                let _ = hook_runner
+                                    .post_tool_use(&call.name, call.input.clone(), &output, is_error)
+                                    .await;
+
                                 if !skip_ui {
                                     let _ = tx.send(UiEvent::ToolResult {
                                         id: id.clone(),
@@ -314,9 +342,30 @@ pub async fn process_in_background(
                             };
                             let tx = tx.clone();
                             let agent_ref = &agent;
+                            let hook_runner = hook_runner_ref.clone();
                             async move {
+                                // PreToolUse hook for Agent calls
+                                let (blocked, _) = hook_runner
+                                    .pre_tool_use(&call.name, call.input.clone())
+                                    .await;
+                                if blocked {
+                                    let _ = tx.send(UiEvent::ToolResult {
+                                        id: call.id.clone(),
+                                        tool_name: call.name.clone(),
+                                        output: "Blocked by PreToolUse hook".to_string(),
+                                        is_error: true,
+                                        images: Vec::new(),
+                                    }).await;
+                                    return vec![(call.id.clone(), "Blocked by PreToolUse hook".to_string(), true, Vec::new())];
+                                }
+
                                 let results = agent_ref.execute_tools(std::slice::from_ref(&call)).await;
                                 for (id, output, is_error, images) in &results {
+                                    // PostToolUse hook for Agent calls
+                                    let _ = hook_runner
+                                        .post_tool_use(&call.name, call.input.clone(), output, *is_error)
+                                        .await;
+
                                     let _ = tx.send(UiEvent::ToolResult {
                                         id: id.clone(),
                                         tool_name: call.name.clone(),
@@ -357,5 +406,9 @@ pub async fn process_in_background(
     }
 
     messages.truncate(messages_at_start);
+
+    // Stop hook: agent 循环结束
+    let _ = hook_runner.on_stop(turn_count).await;
+
     let _ = tx.send(UiEvent::DoneWithDuration(turn_start.elapsed())).await;
 }

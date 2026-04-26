@@ -13,6 +13,15 @@ use aemeath_llm::client::LlmClient;
 use clap::Parser;
 use std::env;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// 全局 session ID，供日志格式化器使用
+static SESSION_ID: OnceLock<String> = OnceLock::new();
+
+/// 设置全局 session ID（只能调用一次）
+fn set_session_id(id: String) {
+    let _ = SESSION_ID.set(id);
+}
 
 use cli::Args;
 use mcp_loader::load_mcp_tools;
@@ -45,6 +54,18 @@ async fn main() {
                 builder.target(env_logger::Target::Pipe(Box::new(file)));
             }
         }
+        builder.format(|buf, record| {
+            use std::io::Write;
+            let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
+            writeln!(
+                buf,
+                "[{} {} {}] {}",
+                buf.timestamp(),
+                session,
+                record.level(),
+                record.args()
+            )
+        });
         builder.init();
     }
 
@@ -425,6 +446,8 @@ async fn main() {
 
     // 确定 session ID
     let session_id = args.resume.clone().unwrap_or_else(|| aemeath_core::session::new_session_id());
+    set_session_id(session_id.clone());
+    log::info!("session started");
 
     // 解析并发限制: CLI args > config file > defaults
     let max_tool_concurrency = args.max_tool_concurrency
@@ -476,6 +499,10 @@ async fn main() {
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
         app.set_skills(skills_map);
+        // 从配置文件初始化 hook runner
+        if let Some(ref cfg) = config_file {
+            app.hook_runner = aemeath_core::hook::HookRunner::from_config(cfg);
+        }
             if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
                 log::error!("TUI error: {e}");
                 std::process::exit(1);

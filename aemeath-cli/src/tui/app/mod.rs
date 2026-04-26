@@ -75,6 +75,8 @@ pub struct App {
     pub cached_sessions: Vec<(String, String)>,
     /// Whether a tool call is currently active (suppresses thinking output)
     pub tool_call_active: bool,
+    /// Hook runner for lifecycle events
+    pub hook_runner: aemeath_core::hook::HookRunner,
 }
 
 impl App {
@@ -120,6 +122,7 @@ impl App {
             skills: std::collections::HashMap::new(),
             cached_sessions: Vec::new(),
             tool_call_active: false,
+            hook_runner: aemeath_core::hook::HookRunner::empty(),
         }
     }
 
@@ -325,6 +328,7 @@ impl App {
             self.draw(terminal)?;
 
             // Build spawn context refs for update()
+            let hook_runner_clone = self.hook_runner.clone();
             let spawn_refs = processing::SpawnContextRefs {
                 client: &client,
                 registry: &registry,
@@ -340,6 +344,7 @@ impl App {
                 max_tool_concurrency,
                 max_agent_concurrency,
                 agent_semaphore: &agent_semaphore,
+                hook_runner: &hook_runner_clone,
             };
 
             // --- TEA event collection: produce a Msg ---
@@ -410,6 +415,7 @@ impl App {
                         max_tool_concurrency,
                         max_agent_concurrency,
                         agent_semaphore: agent_semaphore.clone(),
+                        hook_runner: self.hook_runner.clone(),
                     });
                 }
             }

@@ -402,6 +402,7 @@ impl App {
             max_tool_concurrency: spawn_refs.max_tool_concurrency,
             max_agent_concurrency: spawn_refs.max_agent_concurrency,
             agent_semaphore: spawn_refs.agent_semaphore.clone(),
+            hook_runner: spawn_refs.hook_runner.clone(),
         }
     }
 }

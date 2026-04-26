@@ -7,6 +7,7 @@
 //! 4. Environment variables
 //! 5. Command line arguments
 
+pub mod hooks;
 pub mod legacy;
 pub mod manager;
 pub mod models;
@@ -17,6 +18,7 @@ pub mod tools;
 pub mod ui;
 
 // Re-exports for backward compatibility
+pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
 pub use manager::ConfigManager;
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
@@ -78,6 +80,10 @@ pub struct Config {
     /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
+
+    /// Hook configuration
+    #[serde(default)]
+    pub hooks: HooksConfig,
 }
 
 #[cfg(test)]

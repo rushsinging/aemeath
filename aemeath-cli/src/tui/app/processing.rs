@@ -28,6 +28,7 @@ pub(crate) struct SpawnContext {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub hook_runner: aemeath_core::hook::HookRunner,
 }
 
 /// Borrowed references to the shared state needed for spawning.
@@ -47,6 +48,7 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
+    pub hook_runner: &'a aemeath_core::hook::HookRunner,
 }
 
 /// Spawn the background LLM processing task.
@@ -59,6 +61,7 @@ pub(super) fn spawn_processing(ctx: SpawnContext) {
             ctx.agent_runner, ctx.allow_all, ctx.interrupted, ctx.cancel,
             ctx.task_store,
             ctx.max_tool_concurrency, ctx.max_agent_concurrency, ctx.agent_semaphore,
+            ctx.hook_runner,
         ).await;
     });
 }

@@ -237,6 +237,7 @@ impl super::App {
             max_tool_concurrency: spawn_ctx.max_tool_concurrency,
             max_agent_concurrency: spawn_ctx.max_agent_concurrency,
             agent_semaphore: spawn_ctx.agent_semaphore.clone(),
+            hook_runner: spawn_ctx.hook_runner.clone(),
         });
 
         KeyResult::None
