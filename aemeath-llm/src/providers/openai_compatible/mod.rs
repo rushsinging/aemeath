@@ -127,9 +127,21 @@ impl LlmProvider for OpenAICompatibleProvider {
             "stream_options": { "include_usage": true }
         });
 
-        // 根据 config 控制 reasoning/thinking 模式
-        if !self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
-            request_body["enable_thinking"] = serde_json::json!(false);
+        // 根据 provider 和 config 控制 reasoning/thinking 模式
+        // 不同 provider 使用不同的 thinking 参数格式
+        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
+        match self.provider {
+            Provider::DeepSeek => {
+                // DeepSeek API: {"thinking": {"type": "enabled/disabled"}}
+                let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
+                request_body["thinking"] = serde_json::json!({"type": thinking_type});
+            }
+            _ => {
+                // 其他 OpenAI 兼容 provider: enable_thinking 布尔值或不支持
+                if !reasoning_enabled {
+                    request_body["enable_thinking"] = serde_json::json!(false);
+                }
+            }
         }
 
         if !tools.is_empty() {

@@ -19,31 +19,34 @@ impl super::App {
         match ev {
             UiEvent::Text(text) => {
                 if self.tool_call_active {
+                    log::debug!("[BUG#4] Text: tool_call_active was true, resetting to false");
                     self.tool_call_active = false;
-                    self.status_bar.set_processing("Generating...");
                 }
+                self.status_bar.set_processing("Generating...");
                 self.output_area.stop_spinner();
                 self.output_area.append_assistant_text(&text);
             }
-            UiEvent::Thinking(text) => {
-                if self.tool_call_active {
-                    // tool call 完成后模型重新开始 thinking，同步状态
-                    self.tool_call_active = false;
-                    self.status_bar.set_processing("Thinking...");
-                }
-                self.output_area.stop_spinner();
-                self.output_area.append_thinking_text(&text);
-            }
+              UiEvent::Thinking(text) => {
+                  if self.tool_call_active {
+                      log::debug!("[BUG#4] Thinking: tool_call_active was true, resetting to false");
+                      self.tool_call_active = false;
+                  }
+                  self.status_bar.set_processing("Thinking...");
+                  self.output_area.stop_spinner();
+                  self.output_area.append_thinking_text(&text);
+              }
             UiEvent::TextBlockComplete(_text) => {
                 self.output_area.finish_streaming();
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
+                log::debug!("[BUG#4] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
                 self.status_bar.set_processing(&format!("Calling {}...", name));
             }
             UiEvent::ToolCall { id, name, summary } => {
+                log::debug!("[BUG#4] ToolCall({name}): tool_call_active={}", self.tool_call_active);
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
             }
@@ -54,7 +57,9 @@ impl super::App {
                     format!("  │  [{} image(s) attached]\n", images.len())
                 };
                 self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
+                log::debug!("[BUG#4] ToolResult({tool_name}): tool_call_active {} -> false", self.tool_call_active);
                 self.tool_call_active = false;
+                self.status_bar.set_processing("Generating...");
             }
             UiEvent::Usage { input, output, last_input, elapsed_secs } => {
                 self.total_input_tokens += input as u64;
@@ -68,6 +73,7 @@ impl super::App {
                 self.status_bar.set_tps(tps);
             }
             UiEvent::Error(msg) => {
+                log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -106,6 +112,7 @@ impl super::App {
                 self.output_area.push_system(&msg);
             }
             UiEvent::Done => {
+                log::debug!("[BUG#4] Done: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -117,6 +124,7 @@ impl super::App {
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
+                log::debug!("[BUG#4] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();

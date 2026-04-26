@@ -9,6 +9,11 @@ impl super::OutputArea {
         let rel_row = row.saturating_sub(rect.y) as usize;
         let rel_col = col.saturating_sub(rect.x) as usize;
 
+        log::debug!(
+            "sel: rect.y={}, row={}, rel_row={}, screen_map.len={}",
+            rect.y, row, rel_row, self.screen_line_map.len()
+        );
+
         // 将屏幕行映射到逻辑行+char偏移
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];

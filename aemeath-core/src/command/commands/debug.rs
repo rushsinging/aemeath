@@ -1,14 +1,19 @@
-use crate::command::{Command, CommandCategory, CommandContext, CommandResult};
+//! Doctor command — run system diagnostics.
+//!
+//! Registered via `inventory::submit!` for compile-time collection.
 
-/// Doctor command - system diagnostics
-pub fn doctor_command() -> Command {
-    Command::new(
-        "doctor".to_string(),
-        "Run system diagnostics".to_string(),
-        CommandCategory::Debug,
-        doctor_execute,
-    )
-    .with_usage(vec!["/doctor - Run diagnostics".to_string()])
+use crate::command::{Command, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "doctor".to_string(),
+            "Run system diagnostics".to_string(),
+            CommandCategory::Debug,
+            doctor_execute,
+        )
+        .with_usage(vec!["/doctor - Run diagnostics".to_string()])
+    })
 }
 
 fn doctor_execute(_args: &str, _ctx: &mut CommandContext) -> CommandResult {

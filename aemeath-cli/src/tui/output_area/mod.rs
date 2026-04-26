@@ -180,17 +180,29 @@ impl OutputArea {
 
                 // 运行中的工具调用闪烁圆点 — 先用普通样式渲染，后处理改 dot 颜色
                 // 已完成/失败的 tool call 同理
-                // 选择高亮
-                if self.selection_start.is_some() && self.selection_end.is_some() {
+                // 先生成基础渲染（markdown / code block / plain），选择高亮叠加在 markdown 之上
+                let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                let is_code_block = code_block_lines.contains(&idx);
+                let has_real_selection = self.has_real_selection();
+
+                if has_real_selection {
                     let screen_start = new_screen_map.len() - wrapped.len();
                     wrapped.into_iter().enumerate().map(|(chunk_idx, chunk)| {
                         let screen_idx = screen_start + chunk_idx;
-                        let line_spans = self.render_line_with_selection(screen_idx, &chunk, style.to_style());
-                        Line::from(line_spans)
+                        if is_code_block {
+                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, code_style);
+                            Line::from(line_spans)
+                        } else if is_markdown {
+                            // markdown：先渲染 inline spans，再叠加选择高亮
+                            let md_spans = markdown::inline_markdown_spans(&chunk, style.to_style());
+                            let line_spans = self.render_spans_with_selection(screen_idx, &md_spans);
+                            Line::from(line_spans)
+                        } else {
+                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, style.to_style());
+                            Line::from(line_spans)
+                        }
                     }).collect::<Vec<_>>()
                 } else {
-                    let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
-                    let is_code_block = code_block_lines.contains(&idx);
                     wrapped.into_iter().map(|chunk| {
                         if is_code_block {
                             Line::styled(chunk, code_style)
@@ -218,9 +230,14 @@ impl OutputArea {
             }
         }
 
-        let total_rendered = lines.len();
-        let lines: Vec<Line> = if total_rendered > area.height as usize {
-            lines.into_iter().skip(total_rendered - area.height as usize).collect()
+        let lines: Vec<Line> = if lines.len() > area.height as usize {
+            let offset = lines.len() - area.height as usize;
+            log::debug!(
+                "trim: lines.len={}, area.height={}, offset={}, screen_map.len={}",
+                lines.len(), area.height, offset, self.screen_line_map.len()
+            );
+            self.screen_line_map = self.screen_line_map.split_off(offset);
+            lines.into_iter().skip(offset).collect()
         } else {
             lines
         };
@@ -228,6 +245,16 @@ impl OutputArea {
             let paragraph = Paragraph::new(lines);
             paragraph.render(area, buf);
         }));
+
+        let total_rendered = self.screen_line_map.len();
+        if total_rendered > 0 {
+            log::debug!(
+                "render: screen_map after trim: first=[{:?}], last=[{:?}], total={}",
+                self.screen_line_map.first(),
+                self.screen_line_map.last(),
+                total_rendered,
+            );
+        }
 
         // 后处理：tool call 行的 dot 颜色
         // 遍历 self.lines 中可见范围内的 tool call 行，修改 buf 上 dot 字符的颜色
@@ -360,6 +387,94 @@ impl OutputArea {
         }
 
         spans
+    }
+
+    /// 是否有实际选中范围（start != end）
+    fn has_real_selection(&self) -> bool {
+        match (self.selection_start, self.selection_end) {
+            (Some((ss, sc)), Some((es, ec))) => ss != es || sc != ec,
+            _ => false,
+        }
+    }
+
+    /// 对已有的 markdown spans 叠加选中高亮
+    /// 不在选中范围内的 span 保持原样，选中部分改为 selection style
+    fn render_spans_with_selection(&self, screen_idx: usize, spans: &[Span<'static>]) -> Vec<Span<'static>> {
+        let Some((start_screen, start_col)) = self.selection_start else {
+            return spans.to_vec();
+        };
+        let Some((end_screen, end_col)) = self.selection_end else {
+            return spans.to_vec();
+        };
+
+        let (start_screen, start_col, end_screen, end_col) = if start_screen < end_screen
+            || (start_screen == end_screen && start_col < end_col)
+        {
+            (start_screen, start_col, end_screen, end_col)
+        } else {
+            (end_screen, end_col, start_screen, start_col)
+        };
+
+        if start_screen == end_screen && start_col == end_col {
+            return spans.to_vec();
+        }
+        if screen_idx < start_screen || screen_idx > end_screen {
+            return spans.to_vec();
+        }
+
+        let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
+
+        // 展开所有 span 的字符，记录每个字符的原始 style
+        let mut all_chars: Vec<(char, Style)> = Vec::new();
+        for span in spans {
+            for ch in span.content.chars() {
+                all_chars.push((ch, span.style));
+            }
+        }
+
+        // 计算本行在展开字符流中的选中范围
+        let chunk_start = if screen_idx < self.screen_line_map.len() {
+            self.screen_line_map[screen_idx].1
+        } else {
+            CharIdx::ZERO
+        };
+        let line_start: usize = if screen_idx == start_screen {
+            start_col.saturating_sub(chunk_start)
+        } else {
+            0
+        };
+        let line_end: usize = if screen_idx == end_screen {
+            end_col.saturating_sub(chunk_start).min(all_chars.len())
+        } else {
+            all_chars.len()
+        };
+
+        // 重新构建 spans
+        let mut result = Vec::new();
+        let mut current_text = String::new();
+        let mut current_style: Option<Style> = None;
+
+        for (i, (ch, base_style)) in all_chars.iter().enumerate() {
+            let is_selected = i >= line_start && i < line_end;
+            let style = if is_selected { selection_style } else { *base_style };
+
+            if current_style != Some(style) {
+                if !current_text.is_empty() {
+                    result.push(Span::styled(
+                        std::mem::take(&mut current_text),
+                        current_style.unwrap_or(*base_style),
+                    ));
+                }
+                current_style = Some(style);
+            }
+            current_text.push(*ch);
+        }
+
+        if !current_text.is_empty() {
+            result.push(Span::styled(current_text, current_style.unwrap()));
+        }
+
+        result
     }
 }
   

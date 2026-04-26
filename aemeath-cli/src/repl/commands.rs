@@ -217,7 +217,7 @@ pub(crate) async fn handle_slash_command(
             let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
 
             // Try to find command in registry
-            let registry = CommandRegistry::with_defaults();
+            let registry = CommandRegistry::global();
             if let Some(cmd_obj) = registry.find(cmd_name) {
                 let state = AppState::default();
                 let config = aemeath_core::config::Config::default();

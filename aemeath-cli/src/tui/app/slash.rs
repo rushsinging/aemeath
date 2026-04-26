@@ -126,21 +126,6 @@ impl super::App {
                         .push_error(&format!("Failed to save session: {e}")),
                 }
             }
-            "/think" => {
-                let current = self.client.as_ref().map(|c| c.is_reasoning()).unwrap_or(true);
-                let arg = parts.get(1).map(|s| *s).unwrap_or("");
-                let new_state = match arg {
-                    "on" => true,
-                    "off" => false,
-                    _ => !current, // toggle
-                };
-                if let Some(ref client) = self.client {
-                    client.set_reasoning(new_state);
-                }
-                let label = if new_state { "ON" } else { "OFF" };
-                self.output_area.push_system(&format!("[thinking mode: {}]", label));
-                self.status_bar.set_thinking(new_state);
-            }
             "/context" => {
                 use aemeath_core::compact;
                 let estimated = compact::estimate_messages_tokens(&self.messages)
@@ -205,7 +190,7 @@ impl super::App {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
 
                 // Try to find command in registry
-                let registry = CommandRegistry::with_defaults();
+                let registry = CommandRegistry::global();
                 if let Some(cmd_obj) = registry.find(cmd_name) {
                     // Create minimal context for command execution
                     let state = AppState::default();
@@ -300,6 +285,16 @@ impl super::App {
                                     self.output_area
                                         .push_system("[reviewing code changes...]");
                                     return Some(prompt);
+                                }
+                                aemeath_core::command::CommandAction::SetThinking(desired) => {
+                                    let current = self.client.as_ref().map(|c| c.is_reasoning()).unwrap_or(true);
+                                    let new_state = desired.unwrap_or(!current);
+                                    if let Some(ref client) = self.client {
+                                        client.set_reasoning(new_state);
+                                    }
+                                    let label = if new_state { "ON" } else { "OFF" };
+                                    self.output_area.push_system(&format!("[thinking mode: {}]", label));
+                                    self.status_bar.set_thinking(new_state);
                                 }
                                 aemeath_core::command::CommandAction::ResumeSession(session_id) => {
                                     match aemeath_core::session::load_session(&session_id).await {
@@ -404,7 +399,7 @@ impl super::App {
             .collect();
 
         // Build command list from CommandRegistry (single source of truth)
-        let registry = CommandRegistry::with_defaults();
+        let registry = CommandRegistry::global();
         let commands: Vec<(String, String, Vec<String>)> = registry
             .list()
             .into_iter()
@@ -425,3 +420,4 @@ impl super::App {
         self.input_area.set_suggestions(suggestions);
     }
 }
+

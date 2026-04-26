@@ -24,7 +24,7 @@ async fn main() {
     // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复旧的 stderr 行为
     {
         let mut builder = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug"),
+            env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug,aemeath_cli=debug"),
         );
         let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -48,7 +48,48 @@ async fn main() {
         builder.init();
     }
 
+    // 设置 panic hook：将 panic 信息写入日志文件 + stderr
+    {
+        let log_path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".aemeath")
+            .join("panic.log");
+        std::panic::set_hook(Box::new(move |info| {
+            let payload = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+
+            let location = info
+                .location()
+                .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+                .unwrap_or_else(|| "unknown location".to_string());
+
+            let msg = format!("[PANIC] {} at {}", payload, location);
+
+            // 写日志文件
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "[{:?}] {}", std::time::SystemTime::now(), msg);
+                // 写 backtrace
+                let _ = writeln!(f, "Backtrace:\n{:?}", std::backtrace::Backtrace::capture());
+            }
+
+            // 同时写 stderr（非 TUI 模式可见）
+            eprintln!("{}", msg);
+        }));
+    }
+
     let mut args = Args::parse();
+
+    // 初始化所有内置命令（自动注册到全局 CommandRegistry）
+    aemeath_core::command::commands::init_all();
 
     // 检查 AEMEATH_PERMISSION_MODE 环境变量
     if !args.allow_all {

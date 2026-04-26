@@ -1,17 +1,22 @@
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult};
+//! Git commands: init, commit, review.
+//!
+//! Registered via `inventory::submit!` for compile-time collection.
 
-/// Init command - initialize project
-pub fn init_command() -> Command {
-    Command::new(
-        "init".to_string(),
-        "Initialize project with aemeath".to_string(),
-        CommandCategory::Git,
-        init_execute,
-    )
-    .with_usage(vec![
-        "/init - Initialize current directory".to_string(),
-        "/init force - Force re-initialization".to_string(),
-    ])
+use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "init".to_string(),
+            "Initialize project with aemeath".to_string(),
+            CommandCategory::Git,
+            init_execute,
+        )
+        .with_usage(vec![
+            "/init - Initialize current directory".to_string(),
+            "/init force - Force re-initialization".to_string(),
+        ])
+    })
 }
 
 fn init_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -38,18 +43,19 @@ fn init_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     CommandResult::Success(output)
 }
 
-/// Commit command - create git commit
-pub fn commit_command() -> Command {
-    Command::new(
-        "commit".to_string(),
-        "Create a git commit with AI".to_string(),
-        CommandCategory::Git,
-        commit_execute,
-    )
-    .with_usage(vec![
-        "/commit - Create commit".to_string(),
-        "/commit message - Create commit with message".to_string(),
-    ])
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "commit".to_string(),
+            "Create a git commit with AI".to_string(),
+            CommandCategory::Git,
+            commit_execute,
+        )
+        .with_usage(vec![
+            "/commit - Create commit".to_string(),
+            "/commit message - Create commit with message".to_string(),
+        ])
+    })
 }
 
 fn commit_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -63,23 +69,24 @@ fn commit_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     }
 }
 
-/// Review command - code review
-pub fn review_command() -> Command {
-    Command::new(
-        "review".to_string(),
-        "Review code changes or files".to_string(),
-        CommandCategory::Git,
-        review_execute,
-    )
-    .with_usage(vec![
-        "/review - Review current changes (staged + unstaged)".to_string(),
-        "/review diff - Review current diff".to_string(),
-        "/review staged - Review staged changes only".to_string(),
-        "/review last - Review last commit".to_string(),
-        "/review <file> - Review changes in a specific file".to_string(),
-        "/review HEAD~3..HEAD - Review a commit range".to_string(),
-    ])
-    .with_aliases(vec!["rev".to_string()])
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "review".to_string(),
+            "Review code changes or files".to_string(),
+            CommandCategory::Git,
+            review_execute,
+        )
+        .with_usage(vec![
+            "/review - Review current changes".to_string(),
+            "/review diff - Review current diff".to_string(),
+            "/review staged - Review staged changes only".to_string(),
+            "/review last - Review last commit".to_string(),
+            "/review <file> - Review changes in a specific file".to_string(),
+            "/review HEAD~3..HEAD - Review a commit range".to_string(),
+        ])
+        .with_aliases(vec!["rev".to_string()])
+    })
 }
 
 fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -91,21 +98,15 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     let diff_text = match arg.as_str() {
         "" | "changes" | "diff" => {
             run_git(&cwd, &["diff", "HEAD"])
-                .unwrap_or_else(|| run_git(&cwd, &["diff"]).unwrap_or_default())
+                .or_else(|| run_git(&cwd, &["diff"]))
+                .unwrap_or_default()
         }
-        "staged" => {
-            run_git(&cwd, &["diff", "--cached"]).unwrap_or_default()
-        }
-        "last" | "last-commit" => {
-            run_git(&cwd, &["show", "HEAD", "--format=fuller", "--patch"]).unwrap_or_default()
-        }
+        "staged" => run_git(&cwd, &["diff", "--cached"]).unwrap_or_default(),
+        "last" | "last-commit" => run_git(&cwd, &["show", "HEAD", "--format=fuller", "--patch"]).unwrap_or_default(),
         _ => {
             let original_arg = args.trim();
             if original_arg.starts_with('-') {
-                return CommandResult::Error(format!(
-                    "Invalid argument: {:?}. Flags are not allowed here.",
-                    original_arg
-                ));
+                return CommandResult::Error(format!("Invalid argument: {:?}. Flags are not allowed here.", original_arg));
             }
             if original_arg.contains("..") {
                 run_git(&cwd, &["diff", original_arg]).unwrap_or_default()
@@ -148,7 +149,6 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     CommandResult::Action(CommandAction::Review(review_prompt))
 }
 
-/// Run a git command and return its stdout output
 fn run_git(cwd: &std::path::Path, args: &[&str]) -> Option<String> {
     std::process::Command::new("git")
         .args(args)

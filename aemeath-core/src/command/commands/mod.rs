@@ -1,4 +1,12 @@
 //! Command definitions
+//!
+//! Each module uses `inventory::submit!` to declare commands at compile time.
+//! Adding a new command only requires:
+//!
+//! 1. Create the file with `inventory::submit! { CommandDescriptor::new(|| Command::new(...)) }`
+//! 2. Add `pub mod <name>;` to this file
+//!
+//! The command automatically appears in TUI autocomplete.
 
 pub mod help;
 pub mod misc;
@@ -10,21 +18,16 @@ pub mod tools;
 pub mod git;
 pub mod debug;
 pub mod stats;
+pub mod think;
 
-// Re-export all command constructors for backward compatibility
-// (CommandRegistry uses `use crate::command::commands::builtin::*`)
-pub mod builtin {
-    pub use super::help::help_command;
-    pub use super::misc::{exit_command, clear_command, compact_command};
-    pub use super::misc::{cost_command, usage_command, status_command, version_command};
-    pub use super::session::{resume_command, session_command, rewind_command};
-    pub use super::model::model_command;
-    pub use super::config_cmd::{config_command, permissions_command};
-    pub use super::tasks::tasks_command;
-    pub use super::tools::{mcp_command, skills_command};
-    pub use super::git::{init_command, commit_command, review_command};
-    pub use super::debug::doctor_command;
-    pub use super::stats::stats_command;
+/// Initialize all built-in commands.
+///
+/// Delegates to [`CommandRegistry::initialize`] which iterates all
+/// `inventory::submit!`ed command descriptors.
+///
+/// No manual per-command registration — just add the module and it's automatic.
+pub fn init_all() {
+    crate::command::CommandRegistry::initialize();
 }
 
 use crate::state::AppState;
@@ -79,6 +82,8 @@ pub enum CommandAction {
     },
     /// Review code changes — injects a user message into the conversation
     Review(String),
+    /// Toggle reasoning/thinking mode (None = toggle)
+    SetThinking(Option<bool>),
 }
 
 /// Actions that require confirmation
@@ -155,7 +160,6 @@ pub struct Command {
     pub aliases: Vec<String>,
     /// Command category
     pub category: CommandCategory,
-    /// Execute function (async)
     execute_fn: AsyncExecuteFn,
 }
 

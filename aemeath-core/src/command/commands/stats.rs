@@ -1,22 +1,27 @@
-use crate::command::{Command, CommandCategory, CommandContext, CommandResult};
+//! Stats command — show session and usage statistics.
+//!
+//! Registered via `inventory::submit!` for compile-time collection.
+
+use crate::command::{Command, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
 use std::future::Future;
 use std::pin::Pin;
 
-/// Stats command - show statistics
-pub fn stats_command() -> Command {
-    Command::new_async(
-        "stats".to_string(),
-        "Show session and usage statistics".to_string(),
-        CommandCategory::Utility,
-        stats_execute,
-    )
-    .with_usage(vec![
-        "/stats - Show all statistics".to_string(),
-        "/stats session - Session stats".to_string(),
-        "/stats tools - Tool usage stats".to_string(),
-        "/stats tokens - Token usage estimate".to_string(),
-    ])
-    .with_aliases(vec!["statistics".to_string()])
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new_async(
+            "stats".to_string(),
+            "Show session and usage statistics".to_string(),
+            CommandCategory::Utility,
+            stats_execute,
+        )
+        .with_usage(vec![
+            "/stats - Show all statistics".to_string(),
+            "/stats session - Session stats".to_string(),
+            "/stats tools - Tool usage stats".to_string(),
+            "/stats tokens - Token usage estimate".to_string(),
+        ])
+        .with_aliases(vec!["statistics".to_string()])
+    })
 }
 
 fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {

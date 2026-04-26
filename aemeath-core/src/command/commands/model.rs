@@ -1,18 +1,23 @@
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult};
+//! Model command — change or show the current model.
+//!
+//! Registered via `inventory::submit!` for compile-time collection.
 
-/// Model command - change model
-pub fn model_command() -> Command {
-    Command::new(
-        "model".to_string(),
-        "Change or show the current model".to_string(),
-        CommandCategory::Config,
-        model_execute,
-    )
-    .with_usage(vec![
-        "/model - Show current model".to_string(),
-        "/model list - List available models from config".to_string(),
-        "/model <provider/model_id> - Switch to a different model".to_string(),
-    ])
+use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "model".to_string(),
+            "Change or show the current model".to_string(),
+            CommandCategory::Config,
+            model_execute,
+        )
+        .with_usage(vec![
+            "/model - Show current model".to_string(),
+            "/model list - List available models from config".to_string(),
+            "/model <provider/model_id> - Switch to a different model".to_string(),
+        ])
+    })
 }
 
 fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -35,23 +40,15 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 current_provider = provider_name.clone();
             }
             let display_name = if model.name.is_empty() { &model.id } else { &model.name };
-            let marker = if format!("{}/{}", provider_name, display_name) == ctx.current_model {
-                " ←"
-            } else {
-                ""
-            };
+            let marker = if format!("{}/{}", provider_name, display_name) == ctx.current_model { " ←" } else { "" };
             output.push_str(&format!(
                 "    {}/{} ctx:{}k max:{}k{}\n",
-                provider_name,
-                display_name,
-                model.context_window / 1000,
-                model.max_tokens / 1000,
-                marker,
+                provider_name, display_name,
+                model.context_window / 1000, model.max_tokens / 1000, marker,
             ));
         }
         return CommandResult::Success(output);
     }
-    // Switch model: expect "provider/model_id" format
     match ctx.models_config.find_model(arg) {
         Some((_provider_name, provider_config, model)) => {
             CommandResult::Action(CommandAction::SwitchModel {

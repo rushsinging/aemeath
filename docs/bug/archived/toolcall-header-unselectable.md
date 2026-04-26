@@ -11,6 +11,9 @@
 ## 修复
 将 `compute_char_offsets` 和 `new_screen_map.push` 循环移到三个 tool call 提前 return 分支**之前**。所有行（包括 tool call）先注册屏幕映射，再进行各自的渲染分支。
 
+后续二次修复：tool call 行的 `return` 分支使用特殊 Span（dot + text）跳过了选择高亮渲染。改为统一走 `render_line_with_selection`，dot 颜色通过 buf 后处理叠加。
+**修复 commit**：538a619
+
 ## 回归测试
 - tool call 行鼠标点击/拖拽选中
 - tool call 行选中后复制的内容不应包含额外的不可见字符
@@ -22,4 +25,4 @@
 
 ---
 **发现日期**：2026-04-25
-**已归档**：待用户确认
+**已归档**：2026-04-25，用户确认修复

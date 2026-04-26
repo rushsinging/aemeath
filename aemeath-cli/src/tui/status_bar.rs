@@ -91,6 +91,7 @@ impl StatusBar {
 
     /// Set processing status
     pub fn set_processing(&mut self, msg: &str) {
+        log::debug!("[STATUS] set_processing(\"{msg}\") was=\"{}\"", self.processing_msg);
         self.is_processing = true;
         self.processing_msg = msg.to_string();
         self.status_type = StatusType::Processing;
@@ -98,6 +99,7 @@ impl StatusBar {
 
     /// Clear processing status
     pub fn clear_processing(&mut self) {
+        log::debug!("[STATUS] clear_processing() was=\"{}\"", self.processing_msg);
         self.is_processing = false;
         self.processing_msg.clear();
         self.status_type = StatusType::Normal;

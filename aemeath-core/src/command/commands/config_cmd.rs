@@ -1,22 +1,45 @@
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction};
+//! Config and permissions commands.
+//!
+//! Registered via `inventory::submit!` for compile-time collection.
+
+use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction, CommandDescriptor};
 use crate::config::PermissionModeConfig;
 
-/// Config command - manage configuration
-pub fn config_command() -> Command {
-    Command::new(
-        "config".to_string(),
-        "Manage configuration settings".to_string(),
-        CommandCategory::Config,
-        config_execute,
-    )
-    .with_usage(vec![
-        "/config - Show current config".to_string(),
-        "/config get <key> - Get a config value".to_string(),
-        "/config set <key> <value> - Set a config value".to_string(),
-        "/config reset - Reset to defaults".to_string(),
-        "/config save - Save current config".to_string(),
-    ])
-    .with_aliases(vec!["cfg".to_string()])
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "config".to_string(),
+            "Manage configuration settings".to_string(),
+            CommandCategory::Config,
+            config_execute,
+        )
+        .with_usage(vec![
+            "/config - Show current config".to_string(),
+            "/config get <key> - Get a config value".to_string(),
+            "/config set <key> <value> - Set a config value".to_string(),
+            "/config reset - Reset to defaults".to_string(),
+            "/config save - Save current config".to_string(),
+        ])
+        .with_aliases(vec!["cfg".to_string()])
+    })
+}
+
+inventory::submit! {
+    CommandDescriptor::new(|| {
+        Command::new(
+            "permissions".to_string(),
+            "Manage permission settings".to_string(),
+            CommandCategory::Config,
+            permissions_execute,
+        )
+        .with_usage(vec![
+            "/permissions - Show current mode".to_string(),
+            "/permissions ask - Set to ask mode".to_string(),
+            "/permissions auto-read - Set to auto-read mode".to_string(),
+            "/permissions allow-all - Set to allow-all mode".to_string(),
+        ])
+        .with_aliases(vec!["perm".to_string()])
+    })
 }
 
 fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -48,17 +71,10 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 if parts.len() < 2 {
                     return CommandResult::Error("Usage: /config get <key>".to_string());
                 }
-                let key = parts[1];
-                let value = get_config_value(&ctx.config, key);
-                CommandResult::Success(format!("{} = {}", key, value))
+                CommandResult::Success(format!("{} = {}", parts[1], get_config_value(&ctx.config, parts[1])))
             }
             "set" => {
-                if parts.len() < 3 {
-                    return CommandResult::Error("Usage: /config set <key> <value>".to_string());
-                }
-                CommandResult::Error(format!(
-                    "/config set is not yet implemented. Edit ~/.aemeath/config.json directly."
-                ))
+                CommandResult::Error("`/config set` is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string())
             }
             "reset" => {
                 CommandResult::Confirm {
@@ -67,9 +83,7 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 }
             }
             "save" => {
-                CommandResult::Error(
-                    "/config save is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string()
-                )
+                CommandResult::Error("`/config save` is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string())
             }
             _ => CommandResult::Error(format!("Unknown config command: {}", parts[0])),
         }
@@ -90,23 +104,6 @@ fn get_config_value(config: &crate::config::Config, key: &str) -> String {
         },
         _ => "unknown key".to_string(),
     }
-}
-
-/// Permissions command - manage permissions
-pub fn permissions_command() -> Command {
-    Command::new(
-        "permissions".to_string(),
-        "Manage permission settings".to_string(),
-        CommandCategory::Config,
-        permissions_execute,
-    )
-    .with_usage(vec![
-        "/permissions - Show current mode".to_string(),
-        "/permissions ask - Set to ask mode".to_string(),
-        "/permissions auto-read - Set to auto-read mode".to_string(),
-        "/permissions allow-all - Set to allow-all mode".to_string(),
-    ])
-    .with_aliases(vec!["perm".to_string()])
 }
 
 fn permissions_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
