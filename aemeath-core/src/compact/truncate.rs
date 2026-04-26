@@ -111,3 +111,120 @@ pub fn safe_slice_tail(s: &str, max_bytes: usize) -> &str {
     }
     &s[start..]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message::{ContentBlock, Message};
+
+    // ── safe_slice ──────────────────────────────────────────────
+
+    #[test]
+    fn safe_slice_short_string_unchanged() {
+        assert_eq!(safe_slice("hello", 10), "hello");
+    }
+
+    #[test]
+    fn safe_slice_ascii_exact_truncation() {
+        assert_eq!(safe_slice("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn safe_slice_multibyte_no_char_split() {
+        // "你好世界" — each char is 3 bytes in UTF-8
+        let s = "你好世界";
+        // 4 bytes falls inside the second Chinese character (bytes 3-5)
+        // should back up to byte 3, returning "你"
+        assert_eq!(safe_slice(s, 4), "你");
+    }
+
+    #[test]
+    fn safe_slice_at_char_boundary_returns_directly() {
+        let s = "abc你好";
+        // byte 3 is exactly the boundary before '你'
+        assert_eq!(safe_slice(s, 3), "abc");
+    }
+
+    // ── safe_slice_tail ─────────────────────────────────────────
+
+    #[test]
+    fn safe_slice_tail_short_string_unchanged() {
+        assert_eq!(safe_slice_tail("hello", 10), "hello");
+    }
+
+    #[test]
+    fn safe_slice_tail_ascii_truncation() {
+        assert_eq!(safe_slice_tail("hello world", 5), "world");
+    }
+
+    #[test]
+    fn safe_slice_tail_multibyte_no_char_split() {
+        let s = "你好世界";
+        // 4 bytes from the end: bytes 7-11 ("界" is bytes 9-11)
+        // should skip forward to char boundary at byte 9, returning "界"
+        assert_eq!(safe_slice_tail(s, 4), "界");
+    }
+
+    // ── truncate_tool_result ────────────────────────────────────
+
+    #[test]
+    fn truncate_tool_result_short_text_unchanged() {
+        let short = "a".repeat(100);
+        assert_eq!(truncate_tool_result(&short), short);
+    }
+
+    #[test]
+    fn truncate_tool_result_long_text_truncated() {
+        let long = "a".repeat(MAX_TOOL_RESULT_CHARS + 10);
+        let result = truncate_tool_result(&long);
+        assert!(result.contains("[... truncated"));
+        // should contain head portion
+        assert!(result.starts_with(&"a".repeat(TRUNCATION_PREVIEW_HEAD)));
+        // should contain tail portion
+        assert!(result.ends_with(&"a".repeat(TRUNCATION_PREVIEW_TAIL)));
+    }
+
+    // ── apply_tool_result_budget ────────────────────────────────
+
+    #[test]
+    fn apply_tool_result_budget_under_limit_unchanged() {
+        let mut msg = Message {
+            role: crate::message::Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "t1".to_string(),
+                content: serde_json::Value::String("short".to_string()),
+                is_error: false,
+            }],
+        };
+        apply_tool_result_budget(&mut msg);
+        match &msg.content[0] {
+            ContentBlock::ToolResult { content, .. } => {
+                assert_eq!(content, &serde_json::Value::String("short".to_string()));
+            }
+            _ => panic!("expected ToolResult"),
+        }
+    }
+
+    #[test]
+    fn apply_tool_result_budget_over_limit_truncates_largest() {
+        let large_content = "x".repeat(MAX_TOOL_RESULTS_PER_MESSAGE_CHARS + 1000);
+        let mut msg = Message {
+            role: crate::message::Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "t1".to_string(),
+                content: serde_json::Value::String(large_content.clone()),
+                is_error: false,
+            }],
+        };
+        apply_tool_result_budget(&mut msg);
+        match &msg.content[0] {
+            ContentBlock::ToolResult { content, .. } => {
+                let text = content.as_str().unwrap();
+                // Should have been truncated — significantly shorter than original
+                assert!(text.len() < large_content.len());
+                assert!(text.contains("[... truncated"));
+            }
+            _ => panic!("expected ToolResult"),
+        }
+    }
+}

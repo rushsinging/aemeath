@@ -143,7 +143,7 @@ fn flush_plain(spans: &mut Vec<Span<'static>>, buf: &mut String, base_style: Sty
 /// 检测 Markdown 表格分隔行，如 `|---|---|`、`| :---: | ---: |`
 pub fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim();
-    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') || trimmed.len() <= 2 {
         return false;
     }
     let inner = trimmed[1..trimmed.len() - 1].trim();
@@ -163,6 +163,9 @@ pub fn is_table_row(line: &str) -> bool {
 /// 解析表格行中的单元格内容
 pub fn parse_table_cells(line: &str) -> Vec<&str> {
     let trimmed = line.trim();
+    if trimmed.len() <= 2 {
+        return vec![];
+    }
     let trimmed = &trimmed[1..trimmed.len() - 1]; // strip leading/trailing |
     trimmed.split('|').map(|s| s.trim()).collect()
 }

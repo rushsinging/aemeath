@@ -35,18 +35,3 @@ pub(crate) enum Cmd {
     /// Save session with the given messages (async operation).
     SaveSession(Vec<aemeath_core::message::Message>),
 }
-
-impl Cmd {
-    /// Convenience: batch multiple commands into one.
-    /// Returns the first non-None command, or Cmd::None.
-    #[allow(dead_code)]
-    pub fn batch(cmds: Vec<Cmd>) -> Cmd {
-        for cmd in cmds {
-            match cmd {
-                Cmd::None => continue,
-                other => return other,
-            }
-        }
-        Cmd::None
-    }
-}

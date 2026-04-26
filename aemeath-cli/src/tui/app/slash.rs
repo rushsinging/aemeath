@@ -6,12 +6,6 @@ use aemeath_core::state::AppState;
 use std::sync::Arc;
 
 impl super::App {
-    /// Called from dialog Enter handler to dispatch /model switch
-    #[allow(dead_code)]
-    pub(crate) async fn handle_slash_command_str(&mut self, input: &str) -> Option<String> {
-        self.handle_slash_command(input).await
-    }
-
     /// Handle slash commands. Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
     pub(crate) async fn handle_slash_command(&mut self, input: &str) -> Option<String> {
         let parts: Vec<&str> = input.split_whitespace().collect();

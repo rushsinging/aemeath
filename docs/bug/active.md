@@ -6,7 +6,8 @@
 | 3 | Tool call 状态栏卡住 + 长时间 tool call 无流式输出 | 高 | 待确认 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
 | 4 | Output Area panic 导致进程卡死 | 高 | 活动中 | 2026-04 | catch_unwind 外 panic / 状态不一致 |
 | 9 | 鼠标选中时高亮区不在鼠标位置（#5 回归） | 中 | 待确认 | 2026-04 | render 时 selection 高亮查旧 screen_line_map |
-| 11 | Markdown 未渲染 Table | 中 | 已修复 | 2026-04 | inline_markdown_spans 未实现 table 语法 |
+| 12 | Ask user tool call 没有询问用户 | 高 | 活动中 | 2026-04 | tool call 未拦截确认直接执行 |
+| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
 
 ## 详情
 
@@ -48,11 +49,20 @@
 **修复方向**：在构建 `new_screen_map` 后、渲染 selection 高亮前，先将 `self.screen_line_map` 更新为 `new_screen_map`，或改为直接使用 `new_screen_map` 查询。
 **涉及路径**：`aemeath-cli/src/tui/output_area/mod.rs` render() 方法
 
-### #11 Markdown 未渲染 Table（已修复）
-**症状**：模型返回的 Markdown 表格（`| col1 | col2 |`）在 TUI 中直接显示为纯文本管道符，无表格渲染。
-**根因**：`inline_markdown_spans` 未实现 table 语法解析，`|` 和 `---` 分隔行被当作普通文本处理。
-**修复**：在 `markdown.rs` 添加 `is_table_separator`、`is_table_row`、`parse_table_cells`、`render_table_block` 函数。在 `mod.rs` render() 中添加表格块预扫描（类似 code block），检测连续 `| ... |` 行为表格，预渲染为 box-drawing 字符表格（`│`、`┼`、`─`），表头粗体，分隔行用 `DarkGray` 色边框。
-**涉及路径**：`aemeath-cli/src/tui/output_area/markdown.rs`、`mod.rs`
+### #12 Ask user tool call 没有询问用户
+**症状**：模型调用 ask user 类 tool call 时，TUI 未弹出确认对话框或等待用户输入，直接执行并返回结果，用户无机会干预。
+**根因**：tool call 执行流程未对 ask user 类请求做拦截确认，直接走普通 tool call 处理路径。
+**修复方向**：在 tool call 执行前检测是否为 ask user 类型，若是则暂停执行、弹出确认 UI，等待用户响应后再继续。
+**涉及路径**：`aemeath-cli/src/tui/app/processing.rs`、`event_handler.rs`
+
+### #13 Zhipu API 超大请求体返回空响应
+**症状**：会话 0000019dc93bab86dfd7032f 中，多轮 tool call 后模型停止输出，TUI 无内容显示。API 返回 `stop_reason=EndTurn` 但 `input_tokens=0 output_tokens=0`，text 为空字符串，无 tool calls。
+**根因**：请求体过大（`body_bytes=11659080` 约 11MB），Zhipu GLM-5.1 API 在收到超大请求时静默返回空响应，不报错。compact 后 messages 从 62 降到 23，但 body 仍约 11MB，说明某条 tool result 包含极大内容（可能是文件搜索/读取返回了大量数据），compaction 未能有效压缩。
+**修复方向**：
+1. 发送前检测 body size，超过阈值时对超大 tool result 做截断或摘要
+2. compaction 阶段主动截断过长的 tool result 内容
+3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
+**涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
 
 ---
 
@@ -76,3 +86,9 @@
 
 ### #10 Markdown 渲染：部分未渲染 + 选中后回退为源码（已修复）
 **修复**：TUI output 重构为 TEA 架构，根本性地解决了 screen_line_map 偏移不一致问题。
+
+### #11 Markdown 未渲染 Table（已修复）
+**症状**：模型返回的 Markdown 表格（`| col1 | col2 |`）在 TUI 中直接显示为纯文本管道符，无表格渲染。
+**根因**：`inline_markdown_spans` 未实现 table 语法解析，`|` 和 `---` 分隔行被当作普通文本处理。
+**修复**：在 `markdown.rs` 添加 `is_table_separator`、`is_table_row`、`parse_table_cells`、`render_table_block` 函数。在 `mod.rs` render() 中添加表格块预扫描（类似 code block），检测连续 `| ... |` 行为表格，预渲染为 box-drawing 字符表格（`│`、`┼`、`─`），表头粗体，分隔行用 `DarkGray` 色边框。
+**涉及路径**：`aemeath-cli/src/tui/output_area/markdown.rs`、`mod.rs`
