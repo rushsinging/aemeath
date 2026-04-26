@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 /// Owned context needed to spawn a background processing task.
-pub(super) struct SpawnContext {
+pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
     pub client: Arc<aemeath_llm::client::LlmClient>,
     pub registry: Arc<ToolRegistry>,
@@ -32,7 +32,7 @@ pub(super) struct SpawnContext {
 
 /// Borrowed references to the shared state needed for spawning.
 /// Used in event_handler to avoid passing many individual parameters.
-pub(super) struct SpawnContextRefs<'a> {
+pub(crate) struct SpawnContextRefs<'a> {
     pub client: &'a Arc<aemeath_llm::client::LlmClient>,
     pub registry: &'a Arc<ToolRegistry>,
     pub system_blocks: &'a Vec<SystemBlock>,

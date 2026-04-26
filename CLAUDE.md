@@ -153,17 +153,22 @@ mod tests {
 ### 9. Bug/Feature 追踪联动
 
 - **开始工作前 MUST 查看 `docs/bug/active.md` 和 `docs/feature/active.md`**，确认当前修改是否与已知 bug 或 feature 相关
+- **Bug 状态流程**：`活动中` → `修复中` → `待确认` → 用户确认后归档
+  - **活动中**：bug 已登记但尚未开始修复
+  - **修复中**：正在修复代码
+  - **待确认**：代码已修改，等待用户验证
+  - **归档**：用户确认后从 `active.md` 移除，详情总结到 `docs/bug/archived/` 文件
 - **修改涉及已知 bug 时 MUST**：
-  1. 在 `docs/bug/active.md` 的对应行标记状态（修复中/待回归等）
+  1. 在 `docs/bug/active.md` 的对应行更新状态（活动中/修复中/待确认）
   2. 在 commit message 中引用 bug 编号（如 `refs #1`）
   3. 修复后将 commit hash 更新到归档文件的"修复"字段
 - **新增 bug 发现时 MUST**：
-  1. 先在 `docs/bug/archived/` 创建详细文件（用模板）
-  2. 再在 `docs/bug/active.md` 表格中添加一行
+  1. 在 `docs/bug/active.md` 表格中添加一行（状态为"活动中"）
+  2. 在详情区域记录症状、根因、修复方向
 - **实现 feature 时 MUST**：
   1. 在 `docs/feature/active.md` 登记
   2. 完成归档后从 `active.md` 移除，文件移入 `archived/`
-- **归档门禁**：bug 修复或 feature 完成后，**MUST 等待用户确认**，确认后才能在 `active.md` 中移除该条目并将文件移入 `archived/`
+- **归档门禁**：bug 修复或 feature 完成后，**MUST 等待用户确认**，确认后才能在 `active.md` 中移除该条目并将详情总结到 `docs/bug/archived/` 文件
 
 ## 开放决策
 - MCP 工具的动态加载方式（当前通过 `mcp_loader.rs` + `serde_json::Value` 配置）

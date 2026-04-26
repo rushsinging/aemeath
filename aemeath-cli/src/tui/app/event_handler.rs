@@ -6,6 +6,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 impl super::App {
+    /// [DEPRECATED] Logic moved to update.rs. Kept for reference only.
+    #[allow(dead_code)]
     /// Handle a UiEvent from the background task.
     /// Returns the updated `is_processing` flag.
     pub(super) async fn handle_ui_event(
@@ -140,6 +142,7 @@ impl super::App {
     }
 
     /// Start processing a queued input message.
+    #[allow(dead_code)]
     fn start_queued_processing(
         &mut self,
         queued: String,

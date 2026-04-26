@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Result of handling a key event.
 #[derive(Default)]
+#[allow(dead_code)]
 pub(super) enum KeyResult {
     #[default]
     None,
@@ -18,7 +19,8 @@ pub(super) enum KeyResult {
 }
 
 impl super::App {
-    /// Handle keyboard input events (all except the async Enter-for-slash-command path).
+    /// [DEPRECATED] Logic moved to update.rs. Kept for reference only.
+    #[allow(dead_code)]
     pub(super) fn handle_key_event(
         &mut self,
         key: crossterm::event::KeyEvent,
@@ -174,6 +176,7 @@ impl super::App {
     }
 
     /// Handle Enter when not processing: send message or defer slash command to caller.
+    #[allow(dead_code)]
     fn handle_enter_not_processing(
         &mut self,
         is_processing: &mut bool,

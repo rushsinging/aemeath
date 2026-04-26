@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 impl super::App {
     /// Called from dialog Enter handler to dispatch /model switch
+    #[allow(dead_code)]
     pub(crate) async fn handle_slash_command_str(&mut self, input: &str) -> Option<String> {
         self.handle_slash_command(input).await
     }

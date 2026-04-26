@@ -8,6 +8,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
+use msg::{Cmd, Msg};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -323,7 +324,7 @@ impl App {
             // Draw UI
             self.draw(terminal)?;
 
-            // Build spawn context refs for handlers
+            // Build spawn context refs for update()
             let spawn_refs = processing::SpawnContextRefs {
                 client: &client,
                 registry: &registry,
@@ -341,85 +342,113 @@ impl App {
                 agent_semaphore: &agent_semaphore,
             };
 
-            // Handle events
-            let maybe_event = tokio::select! {
+            // --- TEA event collection: produce a Msg ---
+            let msg: Option<Msg> = tokio::select! {
                 biased;
+                // UI events have highest priority
                 ev = ui_rx.recv() => {
-                    if let Some(ev) = ev {
-                        self.handle_ui_event(
-                            ev, &mut is_processing, &ui_tx, &active_cancel, &spawn_refs,
-                        ).await;
-                    }
-                    continue;
+                    ev.map(Msg::Ui)
                 }
-                ev = event_stream.next() => ev,
+                // Terminal events
+                ev = event_stream.next() => {
+                    match ev {
+                        Some(Ok(event)) => match event {
+                            Event::Paste(text) => Some(Msg::Paste(text)),
+                            Event::Mouse(mouse) => Some(Msg::Mouse(mouse)),
+                            Event::Key(key) => Some(Msg::Key(key)),
+                            Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }
+                // Tick timeout for spinner etc.
                 _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                    continue;
+                    None
                 }
             };
 
-            if let Some(Ok(event)) = maybe_event {
-                match event {
-                    Event::Paste(text) if !is_processing => {
-                        self.handle_paste_event(text, &ui_tx);
+            let Some(msg) = msg else {
+                self.just_pasted = false;
+                continue;
+            };
+
+            // --- TEA update: state transition ---
+            let result = self.update(msg, &mut is_processing, &ui_tx, &active_cancel, &spawn_refs);
+
+            // --- Handle pending slash commands (async) ---
+            if let Some(input) = result.pending_slash {
+                let review_prompt = self.handle_slash_command(&input).await;
+                if let Some(prompt) = review_prompt {
+                    self.output_area.push_user_message(&input);
+                    self.messages.push(Message::user(&prompt));
+                    interrupted.store(false, Ordering::Relaxed);
+                    self.status_bar.set_processing("Thinking...");
+                    self.output_area.start_spinner();
+                    is_processing = true;
+                    let cancel = CancellationToken::new();
+                    if let Ok(mut guard) = active_cancel.lock() {
+                        *guard = Some(cancel.clone());
                     }
-                    Event::Mouse(mouse) => {
-                        let area = self.output_area_rect;
-                        self.handle_mouse_event(mouse, area);
+                    processing::spawn_processing(processing::SpawnContext {
+                        tx: ui_tx.clone(),
+                        client: client.clone(),
+                        registry: registry.clone(),
+                        system_blocks: system_blocks.clone(),
+                        system_prompt_text: system_prompt_text.clone(),
+                        user_context: user_context.clone(),
+                        messages: self.messages.clone(),
+                        context_size,
+                        cwd: self.cwd.clone(),
+                        session_id: self.session_id.clone(),
+                        read_files: read_files.clone(),
+                        agent_runner: agent_runner.clone(),
+                        allow_all,
+                        interrupted: interrupted.clone(),
+                        cancel,
+                        task_store: task_store.clone(),
+                        max_tool_concurrency,
+                        max_agent_concurrency,
+                        agent_semaphore: agent_semaphore.clone(),
+                    });
+                }
+            }
+
+            // --- TEA command execution ---
+            match result.cmd {
+                Cmd::None => {}
+                Cmd::Quit => {
+                    self.should_exit = true;
+                }
+                Cmd::SpawnProcessing(ctx) => {
+                    if let Ok(mut guard) = active_cancel.lock() {
+                        *guard = Some(ctx.cancel.clone());
                     }
-                    Event::Key(key) => {
-                        use input_handler::KeyResult;
-                        match self.handle_key_event(
-                            key, &mut is_processing, &ui_tx, &active_cancel, &spawn_refs,
-                        ) {
-                            KeyResult::SlashCommand => {
-                                // Slash command needs async handling
-                                if let Some(input) = self.queued_input.take() {
-                                    let review_prompt = self.handle_slash_command(&input).await;
-                                    if let Some(prompt) = review_prompt {
-                                        self.output_area.push_user_message(&input);
-                                        self.messages.push(Message::user(&prompt));
-                                        interrupted.store(false, Ordering::Relaxed);
-                                        self.status_bar.set_processing("Thinking...");
-                                        self.output_area.start_spinner();
-                                        is_processing = true;
-                                        let cancel = CancellationToken::new();
-                                        if let Ok(mut guard) = active_cancel.lock() {
-                                            *guard = Some(cancel.clone());
-                                        }
-                                        processing::spawn_processing(processing::SpawnContext {
-                                            tx: ui_tx.clone(),
-                                            client: client.clone(),
-                                            registry: registry.clone(),
-                                            system_blocks: system_blocks.clone(),
-                                            system_prompt_text: system_prompt_text.clone(),
-                                            user_context: user_context.clone(),
-                                            messages: self.messages.clone(),
-                                            context_size,
-                                            cwd: self.cwd.clone(),
-                                            session_id: self.session_id.clone(),
-                                            read_files: read_files.clone(),
-                                            agent_runner: agent_runner.clone(),
-                                            allow_all,
-                                            interrupted: interrupted.clone(),
-                                            cancel,
-                                            task_store: task_store.clone(),
-                                            max_tool_concurrency,
-                                            max_agent_concurrency,
-                                            agent_semaphore: agent_semaphore.clone(),
-                                        });
-                                    }
-                                }
-                            }
-                            KeyResult::DialogModelSwitch => {
-                                if let Some(input) = self.queued_input.take() {
-                                    let _ = self.handle_slash_command_str(&input).await;
-                                }
-                            }
-                            KeyResult::None => {}
+                    processing::spawn_processing(ctx);
+                }
+                Cmd::SendEvents(events) => {
+                    for ev in events {
+                        let _ = ui_tx.send(ev).await;
+                    }
+                }
+                Cmd::QueueInput(_) => {
+                    // Handled via pending_slash above
+                }
+                Cmd::SaveSession(msgs) => {
+                    if !msgs.is_empty() {
+                        use aemeath_core::session::{self as sess, Session, now_iso};
+                        let s = Session {
+                            id: self.session_id.clone(),
+                            cwd: self.cwd.to_string_lossy().to_string(),
+                            messages: msgs,
+                            created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+                            updated_at: now_iso(),
+                            metadata: Default::default(),
+                        };
+                        if let Err(e) = sess::save_session(&s).await {
+                            log::warn!("failed to auto-save session on sync: {e}");
                         }
                     }
-                    _ => {}
                 }
             }
 
@@ -552,10 +581,12 @@ fn build_session_summary(session: &aemeath_core::session::Session) -> String {
 }
 
 pub mod input_handler;
+pub mod msg;
 pub mod mouse_handler;
 pub mod paste_handler;
 pub mod processing;
 pub mod render;
 pub mod slash;
 pub mod stream;
+pub mod update;
 pub mod util;

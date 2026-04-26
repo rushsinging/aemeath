@@ -157,65 +157,184 @@ impl OutputArea {
             .bg(Color::Rgb(40, 44, 52))
             .fg(Color::Rgb(171, 178, 191));
 
-        let mut lines: Vec<Line> = self.lines
+        // 预扫描 markdown 表格块（连续的 | ... | 行）
+        // table_block_lines: 属于某个表格块的所有逻辑行索引
+        // table_block_info: 每个表格块的起始索引和行内容引用索引列表
+        let mut table_block_lines = std::collections::HashSet::new();
+        {
+            let visible: Vec<(usize, &OutputLine)> = self.lines.iter()
+                .enumerate()
+                .skip(start)
+                .take(end - start)
+                .collect();
+            let mut i = 0;
+            while i < visible.len() {
+                let (_, line) = visible[i];
+                let is_md = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                if is_md && markdown::is_table_row(&line.content) {
+                    // 找到连续表格行
+                    let block_start = i;
+                    let mut block_end = i + 1;
+                    while block_end < visible.len() {
+                        let (_, next_line) = visible[block_end];
+                        let next_is_md = matches!(next_line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                        let trimmed = next_line.content.trim();
+                        if next_is_md && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed)) {
+                            block_end += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    // 至少要有 separator 行才算合法表格
+                    let has_separator = (block_start..block_end).any(|j| markdown::is_table_separator(visible[j].1.content.trim()));
+                    if has_separator {
+                        for j in block_start..block_end {
+                            table_block_lines.insert(visible[j].0);
+                        }
+                    }
+                    i = block_end;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        // 预渲染表格块：table_block_first_idx -> 渲染结果
+        let mut table_render_cache: std::collections::HashMap<usize, Vec<Vec<Span<'static>>>> = std::collections::HashMap::new();
+        {
+            let visible: Vec<(usize, &OutputLine)> = self.lines.iter()
+                .enumerate()
+                .skip(start)
+                .take(end - start)
+                .collect();
+            let mut i = 0;
+            while i < visible.len() {
+                let (idx, _) = visible[i];
+                if table_block_lines.contains(&idx) {
+                    let block_start = i;
+                    let mut block_end = i + 1;
+                    while block_end < visible.len() && table_block_lines.contains(&visible[block_end].0) {
+                        block_end += 1;
+                    }
+                    // 收集块内容
+                    let block_lines: Vec<&str> = (block_start..block_end)
+                        .map(|j| visible[j].1.content.as_str())
+                        .collect();
+                    let base = visible[block_start].1.style.to_style();
+                    let rendered = markdown::render_table_block(&block_lines, base);
+                    table_render_cache.insert(visible[block_start].0, rendered);
+                    i = block_end;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        // 用显式迭代替代 .map().flatten()，以支持表格块等多行组渲染
+        let vis_lines: Vec<(usize, &OutputLine)> = self.lines
             .iter()
             .enumerate()
             .skip(start)
             .take(end - start)
-            .map(|(idx, output_line)| {
-                let wrapped = wrap_line(&output_line.content, self.term_width);
-                let style = output_line.style;
-
-                // 构建屏幕行映射：先于所有渲染分支，确保 tool call 行也被记录
-                let sanitized = display::sanitize_for_display(&output_line.content);
-                let char_offsets = compute_char_offsets(&sanitized, self.term_width);
-                for (chunk_idx, _) in wrapped.iter().enumerate() {
-                    let (char_start, char_end) = if chunk_idx < char_offsets.len() {
-                        char_offsets[chunk_idx]
-                    } else {
-                        (CharIdx::ZERO, CharIdx::ZERO)
-                    };
-                    new_screen_map.push((idx, char_start, char_end));
-                }
-
-                // 运行中的工具调用闪烁圆点 — 先用普通样式渲染，后处理改 dot 颜色
-                // 已完成/失败的 tool call 同理
-                // 先生成基础渲染（markdown / code block / plain），选择高亮叠加在 markdown 之上
-                let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
-                let is_code_block = code_block_lines.contains(&idx);
-                let has_real_selection = self.has_real_selection();
-
-                if has_real_selection {
-                    let screen_start = new_screen_map.len() - wrapped.len();
-                    wrapped.into_iter().enumerate().map(|(chunk_idx, chunk)| {
-                        let screen_idx = screen_start + chunk_idx;
-                        if is_code_block {
-                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, code_style);
-                            Line::from(line_spans)
-                        } else if is_markdown {
-                            // markdown：先渲染 inline spans，再叠加选择高亮
-                            let md_spans = markdown::inline_markdown_spans(&chunk, style.to_style());
-                            let line_spans = self.render_spans_with_selection(screen_idx, &md_spans);
-                            Line::from(line_spans)
-                        } else {
-                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, style.to_style());
-                            Line::from(line_spans)
-                        }
-                    }).collect::<Vec<_>>()
-                } else {
-                    wrapped.into_iter().map(|chunk| {
-                        if is_code_block {
-                            Line::styled(chunk, code_style)
-                        } else if is_markdown {
-                            Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
-                        } else {
-                            Line::styled(chunk, style.to_style())
-                        }
-                    }).collect::<Vec<_>>()
-                }
-            })
-            .flatten()
             .collect();
+
+        let mut lines: Vec<Line> = Vec::new();
+        let mut vi = 0;
+        while vi < vis_lines.len() {
+            let (idx, output_line) = vis_lines[vi];
+            let style = output_line.style;
+
+            // 检查是否为表格块起始行
+            if let Some(table_rows) = table_render_cache.get(&idx) {
+                // 渲染整个表格块
+                for row_spans in table_rows {
+                    // 每个表格行的 spans 合成一个屏幕行（不 wrap，表格行不应换行）
+                    let line_text: String = row_spans.iter().map(|s| s.content.clone().into_owned()).collect();
+                    let sanitized = display::sanitize_for_display(&line_text);
+                    let char_offsets = compute_char_offsets(&sanitized, self.term_width);
+                    let wrapped = wrap_line(&line_text, self.term_width);
+                    for (chunk_idx, _) in wrapped.iter().enumerate() {
+                        let (char_start, char_end) = if chunk_idx < char_offsets.len() {
+                            char_offsets[chunk_idx]
+                        } else {
+                            (CharIdx::ZERO, CharIdx::ZERO)
+                        };
+                        new_screen_map.push((idx, char_start, char_end));
+                    }
+                    // 渲染每个 wrap chunk
+                    if self.has_real_selection() {
+                        let screen_start = new_screen_map.len() - wrapped.len();
+                        for (chunk_idx, chunk) in wrapped.into_iter().enumerate() {
+                            let screen_idx = screen_start + chunk_idx;
+                            let base_s = style.to_style();
+                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, base_s, &new_screen_map);
+                            lines.push(Line::from(line_spans));
+                        }
+                    } else {
+                        // 无选择：如果只有 1 个 wrapped 行，直接用 table spans
+                        if wrapped.len() == 1 {
+                            lines.push(Line::from(row_spans.clone()));
+                        } else {
+                            // wrap 后每行用 plain text（表格不太可能 wrap，但保底）
+                            for chunk in wrapped {
+                                lines.push(Line::styled(chunk, style.to_style()));
+                            }
+                        }
+                    }
+                }
+                // 跳过整个表格块
+                vi += table_rows.len();
+                continue;
+            }
+
+            // 非表格行：原逻辑
+            let wrapped = wrap_line(&output_line.content, self.term_width);
+
+            let sanitized = display::sanitize_for_display(&output_line.content);
+            let char_offsets = compute_char_offsets(&sanitized, self.term_width);
+            for (chunk_idx, _) in wrapped.iter().enumerate() {
+                let (char_start, char_end) = if chunk_idx < char_offsets.len() {
+                    char_offsets[chunk_idx]
+                } else {
+                    (CharIdx::ZERO, CharIdx::ZERO)
+                };
+                new_screen_map.push((idx, char_start, char_end));
+            }
+
+            let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+            let is_code_block = code_block_lines.contains(&idx);
+            let has_real_selection = self.has_real_selection();
+
+            let rendered: Vec<Line> = if has_real_selection {
+                let screen_start = new_screen_map.len() - wrapped.len();
+                wrapped.into_iter().enumerate().map(|(chunk_idx, chunk)| {
+                    let screen_idx = screen_start + chunk_idx;
+                    if is_code_block {
+                        let line_spans = self.render_line_with_selection(screen_idx, &chunk, code_style, &new_screen_map);
+                        Line::from(line_spans)
+                    } else if is_markdown {
+                        let md_spans = markdown::inline_markdown_spans(&chunk, style.to_style());
+                        let line_spans = self.render_spans_with_selection(screen_idx, &md_spans, &new_screen_map);
+                        Line::from(line_spans)
+                    } else {
+                        let line_spans = self.render_line_with_selection(screen_idx, &chunk, style.to_style(), &new_screen_map);
+                        Line::from(line_spans)
+                    }
+                }).collect()
+            } else {
+                wrapped.into_iter().map(|chunk| {
+                    if is_code_block {
+                        Line::styled(chunk, code_style)
+                    } else if is_markdown {
+                        Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
+                    } else {
+                        Line::styled(chunk, style.to_style())
+                    }
+                }).collect()
+            };
+            lines.extend(rendered);
+            vi += 1;
+        }
 
         self.screen_line_map = new_screen_map;
 
@@ -315,7 +434,7 @@ impl OutputArea {
     }
 
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
-    fn render_line_with_selection(&self, screen_idx: usize, content: &str, base_style: Style) -> Vec<Span<'static>> {
+    fn render_line_with_selection(&self, screen_idx: usize, content: &str, base_style: Style, screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
         let Some((start_screen, start_col)) = self.selection_start else {
             return vec![Span::styled(content.to_string(), base_style)];
         };
@@ -347,8 +466,8 @@ impl OutputArea {
         let chars_len = chars.len();
 
         // 计算本行的选中起止列（转为 usize 以索引 chars vec）
-        let chunk_start = if screen_idx < self.screen_line_map.len() {
-            self.screen_line_map[screen_idx].1
+        let chunk_start = if screen_idx < screen_map.len() {
+            screen_map[screen_idx].1
         } else {
             CharIdx::ZERO
         };
@@ -399,7 +518,7 @@ impl OutputArea {
 
     /// 对已有的 markdown spans 叠加选中高亮
     /// 不在选中范围内的 span 保持原样，选中部分改为 selection style
-    fn render_spans_with_selection(&self, screen_idx: usize, spans: &[Span<'static>]) -> Vec<Span<'static>> {
+    fn render_spans_with_selection(&self, screen_idx: usize, spans: &[Span<'static>], screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
         let Some((start_screen, start_col)) = self.selection_start else {
             return spans.to_vec();
         };
@@ -433,8 +552,8 @@ impl OutputArea {
         }
 
         // 计算本行在展开字符流中的选中范围
-        let chunk_start = if screen_idx < self.screen_line_map.len() {
-            self.screen_line_map[screen_idx].1
+        let chunk_start = if screen_idx < screen_map.len() {
+            screen_map[screen_idx].1
         } else {
             CharIdx::ZERO
         };
