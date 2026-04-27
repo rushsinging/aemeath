@@ -1,5 +1,7 @@
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
+use aemeath_core::config::hooks::HookEvent;
+use aemeath_core::hook::{HookData, StopHookData, ToolHookData};
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::provider::StreamHandler;
@@ -50,6 +52,7 @@ pub async fn process_in_background(
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore,
+        progress_tx: None,
     };
     let agent = Agent {
         registry: &registry,
@@ -234,81 +237,157 @@ pub async fn process_in_background(
                         .into_iter()
                         .partition(|c| c.name == "Agent");
 
-                    let is_task_tool = |name: &str| name == "TaskCreate" || name == "TaskUpdate";
+                    let is_ask_user = |name: &str| name == "AskUserQuestion";
 
                     let non_agent_calls: Vec<ToolCall> = non_agent_approved.into_iter().map(|c| {
                         ToolCall { id: c.id.clone(), name: c.name.clone(), input: c.input.clone() }
                     }).collect();
 
-                    for call in &non_agent_calls {
-                        if !is_task_tool(&call.name) {
-                            let _ = tx.send(UiEvent::ToolCall {
-                                id: call.id.clone(),
-                                name: call.name.clone(),
-                                summary: call.input.to_string(),
-                            }).await;
-                        }
+                    // 拦截 AskUserQuestion：不走 execute_tools，而是通过 UI 询问用户
+                    log::debug!("[AskUser] non_agent_calls: {:?}", non_agent_calls.iter().map(|c| &c.name).collect::<Vec<_>>());
+                    let mut ask_user_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
+                    let ask_calls: Vec<&ToolCall> = non_agent_calls.iter()
+                        .filter(|c| is_ask_user(&c.name))
+                        .collect();
+                    log::debug!("[AskUser] ask_calls count: {}", ask_calls.len());
+                    for call in &ask_calls {
+                        let question = call.input.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let options: Vec<String> = call.input.get("options")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                            .unwrap_or_default();
+                        let allow_free_input = call.input.get("allow_free_input").and_then(|v| v.as_bool()).unwrap_or(true);
+                        let multi_select = call.input.get("multi_select").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let default = call.input.get("default").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<String>();
+                        let _ = tx.send(UiEvent::AskUser {
+                            id: call.id.clone(),
+                            question: question.clone(),
+                            options: options.clone(),
+                            allow_free_input,
+                            multi_select,
+                            default: default.clone(),
+                            reply_tx,
+                        }).await;
+
+                        // 挂起等待用户回答
+                        let answer = match reply_rx.await {
+                            Ok(a) if !a.is_empty() => a,
+                            _ => default.unwrap_or_default(),
+                        };
+                        let _ = tx.send(UiEvent::ToolResult {
+                            id: call.id.clone(),
+                            tool_name: call.name.clone(),
+                            output: answer.clone(),
+                            is_error: false,
+                            images: Vec::new(),
+                        }).await;
+                        ask_user_results.push((call.id.clone(), answer, false, Vec::new()));
                     }
 
-                    use futures::future::join_all;
-                    let hook_runner_ref = &hook_runner;
-                    let per_tool_futures = non_agent_calls.iter().map(|call| {
+                    // 其他 non-agent tool calls（排除 AskUserQuestion）
+                    let other_calls: Vec<&ToolCall> = non_agent_calls.iter()
+                        .filter(|c| !is_ask_user(&c.name))
+                        .collect();
+
+                    for call in &other_calls {
+                        let _ = tx.send(UiEvent::ToolCall {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            summary: call.input.to_string(),
+                        }).await;
+                    }
+
+                    // Execute tool calls sequentially so each ToolResult is sent
+                    // immediately after completion (instead of join_all batching).
+                    let mut non_agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
+                    for call in &other_calls {
                         let call = ToolCall {
                             id: call.id.clone(),
                             name: call.name.clone(),
                             input: call.input.clone(),
                         };
-                        let tx = tx.clone();
-                        let agent_ref = &agent;
-                        let hook_runner = hook_runner_ref.clone();
-                        async move {
-                            let skip_ui = is_task_tool(&call.name);
-
-                            // PreToolUse hook: 检查是否应阻止执行
-                            let (blocked, _hook_results) = hook_runner
-                                .pre_tool_use(&call.name, call.input.clone())
-                                .await;
-                            if blocked {
-                                if !skip_ui {
-                                    let _ = tx.send(UiEvent::ToolResult {
-                                        id: call.id.clone(),
-                                        tool_name: call.name.clone(),
-                                        output: format!("Blocked by PreToolUse hook"),
-                                        is_error: true,
-                                        images: Vec::new(),
-                                    }).await;
-                                }
-                                return vec![(call.id.clone(), "Blocked by PreToolUse hook".to_string(), true, Vec::new())];
-                            }
-
-                            let results = agent_ref
-                                .execute_tools(std::slice::from_ref(&call))
-                                .await;
-                            let mut collected = Vec::with_capacity(results.len());
-                            for (id, output, is_error, images) in results {
-                                // PostToolUse hook
-                                let _ = hook_runner
-                                    .post_tool_use(&call.name, call.input.clone(), &output, is_error)
-                                    .await;
-
-                                if !skip_ui {
-                                    let _ = tx.send(UiEvent::ToolResult {
-                                        id: id.clone(),
-                                        tool_name: call.name.clone(),
-                                        output: output.clone(),
-                                        is_error,
-                                        images: images.clone(),
-                                    }).await;
-                                }
-                                collected.push((id, output, is_error, images));
-                            }
-                            collected
+                        // PreToolUse hook: 检查是否应阻止执行
+                        let (blocked, _hook_results) = hook_runner
+                            .pre_tool_use(&call.name, call.input.clone())
+                            .await;
+                        if blocked {
+                            let _ = tx.send(UiEvent::ToolResult {
+                                id: call.id.clone(),
+                                tool_name: call.name.clone(),
+                                output: format!("Blocked by PreToolUse hook"),
+                                is_error: true,
+                                images: Vec::new(),
+                            }).await;
+                            non_agent_results.push((call.id.clone(), "Blocked by PreToolUse hook".to_string(), true, Vec::new()));
+                            continue;
                         }
-                    });
-                    let collected_per_tool: Vec<Vec<(String, String, bool, Vec<ImageData>)>> =
-                        join_all(per_tool_futures).await;
-                    let non_agent_results: Vec<(String, String, bool, Vec<ImageData>)> =
-                        collected_per_tool.into_iter().flatten().collect();
+
+                        let results = agent
+                            .execute_tools(std::slice::from_ref(&call))
+                            .await;
+                        for (id, output, is_error, images) in results {
+                            // PostToolUse hook: run with JSON output parsing
+                            let hook_results = hook_runner
+                                .run_hooks_with_json(
+                                    HookEvent::PostToolUse,
+                                    Some(&call.name),
+                                    HookData::Tool(ToolHookData {
+                                        tool_name: call.name.clone(),
+                                        tool_input: call.input.clone(),
+                                        tool_output: Some(output.clone()),
+                                        is_error: Some(is_error),
+                                    }),
+                                )
+                                .await;
+                            for (_entry, _result, json_output) in &hook_results {
+                                if let Some(json) = json_output {
+                                    if let Some(ref ctx) = json.additional_context {
+                                        let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                    }
+                                    if let Some(ref msg) = json.system_message {
+                                        let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                    }
+                                }
+                            }
+
+                            // PostToolUseFailure hook: 工具执行失败时触发
+                            if is_error {
+                                let hook_results = hook_runner
+                                    .run_hooks_with_json(
+                                        HookEvent::PostToolUseFailure,
+                                        Some(&call.name),
+                                        HookData::Tool(ToolHookData {
+                                            tool_name: call.name.clone(),
+                                            tool_input: call.input.clone(),
+                                            tool_output: Some(output.clone()),
+                                            is_error: Some(is_error),
+                                        }),
+                                    )
+                                    .await;
+                                for (_entry, _result, json_output) in &hook_results {
+                                    if let Some(json) = json_output {
+                                        if let Some(ref ctx) = json.additional_context {
+                                            let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                        }
+                                        if let Some(ref msg) = json.system_message {
+                                            let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                        }
+                                    }
+                                }
+                            }
+
+                            let _ = tx.send(UiEvent::ToolResult {
+                                id: id.clone(),
+                                tool_name: call.name.clone(),
+                                output: output.clone(),
+                                is_error,
+                                images: images.clone(),
+                            }).await;
+                            non_agent_results.push((id, output, is_error, images));
+                        }
+                    }
 
                     let mut agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     let batch_size = max_agent_concurrency.max(1);
@@ -334,6 +413,17 @@ pub async fn process_in_background(
                     // Process agent calls in batches with semaphore
                     for batch in agent_approved.chunks(batch_size) {
                         if interrupted.load(Ordering::Relaxed) { break; }
+
+                        // Send ToolCall event for each Agent call so the TUI can
+                        // display role/model/description info (replacing the bare "● Agent...")
+                        for call in batch {
+                            let _ = tx.send(UiEvent::ToolCall {
+                                id: call.id.clone(),
+                                name: call.name.clone(),
+                                summary: call.input.to_string(),
+                            }).await;
+                        }
+
                         let agent_futures: Vec<_> = batch.iter().map(|call| {
                             let call = ToolCall {
                                 id: call.id.clone(),
@@ -341,8 +431,9 @@ pub async fn process_in_background(
                                 input: call.input.clone(),
                             };
                             let tx = tx.clone();
-                            let agent_ref = &agent;
-                            let hook_runner = hook_runner_ref.clone();
+                            let mut ag_ctx = agent.ctx.clone();
+                            let hook_runner = hook_runner.clone();
+                            let registry_ref = registry.clone();
                             async move {
                                 // PreToolUse hook for Agent calls
                                 let (blocked, _) = hook_runner
@@ -359,12 +450,68 @@ pub async fn process_in_background(
                                     return vec![(call.id.clone(), "Blocked by PreToolUse hook".to_string(), true, Vec::new())];
                                 }
 
-                                let results = agent_ref.execute_tools(std::slice::from_ref(&call)).await;
+                                // Set up progress channel so CliAgentRunner can stream
+                                // per-turn output back to the TUI while the sub-agent runs.
+                                let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<String>(32);
+                                ag_ctx.progress_tx = Some(prog_tx);
+
+                                let call_id = call.id.clone();
+                                let ui_tx = tx.clone();
+                                // Spawn a task that forwards progress to the UI
+                                let forward_handle = tokio::spawn(async move {
+                                    while let Some(text) = prog_rx.recv().await {
+                                        let _ = ui_tx.send(UiEvent::AgentProgress {
+                                            _tool_id: call_id.clone(),
+                                            _text: text,
+                                        }).await;
+                                    }
+                                });
+
+                                // Call AgentTool directly via registry with progress_tx enabled ctx
+                                let agent_tool = registry_ref.get("Agent")
+                                    .expect("Agent tool not found in registry");
+                                let result = agent_tool.call(call.input.clone(), &ag_ctx).await;
+                                let results = vec![(call.id.clone(), result.output, result.is_error, result.images)];
+
+                                // Drop ag_ctx to close channel, signal the forward task
+                                drop(ag_ctx);
+                                // Wait briefly for forward task to flush remaining messages
+                                let _ = tokio::time::timeout(
+                                    std::time::Duration::from_millis(500),
+                                    forward_handle,
+                                ).await;
+
                                 for (id, output, is_error, images) in &results {
                                     // PostToolUse hook for Agent calls
                                     let _ = hook_runner
                                         .post_tool_use(&call.name, call.input.clone(), output, *is_error)
                                         .await;
+
+                                    // PostToolUseFailure hook: Agent 工具执行失败时触发
+                                    if *is_error {
+                                        let hook_results = hook_runner
+                                            .run_hooks_with_json(
+                                                HookEvent::PostToolUseFailure,
+                                                Some(&call.name),
+                                                HookData::Tool(ToolHookData {
+                                                    tool_name: call.name.clone(),
+                                                    tool_input: call.input.clone(),
+                                                    tool_output: Some(output.clone()),
+                                                    is_error: Some(*is_error),
+                                                }),
+                                            )
+                                            .await;
+                                        for (_entry, _result, json_output) in &hook_results {
+                                            if let Some(json) = json_output {
+                                                if let Some(ref ctx) = json.additional_context {
+                                                    let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                                }
+                                                if let Some(ref msg) = json.system_message {
+                                                    let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                                }
+                                            }
+                                        }
+                                    }
 
                                     let _ = tx.send(UiEvent::ToolResult {
                                         id: id.clone(),
@@ -384,8 +531,9 @@ pub async fn process_in_background(
                         }
                     }
 
-                    let all_results: Vec<(String, String, bool, Vec<ImageData>)> = non_agent_results
+                    let all_results: Vec<(String, String, bool, Vec<ImageData>)> = ask_user_results
                         .into_iter()
+                        .chain(non_agent_results.into_iter())
                         .chain(agent_results.into_iter())
                         .chain(denied_results.into_iter())
                         .collect();
@@ -399,6 +547,17 @@ pub async fn process_in_background(
             }
             Err(e) => {
                 let _ = tx.send(UiEvent::Error(e.to_string())).await;
+                // StopFailure hook: API 错误导致 agent 循环结束
+                let stop_results = hook_runner.run_hooks_with_json(
+                    HookEvent::StopFailure,
+                    None,
+                    HookData::Stop(StopHookData { turns: turn_count }),
+                ).await;
+                let (system_message, additional_context) = stop_results.into_iter()
+                    .find_map(|(_, _, json_output)| json_output)
+                    .map(|output| (output.system_message, output.additional_context))
+                    .unwrap_or((None, None));
+                let _ = tx.send(UiEvent::StopFailureHook { system_message, additional_context }).await;
                 let _ = tx.send(UiEvent::Done).await;
                 return;
             }

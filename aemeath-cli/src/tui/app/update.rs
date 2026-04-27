@@ -395,9 +395,9 @@ impl App {
                 self.status_bar.set_tps(tps);
             }
             UiEvent::AgentProgress { .. } => {
-                    // Sub-agent progress is not displayed on the header line — the header
-                    // is already set by ToolCall/ToolCallStart events and should remain stable.
-                }
+                // Sub-agent progress is not displayed on the header line — the header
+                // is already set by ToolCall/ToolCallStart events and should remain stable.
+            }
             UiEvent::Error(msg) => {
                 log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_error(&msg);
@@ -453,6 +453,14 @@ impl App {
                     self.ask_user_reply_tx = Some(reply_tx);
                 }
                 self.status_bar.set_processing("Waiting for your input...");
+            }
+            UiEvent::StopFailureHook { system_message, additional_context } => {
+                if let Some(ref msg) = system_message {
+                    self.output_area.push_system(msg);
+                }
+                if let Some(ref ctx) = additional_context {
+                    self.output_area.push_system(&format!("[Additional Context] {ctx}"));
+                }
             }
             UiEvent::Done => {
                 log::debug!("[BUG#4] Done: tool_call_active {} -> false", self.tool_call_active);

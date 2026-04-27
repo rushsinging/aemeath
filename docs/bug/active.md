@@ -2,10 +2,10 @@
 
 | # | 标题 | 优先级 | 状态 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|
-| 3 | Tool call 状态栏卡住 + 长时间 tool call 无流式输出 | 高 | 待确认 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
+| 3 | 优化 tool call TUI 显示 | 高 | 活动中 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
 | 4 | Output Area panic 导致进程卡死 | 高 | 活动中 | 2026-04 | catch_unwind 外 panic / 状态不一致 |
 | 9 | 鼠标选中时高亮区不在鼠标位置（#5 回归） | 中 | 待确认 | 2026-04 | render 时 selection 高亮查旧 screen_line_map |
-| 12 | Ask user tool call 没有询问用户 | 高 | 活动中 | 2026-04 | tool call 未拦截确认直接执行 |
+| 12 | Ask user tool call 没有询问用户 | 高 | 已修复 | 2026-04 | tool call 未拦截确认直接执行 |
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
 
 ## 详情
@@ -22,20 +22,20 @@
 **修复**：改为 `bg(Rgb(40,44,52)) + fg(Rgb(171,178,191))`（One Dark 色系）。
 **关联**：依赖于 #1 的修复。
 
-### #3 Tool call 状态栏卡住 + 长时间 tool call 无流式输出
+### #3 优化 tool call TUI 显示
 **症状**：
-1. 模型完成 tool call 后重新开始 thinking 时，状态栏仍显示 "Calling xxx..."，thinking 文本不显示。
+1. ~~模型完成 tool call 后重新开始 thinking 时，状态栏仍显示 "Calling xxx..."，thinking 文本不显示。~~
 2. 长时间 tool call（如文件搜索、代码分析）执行期间 TUI 无任何输出，执行完毕后才一次性显示所有结果。应改为：先输出 tool call 标题 → 执行过程中流式输出中间结果 → 完成后输出最终结果。
 
 **根因**：
-- 症状 1：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过，导致 thinking 文本被丢弃、`tool_call_active` 未重置、状态栏未清除。`ToolResult` 虽然设置了 `tool_call_active = false`，但多轮 tool call 场景下状态栏显示不正确。
-- 症状 2：tool call 执行期间输出被缓冲，未在 streaming 过程中逐步渲染到 TUI。
+- ~~症状 1：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过，导致 thinking 文本被丢弃、`tool_call_active` 未重置、状态栏未清除。`ToolResult` 虽然设置了 `tool_call_active = false`，但多轮 tool call 场景下状态栏显示不正确。~~ → 已修复：update.rs 中 Text/Thinking 事件在 `tool_call_active` 时自动重置并正常显示。
+- 症状 2：tool call 执行期间输出被缓冲，未在 streaming 过程中逐步渲染到 TUI。当前架构 `join_all` 并行执行所有 tool，执行完后才发送 `ToolResult`。
 
 **修复**：
-- 症状 1：`Thinking` 事件无论 `tool_call_active` 状态都正常显示 thinking 文本，若为 true 则同步重置并更新状态栏。`Text` 事件同理。
+- ~~症状 1：`Thinking` 事件无论 `tool_call_active` 状态都正常显示 thinking 文本，若为 true 则同步重置并更新状态栏。`Text` 事件同理。~~ → 已修复
 - 症状 2：需要将 tool call 输出改为流式——收到 tool call 开始事件时立即渲染标题，执行过程中逐步渲染中间输出，收到 tool result 时渲染最终结果。
 
-**涉及路径**：`aemeath-cli/src/tui/app/event_handler.rs`、`processing.rs`
+**涉及路径**：`aemeath-cli/src/tui/app/stream.rs`（tool 执行改为逐个顺序发送 ToolResult）
 
 ### #4 Output Area panic 导致进程卡死
 **症状**：Output area 渲染时触发 panic，TUI 进程卡死无响应，需 kill。
