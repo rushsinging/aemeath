@@ -12,9 +12,9 @@ use tokio_util::sync::CancellationToken;
 pub(super) enum KeyResult {
     #[default]
     None,
-    /// A slash command input needs async processing (stored in queued_input).
+    /// A slash command input needs async processing (stored in input_queue).
     SlashCommand,
-    /// A dialog model switch needs async processing (stored in queued_input).
+    /// A dialog model switch needs async processing (stored in input_queue).
     DialogModelSwitch,
 }
 
@@ -43,7 +43,7 @@ impl super::App {
                     if let Some(idx) = selected {
                         if idx < self.dialog_model_keys.len() {
                             let model_key = self.dialog_model_keys[idx].clone();
-                            self.queued_input = Some(format!("/model {}", model_key));
+                            self.input_queue.push_back(format!("/model {}", model_key));
                             self.active_dialog = None;
                             self.dialog_model_keys.clear();
                             return KeyResult::DialogModelSwitch;
@@ -109,11 +109,12 @@ impl super::App {
             (_, KeyCode::Enter) if *is_processing => {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();
-                    self.output_area.push_user_message(&input);
                     self.input_area.add_history(&input);
                     self.input_area.clear();
-                    self.queued_input = Some(input);
-                    self.status_bar.set_warning("Message queued");
+                    self.input_queue.push_back(input.clone());
+                    self.output_area.queued_messages.push(input);
+                    let n = self.input_queue.len();
+                    self.status_bar.set_warning(&format!("{n} message(s) queued"));
                 }
             }
             (_, KeyCode::Enter) if !*is_processing => {
@@ -189,7 +190,7 @@ impl super::App {
             // Slash commands need async — store for caller and add to history
             self.input_area.add_history(&input);
             self.input_area.clear();
-            self.queued_input = Some(input);
+            self.input_queue.push_back(input);
             return KeyResult::SlashCommand;
         }
 

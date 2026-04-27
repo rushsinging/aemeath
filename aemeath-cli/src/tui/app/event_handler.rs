@@ -113,6 +113,10 @@ impl super::App {
             UiEvent::SystemMessage(msg) => {
                 self.output_area.push_system(&msg);
             }
+            UiEvent::AskUser { id, question, options, allow_free_input: _, multi_select: _, default, reply_tx } => {
+                  // DEPRECATED path — logic moved to update.rs; keep for compilation
+                  let _ = (id, question, options, default, reply_tx);
+              }
             UiEvent::Done => {
                 log::debug!("[BUG#4] Done: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.finish_streaming();
@@ -121,8 +125,13 @@ impl super::App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if let Some(queued) = self.queued_input.take() {
-                    self.start_queued_processing(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
+                if !self.input_queue.is_empty() {
+                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                    for msg in &flushed {
+                        self.output_area.push_user_message(msg);
+                    }
+                    let queued: Vec<String> = self.input_queue.drain(..).collect();
+                    self.start_queued_processing_batch(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
@@ -134,25 +143,35 @@ impl super::App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if let Some(queued) = self.queued_input.take() {
-                    self.start_queued_processing(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
+                if !self.input_queue.is_empty() {
+                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                    for msg in &flushed {
+                        self.output_area.push_user_message(msg);
+                    }
+                    let queued: Vec<String> = self.input_queue.drain(..).collect();
+                    self.start_queued_processing_batch(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
                 }
+            }
+            UiEvent::AgentProgress { .. } => {
+                // Sub-agent progress is no longer displayed on the header line
             }
         }
     }
 
-    /// Start processing a queued input message.
+    /// Start processing all queued input messages as a single batch.
     #[allow(dead_code)]
-    fn start_queued_processing(
+    fn start_queued_processing_batch(
         &mut self,
-        queued: String,
+        queued: Vec<String>,
         is_processing: &mut bool,
         ui_tx: &mpsc::Sender<UiEvent>,
         active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_ctx: &super::processing::SpawnContextRefs<'_>,
     ) {
         spawn_ctx.interrupted.store(false, Ordering::Relaxed);
-        self.messages.push(Message::user(&queued));
+        for msg in &queued {
+            self.messages.push(Message::user(msg));
+        }
         self.status_bar.set_processing("Thinking...");
         self.output_area.start_spinner();
         *is_processing = true;

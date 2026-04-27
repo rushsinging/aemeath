@@ -64,7 +64,7 @@ impl App {
                     if let Some(idx) = selected {
                         if idx < self.dialog_model_keys.len() {
                             let model_key = self.dialog_model_keys[idx].clone();
-                            self.queued_input = Some(format!("/model {}", model_key));
+                            self.input_queue.push_back(format!("/model {}", model_key));
                             self.active_dialog = None;
                             self.dialog_model_keys.clear();
                             return UpdateResult { cmd: Cmd::None, pending_slash: Some(format!("/model {}", model_key)) };
@@ -78,6 +78,101 @@ impl App {
                     self.dialog_model_keys.clear();
                 }
                 _ => {}
+            }
+            return UpdateResult { cmd: Cmd::None, pending_slash: None };
+        }
+
+        // AskUserQuestion 交互模式
+        if let Some(ref state) = self.ask_user_state {
+            let options_count = state.options.len();
+            let multi_select = state.multi_select;
+
+            match key.code {
+                KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
+                    if options_count > 0 {
+                        let cursor = if state.cursor == 0 { options_count - 1 } else { state.cursor - 1 };
+                        self.ask_user_state.as_mut().unwrap().cursor = cursor;
+                        let s = self.ask_user_state.as_ref().unwrap();
+                        self.output_area.update_ask_user_options(
+                            s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                        );
+                    }
+                }
+                KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
+                    if options_count > 0 {
+                        let cursor = (state.cursor + 1) % options_count;
+                        self.ask_user_state.as_mut().unwrap().cursor = cursor;
+                        let s = self.ask_user_state.as_ref().unwrap();
+                        self.output_area.update_ask_user_options(
+                            s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                        );
+                    }
+                }
+                KeyCode::Char(' ') if key.modifiers == KeyModifiers::NONE && multi_select => {
+                    let idx = state.cursor;
+                    self.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
+                    let s = self.ask_user_state.as_ref().unwrap();
+                    self.output_area.update_ask_user_options(
+                        s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                    );
+                }
+                KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
+                    let state = self.ask_user_state.take().unwrap();
+                    let answer = if multi_select {
+                        // 多选：返回所有选中项的文本，逗号分隔
+                        let selected: Vec<&str> = state.selected.iter().enumerate()
+                            .filter(|(_, s)| **s)
+                            .map(|(i, _)| state.options[i].as_str())
+                            .collect();
+                        if selected.is_empty() {
+                            // 没选任何项，返回光标所在项
+                            state.options[state.cursor].clone()
+                        } else {
+                            selected.join(", ")
+                        }
+                    } else if options_count > 0 {
+                        // 单选：返回光标所在项
+                        state.options[state.cursor].clone()
+                    } else {
+                        // 无选项：取输入框文本
+                        let text = self.input_area.get_text();
+                        if text.is_empty() {
+                            String::new()
+                        } else {
+                            text
+                        }
+                    };
+                    if !answer.is_empty() {
+                        self.output_area.push_user_message(&answer);
+                    }
+                    self.input_area.clear();
+                    let _ = state.reply_tx.send(answer);
+                    self.status_bar.set_processing("Generating...");
+                }
+                KeyCode::Esc => {
+                    let state = self.ask_user_state.take().unwrap();
+                    self.input_area.clear();
+                    let _ = state.reply_tx.send(String::new());
+                    self.status_bar.set_processing("Generating...");
+                }
+                _ => {
+                    // 普通按键传递给 input_area（用于自由输入模式）
+                    match (key.modifiers, key.code) {
+                        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                            let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                c.to_ascii_uppercase()
+                            } else { c };
+                            self.input_area.input(ch);
+                        }
+                        (KeyModifiers::NONE, KeyCode::Backspace) => { self.input_area.backspace(); }
+                        (KeyModifiers::NONE, KeyCode::Left) => self.input_area.move_left(),
+                        (KeyModifiers::NONE, KeyCode::Right) => self.input_area.move_right(),
+                        (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
+                        (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
+                        (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
+                        _ => {}
+                    }
+                }
             }
             return UpdateResult { cmd: Cmd::None, pending_slash: None };
         }
@@ -130,11 +225,12 @@ impl App {
             (_, KeyCode::Enter) if *is_processing => {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();
-                    self.output_area.push_user_message(&input);
                     self.input_area.add_history(&input);
                     self.input_area.clear();
-                    self.queued_input = Some(input);
-                    self.status_bar.set_warning("Message queued");
+                    self.input_queue.push_back(input.clone());
+                    self.output_area.queued_messages.push(input);
+                    let n = self.input_queue.len();
+                    self.status_bar.set_warning(&format!("{n} message(s) queued"));
                 }
             }
             (_, KeyCode::Enter) if !*is_processing => {
@@ -206,7 +302,7 @@ impl App {
         if input.starts_with('/') {
             self.input_area.add_history(&input);
             self.input_area.clear();
-            self.queued_input = Some(input.clone());
+            self.input_queue.push_back(input.clone());
             return UpdateResult { cmd: Cmd::None, pending_slash: Some(input) };
         }
 
@@ -298,6 +394,10 @@ impl App {
             UiEvent::LiveTps(tps) => {
                 self.status_bar.set_tps(tps);
             }
+            UiEvent::AgentProgress { .. } => {
+                    // Sub-agent progress is not displayed on the header line — the header
+                    // is already set by ToolCall/ToolCallStart events and should remain stable.
+                }
             UiEvent::Error(msg) => {
                 log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_error(&msg);
@@ -324,6 +424,36 @@ impl App {
             UiEvent::SystemMessage(msg) => {
                 self.output_area.push_system(&msg);
             }
+            UiEvent::AskUser { id: _, question, options, allow_free_input, multi_select, default, reply_tx } => {
+                self.tool_call_active = false;
+                self.output_area.stop_spinner();
+                let default_ref = default.as_deref();
+                let option_line_start = self.output_area.push_ask_user(
+                    &question,
+                    &options,
+                    default_ref,
+                    multi_select,
+                );
+
+                if let Some(start) = option_line_start {
+                    let cursor = default.as_ref()
+                        .and_then(|d| options.iter().position(|o| o == d))
+                        .unwrap_or(0);
+                    self.ask_user_state = Some(super::AskUserState {
+                        reply_tx,
+                        options: options.clone(),
+                        cursor,
+                        multi_select,
+                        selected: vec![false; options.len()],
+                        option_line_start: start,
+                        allow_free_input,
+                    });
+                } else {
+                    // 无选项：退回自由输入模式
+                    self.ask_user_reply_tx = Some(reply_tx);
+                }
+                self.status_bar.set_processing("Waiting for your input...");
+            }
             UiEvent::Done => {
                 log::debug!("[BUG#4] Done: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.finish_streaming();
@@ -332,8 +462,14 @@ impl App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if let Some(queued) = self.queued_input.take() {
-                    return self.start_queued(queued, is_processing, ui_tx, active_cancel, spawn_refs);
+                if !self.input_queue.is_empty() {
+                    // Flush queued messages from spinner area into output area
+                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                    for msg in &flushed {
+                        self.output_area.push_user_message(msg);
+                    }
+                    let queued: Vec<String> = self.input_queue.drain(..).collect();
+                    return self.start_queued_batch(queued, is_processing, ui_tx, active_cancel, spawn_refs);
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
@@ -345,8 +481,14 @@ impl App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if let Some(queued) = self.queued_input.take() {
-                    return self.start_queued(queued, is_processing, ui_tx, active_cancel, spawn_refs);
+                if !self.input_queue.is_empty() {
+                    // Flush queued messages from spinner area into output area
+                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                    for msg in &flushed {
+                        self.output_area.push_user_message(msg);
+                    }
+                    let queued: Vec<String> = self.input_queue.drain(..).collect();
+                    return self.start_queued_batch(queued, is_processing, ui_tx, active_cancel, spawn_refs);
                 }
             }
         }
@@ -354,17 +496,19 @@ impl App {
         UpdateResult { cmd: Cmd::None, pending_slash: None }
     }
 
-    /// Start processing a queued input message
-    fn start_queued(
+    /// Start processing all queued input messages as a single batch
+    fn start_queued_batch(
         &mut self,
-        queued: String,
+        queued: Vec<String>,
         is_processing: &mut bool,
         ui_tx: &mpsc::Sender<UiEvent>,
         active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
         spawn_refs.interrupted.store(false, Ordering::Relaxed);
-        self.messages.push(Message::user(&queued));
+        for msg in &queued {
+            self.messages.push(Message::user(msg));
+        }
         self.status_bar.set_processing("Thinking...");
         self.output_area.start_spinner();
         *is_processing = true;

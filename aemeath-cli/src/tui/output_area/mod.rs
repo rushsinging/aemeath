@@ -59,6 +59,8 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// spinner 下方显示的任务状态行（外部更新）
     pub task_status_lines: Vec<String>,
+    /// 排队的用户消息（显示在 spinner 上方）
+    pub queued_messages: Vec<String>,
 }
 
 impl Default for OutputArea {
@@ -92,6 +94,7 @@ impl OutputArea {
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
+            queued_messages: Vec::new(),
         }
     }
 
@@ -112,7 +115,8 @@ impl OutputArea {
         // 构建 spinner 行和任务状态行
         let spinner_line = self.build_spinner_line();
         let task_line_count = if self.spinner.is_some() { self.task_status_lines.len() } else { 0 };
-        let reserved = if spinner_line.is_some() { 1 + task_line_count } else { 0 };
+        let queued_count = self.queued_messages.len();
+        let reserved = if spinner_line.is_some() { 1 + task_line_count + queued_count } else { queued_count };
 
         let visible_lines = (area.height as usize).saturating_sub(reserved);
         self.last_visible_height = visible_lines;
@@ -373,7 +377,13 @@ impl OutputArea {
 
         self.screen_line_map = new_screen_map;
 
-        // 追加 spinner 和任务状态行
+        // 追加排队消息、spinner 和任务状态行
+        for msg in &self.queued_messages {
+            lines.push(Line::styled(
+                format!("> {msg}"),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
         if let Some(sl) = spinner_line {
             lines.push(sl);
             for task_line in &self.task_status_lines {

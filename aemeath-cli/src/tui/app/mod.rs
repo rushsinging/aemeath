@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 /// Events sent from background task to UI
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum UiEvent {
     Text(String),
     Thinking(String),
@@ -39,6 +39,22 @@ pub enum UiEvent {
     LiveTps(f64),
     ClipboardImage(crate::image::ProcessedImage),
     SystemMessage(String),
+    /// AskUserQuestion tool call: pause and wait for user input
+    AskUser {
+        id: String,
+        question: String,
+        options: Vec<String>,
+        #[allow(dead_code)]
+        allow_free_input: bool,
+        multi_select: bool,
+        default: Option<String>,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    /// Sub-agent progress update (streams per-turn output to TUI)
+    AgentProgress {
+        _tool_id: String,
+        _text: String,
+    },
 }
 
 /// Main TUI application
@@ -59,7 +75,7 @@ pub struct App {
     pub input_area_rect: Rect,
     pub status_bar_rect: Rect,
     pub just_pasted: bool,
-    pub queued_input: Option<String>,
+    pub input_queue: std::collections::VecDeque<String>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
     pub system_prompt_text: String,
     pub context_size: usize,
@@ -77,6 +93,24 @@ pub struct App {
     pub tool_call_active: bool,
     /// Hook runner for lifecycle events
     pub hook_runner: aemeath_core::hook::HookRunner,
+    /// Pending oneshot sender for AskUserQuestion reply
+    pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<String>>,
+    /// Interactive ask-user selection state
+    pub ask_user_state: Option<AskUserState>,
+}
+
+/// State for interactive AskUserQuestion option selection
+pub struct AskUserState {
+    pub reply_tx: tokio::sync::oneshot::Sender<String>,
+    pub options: Vec<String>,
+    pub cursor: usize,
+    pub multi_select: bool,
+    pub selected: Vec<bool>,
+    /// Index in output_area.lines where option rows start
+    pub option_line_start: usize,
+    /// Whether free-text input is allowed
+    #[allow(dead_code)]
+    pub allow_free_input: bool,
 }
 
 impl App {
@@ -108,7 +142,7 @@ impl App {
             input_area_rect: Rect::default(),
             status_bar_rect: Rect::default(),
             just_pasted: false,
-            queued_input: None,
+            input_queue: std::collections::VecDeque::new(),
             last_click: None,
             system_prompt_text: String::new(),
             context_size: 200_000,
@@ -123,6 +157,8 @@ impl App {
             cached_sessions: Vec::new(),
             tool_call_active: false,
             hook_runner: aemeath_core::hook::HookRunner::empty(),
+            ask_user_reply_tx: None,
+            ask_user_state: None,
         }
     }
 
