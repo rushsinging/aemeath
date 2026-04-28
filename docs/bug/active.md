@@ -7,6 +7,7 @@
 | 9 | 鼠标选中时高亮区不在鼠标位置（#5 回归） | 中 | 待确认 | 2026-04 | render 时 selection 高亮查旧 screen_line_map |
 | 12 | Ask user tool call 没有询问用户 | 高 | 已修复 | 2026-04 | tool call 未拦截确认直接执行 |
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
+| 14 | Tool call 标题可选中但无法复制 | 中 | 活动中 | 2026-04 | selection 含 tool call 行时复制路径未取出文本 |
 
 ## 详情
 
@@ -62,6 +63,18 @@
 2. compaction 阶段主动截断过长的 tool result 内容
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
+
+### #14 Tool call 标题可选中但无法复制
+**症状**：在 output area 中用鼠标选中 tool call 标题行（`● ToolName(...)`）时，行内文字会显示高亮（视觉上可选中），但执行复制（Cmd+C / 右键复制 / 终端默认复制快捷键）时剪贴板里拿不到这段文本，或拿到空内容/不完整内容。
+**根因方向**：待调查。可能方向：
+- tool call 行在 `screen_line_map` 中标注为不可复制类型，selection 渲染走了高亮路径但 copy 路径过滤掉了
+- tool call 行的文本存在 `LineKind` 枚举的非 Text 分支，`copy_selection` 实现只处理了 Text 分支
+- 高亮 spans 和实际文本 spans 不一致（渲染用一份、复制读另一份）
+**修复方向**：
+1. 定位 selection → clipboard 的代码路径（搜 `copy_selection` / `clipboard`）
+2. 检查 tool call 行所在的 LineKind 分支是否在复制时被跳过
+3. 让所有可见 + 高亮的内容都能进入剪贴板，至少把 header 文本（`ToolName(args)`）包含进去
+**涉及路径**：`aemeath-cli/src/tui/output_area/`（selection / clipboard 相关模块）
 
 ---
 

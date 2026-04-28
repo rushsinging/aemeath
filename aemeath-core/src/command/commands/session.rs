@@ -71,7 +71,7 @@ fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future
                 let preview = s.messages.last()
                     .map(|m| {
                         let t = m.text_content();
-                        if t.len() > 80 { format!("{}...", &t[..77]) } else { t }
+                        if t.len() > 80 { format!("{}...", t.chars().take(77).collect::<String>()) } else { t }
                     })
                     .unwrap_or_default();
                 output.push_str(&format!("  {} [{} msgs] {}\n", s.id, s.messages.len(), preview));

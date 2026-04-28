@@ -40,7 +40,7 @@ pub async fn run_repl(
     registry: ToolRegistry,
     system_blocks: Vec<SystemBlock>,
     system_prompt_text: String,
-    user_context: String,
+    mut user_context: String,
     cwd: PathBuf,
     verbose: bool,
     markdown: bool,
@@ -52,7 +52,33 @@ pub async fn run_repl(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     skills: std::collections::HashMap<String, Skill>,
+    hook_runner: aemeath_core::hook::HookRunner,
 ) {
+    // Run SessionStart hooks: inject additional_context into user_context
+    {
+        use aemeath_core::config::hooks::HookEvent;
+        use aemeath_core::hook::{HookData, SessionHookData};
+        let hook_results = hook_runner.run_hooks_with_json(
+            HookEvent::SessionStart,
+            None,
+            HookData::Session(SessionHookData {}),
+        ).await;
+        for (_, result, json_output) in &hook_results {
+            if let Some(json) = json_output {
+                if let Some(ref ctx) = json.additional_context {
+                    user_context = if user_context.is_empty() {
+                        ctx.clone()
+                    } else {
+                        format!("{}\n\n{}", ctx, user_context)
+                    };
+                }
+            }
+            if result.blocked {
+                eprintln!("[SessionStart hook blocked session start]");
+            }
+        }
+    }
+
     let mut rl = match DefaultEditor::new() {
         Ok(rl) => rl,
         Err(e) => {
@@ -249,6 +275,7 @@ pub async fn run_repl(
             max_tool_concurrency,
             max_agent_concurrency: 0,
             agent_semaphore: agent_semaphore.clone(),
+            progress_tx: None,
         };
         let agent = Agent {
             registry: &registry,
@@ -510,6 +537,21 @@ pub async fn run_repl(
             eprintln!("warning: failed to save session: {e}");
         } else {
             TerminalRenderer::print_session_saved(&session_id);
+        }
+    }
+
+    // Run SessionEnd hooks
+    {
+        let hook_results = hook_runner.on_session_end().await;
+        for (_, result, json_output) in &hook_results {
+            if let Some(json) = json_output {
+                if let Some(ref msg) = json.system_message {
+                    eprintln!("{}", msg);
+                }
+            }
+            if result.error.is_some() {
+                log::warn!("SessionEnd hook error: {:?}", result.error);
+            }
         }
     }
 

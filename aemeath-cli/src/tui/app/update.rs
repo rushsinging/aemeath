@@ -399,13 +399,18 @@ impl App {
                 // is already set by ToolCall/ToolCallStart events and should remain stable.
             }
             UiEvent::Error(msg) => {
-                log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
-                self.output_area.push_error(&msg);
-                self.output_area.stop_spinner();
-                self.tool_call_active = false;
-                *is_processing = false;
-                self.status_bar.clear_processing();
-            }
+                    log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
+                    let hook_runner = spawn_refs.hook_runner.clone();
+                    let msg_clone = msg.clone();
+                    tokio::spawn(async move {
+                        let _ = hook_runner.on_notification(&msg_clone, "error").await;
+                    });
+                    self.output_area.push_error(&msg);
+                    self.output_area.stop_spinner();
+                    self.tool_call_active = false;
+                    *is_processing = false;
+                    self.status_bar.clear_processing();
+                }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
@@ -422,6 +427,11 @@ impl App {
                 self.input_area.set_pending_images(self.pending_images.len());
             }
             UiEvent::SystemMessage(msg) => {
+                let hook_runner = spawn_refs.hook_runner.clone();
+                let msg_clone = msg.clone();
+                tokio::spawn(async move {
+                    let _ = hook_runner.on_notification(&msg_clone, "system_message").await;
+                });
                 self.output_area.push_system(&msg);
             }
             UiEvent::AskUser { id: _, question, options, allow_free_input, multi_select, default, reply_tx } => {
@@ -456,6 +466,11 @@ impl App {
             }
             UiEvent::StopFailureHook { system_message, additional_context } => {
                 if let Some(ref msg) = system_message {
+                    let hook_runner = spawn_refs.hook_runner.clone();
+                    let msg_clone = msg.clone();
+                    tokio::spawn(async move {
+                        let _ = hook_runner.on_notification(&msg_clone, "system_message").await;
+                    });
                     self.output_area.push_system(msg);
                 }
                 if let Some(ref ctx) = additional_context {

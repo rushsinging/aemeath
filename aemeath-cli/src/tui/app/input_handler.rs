@@ -1,4 +1,6 @@
 use super::UiEvent;
+use aemeath_core::config::hooks::HookEvent;
+use aemeath_core::hook::{HookData, PromptHookData};
 use aemeath_core::message::Message;
 use crossterm::event::{KeyCode, KeyModifiers, KeyEventKind};
 use std::sync::atomic::Ordering;
@@ -177,6 +179,7 @@ impl super::App {
     }
 
     /// Handle Enter when not processing: send message or defer slash command to caller.
+    /// Runs UserPromptSubmit hooks before sending to LLM.
     #[allow(dead_code)]
     fn handle_enter_not_processing(
         &mut self,
@@ -193,6 +196,45 @@ impl super::App {
             self.input_queue.push_back(input);
             return KeyResult::SlashCommand;
         }
+
+        // ── UserPromptSubmit hook ──────────────────────────────────────────
+        // Run hooks before sending user input to LLM. Hooks can block the
+        // input, inject additional context, or display system messages.
+        let rt_handle = tokio::runtime::Handle::current();
+        let hook_results = rt_handle.block_on(
+            spawn_ctx.hook_runner.run_hooks_with_json(
+                HookEvent::UserPromptSubmit,
+                None,
+                HookData::Prompt(PromptHookData {
+                    prompt: input.clone(),
+                }),
+            ),
+        );
+
+        for (_hook, _result, json_output) in &hook_results {
+            if let Some(json) = json_output {
+                // ── Block decision ──
+                if json.decision.as_deref() == Some("block") {
+                    let reason = json.reason.as_deref().unwrap_or("Blocked by hook");
+                    let _ = ui_tx.try_send(UiEvent::SystemMessage(format!(
+                        "[blocked] {reason}"
+                    )));
+                    self.status_bar.set_warning(&format!("Blocked: {reason}"));
+                    return KeyResult::None;
+                }
+
+                // ── Inject additional context ──
+                if let Some(ctx) = &json.additional_context {
+                    let _ = ui_tx.try_send(UiEvent::SystemMessage(ctx.clone()));
+                }
+
+                // ── Inject system message ──
+                if let Some(msg) = &json.system_message {
+                    let _ = ui_tx.try_send(UiEvent::SystemMessage(msg.clone()));
+                }
+            }
+        }
+        // ── End UserPromptSubmit hook ──────────────────────────────────────
 
         self.output_area.push_user_message(&input);
         self.input_area.add_history(&input);

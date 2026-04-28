@@ -80,7 +80,10 @@ impl Tool for FileEditTool {
             let hint = if !first_line.is_empty() {
                 let mut nearby = String::new();
                 for (i, line) in content.lines().enumerate() {
-                    if line.contains(first_line) || (first_line.len() > 10 && line.contains(&first_line[..first_line.len().min(30)])) {
+                    if line.contains(first_line) || (first_line.len() > 10 && {
+                        let trunc: String = first_line.chars().take(30).collect();
+                        line.contains(&trunc)
+                    }) {
                         let start = i.saturating_sub(2);
                         let end = (i + 3).min(content.lines().count());
                         nearby = content.lines()

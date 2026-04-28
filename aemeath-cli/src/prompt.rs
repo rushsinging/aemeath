@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use aemeath_core::hook::HookRunner;
+
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 pub struct SystemPromptParts {
     /// Static instructions that rarely change — eligible for prompt caching.
@@ -10,7 +12,7 @@ pub struct SystemPromptParts {
     pub claude_md: String,
 }
 
-pub async fn build_system_prompt_parts(cwd: &PathBuf) -> SystemPromptParts {
+pub async fn build_system_prompt_parts(cwd: &PathBuf, hook_runner: &HookRunner) -> SystemPromptParts {
     let cwd_str = cwd.to_string_lossy();
     let is_git = is_git_repo(cwd).await;
 
@@ -86,7 +88,7 @@ GOOD: TodoWrite(3 todos with dependencies) → TodoRun()
     }
 
     // --- CLAUDE.md: will be injected as a separate user-context message ---
-    let claude_md = load_claude_md(cwd).await;
+    let claude_md = load_claude_md(cwd, hook_runner).await;
 
     SystemPromptParts {
         static_part,
@@ -131,13 +133,16 @@ pub async fn is_git_repo(cwd: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn load_claude_md(cwd: &PathBuf) -> String {
+pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     // Check project-level CLAUDE.md
     let project_path = cwd.join("CLAUDE.md");
     if project_path.exists() {
         if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
+            // Trigger InstructionsLoaded hook
+            let file_path_str = project_path.to_string_lossy().to_string();
+            hook_runner.on_instructions_loaded(&file_path_str, "claude_md").await;
             parts.push(content);
         }
     }
@@ -147,6 +152,9 @@ pub async fn load_claude_md(cwd: &PathBuf) -> String {
         let global_path = home.join(".claude").join("CLAUDE.md");
         if global_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&global_path).await {
+                // Trigger InstructionsLoaded hook
+                let file_path_str = global_path.to_string_lossy().to_string();
+                hook_runner.on_instructions_loaded(&file_path_str, "claude_md").await;
                 parts.push(content);
             }
         }

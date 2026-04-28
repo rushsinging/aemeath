@@ -27,6 +27,127 @@ pub enum HookData {
     Prompt(PromptHookData),
     /// Stop 事件数据
     Stop(StopHookData),
+    /// SessionStart 事件数据
+    Session(SessionHookData),
+    /// PreCompact / PostCompact 事件数据
+    Compact(CompactHookData),
+    /// SubagentStart / SubagentStop 事件数据
+    Subagent(SubagentHookData),
+    // ========== P2 事件数据 ==========
+    /// PermissionRequest / PermissionDenied 事件数据
+    Permission(PermissionHookData),
+    /// Notification 事件数据
+    Notification(NotificationHookData),
+    /// InstructionsLoaded 事件数据
+    InstructionsLoaded(InstructionsLoadedHookData),
+    /// ConfigChange 事件数据
+    ConfigChange(ConfigChangeHookData),
+    /// Elicitation / ElicitationResult 事件数据
+    Elicitation(ElicitationHookData),
+    // ========== P3 事件数据 ==========
+    /// UserPromptExpansion 事件数据
+    UserPromptExpansion(UserPromptExpansionHookData),
+    /// CwdChanged 事件数据
+    CwdChanged(CwdChangedHookData),
+    /// FileChanged 事件数据
+    FileChanged(FileChangedHookData),
+    /// TeammateIdle 事件数据
+    TeammateIdle(TeammateIdleHookData),
+}
+
+impl HookData {
+    /// 将事件数据转换为环境变量（用于传递给 hook 命令）
+    pub fn to_env_vars(&self) -> Vec<(&'static str, String)> {
+        match self {
+            HookData::Tool(d) => vec![
+                ("AEMEATH_TOOL_NAME", d.tool_name.clone()),
+                ("AEMEATH_TOOL_INPUT", serde_json::to_string(&d.tool_input).unwrap_or_default()),
+            ],
+            HookData::Prompt(d) => vec![("AEMEATH_PROMPT", d.prompt.clone())],
+            HookData::Stop(d) => vec![("AEMEATH_STOP_TURNS", d.turns.to_string())],
+            HookData::Session(_) => vec![],
+            HookData::Compact(d) => vec![
+                ("AEMEATH_COMPACT_TURNS", d.turns.to_string()),
+                (
+                    "AEMEATH_COMPACT_MESSAGES_BEFORE",
+                    d.messages_before.to_string(),
+                ),
+                (
+                    "AEMEATH_COMPACT_MESSAGES_AFTER",
+                    d.messages_after.map(|n| n.to_string()).unwrap_or_default(),
+                ),
+            ],
+            HookData::Subagent(d) => {
+                let mut vars = vec![
+                    ("AEMEATH_SUBAGENT_PROMPT", d.prompt.clone()),
+                    ("AEMEATH_SUBAGENT_SYSTEM", d.system.clone()),
+                ];
+                if let Some(ref spec) = d.model_spec {
+                    vars.push(("AEMEATH_SUBAGENT_MODEL_SPEC", spec.clone()));
+                }
+                if let Some(ref result) = d.result {
+                    vars.push(("AEMEATH_SUBAGENT_RESULT", result.clone()));
+                }
+                if let Some(turns) = d.turns {
+                    vars.push(("AEMEATH_SUBAGENT_TURNS", turns.to_string()));
+                }
+                if let Some(is_error) = d.is_error {
+                    vars.push(("AEMEATH_SUBAGENT_IS_ERROR", is_error.to_string()));
+                }
+                vars
+            }
+            // P2 事件
+            HookData::Permission(d) => vec![
+                ("AEMEATH_PERMISSION_TOOL_NAME", d.tool_name.clone()),
+                ("AEMEATH_PERMISSION_RULE", d.permission_rule.clone()),
+            ],
+            HookData::Notification(d) => vec![
+                ("AEMEATH_NOTIFICATION_TEXT", d.notification_text.clone()),
+                ("AEMEATH_NOTIFICATION_TYPE", d.notification_type.clone()),
+            ],
+            HookData::InstructionsLoaded(d) => vec![
+                ("AEMEATH_INSTRUCTIONS_FILE_PATH", d.file_path.clone()),
+                ("AEMEATH_INSTRUCTIONS_TYPE", d.instruction_type.clone()),
+            ],
+            HookData::ConfigChange(d) => {
+                let mut vars = vec![("AEMEATH_CONFIG_FILE", d.config_file.clone())];
+                if let Some(ref field) = d.changed_field {
+                    vars.push(("AEMEATH_CONFIG_CHANGED_FIELD", field.clone()));
+                }
+                vars
+            }
+            HookData::Elicitation(d) => {
+                let mut vars = vec![("AEMEATH_ELICITATION_SERVER", d.server_name.clone())];
+                if let Some(ref text) = d.elicitation_text {
+                    vars.push(("AEMEATH_ELICITATION_TEXT", text.clone()));
+                }
+                if let Some(ref response) = d.user_response {
+                    vars.push(("AEMEATH_ELICITATION_RESPONSE", response.clone()));
+                }
+                vars
+            }
+            // P3 事件
+            HookData::UserPromptExpansion(d) => vec![
+                ("AEMEATH_PROMPT_ORIGINAL", d.original_input.clone()),
+                ("AEMEATH_PROMPT_EXPANDED", d.expanded_input.clone()),
+            ],
+            HookData::CwdChanged(d) => vec![
+                ("AEMEATH_CWD_OLD", d.old_cwd.clone()),
+                ("AEMEATH_CWD_NEW", d.new_cwd.clone()),
+            ],
+            HookData::FileChanged(d) => vec![
+                ("AEMEATH_FILE_PATH", d.file_path.clone()),
+                ("AEMEATH_FILE_CHANGE_TYPE", d.change_type.clone()),
+            ],
+            HookData::TeammateIdle(d) => {
+                let mut vars = vec![("AEMEATH_TEAMMATE_NAME", d.teammate_name.clone())];
+                if let Some(ref reason) = d.idle_reason {
+                    vars.push(("AEMEATH_TEAMMATE_IDLE_REASON", reason.clone()));
+                }
+                vars
+            }
+        }
+    }
 }
 
 /// 工具相关 hook 数据
@@ -56,6 +177,137 @@ pub struct PromptHookData {
 pub struct StopHookData {
     /// agent 循环执行的轮次
     pub turns: usize,
+}
+
+/// SessionStart 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionHookData {
+}
+
+/// PreCompact / PostCompact 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactHookData {
+    /// agent 循环执行的轮次
+    pub turns: usize,
+    /// 压缩前消息数量
+    pub messages_before: usize,
+    /// 压缩后消息数量（仅 PostCompact）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messages_after: Option<usize>,
+    /// 是否实际执行了压缩
+    pub was_compacted: bool,
+}
+
+/// SubagentStart / SubagentStop 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentHookData {
+    /// sub-agent 的输入提示
+    pub prompt: String,
+    /// 系统消息
+    pub system: String,
+    /// 使用的模型规格（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_spec: Option<String>,
+    /// 执行结果（仅 SubagentStop）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// 执行的轮次（仅 SubagentStop）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns: Option<usize>,
+    /// 是否为错误结果（仅 SubagentStop）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
+}
+
+// ========== P2 事件数据 ==========
+
+/// PermissionRequest / PermissionDenied 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionHookData {
+    /// 工具名
+    pub tool_name: String,
+    /// 权限规则
+    pub permission_rule: String,
+}
+
+/// Notification 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationHookData {
+    /// 通知文本
+    pub notification_text: String,
+    /// 通知类型
+    pub notification_type: String,
+}
+
+/// InstructionsLoaded 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstructionsLoadedHookData {
+    /// 文件路径
+    pub file_path: String,
+    /// 指令类型（"claude_md" / "guidance"）
+    pub instruction_type: String,
+}
+
+/// ConfigChange 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigChangeHookData {
+    /// 配置文件
+    pub config_file: String,
+    /// 变更的字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_field: Option<String>,
+}
+
+/// Elicitation / ElicitationResult 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationHookData {
+    /// MCP 服务器名
+    pub server_name: String,
+    /// 请求文本（仅 Elicitation）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation_text: Option<String>,
+    /// 用户响应（仅 ElicitationResult）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_response: Option<String>,
+}
+
+// ========== P3 事件数据 ==========
+
+/// UserPromptExpansion 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserPromptExpansionHookData {
+    /// 原始用户输入
+    pub original_input: String,
+    /// 展开后的输入
+    pub expanded_input: String,
+}
+
+/// CwdChanged 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CwdChangedHookData {
+    /// 旧工作目录
+    pub old_cwd: String,
+    /// 新工作目录
+    pub new_cwd: String,
+}
+
+/// FileChanged 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileChangedHookData {
+    /// 文件路径
+    pub file_path: String,
+    /// 变更类型
+    pub change_type: String,
+}
+
+/// TeammateIdle 事件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeammateIdleHookData {
+    /// 队友名称
+    pub teammate_name: String,
+    /// 空闲原因
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_reason: Option<String>,
 }
 
 /// hook 执行结果
@@ -143,6 +395,7 @@ impl HookRunner {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .env("AEMEATH_HOOK_EVENT", serde_json::to_string(&input.event).unwrap_or_default())
+            .envs(input.data.to_env_vars())
             .spawn()
         {
             Ok(c) => c,
@@ -298,7 +551,7 @@ impl HookRunner {
     pub async fn user_prompt(&self, prompt: &str) -> (bool, Vec<HookResult>) {
         let results = self
             .run_hooks(
-                HookEvent::UserPrompt,
+                HookEvent::UserPromptSubmit,
                 None,
                 HookData::Prompt(PromptHookData {
                     prompt: prompt.to_string(),
@@ -317,6 +570,429 @@ impl HookRunner {
             HookData::Stop(StopHookData { turns }),
         )
         .await
+    }
+
+    /// 便捷方法：运行 SessionStart hooks，返回 JSON 输出
+    pub async fn on_session_start(&self) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::SessionStart,
+            None,
+            HookData::Session(SessionHookData {}),
+        )
+        .await
+    }
+
+    /// 便捷方法：运行 SessionEnd hooks，返回 JSON 输出
+    pub async fn on_session_end(&self) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::SessionEnd,
+            None,
+            HookData::Session(SessionHookData {}),
+        )
+        .await
+    }
+
+    /// 便捷方法：运行 PreCompact hooks，返回是否应阻止
+    pub async fn pre_compact(
+        &self,
+        turns: usize,
+        messages_count: usize,
+    ) -> (bool, Vec<HookResult>) {
+        let results = self
+            .run_hooks(
+                HookEvent::PreCompact,
+                None,
+                HookData::Compact(CompactHookData {
+                    turns,
+                    messages_before: messages_count,
+                    messages_after: None,
+                    was_compacted: false,
+                }),
+            )
+            .await;
+        let blocked = results.iter().any(|r| r.blocked);
+        (blocked, results)
+    }
+
+    /// 便捷方法：运行 PostCompact hooks
+    pub async fn post_compact(
+        &self,
+        turns: usize,
+        messages_before: usize,
+        messages_after: usize,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::PostCompact,
+            None,
+            HookData::Compact(CompactHookData {
+                turns,
+                messages_before,
+                messages_after: Some(messages_after),
+                was_compacted: true,
+            }),
+        )
+        .await
+    }
+
+    /// 便捷方法：运行 SubagentStart hooks，返回 JSON 输出
+    pub async fn on_subagent_start(
+        &self,
+        prompt: &str,
+        system: &str,
+        model_spec: Option<&str>,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::SubagentStart,
+            None,
+            HookData::Subagent(SubagentHookData {
+                prompt: prompt.to_string(),
+                system: system.to_string(),
+                model_spec: model_spec.map(String::from),
+                result: None,
+                turns: None,
+                is_error: None,
+            }),
+        )
+        .await
+    }
+
+    /// 便捷方法：运行 SubagentStop hooks，返回 JSON 输出
+  pub async fn on_subagent_stop(
+      &self,
+      prompt: &str,
+      system: &str,
+      model_spec: Option<&str>,
+      result: &str,
+      turns: usize,
+      is_error: bool,
+  ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+      self.run_hooks_with_json(
+          HookEvent::SubagentStop,
+          None,
+          HookData::Subagent(SubagentHookData {
+              prompt: prompt.to_string(),
+              system: system.to_string(),
+              model_spec: model_spec.map(String::from),
+              result: Some(result.to_string()),
+              turns: Some(turns),
+              is_error: Some(is_error),
+          }),
+      )
+      .await
+  }
+
+  /// 便捷方法：运行 TaskCreated hooks，返回 JSON 输出
+  pub async fn on_task_created(
+      &self,
+      tool_input: serde_json::Value,
+      tool_output: &str,
+  ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+      self.run_hooks_with_json(
+          HookEvent::TaskCreated,
+          None,
+          HookData::Tool(ToolHookData {
+              tool_name: "TaskCreate".to_string(),
+              tool_input,
+              tool_output: Some(tool_output.to_string()),
+              is_error: Some(false),
+          }),
+      )
+      .await
+  }
+
+  /// 便捷方法：运行 TaskCompleted hooks，返回 JSON 输出
+      pub async fn on_task_completed(
+          &self,
+          tool_input: serde_json::Value,
+          tool_output: &str,
+      ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+          self.run_hooks_with_json(
+              HookEvent::TaskCompleted,
+              None,
+              HookData::Tool(ToolHookData {
+                  tool_name: "TaskUpdate".to_string(),
+                  tool_input,
+                  tool_output: Some(tool_output.to_string()),
+                  is_error: Some(false),
+              }),
+          )
+          .await
+      }
+
+      // ========== P2 便捷方法 ==========
+
+      /// 便捷方法：运行 PermissionRequest hooks，返回是否应阻止
+      pub async fn on_permission_request(
+          &self,
+          tool_name: &str,
+          permission_rule: &str,
+      ) -> (bool, Vec<HookResult>) {
+          let results = self
+              .run_hooks(
+                  HookEvent::PermissionRequest,
+                  None,
+                  HookData::Permission(PermissionHookData {
+                      tool_name: tool_name.to_string(),
+                      permission_rule: permission_rule.to_string(),
+                  }),
+              )
+              .await;
+          let blocked = results.iter().any(|r| r.blocked);
+          (blocked, results)
+      }
+
+      /// 便捷方法：运行 PermissionDenied hooks
+      pub async fn on_permission_denied(
+          &self,
+          tool_name: &str,
+          permission_rule: &str,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::PermissionDenied,
+              None,
+              HookData::Permission(PermissionHookData {
+                  tool_name: tool_name.to_string(),
+                  permission_rule: permission_rule.to_string(),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 Notification hooks
+      pub async fn on_notification(
+          &self,
+          notification_text: &str,
+          notification_type: &str,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::Notification,
+              None,
+              HookData::Notification(NotificationHookData {
+                  notification_text: notification_text.to_string(),
+                  notification_type: notification_type.to_string(),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 InstructionsLoaded hooks
+      pub async fn on_instructions_loaded(
+          &self,
+          file_path: &str,
+          instruction_type: &str,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::InstructionsLoaded,
+              None,
+              HookData::InstructionsLoaded(InstructionsLoadedHookData {
+                  file_path: file_path.to_string(),
+                  instruction_type: instruction_type.to_string(),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 ConfigChange hooks
+      pub async fn on_config_change(
+          &self,
+          config_file: &str,
+          changed_field: Option<&str>,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::ConfigChange,
+              None,
+              HookData::ConfigChange(ConfigChangeHookData {
+                  config_file: config_file.to_string(),
+                  changed_field: changed_field.map(String::from),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 Elicitation hooks，返回是否应阻止
+      pub async fn on_elicitation(
+          &self,
+          server_name: &str,
+          elicitation_text: &str,
+      ) -> (bool, Vec<HookResult>) {
+          let results = self
+              .run_hooks(
+                  HookEvent::Elicitation,
+                  None,
+                  HookData::Elicitation(ElicitationHookData {
+                      server_name: server_name.to_string(),
+                      elicitation_text: Some(elicitation_text.to_string()),
+                      user_response: None,
+                  }),
+              )
+              .await;
+          let blocked = results.iter().any(|r| r.blocked);
+          (blocked, results)
+      }
+
+      /// 便捷方法：运行 ElicitationResult hooks
+      pub async fn on_elicitation_result(
+          &self,
+          server_name: &str,
+          user_response: &str,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::ElicitationResult,
+              None,
+              HookData::Elicitation(ElicitationHookData {
+                  server_name: server_name.to_string(),
+                  elicitation_text: None,
+                  user_response: Some(user_response.to_string()),
+              }),
+          )
+          .await
+      }
+
+      // ========== P3 便捷方法 ==========
+
+      /// 便捷方法：运行 UserPromptExpansion hooks，返回是否应拒绝
+      pub async fn on_user_prompt_expansion(
+          &self,
+          original_input: &str,
+          expanded_input: &str,
+      ) -> (bool, Vec<HookResult>) {
+          let results = self
+              .run_hooks(
+                  HookEvent::UserPromptExpansion,
+                  None,
+                  HookData::UserPromptExpansion(UserPromptExpansionHookData {
+                      original_input: original_input.to_string(),
+                      expanded_input: expanded_input.to_string(),
+                  }),
+              )
+              .await;
+          let blocked = results.iter().any(|r| r.blocked);
+          (blocked, results)
+      }
+
+      /// 便捷方法：运行 CwdChanged hooks
+      pub async fn on_cwd_changed(&self, old_cwd: &str, new_cwd: &str) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::CwdChanged,
+              None,
+              HookData::CwdChanged(CwdChangedHookData {
+                  old_cwd: old_cwd.to_string(),
+                  new_cwd: new_cwd.to_string(),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 FileChanged hooks
+      pub async fn on_file_changed(
+          &self,
+          file_path: &str,
+          change_type: &str,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::FileChanged,
+              None,
+              HookData::FileChanged(FileChangedHookData {
+                  file_path: file_path.to_string(),
+                  change_type: change_type.to_string(),
+              }),
+          )
+          .await
+      }
+
+      /// 便捷方法：运行 TeammateIdle hooks
+      pub async fn on_teammate_idle(
+          &self,
+          teammate_name: &str,
+          idle_reason: Option<&str>,
+      ) -> Vec<HookResult> {
+          self.run_hooks(
+              HookEvent::TeammateIdle,
+              None,
+              HookData::TeammateIdle(TeammateIdleHookData {
+                  teammate_name: teammate_name.to_string(),
+                  idle_reason: idle_reason.map(String::from),
+              }),
+          )
+          .await
+      }
+
+      /// 运行匹配的 hook 并解析 JSON 输出
+    ///
+    /// 对每个 hook 结果尝试解析 JSON 输出，如果某个 hook 的 JSON 中
+    /// `continue` 为 false 或 exit_code 为 2，则中断后续 hook。
+    pub async fn run_hooks_with_json(
+        &self,
+        event: HookEvent,
+        tool_name: Option<&str>,
+        data: HookData,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        let hooks = self.matching_hooks(event, tool_name);
+        if hooks.is_empty() {
+            return Vec::new();
+        }
+
+        let input = HookInput {
+            event,
+            data,
+        };
+
+        let mut results = Vec::with_capacity(hooks.len());
+        for hook in hooks {
+            log::debug!("running hook (with json): event={:?} matcher={} cmd={}", event, hook.matcher, hook.command);
+            let result = self.execute_hook(hook, &input).await;
+            let json_output = result.parse_json_output();
+            let should_break = result.blocked
+                || json_output.as_ref().is_some_and(|j| !j.r#continue);
+            log::debug!("hook result (json): blocked={} continue={:?} error={:?}",
+                result.blocked,
+                json_output.as_ref().map(|j| j.r#continue),
+                result.error,
+            );
+            results.push((hook.clone(), result, json_output));
+            if should_break {
+                break;
+            }
+        }
+        results
+    }
+}
+
+/// Hook 的 JSON 输出（exit 0 时 stdout 可包含此 JSON）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HookJsonOutput {
+    /// 是否继续执行（false 时全局停止，需配合 stopReason）
+    #[serde(default = "default_true")]
+    pub r#continue: bool,
+    /// 停止原因
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    /// 决策（"block" 表示阻止操作）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
+    /// 阻止原因
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// 额外上下文（注入到 LLM 对话流）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_context: Option<String>,
+    /// 系统消息（警告等，显示在 TUI）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_message: Option<String>,
+    /// 事件特定输出（PreToolUse 用：permission/updatedInput 等）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_specific_output: Option<serde_json::Value>,
+}
+
+fn default_true() -> bool { true }
+
+impl HookResult {
+    /// 从 output 字段解析 JSON 输出
+    pub fn parse_json_output(&self) -> Option<HookJsonOutput> {
+        if self.output.trim().is_empty() {
+            return None;
+        }
+        serde_json::from_str::<HookJsonOutput>(&self.output).ok()
     }
 }
 

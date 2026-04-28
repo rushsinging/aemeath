@@ -91,6 +91,78 @@ impl super::OutputArea {
         });
     }
 
+    /// 添加 AskUserQuestion 确认界面
+    /// 添加 AskUserQuestion 界面，返回选项行在 lines 中的起始索引（无选项返回 None）
+    pub fn push_ask_user(&mut self, question: &str, options: &[String], default: Option<&str>, multi_select: bool) -> Option<usize> {
+        self.finish_streaming();
+
+        // 问题文本
+        for line in question.lines() {
+            self.push_line(OutputLine {
+                content: line.to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+        }
+
+        if options.is_empty() {
+            if let Some(d) = default {
+                self.push_line(OutputLine {
+                    content: format!("  (default: {})", d),
+                    style: LineStyle::System,
+                    ..Default::default()
+                });
+            }
+            return None;
+        }
+
+        // 空行分隔
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::Normal,
+            ..Default::default()
+        });
+
+        let option_start = self.lines.len();
+
+        for (i, opt) in options.iter().enumerate() {
+            let is_default = default.as_ref().map_or(i == 0, |d| opt == d);
+            let content = if multi_select {
+                let check = if is_default { "✓" } else { " " };
+                format!("  [{}] {}. {}", check, i + 1, opt)
+            } else {
+                let arrow = if is_default { "❯" } else { " " };
+                format!("{} {}. {}", arrow, i + 1, opt)
+            };
+            self.push_line(OutputLine {
+                content,
+                style: if is_default { LineStyle::Assistant } else { LineStyle::Normal },
+                ..Default::default()
+            });
+        }
+
+        Some(option_start)
+    }
+
+    /// 原地更新 AskUser 选项行的显示
+    pub fn update_ask_user_options(&mut self, start: usize, options: &[String], cursor: usize, multi_select: bool, selected: &[bool]) {
+        for (i, opt) in options.iter().enumerate() {
+            let content = if multi_select {
+                let check = if selected[i] { "✓" } else { " " };
+                let arrow = if i == cursor { "❯" } else { " " };
+                format!("{}[{}] {}. {}", arrow, check, i + 1, opt)
+            } else {
+                let arrow = if i == cursor { "❯" } else { " " };
+                format!("{} {}. {}", arrow, i + 1, opt)
+            };
+            let is_highlight = i == cursor || (multi_select && selected[i]);
+            if let Some(line) = self.lines.get_mut(start + i) {
+                line.content = content;
+                line.style = if is_highlight { LineStyle::Assistant } else { LineStyle::Normal };
+            }
+        }
+    }
+
     /// 添加系统消息
     pub fn push_system(&mut self, msg: &str) {
         self.finish_streaming();

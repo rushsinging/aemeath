@@ -155,6 +155,9 @@ impl super::App {
             UiEvent::AgentProgress { .. } => {
                 // Sub-agent progress is no longer displayed on the header line
             }
+            UiEvent::StopFailureHook { .. } => {
+                // Handled in update.rs (update_ui)
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::config::hooks::HookEvent;
-use aemeath_core::hook::{HookData, StopHookData, ToolHookData};
+use aemeath_core::hook::{CompactHookData, HookData, StopHookData, ToolHookData};
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::provider::StreamHandler;
@@ -133,23 +133,80 @@ pub async fn process_in_background(
         // Auto-compact if approaching context limit
         {
             use aemeath_core::compact;
-            let should_compact = if last_api_input_tokens > 0 {
-                compact::needs_compaction_actual(last_api_input_tokens, 0, context_size)
+
+            // PreCompact hook: 在压缩前触发，可阻止压缩
+            let pre_compact_results = hook_runner
+                .run_hooks_with_json(
+                    HookEvent::PreCompact,
+                    None,
+                    HookData::Compact(CompactHookData {
+                        turns: turn_count,
+                        messages_before: messages.len(),
+                        messages_after: None,
+                        was_compacted: false,
+                    }),
+                )
+                .await;
+            let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
+                result.blocked || json.as_ref().is_some_and(|j| j.decision.as_deref() == Some("block"))
+            });
+            for (_entry, _result, json_output) in &pre_compact_results {
+                if let Some(json) = json_output {
+                    if let Some(ref ctx) = json.additional_context {
+                        let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                    }
+                    if let Some(ref msg) = json.system_message {
+                        let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                    }
+                }
+            }
+
+            if pre_compact_blocked {
+                log::warn!("PreCompact hook blocked compaction");
             } else {
-                compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
-            };
-            if should_compact && messages.len() > 4 {
-                let old_len = messages.len();
-                compact::microcompact(&mut messages, 10);
-                if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
-                    || (last_api_input_tokens > 0 && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
-                {
-                    let (compacted, was_compacted) = compact::compact_messages(&messages, &system_prompt_text, context_size);
-                    if was_compacted {
-                        messages = compacted;
-                        let _ = tx.send(UiEvent::SystemMessage(
-                            format!("[auto-compacted: {} → {} messages]", old_len, messages.len()),
-                        )).await;
+                let should_compact = if last_api_input_tokens > 0 {
+                    compact::needs_compaction_actual(last_api_input_tokens, 0, context_size)
+                } else {
+                    compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+                };
+                if should_compact && messages.len() > 4 {
+                    let old_len = messages.len();
+                    compact::microcompact(&mut messages, 10);
+                    if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+                        || (last_api_input_tokens > 0 && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
+                    {
+                        let (compacted, was_compacted) = compact::compact_messages(&messages, &system_prompt_text, context_size);
+                        if was_compacted {
+                            let new_len = compacted.len();
+                            messages = compacted;
+                            let _ = tx.send(UiEvent::SystemMessage(
+                                format!("[auto-compacted: {} → {} messages]", old_len, new_len),
+                            )).await;
+
+                            // PostCompact hook: 在压缩成功后触发
+                            let post_compact_results = hook_runner
+                                .run_hooks_with_json(
+                                    HookEvent::PostCompact,
+                                    None,
+                                    HookData::Compact(CompactHookData {
+                                        turns: turn_count,
+                                        messages_before: old_len,
+                                        messages_after: Some(new_len),
+                                        was_compacted: true,
+                                    }),
+                                )
+                                .await;
+                            for (_entry, _result, json_output) in &post_compact_results {
+                                if let Some(json) = json_output {
+                                    if let Some(ref ctx) = json.additional_context {
+                                        let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                    }
+                                    if let Some(ref msg) = json.system_message {
+                                        let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -217,6 +274,11 @@ pub async fn process_in_background(
 
                     let mut denied_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     for call in &denied {
+                        // PermissionDenied hook: notify when a tool is denied
+                        let _hook_results = hook_runner
+                            .on_permission_denied(&call.name, "deny")
+                            .await;
+
                         let result = (
                             call.id.clone(),
                             format!("Tool {} denied: use --allow-all to permit write operations", call.name),
@@ -251,6 +313,11 @@ pub async fn process_in_background(
                         .collect();
                     log::debug!("[AskUser] ask_calls count: {}", ask_calls.len());
                     for call in &ask_calls {
+                        // PermissionRequest hook: notify before executing AskUserQuestion tool
+                        let _hook_results = hook_runner
+                            .on_permission_request(&call.name, "manual")
+                            .await;
+
                         let question = call.input.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let options: Vec<String> = call.input.get("options")
                             .and_then(|v| v.as_array())
@@ -303,6 +370,11 @@ pub async fn process_in_background(
                     // immediately after completion (instead of join_all batching).
                     let mut non_agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     for call in &other_calls {
+                        // PermissionRequest hook: notify before executing non-agent tool
+                        let _hook_results = hook_runner
+                            .on_permission_request(&call.name, "auto")
+                            .await;
+
                         let call = ToolCall {
                             id: call.id.clone(),
                             name: call.name.clone(),
@@ -365,6 +437,40 @@ pub async fn process_in_background(
                                             is_error: Some(is_error),
                                         }),
                                     )
+                                    .await;
+                                for (_entry, _result, json_output) in &hook_results {
+                                    if let Some(json) = json_output {
+                                        if let Some(ref ctx) = json.additional_context {
+                                            let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                        }
+                                        if let Some(ref msg) = json.system_message {
+                                            let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // TaskCreated hook: TaskCreate 工具执行成功时触发
+                            if !is_error && call.name == "TaskCreate" {
+                                let hook_results = hook_runner
+                                    .on_task_created(call.input.clone(), &output)
+                                    .await;
+                                for (_entry, _result, json_output) in &hook_results {
+                                    if let Some(json) = json_output {
+                                        if let Some(ref ctx) = json.additional_context {
+                                            let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                                        }
+                                        if let Some(ref msg) = json.system_message {
+                                            let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // TaskCompleted hook: TaskUpdate 将任务标记为 completed 时触发
+                            if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
+                                let hook_results = hook_runner
+                                    .on_task_completed(call.input.clone(), &output)
                                     .await;
                                 for (_entry, _result, json_output) in &hook_results {
                                     if let Some(json) = json_output {
@@ -543,6 +649,25 @@ pub async fn process_in_background(
 
                     // Sync after tool execution
                     let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+
+                    // PostToolBatch hook: 批量工具调用完成后触发（汇总注入）
+                    let post_batch_results = hook_runner
+                        .run_hooks_with_json(
+                            HookEvent::PostToolBatch,
+                            None,
+                            HookData::Stop(StopHookData { turns: turn_count }),
+                        )
+                        .await;
+                    for (_entry, _result, json_output) in &post_batch_results {
+                        if let Some(json) = json_output {
+                            if let Some(ref ctx) = json.additional_context {
+                                let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                            }
+                            if let Some(ref msg) = json.system_message {
+                                let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {

@@ -23,7 +23,7 @@ fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);
 }
 
-use cli::Args;
+use cli::{Args, Cli, Commands};
 use mcp_loader::load_mcp_tools;
 use prompt::build_system_prompt_parts;
 
@@ -107,7 +107,183 @@ async fn main() {
         }));
     }
 
-    let mut args = Args::parse();
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Models { json }) => {
+            run_models_command(json);
+            return;
+        }
+        Some(Commands::Sessions { delete, json, limit }) => {
+            run_sessions_command(delete, json, limit).await;
+            return;
+        }
+        Some(Commands::Run {
+            provider,
+            api_key,
+            base_url,
+            model,
+            cwd,
+            max_tokens,
+            verbose,
+            no_markdown,
+            context_size,
+            resume,
+            allow_all,
+            tui,
+            no_tui,
+            max_tool_concurrency,
+            max_agent_concurrency,
+            no_think,
+        }) => {
+            let args = Args::from_run(
+                provider, api_key, base_url, model, cwd, max_tokens, verbose,
+                no_markdown, context_size, resume, allow_all, tui, no_tui,
+                max_tool_concurrency, max_agent_concurrency, no_think,
+            );
+            run_chat(args).await;
+        }
+        None => {
+            // 无子命令 — 使用默认值启动（兼容旧行为）
+            let args = Args::from_run(
+                "anthropic".into(), None, None, None, None, 200000, false,
+                false, 128000, None, false, true, false,
+                None, None, false,
+            );
+            run_chat(args).await;
+        }
+    }
+}
+
+/// 处理 `aemeath models` 子命令
+fn run_models_command(json: bool) {
+    let config_file = load_config();
+    match config_file {
+        Some(cfg) => {
+            let models = cfg.models.list_models();
+            if models.is_empty() {
+                eprintln!("No models configured. Add models to ~/.aemeath/config.json");
+                std::process::exit(1);
+            }
+            if json {
+                let output: Vec<serde_json::Value> = models.iter().map(|(provider, m)| {
+                    serde_json::json!({
+                        "provider": provider,
+                        "id": m.id,
+                        "name": m.name,
+                        "context_window": m.context_window,
+                        "max_tokens": m.max_tokens,
+                    })
+                }).collect();
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            } else {
+                // 表格输出 — 自适应列宽
+                let header = ("PROVIDER", "ID", "NAME", "CTX");
+                let rows: Vec<(&str, &str, &str, String)> = models.iter().map(|(provider, m)| {
+                    let name = if m.name.is_empty() { "-" } else { m.name.as_str() };
+                    let ctx = if m.context_window > 0 {
+                        format!("{}k", m.context_window / 1000)
+                    } else {
+                        "-".to_string()
+                    };
+                    (provider.as_str(), m.id.as_str(), name, ctx)
+                }).collect();
+
+                let w0 = rows.iter().map(|r| r.0.len()).chain(std::iter::once(header.0.len())).max().unwrap_or(0);
+                let w1 = rows.iter().map(|r| r.1.len()).chain(std::iter::once(header.1.len())).max().unwrap_or(0);
+                let w2 = rows.iter().map(|r| r.2.len()).chain(std::iter::once(header.2.len())).max().unwrap_or(0);
+
+                println!("{:<w$}  {:<w2$}  {:<w3$}  {}", header.0, header.1, header.2, header.3, w = w0, w2 = w1, w3 = w2);
+                for (provider, id, name, ctx) in &rows {
+                    println!("{:<w$}  {:<w2$}  {:<w3$}  {}", provider, id, name, ctx, w = w0, w2 = w1, w3 = w2);
+                }
+            }
+        }
+        None => {
+            eprintln!("No config file found. Create ~/.aemeath/config.json to configure models.");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 处理 `aemeath sessions` 子命令
+async fn run_sessions_command(delete: Option<String>, json: bool, limit: usize) {
+    // 初始化 session ID（日志需要）
+    set_session_id("sessions".to_string());
+
+    if let Some(id) = delete {
+        match aemeath_core::session::delete_session(&id).await {
+            Ok(()) => println!("Session {} deleted.", id),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let sessions = aemeath_core::session::list_sessions().await;
+    if sessions.is_empty() {
+        println!("No saved sessions.");
+        return;
+    }
+
+    let display: Vec<_> = sessions.into_iter().take(limit).collect();
+
+    if json {
+        let output: Vec<serde_json::Value> = display.iter().map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "title": s.metadata.title,
+                "project": s.metadata.project,
+                "model": s.metadata.model,
+                "messages": s.messages.len(),
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+            })
+        }).collect();
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    } else {
+        let header = ("ID", "SUMMARY", "PROJECT", "MSG", "UPDATED");
+        let rows: Vec<(&str, String, &str, usize, &str)> = display.iter().map(|s| {
+            let summary = s.summary();
+            let summary_display: String = summary.chars().take(80).collect();
+            let project = s.metadata.project.as_deref().unwrap_or("-");
+            let updated = s.updated_at.get(..16).unwrap_or(&s.updated_at);
+            (s.id.as_str(), summary_display, project, s.messages.len(), updated)
+        }).collect();
+
+        let w0 = rows.iter().map(|r| r.0.len()).chain(std::iter::once(header.0.len())).max().unwrap_or(0);
+        let w1 = rows.iter().map(|r| r.1.len()).chain(std::iter::once(header.1.len())).max().unwrap_or(0).min(60);
+        let w2 = rows.iter().map(|r| r.2.len()).chain(std::iter::once(header.2.len())).max().unwrap_or(0);
+
+        println!("{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}", header.0, header.1, header.2, header.3, header.4, w = w0, w2 = w1, w3 = w2);
+        for (id, summary, project, msg, updated) in &rows {
+            println!("{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}", id, summary, project, msg, updated, w = w0, w2 = w1, w3 = w2);
+        }
+    }
+}
+
+/// 加载配置文件（供子命令复用）
+fn load_config() -> Option<aemeath_core::config::Config> {
+    let paths = [
+        dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+        std::path::PathBuf::from(".aemeath/config.json"),
+    ];
+    for path in &paths {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(c) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
+                    return Some(c);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 主聊天逻辑（原 main 主体）
+async fn run_chat(mut args: Args) {
 
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
     aemeath_core::command::commands::init_all();
@@ -326,41 +502,49 @@ async fn main() {
 
     let _mcp_clients = load_mcp_tools(&mut registry, &cwd).await;
 
-    let agent_runner = {
-        // Build LlmClientPool if there are multiple providers configured
-        let models_config_arc = std::sync::Arc::new(
-            config_file
-                .as_ref()
-                .map(|c| c.models.clone())
-                .unwrap_or_default()
-        );
-        let has_multi_providers = models_config_arc.providers.len() > 1
-            || !config_file.as_ref().map(|c| c.agents.roles.is_empty()).unwrap_or(true);
+          // Create hook runner before agent_runner so it can be shared
+          let hook_runner = if let Some(ref cfg) = config_file {
+              aemeath_core::hook::HookRunner::from_config(cfg)
+          } else {
+              aemeath_core::hook::HookRunner::empty()
+          };
 
-        let pool = if has_multi_providers {
-            Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
-                client.clone(),
-                models_config_arc,
-            )))
-        } else {
-            None
-        };
+          let agent_runner = {
+              // Build LlmClientPool if there are multiple providers configured
+              let models_config_arc = std::sync::Arc::new(
+                  config_file
+                      .as_ref()
+                      .map(|c| c.models.clone())
+                      .unwrap_or_default()
+              );
+              let has_multi_providers = models_config_arc.providers.len() > 1
+                  || !config_file.as_ref().map(|c| c.agents.roles.is_empty()).unwrap_or(true);
 
-        let agents_config = std::sync::Arc::new(
-            config_file
-                .as_ref()
-                .map(|c| c.agents.clone())
-                .unwrap_or_default()
-        );
+              let pool = if has_multi_providers {
+                  Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
+                      client.clone(),
+                      models_config_arc,
+                  )))
+              } else {
+                  None
+              };
 
-        std::sync::Arc::new(agent_runner::CliAgentRunner {
-            client: client.clone(),
-            pool,
-            agents_config,
-        })
-    };
+              let agents_config = std::sync::Arc::new(
+                  config_file
+                      .as_ref()
+                      .map(|c| c.agents.clone())
+                      .unwrap_or_default()
+              );
 
-    let prompt_parts = build_system_prompt_parts(&cwd).await;
+              std::sync::Arc::new(agent_runner::CliAgentRunner {
+                  client: client.clone(),
+                  pool,
+                  agents_config,
+                  hook_runner: hook_runner.clone(),
+              })
+          };
+
+          let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner).await;
 
     // Skills 列表加入 static part（仅在启动时变化）
     let static_prompt = {
@@ -372,11 +556,13 @@ async fn main() {
             .map(|c| c.models.guidance.clone())
             .unwrap_or_default();
         let reasoning = !args.no_think;
-        let model_guidance = aemeath_core::guidance::resolve_guidance(
+        let model_guidance = aemeath_core::guidance::resolve_guidance_async(
             &model,
             &guidance_config,
             reasoning,
-        );
+            Some(&hook_runner),
+        )
+        .await;
 
         // 组装: static_part + universal discipline + skills + model guidance (末尾锚定语言)
         let mut prompt = prompt_parts.static_part;
@@ -472,9 +658,9 @@ async fn main() {
     }
     log::info!("concurrency limits: max_tool={}, max_agent={}", max_tool_concurrency, max_agent_concurrency);
 
-    // 以 TUI 模式或旧版 REPL 模式运行
+          // 以 TUI 模式或旧版 REPL 模式运行
     if args.no_tui {
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone()).await;
+        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone(), hook_runner.clone()).await;
     } else {
         // 构建显示名: provider/name (来自 config) 或仅 model id
         // provider 名称以原始 config 形式显示（不转小写），
@@ -499,14 +685,11 @@ async fn main() {
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
         app.set_skills(skills_map);
-        // 从配置文件初始化 hook runner
-        if let Some(ref cfg) = config_file {
-            app.hook_runner = aemeath_core::hook::HookRunner::from_config(cfg);
+        app.hook_runner = hook_runner.clone();
+        if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
+            log::error!("TUI error: {e}");
+            std::process::exit(1);
         }
-            if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
-                log::error!("TUI error: {e}");
-                std::process::exit(1);
-            }
-            println!("aemeath --resume {}", session_id);
-        }
+        println!("aemeath --resume {}", session_id);
     }
+}

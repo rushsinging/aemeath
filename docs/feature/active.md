@@ -11,6 +11,7 @@
 | 7 | Input Queue 优化 | - | ✅ 已完成 | 将单条 queued_input 改为多消息队列（VecDeque），支持处理期间连续排队多条输入 |
 | 8 | Memory 系统 | - | 待实施 | 增加 memory 系统，支持跨会话持久化记忆，在合适时机自动写入/检索上下文 |
 | 9 | 反思系统 | - | 待实施 | 在关键节点对过去行为/决策做反思总结，提炼经验写入 Memory 系统（依赖 #8） |
+| 10 | 日志文件规范化 | - | 待实施 | 规范 aemeath.log / panic.log / agent.log 的职责边界、格式、轮转策略 |
 
 ##  #3 CLI 子命令
 
@@ -55,7 +56,11 @@
 
 **本次实施（v2 — 完整设计）**：
 
-#### 事件类型（9 个）
+#### 事件类型
+
+参考 Claude Code 官方文档（https://code.claude.com/docs/en/hooks）的事件清单，按优先级分批落地。
+
+##### 已实施 / 计划首批（P0–P1）
 
 | 事件 | 优先级 | 说明 |
 |------|--------|------|
@@ -68,6 +73,30 @@
 | SessionStart | P1（新增） | 会话开始，注入上下文 |
 | PreCompact | P1（新增，占位） | 上下文压缩前 |
 | PostToolBatch | P1（新增，占位） | 批量工具后汇总 |
+
+##### 待补充（与官方文档对齐）
+
+| 事件 | 优先级 | 说明 | 备注 |
+|------|--------|------|------|
+| SessionEnd | P1 | 会话结束清理（写日志/反思入口） | 与 SessionStart 配对 |
+| PostCompact | P1 | 上下文压缩完成后 | 与 PreCompact 配对 |
+| SubagentStart | P1 | 子代理启动 | 配合 Feature #2 SubAgent |
+| SubagentStop | P1 | 子代理完成 | 配合 Feature #2 SubAgent |
+| TaskCreated | P1 | 通过 TaskCreate 创建任务时 | 配合 Feature #6 任务系统 |
+| TaskCompleted | P1 | 任务标记完成时 | 反思系统（#9）的天然触发点 |
+| PermissionRequest | P2 | 权限对话弹出 | 用于审计 / 自动批准策略 |
+| PermissionDenied | P2 | 自动模式拒绝 | 用于审计 / 提示用户 |
+| Notification | P2 | Claude 发送通知时 | TUI 通知钩子 |
+| InstructionsLoaded | P2 | CLAUDE.md / guidance 加载到上下文 | 用于注入额外规则 |
+| ConfigChange | P2 | 会话中配置文件变更 | 配合 hot reload |
+| Elicitation | P2 | MCP 服务器请求用户输入前 | 依赖 MCP 体系完善度 |
+| ElicitationResult | P2 | 用户响应 MCP elicitation 后 | 同上 |
+| UserPromptExpansion | P3 | 用户输入展开为提示时（如 slash 命令） | 官方文档已列，cli.js v2.1.88 尚未落地，跟进观察 |
+| CwdChanged | P3 | 工作目录改变 | 价值有限，按需 |
+| FileChanged | P3 | 监视文件在磁盘改变 | 需 file watcher 基础设施 |
+| TeammateIdle | P3 | 团队队友空闲 | aemeath 暂无 agent team 特性 |
+| WorktreeCreate | — | git worktree 创建 | aemeath 不支持 worktree，**不实施** |
+| WorktreeRemove | — | git worktree 移除 | 同上，**不实施** |
 
 #### JSON 输出协议（v2 核心改进）
 
@@ -210,6 +239,59 @@ exit 其他 = 非阻塞错误
 - 反思是否消耗当前 session 的 model 调用，还是用独立的轻量 model（成本权衡）
 - 反思失败（如 LLM 返回空）时是否静默丢弃 vs 提示用户
 - Memory 容量上限策略：何时压缩 / 淘汰旧反思
+
+---
+
+### #10 日志文件规范化
+
+**目标**：明确 `aemeath.log`、`panic.log`、`agent.log` 三个日志文件的职责边界、写入入口、格式约定与轮转策略，避免日志散落、内容互相覆盖、无法定位问题。
+
+**当前状态（待核实）**：
+- `aemeath.log` — 主日志（env_logger 输出，CLAUDE.md 已写明）
+- `debug.log` — debug 级独立文件（CLAUDE.md 已写明）
+- `agent.log` — 子 agent 执行日志（在 Feature #5 描述中提到 "日志写入 agent.log"）
+- `panic.log` — 进程 panic 时的崩溃记录（**目前是否已写入待确认**）
+
+存在的问题：
+- 没有统一文档说明每个日志文件的语义和何时写入
+- panic 路径（与 Bug #4 相关）的崩溃信息是否落盘、落到哪里不清晰
+- agent.log 与 aemeath.log 的内容重叠/分工不明
+- 缺乏轮转，长期会话日志会无限增长
+
+**设计目标**：
+
+#### 1. 职责边界
+| 文件 | 内容 | 写入入口 | 级别 |
+|------|------|----------|------|
+| `aemeath.log` | 主进程日志（API 调用、tool 执行、状态变更） | env_logger（lib.rs 路由） | warn 默认，可调 |
+| `debug.log` | 详细调试信息（API 请求体、stream 事件、状态机转换） | 显式 debug! 宏 | debug |
+| `agent.log` | 子 agent 执行轨迹（每个 sub-agent 一段，含 turn N、tool call 名、token 消耗） | `agent_runner.rs` 中 progress 闭包 | info |
+| `panic.log` | 进程 panic 捕获（panic 信息、backtrace、当前会话 ID、最近 N 条事件） | `set_hook` 全局 panic handler | error |
+
+#### 2. 格式约定
+- 每行 JSON Lines（机器可解析）或 `[时间戳] [级别] [模块] message`（人可读）— **二选一，需决策**
+- 时间戳统一 RFC3339（带本地时区）
+- session_id 字段贯穿（便于跨文件 grep）
+
+#### 3. 轮转策略
+- 单文件超过 10MB 自动 rotate（`aemeath.log.1` / `aemeath.log.2` ...）
+- 保留最近 5 份
+- 程序启动时清理超过 30 天的旧轮转文件
+
+#### 4. panic.log 关键设计
+- 在 `main.rs` 早期注册 `std::panic::set_hook`
+- panic 时写入：panic message + backtrace + 当前 session_id + 最近 20 条 ring buffer 事件 + active tool call 状态
+- 与 Bug #4（Output Area panic）联动：panic.log 应能直接还原触发场景
+
+**涉及路径**：
+- `aemeath-cli/src/main.rs` — panic handler 注册、log dispatch 初始化
+- `aemeath-core/src/lib.rs` — env_logger 配置（已有 file appender）
+- `aemeath-cli/src/agent_runner.rs` — agent.log 写入入口
+- 新增：`aemeath-core/src/logging.rs` — 统一 log 路径与轮转工具
+
+**开放问题**：
+- 是否需要每会话一个独立子目录（`~/.aemeath/sessions/<id>/aemeath.log`）便于追溯
+- agent.log 是否应该也按 sub-agent 拆分（`agent.log.<turn>.<id>`）
 
 ---
 **开始日期**：2026-04-27

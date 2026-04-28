@@ -60,6 +60,10 @@ impl super::OutputArea {
     pub fn end_selection(&mut self) -> Option<String> {
         self.is_selecting = false;
         let selected = self.get_selected_text();
+        log::debug!(
+            "end_selection: start={:?}, end={:?}, selected={:?}",
+            self.selection_start, self.selection_end, selected.as_deref().map(|s| if s.len() > 100 { &s[..100] } else { s })
+        );
         if let Some(ref text) = selected {
             self.copy_to_clipboard(text);
         }
@@ -138,10 +142,12 @@ impl super::OutputArea {
 
         for screen_idx in start_screen..=end_screen {
             if screen_idx >= self.screen_line_map.len() {
+                log::debug!("get_selected_text: screen_idx {} >= map len {}, breaking", screen_idx, self.screen_line_map.len());
                 break;
             }
             let (logic_idx, chunk_start, _chunk_end) = self.screen_line_map[screen_idx];
             if logic_idx >= self.lines.len() {
+                log::debug!("get_selected_text: logic_idx {} >= lines len {}, breaking", logic_idx, self.lines.len());
                 break;
             }
 
@@ -164,6 +170,11 @@ impl super::OutputArea {
             } else {
                 chars.len()
             };
+            log::debug!(
+                "get_selected_text: screen={}, logic={}, chunk_start={:?}, from={}, to={}, chars_len={}, content={:?}",
+                screen_idx, logic_idx, chunk_start, from, to, chars.len(),
+                &self.lines[logic_idx].content.chars().take(60).collect::<String>()
+            );
             result.extend(chars[from..to].iter());
         }
 

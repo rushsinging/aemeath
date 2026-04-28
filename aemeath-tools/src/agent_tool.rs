@@ -159,6 +159,7 @@ Instructions:
                 ctx,
                 max_turns,
                 model_spec,
+                ctx.progress_tx.clone(),
             )
             .await;
 

@@ -24,6 +24,7 @@ dependencies = [
  "env_logger",
  "futures",
  "indicatif",
+ "inventory",
  "log",
  "once_cell",
  "rand",

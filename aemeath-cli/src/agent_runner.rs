@@ -1,6 +1,7 @@
 use aemeath_core::agent::Agent;
 use aemeath_core::compact::safe_slice;
 use aemeath_core::config::{AgentRoleConfig, AgentsConfig};
+use aemeath_core::hook::HookRunner;
 use aemeath_core::message::Message;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{AgentRunner, ToolContext, ToolRegistry};
@@ -27,6 +28,8 @@ pub struct CliAgentRunner {
     pub pool: Option<Arc<LlmClientPool>>,
     /// Agent config for role resolution.
     pub agents_config: Arc<AgentsConfig>,
+    /// Hook runner for executing sub-agent hooks.
+    pub hook_runner: HookRunner,
 }
 
 impl CliAgentRunner {
@@ -80,6 +83,7 @@ impl AgentRunner for CliAgentRunner {
         ctx: &ToolContext,
         max_turns_override: Option<u32>,
         model_spec: Option<&str>,
+        progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> String {
         // Resolve role and model
         let role = self.resolve_role(model_spec);
@@ -92,10 +96,81 @@ impl AgentRunner for CliAgentRunner {
             _ => self.client.clone(),
         };
 
+        // Extract hook_runner to avoid borrow conflicts with closure
+        let hook_runner = self.hook_runner.clone();
+
         // Append role-specific system suffix if configured
         let system = match role.and_then(|r| r.system_suffix.as_ref()) {
             Some(suffix) => format!("{}\n\n{}", system, suffix),
             None => system.to_string(),
+        };
+
+        // Call SubagentStart hook
+        let hook_results = hook_runner
+            .on_subagent_start(prompt, &system, resolved_spec.as_deref())
+            .await;
+        // Send any system messages from hook results to progress_tx
+        for (_, _, json_output) in &hook_results {
+            if let Some(ref output) = json_output {
+                if let Some(ref sys_msg) = output.system_message {
+                    if let Some(ref tx) = progress_tx {
+                        let _ = tx.try_send(format!("[hook] {}", sys_msg));
+                    }
+                }
+            }
+        }
+
+        // Helper to emit progress — writes to log file for diagnostics
+        let log_path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".aemeath")
+            .join("agent.log");
+        let progress = move |msg: &str| {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let _ = writeln!(f, "[{}] {}", now, msg);
+            }
+        };
+
+        // Helper to call SubagentStop hook and send system messages
+        let hook_runner_clone = hook_runner.clone();
+        let progress_tx_clone = progress_tx.clone();
+        let system_for_hook = system.clone();
+        let resolved_spec_for_hook = resolved_spec.clone();
+        let call_subagent_stop_hook = move |result: String, turns: usize, is_error: bool| {
+            let hook_runner = hook_runner_clone.clone();
+            let progress_tx = progress_tx_clone.clone();
+            let prompt = prompt.to_string();
+            let system = system_for_hook.clone();
+            let resolved_spec = resolved_spec_for_hook.clone();
+            async move {
+                let hook_results = hook_runner.on_subagent_stop(
+                    &prompt,
+                    &system,
+                    resolved_spec.as_deref(),
+                    &result,
+                    turns,
+                    is_error,
+                ).await;
+                // Send any system messages from hook results to progress_tx
+                for (_, _, json_output) in &hook_results {
+                    if let Some(ref output) = json_output {
+                        if let Some(ref sys_msg) = output.system_message {
+                            if let Some(ref tx) = progress_tx {
+                                let _ = tx.try_send(format!("[hook] {}", sys_msg));
+                            }
+                        }
+                    }
+                }
+            }
         };
 
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
@@ -123,30 +198,11 @@ impl AgentRunner for CliAgentRunner {
             max_tool_concurrency: ctx.max_tool_concurrency,
             max_agent_concurrency: ctx.max_agent_concurrency,
             agent_semaphore: ctx.agent_semaphore.clone(),
+            progress_tx: None, // sub-agents don't stream progress (yet)
         };
         let agent = Agent {
             registry: &sub_registry,
             ctx: sub_ctx,
-        };
-
-        // Helper to emit progress — writes to log file for diagnostics
-        let log_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".aemeath")
-            .join("agent.log");
-        let progress = move |msg: &str| {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let _ = writeln!(f, "[{}] {}", now, msg);
-            }
         };
 
         let model_display = resolved_spec.as_deref().unwrap_or("default");
@@ -160,7 +216,9 @@ impl AgentRunner for CliAgentRunner {
         for turn in 0..max_turns {
             if ctx.cancel.is_cancelled() {
                 progress("Agent cancelled by user");
-                return "Cancelled by user".to_string();
+                let result = "Cancelled by user".to_string();
+                call_subagent_stop_hook(result.clone(), turn, true).await;
+                return result;
             }
             if start_time.elapsed() > max_duration {
                 progress(&format!("Agent timed out after {}s", start_time.elapsed().as_secs()));
@@ -168,10 +226,14 @@ impl AgentRunner for CliAgentRunner {
                 for msg in messages.iter().rev() {
                     let text = msg.text_content();
                     if !text.is_empty() {
-                        return format!("{}\n\n[Sub-agent timed out after {}s]", text, start_time.elapsed().as_secs());
+                        let result = format!("{}\n\n[Sub-agent timed out after {}s]", text, start_time.elapsed().as_secs());
+                        call_subagent_stop_hook(result.clone(), turn, true).await;
+                        return result;
                     }
                 }
-                return format!("Sub-agent timed out after {}s", start_time.elapsed().as_secs());
+                let result = format!("Sub-agent timed out after {}s", start_time.elapsed().as_secs());
+                call_subagent_stop_hook(result.clone(), turn, true).await;
+                return result;
             }
             let msg_tokens = aemeath_core::compact::estimate_messages_tokens(&messages);
             progress(&format!(
@@ -192,10 +254,26 @@ impl AgentRunner for CliAgentRunner {
                     ));
                     messages.push(resp.assistant_message.clone());
 
+                    // Send text output to TUI progress channel (if available)
+                    if let Some(ref tx) = progress_tx {
+                        let text = resp.assistant_message.text_content();
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            let short = if trimmed.len() > 300 {
+                                format!("{}...", safe_slice(trimmed, 300))
+                            } else {
+                                trimmed.to_string()
+                            };
+                            let _ = tx.try_send(format!("Turn {}: {}", turn + 1, short));
+                        }
+                    }
+
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         progress("Agent completed");
-                        return resp.assistant_message.text_content();
+                        let result = resp.assistant_message.text_content();
+                        call_subagent_stop_hook(result.clone(), turn + 1, false).await;
+                        return result;
                     }
 
                     // Build a lookup from tool_use_id to tool call info
@@ -217,6 +295,12 @@ impl AgentRunner for CliAgentRunner {
                         "Tools done ({}s elapsed), {} results",
                         start_time.elapsed().as_secs(), results.len()
                     ));
+
+                    // Send tool call names to TUI progress channel
+                    if let Some(ref tx) = progress_tx {
+                        let tool_names: Vec<&str> = tool_calls.iter().map(|c| c.name.as_str()).collect();
+                        let _ = tx.try_send(format!("[Turn {}] calling: {}", turn + 1, tool_names.join(", ")));
+                    }
 
                     // Log each call followed by its result (interleaved)
                     for (id, output, is_error, _) in results.iter() {
@@ -270,7 +354,9 @@ impl AgentRunner for CliAgentRunner {
                 }
                 Err(e) => {
                     progress(&format!("Agent error: {e}"));
-                    return format!("Sub-agent error: {e}");
+                    let result = format!("Sub-agent error: {e}");
+                    call_subagent_stop_hook(result.clone(), turn, true).await;
+                    return result;
                 }
             }
         }
@@ -280,10 +366,14 @@ impl AgentRunner for CliAgentRunner {
         for msg in messages.iter().rev() {
             let text = msg.text_content();
             if !text.is_empty() {
-                return format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns);
+                let result = format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns);
+                call_subagent_stop_hook(result.clone(), max_turns, false).await;
+                return result;
             }
         }
-        format!("Sub-agent reached max turns ({})", max_turns)
+        let result = format!("Sub-agent reached max turns ({})", max_turns);
+        call_subagent_stop_hook(result.clone(), max_turns, false).await;
+        result
     }
 
     async fn complete(

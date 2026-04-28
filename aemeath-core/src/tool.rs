@@ -54,6 +54,8 @@ pub trait AgentRunner: Send + Sync {
         ctx: &ToolContext,
         max_turns: Option<u32>,
         model_spec: Option<&str>,
+        // Optional channel to stream per-turn progress to TUI
+        progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> String;
 
     /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
@@ -81,6 +83,10 @@ pub struct ToolContext {
     pub max_agent_concurrency: usize,
     /// Semaphore to limit concurrent sub-agent executions (shared across tool calls)
     pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    /// Channel to send agent progress updates to the TUI (tool_id → progress_text).
+    /// Populated when an Agent tool call is in flight, so CliAgentRunner can stream
+    /// per-turn textual output back to the user.
+    pub progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 #[async_trait]

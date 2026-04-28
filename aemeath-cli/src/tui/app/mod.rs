@@ -55,6 +55,11 @@ pub enum UiEvent {
         _tool_id: String,
         _text: String,
     },
+    /// Results from StopFailure hook (API error导致 agent 循环结束)
+    StopFailureHook {
+        system_message: Option<String>,
+        additional_context: Option<String>,
+    },
 }
 
 /// Main TUI application
@@ -181,7 +186,7 @@ impl App {
         registry: ToolRegistry,
         system_blocks: Vec<aemeath_llm::types::SystemBlock>,
         system_prompt_text: String,
-        user_context: String,
+        mut user_context: String,
         context_size: usize,
         verbose: bool,
         use_markdown: bool,
@@ -282,6 +287,35 @@ impl App {
         let interrupted = Arc::new(AtomicBool::new(false));
         let registry = Arc::new(registry);
 
+        // Run SessionStart hooks: inject additional_context into user_context,
+        // and display system_message in the output area.
+        {
+            use aemeath_core::config::hooks::HookEvent;
+            use aemeath_core::hook::{HookData, SessionHookData};
+            let hook_results = self.hook_runner.run_hooks_with_json(
+                HookEvent::SessionStart,
+                None,
+                HookData::Session(SessionHookData {}),
+            ).await;
+            for (_, result, json_output) in &hook_results {
+                if let Some(json) = json_output {
+                    if let Some(ref ctx) = json.additional_context {
+                        user_context = if user_context.is_empty() {
+                            ctx.clone()
+                        } else {
+                            format!("{}\n\n{}", ctx, user_context)
+                        };
+                    }
+                    if let Some(ref msg) = json.system_message {
+                        self.output_area.push_system(msg);
+                    }
+                }
+                if result.blocked {
+                    self.output_area.push_system("[SessionStart hook blocked session start]");
+                }
+            }
+        }
+
         let result = self.run_loop(
             &mut terminal,
             client,
@@ -314,6 +348,21 @@ impl App {
             };
             if let Err(e) = sess::save_session(&s).await {
                 log::warn!("failed to auto-save session: {e}");
+            }
+        }
+
+        // Run SessionEnd hooks: display system_message in the output area
+        {
+            let hook_results = self.hook_runner.on_session_end().await;
+            for (_, result, json_output) in &hook_results {
+                if let Some(json) = json_output {
+                    if let Some(ref msg) = json.system_message {
+                        self.output_area.push_system(msg);
+                    }
+                }
+                if result.error.is_some() {
+                    log::warn!("SessionEnd hook error: {:?}", result.error);
+                }
             }
         }
 
