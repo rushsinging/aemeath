@@ -64,23 +64,57 @@ fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future
         if arg.is_empty() {
             let sessions = crate::session::list_sessions().await;
             if sessions.is_empty() {
-                return CommandResult::Success("No saved sessions found".to_string());
+                return CommandResult::Success("No saved sessions found.\nStart a conversation first, then use /save to create a session.".to_string());
             }
-            let mut output = String::from("Recent sessions:\n");
-            for s in sessions.iter().take(10) {
-                let preview = s.messages.last()
-                    .map(|m| {
-                        let t = m.text_content();
-                        if t.len() > 80 { format!("{}...", t.chars().take(77).collect::<String>()) } else { t }
-                    })
-                    .unwrap_or_default();
-                output.push_str(&format!("  {} [{} msgs] {}\n", s.id, s.messages.len(), preview));
+            let mut output = String::from("Recent sessions (use /resume <id> to resume):\n\n");
+            for (i, s) in sessions.iter().take(15).enumerate() {
+                let summary = s.summary();
+                let msg_count = s.messages.len();
+                let updated = relative_time(&s.updated_at);
+                let title = s.metadata.title.as_deref().unwrap_or("");
+                output.push_str(&format!(
+                    "  {:>2}. {}  {} msg  {}\n",
+                    i + 1,
+                    s.id,
+                    msg_count,
+                    updated,
+                ));
+                if !title.is_empty() {
+                    output.push_str(&format!("      {}\n", title));
+                } else if !summary.is_empty() {
+                    output.push_str(&format!("      {}\n", summary));
+                }
+            }
+            let remaining = sessions.len().saturating_sub(15);
+            if remaining > 0 {
+                output.push_str(&format!("\n  ... and {} more sessions\n", remaining));
             }
             CommandResult::Success(output)
         } else {
             CommandResult::Action(CommandAction::ResumeSession(arg.to_string()))
         }
     })
+}
+
+/// Format an ISO timestamp as a human-readable relative time string.
+fn relative_time(iso: &str) -> String {
+    let then = match chrono::DateTime::parse_from_rfc3339(iso) {
+        Ok(dt) => dt.with_timezone(&chrono::Utc),
+        Err(_) => return iso.to_string(),
+    };
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(then);
+    if delta.num_seconds() < 60 {
+        "just now".to_string()
+    } else if delta.num_minutes() < 60 {
+        format!("{}m ago", delta.num_minutes())
+    } else if delta.num_hours() < 24 {
+        format!("{}h ago", delta.num_hours())
+    } else if delta.num_days() < 30 {
+        format!("{}d ago", delta.num_days())
+    } else {
+        then.format("%Y-%m-%d").to_string()
+    }
 }
 
 fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
@@ -96,10 +130,21 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
                 if sessions.is_empty() {
                     return CommandResult::Success("No saved sessions".to_string());
                 }
-                let mut output = String::from("Sessions:\n");
-                for s in &sessions {
-                    output.push_str(&format!("  {} ({} messages)\n", s.id, s.messages.len()));
+                let mut output = String::from("Recent sessions:\n\n");
+                for s in sessions.iter().take(15) {
+                    let updated = relative_time(&s.updated_at);
+                    let summary = s.summary();
+                    output.push_str(&format!(
+                        "  {}  {} msg  {}\n",
+                        s.id,
+                        s.messages.len(),
+                        updated,
+                    ));
+                    if !summary.is_empty() {
+                        output.push_str(&format!("      {}\n", summary));
+                    }
                 }
+                output.push_str(&format!("\nTotal: {} sessions\n", sessions.len()));
                 CommandResult::Success(output)
             }
             "new" => CommandResult::Action(CommandAction::NewSession),

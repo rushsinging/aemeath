@@ -8,6 +8,8 @@
 | 12 | Ask user tool call 没有询问用户 | 高 | 已修复 | 2026-04 | tool call 未拦截确认直接执行 |
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
 | 14 | Tool call 标题可选中但无法复制 | 中 | 活动中 | 2026-04 | selection 含 tool call 行时复制路径未取出文本 |
+| 15 | resume 和 session 命令在 TUI 中表现不对 | 高 | 活动中 | 2026-04 | CLI 重构后 resume/session 子命令路径未接入 TUI |
+| 16 | /resume 会话列表行字符被吞 | 中 | 活动中 | 2026-04 | session 标题行宽度计算错误 / CJK 与 ANSI 混排截断 |
 
 ## 详情
 
@@ -75,6 +77,34 @@
 2. 检查 tool call 行所在的 LineKind 分支是否在复制时被跳过
 3. 让所有可见 + 高亮的内容都能进入剪贴板，至少把 header 文本（`ToolName(args)`）包含进去
 **涉及路径**：`aemeath-cli/src/tui/output_area/`（selection / clipboard 相关模块）
+
+### #15 resume 和 session 命令在 TUI 中表现不对
+**症状**：使用 `aemeath --resume <id>` 或 `aemeath sessions` 子命令时，行为不符合预期（如 resume 未恢复历史消息、sessions 列表格式异常或未正确显示等）。
+**根因方向**：CLI 重构为 subcommand 架构后，`--resume` 参数和 `sessions` 子命令的处理路径可能与 TUI 启动流程未正确对接。`None` 分支（无子命令）使用硬编码默认值启动，`--resume` 走 `Run` 子命令解析，但默认值与原始 `Args` 不一致。
+**修复方向**：
+1. 确认 `--resume` 参数在 `Run` subcommand 中正确传递到 `run_chat()` → TUI 启动
+2. 确认 `sessions` 子命令的输出格式和 session 加载逻辑
+3. 对比重构前后 `Args` 默认值是否一致
+**涉及路径**：`aemeath-cli/src/cli.rs`、`aemeath-cli/src/main.rs`
+
+### #16 /resume 会话列表行字符被吞
+**症状**：在 TUI 中输入 `/resume` 弹出的历史会话选择列表中，每条 session 的标题摘要文本出现**字符缺失/空白断裂**，中英文混排处尤其明显。截图实例：
+- `分    git 仓        commit message 并    [80msg]`（"分析"→"分"，"仓库"→"仓"）
+- `现 docs/ 有 eature bug`（"feature" → "eature"）
+- `测    gent`（"测试 Agent" → "测 gent"）
+- `@docs/ 有  ug 和 eature`（"bug" → "ug"，"feature" → "eature"）
+
+**根因方向**：待调查。可能方向：
+1. session 标题渲染时按**字节长度**而非显示宽度截断，CJK 字符（占 2 列）被切成半个字符，半个 byte 被丢弃后视觉上"吞"字
+2. 用 `unicode-width` 算列宽时，列对齐 padding 用了固定字符数填充，遇到宽字符时溢出，把后续字符挤掉
+3. 渲染时 span 拼接顺序错误（如在中文后插入空格 padding，但 padding 按字符数算时少算了 1 列，导致下一个 span 起点错位 1 列、覆盖前一个字符）
+
+**修复方向**：
+1. 定位 `/resume` 列表的渲染代码（搜 `resume` / `session` picker / list）
+2. 检查所有 `text.len()` / `chars().count()` 用法，列宽应改用 `unicode_width::UnicodeWidthStr::width`
+3. 修复后用纯中文、纯英文、中英混排三种 session 标题分别验证
+
+**涉及路径**：待定位（可能在 `aemeath-cli/src/tui/` 或 `aemeath-cli/src/repl/` 中的 session 列表渲染）
 
 ---
 
