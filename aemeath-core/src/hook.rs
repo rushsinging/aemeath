@@ -325,25 +325,32 @@ pub struct HookResult {
 #[derive(Debug, Clone)]
 pub struct HookRunner {
     config: HooksConfig,
+    /// 项目根目录
+    project_dir: String,
 }
 
 impl HookRunner {
     /// 从配置创建 runner
-    pub fn new(config: HooksConfig) -> Self {
-        Self { config }
+    pub fn new(config: HooksConfig, project_dir: String) -> Self {
+        Self {
+            config,
+            project_dir,
+        }
     }
 
     /// 创建空 runner（无 hook 配置时使用）
-    pub fn empty() -> Self {
+    pub fn empty(project_dir: String) -> Self {
         Self {
             config: HooksConfig::default(),
+            project_dir,
         }
     }
 
     /// 从配置 HashMap 创建（兼容 CLI 层的 config_file 结构）
-    pub fn from_config(config: &crate::config::Config) -> Self {
+    pub fn from_config(config: &crate::config::Config, project_dir: String) -> Self {
         Self {
             config: config.hooks.clone(),
+            project_dir,
         }
     }
 
@@ -395,6 +402,7 @@ impl HookRunner {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .env("AEMEATH_HOOK_EVENT", serde_json::to_string(&input.event).unwrap_or_default())
+            .env("AEMEATH_PROJECT_DIR", &self.project_dir)
             .envs(input.data.to_env_vars())
             .spawn()
         {
@@ -1017,7 +1025,7 @@ mod tests {
                 map
             },
         };
-        let runner = HookRunner::new(config);
+        let runner = HookRunner::new(config, ".".to_string());
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert_eq!(hooks.len(), 1);
     }
@@ -1045,7 +1053,7 @@ mod tests {
                 map
             },
         };
-        let runner = HookRunner::new(config);
+        let runner = HookRunner::new(config, ".".to_string());
 
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert_eq!(hooks.len(), 1);
@@ -1057,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_matching_hooks_no_config() {
-        let runner = HookRunner::empty();
+        let runner = HookRunner::empty(".".to_string());
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert!(hooks.is_empty());
     }
@@ -1069,7 +1077,7 @@ mod tests {
             command: "echo 'hello from hook'".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty();
+        let runner = HookRunner::empty(".".to_string());
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -1092,7 +1100,7 @@ mod tests {
             command: "exit 2".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty();
+        let runner = HookRunner::empty(".".to_string());
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -1113,7 +1121,7 @@ mod tests {
             command: "sleep 10".to_string(),
             timeout: 1,
         };
-        let runner = HookRunner::empty();
+        let runner = HookRunner::empty(".".to_string());
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -1130,7 +1138,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pre_tool_use_no_hooks() {
-        let runner = HookRunner::empty();
+        let runner = HookRunner::empty(".".to_string());
         let (blocked, results) = runner
             .pre_tool_use("Bash", serde_json::json!({"command": "ls"}))
             .await;

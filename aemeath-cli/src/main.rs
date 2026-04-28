@@ -503,10 +503,11 @@ async fn run_chat(mut args: Args) {
     let _mcp_clients = load_mcp_tools(&mut registry, &cwd).await;
 
           // Create hook runner before agent_runner so it can be shared
+          let cwd_str = cwd.display().to_string();
           let hook_runner = if let Some(ref cfg) = config_file {
-              aemeath_core::hook::HookRunner::from_config(cfg)
+              aemeath_core::hook::HookRunner::from_config(cfg, cwd_str.clone())
           } else {
-              aemeath_core::hook::HookRunner::empty()
+              aemeath_core::hook::HookRunner::empty(cwd_str.clone())
           };
 
           let agent_runner = {

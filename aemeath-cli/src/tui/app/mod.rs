@@ -161,7 +161,11 @@ impl App {
             skills: std::collections::HashMap::new(),
             cached_sessions: Vec::new(),
             tool_call_active: false,
-            hook_runner: aemeath_core::hook::HookRunner::empty(),
+            hook_runner: aemeath_core::hook::HookRunner::empty(
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            ),
             ask_user_reply_tx: None,
             ask_user_state: None,
         }
