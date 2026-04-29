@@ -14,8 +14,8 @@
 | 10 | 日志文件规范化 | - | 待确认 | 未确认 | 规范 aemeath.log / panic.log / agent.log 的职责边界、格式、轮转策略 |
 | 11 | OpenAI reasoning_effort 配置支持 | - | 待实施 | 未确认 | 支持 GPT-5.x 系列 `reasoning_effort` (none/low/medium/high/xhigh)，可在 config.json 配置 |
 | 12 | Input Queue 双层循环优化 | - | 待实施 | 未确认 | 双层循环让 LLM 不必完成整轮对话即可读取 input queue；在 tool call 完成后可读取用户新输入并补充给 LLM，实现快速响应用户反馈 |
-| 13 | Task list 显示在 spinner 下方 | - | 待实施 | 未确认 | 临时区域渲染顺序调整为：queued messages → spinner → task status lines，让 task list 出现在 spinner 下方而非上方 |
-| 14 | Session ID 自增无冲突方案 | - | 待实施 | 未确认 | 当前 `{timestamp_ms}{rand_u32}` 24 位 hex 不可读、不自增；探索"按时间单调自增 + 全局无冲突"的方案，兼顾可读性、排序、迁移兼容 |
+| 13 | Task list 显示在 spinner 下方 | - | ✅ 已完成 | 未确认 | 临时区域渲染顺序调整为：queued messages → spinner → task status lines，让 task list 出现在 spinner 下方而非上方 |
+| 14 | Session ID 自增无冲突方案 | - | 待确认 | 未确认 | 当前 `{timestamp_ms}{rand_u32}` 24 位 hex 不可读、不自增；探索"按时间单调自增 + 全局无冲突"的方案，兼顾可读性、排序、迁移兼容 |
 
 ##  #3 CLI 子命令
 
@@ -426,6 +426,40 @@ if reasoning_enabled && self.config.is_openai_reasoning_capable() {
 
 **关联**：与 `/think` 命令、`reasoning` 配置字段并存；后续可扩展到 Anthropic 的 `budget_tokens`。
 
+#### 6. 待确认：GPT 思考内容当前不显示
+
+**现象**：当前调用 OpenAI（含 GPT-5.x / o1 / o3 等具备 reasoning 能力的模型）时，TUI 中**看不到 thinking 内容**——只看到最终回答，没有任何 `> thinking…` 段或 reasoning 流式输出，与 Anthropic / DeepSeek 等 provider 行为不一致。
+
+**需要确认的问题**：
+1. **是否预期？**
+   - OpenAI Chat Completions API 对 GPT-5.x 系列的 reasoning 内容**默认不返回**（出于费用 / 内容安全），仅在 Responses API 或显式开启 `reasoning.summary` 时才透出 reasoning summary
+   - o1 / o3 系列 Chat Completions 同样不返回 thinking 文本，只返回 `usage.completion_tokens_details.reasoning_tokens`（计费用）
+   - 因此"OpenAI 不显示 thinking"很可能是 **API 限制**而非 aemeath bug
+2. **能否绕开？**
+   - **方案 A**：切到 Responses API（`/v1/responses`），请求带 `reasoning: { "effort": "...", "summary": "auto" }`，响应里 `output[].type == "reasoning"` 段含 summary 文本——可作为 thinking 展示
+   - **方案 B**：保留 Chat Completions，仅显示 reasoning_tokens 计数（"模型思考了 1234 tokens"），无文本内容
+   - **方案 C**：维持现状，文档说明 OpenAI thinking 不可见
+
+**排查行动**（与 #11 主体合并实施）：
+1. 抓一次 GPT-5.5 + reasoning_effort=high 的实际响应体，确认 `choices[0].message` / `delta` 中是否真的没有 thinking 字段
+2. 检查 `aemeath-llm/src/providers/openai_compatible/{stream,non_stream}.rs` 是否漏解析了 `reasoning_content` / `reasoning` / `thinking` 等字段
+3. 对比 DeepSeek / Anthropic 路径如何把 thinking 推到 `UiEvent::Thinking`，确认 OpenAI 路径有无对应分支
+4. 决策方案：是接 Responses API（方案 A）还是只显示 token 数（方案 B）
+
+**测试场景**（确认后补充到 #11 主测试）：
+- GPT-5.5 + effort=high → 抓包响应体，确认有/无 reasoning 段
+- 切到 Responses API → reasoning summary 是否完整流式
+- DeepSeek-R1（已知能显示 thinking）作为对照基线
+
+**涉及路径**（额外）：
+- `aemeath-llm/src/providers/openai_compatible/stream.rs`（流式 reasoning 解析）
+- `aemeath-llm/src/providers/openai_compatible/non_stream.rs`（非流式 reasoning 解析）
+- 可能新增：Responses API 路径（`providers/openai_responses/`）
+
+**开放问题**：
+- 是否同期切到 Responses API？切换会影响所有 OpenAI 请求路径，是 #11 + 一个独立 feature 的工作量
+- 若维持 Chat Completions，是否在 status bar 显示 "reasoning: 1234 tokens"（替代不可见的 thinking 文本）
+
 **开放问题**：
 - 是否需要把"按 effort 估算 budget_tokens"的 Anthropic 映射也一起做？还是分两期？
 - `/effort` 切换是否在当前 turn 立即生效，还是下一个 turn 生效？（建议下一个 turn，避免请求中断）
@@ -625,7 +659,7 @@ input area
 
 ### #14 Session ID 自增无冲突方案
 
-**目标**：替换当前的 session ID 生成方案，找到一个**单调递增、跨进程/跨设备无冲突、可读性更好**的方案，让 session 列表能按 ID 自然排序，便于人工识别和文件系统按字母序对应时间序。
+**目标**：替换当前的 session ID 生成方案，采用标准化、时间有序、跨进程/跨设备低冲突概率的 ID，让 session 文件名天然按创建时间排序，并保留旧 session 兼容性。
 
 **当前方案**（`aemeath-core/src/state.rs:new_session_id`）：
 
@@ -645,7 +679,23 @@ format!("{:016x}{:08x}", timestamp, random)
 4. **不携带语义**：看 session id 看不出 "什么 cwd / 什么模型 / 第几个 session"
 5. **不"自增"**：用户口里说的"自增 ID"通常指可数（#1、#2、#3...）的整数，便于命令行短引用（`/resume 5` 而不是 `/resume 0000019dc93bab86dfd7032f`）
 
-**设计方向**：分两层 ID 共存
+**本次实现（2026-04-29）**：采用 UUIDv7 替换随机 hex ID。
+
+- 新 ID 格式：标准 UUIDv7，例如 `018f2d4e-9c7a-7b12-9a34-8f0c1d2e3f45`
+- UUIDv7 前缀携带时间信息，字典序基本对应创建时间序
+- 不再维护 `session_counter.json` / lock 目录，避免本地状态损坏、锁残留、时钟回拨处理等复杂度
+- 依赖 `uuid` crate 的 `v7` feature，通过 `Uuid::new_v7(Timestamp::now(NoContext))` 生成
+- 旧格式 24 位 hex ID 不迁移、不重命名，`validate_session_id` 仍然接受并可继续 `--resume`
+
+**未纳入本期**：用户可见短编号（如 `/resume 5`）需要独立 session index 与命令解析改造，暂不实现，避免扩大迁移面。
+
+**测试覆盖**：
+- 正常路径：新建 ID 是合法 UUIDv7，且通过 session id 校验
+- 边界条件：同一 timestamp 下连续生成两个 UUIDv7 仍不重复
+- 错误路径：包含路径分隔符的伪 UUID 被 `validate_session_id` 拒绝
+- 兼容路径：旧 24 位 hex session ID 仍通过校验
+
+**原始设计草案**：分两层 ID 共存
 
 #### 1. 内部全局 ID（保留唯一性）
 
