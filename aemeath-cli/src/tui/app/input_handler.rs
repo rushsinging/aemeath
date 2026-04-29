@@ -108,6 +108,16 @@ impl super::App {
                     self.input_area.clear_suggestions();
                 }
             }
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                // Esc during processing: interrupt current LLM turn + tool calls
+                spawn_ctx.interrupted.store(true, Ordering::Relaxed);
+                if let Ok(guard) = active_cancel.lock() {
+                    if let Some(token) = guard.as_ref() {
+                        token.cancel();
+                    }
+                }
+                self.status_bar.set_warning("Interrupted");
+            }
             (_, KeyCode::Enter) if *is_processing => {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();

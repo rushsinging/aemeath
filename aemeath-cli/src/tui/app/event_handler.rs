@@ -21,7 +21,7 @@ impl super::App {
         match ev {
             UiEvent::Text(text) => {
                 if self.tool_call_active {
-                    log::debug!("[BUG#4] Text: tool_call_active was true, resetting to false");
+                    log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
                     self.tool_call_active = false;
                 }
                 self.status_bar.set_processing("Generating...");
@@ -30,7 +30,7 @@ impl super::App {
             }
               UiEvent::Thinking(text) => {
                   if self.tool_call_active {
-                      log::debug!("[BUG#4] Thinking: tool_call_active was true, resetting to false");
+                      log::debug!("[SPINNER] Thinking: tool_call_active was true, resetting to false");
                       self.tool_call_active = false;
                   }
                   self.status_bar.set_processing("Thinking...");
@@ -42,13 +42,17 @@ impl super::App {
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
-                log::debug!("[BUG#4] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
+                log::debug!("[SPINNER] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
                 self.status_bar.set_processing(&format!("Calling {}...", name));
+                // AskUserQuestion 等待用户回复期间不应显示 spinner
+                if name != "AskUserQuestion" {
+                    self.output_area.start_spinner();
+                }
             }
             UiEvent::ToolCall { id, name, summary } => {
-                log::debug!("[BUG#4] ToolCall({name}): tool_call_active={}", self.tool_call_active);
+                log::debug!("[SPINNER] ToolCall({name}): tool_call_active={}", self.tool_call_active);
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
             }
@@ -59,9 +63,10 @@ impl super::App {
                     format!("  │  [{} image(s) attached]\n", images.len())
                 };
                 self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
-                log::debug!("[BUG#4] ToolResult({tool_name}): tool_call_active {} -> false", self.tool_call_active);
+                log::debug!("[BUG#24] ToolResult({tool_name}): restarting spinner for next turn");
                 self.tool_call_active = false;
-                self.status_bar.set_processing("Generating...");
+                self.status_bar.set_processing("Thinking...");
+                self.output_area.start_spinner();
             }
             UiEvent::Usage { input, output, last_input, elapsed_secs } => {
                 self.total_input_tokens += input as u64;
@@ -75,7 +80,7 @@ impl super::App {
                 self.status_bar.set_tps(tps);
             }
             UiEvent::Error(msg) => {
-                log::debug!("[BUG#4] Error: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!("[SPINNER] Error: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -92,15 +97,11 @@ impl super::App {
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
                 if !self.messages.is_empty() {
-                    use aemeath_core::session::{self as sess, Session, now_iso};
-                    let s = Session {
-                        id: self.session_id.clone(),
-                        cwd: self.cwd.to_string_lossy().to_string(),
-                        messages: self.messages.clone(),
-                        created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
-                        updated_at: now_iso(),
-                        metadata: Default::default(),
-                    };
+                    use aemeath_core::session::{self as sess, Session};
+                    let mut s = Session::new(self.session_id.clone(), self.cwd.to_string_lossy().to_string());
+                    s.messages = self.messages.clone();
+                    s.created_at = self.session_created_at.clone().unwrap_or_else(|| aemeath_core::session::now_iso());
+                    s.updated_at = aemeath_core::session::now_iso();
                     if let Err(e) = sess::save_session(&s).await {
                         log::warn!("failed to auto-save session on sync: {e}");
                     }
@@ -118,7 +119,7 @@ impl super::App {
                   let _ = (id, question, options, default, reply_tx);
               }
             UiEvent::Done => {
-                log::debug!("[BUG#4] Done: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!("[SPINNER] Done: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -135,7 +136,7 @@ impl super::App {
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
-                log::debug!("[BUG#4] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!("[SPINNER] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();

@@ -23,8 +23,8 @@ impl super::OutputArea {
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start), rel_col,
                 );
-                self.selection_start = Some((rel_row, char_start.add(char_col.as_usize())));
-                self.selection_end = Some((rel_row, char_start.add(char_col.as_usize())));
+                self.selection_start = Some((logic_idx, char_start.add(char_col.as_usize())));
+                self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
             }
         }
         self.is_selecting = true;
@@ -46,12 +46,13 @@ impl super::OutputArea {
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start), rel_col,
                 );
-                self.selection_end = Some((rel_row, char_start.add(char_col.as_usize())));
+                self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
             }
         } else {
-            // 超出可见范围时，选到最后一个屏幕行的末尾
+            // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
             if let Some(&(_, _, char_end)) = self.screen_line_map.last() {
-                self.selection_end = Some((self.screen_line_map.len().saturating_sub(1), char_end));
+                let last_logic = self.screen_line_map.last().map(|(li, _, _)| *li).unwrap_or(0);
+                self.selection_end = Some((last_logic, char_end));
             }
         }
     }
@@ -62,7 +63,18 @@ impl super::OutputArea {
         let selected = self.get_selected_text();
         log::debug!(
             "end_selection: start={:?}, end={:?}, selected={:?}",
-            self.selection_start, self.selection_end, selected.as_deref().map(|s| if s.len() > 100 { &s[..100] } else { s })
+            self.selection_start, self.selection_end, selected.as_deref().map(|s| {
+                if s.len() > 100 {
+                    // find a safe UTF-8 boundary at or before byte 100
+                    let mut end = 100;
+                    while end > 0 && !s.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    &s[..end]
+                } else {
+                    s
+                }
+            })
         );
         if let Some(ref text) = selected {
             self.copy_to_clipboard(text);
@@ -111,8 +123,8 @@ impl super::OutputArea {
             }
         }
 
-        self.selection_start = Some((rel_row, CharIdx::new(start)));
-        self.selection_end = Some((rel_row, CharIdx::new(end + 1)));
+        self.selection_start = Some((logic_idx, CharIdx::new(start)));
+        self.selection_end = Some((logic_idx, CharIdx::new(end + 1)));
         self.is_selecting = true;
 
         if let Some(text) = self.get_selected_text() {
@@ -120,59 +132,50 @@ impl super::OutputArea {
         }
     }
 
-    /// Get the selected text based on screen line coordinates
+    /// Get the selected text based on logic line coordinates
     pub fn get_selected_text(&self) -> Option<String> {
-        let (start_screen, start_col) = self.selection_start?;
-        let (end_screen, end_col) = self.selection_end?;
+        let (start_logic, start_col) = self.selection_start?;
+        let (end_logic, end_col) = self.selection_end?;
 
-        let (start_screen, start_col, end_screen, end_col) = if start_screen < end_screen
-            || (start_screen == end_screen && start_col < end_col)
+        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
+            || (start_logic == end_logic && start_col < end_col)
         {
-            (start_screen, start_col, end_screen, end_col)
+            (start_logic, start_col, end_logic, end_col)
         } else {
-            (end_screen, end_col, start_screen, start_col)
+            (end_logic, end_col, start_logic, start_col)
         };
 
-        if start_screen == end_screen && start_col == end_col {
+        if start_logic == end_logic && start_col == end_col {
             return None;
         }
 
         let mut result = String::new();
-        let mut prev_logic_idx = None;
 
-        for screen_idx in start_screen..=end_screen {
-            if screen_idx >= self.screen_line_map.len() {
-                log::debug!("get_selected_text: screen_idx {} >= map len {}, breaking", screen_idx, self.screen_line_map.len());
-                break;
-            }
-            let (logic_idx, chunk_start, _chunk_end) = self.screen_line_map[screen_idx];
+        for logic_idx in start_logic..=end_logic {
             if logic_idx >= self.lines.len() {
                 log::debug!("get_selected_text: logic_idx {} >= lines len {}, breaking", logic_idx, self.lines.len());
                 break;
             }
 
             // 不同逻辑行之间加换行
-            if let Some(prev) = prev_logic_idx {
-                if logic_idx != prev {
-                    result.push('\n');
-                }
+            if logic_idx > start_logic {
+                result.push('\n');
             }
-            prev_logic_idx = Some(logic_idx);
 
             let chars: Vec<char> = self.lines[logic_idx].content.chars().collect();
-            let from = if screen_idx == start_screen {
-                start_col.max(chunk_start).as_usize()
+            let from = if logic_idx == start_logic {
+                start_col.as_usize()
             } else {
-                chunk_start.as_usize()
+                0
             };
-            let to = if screen_idx == end_screen {
+            let to = if logic_idx == end_logic {
                 end_col.as_usize().min(chars.len())
             } else {
                 chars.len()
             };
             log::debug!(
-                "get_selected_text: screen={}, logic={}, chunk_start={:?}, from={}, to={}, chars_len={}, content={:?}",
-                screen_idx, logic_idx, chunk_start, from, to, chars.len(),
+                "get_selected_text: logic={}, from={}, to={}, chars_len={}, content={:?}",
+                logic_idx, from, to, chars.len(),
                 &self.lines[logic_idx].content.chars().take(60).collect::<String>()
             );
             result.extend(chars[from..to].iter());

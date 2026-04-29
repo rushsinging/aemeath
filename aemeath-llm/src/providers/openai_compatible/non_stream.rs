@@ -1,7 +1,7 @@
 //! 非流式请求：发送消息并等待完整响应
 
 use aemeath_core::message::{ContentBlock, Message, Role};
-use crate::provider::{Provider, StreamHandler};
+use crate::provider::StreamHandler;
 use crate::types::{StreamResponse, SystemBlock};
 use super::OpenAICompatibleProvider;
 
@@ -25,16 +25,11 @@ impl OpenAICompatibleProvider {
 
         // 根据 provider 和 config 控制 reasoning/thinking 模式
         let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        match self.provider {
-            Provider::DeepSeek => {
-                let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
-                request_body["thinking"] = serde_json::json!({"type": thinking_type});
-            }
-            _ => {
-                if !reasoning_enabled {
-                    request_body["enable_thinking"] = serde_json::json!(false);
-                }
-            }
+        if self.config.is_deepseek || self.config.is_zhipu {
+            let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
+            request_body["thinking"] = serde_json::json!({"type": thinking_type});
+        } else if self.config.supports_enable_thinking {
+            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
         }
 
         if !tools.is_empty() {
@@ -45,7 +40,7 @@ impl OpenAICompatibleProvider {
 
         let response = self
             .http
-            .post(format!("{}{}", self.base_url, self.provider.chat_api_suffix()))
+            .post(self.chat_url())
             .headers(headers)
             .json(&request_body)
             .send()

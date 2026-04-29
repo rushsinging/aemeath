@@ -20,7 +20,7 @@ pub trait ToolDisplay: Send + Sync {
     fn detail_style(&self) -> LineStyle { LineStyle::System }
 
     /// Max lines of result output to show (default 3).
-    fn result_max_lines(&self) -> usize { 3 }
+    fn result_max_lines(&self) -> usize { 10 }
 
     /// Style for result content lines.
     fn result_style(&self) -> LineStyle { LineStyle::System }
@@ -451,29 +451,35 @@ impl super::OutputArea {
         format_tool_call("TodoWrite", raw_json)
     }
 
-    pub fn push_completed_tool_call(&mut self, name: &str, input_json: &str) {
-        let (header, details) = format_tool_call(name, input_json);
-        let header = header.replacen("●", "✓", 1);
-        self.push_line(OutputLine {
-            content: header,
-            style: LineStyle::ToolCallSuccess,
-            ..Default::default()
-        });
-        let detail_style = lookup_display(name)
-            .map(|d| d.detail_style())
-            .unwrap_or(LineStyle::System);
-        for detail in details.iter() {
-            self.push_line(OutputLine {
-                content: format!("{INDENT}{detail}"),
-                style: detail_style,
-                ..Default::default()
-            });
+    pub fn push_tool_progress(&mut self, tool_id: &str, text: &str) {
+        self.finish_streaming();
+
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
         }
-        self.push_line(OutputLine {
-            content: String::new(),
-            style: LineStyle::System,
-            ..Default::default()
+
+        let content = format!("{INDENT}↳ {trimmed}");
+        let already_shown = self.lines.iter().rev().take(8).any(|line| {
+            line.tool_id.as_deref() == Some(tool_id) && line.content == content
         });
+        if already_shown {
+            return;
+        }
+
+        let id_tag = Some(tool_id.to_string());
+        let progress_line = OutputLine {
+            content,
+            style: LineStyle::System,
+            tool_id: id_tag,
+        };
+
+        let insert_at = self.lines.iter().enumerate().rev()
+            .find(|(_, line)| line.tool_id.as_deref() == Some(tool_id))
+            .map(|(idx, _)| idx + 1)
+            .unwrap_or(self.lines.len());
+
+        self.insert_lines_at(insert_at, vec![progress_line]);
     }
 
     pub fn push_tool_result_with_diff(

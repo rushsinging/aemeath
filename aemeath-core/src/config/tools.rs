@@ -52,6 +52,13 @@ pub struct AgentRoleConfig {
     /// Appended to the sub-agent system prompt for role-specific instructions.
     #[serde(default, rename = "systemSuffix")]
     pub system_suffix: Option<String>,
+
+    /// Reasoning / thinking mode for sub-agents using this role.
+    /// - `None` (default) — inherit from the main model's reasoning setting
+    /// - `Some(true)` — force enable thinking for this role
+    /// - `Some(false)` — force disable thinking for this role
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
 }
 
 /// Agent configuration

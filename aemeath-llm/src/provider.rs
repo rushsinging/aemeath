@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use crate::types::{StreamResponse, SystemBlock};
 
 // Re-export Provider from aemeath_core
-pub use aemeath_core::provider::Provider;
+pub use aemeath_core::provider::ApiType;
 
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {

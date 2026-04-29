@@ -86,6 +86,9 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
         "glm.md",
         r#"# GLM Model Guidance
 - Do not paraphrase or repeat tool output in Chinese — refer to it directly.
+- Tool call JSON parameters must be strictly valid JSON. Double-check before sending.
+- When editing code, always show the exact old_string and new_string — never approximate.
+- Your reasoning/thinking content will be displayed separately (thinking mode). Keep it extremely concise: 100 characters or less, 2 sentences max. Do NOT repeat the request, do NOT re-explain code, do NOT include any code snippets in your thinking.
 "#,
     ),
     (
@@ -93,7 +96,7 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
         r#"# DeepSeek Model Guidance
 - 你的推理过程（reasoning_content）必须使用中文。在思考阶段使用中文进行推理和分析。
 - 回复内容也使用中文，除非用户明确使用其他语言。
-- 推理过程要精简高效，控制在 200 字以内。只思考关键决策点，不要展开已有代码的逐行复述。避免在推理中重复粘贴大段代码。
+- **强制要求**：reasoning_content 严格限制在 100 字以内。只输出最终结论，禁止中间推导步骤，禁止代码分析，禁止在推理中引用或复制任何代码。超过 2 句话立即停止。这是硬性约束。
 "#,
     ),
     (
@@ -108,6 +111,7 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
         r#"# Language Preference
 - You MUST think/reason in Chinese (中文). Your internal reasoning process must be in Chinese.
 - Your final response should also be in Chinese unless the user explicitly writes in another language.
+- Keep reasoning concise: output only the final conclusion, no intermediate steps, no code snippets.
 "#,
     ),
 ];

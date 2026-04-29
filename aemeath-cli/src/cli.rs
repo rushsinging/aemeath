@@ -35,8 +35,8 @@ pub enum Commands {
         cwd: Option<PathBuf>,
 
         /// Max output tokens
-        #[arg(long, default_value = "200000")]
-        max_tokens: u32,
+        #[arg(long)]
+        max_tokens: Option<u32>,
 
         /// Print raw SSE data for debugging
         #[arg(long)]
@@ -110,7 +110,7 @@ pub struct Args {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
-    pub max_tokens: u32,
+    pub max_tokens: Option<u32>,
     pub verbose: bool,
     pub no_markdown: bool,
     pub context_size: usize,
@@ -132,7 +132,7 @@ impl Args {
         base_url: Option<String>,
         model: Option<String>,
         cwd: Option<PathBuf>,
-        max_tokens: u32,
+        max_tokens: Option<u32>,
         verbose: bool,
         no_markdown: bool,
         context_size: usize,

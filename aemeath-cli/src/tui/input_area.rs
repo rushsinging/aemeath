@@ -496,8 +496,8 @@ impl InputArea {
         }
 
         let max_visible = 5;
-        let _visible_count = self.suggestions.len().min(max_visible);
-        
+        let max_cols = area.width as usize;
+
         // Render suggestion items
         for (i, suggestion) in self.suggestions.iter().take(max_visible).enumerate() {
             let is_selected = i as i32 == self.selected_suggestion;
@@ -516,26 +516,43 @@ impl InputArea {
                 SuggestionType::Session => ">",
             };
 
-            // Render the suggestion text
+            // Build the suggestion text, truncate by display width
             let text = format!(" {} {}", icon, suggestion.display_text);
-            let truncated = if text.len() > area.width as usize - 2 {
-                text.chars().take(area.width as usize - 4).collect::<String>() + ".."
-            } else {
-                text
-            };
+            let truncated = crate::tui::output_area::display::truncate_unicode_width(&text, max_cols.saturating_sub(2));
 
-            // Fill the entire row with background color
-            for x in 0..area.width {
-                let x_usize = x as usize;
-                if x as u16 + area.x < buf.area.width {
-                    let ch = if x_usize < truncated.len() { 
-                        truncated.chars().nth(x_usize).unwrap_or(' ') 
-                    } else { 
-                        ' ' 
-                    };
-                    buf[(area.x + x, y)]
-                        .set_char(ch)
-                        .set_style(Style::default().fg(fg_color).bg(bg_color));
+            // Fill the entire row: walk chars by display width, not by char index
+            let style = Style::default().fg(fg_color).bg(bg_color);
+            let mut col: usize = 0;
+            for ch in truncated.chars() {
+                if col >= max_cols { break; }
+                let ch_w = ch.width().unwrap_or(1) as usize;
+                // Wide char that would overflow → fill remaining with spaces and stop
+                if col + ch_w > max_cols {
+                    for c in col..max_cols {
+                        if area.x + (c as u16) < buf.area.width {
+                            buf[(area.x + c as u16, y)].set_char(' ').set_style(style);
+                        }
+                    }
+                    col = max_cols;
+                    break;
+                }
+                // Write the char at the current column
+                if area.x + (col as u16) < buf.area.width {
+                    buf[(area.x + col as u16, y)].set_char(ch).set_style(style);
+                }
+                // For wide chars (2 cols), fill the next cell with empty marker
+                if ch_w > 1 {
+                    let next_col = col + 1;
+                    if next_col < max_cols && area.x + (next_col as u16) < buf.area.width {
+                        buf[(area.x + next_col as u16, y)].set_char('\0').set_style(style);
+                    }
+                }
+                col += ch_w;
+            }
+            // Fill remaining columns with spaces
+            for c in col..max_cols {
+                if area.x + (c as u16) < buf.area.width {
+                    buf[(area.x + c as u16, y)].set_char(' ').set_style(style);
                 }
             }
         }

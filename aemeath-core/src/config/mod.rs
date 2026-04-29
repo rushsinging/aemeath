@@ -89,7 +89,6 @@ pub struct Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::Provider;
 
     #[test]
     fn test_default_config() {
@@ -104,23 +103,5 @@ mod tests {
     fn test_config_manager_creation() {
         let mgr = ConfigManager::new(None);
         assert!(mgr.global_path().to_string_lossy().contains("aemeath"));
-    }
-
-    #[test]
-    fn test_provider() {
-        assert_eq!(Provider::from_str("anthropic"), Some(Provider::Anthropic));
-        assert_eq!(Provider::from_str("openai"), Some(Provider::OpenAI));
-        assert_eq!(Provider::from_str("deepseek"), Some(Provider::DeepSeek));
-        assert_eq!(Provider::from_str("moonshot"), Some(Provider::Moonshot));
-        assert_eq!(Provider::from_str("dashscope"), Some(Provider::DashScope));
-        assert_eq!(Provider::from_str("invalid"), None);
-    }
-
-    #[test]
-    fn test_provider_defaults() {
-        assert_eq!(Provider::Anthropic.default_base_url(), "https://api.anthropic.com");
-        assert_eq!(Provider::OpenAI.default_base_url(), "https://api.openai.com");
-        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-6");
-        assert_eq!(Provider::OpenAI.default_model(), "gpt-4o");
     }
 }

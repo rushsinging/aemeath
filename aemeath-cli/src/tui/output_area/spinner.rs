@@ -45,6 +45,7 @@ impl super::OutputArea {
     /// Start the animated spinner in the output area
     pub fn start_spinner(&mut self) {
         if self.spinner.is_some() {
+            log::debug!("[SPINNER] start_spinner: already running, frame={}", self.spinner.as_ref().unwrap().frame);
             return;
         }
         let mut rng = rand::rng();
@@ -53,10 +54,14 @@ impl super::OutputArea {
             verb: SPINNER_VERBS.choose(&mut rng).unwrap_or(&"Thinking").to_string(),
             start: std::time::Instant::now(),
         });
+        log::debug!("[SPINNER] start_spinner: started");
     }
 
     /// Stop the animated spinner
     pub fn stop_spinner(&mut self) {
+        if self.spinner.is_some() {
+            log::debug!("[SPINNER] stop_spinner: stopping (was running)");
+        }
         self.spinner = None;
     }
 

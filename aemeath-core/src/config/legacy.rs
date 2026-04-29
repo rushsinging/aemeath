@@ -2,7 +2,6 @@
 //!
 //! 仅保留向后兼容。新配置应使用 `models` 字段。
 
-use crate::provider::Provider;
 use serde::{Deserialize, Serialize};
 
 /// **Legacy** API configuration. Prefer using `models.providers` instead.
@@ -11,9 +10,9 @@ use serde::{Deserialize, Serialize};
 /// commands (`/model`, `/config`). New configurations should use `ModelsConfig`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
-    /// LLM provider to use (None = unset, use base value; Some = explicitly set)
+    /// LLM provider name (None = unset; Some = e.g. "anthropic", "deepseek")
     #[serde(default)]
-    pub provider: Option<Provider>,
+    pub provider: Option<String>,
 
     /// API key (can also be set via provider-specific env var)
     #[serde(skip_serializing_if = "Option::is_none")]

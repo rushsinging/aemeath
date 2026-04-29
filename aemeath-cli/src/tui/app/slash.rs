@@ -207,6 +207,18 @@ impl super::App {
                                 aemeath_core::command::CommandAction::Exit => self.should_exit = true,
                                 aemeath_core::command::CommandAction::Clear => {
                                     self.messages.clear();
+                                    // Reset token counters & status bar runtime state
+                                    self.total_input_tokens = 0;
+                                    self.total_output_tokens = 0;
+                                    self.total_api_calls = 0;
+                                    self.last_input_tokens = 0;
+                                    self.tool_call_active = false;
+                                    self.active_tool_call_ids.clear();
+                                    self.input_queue.clear();
+                                    self.status_bar.set_tokens(0, 0, 0);
+                                    self.status_bar.set_api_calls(0);
+                                    self.status_bar.set_tps(0.0);
+                                    self.status_bar.clear_processing();
                                     self.output_area.push_system("[cleared]");
                                 }
                                 aemeath_core::command::CommandAction::Compact => {
@@ -233,33 +245,33 @@ impl super::App {
                                     api_type,
                                     max_tokens,
                                     context_window,
+                                    reasoning,
                                 } => {
-                                    // Determine provider type from api_type and provider_name
-                                    let provider = match api_type.as_str() {
-                                        "anthropic" => aemeath_core::provider::Provider::Anthropic,
-                                        "ollama" => aemeath_core::provider::Provider::Ollama,
-                                        _ => {
-                                            // Try to match known providers by name for correct URL suffix
-                                            aemeath_core::provider::Provider::from_str(&provider_name)
-                                                .unwrap_or(
-                                                    aemeath_core::provider::Provider::OpenAICompatible,
-                                                )
-                                        }
+                                    // Determine api type from config's api_type field
+                                    let api_type = match api_type.as_str() {
+                                        "anthropic" => aemeath_core::provider::ApiType::Anthropic,
+                                        _ => aemeath_core::provider::ApiType::OpenAICompatible,
                                     };
 
-                                    // Preserve current reasoning state when switching models
-                                    let reasoning = self.client
-                                        .as_ref()
-                                        .map(|c| c.is_reasoning())
-                                        .unwrap_or(true);
+                                    // Build OpenAI provider config
+                                    let openai_config = if matches!(api_type, aemeath_core::provider::ApiType::OpenAICompatible) {
+                                        Some(aemeath_llm::client::OpenAIProviderConfig::from_provider_name(&provider_name))
+                                    } else {
+                                        None
+                                    };
 
-                                    let new_client = aemeath_llm::client::LlmClient::with_provider(
-                                        provider,
+                                    // Model config takes priority; keep current reasoning only when unset.
+                                    let reasoning = reasoning.or_else(|| {
+                                        self.client.as_ref().map(|c| c.is_reasoning())
+                                    }).unwrap_or(true);
+                                    let new_client = aemeath_llm::client::LlmClient::from_config(
+                                        api_type,
                                         api_key,
                                         Some(base_url),
-                                        Some(model_id.clone()),
+                                        model_id.clone(),
                                         max_tokens,
                                         reasoning,
+                                        openai_config,
                                     );
 
                                     self.client = Some(Arc::new(new_client));
@@ -273,6 +285,7 @@ impl super::App {
                                     let display = format!("{}/{}", provider_name, display_name);
                                     self.current_model_display = display.clone();
                                     self.status_bar.set_model(&display);
+                                    self.status_bar.set_thinking(reasoning);
                                     self.output_area
                                         .push_system(&format!("[switched to {}]", display));
                                 }
@@ -311,8 +324,9 @@ impl super::App {
                                                 0
                                             };
                                             // Render history into output_area
-                                            for msg in &msgs {
-                                                self.render_history_message(msg);
+                                            for i in 0..msgs.len() {
+                                                let subsequent = if i + 1 < msgs.len() { Some(&msgs[i + 1]) } else { None };
+                                                self.render_history_message(&msgs[i], subsequent);
                                             }
                                             self.messages = msgs;
                                             self.output_area.push_system(&format!(

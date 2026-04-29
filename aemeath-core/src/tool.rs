@@ -87,6 +87,9 @@ pub struct ToolContext {
     /// Populated when an Agent tool call is in flight, so CliAgentRunner can stream
     /// per-turn textual output back to the user.
     pub progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
+    /// back to the user-visible session.
+    pub parent_session_id: Option<String>,
 }
 
 #[async_trait]

@@ -52,8 +52,8 @@ pub enum UiEvent {
     },
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
-        _tool_id: String,
-        _text: String,
+        tool_id: String,
+        text: String,
     },
     /// Results from StopFailure hook (API error导致 agent 循环结束)
     StopFailureHook {
@@ -96,6 +96,8 @@ pub struct App {
     pub cached_sessions: Vec<(String, String)>,
     /// Whether a tool call is currently active (suppresses thinking output)
     pub tool_call_active: bool,
+    /// Tool call IDs that have started and have not emitted a result yet.
+    pub active_tool_call_ids: std::collections::HashSet<String>,
     /// Hook runner for lifecycle events
     pub hook_runner: aemeath_core::hook::HookRunner,
     /// Pending oneshot sender for AskUserQuestion reply
@@ -161,6 +163,7 @@ impl App {
             skills: std::collections::HashMap::new(),
             cached_sessions: Vec::new(),
             tool_call_active: false,
+            active_tool_call_ids: std::collections::HashSet::new(),
             hook_runner: aemeath_core::hook::HookRunner::empty(
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
@@ -226,8 +229,9 @@ impl App {
                         } else {
                             0
                         };
-                        for msg in &msgs {
-                            self.render_history_message(msg);
+                        for i in 0..msgs.len() {
+                            let subsequent = if i + 1 < msgs.len() { Some(&msgs[i + 1]) } else { None };
+                            self.render_history_message(&msgs[i], subsequent);
                         }
                         self.messages = msgs;
                         self.output_area.push_system(&format!(
@@ -557,7 +561,7 @@ impl App {
     async fn update_task_status(
         &mut self,
         task_store: &Arc<aemeath_core::task::TaskStore>,
-        is_processing: bool,
+        _is_processing: bool,
     ) {
         let tasks = task_store.list().await;
         let mut active: Vec<_> = tasks.iter()
@@ -567,12 +571,10 @@ impl App {
             a.id.parse::<u64>().unwrap_or(u64::MAX)
                 .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
         });
-        let any_active = active.iter().any(|t|
-            t.status == aemeath_core::task::TaskStatus::InProgress
-            || t.status == aemeath_core::task::TaskStatus::Pending);
-        if any_active && is_processing {
-            self.output_area.start_spinner();
-        }
+        // Note: we intentionally do NOT call start_spinner() here.
+        // Spinner lifecycle is managed by update_ui() based on UiEvents.
+        // Starting spinner here caused BUG#24 — it could restart a stopped
+        // spinner at wrong moments (e.g. after ToolResult but before next turn).
         if active.is_empty() {
             self.output_area.set_task_status(Vec::new());
         } else {

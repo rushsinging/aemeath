@@ -276,6 +276,7 @@ pub async fn run_repl(
             max_agent_concurrency: 0,
             agent_semaphore: agent_semaphore.clone(),
             progress_tx: None,
+            parent_session_id: Some(session_id.clone()),
         };
         let agent = Agent {
             registry: &registry,

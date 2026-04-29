@@ -53,6 +53,7 @@ pub async fn process_in_background(
         max_agent_concurrency,
         agent_semaphore,
         progress_tx: None,
+        parent_session_id: Some(session_id.clone()),
     };
     let agent = Agent {
         registry: &registry,
@@ -67,6 +68,13 @@ pub async fn process_in_background(
 
     for _ in 0..MAX_TURNS {
         turn_count += 1;
+        crate::set_current_turn(turn_count);
+        log::info!(
+            "turn started: messages={}, context_size={}, tool_schemas={}",
+            messages.len(),
+            context_size,
+            tool_schemas.len()
+        );
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
             messages.truncate(messages_at_start);
@@ -235,7 +243,8 @@ pub async fn process_in_background(
             .stream_message(&system_blocks, &messages_for_api, &tool_schemas, &mut handler, &cancel)
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-
+        log::debug!("turn api finished: elapsed_secs={:.3}", api_elapsed);
+  
         match response {
             Ok(resp) => {
                 last_api_input_tokens = resp.usage.input_tokens as u64;
@@ -567,8 +576,8 @@ pub async fn process_in_background(
                                 let forward_handle = tokio::spawn(async move {
                                     while let Some(text) = prog_rx.recv().await {
                                         let _ = ui_tx.send(UiEvent::AgentProgress {
-                                            _tool_id: call_id.clone(),
-                                            _text: text,
+                                            tool_id: call_id.clone(),
+                                            text,
                                         }).await;
                                     }
                                 });

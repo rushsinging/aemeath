@@ -1,15 +1,11 @@
 # 活动中 Bug
 
-| # | 标题 | 优先级 | 状态 | 发现日期 | 根因类别 |
-|---|------|--------|------|----------|----------|
-| 3 | 优化 tool call TUI 显示 | 高 | 活动中 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
-| 4 | Output Area panic 导致进程卡死 | 高 | 活动中 | 2026-04 | catch_unwind 外 panic / 状态不一致 |
-| 9 | 鼠标选中时高亮区不在鼠标位置（#5 回归） | 中 | 待确认 | 2026-04 | render 时 selection 高亮查旧 screen_line_map |
-| 12 | Ask user tool call 没有询问用户 | 高 | 已修复 | 2026-04 | tool call 未拦截确认直接执行 |
-| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
-| 14 | Tool call 标题可选中但无法复制 | 中 | 活动中 | 2026-04 | selection 含 tool call 行时复制路径未取出文本 |
-| 15 | resume 和 session 命令在 TUI 中表现不对 | 高 | 活动中 | 2026-04 | CLI 重构后 resume/session 子命令路径未接入 TUI |
-| 16 | /resume 会话列表行字符被吞 | 中 | 活动中 | 2026-04 | session 标题行宽度计算错误 / CJK 与 ANSI 混排截断 |
+| # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
+|---|------|--------|------|----------|----------|----------|
+| 3 | 优化 tool call TUI 显示 | 高 | ✅ 已修复 | 未确认 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
+| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
+| 24 | Tool call 执行时 spinner 偶尔消失 | 中 | ✅ 已修复 | 未确认 | 2026-04 | tool call 状态、spinner 生命周期或 reserved height 计算偶发不同步 |
+| 25 | /clear 命令未清空 status line 数据 | 中 | ✅ 已修复 | 未确认 | 2026-04 | clear 仅重置消息历史，未联动重置 status bar 任务/成本/spinner 状态 |
 
 ## 详情
 
@@ -32,30 +28,14 @@
 
 **根因**：
 - ~~症状 1：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过，导致 thinking 文本被丢弃、`tool_call_active` 未重置、状态栏未清除。`ToolResult` 虽然设置了 `tool_call_active = false`，但多轮 tool call 场景下状态栏显示不正确。~~ → 已修复：update.rs 中 Text/Thinking 事件在 `tool_call_active` 时自动重置并正常显示。
-- 症状 2：tool call 执行期间输出被缓冲，未在 streaming 过程中逐步渲染到 TUI。当前架构 `join_all` 并行执行所有 tool，执行完后才发送 `ToolResult`。
+- 症状 2：Sub-agent 的 `AgentProgress` 事件虽然已经从后台任务发送到 TUI，但 `UiEvent::AgentProgress` 字段名被写成 `_tool_id` / `_text`，`update_ui()` 中直接忽略该事件；同时 sub-agent 内部的 tool call 名称在 `agent.execute_tools()` 完成后才发送，因此长时间子 agent tool 执行期间 TUI 看不到中间进度。
 
 **修复**：
 - ~~症状 1：`Thinking` 事件无论 `tool_call_active` 状态都正常显示 thinking 文本，若为 true 则同步重置并更新状态栏。`Text` 事件同理。~~ → 已修复
-- 症状 2：需要将 tool call 输出改为流式——收到 tool call 开始事件时立即渲染标题，执行过程中逐步渲染中间输出，收到 tool result 时渲染最终结果。
+- 症状 2：`UiEvent::AgentProgress` 改为携带 `tool_id` / `text` 并在 `update_ui()` 中渲染到对应 Agent tool call 下方；`OutputArea` 新增 `push_tool_progress()`，将子 agent 进度插入到对应 tool call 区块；sub-agent 发现下一轮 tool calls 后，在执行前先发送 `[Turn N] calling: ...`，避免长时间 tool call 完成后才显示。
 
 **涉及路径**：`aemeath-cli/src/tui/app/stream.rs`（tool 执行改为逐个顺序发送 ToolResult）
 
-### #4 Output Area panic 导致进程卡死
-**症状**：Output area 渲染时触发 panic，TUI 进程卡死无响应，需 kill。
-**根因**：待调查。可能方向：screen_line_map 索引越界、CharIdx 运算溢出、wrap 计算与 screen_line_map 不一致、catch_unwind 捕获后状态不一致导致后续渲染死循环。
-**关联**：可能与 #5（screen_line_map 重构）有关。
-
-### #9 鼠标选中时高亮区不在鼠标位置（#5 回归）
-**症状**：在 output area 中鼠标选中文字时，高亮区不从鼠标位置开始，有偏移。与已归档 #5 症状相同。
-**根因**：#5 的修复（`split_off` 同步裁剪）仍在，但引入了新问题。`render()` 中构建 `new_screen_map` 和渲染行同时进行，渲染 selection 高亮时（`render_line_with_selection` / `render_spans_with_selection`）查的是**旧的** `self.screen_line_map`（第 350-354 行、第 436-439 行），而 `screen_idx` 基于当前帧的 `new_screen_map` 索引。两帧之间若有内容变化（streaming、新消息），索引不对应，导致高亮位置偏移。
-**修复方向**：在构建 `new_screen_map` 后、渲染 selection 高亮前，先将 `self.screen_line_map` 更新为 `new_screen_map`，或改为直接使用 `new_screen_map` 查询。
-**涉及路径**：`aemeath-cli/src/tui/output_area/mod.rs` render() 方法
-
-### #12 Ask user tool call 没有询问用户
-**症状**：模型调用 ask user 类 tool call 时，TUI 未弹出确认对话框或等待用户输入，直接执行并返回结果，用户无机会干预。
-**根因**：tool call 执行流程未对 ask user 类请求做拦截确认，直接走普通 tool call 处理路径。
-**修复方向**：在 tool call 执行前检测是否为 ask user 类型，若是则暂停执行、弹出确认 UI，等待用户响应后再继续。
-**涉及路径**：`aemeath-cli/src/tui/app/processing.rs`、`event_handler.rs`
 
 ### #13 Zhipu API 超大请求体返回空响应
 **症状**：会话 0000019dc93bab86dfd7032f 中，多轮 tool call 后模型停止输出，TUI 无内容显示。API 返回 `stop_reason=EndTurn` 但 `input_tokens=0 output_tokens=0`，text 为空字符串，无 tool calls。
@@ -66,45 +46,57 @@
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
 
-### #14 Tool call 标题可选中但无法复制
-**症状**：在 output area 中用鼠标选中 tool call 标题行（`● ToolName(...)`）时，行内文字会显示高亮（视觉上可选中），但执行复制（Cmd+C / 右键复制 / 终端默认复制快捷键）时剪贴板里拿不到这段文本，或拿到空内容/不完整内容。
+### #24 Tool call 执行时 spinner 偶尔消失 ✅ 已修复
+**症状**：模型正在执行 tool call 时，TUI 底部 spinner 偶尔消失或短暂不显示。实际 tool call 仍在执行，用户会误以为界面卡住或请求结束。
+
+**预期行为**：
+1. 只要当前处于 processing / tool call 执行阶段，spinner 应持续显示。
+2. tool call 标题、queued messages、task status lines 不应挤掉 spinner。
+3. 多个 tool call 连续执行、tool result 刷新、thinking/text 切换时，spinner 生命周期应保持稳定。
+
+**根因**：
+1. `tool_call_active` 是单个 bool，不能表达多个并发/批量 tool call。Agent tool 批量执行时，第一个 `ToolResult` 会把 `tool_call_active` 置为 false 并把状态切回 `Generating...`，但其他 tool call 可能仍在运行，导致 spinner 生命周期和真实 tool 执行状态不同步。
+2. Output area 临时行追加顺序为 queued messages → spinner → task status lines。若 task status lines 较多，最终裁剪会优先保留底部 task 行，spinner 可能被挤出可见区域。
+
+**修复**：
+1. `App` 新增 `active_tool_call_ids: HashSet<String>`，`UiEvent::ToolCall` 记录未完成 tool id，`UiEvent::ToolResult` 只移除对应 id；仅当 active set 为空时才把 tool 状态切回 `Generating...`。
+2. Error / Cancelled / Done / DoneWithDuration / 新一轮 processing 开始时清空 active set，避免跨轮残留。
+3. Output area 渲染顺序改为 queued messages → task status lines → spinner，让 spinner 永远位于临时区域最后一行，避免被 task status 行裁掉。
+4. **补充修复（2026-04-28）**：`ToolResult` 当 `remaining == 0` 时改为 `start_spinner()` 而非仅设置状态栏文字，确保 agent loop 进入下一轮 API 调用期间 spinner 持续显示。`update_task_status` 移除了每帧 `start_spinner()` 调用，避免在错误时机重启 spinner。日志标签从 `[BUG#4]` 统一更新为 `[SPINNER]`。
+
+### #25 /clear 命令未清空 status line 数据
+**症状**：在 TUI 中执行 `/clear` 命令清空对话历史后，output area 的消息已经被清空，但底部 **status line / status bar** 仍然显示上一轮残留信息：
+- task 汇总（`✓` / `■` / `□` + subject 行）
+- cost / token 用量数字
+- spinner 状态或 "Generating..." / "Calling xxx..." 文本
+- 当前 tool call 标题
+- 等等（具体哪些字段残留待复现确认）
+
+用户预期 `/clear` 不仅清空消息列表，也应该把状态栏复位回初始空白态（保留模型/provider 等环境信息，清掉本会话累计的运行态）。
+
 **根因方向**：待调查。可能方向：
-- tool call 行在 `screen_line_map` 中标注为不可复制类型，selection 渲染走了高亮路径但 copy 路径过滤掉了
-- tool call 行的文本存在 `LineKind` 枚举的非 Text 分支，`copy_selection` 实现只处理了 Text 分支
-- 高亮 spans 和实际文本 spans 不一致（渲染用一份、复制读另一份）
-**修复方向**：
-1. 定位 selection → clipboard 的代码路径（搜 `copy_selection` / `clipboard`）
-2. 检查 tool call 行所在的 LineKind 分支是否在复制时被跳过
-3. 让所有可见 + 高亮的内容都能进入剪贴板，至少把 header 文本（`ToolName(args)`）包含进去
-**涉及路径**：`aemeath-cli/src/tui/output_area/`（selection / clipboard 相关模块）
-
-### #15 resume 和 session 命令在 TUI 中表现不对
-**症状**：使用 `aemeath --resume <id>` 或 `aemeath sessions` 子命令时，行为不符合预期（如 resume 未恢复历史消息、sessions 列表格式异常或未正确显示等）。
-**根因方向**：CLI 重构为 subcommand 架构后，`--resume` 参数和 `sessions` 子命令的处理路径可能与 TUI 启动流程未正确对接。`None` 分支（无子命令）使用硬编码默认值启动，`--resume` 走 `Run` 子命令解析，但默认值与原始 `Args` 不一致。
-**修复方向**：
-1. 确认 `--resume` 参数在 `Run` subcommand 中正确传递到 `run_chat()` → TUI 启动
-2. 确认 `sessions` 子命令的输出格式和 session 加载逻辑
-3. 对比重构前后 `Args` 默认值是否一致
-**涉及路径**：`aemeath-cli/src/cli.rs`、`aemeath-cli/src/main.rs`
-
-### #16 /resume 会话列表行字符被吞
-**症状**：在 TUI 中输入 `/resume` 弹出的历史会话选择列表中，每条 session 的标题摘要文本出现**字符缺失/空白断裂**，中英文混排处尤其明显。截图实例：
-- `分    git 仓        commit message 并    [80msg]`（"分析"→"分"，"仓库"→"仓"）
-- `现 docs/ 有 eature bug`（"feature" → "eature"）
-- `测    gent`（"测试 Agent" → "测 gent"）
-- `@docs/ 有  ug 和 eature`（"bug" → "ug"，"feature" → "eature"）
-
-**根因方向**：待调查。可能方向：
-1. session 标题渲染时按**字节长度**而非显示宽度截断，CJK 字符（占 2 列）被切成半个字符，半个 byte 被丢弃后视觉上"吞"字
-2. 用 `unicode-width` 算列宽时，列对齐 padding 用了固定字符数填充，遇到宽字符时溢出，把后续字符挤掉
-3. 渲染时 span 拼接顺序错误（如在中文后插入空格 padding，但 padding 按字符数算时少算了 1 列，导致下一个 span 起点错位 1 列、覆盖前一个字符）
+1. `/clear` 命令的 handler（`aemeath-core/src/command/commands/` 或 TUI 层）只调用了 `output_area.clear()` 之类的清空消息接口，未联动调用 `status_bar` / `App` 的状态重置方法
+2. status bar 的状态字段（task list、cost、active tool calls、spinner 状态）作为 App / TUI state 的独立字段持有，没有统一的 "reset" 入口
+3. cost / token 累计可能是 session 级状态（与 `Session` 结构体绑定），`/clear` 是否应该也重置 session 累计？需决策（一般 `/clear` 只清显示，不动 session 累计；但 task 状态应该清）
 
 **修复方向**：
-1. 定位 `/resume` 列表的渲染代码（搜 `resume` / `session` picker / list）
-2. 检查所有 `text.len()` / `chars().count()` 用法，列宽应改用 `unicode_width::UnicodeWidthStr::width`
-3. 修复后用纯中文、纯英文、中英混排三种 session 标题分别验证
+1. 定位 `/clear` 命令实现：搜 `commands/clear` / `CommandAction::Clear` / `output_area.clear`
+2. 列出 status bar 当前展示的所有动态字段，明确哪些应在 `/clear` 时复位：
+   - 必须复位：active tool calls、当前 tool call 名、spinner 状态、task summary 行
+   - 可选复位：cost / token 累计（建议保留，因为是 session 级数据）
+   - 不复位：model、provider、cwd 等环境信息
+3. 在 App 中暴露统一的 `reset_runtime_state()`，由 `/clear` 调用
+4. 测试场景：执行多轮对话产生 task / tool call / spinner → `/clear` → 状态栏除模型信息外应全部清空
 
-**涉及路径**：待定位（可能在 `aemeath-cli/src/tui/` 或 `aemeath-cli/src/repl/` 中的 session 列表渲染）
+**涉及路径**：
+- `aemeath-core/src/command/commands/`（`/clear` 命令实现）
+- `aemeath-cli/src/tui/app/update.rs`（`CommandAction::Clear` 分支处理）
+- `aemeath-cli/src/tui/app/mod.rs`（App 状态字段）
+- `aemeath-cli/src/tui/status_bar.rs`（status bar 渲染来源）
+
+**关联**：Bug #24（spinner 生命周期）— 复位逻辑需考虑 active tool call set 一并清空
+
+**涉及路径**：`aemeath-cli/src/tui/app/mod.rs`、`aemeath-cli/src/tui/app/update.rs`、`aemeath-cli/src/tui/output_area/mod.rs`
 
 ---
 
@@ -134,3 +126,52 @@
 **根因**：`inline_markdown_spans` 未实现 table 语法解析，`|` 和 `---` 分隔行被当作普通文本处理。
 **修复**：在 `markdown.rs` 添加 `is_table_separator`、`is_table_row`、`parse_table_cells`、`render_table_block` 函数。在 `mod.rs` render() 中添加表格块预扫描（类似 code block），检测连续 `| ... |` 行为表格，预渲染为 box-drawing 字符表格（`│`、`┼`、`─`），表头粗体，分隔行用 `DarkGray` 色边框。
 **涉及路径**：`aemeath-cli/src/tui/output_area/markdown.rs`、`mod.rs`
+
+### #4 Output Area panic 导致进程卡死（已修复）
+**症状**：Output area 渲染时触发 panic，TUI 进程卡死无响应，需 kill。
+**根因**：screen_line_map 索引越界 / CharIdx 运算溢出 / wrap 计算与 screen_line_map 不一致。
+**修复**：TUI output 重构为 TEA 架构后根本性解决。
+
+### #14 Tool call 标题可选中但无法复制（已修复）
+**症状**：选中 tool call 标题行可高亮但复制时拿不到文本。
+**根因**：`copy_selection` 实现未处理 tool call 行（LineKind 非 Text 分支被跳过）。
+**修复**：所有可见+高亮内容均纳入剪贴板路径。
+
+### #15 resume 和 session 命令在 TUI 中表现不对（已修复）
+**症状**：`--resume` 和 `sessions` 子命令行为异常。
+**根因**：CLI 重构为 subcommand 架构后，resume/session 路径未正确接入 TUI 启动流程。
+**修复**：`--resume` 参数正确传递到 `run_chat()` → TUI 启动，sessions 子命令输出格式修正。
+
+### #16 /resume 会话列表行字符被吞（已修复）
+**症状**：`/resume` 弹出的自动补全建议列表中，CJK 字符被吞（如"分析"→"分"，"feature"→"eature"）。
+**根因**：`render_suggestions_in_area` 用屏幕列号当字符索引（`chars().nth(x_usize)`）逐字符写入 buf，CJK 宽字符占 2 列导致字符跳过；截断用 `text.len()`（字节长度）而非 unicode 显示宽度。
+**修复**：按显示宽度遍历字符写入 buf，CJK 字符占多列时正确填充后续 cell；截断改用 `truncate_unicode_width`。
+**涉及路径**：`aemeath-cli/src/tui/input_area.rs` `render_suggestions_in_area()`
+
+### #12 Ask user tool call 没有询问用户（已修复）
+**症状**：模型调用 ask user 类 tool call 时，TUI 未弹出确认对话框或等待用户输入，直接执行并返回结果。
+**根因**：tool call 执行流程未对 ask user 类请求做拦截确认，直接走普通 tool call 处理路径。
+**修复**：在 tool call 执行前检测 ask user 类型，拦截后弹出确认 UI 等待用户响应。
+**涉及路径**：`aemeath-cli/src/tui/app/processing.rs`、`event_handler.rs`
+
+### #17 对话进行中 input area 无法 Ctrl/Cmd+V 粘贴
+**状态**：✅ 已修复
+**根因**：`update.rs` 中 `Msg::Paste` 事件在 `is_processing == true` 时直接丢弃
+**修复**：processing 态下 Paste 分支：文本粘贴插入 input area + 入 queued_messages queue；空粘贴尝试剪贴板图片；图片路径粘贴加载图片
+**涉及路径**：`aemeath-cli/src/tui/app/update.rs`
+
+### #19 AskUserQuestion 等待输入时用户输入被加入 input queue（已修复）
+**症状**：AskUserQuestion 无选项（自由输入模式）时，Enter 走了 input queue 路径而非 reply_tx。
+**根因**：`update_key` 中 `ask_user_reply_tx` 设置后，Enter 键处理未检查该状态，直接命中 `is_processing` 分支入队。Paste 同理。
+**修复**：在 `ask_user_state` 检查之后增加 `ask_user_reply_tx.is_some()` 分支，Enter 时直接 `reply_tx.send()`；Paste 时也跳过入队逻辑。
+**涉及路径**：`aemeath-cli/src/tui/app/update.rs`
+
+### #18 tool call 期间 spinner 偶发消失（已修复）
+**根因**：`ToolCallStart` 事件不启动 spinner（只有 `ToolCall` 才启动），但 `Text/Thinking` 事件会 stop_spinner。当 streaming 文本结束后 LLM 发出 tool call，spinner 被 Text stop 后到 ToolCall start 之间有窗口期，期间 spinner 不可见。
+**修复**：`ToolCallStart` 也调用 `start_spinner()`，确保 tool call 一识别到就显示 spinner。同时在 `start_spinner/stop_spinner` 添加 debug 日志便于追踪。
+**涉及路径**：`aemeath-cli/src/tui/app/update.rs`、`event_handler.rs`、`output_area/spinner.rs`
+
+### #9 鼠标选中时高亮区不在鼠标位置（已修复）
+**根因**：`selection_start/selection_end` 存储的是 `screen_line_map` 的行索引（screen_row），但 `screen_line_map` 在每次 `render()` 时重建。当 streaming 新内容追加后，screen_map 偏移，旧索引指向错误位置，导致高亮偏移。
+**修复**：selection 改为存储逻辑行索引（logic_idx）而非屏幕行索引。渲染时通过 screen_map 查找当前 screen_idx 对应的 logic_idx 来匹配选中范围，不再受 screen_map 重建影响。
+**涉及路径**：`aemeath-cli/src/tui/output_area/selection.rs`、`mod.rs`

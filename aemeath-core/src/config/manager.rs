@@ -1,7 +1,6 @@
 //! 配置管理器 — 加载、合并、保存配置
 
 use super::*;
-use crate::provider::Provider;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
@@ -64,26 +63,18 @@ impl ConfigManager {
     fn apply_env_vars(mut config: Config) -> Config {
         // Provider
         if let Ok(provider_str) = std::env::var("AEMEATH_PROVIDER") {
-            if let Some(provider) = Provider::from_str(&provider_str) {
-                config.api.provider = Some(provider);
-            }
+            config.api.provider = Some(provider_str);
         }
 
-        // API key - check provider-specific env var first
-        let effective_provider = config.api.provider.unwrap_or_default();
-        let provider_key_env = effective_provider.api_key_env();
-        if let Ok(key) = std::env::var(provider_key_env) {
-            config.api.key = Some(key);
-        } else if let Ok(key) = std::env::var("LLM_API_KEY") {
-            // Generic fallback (provider-agnostic)
+        // API key - check provider-specific env var first, then generic
+        if let Ok(key) = std::env::var("LLM_API_KEY") {
             config.api.key = Some(key);
         }
 
-        // Base URL - check provider-specific env var first
-        let provider_base_env = effective_provider.base_url_env();
+        // Base URL
         if let Ok(url) = std::env::var("AEMEATH_BASE_URL") {
             config.api.base_url = Some(url);
-        } else if let Ok(url) = std::env::var(provider_base_env) {
+        } else if let Ok(url) = std::env::var("LLM_BASE_URL") {
             config.api.base_url = Some(url);
         }
 

@@ -79,6 +79,7 @@ pub enum CommandAction {
         api_type: String,
         max_tokens: u32,
         context_window: usize,
+        reasoning: Option<bool>,
     },
     /// Review code changes — injects a user message into the conversation
     Review(String),

@@ -7,20 +7,34 @@ mod render;
 mod repl;
 mod tui;
 
-use aemeath_core::provider::Provider;
+use aemeath_core::logging::{self, LogFile};
+use aemeath_core::provider::ApiType;
 use aemeath_core::tool::ToolRegistry;
-use aemeath_llm::client::LlmClient;
+use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
 use clap::Parser;
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 /// 全局 session ID，供日志格式化器使用
 static SESSION_ID: OnceLock<String> = OnceLock::new();
+static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
 
 /// 设置全局 session ID（只能调用一次）
 fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);
+}
+
+pub(crate) fn set_current_turn(turn: usize) {
+    CURRENT_TURN.store(turn, Ordering::Relaxed);
+}
+
+fn current_turn_for_log() -> Option<usize> {
+    match CURRENT_TURN.load(Ordering::Relaxed) {
+        0 => None,
+        turn => Some(turn),
+    }
 }
 
 use cli::{Args, Cli, Commands};
@@ -29,83 +43,8 @@ use prompt::build_system_prompt_parts;
 
 #[tokio::main]
 async fn main() {
-    // 初始化结构化日志 — 路由到 ~/.aemeath/aemeath.log，避免库的 log::warn! / log::error! 破坏 TUI 渲染
-    // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复旧的 stderr 行为
-    {
-        let mut builder = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug,aemeath_cli=debug"),
-        );
-        let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        if !use_stderr {
-            let log_path = dirs::home_dir()
-                .unwrap_or_default()
-                .join(".aemeath")
-                .join("aemeath.log");
-            if let Some(parent) = log_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Ok(file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                builder.target(env_logger::Target::Pipe(Box::new(file)));
-            }
-        }
-        builder.format(|buf, record| {
-            use std::io::Write;
-            let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
-            writeln!(
-                buf,
-                "[{} {} {}] {}",
-                buf.timestamp(),
-                session,
-                record.level(),
-                record.args()
-            )
-        });
-        builder.init();
-    }
-
-    // 设置 panic hook：将 panic 信息写入日志文件 + stderr
-    {
-        let log_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".aemeath")
-            .join("panic.log");
-        std::panic::set_hook(Box::new(move |info| {
-            let payload = info
-                .payload()
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| info.payload().downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "unknown panic".to_string());
-
-            let location = info
-                .location()
-                .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
-                .unwrap_or_else(|| "unknown location".to_string());
-
-            let msg = format!("[PANIC] {} at {}", payload, location);
-
-            // 写日志文件
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                use std::io::Write;
-                let _ = writeln!(f, "[{:?}] {}", std::time::SystemTime::now(), msg);
-                // 写 backtrace
-                let _ = writeln!(f, "Backtrace:\n{:?}", std::backtrace::Backtrace::capture());
-            }
-
-            // 同时写 stderr（非 TUI 模式可见）
-            eprintln!("{}", msg);
-        }));
-    }
+    init_logging();
+    init_panic_hook();
 
     let cli = Cli::parse();
 
@@ -146,13 +85,79 @@ async fn main() {
         None => {
             // 无子命令 — 使用默认值启动（兼容旧行为）
             let args = Args::from_run(
-                "anthropic".into(), None, None, None, None, 200000, false,
+                "anthropic".into(), None, None, None, None, None, false,
                 false, 128000, None, false, true, false,
                 None, None, false,
             );
             run_chat(args).await;
         }
     }
+}
+
+fn init_logging() {
+    // 初始化结构化日志 — 路由到 ~/.aemeath/aemeath.log，避免库的 log::warn! / log::error! 破坏 TUI 渲染。
+    // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复 stderr 行为。
+    let mut builder = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug,aemeath_cli=debug"),
+    );
+    let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !use_stderr {
+        if let Ok(file) = logging::open_append(LogFile::Aemeath) {
+            builder.target(env_logger::Target::Pipe(Box::new(file)));
+        }
+    }
+    builder.format(|buf, record| {
+        use std::io::Write;
+        let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
+        writeln!(
+            buf,
+            "{}",
+            logging::format_text_line_with_turn(
+                session,
+                current_turn_for_log(),
+                record.level().as_str(),
+                record.module_path().unwrap_or(record.target()),
+                &record.args().to_string(),
+            )
+        )
+    });
+    builder.init();
+}
+
+fn init_panic_hook() {
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+
+        let location = info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
+        let backtrace = format!("{:?}", std::backtrace::Backtrace::capture());
+        let msg = format!("{} at {}", payload, location);
+        let extra = serde_json::json!({
+            "location": location,
+            "backtrace": backtrace,
+        });
+
+        let _ = logging::append_json_line_with_turn(
+            LogFile::Panic,
+            session,
+            current_turn_for_log(),
+            "ERROR",
+            "panic",
+            &msg,
+            extra,
+        );
+        eprintln!("[PANIC] {}", msg);
+    }));
 }
 
 /// 处理 `aemeath models` 子命令
@@ -386,40 +391,33 @@ async fn run_chat(mut args: Args) {
         }
     }
 
-    // 解析 provider
-    let provider = Provider::from_str(&args.provider).unwrap_or_else(|| {
-        log::error!("Unknown provider '{}'. Use one of: anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible", args.provider);
-        std::process::exit(1);
-    });
+    // 解析 provider —— 从 config.json 获取 api type，不再使用 Provider enum
+    // 确定 api_type: 从 config.json models.default 或 models.providers 中查找
+    let api_type = determine_api_type(&args.provider, config_file.as_ref());
 
     // 获取 API key: CLI args > env vars > config.json
     let api_key = args.api_key.unwrap_or_else(|| {
-        let env_key = provider.api_key_env();
-        std::env::var(env_key).unwrap_or_else(|_| {
-            // 回退: 尝试 ANTHROPIC_API_KEY（兼容旧版）
-            if provider == Provider::Anthropic {
-                if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-                    return key;
-                }
-            }
-            // 回退: 尝试 config.json 中匹配的 provider
-            if let Some(ref cfg) = config_file {
-                // 按精确 provider 名匹配
-                if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
-                    if !pcfg.api_key.is_empty() {
-                        return pcfg.api_key.clone();
+        // 尝试通用 env var
+        std::env::var("ANTHROPIC_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .or_else(|_| std::env::var("LLM_API_KEY"))
+            .unwrap_or_else(|_| {
+                // 回退: 尝试 config.json 中配置的 key
+                if let Some(ref cfg) = config_file {
+                    if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
+                        if !pcfg.api_key.is_empty() {
+                            return pcfg.api_key.clone();
+                        }
+                    }
+                    for (_, pcfg) in &cfg.models.providers {
+                        if !pcfg.api_key.is_empty() {
+                            return pcfg.api_key.clone();
+                        }
                     }
                 }
-                // 尝试任何 provider（如果只有一个或第一个匹配）
-                for (_, pcfg) in &cfg.models.providers {
-                    if !pcfg.api_key.is_empty() {
-                        return pcfg.api_key.clone();
-                    }
-                }
-            }
-            log::error!("API key not set. Use --api-key, set {}, or configure in ~/.aemeath/config.json", env_key);
-            std::process::exit(1);
-        })
+                eprintln!("Error: API key not set. Use --api-key, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
+                std::process::exit(1);
+            })
     });
 
     let cwd = args
@@ -427,13 +425,11 @@ async fn run_chat(mut args: Args) {
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // 获取 model: CLI args > env var > config.json default > config.json provider > provider default
+    // 获取 model: CLI args > env var > config.json default > config.json provider
     let model = args.model.unwrap_or_else(|| {
-        // 1. 来自 models.default（通过 find_model 解析）
         if let Some((ref model_id, _)) = config_default_model {
             return model_id.clone();
         }
-        // 2. 来自 config.json provider 的第一个 model
         if let Some(ref cfg) = config_file {
             if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
                 if let Some(first_model) = pcfg.models.first() {
@@ -441,15 +437,9 @@ async fn run_chat(mut args: Args) {
                 }
             }
         }
-        // 3. 硬编码默认值（仅当用户没有显式指定 provider 且无 config 时）
-        if args.provider != "anthropic" {
-            log::error!(
-                "No model configured for provider '{}'. Add a model configuration to ~/.aemeath/config.json, or specify --model.",
-                args.provider
-            );
-            std::process::exit(1);
-        }
-        provider.default_model().to_string()
+        // 硬编码默认值
+        eprintln!("Error: No model configured for provider '{}'. Add model config or specify --model.", args.provider);
+        std::process::exit(1);
     });
 
     // 获取 base_url: CLI args > env var > config.json > provider default
@@ -463,24 +453,52 @@ async fn run_chat(mut args: Args) {
         }
     }
 
-    // 将 max_tokens 限制在 provider 上限内
-    let max_tokens = {
-        let limit = provider.max_output_tokens();
-        if limit > 0 && args.max_tokens > limit {
-            log::info!("max_tokens {} exceeds provider limit, clamped to {}", args.max_tokens, limit);
-            limit
-        } else {
-            args.max_tokens
+    // max_tokens: CLI args > config.json model.maxTokens > 32000 default
+    let max_tokens = args.max_tokens.unwrap_or_else(|| {
+        // 从 config.json 中查找当前 model 的 maxTokens
+        if let Some(ref cfg) = config_file {
+            // 用 "provider/model_id" 格式查找 model entry
+            let query = format!("{}/{}", args.provider, model);
+            if let Some((_, _, model_entry)) = cfg.models.find_model(&query) {
+                if model_entry.max_tokens > 0 {
+                    return model_entry.max_tokens;
+                }
+            }
         }
+        32000 // 保守默认值
+    });
+
+    // 构建 OpenAI provider config (用于 OpenAI-compatible 提供者)
+    let openai_config = if matches!(api_type, ApiType::OpenAICompatible) {
+        Some(OpenAIProviderConfig::from_provider_name(&args.provider))
+    } else {
+        None
     };
 
-    let client = LlmClient::with_provider(
-        provider,
+    // 提前计算 reasoning（当前实际模型配置优先于 CLI flag）
+    let current_model_entry = config_file.as_ref().and_then(|cfg| {
+        let query = format!("{}/{}", args.provider, model);
+        cfg.models.find_model(&query).map(|(_, _, entry)| entry)
+    });
+    let reasoning = current_model_entry
+        .as_ref()
+        .and_then(|entry| entry.reasoning)
+        .unwrap_or(!args.no_think);
+    log::info!(
+        "[main] reasoning={} (current_model={:?}, args.no_think={})",
+        reasoning,
+        current_model_entry.as_ref().map(|entry| format!("id={}, reasoning={:?}", entry.id, entry.reasoning)),
+        args.no_think
+    );
+
+    let client = LlmClient::from_config(
+        api_type,
         api_key,
         args.base_url,
-        Some(model.clone()),
+        model.clone(),
         max_tokens,
-        !args.no_think, // reasoning defaults to on, --no-think disables it
+        reasoning,
+        openai_config,
     );
 
     let client = std::sync::Arc::new(client);
@@ -524,12 +542,11 @@ async fn run_chat(mut args: Args) {
               let pool = if has_multi_providers {
                   Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
                       client.clone(),
-                      models_config_arc,
+                      models_config_arc.clone(),
                   )))
               } else {
                   None
               };
-
               let agents_config = std::sync::Arc::new(
                   config_file
                       .as_ref()
@@ -542,6 +559,8 @@ async fn run_chat(mut args: Args) {
                   pool,
                   agents_config,
                   hook_runner: hook_runner.clone(),
+                  reasoning,
+                  models_config: models_config_arc.clone(),
               })
           };
 
@@ -556,7 +575,6 @@ async fn run_chat(mut args: Args) {
             .as_ref()
             .map(|c| c.models.guidance.clone())
             .unwrap_or_default();
-        let reasoning = !args.no_think;
         let model_guidance = aemeath_core::guidance::resolve_guidance_async(
             &model,
             &guidance_config,
@@ -693,4 +711,18 @@ async fn run_chat(mut args: Args) {
         }
         println!("aemeath --resume {}", session_id);
     }
+}
+
+/// Determine the API type from config.json based on provider name.
+/// Falls back to OpenAICompatible if provider not found in config.
+fn determine_api_type(provider_name: &str, config_file: Option<&aemeath_core::config::Config>) -> ApiType {
+  if let Some(cfg) = config_file {
+      if let Some(pcfg) = cfg.models.provider_ci(provider_name) {
+          match pcfg.api.as_str() {
+              "anthropic" => return ApiType::Anthropic,
+              _ => return ApiType::OpenAICompatible,
+          }
+      }
+  }
+  ApiType::OpenAICompatible
 }

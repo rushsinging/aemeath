@@ -44,9 +44,9 @@ pub struct OutputArea {
     pub queued_line_count: usize,
     /// 鼠标是否正在拖拽选择
     pub is_selecting: bool,
-    /// 选择起始点：(屏幕行索引, char 偏移)
+    /// 选择起始点：(逻辑行索引, char 偏移)
     pub selection_start: Option<(usize, CharIdx)>,
-    /// 选择结束点：(屏幕行索引, char 偏移)
+    /// 选择结束点：(逻辑行索引, char 偏移)
     pub selection_end: Option<(usize, CharIdx)>,
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
     /// 由 render() 构建，供 selection 使用
@@ -112,10 +112,11 @@ impl OutputArea {
         // 更新宽度
         self.term_width = (area.width as usize).saturating_sub(2);
 
-        // 构建 spinner 行和任务状态行
+        // 构建 spinner 行、任务状态行和排队消息行
         let spinner_line = self.build_spinner_line();
+        let queued_lines = self.build_queued_message_lines();
         let task_line_count = if self.spinner.is_some() { self.task_status_lines.len() } else { 0 };
-        let queued_count = self.queued_messages.len();
+        let queued_count = queued_lines.len();
         let reserved = if spinner_line.is_some() { 1 + task_line_count + queued_count } else { queued_count };
 
         let visible_lines = (area.height as usize).saturating_sub(reserved);
@@ -377,21 +378,18 @@ impl OutputArea {
 
         self.screen_line_map = new_screen_map;
 
-        // 追加排队消息、spinner 和任务状态行
-        for msg in &self.queued_messages {
-            lines.push(Line::styled(
-                format!("> {msg}"),
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-        if let Some(sl) = spinner_line {
-            lines.push(sl);
+        // 追加排队消息、任务状态行和 spinner。spinner 放在最后，避免临时行过多时被裁剪掉。
+        lines.extend(queued_lines);
+        if spinner_line.is_some() {
             for task_line in &self.task_status_lines {
                 lines.push(Line::styled(
                     format!("  {task_line}"),
                     Style::default().fg(Color::DarkGray),
                 ));
             }
+        }
+        if let Some(sl) = spinner_line {
+            lines.push(sl);
         }
 
         let lines: Vec<Line> = if lines.len() > area.height as usize {
@@ -478,51 +476,75 @@ impl OutputArea {
         self.last_line_count = total_lines;
     }
 
+    /// 渲染排队消息，保留消息内换行并为后续行补齐缩进
+    fn build_queued_message_lines(&self) -> Vec<Line<'static>> {
+        let style = Style::default().fg(Color::DarkGray);
+        let mut lines = Vec::new();
+
+        for msg in &self.queued_messages {
+            let mut parts = msg.split('\n');
+            let first = parts.next().unwrap_or("");
+            lines.push(Line::styled(format!("> {first}"), style));
+
+            for part in parts {
+                lines.push(Line::styled(format!("  {part}"), style));
+            }
+        }
+
+        lines
+    }
+
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
     fn render_line_with_selection(&self, screen_idx: usize, content: &str, base_style: Style, screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
-        let Some((start_screen, start_col)) = self.selection_start else {
+        let Some((start_logic, start_col)) = self.selection_start else {
             return vec![Span::styled(content.to_string(), base_style)];
         };
-        let Some((end_screen, end_col)) = self.selection_end else {
+        let Some((end_logic, end_col)) = self.selection_end else {
             return vec![Span::styled(content.to_string(), base_style)];
         };
 
         // 归一化：确保 start <= end
-        let (start_screen, start_col, end_screen, end_col) = if start_screen < end_screen
-            || (start_screen == end_screen && start_col < end_col)
+        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
+            || (start_logic == end_logic && start_col < end_col)
         {
-            (start_screen, start_col, end_screen, end_col)
+            (start_logic, start_col, end_logic, end_col)
         } else {
-            (end_screen, end_col, start_screen, start_col)
+            (end_logic, end_col, start_logic, start_col)
         };
 
         let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
 
-        // 当前屏幕行不在选中范围内
-        if screen_idx < start_screen || screen_idx > end_screen {
+        // 查找当前屏幕行对应的逻辑行索引
+        let current_logic = if screen_idx < screen_map.len() {
+            screen_map[screen_idx].0
+        } else {
+            return vec![Span::styled(content.to_string(), base_style)];
+        };
+
+        // 当前逻辑行不在选中范围内
+        if current_logic < start_logic || current_logic > end_logic {
             return vec![Span::styled(content.to_string(), base_style)];
         }
         // 起止相同但没实际选中
-        if start_screen == end_screen && start_col == end_col {
+        if start_logic == end_logic && start_col == end_col {
             return vec![Span::styled(content.to_string(), base_style)];
         }
 
         let chars: Vec<char> = content.chars().collect();
         let chars_len = chars.len();
 
-        // 计算本行的选中起止列（转为 usize 以索引 chars vec）
-        let chunk_start = if screen_idx < screen_map.len() {
-            screen_map[screen_idx].1
-        } else {
-            CharIdx::ZERO
-        };
-        let line_start: usize = if screen_idx == start_screen {
-            start_col.saturating_sub(chunk_start)
+        // 计算本行 chunk 的 char 起始偏移
+        let chunk_start = screen_map[screen_idx].1;
+
+        // 将 chunk 内的 char 偏移转换为逻辑行内的绝对 char 偏移
+        let abs_start = chunk_start;
+        let line_start: usize = if current_logic == start_logic {
+            start_col.saturating_sub(abs_start)
         } else {
             0
         };
-        let line_end: usize = if screen_idx == end_screen {
-            end_col.saturating_sub(chunk_start).min(chars_len)
+        let line_end: usize = if current_logic == end_logic {
+            end_col.saturating_sub(abs_start).min(chars_len)
         } else {
             chars_len
         };
@@ -564,25 +586,33 @@ impl OutputArea {
     /// 对已有的 markdown spans 叠加选中高亮
     /// 不在选中范围内的 span 保持原样，选中部分改为 selection style
     fn render_spans_with_selection(&self, screen_idx: usize, spans: &[Span<'static>], screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
-        let Some((start_screen, start_col)) = self.selection_start else {
+        let Some((start_logic, start_col)) = self.selection_start else {
             return spans.to_vec();
         };
-        let Some((end_screen, end_col)) = self.selection_end else {
+        let Some((end_logic, end_col)) = self.selection_end else {
             return spans.to_vec();
         };
 
-        let (start_screen, start_col, end_screen, end_col) = if start_screen < end_screen
-            || (start_screen == end_screen && start_col < end_col)
+        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
+            || (start_logic == end_logic && start_col < end_col)
         {
-            (start_screen, start_col, end_screen, end_col)
+            (start_logic, start_col, end_logic, end_col)
         } else {
-            (end_screen, end_col, start_screen, start_col)
+            (end_logic, end_col, start_logic, start_col)
         };
 
-        if start_screen == end_screen && start_col == end_col {
+        if start_logic == end_logic && start_col == end_col {
             return spans.to_vec();
         }
-        if screen_idx < start_screen || screen_idx > end_screen {
+
+        // 查找当前屏幕行对应的逻辑行索引
+        let current_logic = if screen_idx < screen_map.len() {
+            screen_map[screen_idx].0
+        } else {
+            return spans.to_vec();
+        };
+
+        if current_logic < start_logic || current_logic > end_logic {
             return spans.to_vec();
         }
 
@@ -596,18 +626,15 @@ impl OutputArea {
             }
         }
 
-        // 计算本行在展开字符流中的选中范围
-        let chunk_start = if screen_idx < screen_map.len() {
-            screen_map[screen_idx].1
-        } else {
-            CharIdx::ZERO
-        };
-        let line_start: usize = if screen_idx == start_screen {
+        // 计算本行 chunk 的 char 起始偏移
+        let chunk_start = screen_map[screen_idx].1;
+
+        let line_start: usize = if current_logic == start_logic {
             start_col.saturating_sub(chunk_start)
         } else {
             0
         };
-        let line_end: usize = if screen_idx == end_screen {
+        let line_end: usize = if current_logic == end_logic {
             end_col.saturating_sub(chunk_start).min(all_chars.len())
         } else {
             all_chars.len()

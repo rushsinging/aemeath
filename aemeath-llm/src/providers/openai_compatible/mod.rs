@@ -1,5 +1,5 @@
 //! OpenAI 兼容 provider 实现
-//! 支持 OpenAI、OpenRouter、DeepSeek、Moonshot、Zhipu、DashScope 及通用 OpenAI 兼容 API
+//! 使用 OpenAIProviderConfig 替代旧 Provider enum
 
 mod message_conversion;
 mod non_stream;
@@ -11,30 +11,28 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use std::error::Error as StdError;
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::{LlmProvider, Provider, StreamHandler};
+use crate::client::OpenAIProviderConfig;
+use crate::provider::{LlmProvider, StreamHandler};
 use crate::types::SystemBlock;
 
 pub(crate) use stream::parse_openai_stream;
 
 pub struct OpenAICompatibleProvider {
-    provider: Provider,
+    config: OpenAIProviderConfig,
     api_key: String,
     base_url: String,
     model: String,
     max_tokens: u32,
     user_agent: String,
     http: reqwest::Client,
-    /// 最大重试次数（默认 10）
     max_retries: u32,
-    /// 请求超时秒数（默认 120）
     timeout_secs: u64,
-    /// 是否使用 reasoning/thinking 模式（运行时可切换）
     reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl OpenAICompatibleProvider {
     pub fn new(
-        provider: Provider,
+        config: OpenAIProviderConfig,
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
@@ -42,13 +40,12 @@ impl OpenAICompatibleProvider {
         reasoning: bool,
     ) -> Self {
         Self {
-            provider,
             base_url: {
-                let url = base_url.unwrap_or_else(|| provider.default_base_url().to_string());
-                // 去掉末尾的 /v1 以避免构建请求 URL 时出现 /v1/v1
+                let url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
                 url.trim_end_matches('/').trim_end_matches("/v1").to_string()
             },
-            model: model.unwrap_or_else(|| provider.default_model().to_string()),
+            model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+            config,
             api_key,
             max_tokens,
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
@@ -62,18 +59,15 @@ impl OpenAICompatibleProvider {
         }
     }
 
-    /// Get a handle to toggle reasoning at runtime
     pub fn reasoning_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         self.reasoning.clone()
     }
 
-    /// 设置最大重试次数
     pub fn with_max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
     }
 
-    /// 设置请求超时秒数
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self.http = reqwest::Client::builder()
@@ -83,21 +77,19 @@ impl OpenAICompatibleProvider {
         self
     }
 
+    fn chat_url(&self) -> String {
+        format!("{}{}", self.base_url, self.config.chat_api_suffix)
+    }
+
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        // 不同 provider 使用不同的 header 格式
-        match self.provider {
-            Provider::OpenRouter => {
-                headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", self.api_key))
-                    .map_err(|e| crate::LlmError::Config(e.to_string()))?);
-                headers.insert("HTTP-Referer", HeaderValue::from_static("https://github.com/aemeath"));
-            }
-            _ => {
-                headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", self.api_key))
-                    .map_err(|e| crate::LlmError::Config(e.to_string()))?);
-            }
+        headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", self.api_key))
+            .map_err(|e| crate::LlmError::Config(e.to_string()))?);
+
+        if self.config.is_openrouter {
+            headers.insert("HTTP-Referer", HeaderValue::from_static("https://github.com/aemeath"));
         }
 
         headers.insert(USER_AGENT, HeaderValue::from_str(&self.user_agent)
@@ -127,30 +119,18 @@ impl LlmProvider for OpenAICompatibleProvider {
             "stream_options": { "include_usage": true }
         });
 
-        // 根据 provider 和 config 控制 reasoning/thinking 模式
-        // 不同 provider 使用不同的 thinking 参数格式
         let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        match self.provider {
-            Provider::DeepSeek => {
-                // DeepSeek API: {"thinking": {"type": "enabled/disabled"}}
-                let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
-                request_body["thinking"] = serde_json::json!({"type": thinking_type});
-            }
-            _ => {
-                // 其他 OpenAI 兼容 provider: enable_thinking 布尔值或不支持
-                if !reasoning_enabled {
-                    request_body["enable_thinking"] = serde_json::json!(false);
-                }
-            }
+        if self.config.is_deepseek || self.config.is_zhipu {
+            let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
+            request_body["thinking"] = serde_json::json!({"type": thinking_type});
+        } else if self.config.supports_enable_thinking {
+            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
         }
 
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
         }
 
-        // 调试：记录请求体中每条消息的摘要，便于回溯查找导致 400 的具体
-        // assistant 消息（例如缺少 reasoning_content 字段）。日志附加到
-        // ~/.aemeath/aemeath.log，使用默认 filter（`aemeath_llm=debug`）启用。
         if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {
             let mut summary = String::with_capacity(256);
             for (i, m) in msgs.iter().enumerate() {
@@ -183,8 +163,8 @@ impl LlmProvider for OpenAICompatibleProvider {
                 .map(|s| s.len())
                 .unwrap_or(0);
             log::debug!(
-                "[openai-compat stream] POST provider={:?} body_bytes={} messages={}:{}",
-                self.provider,
+                "[openai-compat stream] POST provider={} body_bytes={} messages={}:{}",
+                self.config.provider_name,
                 body_bytes,
                 msgs.len(),
                 summary,
@@ -212,7 +192,7 @@ impl LlmProvider for OpenAICompatibleProvider {
 
             let send_fut = self
                 .http
-                .post(format!("{}{}", self.base_url, self.provider.chat_api_suffix()))
+                .post(self.chat_url())
                 .headers(headers.clone())
                 .json(&request_body)
                 .send();
@@ -226,7 +206,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                     match result {
                         Ok(resp) => resp,
                         Err(e) => {
-                            let url = format!("{}{}", self.base_url, self.provider.chat_api_suffix());
+                            let url = self.chat_url();
                             let detail = if e.is_connect() {
                                 "connection failed"
                             } else if e.is_timeout() {
@@ -250,7 +230,6 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 source = cause.source();
                                 depth += 1;
                             }
-                            // 网络错误可重试 — 向 UI 展示重试进度
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
                             if remaining > 0 {
                                 handler.on_error(&format!(
@@ -278,7 +257,6 @@ impl LlmProvider for OpenAICompatibleProvider {
                 continue;
             }
 
-            // 重试 5xx 错误（服务端问题可能是暂时的）
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
                 let remaining = self.max_retries.saturating_sub(attempt + 1);
@@ -313,7 +291,6 @@ impl LlmProvider for OpenAICompatibleProvider {
                     return Err(crate::LlmError::Stream(msg.clone()));
                 }
                 Err(crate::LlmError::Stream(e)) => {
-                    // 流解码错误 — 先重试，最后一次尝试时回退到非流式
                     handler.on_error(&format!("Streaming error: {}, retrying...", e));
                     last_error = Some(crate::LlmError::Stream(e));
                     continue;
@@ -322,7 +299,6 @@ impl LlmProvider for OpenAICompatibleProvider {
             }
         }
 
-        // 所有流式重试耗尽 — 尝试最后一次非流式请求
         if let Some(ref err) = last_error {
             if matches!(err, crate::LlmError::Stream(_)) {
                 handler.on_error("All streaming retries failed, attempting non-streaming fallback");
@@ -337,18 +313,7 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn provider_name(&self) -> &str {
-        match self.provider {
-            Provider::OpenAI => "openai",
-            Provider::OpenRouter => "openrouter",
-            Provider::DeepSeek => "deepseek",
-            Provider::Moonshot => "moonshot",
-            Provider::Zhipu => "zhipu",
-            Provider::DashScope => "dashscope",
-            Provider::MiniMax => "minimax",
-            Provider::OpenAICompatible => "openai-compatible",
-            Provider::Anthropic => "anthropic", // 不应发生，作为兜底
-            Provider::Ollama => "ollama", // 不应发生 — 应使用 OllamaProvider
-        }
+        &self.config.provider_name
     }
 
     fn set_reasoning(&self, enabled: bool) {

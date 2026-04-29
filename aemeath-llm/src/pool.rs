@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aemeath_core::config::ModelsConfig;
-use aemeath_core::provider::Provider;
+use aemeath_core::provider::ApiType;
 
-use crate::client::LlmClient;
+use crate::client::{LlmClient, OpenAIProviderConfig};
 
 /// A pool of `LlmClient` instances keyed by model spec (`"provider/model_id"`).
 ///
@@ -110,13 +110,31 @@ impl LlmClientPool {
                 )
             })?;
 
-        let provider = Provider::from_str(provider_name)
-            .ok_or_else(|| format!("unknown provider '{}'", provider_name))?;
+        // Resolve ApiType from config (the `api` field)
+        let api_type = match provider_config.api.as_str() {
+            "anthropic" => ApiType::Anthropic,
+            _ => ApiType::OpenAICompatible,
+        };
 
+        // Build OpenAI provider config for OpenAI-compatible providers
+        let openai_config = if matches!(api_type, ApiType::OpenAICompatible) {
+            Some(OpenAIProviderConfig::from_provider_name(provider_name))
+        } else {
+            None
+        };
+
+        // API key — config first, then env var
         let api_key = if provider_config.api_key.is_empty() {
-            // Fall back to env var
-            std::env::var(provider.api_key_env())
-                .map_err(|_| format!("no API key for provider '{}' (config or {})", provider_name, provider.api_key_env()))?
+            // Fall back to generic env var for now (config.json already handles per-provider keys)
+            std::env::var("LLM_API_KEY")
+                .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+                .or_else(|_| std::env::var("OPENAI_API_KEY"))
+                .map_err(|_| {
+                    format!(
+                        "no API key for provider '{}'. Set it in config.json or LLM_API_KEY env var",
+                        provider_name
+                    )
+                })?
         } else {
             provider_config.api_key.clone()
         };
@@ -130,25 +148,26 @@ impl LlmClientPool {
         let max_tokens = model_entry.max_tokens;
         if max_tokens == 0 {
             log::warn!(
-                "[LlmClientPool] max_tokens is 0 for '{}' — using provider default",
+                "[LlmClientPool] max_tokens is 0 for '{}' — using 200000 default",
                 spec
             );
         }
         let max_tokens = if max_tokens > 0 {
             max_tokens
         } else {
-            provider.max_output_tokens()
+            200000
         };
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
         Ok(LlmClient::from_config(
-            provider,
+            api_type,
             api_key,
             base_url,
             model_entry.id,
             max_tokens,
             reasoning,
+            openai_config,
         ))
     }
 

@@ -160,41 +160,49 @@ pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
 /// Extra directories are scanned after standard locations, so their skills
 /// take lower priority (won't override same-name skills from project/global).
 pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Skill> {
-    let mut map = HashMap::new();
+      let mut map = HashMap::new();
+      let home = dirs::home_dir();
 
-    // Project-level skills: .claude/skills/
-    let project_dir = cwd.join(".claude").join("skills");
-    for skill in load_skills_from_dir(&project_dir) {
-        map.insert(skill.name.clone(), skill);
-    }
+      // Project-level skills (highest priority)
+      // 1. {cwd}/.aemeath/skills/
+      let project_dir = cwd.join(".aemeath").join("skills");
+      for skill in load_skills_from_dir(&project_dir) {
+          map.insert(skill.name.clone(), skill);
+      }
 
-    // Global skills: ~/.aemeath/skills/
-    if let Some(home) = dirs::home_dir() {
-        let global_dir = home.join(".aemeath").join("skills");
-        for skill in load_skills_from_dir(&global_dir) {
-            map.entry(skill.name.clone()).or_insert(skill);
-        }
-    }
+      // Global skills
+      if let Some(ref home) = home {
+          // 2. ~/.aemeath/skills/
+          let aemeath_global = home.join(".aemeath").join("skills");
+          for skill in load_skills_from_dir(&aemeath_global) {
+              map.entry(skill.name.clone()).or_insert(skill);
+          }
+          // 3. ~/.agents/skills/
+          let agents_global = home.join(".agents").join("skills");
+          for skill in load_skills_from_dir(&agents_global) {
+              map.entry(skill.name.clone()).or_insert(skill);
+          }
+      }
 
-    // Extra skill directories from config.json
-    for dir in extra_dirs {
-        // Expand `~` to home directory
-        let expanded = if dir.starts_with("~") {
-            if let Some(home) = dirs::home_dir() {
-                home.join(dir.strip_prefix("~").unwrap_or(dir).strip_prefix("/").unwrap_or(dir))
-            } else {
-                dir.clone()
-            }
-        } else {
-            dir.clone()
-        };
-        for skill in load_skills_from_dir(&expanded) {
-            map.entry(skill.name.clone()).or_insert(skill);
-        }
-    }
+      // Extra skill directories from config.json (lowest priority)
+      for dir in extra_dirs {
+          // Expand `~` to home directory
+          let expanded = if dir.starts_with("~") {
+              if let Some(ref home) = home {
+                  home.join(dir.strip_prefix("~").unwrap_or(dir).strip_prefix("/").unwrap_or(dir))
+              } else {
+                  dir.clone()
+              }
+          } else {
+              dir.clone()
+          };
+          for skill in load_skills_from_dir(&expanded) {
+              map.entry(skill.name.clone()).or_insert(skill);
+          }
+      }
 
-    map
-}
+      map
+  }
 
 /// Load skills and filter based on available tools and other skills.
 pub fn load_and_filter_skills(

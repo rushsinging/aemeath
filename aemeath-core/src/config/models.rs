@@ -48,12 +48,16 @@ impl ModelsConfig {
     /// user to type the exact symbol when setting `"default"`.
     pub fn find_model(&self, query: &str) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
         if let Some((provider_name, model_query)) = query.split_once('/') {
-            if let Some(provider_config) = self.providers.get(provider_name) {
+            if let Some((actual_provider_name, provider_config)) = self
+                .providers
+                .iter()
+                .find(|(name, _)| name.to_lowercase() == provider_name.to_lowercase())
+            {
                 if let Some(model) = provider_config.models.iter().find(|m| m.name == model_query)
                     .or_else(|| provider_config.models.iter().find(|m| m.id == model_query))
                 {
                     return Some((
-                        provider_name.to_string(),
+                        actual_provider_name.to_string(),
                         provider_config.clone(),
                         model.clone(),
                     ));
@@ -66,7 +70,7 @@ impl ModelsConfig {
                         .find(|m| normalize_model_key(&m.id) == norm))
                 {
                     return Some((
-                        provider_name.to_string(),
+                        actual_provider_name.to_string(),
                         provider_config.clone(),
                         model.clone(),
                     ));
@@ -140,4 +144,70 @@ pub struct ModelEntryConfig {
     /// Maximum output tokens
     #[serde(default, rename = "maxTokens")]
     pub max_tokens: u32,
+
+    /// Reasoning / thinking mode for this model.
+    /// - `None` (default) — use CLI flag / global default
+    /// - `Some(true)` — force enable thinking
+    /// - `Some(false)` — force disable thinking
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn test_config() -> ModelsConfig {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "LiteLLM".to_string(),
+            ProviderModelsConfig {
+                base_url: "http://localhost:4000".to_string(),
+                api_key: String::new(),
+                api: "openai-completions".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "gpt-5.5".to_string(),
+                    name: "GPT-5.5".to_string(),
+                    input: vec!["text".to_string()],
+                    context_window: 200_000,
+                    max_tokens: 32_000,
+                    reasoning: Some(false),
+                }],
+            },
+        );
+        ModelsConfig {
+            mode: String::new(),
+            default: String::new(),
+            providers,
+            guidance: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_find_model_exact_provider_case_insensitive() {
+        let config = test_config();
+        let result = config.find_model("litellm/gpt-5.5");
+        assert!(result.is_some());
+        let (provider, _, model) = result.unwrap();
+        assert_eq!(provider, "LiteLLM");
+        assert_eq!(model.id, "gpt-5.5");
+        assert_eq!(model.reasoning, Some(false));
+    }
+
+    #[test]
+    fn test_find_model_display_name_case_insensitive_provider() {
+        let config = test_config();
+        let result = config.find_model("litellm/GPT-5.5");
+        assert!(result.is_some());
+        let (_, _, model) = result.unwrap();
+        assert_eq!(model.name, "GPT-5.5");
+    }
+
+    #[test]
+    fn test_find_model_unknown_provider_returns_none() {
+        let config = test_config();
+        let result = config.find_model("openai/gpt-5.5");
+        assert!(result.is_none());
+    }
 }

@@ -22,4 +22,5 @@ pub mod tool_result_storage;
 pub mod guidance;
 pub mod security;
 pub mod string_idx;
+pub mod logging;
 pub mod hook;
