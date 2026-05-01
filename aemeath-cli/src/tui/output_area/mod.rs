@@ -378,8 +378,12 @@ impl OutputArea {
 
         self.screen_line_map = new_screen_map;
 
-        // 追加排队消息、任务状态行和 spinner。spinner 放在最后，避免临时行过多时被裁剪掉。
+        // 追加排队消息、spinner 和任务状态行。spinner 放在 queued 之后，
+        // task status lines 放在 spinner 下方（最底部）。
         lines.extend(queued_lines);
+        if let Some(ref sl) = spinner_line {
+            lines.push(sl.clone());
+        }
         if spinner_line.is_some() {
             for task_line in &self.task_status_lines {
                 lines.push(Line::styled(
@@ -387,9 +391,6 @@ impl OutputArea {
                     Style::default().fg(Color::DarkGray),
                 ));
             }
-        }
-        if let Some(sl) = spinner_line {
-            lines.push(sl);
         }
 
         let lines: Vec<Line> = if lines.len() > area.height as usize {

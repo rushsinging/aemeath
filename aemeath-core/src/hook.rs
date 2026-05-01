@@ -354,6 +354,11 @@ impl HookRunner {
         }
     }
 
+    /// 返回配置的 hook 事件数量（用于调试日志）
+    pub fn hook_count(&self) -> usize {
+        self.config.events.len()
+    }
+
     /// 获取匹配指定事件和工具名的 hook 列表
     pub fn matching_hooks(
         &self,
@@ -395,7 +400,14 @@ impl HookRunner {
 
         let timeout = Duration::from_secs(hook.timeout);
         let command = self.expand_command_placeholders(&hook.command);
-
+        log::info!(
+            "hook start: event={:?} matcher={} command={} project_dir={}",
+            input.event,
+            hook.matcher,
+            command,
+            self.project_dir
+        );
+  
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
@@ -409,6 +421,12 @@ impl HookRunner {
         {
             Ok(c) => c,
             Err(e) => {
+                log::warn!(
+                    "hook spawn failed: event={:?} command={} error={}",
+                    input.event,
+                    command,
+                    e
+                );
                 return HookResult {
                     blocked: false,
                     output: String::new(),
@@ -420,17 +438,22 @@ impl HookRunner {
         // 写入 stdin 并关闭
         use tokio::io::AsyncWriteExt;
         if let Some(stdin) = child.stdin.take() {
-            if let Err(e) = tokio::io::BufWriter::new(stdin)
-                .write_all(input_json.as_bytes())
-                .await
-            {
+            let mut writer = tokio::io::BufWriter::new(stdin);
+            if let Err(e) = writer.write_all(input_json.as_bytes()).await {
                 return HookResult {
                     blocked: false,
                     output: String::new(),
                     error: Some(format!("写入 hook stdin 失败: {e}")),
                 };
             }
-            // stdin 在此处被 drop，进程看到 EOF
+            if let Err(e) = writer.shutdown().await {
+                return HookResult {
+                    blocked: false,
+                    output: String::new(),
+                    error: Some(format!("关闭 hook stdin 失败: {e}")),
+                };
+            }
+            // stdin 在此处被关闭，进程看到 EOF
         }
 
         let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
@@ -452,7 +475,16 @@ impl HookRunner {
                         stderr.trim()
                     );
                 }
-
+                log::info!(
+                    "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={}",
+                    input.event,
+                    command,
+                    code,
+                    blocked,
+                    stdout.len(),
+                    stderr.len()
+                );
+  
                 HookResult {
                     blocked,
                     output: stdout,
@@ -463,19 +495,35 @@ impl HookRunner {
                     },
                 }
             }
-            Ok(Err(e)) => HookResult {
-                blocked: false,
-                output: String::new(),
-                error: Some(format!("等待 hook 进程失败: {e}")),
-            },
-            Err(_) => HookResult {
-                blocked: false,
-                output: String::new(),
-                error: Some(format!(
-                    "hook '{}' 超时（{}秒）",
-                    command, hook.timeout
-                )),
-            },
+            Ok(Err(e)) => {
+                log::warn!(
+                    "hook wait failed: event={:?} command={} error={}",
+                    input.event,
+                    command,
+                    e
+                );
+                HookResult {
+                    blocked: false,
+                    output: String::new(),
+                    error: Some(format!("等待 hook 进程失败: {e}")),
+                }
+            }
+            Err(_) => {
+                log::warn!(
+                    "hook timeout: event={:?} command={} timeout={}s",
+                    input.event,
+                    command,
+                    hook.timeout
+                );
+                HookResult {
+                    blocked: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "hook '{}' 超时（{}秒）",
+                        command, hook.timeout
+                    )),
+                }
+            }
         }
     }
 
@@ -973,6 +1021,7 @@ impl HookRunner {
 
 /// Hook 的 JSON 输出（exit 0 时 stdout 可包含此 JSON）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HookJsonOutput {
     /// 是否继续执行（false 时全局停止，需配合 stopReason）
     #[serde(default = "default_true")]
@@ -1191,5 +1240,59 @@ mod tests {
         assert!(!result.blocked);
         assert!(result.error.is_none());
         assert_eq!(result.output, project_dir);
+    }
+
+    #[tokio::test]
+    async fn test_on_stop_runs_configured_hook_with_event_and_project_dir() {
+        let project_dir = std::env::temp_dir().join(format!(
+            "aemeath-stop-hook-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let marker = project_dir.join("stop-hook.marker");
+        let marker_path = marker.display().to_string();
+        let project_dir_string = project_dir.display().to_string();
+
+        let config = HooksConfig {
+            events: {
+                let mut map = HashMap::new();
+                map.insert(
+                    HookEvent::Stop,
+                    vec![HookEntry {
+                        matcher: String::new(),
+                        command: format!(
+                            "printf '%s\\n' \"$AEMEATH_HOOK_EVENT|$AEMEATH_PROJECT_DIR\" > \"{}\"; cat >> \"{}\"",
+                            marker_path, marker_path
+                        ),
+                        timeout: 5,
+                    }],
+                );
+                map
+            },
+        };
+        let runner = HookRunner::new(config, project_dir_string.clone());
+
+        let results = runner.on_stop(7).await;
+
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].blocked);
+        assert!(results[0].error.is_none());
+        assert!(marker.exists());
+        let marker_content = std::fs::read_to_string(&marker).unwrap();
+        assert!(
+            marker_content.contains(&format!("\"Stop\"|{project_dir_string}")),
+            "marker content: {marker_content:?}"
+        );
+        let json_start = marker_content
+            .find('{')
+            .unwrap_or_else(|| panic!("marker content: {marker_content:?}"));
+        let hook_input: HookInput = serde_json::from_str(&marker_content[json_start..]).unwrap();
+        assert_eq!(hook_input.event, HookEvent::Stop);
+        match hook_input.data {
+            HookData::Stop(data) => assert_eq!(data.turns, 7),
+            other => panic!("expected Stop hook data, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&project_dir);
     }
 }

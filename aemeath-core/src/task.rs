@@ -80,6 +80,10 @@ pub struct Task {
     /// Tags for categorization
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Batch ID: tasks created in the same turn share the same batch.
+    /// A new batch starts when all previous tasks are completed.
+    #[serde(default)]
+    pub batch: u64,
 }
 
 fn default_timestamp() -> u64 {
@@ -179,6 +183,9 @@ pub struct TaskStore {
     next_id: Arc<Mutex<u64>>,
     /// Path for persistence
     persistence_path: Option<PathBuf>,
+    /// Monotonically increasing batch ID. Each `create()` call checks if a new
+    /// turn has started (no non-completed tasks exist) and bumps the batch.
+    current_batch: Arc<Mutex<u64>>,
 }
 
 impl TaskStore {
@@ -187,6 +194,7 @@ impl TaskStore {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(Mutex::new(1)),
             persistence_path: None,
+            current_batch: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -196,6 +204,7 @@ impl TaskStore {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(Mutex::new(1)),
             persistence_path: Some(path.clone()),
+            current_batch: Arc::new(Mutex::new(0)),
         };
         // Try to load existing data (async version for init)
         store.load().await.ok();
@@ -261,33 +270,51 @@ impl TaskStore {
     }
 
     /// Create a new task with all fields (async for auto-save)
-    pub async fn create(&self, subject: String, description: String, active_form: Option<String>) -> Task {
-        let id = {
-            let mut next_id = self.next_id.lock().await;
-            let id = next_id.to_string();
-            *next_id += 1;
-            id
-            // next_id lock released here
-        };
+      pub async fn create(&self, subject: String, description: String, active_form: Option<String>) -> Task {
+          let id = {
+              let mut next_id = self.next_id.lock().await;
+              let id = next_id.to_string();
+              *next_id += 1;
+              id
+              // next_id lock released here
+          };
 
-        let now = default_timestamp();
-        let task = Task {
-            id: id.clone(),
-            subject,
-            description,
-            status: TaskStatus::Pending,
-            active_form,
-            owner: None,
-            blocked_by: Vec::new(),
-            blocks: Vec::new(),
-            priority: TaskPriority::default(),
-            progress: 0,
-            progress_message: None,
-            created_at: now,
-            updated_at: now,
-            session_id: None,
-            tags: Vec::new(),
-        };
+          // Bump batch if all existing tasks are completed (new turn)
+          let batch = {
+              let (has_active, has_any) = {
+                  let tasks = self.tasks.lock().await;
+                  let has_any = !tasks.is_empty();
+                  let has_active = tasks.values().any(|t| {
+                      t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted
+                  });
+                  (has_active, has_any)
+              };
+              let mut batch = self.current_batch.lock().await;
+              if has_any && !has_active {
+                  *batch += 1;
+              }
+              *batch
+          };
+
+          let now = default_timestamp();
+          let task = Task {
+              id: id.clone(),
+              subject,
+              description,
+              status: TaskStatus::Pending,
+              active_form,
+              owner: None,
+              blocked_by: Vec::new(),
+              blocks: Vec::new(),
+              priority: TaskPriority::default(),
+              progress: 0,
+              progress_message: None,
+              created_at: now,
+              updated_at: now,
+              session_id: None,
+              tags: Vec::new(),
+              batch,
+          };
 
         self.tasks.lock().await.insert(id, task.clone());
         // Auto-save (safe now: no locks held)
@@ -312,6 +339,23 @@ impl TaskStore {
             id
         };
 
+        // Bump batch if all existing tasks are completed (new turn)
+        let batch = {
+            let (has_active, has_any) = {
+                let tasks = self.tasks.lock().await;
+                let has_any = !tasks.is_empty();
+                let has_active = tasks.values().any(|t| {
+                    t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted
+                });
+                (has_active, has_any)
+            };
+            let mut batch = self.current_batch.lock().await;
+            if has_any && !has_active {
+                *batch += 1;
+            }
+            *batch
+        };
+
         let now = default_timestamp();
         let task = Task {
             id: id.clone(),
@@ -329,6 +373,7 @@ impl TaskStore {
             updated_at: now,
             session_id: None,
             tags: Vec::new(),
+            batch,
         };
 
         self.tasks.lock().await.insert(id, task.clone());
@@ -403,17 +448,38 @@ impl TaskStore {
     }
 
     /// Clear all tasks
-    pub async fn clear(&self) {
-        {
-            let mut tasks = self.tasks.lock().await;
-            tasks.clear();
-        }
-        // Release tasks lock before acquiring next_id lock
-        {
-            let mut next_id = self.next_id.lock().await;
-            *next_id = 1;
-        }
-    }
+      pub async fn clear(&self) {
+          {
+              let mut tasks = self.tasks.lock().await;
+              tasks.clear();
+          }
+          // Release tasks lock before acquiring next_id lock
+          {
+              let mut next_id = self.next_id.lock().await;
+              *next_id = 1;
+          }
+      }
+
+      /// List tasks belonging to the latest batch only.
+      /// This shows the current turn's task list, including completed ones,
+      /// but hides tasks from previous turns.
+      pub async fn list_current_batch(&self) -> Vec<Task> {
+          let tasks = self.tasks.lock().await;
+          let max_batch = tasks.values()
+              .map(|t| t.batch)
+              .max()
+              .unwrap_or(0);
+          let mut result: Vec<Task> = tasks
+              .values()
+              .filter(|t| t.batch == max_batch && t.status != TaskStatus::Deleted)
+              .cloned()
+              .collect();
+          result.sort_by(|a, b| {
+              b.priority.cmp(&a.priority)
+                  .then_with(|| a.created_at.cmp(&b.created_at))
+          });
+          result
+      }
 
     /// Clear all deleted tasks from memory (async for auto-save)
     pub async fn purge_deleted(&self) {

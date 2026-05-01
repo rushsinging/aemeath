@@ -2,6 +2,7 @@ use crate::image::{is_image_file, process_image_file};
 use crate::render::{TerminalRenderer, TerminalStreamHandler, ThinkingIndicator};
 use aemeath_core::agent::Agent;
 use aemeath_core::compact;
+use aemeath_core::hook::{HookData, StopHookData};
 use aemeath_core::message::Message;
 use aemeath_core::session::{self, Session};
 use aemeath_core::skill::Skill;
@@ -137,7 +138,8 @@ pub async fn run_repl(
     let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
     let pending_images: PendingImages = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut skip_message_build = false;
-
+    let mut turn_count = 0usize;
+  
     loop {
         skip_message_build = false;
 
@@ -518,7 +520,8 @@ pub async fn run_repl(
 
         ctrlc_handle.abort();
         interrupted.store(false, Ordering::Release);
-
+        turn_count += turns;
+  
         TerminalRenderer::print_done(turn_start.elapsed());
         TerminalRenderer::print_newline();
     }
@@ -538,6 +541,27 @@ pub async fn run_repl(
             eprintln!("warning: failed to save session: {e}");
         } else {
             TerminalRenderer::print_session_saved(&session_id);
+        }
+    }
+
+    // Run Stop hooks
+    {
+        use aemeath_core::config::hooks::HookEvent;
+        let hook_results = hook_runner
+            .run_hooks(
+                HookEvent::Stop,
+                None,
+                HookData::Stop(StopHookData { turns: turn_count }),
+            )
+            .await;
+        for result in &hook_results {
+            if result.blocked {
+                eprintln!("[Stop hook blocked]");
+            }
+            if let Some(error) = &result.error {
+                log::warn!("Stop hook error: {error}");
+                eprintln!("warning: Stop hook error: {error}");
+            }
         }
     }
 

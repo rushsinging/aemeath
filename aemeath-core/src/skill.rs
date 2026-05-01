@@ -37,19 +37,12 @@ struct SkillFrontmatter {
     aliases: Vec<String>,
 }
 
-/// Parse a skill from a markdown file with YAML frontmatter
-/// Format:
-/// ```ignore
-/// ---
-/// name: skill-name
-/// description: What this skill does
-/// requires_tools:
-///   - tool1
-///   - tool2
-/// ---
-/// Content here...
-/// ```
 /// Parse a skill from a markdown file with YAML frontmatter.
+///
+/// Only reads the YAML frontmatter (name, description, aliases, etc.) and
+/// records the file path. The body content is **not** read at this point —
+/// it is loaded lazily when the Skill tool is invoked (see
+/// [`read_skill_content`]).
 ///
 /// If the frontmatter does not specify a `name`, the stem of the **parent
 /// directory** is used (so `cm/SKILL.md` gets name `cm`).  When the inferred
@@ -65,7 +58,6 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
     let rest = &text[3..];
     let end = rest.find("---")?;
     let frontmatter_str = &rest[..end].trim();
-    let content = rest[end + 3..].trim().to_string();
 
     // Parse YAML using serde_yml — handles standard YAML lists, multi-line values, etc.
     let fm: SkillFrontmatter = match serde_yml::from_str(frontmatter_str) {
@@ -109,7 +101,7 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
     Some(Skill {
         name,
         description: fm.description,
-        content,
+        content: String::new(), // lazy-loaded by read_skill_content()
         source_path: path.to_path_buf(),
         requires_tools: fm.requires_tools,
         fallback_for: fm.fallback_for,
@@ -117,11 +109,37 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
     })
 }
 
+/// Read the full body content of a skill from its source file.
+///
+/// Returns the markdown body (everything after the closing `---` of the
+/// YAML frontmatter). If the file cannot be read, returns an empty string.
+pub fn read_skill_content(skill: &Skill) -> String {
+    let text = match std::fs::read_to_string(&skill.source_path) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("failed to read skill content from {}: {e}", skill.source_path.display());
+            return String::new();
+        }
+    };
+
+    if !text.starts_with("---") {
+        return text;
+    }
+
+    let rest = &text[3..];
+    if let Some(end) = rest.find("---") {
+        rest[end + 3..].trim().to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Load all skills from a directory.
 ///
-/// Scans `.md` files directly in the directory **and** recursively inside
-/// immediate sub-directories (supports the `<skill-name>/SKILL.md` layout
-/// used by Claude Code / gstack).
+/// At the top level, scans `.md` files directly and in immediate sub-directories.
+/// For sub-directories that contain a `skills/` child, treats them as skill
+/// packages and only scans the `skills/` child (supporting
+/// `<pkg>/skills/<name>/SKILL.md` convention used by skill packages like superpowers).
 pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
     if !dir.exists() {
         return Vec::new();
@@ -137,12 +155,48 @@ pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
                     skills.push(skill);
                 }
             } else if path.is_dir() {
-                // Sub-directory: look for .md files inside (e.g. cm/SKILL.md)
+                let skills_child = path.join("skills");
+                if skills_child.is_dir() {
+                    // Skill package: scan the `skills/` child and add namespace prefix
+                    let pkg_name = path.file_name().map(|n| n.to_string_lossy().to_string());
+                    scan_subdir_md(&skills_child, &mut skills, pkg_name.as_deref());
+                } else {
+                    // Regular skill directory (e.g. cm/SKILL.md)
+                    scan_subdir_md(&path, &mut skills, None);
+                }
+            }
+        }
+    }
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+/// Scan `.md` files directly in `dir` and in its immediate sub-directories.
+/// If `namespace` is provided, skill names are prefixed with `<namespace>:`.
+fn scan_subdir_md(dir: &Path, skills: &mut Vec<Skill>, namespace: Option<&str>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                if let Some(mut skill) = parse_skill(&path) {
+                    if let Some(ns) = namespace {
+                        // Add namespace prefix to skill name and aliases
+                        skill.aliases.push(skill.name.clone());
+                        skill.name = format!("{ns}:{}", skill.name);
+                    }
+                    skills.push(skill);
+                }
+            } else if path.is_dir() {
+                // One level deeper: scan .md files inside sub-sub-directories
                 if let Ok(sub_entries) = std::fs::read_dir(&path) {
                     for sub_entry in sub_entries.flatten() {
                         let sub_path = sub_entry.path();
                         if sub_path.extension().is_some_and(|e| e == "md") {
-                            if let Some(skill) = parse_skill(&sub_path) {
+                            if let Some(mut skill) = parse_skill(&sub_path) {
+                                if let Some(ns) = namespace {
+                                    skill.aliases.push(skill.name.clone());
+                                    skill.name = format!("{ns}:{}", skill.name);
+                                }
                                 skills.push(skill);
                             }
                         }
@@ -151,8 +205,6 @@ pub fn load_skills_from_dir(dir: &Path) -> Vec<Skill> {
             }
         }
     }
-    skills.sort_by(|a, b| a.name.cmp(&b.name));
-    skills
 }
 
 /// Load skills from all standard locations, plus any extra directories.
@@ -290,8 +342,8 @@ mod tests {
 
         let skill = parse_skill(&path).unwrap();
         assert_eq!(skill.name, "cm", "expected name from parent dir");
-        // dir name == skill name, so no auto-alias needed
         assert!(skill.aliases.is_empty());
+        assert!(skill.content.is_empty(), "content should not be loaded at scan time");
 
         std::fs::remove_dir_all(&base).unwrap();
     }
@@ -308,8 +360,26 @@ mod tests {
 
         let skill = parse_skill(&path).unwrap();
         assert_eq!(skill.name, "my-skill");
-        // dir name ("my-dir") differs from skill name ("my-skill"), auto-added as alias
         assert_eq!(skill.aliases, vec!["my-dir"]);
+        assert!(skill.content.is_empty());
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_read_skill_content_lazy() {
+        let base = std::env::temp_dir().join("aemeath_test_skill_lazy");
+        let dir = base.join("my-skill");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("SKILL.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        write!(f, "---\nname: my-skill\ndescription: test\n---\nFull body content here!").unwrap();
+
+        let skill = parse_skill(&path).unwrap();
+        assert!(skill.content.is_empty(), "scan should not load content");
+
+        let content = read_skill_content(&skill);
+        assert_eq!(content, "Full body content here!");
 
         std::fs::remove_dir_all(&base).unwrap();
     }
@@ -334,6 +404,78 @@ mod tests {
         assert_eq!(skills.len(), 2, "should load both direct and sub-dir skills");
         assert!(skills.iter().any(|s| s.name == "hello"), "direct skill");
         assert!(skills.iter().any(|s| s.name == "review"), "sub-dir skill");
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_load_skills_nested_with_namespace() {
+        // Simulate: ~/.aemeath/skills/superpowers/skills/brainstorming/SKILL.md
+        let base = std::env::temp_dir().join("aemeath_test_skill_ns");
+        let deep = base.join("superpowers").join("skills").join("brainstorming");
+        std::fs::create_dir_all(&deep).unwrap();
+
+        let skill_file = deep.join("SKILL.md");
+        let mut f = std::fs::File::create(&skill_file).unwrap();
+        write!(f, "---\nname: brainstorming\ndescription: test\n---\nbrainstorm content").unwrap();
+
+        let skills = load_skills_from_dir(&base);
+        assert_eq!(skills.len(), 1, "should find nested skill");
+        assert_eq!(skills[0].name, "superpowers:brainstorming");
+        assert!(skills[0].aliases.contains(&"brainstorming".to_string()),
+            "original name should be an alias");
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_load_skills_ignores_non_skills_dirs() {
+        // Non-"skills" dirs at nested levels should be skipped
+        let base = std::env::temp_dir().join("aemeath_test_skill_ignore");
+        let pkg = base.join("superpowers");
+        let skills_dir = pkg.join("skills").join("my-skill");
+        let agents_dir = pkg.join("agents");
+        let github_dir = pkg.join(".github").join("ISSUE_TEMPLATE");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::create_dir_all(&github_dir).unwrap();
+
+        // Real skill
+        let skill_file = skills_dir.join("SKILL.md");
+        let mut f = std::fs::File::create(&skill_file).unwrap();
+        write!(f, "---\nname: my-skill\ndescription: real\n---\ncontent").unwrap();
+
+        // Agent file (should be ignored — agents/ is not "skills")
+        let agent_file = agents_dir.join("code-reviewer.md");
+        let mut f = std::fs::File::create(&agent_file).unwrap();
+        write!(f, "---\nname: code-reviewer\ndescription: agent\n---\nagent content").unwrap();
+
+        // GitHub issue template (should be ignored)
+        let issue_file = github_dir.join("bug_report.md");
+        let mut f = std::fs::File::create(&issue_file).unwrap();
+        write!(f, "---\nname: bug_report\ndescription: template\n---\ntemplate").unwrap();
+
+        let skills = load_skills_from_dir(&base);
+        assert_eq!(skills.len(), 1, "should only find the skill, not agent/template");
+        assert_eq!(skills[0].name, "superpowers:my-skill");
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_load_skills_no_namespace_for_regular_dirs() {
+        // Regular skill directories (no `skills/` child) should NOT get namespace prefix
+        let base = std::env::temp_dir().join("aemeath_test_no_ns");
+        let sub = base.join("review");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let sub_file = sub.join("SKILL.md");
+        let mut f = std::fs::File::create(&sub_file).unwrap();
+        write!(f, "---\ndescription: review skill\n---\nreview content").unwrap();
+
+        let skills = load_skills_from_dir(&base);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "review", "no namespace prefix for regular dirs");
 
         std::fs::remove_dir_all(&base).unwrap();
     }

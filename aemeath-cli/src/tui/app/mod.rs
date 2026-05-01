@@ -64,8 +64,11 @@ pub enum UiEvent {
     DrainQueuedInput {
         reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
-}
-/// Main TUI application
+    /// Lifecycle hook execution started.
+    HookStart { event: String, command: String },
+    /// Lifecycle hook execution finished.
+    HookEnd { event: String, blocked: bool, error: Option<String> },
+}/// Main TUI application
 pub struct App {
     pub output_area: OutputArea,
     pub input_area: InputArea,
@@ -425,7 +428,7 @@ impl App {
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
-        let mut is_processing = self.status_bar.is_processing();
+        let mut is_processing = false;
         let active_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>> =
             Arc::new(std::sync::Mutex::new(None));
 
@@ -499,8 +502,8 @@ impl App {
                     self.output_area.push_user_message(&input);
                     self.messages.push(Message::user(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
-                    self.status_bar.set_processing("Thinking...");
                     self.output_area.start_spinner();
+                    self.output_area.set_spinner_phase("Thinking...");
                     is_processing = true;
                     let cancel = CancellationToken::new();
                     if let Ok(mut guard) = active_cancel.lock() {
@@ -582,7 +585,7 @@ impl App {
         task_store: &Arc<aemeath_core::task::TaskStore>,
         _is_processing: bool,
     ) {
-        let tasks = task_store.list().await;
+        let tasks = task_store.list_current_batch().await;
         let mut active: Vec<_> = tasks.iter()
             .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
             .collect();

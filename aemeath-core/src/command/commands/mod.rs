@@ -19,6 +19,7 @@ pub mod git;
 pub mod debug;
 pub mod stats;
 pub mod think;
+pub mod effort;
 
 /// Initialize all built-in commands.
 ///

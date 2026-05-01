@@ -32,6 +32,17 @@ impl OpenAICompatibleProvider {
             request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
         }
 
+        // OpenAI GPT-5.x / o-series: inject reasoning_effort
+        if self.config.is_openai {
+            if let Ok(guard) = self.reasoning_effort.lock() {
+                if let Some(ref effort) = *guard {
+                    if aemeath_core::config::models::supports_reasoning_effort(&self.model) {
+                        request_body["reasoning_effort"] = serde_json::json!(effort);
+                    }
+                }
+            }
+        }
+
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
         }

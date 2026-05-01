@@ -444,9 +444,27 @@ async fn run_chat(mut args: Args) {
         .as_ref()
         .and_then(|entry| entry.reasoning)
         .unwrap_or(!args.no_think);
+
+    // reasoning_effort: CLI args > config.json model entry > env var > None
+    let reasoning_effort = args.reasoning_effort.clone()
+        .or_else(|| {
+            current_model_entry
+                .as_ref()
+                .and_then(|entry| entry.reasoning_effort.clone())
+        })
+        .or_else(|| std::env::var("AEMEATH_REASONING_EFFORT").ok())
+        .filter(|e| !e.is_empty());
+    if let Some(ref effort) = reasoning_effort {
+        if let Err(e) = aemeath_core::config::models::validate_reasoning_effort(effort) {
+            log::error!("{}", e);
+            std::process::exit(1);
+        }
+    }
+
     log::info!(
-        "[main] reasoning={} (current_model={:?}, args.no_think={})",
+        "[main] reasoning={} effort={:?} (current_model={:?}, args.no_think={})",
         reasoning,
+        reasoning_effort,
         current_model_entry.as_ref().map(|entry| format!("id={}, reasoning={:?}", entry.id, entry.reasoning)),
         args.no_think
     );
@@ -460,6 +478,9 @@ async fn run_chat(mut args: Args) {
         reasoning,
         openai_config,
     );
+    if let Some(effort) = reasoning_effort {
+        client.set_reasoning_effort(Some(effort));
+    }
 
     let client = std::sync::Arc::new(client);
 

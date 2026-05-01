@@ -66,4 +66,6 @@ pub struct SpinnerState {
     pub verb: String,
     /// spinner 启动时间
     pub start: std::time::Instant,
+    /// 当前细分阶段，显示在 spinner 行括号中
+    pub phase: Option<String>,
 }

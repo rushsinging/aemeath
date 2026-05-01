@@ -78,6 +78,10 @@ pub struct RunArgs {
     /// Disable reasoning/thinking mode (default: enabled)
     #[arg(long)]
     pub no_think: bool,
+
+    /// Reasoning effort level for compatible models (none/low/medium/high/xhigh)
+    #[arg(long)]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -131,8 +135,8 @@ pub struct Args {
     pub max_tool_concurrency: Option<usize>,
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
+    pub reasoning_effort: Option<String>,
 }
-
 impl From<RunArgs> for Args {
     fn from(r: RunArgs) -> Self {
         Self {
@@ -152,6 +156,7 @@ impl From<RunArgs> for Args {
             max_tool_concurrency: r.max_tool_concurrency,
             max_agent_concurrency: r.max_agent_concurrency,
             no_think: r.no_think,
+            reasoning_effort: r.reasoning_effort,
         }
     }
 }

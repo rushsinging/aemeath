@@ -1,4 +1,4 @@
-use aemeath_core::skill::Skill;
+use aemeath_core::skill::{read_skill_content, Skill};
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -71,7 +71,8 @@ impl Tool for SkillTool {
         };
         drop(skills);
 
-        let mut content = skill.content.clone();
+        // Lazily load the full skill content from disk on first invocation
+        let mut content = read_skill_content(&skill);
         if !args.is_empty() {
             content = format!("{content}\n\nArguments: {args}");
         }

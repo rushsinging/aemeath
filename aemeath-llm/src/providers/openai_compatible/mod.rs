@@ -28,6 +28,7 @@ pub struct OpenAICompatibleProvider {
     max_retries: u32,
     timeout_secs: u64,
     reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reasoning_effort: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl OpenAICompatibleProvider {
@@ -56,6 +57,7 @@ impl OpenAICompatibleProvider {
             max_retries: 10,
             timeout_secs: 120,
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
+            reasoning_effort: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -125,6 +127,22 @@ impl LlmProvider for OpenAICompatibleProvider {
             request_body["thinking"] = serde_json::json!({"type": thinking_type});
         } else if self.config.supports_enable_thinking {
             request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
+        }
+
+        // OpenAI GPT-5.x / o-series: inject reasoning_effort
+        if self.config.is_openai {
+            if let Ok(guard) = self.reasoning_effort.lock() {
+                if let Some(ref effort) = *guard {
+                    if aemeath_core::config::models::supports_reasoning_effort(&self.model) {
+                        request_body["reasoning_effort"] = serde_json::json!(effort);
+                    } else {
+                        log::debug!(
+                            "[openai-compat] reasoning_effort='{}' set but model '{}' does not support it, ignoring",
+                            effort, self.model
+                        );
+                    }
+                }
+            }
         }
 
         if !tools.is_empty() {
@@ -322,5 +340,15 @@ impl LlmProvider for OpenAICompatibleProvider {
 
     fn is_reasoning(&self) -> bool {
         self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_reasoning_effort(&self, effort: Option<String>) {
+        if let Ok(mut guard) = self.reasoning_effort.lock() {
+            *guard = effort;
+        }
+    }
+
+    fn reasoning_effort(&self) -> Option<String> {
+        self.reasoning_effort.lock().ok().and_then(|g| g.clone())
     }
 }

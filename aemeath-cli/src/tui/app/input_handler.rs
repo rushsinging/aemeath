@@ -261,8 +261,8 @@ impl super::App {
         }
 
         spawn_ctx.interrupted.store(false, Ordering::Relaxed);
-        self.status_bar.set_processing("Thinking...");
         self.output_area.start_spinner();
+        self.output_area.set_spinner_phase("Thinking...");
         *is_processing = true;
 
         let cancel = CancellationToken::new();

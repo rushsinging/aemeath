@@ -22,10 +22,6 @@ pub struct StatusBar {
       session_id: Option<String>,
       /// LLM API call count
       api_calls: u64,
-      /// Is processing
-      is_processing: bool,
-      /// Processing message
-      processing_msg: String,
       /// Current model name
       model: Option<String>,
       /// Context window size
@@ -46,7 +42,6 @@ pub enum StatusType {
     Normal,
     Success,
     Warning,
-    Processing,
 }
 
 impl Default for StatusBar {
@@ -65,8 +60,6 @@ impl StatusBar {
             last_input_tokens: 0,
             session_id: None,
             api_calls: 0,
-            is_processing: false,
-            processing_msg: String::new(),
             model: None,
             context_size: 0,
             tps: 0.0,
@@ -89,22 +82,6 @@ impl StatusBar {
         self.status_type = StatusType::Warning;
     }
 
-    /// Set processing status
-    pub fn set_processing(&mut self, msg: &str) {
-        log::debug!("[STATUS] set_processing(\"{msg}\") was=\"{}\"", self.processing_msg);
-        self.is_processing = true;
-        self.processing_msg = msg.to_string();
-        self.status_type = StatusType::Processing;
-    }
-
-    /// Clear processing status
-    pub fn clear_processing(&mut self) {
-        log::debug!("[STATUS] clear_processing() was=\"{}\"", self.processing_msg);
-        self.is_processing = false;
-        self.processing_msg.clear();
-        self.status_type = StatusType::Normal;
-    }
-
     /// Reset runtime status while preserving environment fields
     pub fn reset_runtime_state(&mut self) {
         log::debug!("[STATUS] reset_runtime_state()");
@@ -114,8 +91,6 @@ impl StatusBar {
         self.output_tokens = 0;
         self.last_input_tokens = 0;
         self.api_calls = 0;
-        self.is_processing = false;
-        self.processing_msg.clear();
         self.tps = 0.0;
         self.clear_selection();
     }
@@ -157,11 +132,6 @@ impl StatusBar {
         self.thinking = enabled;
     }
 
-    /// Check if processing
-    pub fn is_processing(&self) -> bool {
-        self.is_processing
-    }
-
     /// Render the status bar
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 {
@@ -192,25 +162,16 @@ impl StatusBar {
             ));
         }
 
-        // Processing status or regular status
-        if self.is_processing {
-            spans.push(Span::styled(
-                format!(" {} ", self.processing_msg),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            let status_style = match self.status_type {
-                StatusType::Normal => Style::default().fg(Color::White),
-                StatusType::Success => Style::default().fg(Color::Green),
-                StatusType::Warning => Style::default().fg(Color::Yellow),
-                StatusType::Processing => Style::default().fg(Color::Yellow),
-            };
-            spans.push(Span::styled(
-                format!(" {} ", self.status),
-                status_style,
-            ));
-        }
-
+        // Regular status
+        let status_style = match self.status_type {
+            StatusType::Normal => Style::default().fg(Color::White),
+            StatusType::Success => Style::default().fg(Color::Green),
+            StatusType::Warning => Style::default().fg(Color::Yellow),
+        };
+        spans.push(Span::styled(
+            format!(" {} ", self.status),
+            status_style,
+        ));
         // Token usage: in/out + t/s + context window usage
         {
             let in_out = format!("In: {} / Out: {}", format_tokens(self.input_tokens), format_tokens(self.output_tokens));
@@ -310,13 +271,8 @@ impl StatusBar {
             let label = if self.thinking { "ON" } else { "OFF" };
             parts.push(format!(" Think:{} │", label));
         }
-        if self.is_processing {
-            parts.push(format!(" {} ", self.processing_msg));
-        } else {
-            parts.push(format!(" {} ", self.status));
-        }
-        {
-            let in_out = format!("In: {} / Out: {}",
+        parts.push(format!(" {} ", self.status));
+        {            let in_out = format!("In: {} / Out: {}",
                 aemeath_core::cost::format_tokens(self.input_tokens),
                 aemeath_core::cost::format_tokens(self.output_tokens));
             parts.push(format!(" {} ", in_out));

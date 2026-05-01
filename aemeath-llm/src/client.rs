@@ -31,6 +31,8 @@ pub struct OpenAIProviderConfig {
     /// Whether this provider supports the non-standard `enable_thinking` request parameter.
     /// OpenAI, OpenRouter, and others reject this parameter with a 400 error.
     pub supports_enable_thinking: bool,
+    /// Whether this is the official OpenAI provider (sends `reasoning_effort`).
+    pub is_openai: bool,
 }
 
 impl OpenAIProviderConfig {
@@ -49,6 +51,7 @@ impl OpenAIProviderConfig {
                 lc.as_str(),
                 "minimax" | "moonshot" | "kimi" | "dashscope" | "qwen" | "openai-compatible"
             ),
+            is_openai: lc == "openai",
         }
     }
 }
@@ -200,4 +203,6 @@ impl LlmClient {
     pub fn provider_name(&self) -> &str { self.provider.provider_name() }
     pub fn set_reasoning(&self, enabled: bool) { self.provider.set_reasoning(enabled); }
     pub fn is_reasoning(&self) -> bool { self.provider.is_reasoning() }
+    pub fn set_reasoning_effort(&self, effort: Option<String>) { self.provider.set_reasoning_effort(effort); }
+    pub fn reasoning_effort(&self) -> Option<String> { self.provider.reasoning_effort() }
 }

@@ -3,12 +3,248 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
-| 8 | Memory 系统 | - | 待实施 | 未确认 | 增加 memory 系统，支持跨会话持久化记忆，在合适时机自动写入/检索上下文 |
-| 9 | 反思系统 | - | 待实施 | 未确认 | 在关键节点对过去行为/决策做反思总结，提炼经验写入 Memory 系统（依赖 #8） |
-| 11 | OpenAI reasoning_effort 配置支持 | - | 待实施 | 未确认 | 支持 GPT-5.x 系列 `reasoning_effort` (none/low/medium/high/xhigh)，可在 config.json 配置 |
+| 8 | Memory 系统 | - | 重新设计中 | 未确认 | 跨会话持久化记忆，记忆作为一等公民，LLM 自主管理 + Hook 兜底。详见 [spec](specs/008-memory-system.md) |
+| 9 | 反思系统 | - | 重新设计中 | 未确认 | 关键节点自动反思，发现偏差并提炼经验写入 Memory（依赖 #8）。详见 [spec](specs/009-reflection-system.md) |
+| 11 | OpenAI reasoning_effort 配置支持 | - | ✅ 已完成 | 未确认 | 支持 GPT-5.x 系列 `reasoning_effort` (none/low/medium/high/xhigh)，可在 config.json 配置 |
 | 13 | Task list 显示在 spinner 下方 | - | ✅ 已完成 | 未确认 | 临时区域渲染顺序调整为：queued messages → spinner → task status lines，让 task list 出现在 spinner 下方而非上方 |
 | 15 | 通过 max_tokens 限制 LLM thinking 长度 | - | 待实施 | 未确认 | 用户可配置 thinking 阶段最大 token 数，避免模型在简单问题上过度思考浪费 token / 时间；映射到各 provider 的 thinking budget 字段 |
-| 16 | Spinner 行合并状态显示 + Hook 调用信息 | - | 待实施 | 未确认 | 把 status line 的 Thinking / Calling xxx 等运行态搬到 output area spinner 行（如 `✻ cooking ... 2s (Thinking ...)`），并在 spinner 行展示当前 hook 调用信息 |
+| 16 | Spinner 行合并状态显示 + Hook 调用信息 | - | 待确认 | 未确认 | 把 status line 的 Thinking / Calling xxx 等运行态搬到 output area spinner 行（如 `✻ cooking ... 2s (Thinking ...)`），并在 spinner 行展示当前 hook 调用信息 |
+| 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
+| 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
+
+### #17 Skill 延迟加载 + 命名空间前缀
+
+**目标**：对齐 Claude Code 的 plugin/skill 加载机制，降低启动开销，支持 skill 包（如 superpowers）的自动发现和命名空间隔离。
+
+**已完成的改动**：
+
+1. **启动只读 frontmatter**：`parse_skill()` 不再读取 SKILL.md 的 body content，`Skill.content` 启动时为空字符串。新增 `read_skill_content()` 函数，由 Skill 工具调用时按需读取全文。
+2. **Skill 工具延迟加载**：`aemeath-tools/src/skill_tool.rs` 调用时通过 `read_skill_content()` 从 `source_path` 读取完整内容返回给 LLM。
+3. **命名空间前缀**：`load_skills_from_dir()` 自动识别 skill 包（含 `skills/` 子目录的目录），包内 skill 自动加 `<pkg_name>:` 前缀（如 `superpowers:brainstorming`），原始名保留为 alias。顶层 skill 和普通目录下的 skill 无前缀。
+4. **HookJsonOutput 修复**：`aemeath-core/src/hook.rs` 的 `HookJsonOutput` 加了 `#[serde(rename_all = "camelCase")]`，修复 hook 脚本输出的 `additionalContext`（camelCase）无法被反序列化的问题。
+5. **SessionStart hook 精简**：`superpowers-inject.sh` 从注入全文（~5500 字符/每次 API 调用）改为简短提示（113 字符），提醒 LLM 检查可用 skill 并通过 Skill 工具按需加载。
+6. **Skill 目录扫描优化**：自动发现 skill 包内的 `skills/` 子目录，跳过 `agents/`、`.github/` 等无关目录。
+
+**涉及路径**：
+- `aemeath-core/src/skill.rs`（parse_skill 延迟加载、load_skills_from_dir 命名空间、read_skill_content）
+- `aemeath-tools/src/skill_tool.rs`（Skill 工具调用时读取全文）
+- `aemeath-core/src/hook.rs`（HookJsonOutput camelCase 支持）
+- `~/.aemeath/hooks/superpowers-inject.sh`（SessionStart hook 精简）
+
+**测试**：7 个单元测试覆盖命名空间前缀、延迟加载、忽略非 skills 目录、常规 skill 目录。
+
+---
+
+### #18 Task list 跨轮次 batch 机制
+
+**目标**：Task list 跨轮次持久化，不再每次用户消息清空。通过 batch 机制区分不同 turn 的 task list，旧 batch 自动隐藏。
+
+**已完成的改动**：
+
+1. **移除自动清空**：`stream.rs` 不再在每次进入时调用 `_task_store.clear()`，task 跟随 session 生命周期。
+2. **Batch ID 机制**：`Task` 新增 `batch` 字段，`TaskStore` 新增 `current_batch` 计数器。`create()` 时检测上一 batch 是否全部 completed/deleted，如果是则递增 batch。
+3. **当前 batch 显示**：新增 `list_current_batch()` 方法，TUI 只显示最新 batch 的 task（含 Completed）。
+4. **Completed 可见**：当前 batch 内 Completed 的 task 继续显示（✓ 图标），摘要行 `━━ Tasks: 3/5 ━━` 反映完成进度。
+
+**涉及路径**：
+- `aemeath-core/src/task.rs`（batch 字段、current_batch 计数器、list_current_batch）
+- `aemeath-cli/src/tui/app/mod.rs`（update_task_status 使用 list_current_batch）
+- `aemeath-cli/src/tui/app/stream.rs`（移除 clear 调用）
+
+---
+
+### #8 Memory 系统
+
+**目标**：跨会话持久化记忆，让 agent 在不同会话间积累项目知识、用户偏好和决策上下文，避免每次从零开始。
+
+**存储设计**：
+
+```
+~/.aemeath/memory/
+├── _global.json          # 全局记忆（跨项目）
+├── <project-hash>/       # 项目级记忆
+│   ├── _index.json       # 记忆索引（id → metadata）
+│   ├── <id>.json         # 单条记忆
+│   └── _archive/         # 过期/合并后的归档
+```
+
+**记忆条目结构**：
+
+```rust
+struct MemoryEntry {
+    id: String,             // UUIDv7
+    category: MemoryCategory,
+    content: String,        // 记忆正文
+    source: String,         // 来源：session id / reflection / user
+    project: Option<String>,// 项目标识（None = 全局）
+    relevance_tags: Vec<String>,  // 检索标签
+    created_at: u64,
+    accessed_at: u64,       // 最后一次被检索注入的时间
+    access_count: u32,      // 被检索次数（用于优先级排序）
+    expires_at: Option<u64>,// 过期时间（None = 永久）
+}
+```
+
+**分类**：
+
+```rust
+enum MemoryCategory {
+    ProjectStructure,  // 项目架构、文件组织
+    Decision,          // 重要设计决策及其理由
+    Preference,        // 用户偏好（语言、风格、框架选择等）
+    Pattern,           // 项目特定模式（命名规范、错误处理方式）
+    Pitfall,           // 已知坑点/踩坑记录
+    Context,           // 一般上下文知识
+}
+```
+
+**写入时机**（通过 Hook 触发）：
+
+| 时机 | HookEvent | 写入策略 |
+|------|-----------|---------|
+| 会话结束时 | `SessionEnd` | LLM 总结本会话关键决策和发现，写入 memory |
+| 压缩后 | `PostCompact` | 提取被压缩掉的重要上下文到 memory |
+| 用户主动 | `/memory add <content>` 命令 | 直接写入 |
+| 反思系统 | `ReflectionGenerated`（新事件） | 反思结果写入 |
+
+**检索注入**（System Prompt 构建阶段）：
+
+1. `build_system_prompt_parts()` 中新增 memory 检索步骤
+2. 基于当前 cwd 定位项目 memory 目录
+3. 按 `access_count` + `created_at` 加权排序，取 top-N（默认 10 条）
+4. 注入到 system prompt 的 dynamic_part 中：
+   ```
+   # Project Memory
+   - [Decision] 使用 tokio channel 而非 mpsc，因为需要跨 async task 通信
+   - [Pattern] 错误处理统一用 AemeathError，thiserror derive
+   - [Pitfall] bash.rs 中 check_command_safety 不受 allow_all 控制，已修复
+   ```
+5. 更新被注入条目的 `accessed_at` 和 `access_count`
+
+**新增模块**：
+
+- `aemeath-core/src/memory.rs` — MemoryStore（CRUD + 索引 + 检索 + 淘汰）
+- `aemeath-core/src/command/commands/memory.rs` — `/memory` 命令
+
+**新增命令**：
+
+| 命令 | 说明 |
+|------|------|
+| `/memory` | 显示当前项目的 memory 摘要 |
+| `/memory add <content>` | 添加一条记忆 |
+| `/memory search <query>` | 搜索记忆 |
+| `/memory delete <id>` | 删除一条记忆 |
+| `/memory clear` | 清空项目记忆 |
+
+**淘汰策略**：
+- 单条记忆超过 90 天未被访问（`accessed_at`）且 `access_count < 3` → 归档
+- 单项目记忆超过 100 条 → 触发合并：将相近 tag 的记忆用 LLM 合并为一条摘要
+- 归档文件不删除，可通过 `/memory search` 搜索
+
+**配置**（`config.json`）：
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "max_entries_per_project": 100,
+    "max_inject_count": 10,
+    "auto_summary_on_session_end": true,
+    "archive_after_days": 90
+  }
+}
+```
+
+**依赖**：无外部依赖，纯文件系统存储 + JSON 序列化。
+
+---
+
+### #9 反思系统
+
+**目标**：在关键节点自动触发反思，让 agent 从过去的行为中提炼经验，写入 Memory 系统，避免重复犯错。
+
+**反思触发时机**：
+
+| 触发点 | 条件 | 反思内容 |
+|--------|------|---------|
+| 连续工具失败 | 同一 turn 内 ≥2 次工具调用失败 | 失败原因分析 + 正确做法 |
+| 会话结束 | `SessionEnd` hook | 整体会话总结 + 关键决策 |
+| 子代理结束 | `SubagentStop` hook | 子代理执行摘要 |
+| 用户中断 | 用户按 Escape 取消 | 当前进度快照 + 未完成原因 |
+| 重试后成功 | API 错误后重试成功 | 错误类型 + 重试策略有效性 |
+
+**反思流程**：
+
+```
+触发条件满足
+  → 构造反思 prompt（含近期对话片段）
+  → 调用 LLM 生成反思摘要（用轻量模型，如 deepseek-chat）
+  → 解析反思结果为结构化 MemoryEntry
+  → 写入 MemoryStore
+```
+
+**反思 Prompt 模板**：
+
+```
+你是一个反思助手。请分析以下对话片段，提炼出对未来会话有价值的信息。
+
+要求：
+1. 只记录客观事实和有效经验，不要记录临时状态
+2. 每条不超过 200 字
+3. 标注分类：Decision / Pattern / Pitfall / Preference
+
+对话片段：
+{recent_messages}
+
+请输出 JSON 数组：
+[{"category": "...", "content": "...", "tags": ["..."]}]
+```
+
+**反思结果结构**：
+
+```rust
+struct ReflectionResult {
+    entries: Vec<ReflectionEntry>,
+}
+
+struct ReflectionEntry {
+    category: MemoryCategory,
+    content: String,
+    tags: Vec<String>,
+}
+```
+
+**实现策略**：
+
+1. 反思调用使用**独立轻量 LLM 调用**（非主对话），避免干扰上下文
+2. 反思在后台异步执行（tokio::spawn），不阻塞主循环
+3. 反思结果静默写入 MemoryStore，不显示在对话中
+4. 仅在 `memory.enabled = true` 且有有效反思内容时触发
+
+**配置**（`config.json`）：
+
+```json
+{
+  "reflection": {
+    "enabled": true,
+    "model": "deepseek/deepseek-chat",
+    "max_entries_per_reflection": 3,
+    "min_turns_for_session_summary": 5,
+    "consecutive_failures_threshold": 2
+  }
+}
+```
+
+**依赖**：
+- Feature #8（Memory 系统）— 反思结果写入 MemoryStore
+- Hook 系统 — 通过 HookEvent 触发反思
+
+**实施阶段**：
+- P0：会话结束反思（最核心，收益最大）
+- P1：连续工具失败反思
+- P2：子代理反思、用户中断反思
+
+---
 
 ### #16 Spinner 行合并状态显示 + Hook 调用信息
 

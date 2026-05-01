@@ -24,7 +24,7 @@ impl super::App {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
                     self.tool_call_active = false;
                 }
-                self.status_bar.set_processing("Generating...");
+                self.output_area.set_spinner_phase("Generating...");
                 self.output_area.stop_spinner();
                 self.output_area.append_assistant_text(&text);
             }
@@ -33,7 +33,7 @@ impl super::App {
                       log::debug!("[SPINNER] Thinking: tool_call_active was true, resetting to false");
                       self.tool_call_active = false;
                   }
-                  self.status_bar.set_processing("Thinking...");
+                  self.output_area.set_spinner_phase("Thinking...");
                   self.output_area.stop_spinner();
                   self.output_area.append_thinking_text(&text);
               }
@@ -45,7 +45,6 @@ impl super::App {
                 log::debug!("[SPINNER] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
-                self.status_bar.set_processing(&format!("Calling {}...", name));
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.output_area.start_spinner();
@@ -65,7 +64,7 @@ impl super::App {
                 self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
                 log::debug!("[BUG#24] ToolResult({tool_name}): restarting spinner for next turn");
                 self.tool_call_active = false;
-                self.status_bar.set_processing("Thinking...");
+                self.output_area.set_spinner_phase("Thinking...");
                 self.output_area.start_spinner();
             }
             UiEvent::Usage { input, output, last_input, elapsed_secs } => {
@@ -85,14 +84,12 @@ impl super::App {
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 *is_processing = false;
-                self.status_bar.clear_processing();
             }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 *is_processing = false;
-                self.status_bar.clear_processing();
             }
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
@@ -124,7 +121,6 @@ impl super::App {
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 *is_processing = false;
-                self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
                 if !self.input_queue.is_empty() {
                     let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
@@ -142,7 +138,6 @@ impl super::App {
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 *is_processing = false;
-                self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
                 if !self.input_queue.is_empty() {
                     let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
@@ -167,6 +162,9 @@ impl super::App {
                 }
                 let _ = reply_tx.send(queued);
             }
+            UiEvent::HookStart { .. } | UiEvent::HookEnd { .. } => {
+                // Hook lifecycle events — handled in update.rs for spinner display
+            }
         }
     }
 
@@ -184,7 +182,7 @@ impl super::App {
         for msg in &queued {
             self.messages.push(Message::user(msg));
         }
-        self.status_bar.set_processing("Thinking...");
+        self.output_area.set_spinner_phase("Thinking...");
         self.output_area.start_spinner();
         *is_processing = true;
 

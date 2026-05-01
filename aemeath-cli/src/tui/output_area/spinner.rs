@@ -53,8 +53,20 @@ impl super::OutputArea {
             frame: 0,
             verb: SPINNER_VERBS.choose(&mut rng).unwrap_or(&"Thinking").to_string(),
             start: std::time::Instant::now(),
+            phase: None,
         });
         log::debug!("[SPINNER] start_spinner: started");
+    }
+
+    /// Update the detailed phase shown on the spinner line.
+    pub fn set_spinner_phase(&mut self, phase: impl Into<String>) {
+        let phase = phase.into();
+        if self.spinner.is_none() {
+            self.start_spinner();
+        }
+        if let Some(ref mut spinner) = self.spinner {
+            spinner.phase = Some(phase);
+        }
     }
 
     /// Stop the animated spinner
@@ -102,6 +114,15 @@ impl super::OutputArea {
                 format!("  {}s", elapsed),
                 Style::default().fg(Color::DarkGray),
             ));
+        }
+
+        if let Some(phase) = s.phase.as_deref().filter(|p| !p.is_empty()) {
+            spans.push(Span::styled("  (", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                phase.to_string(),
+                Style::default().fg(Color::Yellow),
+            ));
+            spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
         }
 
         Some(Line::from(spans))

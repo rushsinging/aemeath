@@ -1,7 +1,7 @@
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::config::hooks::HookEvent;
-use aemeath_core::hook::{CompactHookData, HookData, StopHookData, ToolHookData};
+use aemeath_core::hook::{CompactHookData, HookData, HookJsonOutput, HookResult, StopHookData, ToolHookData};
 use aemeath_core::logging::{self, LogFile};
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
@@ -39,8 +39,8 @@ pub async fn process_in_background(
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     hook_runner: aemeath_core::hook::HookRunner,
 ) {
-    _task_store.clear().await;
-
+    let hook_ui = HookUi::new(tx.clone());
+  
     let tool_schemas = registry.schemas();
     let tool_schema_tokens = aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
@@ -145,8 +145,9 @@ pub async fn process_in_background(
             use aemeath_core::compact;
 
             // PreCompact hook: 在压缩前触发，可阻止压缩
-            let pre_compact_results = hook_runner
-                .run_hooks_with_json(
+            let pre_compact_results = hook_ui
+                .run_json(
+                    &hook_runner,
                     HookEvent::PreCompact,
                     None,
                     HookData::Compact(CompactHookData {
@@ -194,8 +195,9 @@ pub async fn process_in_background(
                             )).await;
 
                             // PostCompact hook: 在压缩成功后触发
-                            let post_compact_results = hook_runner
-                                .run_hooks_with_json(
+                            let post_compact_results = hook_ui
+                                .run_json(
+                                    &hook_runner,
                                     HookEvent::PostCompact,
                                     None,
                                     HookData::Compact(CompactHookData {
@@ -295,8 +297,16 @@ pub async fn process_in_background(
                     let mut denied_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     for call in &denied {
                         // PermissionDenied hook: notify when a tool is denied
-                        let _hook_results = hook_runner
-                            .on_permission_denied(&call.name, "deny")
+                        let _hook_results = hook_ui
+                            .run_plain(
+                                &hook_runner,
+                                HookEvent::PermissionDenied,
+                                Some(&call.name),
+                                HookData::Permission(aemeath_core::hook::PermissionHookData {
+                                    tool_name: call.name.clone(),
+                                    permission_rule: "deny".to_string(),
+                                }),
+                            )
                             .await;
 
                         let result = (
@@ -334,8 +344,16 @@ pub async fn process_in_background(
                     log::debug!("[AskUser] ask_calls count: {}", ask_calls.len());
                     for call in &ask_calls {
                         // PermissionRequest hook: notify before executing AskUserQuestion tool
-                        let _hook_results = hook_runner
-                            .on_permission_request(&call.name, "manual")
+                        let _hook_results = hook_ui
+                            .run_plain(
+                                &hook_runner,
+                                HookEvent::PermissionRequest,
+                                Some(&call.name),
+                                HookData::Permission(aemeath_core::hook::PermissionHookData {
+                                    tool_name: call.name.clone(),
+                                    permission_rule: "manual".to_string(),
+                                }),
+                            )
                             .await;
 
                         let question = call.input.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -391,19 +409,38 @@ pub async fn process_in_background(
                     let mut non_agent_results: Vec<(String, String, bool, Vec<ImageData>)> = Vec::new();
                     for call in &other_calls {
                         // PermissionRequest hook: notify before executing non-agent tool
-                        let _hook_results = hook_runner
-                            .on_permission_request(&call.name, "auto")
+                        let _hook_results = hook_ui
+                            .run_plain(
+                                &hook_runner,
+                                HookEvent::PermissionRequest,
+                                Some(&call.name),
+                                HookData::Permission(aemeath_core::hook::PermissionHookData {
+                                    tool_name: call.name.clone(),
+                                    permission_rule: "auto".to_string(),
+                                }),
+                            )
                             .await;
-
+  
                         let call = ToolCall {
                             id: call.id.clone(),
                             name: call.name.clone(),
                             input: call.input.clone(),
                         };
                         // PreToolUse hook: 检查是否应阻止执行
-                        let (blocked, _hook_results) = hook_runner
-                            .pre_tool_use(&call.name, call.input.clone())
+                        let pre_results = hook_ui
+                            .run_plain(
+                                &hook_runner,
+                                HookEvent::PreToolUse,
+                                Some(&call.name),
+                                HookData::Tool(ToolHookData {
+                                    tool_name: call.name.clone(),
+                                    tool_input: call.input.clone(),
+                                    tool_output: None,
+                                    is_error: None,
+                                }),
+                            )
                             .await;
+                        let blocked = pre_results.iter().any(|r| r.blocked);
                         if blocked {
                             let _ = tx.send(UiEvent::ToolResult {
                                 id: call.id.clone(),
@@ -421,8 +458,9 @@ pub async fn process_in_background(
                             .await;
                         for (id, output, is_error, images) in results {
                             // PostToolUse hook: run with JSON output parsing
-                            let hook_results = hook_runner
-                                .run_hooks_with_json(
+                            let hook_results = hook_ui
+                                .run_json(
+                                    &hook_runner,
                                     HookEvent::PostToolUse,
                                     Some(&call.name),
                                     HookData::Tool(ToolHookData {
@@ -446,8 +484,9 @@ pub async fn process_in_background(
 
                             // PostToolUseFailure hook: 工具执行失败时触发
                             if is_error {
-                                let hook_results = hook_runner
-                                    .run_hooks_with_json(
+                                let hook_results = hook_ui
+                                    .run_json(
+                                        &hook_runner,
                                         HookEvent::PostToolUseFailure,
                                         Some(&call.name),
                                         HookData::Tool(ToolHookData {
@@ -472,8 +511,18 @@ pub async fn process_in_background(
 
                             // TaskCreated hook: TaskCreate 工具执行成功时触发
                             if !is_error && call.name == "TaskCreate" {
-                                let hook_results = hook_runner
-                                    .on_task_created(call.input.clone(), &output)
+                                let hook_results = hook_ui
+                                    .run_json(
+                                        &hook_runner,
+                                        HookEvent::TaskCreated,
+                                        None,
+                                        HookData::Tool(ToolHookData {
+                                            tool_name: "TaskCreate".to_string(),
+                                            tool_input: call.input.clone(),
+                                            tool_output: Some(output.clone()),
+                                            is_error: Some(false),
+                                        }),
+                                    )
                                     .await;
                                 for (_entry, _result, json_output) in &hook_results {
                                     if let Some(json) = json_output {
@@ -489,8 +538,18 @@ pub async fn process_in_background(
 
                             // TaskCompleted hook: TaskUpdate 将任务标记为 completed 时触发
                             if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
-                                let hook_results = hook_runner
-                                    .on_task_completed(call.input.clone(), &output)
+                                let hook_results = hook_ui
+                                    .run_json(
+                                        &hook_runner,
+                                        HookEvent::TaskCompleted,
+                                        None,
+                                        HookData::Tool(ToolHookData {
+                                            tool_name: "TaskUpdate".to_string(),
+                                            tool_input: call.input.clone(),
+                                            tool_output: Some(output.clone()),
+                                            is_error: Some(false),
+                                        }),
+                                    )
                                     .await;
                                 for (_entry, _result, json_output) in &hook_results {
                                     if let Some(json) = json_output {
@@ -557,14 +616,26 @@ pub async fn process_in_background(
                                 input: call.input.clone(),
                             };
                             let tx = tx.clone();
+                            let hook_ui = hook_ui.clone();
                             let mut ag_ctx = agent.ctx.clone();
                             let hook_runner = hook_runner.clone();
                             let registry_ref = registry.clone();
                             async move {
                                 // PreToolUse hook for Agent calls
-                                let (blocked, _) = hook_runner
-                                    .pre_tool_use(&call.name, call.input.clone())
+                                let pre_results = hook_ui
+                                    .run_plain(
+                                        &hook_runner,
+                                        HookEvent::PreToolUse,
+                                        Some(&call.name),
+                                        HookData::Tool(ToolHookData {
+                                            tool_name: call.name.clone(),
+                                            tool_input: call.input.clone(),
+                                            tool_output: None,
+                                            is_error: None,
+                                        }),
+                                    )
                                     .await;
+                                let blocked = pre_results.iter().any(|r| r.blocked);
                                 if blocked {
                                     let _ = tx.send(UiEvent::ToolResult {
                                         id: call.id.clone(),
@@ -609,14 +680,25 @@ pub async fn process_in_background(
 
                                 for (id, output, is_error, images) in &results {
                                     // PostToolUse hook for Agent calls
-                                    let _ = hook_runner
-                                        .post_tool_use(&call.name, call.input.clone(), output, *is_error)
+                                    let _ = hook_ui
+                                        .run_json(
+                                            &hook_runner,
+                                            HookEvent::PostToolUse,
+                                            Some(&call.name),
+                                            HookData::Tool(ToolHookData {
+                                                tool_name: call.name.clone(),
+                                                tool_input: call.input.clone(),
+                                                tool_output: Some(output.clone()),
+                                                is_error: Some(*is_error),
+                                            }),
+                                        )
                                         .await;
 
                                     // PostToolUseFailure hook: Agent 工具执行失败时触发
                                     if *is_error {
-                                        let hook_results = hook_runner
-                                            .run_hooks_with_json(
+                                        let hook_results = hook_ui
+                                            .run_json(
+                                                &hook_runner,
                                                 HookEvent::PostToolUseFailure,
                                                 Some(&call.name),
                                                 HookData::Tool(ToolHookData {
@@ -678,8 +760,9 @@ pub async fn process_in_background(
                     }
 
                     // PostToolBatch hook: 批量工具调用完成后触发（汇总注入）
-                    let post_batch_results = hook_runner
-                        .run_hooks_with_json(
+                    let post_batch_results = hook_ui
+                        .run_json(
+                            &hook_runner,
                             HookEvent::PostToolBatch,
                             None,
                             HookData::Stop(StopHookData { turns: turn_count }),
@@ -700,11 +783,14 @@ pub async fn process_in_background(
             Err(e) => {
                 let _ = tx.send(UiEvent::Error(e.to_string())).await;
                 // StopFailure hook: API 错误导致 agent 循环结束
-                let stop_results = hook_runner.run_hooks_with_json(
-                    HookEvent::StopFailure,
-                    None,
-                    HookData::Stop(StopHookData { turns: turn_count }),
-                ).await;
+                let stop_results = hook_ui
+                    .run_json(
+                        &hook_runner,
+                        HookEvent::StopFailure,
+                        None,
+                        HookData::Stop(StopHookData { turns: turn_count }),
+                    )
+                    .await;
                 let (system_message, additional_context) = stop_results.into_iter()
                     .find_map(|(_, _, json_output)| json_output)
                     .map(|output| (output.system_message, output.additional_context))
@@ -719,9 +805,108 @@ pub async fn process_in_background(
     messages.truncate(messages_at_start);
 
     // Stop hook: agent 循环结束
-    let _ = hook_runner.on_stop(turn_count).await;
-
+    let _ = hook_ui
+        .run_plain(
+            &hook_runner,
+            HookEvent::Stop,
+            None,
+            HookData::Stop(StopHookData { turns: turn_count }),
+        )
+        .await;
+  
     let _ = tx.send(UiEvent::DoneWithDuration(turn_start.elapsed())).await;
+}
+
+#[derive(Clone)]
+struct HookUi {
+    tx: mpsc::Sender<UiEvent>,
+}
+
+impl HookUi {
+    fn new(tx: mpsc::Sender<UiEvent>) -> Self {
+        Self { tx }
+    }
+
+    async fn run_json(
+        &self,
+        runner: &aemeath_core::hook::HookRunner,
+        event: HookEvent,
+        tool_name: Option<&str>,
+        data: HookData,
+    ) -> Vec<(aemeath_core::config::hooks::HookEntry, HookResult, Option<HookJsonOutput>)> {
+        let hooks = runner.matching_hooks(event, tool_name);
+        if hooks.is_empty() {
+            return Vec::new();
+        }
+
+        let command = hooks
+            .first()
+            .map(|hook| hook.command.clone())
+            .unwrap_or_default();
+        let event_name = hook_event_name(event);
+        let _ = self.tx.send(UiEvent::HookStart {
+            event: event_name.to_string(),
+            command,
+        }).await;
+
+        let hook_results = runner
+            .run_hooks_with_json(event, tool_name, data)
+            .await;
+
+        for (_, result, _) in &hook_results {
+            let _ = self.tx.send(UiEvent::HookEnd {
+                event: event_name.to_string(),
+                blocked: result.blocked,
+                error: result.error.clone(),
+            }).await;
+        }
+        hook_results
+    }
+
+    async fn run_plain(
+        &self,
+        runner: &aemeath_core::hook::HookRunner,
+        event: HookEvent,
+        tool_name: Option<&str>,
+        data: HookData,
+    ) -> Vec<HookResult> {
+        self.run_json(runner, event, tool_name, data)
+            .await
+            .into_iter()
+            .map(|(_, result, _)| result)
+            .collect()
+    }
+}
+
+fn hook_event_name(event: HookEvent) -> &'static str {
+    match event {
+        HookEvent::PreToolUse => "PreToolUse",
+        HookEvent::PostToolUse => "PostToolUse",
+        HookEvent::PostToolUseFailure => "PostToolUseFailure",
+        HookEvent::UserPromptSubmit => "UserPromptSubmit",
+        HookEvent::Stop => "Stop",
+        HookEvent::StopFailure => "StopFailure",
+        HookEvent::SessionStart => "SessionStart",
+        HookEvent::SessionEnd => "SessionEnd",
+        HookEvent::PreCompact => "PreCompact",
+        HookEvent::PostCompact => "PostCompact",
+        HookEvent::PostToolBatch => "PostToolBatch",
+        HookEvent::SubagentStart => "SubagentStart",
+        HookEvent::SubagentStop => "SubagentStop",
+        HookEvent::TaskCreated => "TaskCreated",
+        HookEvent::TaskCompleted => "TaskCompleted",
+        HookEvent::PermissionRequest => "PermissionRequest",
+        HookEvent::PermissionDenied => "PermissionDenied",
+        HookEvent::Notification => "Notification",
+        HookEvent::InstructionsLoaded => "InstructionsLoaded",
+        HookEvent::ConfigChange => "ConfigChange",
+        HookEvent::Elicitation => "Elicitation",
+        HookEvent::ElicitationResult => "ElicitationResult",
+        HookEvent::UserPromptExpansion => "UserPromptExpansion",
+        HookEvent::CwdChanged => "CwdChanged",
+        HookEvent::FileChanged => "FileChanged",
+        HookEvent::TeammateIdle => "TeammateIdle",
+    }
 }
 
 async fn drain_queued_input(tx: &mpsc::Sender<UiEvent>) -> Option<Vec<String>> {

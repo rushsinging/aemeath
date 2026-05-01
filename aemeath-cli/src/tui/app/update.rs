@@ -8,6 +8,22 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+fn truncate_for_spinner(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn short_hook_command(command: &str) -> String {
+    let trimmed = command.trim().trim_matches('"');
+    let tail = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    truncate_for_spinner(tail, 48)
+}
+
 /// Return type for update: (commands, whether to continue the loop)
 pub struct UpdateResult {
     pub cmd: Cmd,
@@ -212,13 +228,13 @@ impl App {
                     }
                     self.input_area.clear();
                     let _ = state.reply_tx.send(answer);
-                    self.status_bar.set_processing("Generating...");
+                    self.output_area.set_spinner_phase("Generating...");
                 }
                 KeyCode::Esc => {
                     let state = self.ask_user_state.take().unwrap();
                     self.input_area.clear();
                     let _ = state.reply_tx.send(String::new());
-                    self.status_bar.set_processing("Generating...");
+                    self.output_area.set_spinner_phase("Generating...");
                 }
                 _ => {
                     // 普通按键传递给 input_area（用于自由输入模式）
@@ -257,7 +273,7 @@ impl App {
                             self.output_area.push_user_message(&text);
                             self.input_area.clear();
                             let _ = reply_tx.send(text);
-                            self.status_bar.set_processing("Generating...");
+                            self.output_area.set_spinner_phase("Generating...");
                         }
                     }
                     return UpdateResult { cmd: Cmd::None, pending_slash: None };
@@ -266,7 +282,7 @@ impl App {
                     if let Some(reply_tx) = self.ask_user_reply_tx.take() {
                         self.input_area.clear();
                         let _ = reply_tx.send(String::new());
-                        self.status_bar.set_processing("Generating...");
+                        self.output_area.set_spinner_phase("Generating...");
                     }
                     return UpdateResult { cmd: Cmd::None, pending_slash: None };
                 }
@@ -452,8 +468,8 @@ impl App {
         spawn_refs.interrupted.store(false, Ordering::Relaxed);
         self.active_tool_call_ids.clear();
         self.tool_call_active = false;
-        self.status_bar.set_processing("Thinking...");
         self.output_area.start_spinner();
+        self.output_area.set_spinner_phase("Thinking...");
         *is_processing = true;
 
         UpdateResult { cmd: Cmd::SpawnProcessing(spawn_ctx), pending_slash: None }
@@ -475,8 +491,7 @@ impl App {
                     self.tool_call_active = false;
                     self.active_tool_call_ids.clear();
                 }
-                self.status_bar.set_processing("Generating...");
-                self.output_area.stop_spinner();
+                self.output_area.set_spinner_phase("Generating...");
                 self.output_area.append_assistant_text(&text);
             }
             UiEvent::Thinking(text) => {
@@ -485,8 +500,7 @@ impl App {
                     self.tool_call_active = false;
                     self.active_tool_call_ids.clear();
                 }
-                self.status_bar.set_processing("Thinking...");
-                self.output_area.stop_spinner();
+                self.output_area.set_spinner_phase("Thinking...");
                 self.output_area.append_thinking_text(&text);
             }
             UiEvent::TextBlockComplete(_text) => {
@@ -497,10 +511,10 @@ impl App {
                 log::debug!("[SPINNER] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
-                self.status_bar.set_processing(&format!("Calling {}...", name));
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.output_area.start_spinner();
+                    self.output_area.set_spinner_phase(format!("Calling {name}..."));
                 }
             }
             UiEvent::ToolCall { id, name, summary } => {
@@ -508,8 +522,8 @@ impl App {
                 self.tool_call_active = true;
                 self.active_tool_call_ids.insert(id.clone());
                 self.output_area.push_tool_call(&id, &name, &summary);
-                self.status_bar.set_processing(&format!("Calling {}...", name));
                 self.output_area.start_spinner();
+                self.output_area.set_spinner_phase(format!("Calling {name}..."));
             }
             UiEvent::ToolResult { id, tool_name, output, is_error, images } => {
                 let image_note = if images.is_empty() {
@@ -527,12 +541,12 @@ impl App {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
                     self.tool_call_active = false;
-                    self.status_bar.set_processing("Thinking...");
-                    self.output_area.start_spinner();
+                              self.output_area.start_spinner();
+                    self.output_area.set_spinner_phase("Thinking...");
                 } else {
                     self.tool_call_active = true;
-                    self.status_bar.set_processing(&format!("Calling tools... ({remaining} running)"));
                     self.output_area.start_spinner();
+                    self.output_area.set_spinner_phase(format!("Calling tools... ({remaining} running)"));
                 }
             }
             UiEvent::Usage { input, output, last_input, elapsed_secs } => {
@@ -548,8 +562,8 @@ impl App {
             }
             UiEvent::AgentProgress { tool_id, text } => {
                 self.output_area.push_tool_progress(&tool_id, &text);
-                self.status_bar.set_processing("Agent working...");
                 self.output_area.start_spinner();
+                self.output_area.set_spinner_phase("Agent working...");
             }
             UiEvent::Error(msg) => {
                     log::debug!("[SPINNER] Error: tool_call_active {} -> false", self.tool_call_active);
@@ -563,7 +577,6 @@ impl App {
                     self.tool_call_active = false;
                     self.active_tool_call_ids.clear();
                     *is_processing = false;
-                    self.status_bar.clear_processing();
                 }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
@@ -571,7 +584,6 @@ impl App {
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
                 *is_processing = false;
-                self.status_bar.clear_processing();
             }
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
@@ -618,7 +630,7 @@ impl App {
                     // 无选项：退回自由输入模式
                     self.ask_user_reply_tx = Some(reply_tx);
                 }
-                self.status_bar.set_processing("Waiting for your input...");
+                self.output_area.set_spinner_phase("Waiting for user");
             }
             UiEvent::StopFailureHook { system_message, additional_context } => {
                 if let Some(ref msg) = system_message {
@@ -640,9 +652,28 @@ impl App {
                     for msg in &flushed {
                         self.output_area.push_user_message(msg);
                     }
-                    self.status_bar.set_processing("Thinking with queued input...");
+                    self.output_area.set_spinner_phase("Thinking with queued input...");
                 }
                 let _ = reply_tx.send(queued);
+            }
+            UiEvent::HookStart { event, command } => {
+                self.output_area.start_spinner();
+                self.output_area.set_spinner_phase(format!(
+                    "Hook {event}: {}",
+                    short_hook_command(&command)
+                ));
+            }
+            UiEvent::HookEnd { event, blocked, error } => {
+                if blocked {
+                    self.output_area.set_spinner_phase(format!("Hook {event} blocked"));
+                } else if let Some(error) = error {
+                    self.output_area.set_spinner_phase(format!(
+                        "Hook {event} failed: {}",
+                        truncate_for_spinner(&error, 48)
+                    ));
+                } else {
+                    self.output_area.set_spinner_phase(format!("Hook {event} done"));
+                }
             }
             UiEvent::Done => {
                 log::debug!("[SPINNER] Done: tool_call_active {} -> false", self.tool_call_active);
@@ -651,7 +682,6 @@ impl App {
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
                 *is_processing = false;
-                self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
             }
             UiEvent::DoneWithDuration(elapsed) => {
@@ -662,7 +692,6 @@ impl App {
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
                 *is_processing = false;
-                self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
             }
         }
