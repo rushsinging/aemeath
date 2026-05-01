@@ -189,7 +189,7 @@ pub async fn run_repl(
                     eprintln!("unknown command: {input}. Type /help for available commands.");
                     continue;
                 }
-                SlashResult::Review(prompt) => {
+                SlashResult::InjectMessage(prompt) => {
                     messages.push(Message::user(&prompt));
                     skip_message_build = true;
                 }

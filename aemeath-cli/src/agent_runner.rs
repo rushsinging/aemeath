@@ -156,18 +156,23 @@ impl AgentRunner for CliAgentRunner {
                     .map(ToString::to_string)
             })
             .unwrap_or_else(|| "subagent".to_string());
+        let session_id_for_log = session_id.clone();
+        let role_name = model_spec.unwrap_or("default").to_string();
+        let model_name = resolved_spec.as_deref().unwrap_or("default").to_string();
+        let role_name_for_log = role_name.clone();
+        let model_name_for_log = model_name.clone();
         let progress = move |turn: Option<usize>, msg: &str| {
-            let _ = logging::append_text_line_with_turn(
+            let _ = logging::append_agent_line(
                 LogFile::Agent,
                 &session_id,
                 turn,
+                &role_name,
+                &model_name,
                 "INFO",
                 "agent",
                 msg,
             );
-        };
-
-        // Helper to call SubagentStop hook and send system messages
+        };        // Helper to call SubagentStop hook and send system messages
         let hook_runner_clone = hook_runner.clone();
         let progress_tx_clone = progress_tx.clone();
         let system_for_hook = system.clone();
@@ -209,10 +214,31 @@ impl AgentRunner for CliAgentRunner {
         let sub_schemas = sub_registry.schemas();
         let mut messages = vec![Message::user(prompt)];
         let mut handler = SilentHandler;
-
+  
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
-
+        let log_request_messages = |turn: usize, messages: &[Message]| {
+            let payload = serde_json::json!({
+                "event": "subagent_llm_request_messages",
+                "provider": client.provider_name(),
+                "model": client.model_name(),
+                "role": role_name_for_log,
+                "model_spec": model_name_for_log,
+                "system_blocks": system_blocks,
+                "messages": messages,
+                "tool_schema_count": sub_schemas.len(),
+            });
+            let _ = logging::append_json_line_with_turn(
+                LogFile::Agent,
+                &session_id_for_log,
+                Some(turn),
+                "INFO",
+                "llm_request",
+                "sub-agent messages sent to LLM",
+                payload,
+            );
+        };
+  
         let sub_ctx = ToolContext {
             cwd: ctx.cwd.clone(),
             cancel: ctx.cancel.clone(),
@@ -270,6 +296,7 @@ impl AgentRunner for CliAgentRunner {
                 turn + 1, max_turns, messages.len(), msg_tokens
             ));
 
+            log_request_messages(turn_number, &messages);
             let response = client
                 .stream_message(&system_blocks, &messages, &sub_schemas, &mut handler, &ctx.cancel)
                 .await;

@@ -1,12 +1,83 @@
-use clap::{Parser, Subcommand};
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A Rust-based AI coding agent
 #[derive(Parser)]
 #[command(name = "aemeath")]
 pub struct Cli {
+    #[command(flatten)]
+    pub run_args: RunArgs,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+/// Run options (shared between top-level `aemeath` and `aemeath run` subcommand)
+#[derive(ClapArgs)]
+pub struct RunArgs {
+    /// LLM provider to use (anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible)
+    #[arg(long, env = "AEMEATH_PROVIDER", default_value = "anthropic")]
+    pub provider: String,
+
+    /// API key (overrides provider-specific env var)
+    #[arg(long, env = "AEMEATH_API_KEY")]
+    pub api_key: Option<String>,
+
+    /// API base URL (overrides provider-specific default)
+    #[arg(long, env = "AEMEATH_BASE_URL")]
+    pub base_url: Option<String>,
+
+    /// Model to use (overrides AEMEATH_MODEL env var)
+    #[arg(long, env = "AEMEATH_MODEL")]
+    pub model: Option<String>,
+
+    /// Working directory
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
+
+    /// Max output tokens
+    #[arg(long)]
+    pub max_tokens: Option<u32>,
+
+    /// Print raw SSE data for debugging
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// Disable markdown rendering
+    #[arg(long)]
+    pub no_markdown: bool,
+
+    /// Context window size in tokens
+    #[arg(long, env = "AEMEATH_CONTEXT_SIZE", default_value = "128000")]
+    pub context_size: usize,
+
+    /// Resume a saved session by ID
+    #[arg(long)]
+    pub resume: Option<String>,
+
+    /// Skip all permission prompts (auto-approve all tool calls)
+    #[arg(long)]
+    pub allow_all: bool,
+
+    /// Use TUI mode (default: true, use --no-tui for legacy REPL)
+    #[arg(long, default_value = "true")]
+    pub tui: bool,
+
+    /// Disable TUI mode and use legacy REPL
+    #[arg(long)]
+    pub no_tui: bool,
+
+    /// Maximum number of concurrent tool executions (default: 10)
+    #[arg(long, env = "AEMEATH_MAX_TOOL_CONCURRENCY")]
+    pub max_tool_concurrency: Option<usize>,
+
+    /// Maximum number of concurrent sub-agent executions (default: 4)
+    #[arg(long, env = "AEMEATH_MAX_AGENT_CONCURRENCY")]
+    pub max_agent_concurrency: Option<usize>,
+
+    /// Disable reasoning/thinking mode (default: enabled)
+    #[arg(long)]
+    pub no_think: bool,
 }
 
 #[derive(Subcommand)]
@@ -14,69 +85,8 @@ pub enum Commands {
     /// Start chat session (default when no subcommand is given)
     #[command(hide = true)]
     Run {
-        /// LLM provider to use (anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible)
-        #[arg(long, env = "AEMEATH_PROVIDER", default_value = "anthropic")]
-        provider: String,
-
-        /// API key (overrides provider-specific env var)
-        #[arg(long, env = "AEMEATH_API_KEY")]
-        api_key: Option<String>,
-
-        /// API base URL (overrides provider-specific default)
-        #[arg(long, env = "AEMEATH_BASE_URL")]
-        base_url: Option<String>,
-
-        /// Model to use (overrides AEMEATH_MODEL env var)
-        #[arg(long, env = "AEMEATH_MODEL")]
-        model: Option<String>,
-
-        /// Working directory
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-
-        /// Max output tokens
-        #[arg(long)]
-        max_tokens: Option<u32>,
-
-        /// Print raw SSE data for debugging
-        #[arg(long)]
-        verbose: bool,
-
-        /// Disable markdown rendering
-        #[arg(long)]
-        no_markdown: bool,
-
-        /// Context window size in tokens
-        #[arg(long, env = "AEMEATH_CONTEXT_SIZE", default_value = "128000")]
-        context_size: usize,
-
-        /// Resume a saved session by ID
-        #[arg(long)]
-        resume: Option<String>,
-
-        /// Skip all permission prompts (auto-approve all tool calls)
-        #[arg(long)]
-        allow_all: bool,
-
-        /// Use TUI mode (default: true, use --no-tui for legacy REPL)
-        #[arg(long, default_value = "true")]
-        tui: bool,
-
-        /// Disable TUI mode and use legacy REPL
-        #[arg(long)]
-        no_tui: bool,
-
-        /// Maximum number of concurrent tool executions (default: 10)
-        #[arg(long, env = "AEMEATH_MAX_TOOL_CONCURRENCY")]
-        max_tool_concurrency: Option<usize>,
-
-        /// Maximum number of concurrent sub-agent executions (default: 4)
-        #[arg(long, env = "AEMEATH_MAX_AGENT_CONCURRENCY")]
-        max_agent_concurrency: Option<usize>,
-
-        /// Disable reasoning/thinking mode (default: enabled)
-        #[arg(long)]
-        no_think: bool,
+        #[command(flatten)]
+        run_args: RunArgs,
     },
 
     /// List available models from config
@@ -102,8 +112,7 @@ pub enum Commands {
     },
 }
 
-/// The original Args struct, reconstructed from the Run subcommand fields.
-/// Used by the rest of main.rs to avoid touching all call sites.
+/// The original Args struct, used by the rest of main.rs to avoid touching all call sites.
 pub struct Args {
     pub provider: String,
     pub api_key: Option<String>,
@@ -124,43 +133,25 @@ pub struct Args {
     pub no_think: bool,
 }
 
-impl Args {
-    /// Construct Args from the Run subcommand fields.
-    pub fn from_run(
-        provider: String,
-        api_key: Option<String>,
-        base_url: Option<String>,
-        model: Option<String>,
-        cwd: Option<PathBuf>,
-        max_tokens: Option<u32>,
-        verbose: bool,
-        no_markdown: bool,
-        context_size: usize,
-        resume: Option<String>,
-        allow_all: bool,
-        tui: bool,
-        no_tui: bool,
-        max_tool_concurrency: Option<usize>,
-        max_agent_concurrency: Option<usize>,
-        no_think: bool,
-    ) -> Self {
+impl From<RunArgs> for Args {
+    fn from(r: RunArgs) -> Self {
         Self {
-            provider,
-            api_key,
-            base_url,
-            model,
-            cwd,
-            max_tokens,
-            verbose,
-            no_markdown,
-            context_size,
-            resume,
-            allow_all,
-            tui,
-            no_tui,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            no_think,
+            provider: r.provider,
+            api_key: r.api_key,
+            base_url: r.base_url,
+            model: r.model,
+            cwd: r.cwd,
+            max_tokens: r.max_tokens,
+            verbose: r.verbose,
+            no_markdown: r.no_markdown,
+            context_size: r.context_size,
+            resume: r.resume,
+            allow_all: r.allow_all,
+            tui: r.tui,
+            no_tui: r.no_tui,
+            max_tool_concurrency: r.max_tool_concurrency,
+            max_agent_concurrency: r.max_agent_concurrency,
+            no_think: r.no_think,
         }
     }
 }

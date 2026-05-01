@@ -394,10 +394,11 @@ impl HookRunner {
         };
 
         let timeout = Duration::from_secs(hook.timeout);
+        let command = self.expand_command_placeholders(&hook.command);
 
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
-            .arg(&hook.command)
+            .arg(&command)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -446,7 +447,7 @@ impl HookRunner {
                 if code != 0 && code != 2 && !stderr.is_empty() {
                     log::warn!(
                         "hook '{}' exited with code {}: {}",
-                        hook.command,
+                        command,
                         code,
                         stderr.trim()
                     );
@@ -472,10 +473,14 @@ impl HookRunner {
                 output: String::new(),
                 error: Some(format!(
                     "hook '{}' 超时（{}秒）",
-                    hook.command, hook.timeout
+                    command, hook.timeout
                 )),
             },
         }
+    }
+
+    fn expand_command_placeholders(&self, command: &str) -> String {
+        command.replace("{AEMEATH_PROJECT_DIR}", &self.project_dir)
     }
 
     /// 运行指定事件的所有匹配 hook
@@ -1144,5 +1149,47 @@ mod tests {
             .await;
         assert!(!blocked);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_expand_command_placeholders_project_dir() {
+        let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
+        let command = runner.expand_command_placeholders(
+            "\"{AEMEATH_PROJECT_DIR}/build.sh\" --check",
+        );
+
+        assert_eq!(command, "\"/tmp/aemeath-project/build.sh\" --check");
+    }
+
+    #[test]
+    fn test_expand_command_placeholders_without_placeholder() {
+        let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
+        let command = runner.expand_command_placeholders("cargo check");
+
+        assert_eq!(command, "cargo check");
+    }
+
+    #[tokio::test]
+    async fn test_execute_hook_expands_project_dir_placeholder() {
+        let project_dir = std::env::current_dir()
+            .unwrap()
+            .display()
+            .to_string();
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "printf '%s' \"{AEMEATH_PROJECT_DIR}\"".to_string(),
+            timeout: 5,
+        };
+        let runner = HookRunner::empty(project_dir.clone());
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(StopHookData { turns: 1 }),
+        };
+
+        let result = runner.execute_hook(&hook, &input).await;
+
+        assert!(!result.blocked);
+        assert!(result.error.is_none());
+        assert_eq!(result.output, project_dir);
     }
 }

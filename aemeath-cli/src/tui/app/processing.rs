@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 /// Owned context needed to spawn a background processing task.
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
+    pub queue_request_tx: mpsc::Sender<UiEvent>,
     pub client: Arc<aemeath_llm::client::LlmClient>,
     pub registry: Arc<ToolRegistry>,
     pub system_blocks: Vec<SystemBlock>,
@@ -55,7 +56,7 @@ pub(crate) struct SpawnContextRefs<'a> {
 pub(super) fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
         super::stream::process_in_background(
-            ctx.tx, ctx.client, ctx.registry, ctx.system_blocks,
+            ctx.tx, ctx.queue_request_tx, ctx.client, ctx.registry, ctx.system_blocks,
             ctx.system_prompt_text, ctx.user_context, ctx.messages,
             ctx.context_size, ctx.cwd, ctx.session_id, ctx.read_files,
             ctx.agent_runner, ctx.allow_all, ctx.interrupted, ctx.cancel,

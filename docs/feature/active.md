@@ -2,41 +2,100 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 1 | Hook 功能 | - | 实施中 | 未确认 | 参考 Claude Code hook 系统，在关键生命周期点执行用户自定义 shell 命令 |
-| 2 | SubAgent 可配置 | - | 部分完成 | 未确认 | 支持通过配置文件定义 agent role（绑定 model、description、system_suffix），Agent tool 通过 `role`/`model` 参数路由到不同 LLM |
-| 3 | CLI 子命令 | - | ✅ 已完成 | 未确认 | 支持 `aemeath models`、`aemeath sessions` 等子命令 |
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
-| 5 | Agent 调用显示优化 | - | ✅ 已完成 | 未确认 | 优化 Agent tool call 的 TUI 显示：调用阶段展示 role/model/description，执行过程展示子 agent 关键进度，结果展示区分 agent 输出与普通 tool 输出 |
-| 6 | Task 调用显示优化 | - | ✅ 已完成 | 未确认 | 优化 Task 系列 tool call 的 TUI 显示：TaskCreate/TaskUpdate 脱离静默模式展示关键信息，TaskList 结果格式化为可读表格，Task 生命周期状态变更可视化 |
-| 7 | Input Queue 优化 | - | ✅ 已完成 | 未确认 | 将单条 queued_input 改为多消息队列（VecDeque），支持处理期间连续排队多条输入 |
 | 8 | Memory 系统 | - | 待实施 | 未确认 | 增加 memory 系统，支持跨会话持久化记忆，在合适时机自动写入/检索上下文 |
 | 9 | 反思系统 | - | 待实施 | 未确认 | 在关键节点对过去行为/决策做反思总结，提炼经验写入 Memory 系统（依赖 #8） |
-| 10 | 日志文件规范化 | - | 待确认 | 未确认 | 规范 aemeath.log / panic.log / agent.log 的职责边界、格式、轮转策略 |
 | 11 | OpenAI reasoning_effort 配置支持 | - | 待实施 | 未确认 | 支持 GPT-5.x 系列 `reasoning_effort` (none/low/medium/high/xhigh)，可在 config.json 配置 |
-| 12 | Input Queue 双层循环优化 | - | 待实施 | 未确认 | 双层循环让 LLM 不必完成整轮对话即可读取 input queue；在 tool call 完成后可读取用户新输入并补充给 LLM，实现快速响应用户反馈 |
 | 13 | Task list 显示在 spinner 下方 | - | ✅ 已完成 | 未确认 | 临时区域渲染顺序调整为：queued messages → spinner → task status lines，让 task list 出现在 spinner 下方而非上方 |
-| 14 | Session ID 自增无冲突方案 | - | 待确认 | 未确认 | 当前 `{timestamp_ms}{rand_u32}` 24 位 hex 不可读、不自增；探索"按时间单调自增 + 全局无冲突"的方案，兼顾可读性、排序、迁移兼容 |
+| 15 | 通过 max_tokens 限制 LLM thinking 长度 | - | 待实施 | 未确认 | 用户可配置 thinking 阶段最大 token 数，避免模型在简单问题上过度思考浪费 token / 时间；映射到各 provider 的 thinking budget 字段 |
+| 16 | Spinner 行合并状态显示 + Hook 调用信息 | - | 待实施 | 未确认 | 把 status line 的 Thinking / Calling xxx 等运行态搬到 output area spinner 行（如 `✻ cooking ... 2s (Thinking ...)`），并在 spinner 行展示当前 hook 调用信息 |
 
-##  #3 CLI 子命令
+### #16 Spinner 行合并状态显示 + Hook 调用信息
 
-**目标**：将扁平的 `--flag` 式 CLI 重构为子命令架构，支持 `aemeath models`、`aemeath sessions` 等独立子命令，同时保持无子命令时默认启动 TUI 的兼容行为。
+**目标**：把 status line 上承担的 "Thinking..." / "Calling xxx..." / "Generating..." 等运行态信息搬到 output area 的 spinner 行展示，让用户视线只需要盯一个地方就能掌握 agent 正在做什么；同时把 hook 触发信息（哪个 event 跑了哪个 hook）也并入 spinner 行展示。
 
-**设计**：
-- `cli.rs` 重构为 `Cli`（顶层）+ `Commands` enum（`Run`、`Models`、`Sessions`），使用 clap `Subcommand` derive
-- `Args` 保留为内部结构体，`from_run()` 构造，避免大范围修改 `run_chat` 内部逻辑
-- `main()` 根据子命令分发：`Models`/`Sessions` 独立处理后 return，`Run`/None 走原有聊天逻辑
+**当前状态**：
+- spinner 行只有 spinner 字符 + 一句固定 "Generating..."（或类似），细分阶段（thinking、calling、tool 名）写在底部 status bar 里
+- 用户需要在 output area 与 status bar 之间来回扫视
+- hook 调用对用户完全不可见，只能事后翻 `aemeath.log`，无法在交互中确认 hook 是否生效
 
-**已实现子命令**：
-- `aemeath models` — 列出 config.json 中所有可用模型（表格 / `--json`）
-- `aemeath sessions` — 列出已保存会话（`--limit N`、`--json`、`--delete <ID>`）
-- `aemeath run [OPTIONS]` — 显式启动聊天（所有原有 flag）
-- `aemeath`（无子命令）— 兼容旧行为，默认启动 TUI
+**预期形态**：
 
-**涉及路径**：`aemeath-cli/src/cli.rs`、`aemeath-cli/src/main.rs`
+spinner 行组合显示：
+
+```
+✻ cooking ... 2s (Thinking ...)
+✻ cooking ... 8s (Calling Read foo.rs)
+✻ cooking ... 12s (Hook PreToolUse: lint-shell.sh)
+```
+
+- 主词：`cooking` / `working`（统一占位词，配置可选）
+- 计时：从当前 turn 开始的秒数
+- 括号：当前细分阶段
+  - `Thinking ...` — LLM thinking 阶段
+  - `Calling <ToolName> <param_summary>` — 当前 tool call
+  - `Hook <Event>: <hook_name>` — hook 正在执行
+  - `Generating ...` — LLM 生成普通文本中
+  - `Compacting ...` — 压缩阶段
+  - `Waiting for user` — AskUser 等待中（spinner 暂停）
+
+status bar 仍保留：
+- 模型 / provider / cwd / token / cost 等环境与累计数据
+- 不再承担"当前在做什么"的瞬时状态
+
+**Hook 调用信息展示**：
+
+| 事件 | spinner 行表现 |
+|------|----------------|
+| PreToolUse / PostToolUse / PostToolUseFailure / PreCompact / PostToolBatch / Stop / StopFailure / SessionStart | `Hook <Event>: <hook_command_short>` 持续期内显示 |
+| UserPromptSubmit | 在 input area 提交后短暂显示 1 秒，再切回正常 spinner |
+
+补充考虑：
+- hook 退出后保留 1 秒"已完成"状态再切走，避免短 hook 一闪而过看不见
+- hook 阻止操作（exit 2 或 `decision: block`）时，spinner 行变红色 + `Hook <Event> blocked: <reason 摘要>`
+- 多个 hook 排队执行时，依次显示当前正在跑的那个，不堆栈
+
+**实施分解**：
+
+1. 抽取 spinner 行 model：`SpinnerLine { phase: Phase, started_at: Instant, hook: Option<HookSnapshot> }`，phase 涵盖 Thinking / Calling / Hook / Generating / Compacting / WaitingUser
+2. UI 事件层：
+   - 现有 `UiEvent::Thinking` / `ToolCall` / `ToolResult` 复用，但 update.rs 不再写入 status bar 文字，只更新 SpinnerLine.phase
+   - 新增 `UiEvent::HookStart { event, name }` / `UiEvent::HookEnd { result }`，由 HookRunner 在执行前后发送
+3. 渲染：output_area/spinner.rs 的 render 拼接 `<spinner> <main> ... <elapsed>s (<phase desc>)`
+4. status_bar.rs 移除 thinking_text / tool_call_name / generating 字段，只保留环境 + 累计数据
+5. 颜色：hook block / 错误用红色，hook 普通用 cyan，thinking 用 dim，calling 用 magenta，generating 用绿
+6. 配置开关：`config.json` 加 `spinner.merge_status: true`（默认开），`spinner.label: "cooking"`
+
+**与已归档 / 现有 feature 的关系**：
+- Feature #1 Hook 系统已落地事件，本 feature 把 hook 运行态可视化
+- Feature #13（task list 在 spinner 下方）已确定 spinner 行的相对位置，本 feature 不动布局，只改 spinner 行内容
+- Bug #25（/clear 未清空 status line）：本 feature 简化了 status bar 字段，复位逻辑相应简化
+- Feature #11 / #15 reasoning effort：spinner 行可在 Thinking 阶段附带 effort 等级，如 `Thinking high ...`
+
+**涉及路径**：
+- `aemeath-cli/src/tui/output_area/spinner.rs`（spinner 行 model + render）
+- `aemeath-cli/src/tui/app/update.rs`（事件路由调整 + 新增 HookStart/HookEnd）
+- `aemeath-cli/src/tui/app/mod.rs`（SpinnerLine 状态字段）
+- `aemeath-cli/src/tui/status_bar.rs`（移除瞬时态字段）
+- `aemeath-core/src/hook.rs` / `aemeath-cli/` 中 HookRunner 调用处（发送 HookStart/HookEnd UI 事件）
+- `aemeath-core/src/config/`（spinner.merge_status / spinner.label 配置）
+
+**测试场景**：
+- 普通对话 → spinner 显示 Thinking → Generating → 消失
+- 多 tool call → spinner 在 Calling A / Calling B / Calling C 之间切换，elapsed 持续累计
+- PreToolUse hook 拦截 → spinner 红色 + "Hook PreToolUse blocked: ..." 后切回 Thinking
+- 长 hook（>1s）→ spinner 期间显示 hook 名称 + elapsed
+- AskUser 等待 → spinner 暂停 + "Waiting for user"
+- /clear → spinner 行清空，status bar 环境信息保留
+
+**开放问题**：
+- spinner 主词 `cooking` 是否需要在用户语境下可关（一些用户可能觉得不专业）→ 默认配置 `spinner.label = "thinking"` 可能更稳，需决策
+- hook 名称太长时如何截断（路径很长的 shell 脚本）
+- elapsed 计时从哪里起算？建议从当前 turn 用户提交时刻起算，跨多 tool call 不重置
+- 多个 hook 并行跑（PostToolBatch + PostToolUse）时显示策略：聚合显示 `Hook x2 running` 或只显示最后一个
 
 ---
 
-### #4 AskUserQuestion TUI 美化
 
 **目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
 
@@ -48,179 +107,6 @@
 - 输入提示区域样式优化
 
 **涉及路径**：`aemeath-cli/src/tui/app/update.rs`（`UiEvent::AskUser` 处理）、`aemeath-cli/src/tui/output_area/`（渲染样式）
-
----
-
-### #1 Hook 功能（参考 Claude Code 设计）
-
-**已实现（v1）**：
-- 4 个生命周期事件（PreToolUse / PostToolUse / Stop / UserPrompt）
-- Hook 执行引擎：通过 stdin 传入 JSON，通过 exit code 控制行为（exit 0=成功, exit 2=阻止）
-- 配置合并
-
-**本次实施（v2 — 完整设计）**：
-
-#### 事件类型
-
-参考 Claude Code 官方文档（https://code.claude.com/docs/en/hooks）的事件清单，按优先级分批落地。
-
-##### 已实施 / 计划首批（P0–P1）
-
-| 事件 | 优先级 | 说明 |
-|------|--------|------|
-| PreToolUse | P0（已有） | 工具执行前阻止/修改 |
-| PostToolUse | P0（已有，需修复 output 生效） | 工具执行后注入上下文 |
-| PostToolUseFailure | P0（新增） | 工具失败后注入修复指导 |
-| UserPromptSubmit | P0（重命名 UserPrompt，需实现调用） | 用户输入检查/修改/拒绝 |
-| Stop | P0（已有） | Agent 停止前质量门 |
-| StopFailure | P1（新增） | API 错误，观察性 |
-| SessionStart | P1（新增） | 会话开始，注入上下文 |
-| PreCompact | P1（新增，占位） | 上下文压缩前 |
-| PostToolBatch | P1（新增，占位） | 批量工具后汇总 |
-
-##### 待补充（与官方文档对齐）
-
-| 事件 | 优先级 | 说明 | 备注 |
-|------|--------|------|------|
-| SessionEnd | P1 | 会话结束清理（写日志/反思入口） | 与 SessionStart 配对 |
-| PostCompact | P1 | 上下文压缩完成后 | 与 PreCompact 配对 |
-| SubagentStart | P1 | 子代理启动 | 配合 Feature #2 SubAgent |
-| SubagentStop | P1 | 子代理完成 | 配合 Feature #2 SubAgent |
-| TaskCreated | P1 | 通过 TaskCreate 创建任务时 | 配合 Feature #6 任务系统 |
-| TaskCompleted | P1 | 任务标记完成时 | 反思系统（#9）的天然触发点 |
-| PermissionRequest | P2 | 权限对话弹出 | 用于审计 / 自动批准策略 |
-| PermissionDenied | P2 | 自动模式拒绝 | 用于审计 / 提示用户 |
-| Notification | P2 | Claude 发送通知时 | TUI 通知钩子 |
-| InstructionsLoaded | P2 | CLAUDE.md / guidance 加载到上下文 | 用于注入额外规则 |
-| ConfigChange | P2 | 会话中配置文件变更 | 配合 hot reload |
-| Elicitation | P2 | MCP 服务器请求用户输入前 | 依赖 MCP 体系完善度 |
-| ElicitationResult | P2 | 用户响应 MCP elicitation 后 | 同上 |
-| UserPromptExpansion | P3 | 用户输入展开为提示时（如 slash 命令） | 官方文档已列，cli.js v2.1.88 尚未落地，跟进观察 |
-| CwdChanged | P3 | 工作目录改变 | 价值有限，按需 |
-| FileChanged | P3 | 监视文件在磁盘改变 | 需 file watcher 基础设施 |
-| TeammateIdle | P3 | 团队队友空闲 | aemeath 暂无 agent team 特性 |
-| WorktreeCreate | — | git worktree 创建 | aemeath 不支持 worktree，**不实施** |
-| WorktreeRemove | — | git worktree 移除 | 同上，**不实施** |
-
-#### JSON 输出协议（v2 核心改进）
-
-exit 0 + stdout JSON 支持以下字段：
-- `continue: false` + `stopReason` — 全局停止
-- `decision: "block"` + `reason` — 阻止操作（PostToolUse / UserPromptSubmit / Stop 等）
-- `additionalContext` — 注入额外上下文
-- `systemMessage` — 系统警告
-- `hookSpecificOutput` — PreToolUse 特定控制（allow/deny/ask + updatedInput）
-
-exit 2 = 阻止操作，stderr 反馈给 LLM
-exit 其他 = 非阻塞错误
-
-#### 设计原则
-- 阻止操作时，反馈消息传给 LLM 让其继续调整，不中断用户交互
-- 所有注入上下文在 LLM 对话流中可见
-- 不新增 UI 事件类型
-
-**涉及路径**：
-- `aemeath-core/src/hook.rs` — 数据结构 + JSON 输出解析
-- `aemeath-core/src/config/hooks.rs` — 事件枚举 + 配置
-- `aemeath-cli/src/tui/app/input_handler.rs` — UserPromptSubmit 调用
-- `aemeath-cli/src/tui/app/stream.rs` — PostToolUse / PostToolUseFailure / PostToolBatch / PreCompact 调用
-- `aemeath-cli/src/tui/app/update.rs` — StopFailure 调用
-- `aemeath-cli/src/main.rs` — SessionStart 调用
-
----
-
-### #5 Agent 调用显示优化
-
-**目标**：优化 Agent tool call 在 TUI 中的显示体验，让用户能够看到 agent 的 role/model/description、关键进度和结果。
-
-**当前状态**：
-- `push_tool_call_start` 只显示 `● Agent...`，无具体信息
-- `push_tool_call` 显示 `● Agent(desc)` + 详情行（prompt 截断 300 字符，role/model 在 detail 行中）
-- 子 agent 执行期间只显示 spinner，无进度反馈
-- 结果展示与普通 tool 输出无区分
-
-**待改进**：
-1. **调用阶段**（`push_tool_call_start` / `push_tool_call`）：
- - header 行展示 `● Agent(desc)` + `role: xxx` / `model: xxx` 信息
- - prompt 预览作为 detail 行显示
-2. **执行阶段**：
- - 当前子 agent 无 TUI 进度反馈（日志写入 agent.log 文件），考虑将关键进度（如 turn X/N、工具调用名）通过 UI 事件推送到 TUI
- - 保持轻量：只推送工具调用名称变更（如 `Agent → Read(foo.rs)`），而非逐行文本
-3. **结果展示**（`push_tool_result_with_diff`）：
- - Agent 结果输出通常较长，当前截断为 3 行不够友好
- - Agent 输出应获得更多显示行数（当前固定 3 行），或折叠/展开机制
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/tool_display.rs` — `format_tool_call` + `push_tool_result_with_diff` 中 Agent 特殊处理
-- `aemeath-cli/src/tui/app/stream.rs` — 子 agent 执行期间的进度事件推送
-- `aemeath-cli/src/agent_runner.rs` — `run_agent` 中进度回调扩展（当前用 `progress` 闭包写日志，需改为发送 UI 事件）
-- `aemeath-cli/src/tui/app/update.rs` — 新增 UI 事件类型（如 `UiEvent::AgentProgress`）
-
----
-
-### #6 Task 调用显示优化
-
-**目标**：优化 Task 系列 tool call（TaskCreate、TaskUpdate、TaskList、TaskGet、TaskStop、TaskOutput）在 TUI 中的显示体验，让用户清晰感知任务生命周期变化。
-
-**当前状态**：
-- `TaskCreate`/`TaskUpdate` 完全静默（`skip_ui = true`），不发送任何 `UiEvent::ToolCall`/`ToolResult`，用户看不到任务的创建和状态变更
-- `TaskList`/`TaskGet`/`TaskStop`/`TaskOutput` 显示为普通 tool call，无特殊样式
-- `TaskList` 结果获得 20 行显示上限，但输出为纯文本列表，无表格格式化
-- 任务状态栏（status bar）已有基本汇总（`✓`/`■`/`□` + subject），但与 tool call 区域的信息割裂
-
-**待改进**：
-
-#### 1. TaskCreate 显示
-- 脱离 `skip_ui`，改为发送 `UiEvent::ToolCall`
-- header 行：`● TaskCreate: {subject}` + priority 标记
-- detail 行：description 截断预览（~80 字符）
-- 结果行：显示 task ID + 状态 `pending`
-
-#### 2. TaskUpdate 显示
-- 脱离 `skip_ui`，改为发送 `UiEvent::ToolCall`
-- header 行：`● TaskUpdate: {task_id_prefix}` + 状态变更箭头（如 `pending → in_progress`）
-- detail 行：subject 变更（若有）、priority 变更（若有）、依赖信息（blockedBy/blocks）
-- 结果行：显示 unblocked tasks 列表（当前已由 tool 返回，需在 TUI 中格式化展示）
-
-#### 3. TaskList 结果格式化
-- `format_tool_call` 中为 `TaskList` 提供专用的 header 显示
-- `push_tool_result_with_diff` 中解析 TaskList 的 JSON 返回，格式化为带状态图标的紧凑表格：
-  ```
-  ✓ #1 Hook 功能        [completed]
-  ■ #5 Agent 调用显示优化 [in_progress]
-  □ #6 Task 调用显示优化  [pending]
-  ```
-
-#### 4. Task 生命周期状态变更可视化
-- TaskUpdate 将 task 置为 `completed` 时，结果行使用成功样式（绿色 ✓）
-- TaskUpdate 将 task 置为 `in_progress` 时，显示 spinner 动效（与 Agent tool 一致）
-- TaskStop 显示为警告样式（黄色）
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/tool_display.rs` — `format_tool_call` + `push_tool_result_with_diff` 中 Task 系列工具特殊处理
-- `aemeath-cli/src/tui/app/stream.rs` — `is_task_tool` 判断逻辑改为发送 UI 事件而非跳过
-
----
-
-### #12 Input Queue 双层循环优化
-
-**目标**：让 LLM 不必等完整一轮 assistant 响应结束后才处理用户排队输入。尤其是在 tool call 完成后，如果用户已经在 input queue 中补充了新要求，应立即把这些输入追加到下一次 LLM 调用中，让模型基于最新反馈继续执行。
-
-**新增要求**：
-- tool call 执行完成后，检查 input queue 是否已有用户新输入。
-- 若有，将这些输入作为新的 user message 或明确的补充上下文注入给 LLM。
-- 注入内容需要保留用户原文和顺序，避免丢失多条排队输入。
-- 这一步发生在下一次 LLM API 调用前，而不是等当前整轮对话完全结束。
-
-**预期效果**：
-1. 用户在 tool 执行期间输入“等等，改成只查 src 目录”。
-2. tool 完成后，系统立即读取该输入。
-3. 下一次 LLM 调用能看到这条补充，并调整后续行为。
-
-**涉及路径**：
-- `aemeath-cli/src/tui/app/stream.rs` — tool result 后、下一轮 LLM 调用前读取 input queue
-- `aemeath-cli/src/tui/app/input_handler.rs` — processing 状态下用户输入入队语义
-- `aemeath-cli/src/tui/app/mod.rs` — `input_queue` 状态管理
 
 ---
 
@@ -265,59 +151,6 @@ exit 其他 = 非阻塞错误
 - 反思是否消耗当前 session 的 model 调用，还是用独立的轻量 model（成本权衡）
 - 反思失败（如 LLM 返回空）时是否静默丢弃 vs 提示用户
 - Memory 容量上限策略：何时压缩 / 淘汰旧反思
-
----
-
-### #10 日志文件规范化
-
-**目标**：明确 `aemeath.log`、`panic.log`、`agent.log` 三个日志文件的职责边界、写入入口、格式约定与轮转策略，避免日志散落、内容互相覆盖、无法定位问题。
-
-**当前状态（待核实）**：
-- `aemeath.log` — 主日志（env_logger 输出，CLAUDE.md 已写明）
-- `debug.log` — debug 级独立文件（CLAUDE.md 已写明）
-- `agent.log` — 子 agent 执行日志（在 Feature #5 描述中提到 "日志写入 agent.log"）
-- `panic.log` — 进程 panic 时的崩溃记录（**目前是否已写入待确认**）
-
-存在的问题：
-- 没有统一文档说明每个日志文件的语义和何时写入
-- panic 路径（与 Bug #4 相关）的崩溃信息是否落盘、落到哪里不清晰
-- agent.log 与 aemeath.log 的内容重叠/分工不明
-- 缺乏轮转，长期会话日志会无限增长
-
-**设计目标**：
-
-#### 1. 职责边界
-| 文件 | 内容 | 写入入口 | 级别 |
-|------|------|----------|------|
-| `aemeath.log` | 主进程日志（API 调用、tool 执行、状态变更） | env_logger（lib.rs 路由） | warn 默认，可调 |
-| `debug.log` | 详细调试信息（API 请求体、stream 事件、状态机转换） | 显式 debug! 宏 | debug |
-| `agent.log` | 子 agent 执行轨迹（每个 sub-agent 一段，含 turn N、tool call 名、token 消耗） | `agent_runner.rs` 中 progress 闭包 | info |
-| `panic.log` | 进程 panic 捕获（panic 信息、backtrace、当前会话 ID、最近 N 条事件） | `set_hook` 全局 panic handler | error |
-
-#### 2. 格式约定
-- 每行 JSON Lines（机器可解析）或 `[时间戳] [级别] [模块] message`（人可读）— **二选一，需决策**
-- 时间戳统一 RFC3339（带本地时区）
-- session_id 字段贯穿（便于跨文件 grep）
-
-#### 3. 轮转策略
-- 单文件超过 10MB 自动 rotate（`aemeath.log.1` / `aemeath.log.2` ...）
-- 保留最近 5 份
-- 程序启动时清理超过 30 天的旧轮转文件
-
-#### 4. panic.log 关键设计
-- 在 `main.rs` 早期注册 `std::panic::set_hook`
-- panic 时写入：panic message + backtrace + 当前 session_id + 最近 20 条 ring buffer 事件 + active tool call 状态
-- 与 Bug #4（Output Area panic）联动：panic.log 应能直接还原触发场景
-
-**涉及路径**：
-- `aemeath-cli/src/main.rs` — panic handler 注册、log dispatch 初始化
-- `aemeath-core/src/lib.rs` — env_logger 配置（已有 file appender）
-- `aemeath-cli/src/agent_runner.rs` — agent.log 写入入口
-- 新增：`aemeath-core/src/logging.rs` — 统一 log 路径与轮转工具
-
-**开放问题**：
-- 是否需要每会话一个独立子目录（`~/.aemeath/sessions/<id>/aemeath.log`）便于追溯
-- agent.log 是否应该也按 sub-agent 拆分（`agent.log.<turn>.<id>`）
 
 ---
 
@@ -657,113 +490,133 @@ input area
 
 ---
 
-### #14 Session ID 自增无冲突方案
+### #15 通过 max_tokens 限制 LLM thinking 长度
 
-**目标**：替换当前的 session ID 生成方案，采用标准化、时间有序、跨进程/跨设备低冲突概率的 ID，让 session 文件名天然按创建时间排序，并保留旧 session 兼容性。
+**目标**：让用户可以为 thinking 阶段设置一个**最大 token 上限**，避免模型在简单问题上"过度思考"——例如打招呼也跑出几千 token 的内心独白，浪费 token 费用与等待时间。统一映射到各 provider 的 thinking budget 字段，让一个配置控制所有 reasoning provider。
 
-**当前方案**（`aemeath-core/src/state.rs:new_session_id`）：
+**背景**：
 
+不同 provider 控制 thinking 长度的方式不同：
+
+| Provider | 字段 | 取值 |
+|----------|------|------|
+| Anthropic | `thinking.budget_tokens` | 整数（>=1024，模型上限通常 32K~64K） |
+| OpenAI GPT-5.x | `reasoning_effort` | 离散等级 `none/low/medium/high/xhigh`（无显式 token 上限） |
+| OpenAI Responses API | `reasoning.max_tokens` | 整数（部分模型支持） |
+| DeepSeek | `thinking.type` + 隐式上限 | 仅 on/off，无显式上限 |
+| GLM / Qwen | `enable_thinking` | 仅 on/off |
+
+aemeath 当前在 `aemeath-llm/src/providers/` 各 provider 里只有 reasoning on/off 控制，没有统一的"thinking 上限"语义。Feature #11 已规划 OpenAI 的 `reasoning_effort` 等级控制，但没覆盖 Anthropic / Responses API 的精确 token 控制。
+
+**设计**：
+
+#### 1. 配置字段
+
+模型级新增 `thinking_max_tokens: Option<u32>`：
+
+```json
+{
+  "name": "claude-opus-4-7",
+  "provider": "anthropic",
+  "model": "claude-opus-4-7",
+  "reasoning": true,
+  "thinking_max_tokens": 4096
+}
+```
+
+- 取值范围：1024 ~ 模型上限（Anthropic 通常 32K，OpenAI Responses API 模型按文档）
+- 不配置时使用 provider 默认（Anthropic 不传 budget_tokens 走默认；OpenAI 走 effort=medium）
+- 与 `reasoning_effort` 互斥优先级：精确数字优先；同时配置时数字胜出 + 日志 warn
+
+#### 2. CLI / 环境变量 / 命令
+
+- CLI：`--thinking-max-tokens <N>`
+- 环境变量：`AEMEATH_THINKING_MAX_TOKENS=4096`
+- Slash 命令：`/budget [N|off]`（不带参数显示当前值；`off` 等价 reasoning 关闭；数字直接设上限）
+- 配置优先级遵循 CLAUDE.md §1：CLI > env > 项目 config > 全局 config > 默认
+
+#### 3. Provider 映射
+
+**Anthropic**（`aemeath-llm/src/providers/anthropic/`）：
 ```rust
-let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(); // u128
-let random: u32 = rand::random();
-format!("{:016x}{:08x}", timestamp, random)
+if reasoning_enabled {
+    let budget = config.thinking_max_tokens.unwrap_or(default_budget);
+    request_body["thinking"] = json!({
+        "type": "enabled",
+        "budget_tokens": budget
+    });
+}
 ```
 
-形如：`0000019dc93bab86dfd7032f`（24 位 hex）。
+**OpenAI Chat Completions（GPT-5.x / o-series）**：
+- Chat Completions 不支持精确 token 上限，需要把 `thinking_max_tokens` **反向映射**为 effort 等级：
+  - `<=1024` → `low`
+  - `<=4096` → `medium`
+  - `<=16384` → `high`
+  - `>16384` → `xhigh`
+  - `0` → `none`
+- 同时在 status bar / 日志里说明"OpenAI 不支持精确数字，已映射为 effort=high"
 
-**痛点**：
+**OpenAI Responses API**（如果走 #11 §6 决策切到 Responses API）：
+- `reasoning.max_output_tokens`（按当时 API 字段名为准）直接传入
+- 优先于 effort 等级
 
-1. **可读性差**：纯 hex 串，人眼识别不出哪个 session 更新、属于哪一天
-2. **排序勉强**：前 16 位是毫秒时间戳 hex，字典序≈时间序——但只有"同一时刻起的字符宽度一致"才成立，时间戳跨阶（如位数变化）排序会错乱（虽然 16 位 padding 暂时够用到 9999 年，实际不会出问题，但仍是巧合而非语义保证）
-3. **冲突可能**：同一毫秒并发两次 `new_session_id` 时，仅靠 32 位随机抗冲突——多机/多进程并发概率虽低但仍存在。无显式去重机制
-4. **不携带语义**：看 session id 看不出 "什么 cwd / 什么模型 / 第几个 session"
-5. **不"自增"**：用户口里说的"自增 ID"通常指可数（#1、#2、#3...）的整数，便于命令行短引用（`/resume 5` 而不是 `/resume 0000019dc93bab86dfd7032f`）
+**DeepSeek / GLM / Qwen**：
+- 不支持精确控制，沿用 on/off
+- 配了 `thinking_max_tokens` 时日志 warn"该 provider 不支持，已忽略"
 
-**本次实现（2026-04-29）**：采用 UUIDv7 替换随机 hex ID。
+#### 4. UI 反馈
 
-- 新 ID 格式：标准 UUIDv7，例如 `018f2d4e-9c7a-7b12-9a34-8f0c1d2e3f45`
-- UUIDv7 前缀携带时间信息，字典序基本对应创建时间序
-- 不再维护 `session_counter.json` / lock 目录，避免本地状态损坏、锁残留、时钟回拨处理等复杂度
-- 依赖 `uuid` crate 的 `v7` feature，通过 `Uuid::new_v7(Timestamp::now(NoContext))` 生成
-- 旧格式 24 位 hex ID 不迁移、不重命名，`validate_session_id` 仍然接受并可继续 `--resume`
+- status bar 在 reasoning 启用时显示 `thinking: ≤4096`（数字配置时）或 `thinking: high`（仅 effort 时）
+- 实际响应回来后，若 provider 上报 `usage.completion_tokens_details.reasoning_tokens`，可显示"thinking used: 1234 / max 4096"作为审计
 
-**未纳入本期**：用户可见短编号（如 `/resume 5`）需要独立 session index 与命令解析改造，暂不实现，避免扩大迁移面。
+#### 5. 默认建议值
 
-**测试覆盖**：
-- 正常路径：新建 ID 是合法 UUIDv7，且通过 session id 校验
-- 边界条件：同一 timestamp 下连续生成两个 UUIDv7 仍不重复
-- 错误路径：包含路径分隔符的伪 UUID 被 `validate_session_id` 拒绝
-- 兼容路径：旧 24 位 hex session ID 仍通过校验
+- 不配置 `thinking_max_tokens` 时各 provider 默认：
+  - Anthropic：不发 budget_tokens（让 API 自己默认）
+  - OpenAI：effort=medium
+  - 其他：on/off
 
-**原始设计草案**：分两层 ID 共存
+文档中给一份"推荐预设":
+- 简单对话：1024
+- 编程协助：4096（默认推荐）
+- 深度推理 / 长链路 debug：16384
+- 极限：32768（注意成本）
 
-#### 1. 内部全局 ID（保留唯一性）
+#### 6. 与 #11 的协作
 
-继续生成不可冲突的全局 ID 作为存储路径主键，但格式调整为更清晰：
-
-```
-{date_yymmdd}-{seq_in_day}-{rand_4_hex}
-例如：260430-0007-a3f1
-```
-
-- 前缀 `260430` 可读时间（年月日）
-- `0007` 当天第 7 次创建（按本机 `~/.aemeath/sessions/` 同前缀文件计数）
-- `a3f1` 4 位随机抗碰撞（即使 seq 计算漏算也极难撞）
-
-或保留底层 ULID / UUIDv7 这类工业方案：
-- **ULID**（128bit，时间 prefix + 随机 suffix，base32 编码 26 字符）— 字典序=时间序，跨设备唯一，社区成熟
-- **UUIDv7**（标准化的时间排序 UUID）— 与 v4 同等无冲突保证 + 时间可排序
-
-倾向 **UUIDv7 或 ULID**：标准、有现成 crate（`uuid::Uuid::now_v7()` / `ulid` crate）、字典序=时间序、不需要本地状态文件。
-
-#### 2. 用户可见短 ID（人类可数）
-
-在 session 列表中给每个 session 分配一个**单调自增的本地短编号**（per cwd 或 per global），用于命令行短引用：
-
-```
-short_id: 1, 2, 3, ... (per global, 不复用)
-```
-
-- 存储在 `~/.aemeath/session_index.json`：`{ "next_id": 42, "map": { "1": "<full_id>", ... } }`
-- `/resume 5` 可命中 short_id=5 的 session
-- 真实持久化目录仍按 full_id（UUIDv7 / ULID），避免 short_id 冲突或迁移困难
-- short_id 仅作引用别名，不作主键
-
-#### 3. 迁移兼容
-
-- 旧格式 `{ms_hex_16}{rand_8}` 仍能 load（`validate_session_id` 已支持任意字母数字+`-_`，无需放宽）
-- 新建 session 用新格式
-- 历史 session 在首次列出时回填 short_id（按文件 mtime 排序分配）
-
-#### 4. 命令行短引用语义
-
-- 输入纯数字 → 当作 short_id 查表
-- 输入 base32 / UUID 形态 → 当作 full_id 直接命中
-- 都不命中 → 提示并列出最近 N 个
+本 feature 与 Feature #11 强相关，建议**合并实施**或在 #11 基础上做：
+- #11 解决"OpenAI effort 等级配置 + 模型能力检测"
+- #15 解决"统一 max_tokens 数字 + 映射到各 provider"
+- 实施顺序：先 #11（拿到 effort 字段管线）→ 再 #15（在管线上加 max_tokens 反向映射）
 
 **测试场景**：
-- 新建 session → 生成 UUIDv7 / ULID → 字典序与时间序一致
-- 同一毫秒并发创建 100 个 session → 全部 ID 不重复
-- `/resume 3` 命中 short_id=3 → 正确加载对应 full_id 的 session
-- 删除 session → short_id 不复用（避免老引用串接到新 session）
-- 迁移：旧 session 仍可 `--resume {old_24_hex}`，列表中也分配到 short_id
+- Anthropic claude-opus-4-7 + `thinking_max_tokens=2048` → 请求 `thinking.budget_tokens=2048`
+- OpenAI GPT-5.5 + `thinking_max_tokens=2048` → 请求 `reasoning_effort=medium`（反向映射）+ 日志说明
+- OpenAI GPT-4o + `thinking_max_tokens=4096` → 不支持 reasoning，整个字段忽略
+- 同时配置 `reasoning_effort=high` + `thinking_max_tokens=512` → 数字胜出 → 映射为 `effort=low` + warn
+- DeepSeek-R1 + `thinking_max_tokens=4096` → 字段忽略 + warn，仅按 on/off 启用
+- 默认值（不配置）→ 行为与现状一致
 
 **涉及路径**：
-- `aemeath-core/src/state.rs`（`new_session_id` 改用 UUIDv7 / ULID）
-- `aemeath-core/src/session.rs`（短 ID 索引：加载/写入 session_index.json）
-- `aemeath-cli/src/cli.rs` / `aemeath-cli/src/main.rs`（`--resume` 数字形参的解析）
-- `aemeath-core/src/command/commands/resume.rs` / `sessions.rs`（短 ID 显示与命中）
-- 新增 crate 依赖：`uuid` (with `v7` feature) 或 `ulid`
+- `aemeath-core/src/config/models.rs`（新增 `thinking_max_tokens` 字段 + 校验）
+- `aemeath-core/src/provider.rs`（`map_thinking_budget_to_effort` 反向映射函数）
+- `aemeath-llm/src/providers/anthropic/`（构造 `thinking.budget_tokens`）
+- `aemeath-llm/src/providers/openai_compatible/`（反向映射 effort）
+- `aemeath-cli/src/cli.rs`（`--thinking-max-tokens` flag）
+- `aemeath-cli/src/main.rs`（env 变量读取 + 配置合并）
+- 新增：`aemeath-core/src/command/commands/budget.rs`（`/budget` 命令）
+- `aemeath-cli/src/tui/status_bar.rs`（thinking 上限显示）
 
 **关联**：
-- 已归档 Bug #15 / #16 / #17（resume 命令路径修复）—— 本期不影响 resume 启动流程，只调整 ID 形态与短引用层
-- 与 session 列表 UI（最近 commit "fix: /resume 和 /session list 显示最近 15 条 session + 相对时间"）联动 —— 列表里增加 "#3" 列展示 short_id
+- Feature #11（reasoning_effort 配置）—— 强依赖，#11 提供 OpenAI effort 字段管线
+- Feature #11 §6（GPT thinking 不显示）—— 若切到 Responses API，可直接用 `reasoning.max_output_tokens`
 
 **开放问题**：
-- short_id 是 per global 自增还是 per cwd 自增？per cwd 更符合"项目内序号"语义，但 cwd 切换时可能混淆
-- 已删除的 short_id 是否复用？默认不复用（避免悬空引用），但可能导致编号膨胀
-- 是否完全废弃旧格式 ID？建议保留兼容，新建走新方案，存量按需迁移
-- ULID vs UUIDv7：ULID 字符更短（26 vs 36），但 UUIDv7 是 IETF 标准；建议 UUIDv7 + 自定义短显示（去掉连字符）
+- 反向映射阈值（1024 / 4096 / 16384）是否合理？需测几款 OpenAI reasoning 模型实际 thinking_tokens 分布
+- 是否需要"软上限"——超过 max_tokens 时模型自行收尾而不是被硬截？Anthropic 的 budget_tokens 是软上限（提示模型尽量不超），OpenAI effort 是隐式控制，行为不一致
+- `/budget 0` 是否应该等价 `/think off`？倾向是，避免两条命令各管一半
+- 是否同期做 Responses API 切换？建议解耦，本期先用 effort 反向映射，Responses API 切换走独立 feature
 
 ---
 **开始日期**：2026-04-27

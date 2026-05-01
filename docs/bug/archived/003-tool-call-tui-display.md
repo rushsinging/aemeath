@@ -1,0 +1,33 @@
+# Bug #3 优化 tool call TUI 显示
+
+**状态**：✅ 已修复，用户已确认
+**发现日期**：2026-04
+**确认日期**：2026-05-01
+**优先级**：高
+**根因类别**：tool_call_active 未同步 + tool call 输出未流式化
+
+## 症状
+
+1. 模型完成 tool call 后重新开始 thinking 时，状态栏仍显示 "Calling xxx..."，thinking 文本不显示。
+2. 长时间 tool call（如文件搜索、代码分析）执行期间 TUI 无任何输出，执行完毕后才一次性显示所有结果。预期：先输出 tool call 标题 → 执行过程中流式输出中间结果 → 完成后输出最终结果。
+
+## 根因
+
+- 症状 1：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过，导致 thinking 文本被丢弃、`tool_call_active` 未重置、状态栏未清除。`ToolResult` 虽然设置了 `tool_call_active = false`，但多轮 tool call 场景下状态栏显示不正确。
+- 症状 2：Sub-agent 的 `AgentProgress` 事件虽已从后台任务发送到 TUI，但 `UiEvent::AgentProgress` 字段名错写为 `_tool_id` / `_text`，`update_ui()` 直接忽略；同时 sub-agent 内部的 tool call 名称在 `agent.execute_tools()` 完成后才发送，导致长时间子 agent tool 执行期间 TUI 看不到中间进度。
+
+## 修复
+
+- 症状 1：`Thinking` 事件无论 `tool_call_active` 状态都正常显示 thinking 文本，若为 true 则同步重置并更新状态栏。`Text` 事件同理。
+- 症状 2：`UiEvent::AgentProgress` 改为携带 `tool_id` / `text` 并在 `update_ui()` 中渲染到对应 Agent tool call 下方；`OutputArea` 新增 `push_tool_progress()`；sub-agent 发现下一轮 tool calls 后，在执行前先发送 `[Turn N] calling: ...`。
+- tool 执行改为顺序发送 `ToolResult`，每完成一个立即推送，避免一次性返回（commit `b3b70e4`）。
+
+## 涉及文件
+
+- `aemeath-cli/src/tui/app/stream.rs`
+- `aemeath-cli/src/tui/app/update.rs`
+- `aemeath-cli/src/tui/output_area/`
+
+## 验证
+
+用户已确认修复。

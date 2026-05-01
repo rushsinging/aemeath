@@ -57,39 +57,12 @@ async fn main() {
             run_sessions_command(delete, json, limit).await;
             return;
         }
-        Some(Commands::Run {
-            provider,
-            api_key,
-            base_url,
-            model,
-            cwd,
-            max_tokens,
-            verbose,
-            no_markdown,
-            context_size,
-            resume,
-            allow_all,
-            tui,
-            no_tui,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            no_think,
-        }) => {
-            let args = Args::from_run(
-                provider, api_key, base_url, model, cwd, max_tokens, verbose,
-                no_markdown, context_size, resume, allow_all, tui, no_tui,
-                max_tool_concurrency, max_agent_concurrency, no_think,
-            );
-            run_chat(args).await;
+        Some(Commands::Run { run_args }) => {
+            run_chat(run_args.into()).await;
         }
         None => {
-            // 无子命令 — 使用默认值启动（兼容旧行为）
-            let args = Args::from_run(
-                "anthropic".into(), None, None, None, None, None, false,
-                false, 128000, None, false, true, false,
-                None, None, false,
-            );
-            run_chat(args).await;
+            // 无子命令 — 默认调用 run，使用顶层参数
+            run_chat(cli.run_args.into()).await;
         }
     }
 }
@@ -303,29 +276,21 @@ async fn run_chat(mut args: Args) {
     }
 
     // 加载 config.json 以获取 provider 默认值 (apiKey, baseUrl, model)
-    // 优先级: CLI args > env vars > config.json > built-in defaults
+    // 优先级: CLI args > env vars > 项目 config.json > 全局 config.json > built-in defaults
 
     // 初始化 guidance 目录（首次运行时生成默认 guidance 文件）
     aemeath_core::guidance::init_guidance_dir();
 
-    let config_file = {
-        let paths = [
-            dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
-            std::path::PathBuf::from(".aemeath/config.json"),
-        ];
-        let mut cfg: Option<aemeath_core::config::Config> = None;
-        for path in &paths {
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(c) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
-                        cfg = Some(c);
-                        break;
-                    }
-                }
-            }
-        }
-        cfg
-    };
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let config_file = aemeath_core::config::ConfigManager::new(Some(&cwd))
+        .load()
+        .await
+        .ok();
 
     // 应用 config.json 中的 permissions.mode（CLI --allow-all 和 env var 优先）
     if !args.allow_all {
@@ -419,11 +384,6 @@ async fn run_chat(mut args: Args) {
                 std::process::exit(1);
             })
     });
-
-    let cwd = args
-        .cwd
-        .or_else(|| env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
 
     // 获取 model: CLI args > env var > config.json default > config.json provider
     let model = args.model.unwrap_or_else(|| {

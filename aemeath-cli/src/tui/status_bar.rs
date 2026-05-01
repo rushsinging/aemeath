@@ -105,6 +105,21 @@ impl StatusBar {
         self.status_type = StatusType::Normal;
     }
 
+    /// Reset runtime status while preserving environment fields
+    pub fn reset_runtime_state(&mut self) {
+        log::debug!("[STATUS] reset_runtime_state()");
+        self.status = "Ready".to_string();
+        self.status_type = StatusType::Normal;
+        self.input_tokens = 0;
+        self.output_tokens = 0;
+        self.last_input_tokens = 0;
+        self.api_calls = 0;
+        self.is_processing = false;
+        self.processing_msg.clear();
+        self.tps = 0.0;
+        self.clear_selection();
+    }
+
     /// Update token usage (cumulative totals + last call's input for Ctx%)
     pub fn set_tokens(&mut self, input: u64, output: u64, last_input: u64) {
         self.input_tokens = input;

@@ -272,6 +272,7 @@ impl super::App {
 
         super::processing::spawn_processing(super::processing::SpawnContext {
             tx: ui_tx.clone(),
+            queue_request_tx: ui_tx.clone(),
             client: spawn_ctx.client.clone(),
             registry: spawn_ctx.registry.clone(),
             system_blocks: spawn_ctx.system_blocks.clone(),

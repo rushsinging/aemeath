@@ -87,6 +87,42 @@ pub fn append_text_line(
     append_text_line_with_turn(log_file, session_id, None, level, module, message)
 }
 
+pub fn format_agent_line(
+    session_id: &str,
+    turn: Option<usize>,
+    role: &str,
+    model: &str,
+    level: &str,
+    module: &str,
+    message: &str,
+) -> String {
+    let turn = turn.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+    format!(
+        "[{}] [session:{}] [turn:{}] [role:{}] [model:{}] [{}] [{}] {}",
+        timestamp_rfc3339(),
+        session_id,
+        turn,
+        role,
+        model,
+        level,
+        module,
+        message
+    )
+}
+
+pub fn append_agent_line(
+    log_file: LogFile,
+    session_id: &str,
+    turn: Option<usize>,
+    role: &str,
+    model: &str,
+    level: &str,
+    module: &str,
+    message: &str,
+) -> std::io::Result<()> {
+    append_line(log_file, &format_agent_line(session_id, turn, role, model, level, module, message))
+}
+
 pub fn append_text_line_with_turn(
     log_file: LogFile,
     session_id: &str,
@@ -256,6 +292,31 @@ mod tests {
     fn test_format_text_line_boundary_empty_values() {
         let line = format_text_line("", "", "", "");
         assert!(line.contains("[session:] [turn:-] [] []"));
+    }
+
+    #[test]
+    fn test_format_agent_line_happy_path() {
+        let line = format_agent_line("sess-1", Some(2), "coder", "deepseek/deepseek-chat", "INFO", "agent", "started");
+        assert!(line.contains("[session:sess-1]"));
+        assert!(line.contains("[turn:2]"));
+        assert!(line.contains("[role:coder]"));
+        assert!(line.contains("[model:deepseek/deepseek-chat]"));
+        assert!(line.contains("[INFO]"));
+        assert!(line.ends_with("started"));
+    }
+
+    #[test]
+    fn test_format_agent_line_boundary_no_turn() {
+        let line = format_agent_line("sess-1", None, "default", "default", "INFO", "agent", "msg");
+        assert!(line.contains("[turn:-]"));
+        assert!(line.contains("[role:default]"));
+        assert!(line.contains("[model:default]"));
+    }
+
+    #[test]
+    fn test_format_agent_line_boundary_empty_role_model() {
+        let line = format_agent_line("sess", Some(0), "", "", "DEBUG", "agent", "");
+        assert!(line.contains("[role:] [model:]"));
     }
 
     #[test]

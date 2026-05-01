@@ -15,7 +15,7 @@ pub(crate) enum SlashResult {
     Exit,
     NotFound,
     /// Inject a user message into the conversation and process it with the LLM
-    Review(String),
+    InjectMessage(String),
 }
 
 pub(crate) async fn handle_slash_command(
@@ -238,9 +238,9 @@ pub(crate) async fn handle_slash_command(
                                 messages.clear();
                                 println!("[cleared]");
                             }
-                            CommandAction::Review(prompt) => {
+                            CommandAction::InjectMessage(prompt) => {
                                 println!("[reviewing code changes...]");
-                                return SlashResult::Review(prompt);
+                                return SlashResult::InjectMessage(prompt);
                             }
                             CommandAction::ChangeMode(mode) => {
                                 match mode.as_str() {
@@ -275,7 +275,7 @@ pub(crate) async fn handle_slash_command(
                     content = format!("{content}\n\nArguments: {args}");
                 }
                 println!("[skill: {}]", skill.name);
-                SlashResult::Review(content)
+                SlashResult::InjectMessage(content)
             } else {
                 SlashResult::NotFound
             }

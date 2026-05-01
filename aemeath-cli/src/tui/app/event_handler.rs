@@ -159,6 +159,14 @@ impl super::App {
             UiEvent::StopFailureHook { .. } => {
                 // Handled in update.rs (update_ui)
             }
+            UiEvent::DrainQueuedInput { reply_tx } => {
+                let queued: Vec<String> = self.input_queue.drain(..).collect();
+                let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                for msg in &flushed {
+                    self.output_area.push_user_message(msg);
+                }
+                let _ = reply_tx.send(queued);
+            }
         }
     }
 
@@ -187,6 +195,7 @@ impl super::App {
 
         super::processing::spawn_processing(super::processing::SpawnContext {
             tx: ui_tx.clone(),
+            queue_request_tx: ui_tx.clone(),
             client: spawn_ctx.client.clone(),
             registry: spawn_ctx.registry.clone(),
             system_blocks: spawn_ctx.system_blocks.clone(),

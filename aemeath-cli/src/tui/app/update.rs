@@ -464,8 +464,8 @@ impl App {
         &mut self,
         ev: UiEvent,
         is_processing: &mut bool,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
+        _ui_tx: &mpsc::Sender<UiEvent>,
+        _active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
         match ev {
@@ -633,6 +633,17 @@ impl App {
                     self.output_area.push_system(&format!("[Additional Context] {ctx}"));
                 }
             }
+            UiEvent::DrainQueuedInput { reply_tx } => {
+                let queued: Vec<String> = self.input_queue.drain(..).collect();
+                if !queued.is_empty() {
+                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
+                    for msg in &flushed {
+                        self.output_area.push_user_message(msg);
+                    }
+                    self.status_bar.set_processing("Thinking with queued input...");
+                }
+                let _ = reply_tx.send(queued);
+            }
             UiEvent::Done => {
                 log::debug!("[SPINNER] Done: tool_call_active {} -> false", self.tool_call_active);
                 self.output_area.finish_streaming();
@@ -642,15 +653,6 @@ impl App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if !self.input_queue.is_empty() {
-                    // Flush queued messages from spinner area into output area
-                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
-                    for msg in &flushed {
-                        self.output_area.push_user_message(msg);
-                    }
-                    let queued: Vec<String> = self.input_queue.drain(..).collect();
-                    return self.start_queued_batch(queued, is_processing, ui_tx, active_cancel, spawn_refs);
-                }
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!("[SPINNER] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
@@ -662,42 +664,10 @@ impl App {
                 *is_processing = false;
                 self.status_bar.clear_processing();
                 self.status_bar.set_success("Ready");
-                if !self.input_queue.is_empty() {
-                    // Flush queued messages from spinner area into output area
-                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
-                    for msg in &flushed {
-                        self.output_area.push_user_message(msg);
-                    }
-                    let queued: Vec<String> = self.input_queue.drain(..).collect();
-                    return self.start_queued_batch(queued, is_processing, ui_tx, active_cancel, spawn_refs);
-                }
             }
         }
 
         UpdateResult { cmd: Cmd::None, pending_slash: None }
-    }
-
-    /// Start processing all queued input messages as a single batch
-    fn start_queued_batch(
-        &mut self,
-        queued: Vec<String>,
-        is_processing: &mut bool,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        spawn_refs: &SpawnContextRefs<'_>,
-    ) -> UpdateResult {
-        spawn_refs.interrupted.store(false, Ordering::Relaxed);
-        self.active_tool_call_ids.clear();
-        self.tool_call_active = false;
-        for msg in &queued {
-            self.messages.push(Message::user(msg));
-        }
-        self.status_bar.set_processing("Thinking...");
-        self.output_area.start_spinner();
-        *is_processing = true;
-
-        let spawn_ctx = self.build_spawn_context(ui_tx, active_cancel, spawn_refs);
-        UpdateResult { cmd: Cmd::SpawnProcessing(spawn_ctx), pending_slash: None }
     }
 
     /// Build an owned SpawnContext from borrowed refs
@@ -711,6 +681,7 @@ impl App {
         // Note: active_cancel is set by the caller after getting the Cmd back
         SpawnContext {
             tx: ui_tx.clone(),
+            queue_request_tx: ui_tx.clone(),
             client: spawn_refs.client.clone(),
             registry: spawn_refs.registry.clone(),
             system_blocks: spawn_refs.system_blocks.clone(),

@@ -55,6 +55,7 @@ inventory::submit! {
             "/commit - Create commit".to_string(),
             "/commit message - Create commit with message".to_string(),
         ])
+        .with_aliases(vec!["cm".to_string()])
     })
 }
 
@@ -62,11 +63,12 @@ fn commit_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     if !std::path::Path::new(".git").exists() {
         return CommandResult::Error("Not a git repository. Use /init first".to_string());
     }
-    if args.trim().is_empty() {
-        CommandResult::Success("Commit: Use the Skill tool with 'commit' skill to create a commit with AI-generated message".to_string())
+    let prompt = if args.trim().is_empty() {
+        "请查看当前的 git diff 和 status，生成合适的 commit message，然后执行 git commit。如果有未暂存的文件，先确认是否需要 git add。commit message 使用中文，遵循 conventional commits 格式。".to_string()
     } else {
-        CommandResult::Success(format!("Commit with message: {} (use Bash tool to commit)", args.trim()))
-    }
+        format!("请执行 git commit，使用以下 commit message：\n\n{}", args.trim())
+    };
+    CommandResult::Action(CommandAction::InjectMessage(prompt))
 }
 
 inventory::submit! {
@@ -146,7 +148,7 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         review_prompt.push_str(&diff_text);
         review_prompt.push_str("\n```");
     }
-    CommandResult::Action(CommandAction::Review(review_prompt))
+    CommandResult::Action(CommandAction::InjectMessage(review_prompt))
 }
 
 fn run_git(cwd: &std::path::Path, args: &[&str]) -> Option<String> {

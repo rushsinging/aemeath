@@ -47,7 +47,9 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.messages.clear();
                 self.pending_images.clear();
+                self.input_area.set_pending_images(0);
                 self.output_area.clear();
+                self.reset_runtime_state();
                 self.output_area.push_system("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
@@ -207,23 +209,14 @@ impl super::App {
                                 aemeath_core::command::CommandAction::Exit => self.should_exit = true,
                                 aemeath_core::command::CommandAction::Clear => {
                                     self.messages.clear();
-                                    // Reset token counters & status bar runtime state
-                                    self.total_input_tokens = 0;
-                                    self.total_output_tokens = 0;
-                                    self.total_api_calls = 0;
-                                    self.last_input_tokens = 0;
-                                    self.tool_call_active = false;
-                                    self.active_tool_call_ids.clear();
-                                    self.input_queue.clear();
-                                    self.status_bar.set_tokens(0, 0, 0);
-                                    self.status_bar.set_api_calls(0);
-                                    self.status_bar.set_tps(0.0);
-                                    self.status_bar.clear_processing();
+                                    self.pending_images.clear();
+                                    self.input_area.set_pending_images(0);
+                                    self.output_area.clear();
+                                    self.reset_runtime_state();
                                     self.output_area.push_system("[cleared]");
                                 }
                                 aemeath_core::command::CommandAction::Compact => {
-                                    use aemeath_core::compact;
-                                    let (compacted, was_compacted) = compact::compact_messages(
+                                    use aemeath_core::compact;                                    let (compacted, was_compacted) = compact::compact_messages(
                                         &mut self.messages,
                                         &self.system_prompt_text,
                                         self.context_size,
@@ -289,10 +282,15 @@ impl super::App {
                                     self.output_area
                                         .push_system(&format!("[switched to {}]", display));
                                 }
-                                aemeath_core::command::CommandAction::Review(prompt) => {
+                                aemeath_core::command::CommandAction::InjectMessage(prompt) => {
                                     self.output_area
                                         .push_system("[reviewing code changes...]");
                                     return Some(prompt);
+                                }
+                                aemeath_core::command::CommandAction::RunSkill(content) => {
+                                    self.output_area
+                                        .push_system("[running skill...]");
+                                    return Some(content);
                                 }
                                 aemeath_core::command::CommandAction::SetThinking(desired) => {
                                     let current = self.client.as_ref().map(|c| c.is_reasoning()).unwrap_or(true);

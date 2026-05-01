@@ -2,6 +2,7 @@ use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{CompactHookData, HookData, StopHookData, ToolHookData};
+use aemeath_core::logging::{self, LogFile};
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::provider::StreamHandler;
@@ -16,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 #[allow(clippy::too_many_arguments)]
 pub async fn process_in_background(
     tx: mpsc::Sender<UiEvent>,
+    queue_request_tx: mpsc::Sender<UiEvent>,
     client: Arc<aemeath_llm::client::LlmClient>,
     registry: Arc<ToolRegistry>,
     system_blocks: Vec<aemeath_llm::types::SystemBlock>,
@@ -238,6 +240,15 @@ pub async fn process_in_background(
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
         };
+        log_llm_request_messages(
+            &session_id,
+            turn_count,
+            client.provider_name(),
+            client.model_name(),
+            &system_blocks,
+            &messages_for_api,
+            &tool_schemas,
+        );
         let api_start = std::time::Instant::now();
         let response = client
             .stream_message(&system_blocks, &messages_for_api, &tool_schemas, &mut handler, &cancel)
@@ -659,6 +670,13 @@ pub async fn process_in_background(
                     // Sync after tool execution
                     let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
+                    if let Some(queued) = drain_queued_input(&queue_request_tx).await {
+                        for input in queued {
+                            messages.push(Message::user(input));
+                        }
+                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                    }
+
                     // PostToolBatch hook: 批量工具调用完成后触发（汇总注入）
                     let post_batch_results = hook_runner
                         .run_hooks_with_json(
@@ -704,4 +722,43 @@ pub async fn process_in_background(
     let _ = hook_runner.on_stop(turn_count).await;
 
     let _ = tx.send(UiEvent::DoneWithDuration(turn_start.elapsed())).await;
+}
+
+async fn drain_queued_input(tx: &mpsc::Sender<UiEvent>) -> Option<Vec<String>> {
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    if tx.send(UiEvent::DrainQueuedInput { reply_tx }).await.is_err() {
+        return None;
+    }
+    match reply_rx.await {
+        Ok(queued) if !queued.is_empty() => Some(queued),
+        _ => None,
+    }
+}
+
+fn log_llm_request_messages(
+    session_id: &str,
+    turn: usize,
+    provider: &str,
+    model: &str,
+    system_blocks: &[aemeath_llm::types::SystemBlock],
+    messages: &[Message],
+    tool_schemas: &[serde_json::Value],
+) {
+    let payload = serde_json::json!({
+        "event": "llm_request_messages",
+        "provider": provider,
+        "model": model,
+        "system_blocks": system_blocks,
+        "messages": messages,
+        "tool_schema_count": tool_schemas.len(),
+    });
+    let _ = logging::append_json_line_with_turn(
+        LogFile::Agent,
+        session_id,
+        Some(turn),
+        "INFO",
+        "llm_request",
+        "messages sent to LLM",
+        payload,
+    );
 }

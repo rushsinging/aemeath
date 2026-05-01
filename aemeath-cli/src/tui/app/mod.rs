@@ -60,8 +60,11 @@ pub enum UiEvent {
         system_message: Option<String>,
         additional_context: Option<String>,
     },
+    /// Background agent loop requests queued user input before next LLM call.
+    DrainQueuedInput {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+    },
 }
-
 /// Main TUI application
 pub struct App {
     pub output_area: OutputArea,
@@ -172,6 +175,21 @@ impl App {
             ask_user_reply_tx: None,
             ask_user_state: None,
         }
+    }
+
+    /// Reset per-conversation runtime state while preserving model/provider/session environment.
+    pub(crate) fn reset_runtime_state(&mut self) {
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_api_calls = 0;
+        self.last_input_tokens = 0;
+        self.tool_call_active = false;
+        self.active_tool_call_ids.clear();
+        self.input_queue.clear();
+        self.output_area.reset_runtime_state();
+        self.status_bar.reset_runtime_state();
+        self.ask_user_reply_tx = None;
+        self.ask_user_state = None;
     }
 
     /// Set loaded skills for slash command alias lookup
@@ -490,6 +508,7 @@ impl App {
                     }
                     processing::spawn_processing(processing::SpawnContext {
                         tx: ui_tx.clone(),
+                        queue_request_tx: ui_tx.clone(),
                         client: client.clone(),
                         registry: registry.clone(),
                         system_blocks: system_blocks.clone(),

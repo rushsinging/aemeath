@@ -2,10 +2,8 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 3 | 优化 tool call TUI 显示 | 高 | ✅ 已修复 | 未确认 | 2026-04 | tool_call_active 未同步 + tool call 输出未流式化 |
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
-| 24 | Tool call 执行时 spinner 偶尔消失 | 中 | ✅ 已修复 | 未确认 | 2026-04 | tool call 状态、spinner 生命周期或 reserved height 计算偶发不同步 |
-| 25 | /clear 命令未清空 status line 数据 | 中 | ✅ 已修复 | 未确认 | 2026-04 | clear 仅重置消息历史，未联动重置 status bar 任务/成本/spinner 状态 |
+| 25 | /clear 命令未清空 status line 数据 | 中 | 待确认 | 未确认 | 2026-04 | clear 仅重置消息历史，未联动重置 status bar 任务/成本/spinner 状态 |
 
 ## 详情
 
@@ -21,22 +19,6 @@
 **修复**：改为 `bg(Rgb(40,44,52)) + fg(Rgb(171,178,191))`（One Dark 色系）。
 **关联**：依赖于 #1 的修复。
 
-### #3 优化 tool call TUI 显示
-**症状**：
-1. ~~模型完成 tool call 后重新开始 thinking 时，状态栏仍显示 "Calling xxx..."，thinking 文本不显示。~~
-2. 长时间 tool call（如文件搜索、代码分析）执行期间 TUI 无任何输出，执行完毕后才一次性显示所有结果。应改为：先输出 tool call 标题 → 执行过程中流式输出中间结果 → 完成后输出最终结果。
-
-**根因**：
-- ~~症状 1：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过，导致 thinking 文本被丢弃、`tool_call_active` 未重置、状态栏未清除。`ToolResult` 虽然设置了 `tool_call_active = false`，但多轮 tool call 场景下状态栏显示不正确。~~ → 已修复：update.rs 中 Text/Thinking 事件在 `tool_call_active` 时自动重置并正常显示。
-- 症状 2：Sub-agent 的 `AgentProgress` 事件虽然已经从后台任务发送到 TUI，但 `UiEvent::AgentProgress` 字段名被写成 `_tool_id` / `_text`，`update_ui()` 中直接忽略该事件；同时 sub-agent 内部的 tool call 名称在 `agent.execute_tools()` 完成后才发送，因此长时间子 agent tool 执行期间 TUI 看不到中间进度。
-
-**修复**：
-- ~~症状 1：`Thinking` 事件无论 `tool_call_active` 状态都正常显示 thinking 文本，若为 true 则同步重置并更新状态栏。`Text` 事件同理。~~ → 已修复
-- 症状 2：`UiEvent::AgentProgress` 改为携带 `tool_id` / `text` 并在 `update_ui()` 中渲染到对应 Agent tool call 下方；`OutputArea` 新增 `push_tool_progress()`，将子 agent 进度插入到对应 tool call 区块；sub-agent 发现下一轮 tool calls 后，在执行前先发送 `[Turn N] calling: ...`，避免长时间 tool call 完成后才显示。
-
-**涉及路径**：`aemeath-cli/src/tui/app/stream.rs`（tool 执行改为逐个顺序发送 ToolResult）
-
-
 ### #13 Zhipu API 超大请求体返回空响应
 **症状**：会话 0000019dc93bab86dfd7032f 中，多轮 tool call 后模型停止输出，TUI 无内容显示。API 返回 `stop_reason=EndTurn` 但 `input_tokens=0 output_tokens=0`，text 为空字符串，无 tool calls。
 **根因**：请求体过大（`body_bytes=11659080` 约 11MB），Zhipu GLM-5.1 API 在收到超大请求时静默返回空响应，不报错。compact 后 messages 从 62 降到 23，但 body 仍约 11MB，说明某条 tool result 包含极大内容（可能是文件搜索/读取返回了大量数据），compaction 未能有效压缩。
@@ -45,24 +27,6 @@
 2. compaction 阶段主动截断过长的 tool result 内容
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
-
-### #24 Tool call 执行时 spinner 偶尔消失 ✅ 已修复
-**症状**：模型正在执行 tool call 时，TUI 底部 spinner 偶尔消失或短暂不显示。实际 tool call 仍在执行，用户会误以为界面卡住或请求结束。
-
-**预期行为**：
-1. 只要当前处于 processing / tool call 执行阶段，spinner 应持续显示。
-2. tool call 标题、queued messages、task status lines 不应挤掉 spinner。
-3. 多个 tool call 连续执行、tool result 刷新、thinking/text 切换时，spinner 生命周期应保持稳定。
-
-**根因**：
-1. `tool_call_active` 是单个 bool，不能表达多个并发/批量 tool call。Agent tool 批量执行时，第一个 `ToolResult` 会把 `tool_call_active` 置为 false 并把状态切回 `Generating...`，但其他 tool call 可能仍在运行，导致 spinner 生命周期和真实 tool 执行状态不同步。
-2. Output area 临时行追加顺序为 queued messages → spinner → task status lines。若 task status lines 较多，最终裁剪会优先保留底部 task 行，spinner 可能被挤出可见区域。
-
-**修复**：
-1. `App` 新增 `active_tool_call_ids: HashSet<String>`，`UiEvent::ToolCall` 记录未完成 tool id，`UiEvent::ToolResult` 只移除对应 id；仅当 active set 为空时才把 tool 状态切回 `Generating...`。
-2. Error / Cancelled / Done / DoneWithDuration / 新一轮 processing 开始时清空 active set，避免跨轮残留。
-3. Output area 渲染顺序改为 queued messages → task status lines → spinner，让 spinner 永远位于临时区域最后一行，避免被 task status 行裁掉。
-4. **补充修复（2026-04-28）**：`ToolResult` 当 `remaining == 0` 时改为 `start_spinner()` 而非仅设置状态栏文字，确保 agent loop 进入下一轮 API 调用期间 spinner 持续显示。`update_task_status` 移除了每帧 `start_spinner()` 调用，避免在错误时机重启 spinner。日志标签从 `[BUG#4]` 统一更新为 `[SPINNER]`。
 
 ### #25 /clear 命令未清空 status line 数据
 **症状**：在 TUI 中执行 `/clear` 命令清空对话历史后，output area 的消息已经被清空，但底部 **status line / status bar** 仍然显示上一轮残留信息：
@@ -101,6 +65,14 @@
 ---
 
 # 已归档 Bug
+
+### #3 优化 tool call TUI 显示（已确认修复）
+**根因**：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过；`UiEvent::AgentProgress` 字段错写为 `_tool_id` / `_text` 被忽略；sub-agent tool call 名称延迟发送。
+**修复**：Thinking/Text 事件在 tool_call_active 时正常显示并重置；AgentProgress 改用 `tool_id` / `text` 并渲染到对应 tool call 下方；sub-agent 在执行前先发送 `[Turn N] calling: ...`；tool 执行改为顺序发送 `ToolResult`。详见 `docs/bug/archived/003-tool-call-tui-display.md`。
+
+### #24 Tool call 执行时 spinner 偶尔消失（已确认修复）
+**根因**：`tool_call_active` 单 bool 无法表达批量并发；output area 临时行裁剪优先保留底部 task 行挤出 spinner。
+**修复**：改用 `active_tool_call_ids: HashSet<String>` 跟踪未完成 tool；渲染顺序改为 queued → task status → spinner；`ToolResult` 当 remaining=0 时调用 `start_spinner()`。详见 `docs/bug/archived/024-spinner-disappears-during-tool-call.md`。
 
 ### #5 鼠标选中时位置错位（已确认修复）
 **症状**：对话后在 output area 中鼠标选中文字时，选择起点不在点击位置，有偏移。

@@ -7,11 +7,14 @@ cd "$(dirname "$0")"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"
 
+# target-dir is configured in .cargo/config.toml
+TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/aemeath-target}"
+
 echo ">>> cargo build --release --package aemeath-cli"
 cargo build --release --package aemeath-cli
 
 mkdir -p "$INSTALL_DIR"
-cp "target/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
 
 # macOS Gatekeeper kills freshly-copied ad-hoc signed binaries on some
 # versions due to `com.apple.provenance` xattr + signature mismatch after

@@ -355,9 +355,11 @@ impl Tool for BashTool {
             None => return ToolResult::error("missing required parameter: command"),
         };
         if let Some(reason) = check_command_safety(command) {
-            return ToolResult::error(format!(
-                "Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."
-            ));
+            if !ctx.allow_all {
+                return ToolResult::error(format!(
+                    "Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."
+                ));
+            }
         }
         // Check for shell injection patterns (skip when allow_all is set)
         if !ctx.allow_all {
