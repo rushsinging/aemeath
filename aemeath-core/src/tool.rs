@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
@@ -73,6 +73,8 @@ pub struct ToolContext {
     pub cancel: CancellationToken,
     pub read_files: std::sync::Arc<Mutex<HashSet<String>>>,
     pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
+    /// Session-local reminders shared by MemoryTool and UI/REPL.
+    pub session_reminders: Option<Arc<Mutex<crate::memory::SessionReminders>>>,
     /// Whether we're in plan mode (simulated tool execution)
     pub plan_mode: Option<bool>,
     /// Whether all tools are auto-approved (skip injection checks)

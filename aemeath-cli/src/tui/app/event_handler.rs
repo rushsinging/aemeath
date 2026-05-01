@@ -204,6 +204,7 @@ impl super::App {
             cwd: self.cwd.clone(),
             session_id: self.session_id.clone(),
             read_files: spawn_ctx.read_files.clone(),
+            session_reminders: spawn_ctx.session_reminders.clone(),
             agent_runner: spawn_ctx.agent_runner.clone(),
             allow_all: spawn_ctx.allow_all,
             interrupted: spawn_ctx.interrupted.clone(),
@@ -213,6 +214,7 @@ impl super::App {
             max_agent_concurrency: spawn_ctx.max_agent_concurrency,
             agent_semaphore: spawn_ctx.agent_semaphore.clone(),
             hook_runner: spawn_ctx.hook_runner.clone(),
+            memory_config: spawn_ctx.memory_config.clone(),
         });
     }
 }

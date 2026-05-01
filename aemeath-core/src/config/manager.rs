@@ -291,6 +291,7 @@ impl ConfigManager {
                 }
                 HooksConfig { events }
             },
+            memory: overlay.memory,
         }
     }
 

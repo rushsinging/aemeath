@@ -21,6 +21,7 @@ pub(crate) struct SpawnContext {
     pub cwd: PathBuf,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: Arc<AtomicBool>,
@@ -30,6 +31,7 @@ pub(crate) struct SpawnContext {
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: aemeath_core::hook::HookRunner,
+    pub memory_config: aemeath_core::config::MemoryConfig,
 }
 
 /// Borrowed references to the shared state needed for spawning.
@@ -42,6 +44,7 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub user_context: &'a str,
     pub context_size: usize,
     pub read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub session_reminders: &'a Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     pub agent_runner: &'a Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: &'a Arc<AtomicBool>,
@@ -50,6 +53,7 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub max_agent_concurrency: usize,
     pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub hook_runner: &'a aemeath_core::hook::HookRunner,
+    pub memory_config: &'a aemeath_core::config::MemoryConfig,
 }
 
 /// Spawn the background LLM processing task.
@@ -59,10 +63,11 @@ pub(super) fn spawn_processing(ctx: SpawnContext) {
             ctx.tx, ctx.queue_request_tx, ctx.client, ctx.registry, ctx.system_blocks,
             ctx.system_prompt_text, ctx.user_context, ctx.messages,
             ctx.context_size, ctx.cwd, ctx.session_id, ctx.read_files,
+            ctx.session_reminders,
             ctx.agent_runner, ctx.allow_all, ctx.interrupted, ctx.cancel,
             ctx.task_store,
             ctx.max_tool_concurrency, ctx.max_agent_concurrency, ctx.agent_semaphore,
-            ctx.hook_runner,
+            ctx.hook_runner, ctx.memory_config,
         ).await;
     });
 }

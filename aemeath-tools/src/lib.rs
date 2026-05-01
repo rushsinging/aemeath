@@ -18,6 +18,7 @@ pub mod task_stop;
 pub mod task_output;
 pub mod mcp_tool;  // McpTool is dynamically created, not statically registered
 pub mod skill_tool;
+pub mod memory_tool;
 pub mod config_tool;
 pub mod sleep;
 pub mod ask_user;
@@ -67,9 +68,10 @@ pub fn register_all_tools(
     registry.register(Box::new(task_stop::TaskStopTool { store: task_store.clone() }));
     registry.register(Box::new(task_output::TaskOutputTool { store: task_store.clone() }));
     
-    // Skill tool (MCP tools are dynamically registered)
+    // Skill and memory tools (MCP tools are dynamically registered)
     registry.register(Box::new(skill_tool::SkillTool { skills }));
-    
+    registry.register(Box::new(memory_tool::MemoryTool));
+      
     // Utility tools
     registry.register(Box::new(config_tool::ConfigTool));
     registry.register(Box::new(sleep::SleepTool));
@@ -110,9 +112,10 @@ pub fn register_all_tools_except_agent(
     registry.register(Box::new(task_stop::TaskStopTool { store: task_store.clone() }));
     registry.register(Box::new(task_output::TaskOutputTool { store: task_store }));
     
-    // Skill tool (MCP tools are dynamically registered)
+    // Skill and memory tools (MCP tools are dynamically registered)
     registry.register(Box::new(skill_tool::SkillTool { skills }));
-    
+    registry.register(Box::new(memory_tool::MemoryTool));
+      
     // Utility tools
     registry.register(Box::new(config_tool::ConfigTool));
     registry.register(Box::new(sleep::SleepTool));

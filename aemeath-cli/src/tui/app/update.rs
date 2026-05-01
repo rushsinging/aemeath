@@ -683,6 +683,11 @@ impl App {
                 self.active_tool_call_ids.clear();
                 *is_processing = false;
                 self.status_bar.set_success("Ready");
+                if let Ok(reminders) = self.session_reminders.lock() {
+                    if let Some(line) = reminders.recap_line() {
+                        self.output_area.push_system(&line);
+                    }
+                }
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!("[SPINNER] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
@@ -693,6 +698,11 @@ impl App {
                 self.active_tool_call_ids.clear();
                 *is_processing = false;
                 self.status_bar.set_success("Ready");
+                if let Ok(reminders) = self.session_reminders.lock() {
+                    if let Some(line) = reminders.recap_line() {
+                        self.output_area.push_system(&line);
+                    }
+                }
             }
         }
 
@@ -721,6 +731,7 @@ impl App {
             cwd: self.cwd.clone(),
             session_id: self.session_id.clone(),
             read_files: spawn_refs.read_files.clone(),
+            session_reminders: spawn_refs.session_reminders.clone(),
             agent_runner: spawn_refs.agent_runner.clone(),
             allow_all: spawn_refs.allow_all,
             interrupted: spawn_refs.interrupted.clone(),
@@ -730,6 +741,7 @@ impl App {
             max_agent_concurrency: spawn_refs.max_agent_concurrency,
             agent_semaphore: spawn_refs.agent_semaphore.clone(),
             hook_runner: spawn_refs.hook_runner.clone(),
+            memory_config: spawn_refs.memory_config.clone(),
         }
     }
 }

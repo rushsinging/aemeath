@@ -54,6 +54,7 @@ pub async fn run_repl(
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     skills: std::collections::HashMap<String, Skill>,
     hook_runner: aemeath_core::hook::HookRunner,
+    memory_config: aemeath_core::config::MemoryConfig,
 ) {
     // Run SessionStart hooks: inject additional_context into user_context
     {
@@ -139,7 +140,10 @@ pub async fn run_repl(
     let pending_images: PendingImages = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut skip_message_build = false;
     let mut turn_count = 0usize;
-  
+    let session_reminders = Arc::new(std::sync::Mutex::new(
+        aemeath_core::memory::SessionReminders::new(),
+    ));
+    
     loop {
         skip_message_build = false;
 
@@ -253,7 +257,7 @@ pub async fn run_repl(
         {
             compact_messages_inner(
                 &mut messages, &system_prompt_text, context_size,
-                &client, &mut compact_state, &read_files,
+                &client, &hook_runner, turn_count, &mut compact_state, &read_files,
             ).await;
         }
 
@@ -272,6 +276,7 @@ pub async fn run_repl(
             cancel: cancel.clone(),
             read_files: read_files.clone(),
             agent_runner: agent_runner.clone(),
+            session_reminders: Some(session_reminders.clone()),
             plan_mode: None,
             allow_all,
             max_tool_concurrency,
@@ -337,6 +342,16 @@ pub async fn run_repl(
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                        if let Some(text) = auto_reflection_text(
+                            &memory_config,
+                            turn_count + turns,
+                            &messages,
+                            &cwd,
+                        )
+                        .await
+                        {
+                            eprintln!("{text}");
+                        }
                         break;
                     }
 
@@ -499,7 +514,7 @@ pub async fn run_repl(
                         if urgency >= 2 && compact_state.should_attempt() {
                             compact_messages_inner(
                                 &mut messages, &system_prompt_text, context_size,
-                                &client, &mut compact_state, &read_files,
+                                &client, &hook_runner, turn_count, &mut compact_state, &read_files,
                             ).await;
                         } else {
                             TerminalRenderer::print_compaction(old_len, messages.len());
@@ -523,6 +538,11 @@ pub async fn run_repl(
         turn_count += turns;
   
         TerminalRenderer::print_done(turn_start.elapsed());
+        if let Ok(reminders) = session_reminders.lock() {
+            if let Some(line) = reminders.recap_line() {
+                eprintln!("{line}");
+            }
+        }
         TerminalRenderer::print_newline();
     }
 
@@ -589,10 +609,26 @@ async fn compact_messages_inner(
     system_prompt_text: &str,
     context_size: usize,
     client: &LlmClient,
+    hook_runner: &aemeath_core::hook::HookRunner,
+    turn_count: usize,
     compact_state: &mut compact::AutoCompactState,
     read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 ) {
     let old_len = messages.len();
+    let (blocked, pre_results) = hook_runner.pre_compact(turn_count, old_len).await;
+    for result in &pre_results {
+        if let Some(error) = &result.error {
+            log::warn!("PreCompact hook error: {error}");
+        }
+        if !result.output.trim().is_empty() {
+            eprintln!("{}", result.output.trim());
+        }
+    }
+    if blocked {
+        log::warn!("PreCompact hook blocked compaction");
+        return;
+    }
+
     let keep_recent = (old_len * 40 / 100).max(4).min(old_len - 1);
     let split_point = old_len - keep_recent;
     let early_messages = &messages[..split_point];
@@ -616,6 +652,9 @@ async fn compact_messages_inner(
             *messages = compacted;
             compact_state.record_success();
             TerminalRenderer::print_compaction(old_len, messages.len());
+            log_post_compact_results(
+                hook_runner.post_compact(turn_count, old_len, messages.len()).await,
+            );
         }
         Err(_) => {
             compact_state.record_failure();
@@ -624,7 +663,60 @@ async fn compact_messages_inner(
             if was_compacted {
                 *messages = compacted;
                 TerminalRenderer::print_compaction(old_len, messages.len());
+                log_post_compact_results(
+                    hook_runner.post_compact(turn_count, old_len, messages.len()).await,
+                );
             }
         }
     }
+}
+
+fn log_post_compact_results(results: Vec<aemeath_core::hook::HookResult>) {
+    for result in results {
+        if let Some(error) = result.error {
+            log::warn!("PostCompact hook error: {error}");
+        }
+        if !result.output.trim().is_empty() {
+            eprintln!("{}", result.output.trim());
+        }
+    }
+}
+
+async fn auto_reflection_text(
+    config: &aemeath_core::config::MemoryConfig,
+    turn_count: usize,
+    messages: &[Message],
+    cwd: &PathBuf,
+) -> Option<String> {
+    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
+        return None;
+    }
+    if turn_count % config.reflection.interval_turns != 0 {
+        return None;
+    }
+
+    let store = aemeath_core::memory::MemoryStore::new(
+        aemeath_core::memory::memory_base_dir(),
+        aemeath_core::memory::project_hash_from_path(cwd),
+        config.max_entries,
+        config.similarity_threshold,
+    )
+    .ok()?;
+    let entries = store.list(Some(aemeath_core::memory::MemoryLayer::Project)).ok()?;
+    let mut output = aemeath_core::reflection::ReflectionOutput {
+        deviations: Vec::new(),
+        suggested_memories: Vec::new(),
+        outdated_memories: entries
+            .iter()
+            .filter(|entry| entry.outdated)
+            .map(|entry| entry.id.clone())
+            .collect(),
+        user_alert: None,
+    };
+    if entries.is_empty() && !messages.is_empty() {
+        output
+            .deviations
+            .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
+    }
+    Some(aemeath_core::reflection::ReflectionEngine::format_output(&output))
 }

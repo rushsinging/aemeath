@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use aemeath_core::hook::HookRunner;
+use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 pub struct SystemPromptParts {
@@ -87,6 +88,11 @@ GOOD: TodoWrite(3 todos with dependencies) → TodoRun()
         }
     }
 
+    if let Some(memory_context) = collect_memory_context(cwd).await {
+        dynamic.push_str("\n\n");
+        dynamic.push_str(&memory_context);
+    }
+  
     // --- CLAUDE.md: will be injected as a separate user-context message ---
     let claude_md = load_claude_md(cwd, hook_runner).await;
 
@@ -176,6 +182,39 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     claude_md
 }
 
+pub async fn collect_memory_context(cwd: &PathBuf) -> Option<String> {
+    collect_memory_context_with_limit(cwd, 10).await
+}
+
+async fn collect_memory_context_with_limit(cwd: &PathBuf, limit: usize) -> Option<String> {
+    if limit == 0 {
+        return None;
+    }
+
+    let mut store = MemoryStore::new(memory_base_dir(), project_hash_from_path(cwd), 100, 0.8).ok()?;
+    let entries = store.top_for_inject(limit).ok()?;
+    format_memory_context(&entries)
+}
+
+fn format_memory_context(entries: &[MemoryEntry]) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+
+    let mut output = String::from("# Project Memory");
+    let mut bytes = output.len();
+    for entry in entries {
+        let line = format!("\n- [{:?}] {}", entry.category, entry.content.trim());
+        if bytes + line.len() > 4000 {
+            break;
+        }
+        bytes += line.len();
+        output.push_str(&line);
+    }
+
+    Some(output)
+}
+
 pub async fn collect_git_context(cwd: &PathBuf) -> String {
     use tokio::process::Command;
 
@@ -260,4 +299,37 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
     } else {
         result
     }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use aemeath_core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+
+  #[test]
+  fn test_format_memory_context_empty() {
+      assert!(format_memory_context(&[]).is_none());
+  }
+
+  #[test]
+  fn test_format_memory_context_with_entries() {
+      let entry = MemoryEntry::new(
+          MemoryLayer::Project,
+          MemoryCategory::Decision,
+          "使用 JSON 存储 Memory",
+          MemorySource::User,
+      );
+      let output = format_memory_context(&[entry]).unwrap();
+
+      assert!(output.contains("# Project Memory"));
+      assert!(output.contains("[Decision]"));
+      assert!(output.contains("使用 JSON 存储 Memory"));
+  }
+
+  #[tokio::test]
+  async fn test_collect_memory_context_zero_limit() {
+      let cwd = PathBuf::from("/tmp/aemeath-no-memory");
+
+      assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
+  }
 }

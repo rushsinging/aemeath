@@ -246,6 +246,7 @@ impl AgentRunner for CliAgentRunner {
                 std::collections::HashSet::new(),
             )),
             agent_runner: None, // No nested agents
+            session_reminders: ctx.session_reminders.clone(),
             plan_mode: ctx.plan_mode,
             allow_all: ctx.allow_all,
             max_tool_concurrency: ctx.max_tool_concurrency,

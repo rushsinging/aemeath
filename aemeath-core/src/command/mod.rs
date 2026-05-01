@@ -49,4 +49,6 @@ pub mod cmd {
     pub const REVIEW: &str = "review";
     pub const DOCTOR: &str = "doctor";
     pub const THINK: &str = "think";
+    pub const MEMORY: &str = "memory";
+    pub const REFLECT: &str = "reflect";
 }

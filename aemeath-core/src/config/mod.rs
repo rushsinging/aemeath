@@ -10,6 +10,7 @@
 pub mod hooks;
 pub mod legacy;
 pub mod manager;
+pub mod memory;
 pub mod models;
 pub mod permissions;
 pub mod skills;
@@ -21,6 +22,7 @@ pub mod ui;
 pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
 pub use manager::ConfigManager;
+pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
@@ -84,6 +86,10 @@ pub struct Config {
     /// Hook configuration
     #[serde(default)]
     pub hooks: HooksConfig,
+
+    /// Memory and reflection configuration
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[cfg(test)]
@@ -97,6 +103,8 @@ mod tests {
         assert_eq!(config.model.max_tokens, 200000);
         assert!(config.ui.markdown);
         assert!(config.storage.persist_sessions);
+        assert!(config.memory.enabled);
+        assert_eq!(config.memory.max_entries, 100);
     }
 
     #[test]

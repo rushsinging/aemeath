@@ -29,6 +29,7 @@ pub async fn process_in_background(
     #[allow(unused_variables)]
     session_id: String,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
     allow_all: bool,
     interrupted: Arc<AtomicBool>,
@@ -38,6 +39,7 @@ pub async fn process_in_background(
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     hook_runner: aemeath_core::hook::HookRunner,
+    memory_config: aemeath_core::config::MemoryConfig,
 ) {
     let hook_ui = HookUi::new(tx.clone());
   
@@ -49,6 +51,7 @@ pub async fn process_in_background(
         cancel: cancel.clone(),
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),
+        session_reminders: Some(session_reminders.clone()),
         plan_mode: None,
         allow_all,
         max_tool_concurrency,
@@ -273,6 +276,9 @@ pub async fn process_in_background(
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                    if let Some(text) = auto_reflection_text(&memory_config, turn_count, &messages, &cwd).await {
+                        let _ = tx.send(UiEvent::SystemMessage(text)).await;
+                    }
                     break;
                 }
 
@@ -815,6 +821,45 @@ pub async fn process_in_background(
         .await;
   
     let _ = tx.send(UiEvent::DoneWithDuration(turn_start.elapsed())).await;
+}
+
+async fn auto_reflection_text(
+    config: &aemeath_core::config::MemoryConfig,
+    turn_count: usize,
+    messages: &[Message],
+    cwd: &PathBuf,
+) -> Option<String> {
+    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
+        return None;
+    }
+    if turn_count % config.reflection.interval_turns != 0 {
+        return None;
+    }
+
+    let store = aemeath_core::memory::MemoryStore::new(
+        aemeath_core::memory::memory_base_dir(),
+        aemeath_core::memory::project_hash_from_path(cwd),
+        config.max_entries,
+        config.similarity_threshold,
+    )
+    .ok()?;
+    let entries = store.list(Some(aemeath_core::memory::MemoryLayer::Project)).ok()?;
+    let mut output = aemeath_core::reflection::ReflectionOutput {
+        deviations: Vec::new(),
+        suggested_memories: Vec::new(),
+        outdated_memories: entries
+            .iter()
+            .filter(|entry| entry.outdated)
+            .map(|entry| entry.id.clone())
+            .collect(),
+        user_alert: None,
+    };
+    if entries.is_empty() && !messages.is_empty() {
+        output
+            .deviations
+            .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
+    }
+    Some(aemeath_core::reflection::ReflectionEngine::format_output(&output))
 }
 
 #[derive(Clone)]

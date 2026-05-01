@@ -20,6 +20,9 @@ pub mod debug;
 pub mod stats;
 pub mod think;
 pub mod effort;
+pub mod memory;
+pub mod reflect;
+mod memory_support;
 
 /// Initialize all built-in commands.
 ///

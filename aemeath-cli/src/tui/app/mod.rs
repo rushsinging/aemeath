@@ -110,6 +110,9 @@ pub struct App {
     pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<String>>,
     /// Interactive ask-user selection state
     pub ask_user_state: Option<AskUserState>,
+    /// Session-local reminders for MemoryTool recap.
+    pub session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
+    pub memory_config: aemeath_core::config::MemoryConfig,
 }
 
 /// State for interactive AskUserQuestion option selection
@@ -177,6 +180,10 @@ impl App {
             ),
             ask_user_reply_tx: None,
             ask_user_state: None,
+            session_reminders: Arc::new(std::sync::Mutex::new(
+                aemeath_core::memory::SessionReminders::new(),
+            )),
+            memory_config: aemeath_core::config::MemoryConfig::default(),
         }
     }
 
@@ -193,6 +200,9 @@ impl App {
         self.status_bar.reset_runtime_state();
         self.ask_user_reply_tx = None;
         self.ask_user_state = None;
+        if let Ok(mut reminders) = self.session_reminders.lock() {
+            reminders.clear();
+        }
     }
 
     /// Set loaded skills for slash command alias lookup
@@ -427,6 +437,7 @@ impl App {
         agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let session_reminders = self.session_reminders.clone();
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
         let mut is_processing = false;
         let active_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>> =
@@ -443,6 +454,7 @@ impl App {
 
             // Build spawn context refs for update()
             let hook_runner_clone = self.hook_runner.clone();
+            let memory_config_clone = self.memory_config.clone();
             let spawn_refs = processing::SpawnContextRefs {
                 client: &client,
                 registry: &registry,
@@ -451,6 +463,7 @@ impl App {
                 user_context: &user_context,
                 context_size,
                 read_files: &read_files,
+                session_reminders: &session_reminders,
                 agent_runner: &agent_runner,
                 allow_all,
                 interrupted: &interrupted,
@@ -459,6 +472,7 @@ impl App {
                 max_agent_concurrency,
                 agent_semaphore: &agent_semaphore,
                 hook_runner: &hook_runner_clone,
+                memory_config: &memory_config_clone,
             };
 
             // --- TEA event collection: produce a Msg ---
@@ -522,6 +536,7 @@ impl App {
                         cwd: self.cwd.clone(),
                         session_id: self.session_id.clone(),
                         read_files: read_files.clone(),
+                        session_reminders: self.session_reminders.clone(),
                         agent_runner: agent_runner.clone(),
                         allow_all,
                         interrupted: interrupted.clone(),
@@ -531,6 +546,7 @@ impl App {
                         max_agent_concurrency,
                         agent_semaphore: agent_semaphore.clone(),
                         hook_runner: self.hook_runner.clone(),
+                        memory_config: self.memory_config.clone(),
                     });
                 }
             }

@@ -660,7 +660,8 @@ async fn run_chat(mut args: Args) {
 
           // 以 TUI 模式或旧版 REPL 模式运行
     if args.no_tui {
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone(), hook_runner.clone()).await;
+        let memory_config = config_file.as_ref().map(|c| c.memory.clone()).unwrap_or_default();
+        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone(), hook_runner.clone(), memory_config).await;
     } else {
         // 构建显示名: provider/name (来自 config) 或仅 model id
         // provider 名称以原始 config 形式显示（不转小写），
@@ -684,6 +685,7 @@ async fn run_chat(mut args: Args) {
             format!("{}/{}", provider_name, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
+        app.memory_config = config_file.as_ref().map(|c| c.memory.clone()).unwrap_or_default();
         app.set_skills(skills_map);
         app.hook_runner = hook_runner.clone();
         if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
