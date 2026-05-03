@@ -1,7 +1,7 @@
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use crate::tui::output_area::{display, build_diff_lines, OutputLine, LineStyle, INDENT};
+use crate::tui::output_area::{build_diff_lines, display, LineStyle, OutputLine, INDENT};
 
 // ── ToolDisplay trait ──────────────────────────────────────────────
 
@@ -17,13 +17,19 @@ pub trait ToolDisplay: Send + Sync {
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
     /// Style for detail lines.
-    fn detail_style(&self) -> LineStyle { LineStyle::System }
+    fn detail_style(&self) -> LineStyle {
+        LineStyle::System
+    }
 
     /// Max lines of result output to show (default 3).
-    fn result_max_lines(&self) -> usize { 10 }
+    fn result_max_lines(&self) -> usize {
+        10
+    }
 
     /// Style for result content lines.
-    fn result_style(&self) -> LineStyle { LineStyle::System }
+    fn result_style(&self) -> LineStyle {
+        LineStyle::System
+    }
 
     /// Format the result summary line(s). Default: "✓ {name} completed".
     fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
@@ -60,8 +66,12 @@ fn lookup_display(name: &str) -> Option<&dyn ToolDisplay> {
 
 struct BashDisplay;
 impl ToolDisplay for BashDisplay {
-    fn name(&self) -> &str { "Bash" }
-    fn format_header(&self, _input: &serde_json::Value) -> String { "● Bash".to_string() }
+    fn name(&self) -> &str {
+        "Bash"
+    }
+    fn format_header(&self, _input: &serde_json::Value) -> String {
+        "● Bash".to_string()
+    }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let cmd = input.get("command").and_then(|c| c.as_str()).unwrap_or("?");
         let timeout = input.get("timeout").and_then(|t| t.as_u64());
@@ -75,19 +85,32 @@ impl ToolDisplay for BashDisplay {
         }
         vec![detail]
     }
-    fn detail_style(&self) -> LineStyle { LineStyle::Normal }
+    fn detail_style(&self) -> LineStyle {
+        LineStyle::Normal
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "Bash", display: || Box::new(BashDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Bash",
+    display: || Box::new(BashDisplay)
+});
 
 struct ReadDisplay;
 impl ToolDisplay for ReadDisplay {
-    fn name(&self) -> &str { "Read" }
+    fn name(&self) -> &str {
+        "Read"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let path = input.get("file_path").and_then(|p| p.as_str()).unwrap_or("?");
+        let path = input
+            .get("file_path")
+            .and_then(|p| p.as_str())
+            .unwrap_or("?");
         format!("● Read({path})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let path = input.get("file_path").and_then(|p| p.as_str()).unwrap_or("?");
+        let path = input
+            .get("file_path")
+            .and_then(|p| p.as_str())
+            .unwrap_or("?");
         let offset = input.get("offset").and_then(|o| o.as_u64());
         let limit = input.get("limit").and_then(|l| l.as_u64());
         let mut detail = format!("Read {path}");
@@ -101,13 +124,21 @@ impl ToolDisplay for ReadDisplay {
         vec![detail]
     }
 }
-inventory::submit!(ToolDisplayEntry { name: "Read", display: || Box::new(ReadDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Read",
+    display: || Box::new(ReadDisplay)
+});
 
 struct WriteDisplay;
 impl ToolDisplay for WriteDisplay {
-    fn name(&self) -> &str { "Write" }
+    fn name(&self) -> &str {
+        "Write"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let path = input.get("file_path").and_then(|p| p.as_str()).unwrap_or("?");
+        let path = input
+            .get("file_path")
+            .and_then(|p| p.as_str())
+            .unwrap_or("?");
         format!("● Write({path})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
@@ -115,46 +146,82 @@ impl ToolDisplay for WriteDisplay {
         vec![format!("{} bytes", content.len())]
     }
 }
-inventory::submit!(ToolDisplayEntry { name: "Write", display: || Box::new(WriteDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Write",
+    display: || Box::new(WriteDisplay)
+});
 
 struct EditDisplay;
 impl ToolDisplay for EditDisplay {
-    fn name(&self) -> &str { "Edit" }
+    fn name(&self) -> &str {
+        "Edit"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let path = input.get("file_path").and_then(|p| p.as_str()).unwrap_or("?");
+        let path = input
+            .get("file_path")
+            .and_then(|p| p.as_str())
+            .unwrap_or("?");
         format!("● Edit({path})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let old = input.get("old_string").and_then(|s| s.as_str()).unwrap_or("");
-        let new = input.get("new_string").and_then(|s| s.as_str()).unwrap_or("");
+        let old = input
+            .get("old_string")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        let new = input
+            .get("new_string")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
         let old_lines = old.lines().count();
         let new_lines = new.lines().count();
         let detail = if old_lines == new_lines {
             format!("Changed {} -> {} chars", old.len(), new.len())
         } else if new_lines > old_lines {
-            format!("Added {} line(s), {} -> {} chars", new_lines - old_lines, old.len(), new.len())
+            format!(
+                "Added {} line(s), {} -> {} chars",
+                new_lines - old_lines,
+                old.len(),
+                new.len()
+            )
         } else {
-            format!("Removed {} line(s), {} -> {} chars", old_lines - new_lines, old.len(), new.len())
+            format!(
+                "Removed {} line(s), {} -> {} chars",
+                old_lines - new_lines,
+                old.len(),
+                new.len()
+            )
         };
         vec![detail]
     }
 }
-inventory::submit!(ToolDisplayEntry { name: "Edit", display: || Box::new(EditDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Edit",
+    display: || Box::new(EditDisplay)
+});
 
 struct GlobDisplay;
 impl ToolDisplay for GlobDisplay {
-    fn name(&self) -> &str { "Glob" }
+    fn name(&self) -> &str {
+        "Glob"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = input.get("pattern").and_then(|p| p.as_str()).unwrap_or("?");
         format!("● Glob({pattern})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "Glob", display: || Box::new(GlobDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Glob",
+    display: || Box::new(GlobDisplay)
+});
 
 struct GrepDisplay;
 impl ToolDisplay for GrepDisplay {
-    fn name(&self) -> &str { "Grep" }
+    fn name(&self) -> &str {
+        "Grep"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = input.get("pattern").and_then(|p| p.as_str()).unwrap_or("?");
         format!("● Grep /{pattern}/")
@@ -164,13 +231,21 @@ impl ToolDisplay for GrepDisplay {
         vec![format!("in {path}")]
     }
 }
-inventory::submit!(ToolDisplayEntry { name: "Grep", display: || Box::new(GrepDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Grep",
+    display: || Box::new(GrepDisplay)
+});
 
 struct AgentDisplay;
 impl ToolDisplay for AgentDisplay {
-    fn name(&self) -> &str { "Agent" }
+    fn name(&self) -> &str {
+        "Agent"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let desc = input.get("description").and_then(|d| d.as_str()).unwrap_or("sub-task");
+        let desc = input
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("sub-task");
         let role = input.get("role").and_then(|r| r.as_str());
         let model = input.get("model").and_then(|m| m.as_str());
         let mut header = format!("● Agent({desc})");
@@ -184,10 +259,13 @@ impl ToolDisplay for AgentDisplay {
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let prompt = input.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
-        if prompt.is_empty() { return vec![]; }
+        if prompt.is_empty() {
+            return vec![];
+        }
         let max_prompt = 200usize.saturating_sub(INDENT.len());
         let preview = if prompt.len() > max_prompt {
-            let end = prompt.char_indices()
+            let end = prompt
+                .char_indices()
                 .take_while(|(i, _)| *i < max_prompt)
                 .last()
                 .map(|(i, c)| i + c.len_utf8())
@@ -198,35 +276,57 @@ impl ToolDisplay for AgentDisplay {
         };
         vec![preview]
     }
-    fn result_max_lines(&self) -> usize { 20 }
-    fn result_style(&self) -> LineStyle { LineStyle::Assistant }
+    fn result_max_lines(&self) -> usize {
+        20
+    }
+    fn result_style(&self) -> LineStyle {
+        LineStyle::Assistant
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "Agent", display: || Box::new(AgentDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Agent",
+    display: || Box::new(AgentDisplay)
+});
 
 struct WebFetchDisplay;
 impl ToolDisplay for WebFetchDisplay {
-    fn name(&self) -> &str { "WebFetch" }
+    fn name(&self) -> &str {
+        "WebFetch"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let url = input.get("url").and_then(|u| u.as_str()).unwrap_or("?");
         format!("● WebFetch({url})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "WebFetch", display: || Box::new(WebFetchDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "WebFetch",
+    display: || Box::new(WebFetchDisplay)
+});
 
 struct TaskCreateDisplay;
 impl ToolDisplay for TaskCreateDisplay {
-    fn name(&self) -> &str { "TaskCreate" }
+    fn name(&self) -> &str {
+        "TaskCreate"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let subject = input.get("subject").and_then(|s| s.as_str()).unwrap_or("?");
         format!("● TaskCreate({subject})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let desc = input.get("description").and_then(|d| d.as_str()).unwrap_or("");
-        if desc.is_empty() { return vec![]; }
+        let desc = input
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("");
+        if desc.is_empty() {
+            return vec![];
+        }
         let max = 80usize;
         let preview = if desc.len() > max {
-            let end = desc.char_indices()
+            let end = desc
+                .char_indices()
                 .take_while(|(i, _)| *i < max)
                 .last()
                 .map(|(i, c)| i + c.len_utf8())
@@ -237,88 +337,158 @@ impl ToolDisplay for TaskCreateDisplay {
         };
         vec![preview]
     }
-    fn result_max_lines(&self) -> usize { 20 }
+    fn result_max_lines(&self) -> usize {
+        20
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskCreate", display: || Box::new(TaskCreateDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskCreate",
+    display: || Box::new(TaskCreateDisplay)
+});
 
 struct TaskUpdateDisplay;
 impl ToolDisplay for TaskUpdateDisplay {
-    fn name(&self) -> &str { "TaskUpdate" }
+    fn name(&self) -> &str {
+        "TaskUpdate"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = input.get("taskId").and_then(|s| s.as_str()).unwrap_or("?");
         format!("● TaskUpdate({id})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let status = input.get("status").and_then(|s| s.as_str()).unwrap_or("");
-        if status.is_empty() { return vec![]; }
+        if status.is_empty() {
+            return vec![];
+        }
         vec![format!("-> {status}")]
     }
-    fn result_max_lines(&self) -> usize { 20 }
+    fn result_max_lines(&self) -> usize {
+        20
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskUpdate", display: || Box::new(TaskUpdateDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskUpdate",
+    display: || Box::new(TaskUpdateDisplay)
+});
 
 struct TaskListDisplay;
 impl ToolDisplay for TaskListDisplay {
-    fn name(&self) -> &str { "TaskList" }
-    fn format_header(&self, _input: &serde_json::Value) -> String { "● TaskList".to_string() }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
-    fn result_max_lines(&self) -> usize { 20 }
+    fn name(&self) -> &str {
+        "TaskList"
+    }
+    fn format_header(&self, _input: &serde_json::Value) -> String {
+        "● TaskList".to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn result_max_lines(&self) -> usize {
+        20
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskList", display: || Box::new(TaskListDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskList",
+    display: || Box::new(TaskListDisplay)
+});
 
 struct SkillDisplay;
 impl ToolDisplay for SkillDisplay {
-    fn name(&self) -> &str { "Skill" }
+    fn name(&self) -> &str {
+        "Skill"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let skill = input.get("skill").and_then(|s| s.as_str()).unwrap_or("?");
         format!("● Skill({skill})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "Skill", display: || Box::new(SkillDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "Skill",
+    display: || Box::new(SkillDisplay)
+});
 
 struct LspDisplay;
 impl ToolDisplay for LspDisplay {
-    fn name(&self) -> &str { "LSP" }
+    fn name(&self) -> &str {
+        "LSP"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let op = input.get("operation").and_then(|o| o.as_str()).unwrap_or("?");
-        let path = input.get("filePath").and_then(|p| p.as_str()).unwrap_or("?");
+        let op = input
+            .get("operation")
+            .and_then(|o| o.as_str())
+            .unwrap_or("?");
+        let path = input
+            .get("filePath")
+            .and_then(|p| p.as_str())
+            .unwrap_or("?");
         format!("● LSP::{op}({path})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "LSP", display: || Box::new(LspDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "LSP",
+    display: || Box::new(LspDisplay)
+});
 
 struct TaskGetDisplay;
 impl ToolDisplay for TaskGetDisplay {
-    fn name(&self) -> &str { "TaskGet" }
+    fn name(&self) -> &str {
+        "TaskGet"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = input.get("taskId").and_then(|s| s.as_str()).unwrap_or("?");
         format!("● TaskGet({id})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskGet", display: || Box::new(TaskGetDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskGet",
+    display: || Box::new(TaskGetDisplay)
+});
 
 struct TaskStopDisplay;
 impl ToolDisplay for TaskStopDisplay {
-    fn name(&self) -> &str { "TaskStop" }
+    fn name(&self) -> &str {
+        "TaskStop"
+    }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = input.get("taskId").and_then(|s| s.as_str()).unwrap_or("?");
         format!("● TaskStop({id})")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
-    fn detail_style(&self) -> LineStyle { LineStyle::ToolCallError }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn detail_style(&self) -> LineStyle {
+        LineStyle::ToolCallError
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskStop", display: || Box::new(TaskStopDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskStop",
+    display: || Box::new(TaskStopDisplay)
+});
 
 struct TaskOutputDisplay;
 impl ToolDisplay for TaskOutputDisplay {
-    fn name(&self) -> &str { "TaskOutput" }
-    fn format_header(&self, _input: &serde_json::Value) -> String { "● TaskOutput".to_string() }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> { vec![] }
+    fn name(&self) -> &str {
+        "TaskOutput"
+    }
+    fn format_header(&self, _input: &serde_json::Value) -> String {
+        "● TaskOutput".to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
 }
-inventory::submit!(ToolDisplayEntry { name: "TaskOutput", display: || Box::new(TaskOutputDisplay) });
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskOutput",
+    display: || Box::new(TaskOutputDisplay)
+});
 
 fn debug_log(msg: &str) {
     use std::io::Write;
@@ -326,7 +496,11 @@ fn debug_log(msg: &str) {
         .unwrap_or_default()
         .join(".aemeath")
         .join("debug.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -337,10 +511,14 @@ fn debug_log(msg: &str) {
 
 /// Format a tool call for human-friendly display.
 pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
-    let parsed: serde_json::Value = serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        return (display.format_header(&parsed), display.format_details(&parsed));
+        return (
+            display.format_header(&parsed),
+            display.format_details(&parsed),
+        );
     }
 
     // Fallback for unknown tools
@@ -350,7 +528,8 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
 
 fn truncate_json(raw: &str) -> String {
     if raw.len() > 100 {
-        let end = raw.char_indices()
+        let end = raw
+            .char_indices()
             .take_while(|(i, _)| *i < 100)
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -374,37 +553,41 @@ impl super::OutputArea {
 
     /// 更新 Agent 工具调用的进度显示（实时替换 header 行文本）
     pub fn push_tool_call(&mut self, tool_id: &str, name: &str, summary: &str) {
-          self.finish_streaming();
+        self.finish_streaming();
 
-          // 清除该 tool 的预占 header（如果有）
-          let pending_id = format!("pending:{name}");
-          if let Some(pos) = self.lines.iter().position(|l| l.tool_id.as_deref() == Some(&pending_id)) {
-              self.lines.remove(pos);
-          }
+        // 清除该 tool 的预占 header（如果有）
+        let pending_id = format!("pending:{name}");
+        if let Some(pos) = self
+            .lines
+            .iter()
+            .position(|l| l.tool_id.as_deref() == Some(&pending_id))
+        {
+            self.lines.remove(pos);
+        }
 
-          let (header, details) = if name == "TodoWrite" {
-              self.format_todowrite(summary)
-          } else {
-              format_tool_call(name, summary)
-          };
+        let (header, details) = if name == "TodoWrite" {
+            self.format_todowrite(summary)
+        } else {
+            format_tool_call(name, summary)
+        };
 
-          self.push_line(OutputLine {
-              content: header,
-              style: LineStyle::ToolCallRunning,
-              tool_id: Some(tool_id.to_string()),
-          });
+        self.push_line(OutputLine {
+            content: header,
+            style: LineStyle::ToolCallRunning,
+            tool_id: Some(tool_id.to_string()),
+        });
 
-          let detail_style = lookup_display(name)
-              .map(|d| d.detail_style())
-              .unwrap_or(LineStyle::System);
-          for detail in details.iter() {
-              self.push_line(OutputLine {
-                  content: format!("{INDENT}{detail}"),
-                  style: detail_style,
-                  tool_id: Some(tool_id.to_string()),
-              });
-          }
-      }
+        let detail_style = lookup_display(name)
+            .map(|d| d.detail_style())
+            .unwrap_or(LineStyle::System);
+        for detail in details.iter() {
+            self.push_line(OutputLine {
+                content: format!("{INDENT}{detail}"),
+                style: detail_style,
+                tool_id: Some(tool_id.to_string()),
+            });
+        }
+    }
 
     fn format_todowrite(&mut self, raw_json: &str) -> (String, Vec<String>) {
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(raw_json);
@@ -420,20 +603,27 @@ impl super::OutputArea {
                         todo.get("id").and_then(|s| s.as_str()),
                         todo.get("subject").and_then(|s| s.as_str()),
                     ) {
-                        self.todo_subject_cache.insert(id.to_string(), subject.to_string());
+                        self.todo_subject_cache
+                            .insert(id.to_string(), subject.to_string());
                     }
                 }
 
                 for todo in todos.iter().take(3) {
-                    let subject = todo.get("subject").and_then(|s| s.as_str())
+                    let subject = todo
+                        .get("subject")
+                        .and_then(|s| s.as_str())
                         .map(|s| s.to_string())
                         .or_else(|| {
-                            todo.get("id").and_then(|s| s.as_str())
+                            todo.get("id")
+                                .and_then(|s| s.as_str())
                                 .and_then(|id| self.todo_subject_cache.get(id).cloned())
                         })
                         .unwrap_or_else(|| "?".to_string());
 
-                    let status = todo.get("status").and_then(|s| s.as_str()).unwrap_or("pending");
+                    let status = todo
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("pending");
                     let icon = match status {
                         "completed" => "✓",
                         "in_progress" => "◐",
@@ -460,9 +650,12 @@ impl super::OutputArea {
         }
 
         let content = format!("{INDENT}↳ {trimmed}");
-        let already_shown = self.lines.iter().rev().take(8).any(|line| {
-            line.tool_id.as_deref() == Some(tool_id) && line.content == content
-        });
+        let already_shown = self
+            .lines
+            .iter()
+            .rev()
+            .take(8)
+            .any(|line| line.tool_id.as_deref() == Some(tool_id) && line.content == content);
         if already_shown {
             return;
         }
@@ -474,7 +667,11 @@ impl super::OutputArea {
             tool_id: id_tag,
         };
 
-        let insert_at = self.lines.iter().enumerate().rev()
+        let insert_at = self
+            .lines
+            .iter()
+            .enumerate()
+            .rev()
             .find(|(_, line)| line.tool_id.as_deref() == Some(tool_id))
             .map(|(idx, _)| idx + 1)
             .unwrap_or(self.lines.len());
@@ -493,7 +690,11 @@ impl super::OutputArea {
         self.finish_streaming();
 
         let done_icon = if is_error { "✗" } else { "✓" };
-        let done_style = if is_error { LineStyle::ToolCallError } else { LineStyle::ToolCallSuccess };
+        let done_style = if is_error {
+            LineStyle::ToolCallError
+        } else {
+            LineStyle::ToolCallSuccess
+        };
 
         let mut header_idx: Option<usize> = None;
         for (idx, line) in self.lines.iter_mut().enumerate() {
@@ -576,7 +777,11 @@ impl super::OutputArea {
             for s in summaries {
                 result_lines.push(OutputLine {
                     content: format!("{INDENT}{s}"),
-                    style: if is_error { LineStyle::ToolCallError } else { LineStyle::ToolCallSuccess },
+                    style: if is_error {
+                        LineStyle::ToolCallError
+                    } else {
+                        LineStyle::ToolCallSuccess
+                    },
                     tool_id: id_tag.clone(),
                 });
             }

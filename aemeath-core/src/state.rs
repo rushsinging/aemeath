@@ -29,7 +29,10 @@ pub fn validate_session_id(id: &str) -> Result<(), String> {
     if id.is_empty() {
         return Err("session ID must not be empty".to_string());
     }
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(format!(
             "invalid session ID: {id:?} — only alphanumeric characters, hyphens, and underscores are allowed"
         ));
@@ -170,7 +173,10 @@ pub struct InternalSession {
 }
 
 /// Alias for backward compatibility during transition
-#[deprecated(since = "0.1.0", note = "Use InternalSession or crate::session::Session instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use InternalSession or crate::session::Session instead"
+)]
 pub type Session = InternalSession;
 
 impl InternalSession {
@@ -234,7 +240,11 @@ impl InternalSession {
             content: result.to_string(),
             timestamp: now,
             tool_name: Some(tool_name.to_string()),
-            tool_result: if is_error { Some("error".to_string()) } else { None },
+            tool_result: if is_error {
+                Some("error".to_string())
+            } else {
+                None
+            },
         });
     }
 }
@@ -276,8 +286,8 @@ impl AppState {
             .await
             .map_err(|e| format!("Failed to read settings: {e}"))?;
 
-        let settings: Settings = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse settings: {e}"))?;
+        let settings: Settings =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse settings: {e}"))?;
 
         *self.settings.write().await = settings;
         Ok(())
@@ -320,7 +330,11 @@ impl AppState {
     }
 
     /// Get or create a session
-    pub async fn get_or_create_session(&self, session_id: Option<&str>, cwd: &Path) -> InternalSession {
+    pub async fn get_or_create_session(
+        &self,
+        session_id: Option<&str>,
+        cwd: &Path,
+    ) -> InternalSession {
         if let Some(id) = session_id {
             // Try to load existing session
             if let Some(session) = self.load_session(id).await {

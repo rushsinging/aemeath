@@ -12,20 +12,20 @@ use aemeath_core::string_idx::CharIdx;
 use crate::tui::output_area::display::wrap_line;
 use crate::tui::output_area::types::DEFAULT_WIDTH;
 
-pub mod types;
-pub mod diff;
-pub mod streaming;
 pub mod content;
-pub mod scroll;
-pub mod markdown;
-pub mod spinner;
+pub mod diff;
 pub mod display;
+pub mod markdown;
+pub mod scroll;
 pub mod selection;
+pub mod spinner;
+pub mod streaming;
 pub mod tool_display;
+pub mod types;
 
 // 重新导出核心类型，方便外部使用
-pub use types::{OutputLine, LineStyle, SpinnerState, MAX_LINES, INDENT};
 pub use diff::build_diff_lines;
+pub use types::{LineStyle, OutputLine, SpinnerState, INDENT, MAX_LINES};
 
 /// 可滚动的输出区域，显示对话历史
 pub struct OutputArea {
@@ -115,9 +115,17 @@ impl OutputArea {
         // 构建 spinner 行、任务状态行和排队消息行
         let spinner_line = self.build_spinner_line();
         let queued_lines = self.build_queued_message_lines();
-        let task_line_count = if self.spinner.is_some() { self.task_status_lines.len() } else { 0 };
+        let task_line_count = if self.spinner.is_some() {
+            self.task_status_lines.len()
+        } else {
+            0
+        };
         let queued_count = queued_lines.len();
-        let reserved = if spinner_line.is_some() { 1 + task_line_count + queued_count } else { queued_count };
+        let reserved = if spinner_line.is_some() {
+            1 + task_line_count + queued_count
+        } else {
+            queued_count
+        };
 
         let visible_lines = (area.height as usize).saturating_sub(reserved);
         self.last_visible_height = visible_lines;
@@ -149,13 +157,23 @@ impl OutputArea {
         let mut in_code_block = false;
         let mut code_block_lines = std::collections::HashSet::new();
         let mut code_fence_lines = std::collections::HashSet::new(); // opening/closing fence 行
-        let mut code_lang_label: std::collections::HashMap<usize, String> = std::collections::HashMap::new(); // opening fence idx -> lang
+        let mut code_lang_label: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new(); // opening fence idx -> lang
         for (i, line) in self.lines.iter().enumerate().skip(start).take(end - start) {
-            let is_markdown_style = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+            let is_markdown_style = matches!(
+                line.style,
+                LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+            );
             if is_markdown_style && line.content.trim().starts_with("```") {
                 if !in_code_block {
                     // opening fence: 提取语言标签
-                    let lang = line.content.trim().strip_prefix("```").unwrap_or("").trim().to_string();
+                    let lang = line
+                        .content
+                        .trim()
+                        .strip_prefix("```")
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
                     code_lang_label.insert(i, lang);
                 }
                 in_code_block = !in_code_block;
@@ -174,7 +192,9 @@ impl OutputArea {
         // table_block_info: 每个表格块的起始索引和行内容引用索引列表
         let mut table_block_lines = std::collections::HashSet::new();
         {
-            let visible: Vec<(usize, &OutputLine)> = self.lines.iter()
+            let visible: Vec<(usize, &OutputLine)> = self
+                .lines
+                .iter()
                 .enumerate()
                 .skip(start)
                 .take(end - start)
@@ -182,23 +202,33 @@ impl OutputArea {
             let mut i = 0;
             while i < visible.len() {
                 let (_, line) = visible[i];
-                let is_md = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                let is_md = matches!(
+                    line.style,
+                    LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+                );
                 if is_md && markdown::is_table_row(&line.content) {
                     // 找到连续表格行
                     let block_start = i;
                     let mut block_end = i + 1;
                     while block_end < visible.len() {
                         let (_, next_line) = visible[block_end];
-                        let next_is_md = matches!(next_line.style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+                        let next_is_md = matches!(
+                            next_line.style,
+                            LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+                        );
                         let trimmed = next_line.content.trim();
-                        if next_is_md && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed)) {
+                        if next_is_md
+                            && (markdown::is_table_row(trimmed)
+                                || markdown::is_table_separator(trimmed))
+                        {
                             block_end += 1;
                         } else {
                             break;
                         }
                     }
                     // 至少要有 separator 行才算合法表格
-                    let has_separator = (block_start..block_end).any(|j| markdown::is_table_separator(visible[j].1.content.trim()));
+                    let has_separator = (block_start..block_end)
+                        .any(|j| markdown::is_table_separator(visible[j].1.content.trim()));
                     if has_separator {
                         for j in block_start..block_end {
                             table_block_lines.insert(visible[j].0);
@@ -212,9 +242,12 @@ impl OutputArea {
         }
 
         // 预渲染表格块：table_block_first_idx -> 渲染结果
-        let mut table_render_cache: std::collections::HashMap<usize, Vec<Vec<Span<'static>>>> = std::collections::HashMap::new();
+        let mut table_render_cache: std::collections::HashMap<usize, Vec<Vec<Span<'static>>>> =
+            std::collections::HashMap::new();
         {
-            let visible: Vec<(usize, &OutputLine)> = self.lines.iter()
+            let visible: Vec<(usize, &OutputLine)> = self
+                .lines
+                .iter()
                 .enumerate()
                 .skip(start)
                 .take(end - start)
@@ -225,7 +258,9 @@ impl OutputArea {
                 if table_block_lines.contains(&idx) {
                     let block_start = i;
                     let mut block_end = i + 1;
-                    while block_end < visible.len() && table_block_lines.contains(&visible[block_end].0) {
+                    while block_end < visible.len()
+                        && table_block_lines.contains(&visible[block_end].0)
+                    {
                         block_end += 1;
                     }
                     // 收集块内容
@@ -243,7 +278,8 @@ impl OutputArea {
         }
 
         // 用显式迭代替代 .map().flatten()，以支持表格块等多行组渲染
-        let vis_lines: Vec<(usize, &OutputLine)> = self.lines
+        let vis_lines: Vec<(usize, &OutputLine)> = self
+            .lines
             .iter()
             .enumerate()
             .skip(start)
@@ -261,7 +297,10 @@ impl OutputArea {
                 // 渲染整个表格块
                 for row_spans in table_rows {
                     // 每个表格行的 spans 合成一个屏幕行（不 wrap，表格行不应换行）
-                    let line_text: String = row_spans.iter().map(|s| s.content.clone().into_owned()).collect();
+                    let line_text: String = row_spans
+                        .iter()
+                        .map(|s| s.content.clone().into_owned())
+                        .collect();
                     let sanitized = display::sanitize_for_display(&line_text);
                     let char_offsets = compute_char_offsets(&sanitized, self.term_width);
                     let wrapped = wrap_line(&line_text, self.term_width);
@@ -279,7 +318,12 @@ impl OutputArea {
                         for (chunk_idx, chunk) in wrapped.into_iter().enumerate() {
                             let screen_idx = screen_start + chunk_idx;
                             let base_s = style.to_style();
-                            let line_spans = self.render_line_with_selection(screen_idx, &chunk, base_s, &new_screen_map);
+                            let line_spans = self.render_line_with_selection(
+                                screen_idx,
+                                &chunk,
+                                base_s,
+                                &new_screen_map,
+                            );
                             lines.push(Line::from(line_spans));
                         }
                     } else {
@@ -313,7 +357,10 @@ impl OutputArea {
                 new_screen_map.push((idx, char_start, char_end));
             }
 
-            let is_markdown = matches!(style, LineStyle::Assistant | LineStyle::Thinking | LineStyle::System);
+            let is_markdown = matches!(
+                style,
+                LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+            );
             let is_code_block = code_block_lines.contains(&idx);
             let is_fence = code_fence_lines.contains(&idx);
             let has_real_selection = self.has_real_selection();
@@ -347,30 +394,52 @@ impl OutputArea {
 
             let rendered: Vec<Line> = if has_real_selection {
                 let screen_start = new_screen_map.len() - wrapped.len();
-                wrapped.into_iter().enumerate().map(|(chunk_idx, chunk)| {
-                    let screen_idx = screen_start + chunk_idx;
-                    if is_code_block {
-                        let line_spans = self.render_line_with_selection(screen_idx, &chunk, code_style, &new_screen_map);
-                        Line::from(line_spans)
-                    } else if is_markdown {
-                        let md_spans = markdown::inline_markdown_spans(&chunk, style.to_style());
-                        let line_spans = self.render_spans_with_selection(screen_idx, &md_spans, &new_screen_map);
-                        Line::from(line_spans)
-                    } else {
-                        let line_spans = self.render_line_with_selection(screen_idx, &chunk, style.to_style(), &new_screen_map);
-                        Line::from(line_spans)
-                    }
-                }).collect()
+                wrapped
+                    .into_iter()
+                    .enumerate()
+                    .map(|(chunk_idx, chunk)| {
+                        let screen_idx = screen_start + chunk_idx;
+                        if is_code_block {
+                            let line_spans = self.render_line_with_selection(
+                                screen_idx,
+                                &chunk,
+                                code_style,
+                                &new_screen_map,
+                            );
+                            Line::from(line_spans)
+                        } else if is_markdown {
+                            let md_spans =
+                                markdown::inline_markdown_spans(&chunk, style.to_style());
+                            let line_spans = self.render_spans_with_selection(
+                                screen_idx,
+                                &md_spans,
+                                &new_screen_map,
+                            );
+                            Line::from(line_spans)
+                        } else {
+                            let line_spans = self.render_line_with_selection(
+                                screen_idx,
+                                &chunk,
+                                style.to_style(),
+                                &new_screen_map,
+                            );
+                            Line::from(line_spans)
+                        }
+                    })
+                    .collect()
             } else {
-                wrapped.into_iter().map(|chunk| {
-                    if is_code_block {
-                        Line::styled(chunk, code_style)
-                    } else if is_markdown {
-                        Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
-                    } else {
-                        Line::styled(chunk, style.to_style())
-                    }
-                }).collect()
+                wrapped
+                    .into_iter()
+                    .map(|chunk| {
+                        if is_code_block {
+                            Line::styled(chunk, code_style)
+                        } else if is_markdown {
+                            Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
+                        } else {
+                            Line::styled(chunk, style.to_style())
+                        }
+                    })
+                    .collect()
             };
             lines.extend(rendered);
             vi += 1;
@@ -397,7 +466,10 @@ impl OutputArea {
             let offset = lines.len() - area.height as usize;
             log::debug!(
                 "trim: lines.len={}, area.height={}, offset={}, screen_map.len={}",
-                lines.len(), area.height, offset, self.screen_line_map.len()
+                lines.len(),
+                area.height,
+                offset,
+                self.screen_line_map.len()
             );
             self.screen_line_map = self.screen_line_map.split_off(offset);
             lines.into_iter().skip(offset).collect()
@@ -424,19 +496,25 @@ impl OutputArea {
         {
             let blink_on = (spinner_frame_idx / 10) % 2 == 0;
             for (si, &(li, _, _)) in self.screen_line_map.iter().enumerate() {
-                if li >= self.lines.len() { continue; }
+                if li >= self.lines.len() {
+                    continue;
+                }
                 let line = &self.lines[li];
                 let content = &line.content;
                 // 计算屏幕 y 坐标
                 let visible_offset = total_rendered.saturating_sub(area.height as usize);
                 let screen_y = si.saturating_sub(visible_offset);
-                if screen_y >= area.height as usize { continue; }
+                if screen_y >= area.height as usize {
+                    continue;
+                }
                 let buf_y = area.y + screen_y as u16;
 
                 let dot_color = match line.style {
-                    LineStyle::ToolCallRunning if content.starts_with('●') => {
-                        Some(if blink_on { Color::White } else { Color::DarkGray })
-                    }
+                    LineStyle::ToolCallRunning if content.starts_with('●') => Some(if blink_on {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    }),
                     LineStyle::ToolCallSuccess if content.starts_with('✓') => Some(Color::Green),
                     LineStyle::ToolCallError if content.starts_with('✗') => Some(Color::Red),
                     _ => None,
@@ -496,7 +574,13 @@ impl OutputArea {
     }
 
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
-    fn render_line_with_selection(&self, screen_idx: usize, content: &str, base_style: Style, screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
+    fn render_line_with_selection(
+        &self,
+        screen_idx: usize,
+        content: &str,
+        base_style: Style,
+        screen_map: &[(usize, CharIdx, CharIdx)],
+    ) -> Vec<Span<'static>> {
         let Some((start_logic, start_col)) = self.selection_start else {
             return vec![Span::styled(content.to_string(), base_style)];
         };
@@ -505,13 +589,12 @@ impl OutputArea {
         };
 
         // 归一化：确保 start <= end
-        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
-            || (start_logic == end_logic && start_col < end_col)
-        {
-            (start_logic, start_col, end_logic, end_col)
-        } else {
-            (end_logic, end_col, start_logic, start_col)
-        };
+        let (start_logic, start_col, end_logic, end_col) =
+            if start_logic < end_logic || (start_logic == end_logic && start_col < end_col) {
+                (start_logic, start_col, end_logic, end_col)
+            } else {
+                (end_logic, end_col, start_logic, start_col)
+            };
 
         let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
 
@@ -557,7 +640,11 @@ impl OutputArea {
         for (i, &ch) in chars.iter().enumerate() {
             let is_selected = i >= line_start && i < line_end;
             if is_selected != current_is_selected && !current_text.is_empty() {
-                let style = if current_is_selected { selection_style } else { base_style };
+                let style = if current_is_selected {
+                    selection_style
+                } else {
+                    base_style
+                };
                 spans.push(Span::styled(std::mem::take(&mut current_text), style));
             }
             current_text.push(ch);
@@ -565,7 +652,11 @@ impl OutputArea {
         }
 
         if !current_text.is_empty() {
-            let style = if current_is_selected { selection_style } else { base_style };
+            let style = if current_is_selected {
+                selection_style
+            } else {
+                base_style
+            };
             spans.push(Span::styled(current_text, style));
         }
 
@@ -586,7 +677,12 @@ impl OutputArea {
 
     /// 对已有的 markdown spans 叠加选中高亮
     /// 不在选中范围内的 span 保持原样，选中部分改为 selection style
-    fn render_spans_with_selection(&self, screen_idx: usize, spans: &[Span<'static>], screen_map: &[(usize, CharIdx, CharIdx)]) -> Vec<Span<'static>> {
+    fn render_spans_with_selection(
+        &self,
+        screen_idx: usize,
+        spans: &[Span<'static>],
+        screen_map: &[(usize, CharIdx, CharIdx)],
+    ) -> Vec<Span<'static>> {
         let Some((start_logic, start_col)) = self.selection_start else {
             return spans.to_vec();
         };
@@ -594,13 +690,12 @@ impl OutputArea {
             return spans.to_vec();
         };
 
-        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
-            || (start_logic == end_logic && start_col < end_col)
-        {
-            (start_logic, start_col, end_logic, end_col)
-        } else {
-            (end_logic, end_col, start_logic, start_col)
-        };
+        let (start_logic, start_col, end_logic, end_col) =
+            if start_logic < end_logic || (start_logic == end_logic && start_col < end_col) {
+                (start_logic, start_col, end_logic, end_col)
+            } else {
+                (end_logic, end_col, start_logic, start_col)
+            };
 
         if start_logic == end_logic && start_col == end_col {
             return spans.to_vec();
@@ -648,7 +743,11 @@ impl OutputArea {
 
         for (i, (ch, base_style)) in all_chars.iter().enumerate() {
             let is_selected = i >= line_start && i < line_end;
-            let style = if is_selected { selection_style } else { *base_style };
+            let style = if is_selected {
+                selection_style
+            } else {
+                *base_style
+            };
 
             if current_style != Some(style) {
                 if !current_text.is_empty() {
@@ -669,7 +768,7 @@ impl OutputArea {
         result
     }
 }
-  
+
 /// 计算 wrap 后每个 chunk 在原始文本中的 char 偏移 (start, end)
 fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(CharIdx, CharIdx)> {
     use unicode_width::UnicodeWidthChar;
@@ -711,8 +810,16 @@ mod tests {
         }
         assert!(header.contains("3 items"), "header was: {header}");
         assert!(details[0].contains("核心"), "detail[0]: {}", details[0]);
-        assert!(details[0].starts_with("◐"), "detail[0] icon: {}", details[0]);
-        assert!(details[1].starts_with("○"), "detail[1] icon: {}", details[1]);
+        assert!(
+            details[0].starts_with("◐"),
+            "detail[0] icon: {}",
+            details[0]
+        );
+        assert!(
+            details[1].starts_with("○"),
+            "detail[1] icon: {}",
+            details[1]
+        );
     }
 
     #[test]

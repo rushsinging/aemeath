@@ -2,7 +2,10 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+    ConfirmAction,
+};
 use crate::config::PermissionModeConfig;
 
 inventory::submit! {
@@ -89,7 +92,9 @@ inventory::submit! {
 
 fn cost_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
     match args.trim().to_lowercase().as_str() {
-        "" | "session" => CommandResult::Success(ctx.cost_tracker.session_summary(&ctx.session_id).format()),
+        "" | "session" => {
+            CommandResult::Success(ctx.cost_tracker.session_summary(&ctx.session_id).format())
+        }
         "total" => CommandResult::Success(ctx.cost_tracker.summary().format()),
         "clear" => CommandResult::Confirm {
             message: "Clear all cost history?".to_string(),
@@ -146,7 +151,12 @@ fn status_execute(_args: &str, ctx: &mut CommandContext) -> CommandResult {
     };
     let markdown_icon = if ctx.config.ui.markdown { "✅" } else { "❌" };
     let tui_icon = if ctx.config.ui.tui { "✅" } else { "❌" };
-    let base_url = ctx.config.api.base_url.as_deref().unwrap_or("https://api.anthropic.com");
+    let base_url = ctx
+        .config
+        .api
+        .base_url
+        .as_deref()
+        .unwrap_or("https://api.anthropic.com");
     CommandResult::Success(format!(
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
          📊 Session Status\n\
@@ -163,11 +173,25 @@ fn status_execute(_args: &str, ctx: &mut CommandContext) -> CommandResult {
          📝 Markdown {}\n│ {}\n\
          🖥️  TUI {}\n│ {}\n\
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        ctx.session_id, ctx.cwd, ctx.config.model.name, ctx.config.model.max_tokens,
-        permission_emoji, permission_text,
+        ctx.session_id,
+        ctx.cwd,
+        ctx.config.model.name,
+        ctx.config.model.max_tokens,
+        permission_emoji,
+        permission_text,
         base_url,
-        markdown_icon, if ctx.config.ui.markdown { "enabled" } else { "disabled" },
-        tui_icon, if ctx.config.ui.tui { "enabled" } else { "disabled" },
+        markdown_icon,
+        if ctx.config.ui.markdown {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        tui_icon,
+        if ctx.config.ui.tui {
+            "enabled"
+        } else {
+            "disabled"
+        },
     ))
 }
 

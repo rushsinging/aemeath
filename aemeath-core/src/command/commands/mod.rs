@@ -8,21 +8,21 @@
 //!
 //! The command automatically appears in TUI autocomplete.
 
-pub mod help;
-pub mod misc;
-pub mod session;
-pub mod model;
 pub mod config_cmd;
-pub mod tasks;
-pub mod tools;
-pub mod git;
 pub mod debug;
-pub mod stats;
-pub mod think;
 pub mod effort;
+pub mod git;
+pub mod help;
 pub mod memory;
-pub mod reflect;
 mod memory_support;
+pub mod misc;
+pub mod model;
+pub mod reflect;
+pub mod session;
+pub mod stats;
+pub mod tasks;
+pub mod think;
+pub mod tools;
 
 /// Initialize all built-in commands.
 ///
@@ -34,9 +34,9 @@ pub fn init_all() {
     crate::command::CommandRegistry::initialize();
 }
 
-use crate::state::AppState;
 use crate::config::Config;
 use crate::cost::CostTracker;
+use crate::state::AppState;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -153,7 +153,11 @@ impl CommandContext {
 }
 
 /// Type alias for the async execute function stored in Command.
-type AsyncExecuteFn = Box<dyn Fn(&str, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> + Send + Sync>;
+type AsyncExecuteFn = Box<
+    dyn Fn(&str, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// A command definition
 pub struct Command {
@@ -218,7 +222,10 @@ impl Command {
         name: String,
         description: String,
         category: CommandCategory,
-        execute: impl Fn(String, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> + Send + Sync + 'static,
+        execute: impl Fn(String, &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         Self {
             name,
@@ -251,7 +258,11 @@ impl Command {
 
     /// Get help text for this command
     pub fn help(&self) -> String {
-        let mut help = format!("/{name} - {desc}\n", name = self.name, desc = self.description);
+        let mut help = format!(
+            "/{name} - {desc}\n",
+            name = self.name,
+            desc = self.description
+        );
 
         if !self.usage.is_empty() {
             help.push_str("\nUsage:\n");

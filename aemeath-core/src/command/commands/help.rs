@@ -2,7 +2,7 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -37,7 +37,10 @@ fn help_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         ];
         let all_commands = registry.list();
         for (category, label) in categories {
-            let commands: Vec<_> = all_commands.iter().filter(|c| c.category == category).collect();
+            let commands: Vec<_> = all_commands
+                .iter()
+                .filter(|c| c.category == category)
+                .collect();
             if !commands.is_empty() {
                 output.push_str(&format!("{}\n", label));
                 for cmd in commands {
@@ -50,7 +53,10 @@ fn help_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         CommandResult::Success(output)
     } else {
         let cmd_name = args.trim().to_lowercase();
-        if let Some(cmd) = registry.find(&cmd_name).or_else(|| registry.find(&format!("/{}", cmd_name))) {
+        if let Some(cmd) = registry
+            .find(&cmd_name)
+            .or_else(|| registry.find(&format!("/{}", cmd_name)))
+        {
             CommandResult::Success(cmd.help())
         } else {
             CommandResult::Error(format!("Unknown command: /{}", cmd_name))

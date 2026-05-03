@@ -116,8 +116,13 @@ pub struct MessageStartPayload {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlockPayload {
-    Text { text: String },
-    ToolUse { id: String, name: String },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+    },
     Thinking {
         #[serde(default)]
         thinking: String,
@@ -129,8 +134,12 @@ pub enum ContentBlockPayload {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DeltaPayload {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
     ThinkingDelta {
         #[serde(default)]
         thinking: String,

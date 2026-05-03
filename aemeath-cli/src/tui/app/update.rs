@@ -45,11 +45,17 @@ impl App {
             Msg::Key(key) => self.update_key(key, is_processing, ui_tx, active_cancel, spawn_refs),
             Msg::Mouse(mouse) => {
                 self.handle_mouse_event(mouse, self.output_area_rect);
-                UpdateResult { cmd: Cmd::None, pending_slash: None }
+                UpdateResult {
+                    cmd: Cmd::None,
+                    pending_slash: None,
+                }
             }
             Msg::Paste(text) if !*is_processing => {
                 self.handle_paste_event(text, ui_tx);
-                UpdateResult { cmd: Cmd::None, pending_slash: None }
+                UpdateResult {
+                    cmd: Cmd::None,
+                    pending_slash: None,
+                }
             }
             Msg::Paste(text) => {
                 // Paste while in AskUserQuestion free-input mode: insert into input area only
@@ -62,7 +68,10 @@ impl App {
                             self.input_area.input(ch);
                         }
                     }
-                    return UpdateResult { cmd: Cmd::None, pending_slash: None };
+                    return UpdateResult {
+                        cmd: Cmd::None,
+                        pending_slash: None,
+                    };
                 }
                 // Paste while processing: insert into input area so it can be queued
                 if text.trim().is_empty() {
@@ -74,20 +83,24 @@ impl App {
                             Ok(img) => {
                                 let size = img.final_size;
                                 let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = output_tx.send(UiEvent::SystemMessage(
-                                    format!("[clipboard image added ({} bytes). Type message to send.]", size)
-                                )).await;
+                                let _ = output_tx
+                                    .send(UiEvent::SystemMessage(format!(
+                                        "[clipboard image added ({} bytes). Type message to send.]",
+                                        size
+                                    )))
+                                    .await;
                             }
                             Err(e) => {
-                                let _ = output_tx.send(UiEvent::Error(
-                                    format!("No image in clipboard: {e}")
-                                )).await;
+                                let _ = output_tx
+                                    .send(UiEvent::Error(format!("No image in clipboard: {e}")))
+                                    .await;
                             }
                         }
                     });
                     self.output_area.push_system("[reading clipboard image...]");
                 } else if crate::image::is_image_file(text.trim()) {
-                    self.output_area.push_system(&format!("[loading image: {}...]", text.trim()));
+                    self.output_area
+                        .push_system(&format!("[loading image: {}...]", text.trim()));
                     let path = text.trim().to_string();
                     let tx = ui_tx.clone();
                     tokio::spawn(async move {
@@ -95,12 +108,17 @@ impl App {
                             Ok(img) => {
                                 let size = img.final_size;
                                 let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx.send(UiEvent::SystemMessage(
-                                    format!("[image loaded ({} bytes). Type message to send.]", size)
-                                )).await;
+                                let _ = tx
+                                    .send(UiEvent::SystemMessage(format!(
+                                        "[image loaded ({} bytes). Type message to send.]",
+                                        size
+                                    )))
+                                    .await;
                             }
                             Err(e) => {
-                                let _ = tx.send(UiEvent::Error(format!("Failed to load image: {e}"))).await;
+                                let _ = tx
+                                    .send(UiEvent::Error(format!("Failed to load image: {e}")))
+                                    .await;
                             }
                         }
                     });
@@ -115,10 +133,19 @@ impl App {
                         }
                     }
                 }
-                UpdateResult { cmd: Cmd::None, pending_slash: None }
+                UpdateResult {
+                    cmd: Cmd::None,
+                    pending_slash: None,
+                }
             }
-            Msg::Resize(_, _) => UpdateResult { cmd: Cmd::None, pending_slash: None },
-            Msg::Tick => UpdateResult { cmd: Cmd::None, pending_slash: None },
+            Msg::Resize(_, _) => UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            },
+            Msg::Tick => UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            },
             Msg::Ui(ev) => self.update_ui(ev, is_processing, ui_tx, active_cancel, spawn_refs),
         }
     }
@@ -132,14 +159,25 @@ impl App {
         spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
-            return UpdateResult { cmd: Cmd::None, pending_slash: None };
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            };
         }
 
         // Dialog mode
         if self.active_dialog.is_some() {
             match key.code {
-                KeyCode::Up => { if let Some(ref mut d) = self.active_dialog { d.select_prev(); } }
-                KeyCode::Down => { if let Some(ref mut d) = self.active_dialog { d.select_next(); } }
+                KeyCode::Up => {
+                    if let Some(ref mut d) = self.active_dialog {
+                        d.select_prev();
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(ref mut d) = self.active_dialog {
+                        d.select_next();
+                    }
+                }
                 KeyCode::Enter => {
                     let selected = self.active_dialog.as_ref().and_then(|d| d.get_selected());
                     if let Some(idx) = selected {
@@ -148,7 +186,10 @@ impl App {
                             self.input_queue.push_back(format!("/model {}", model_key));
                             self.active_dialog = None;
                             self.dialog_model_keys.clear();
-                            return UpdateResult { cmd: Cmd::None, pending_slash: Some(format!("/model {}", model_key)) };
+                            return UpdateResult {
+                                cmd: Cmd::None,
+                                pending_slash: Some(format!("/model {}", model_key)),
+                            };
                         }
                     }
                     self.active_dialog = None;
@@ -160,7 +201,10 @@ impl App {
                 }
                 _ => {}
             }
-            return UpdateResult { cmd: Cmd::None, pending_slash: None };
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            };
         }
 
         // AskUserQuestion 交互模式（有选项列表）
@@ -171,11 +215,19 @@ impl App {
             match key.code {
                 KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
                     if options_count > 0 {
-                        let cursor = if state.cursor == 0 { options_count - 1 } else { state.cursor - 1 };
+                        let cursor = if state.cursor == 0 {
+                            options_count - 1
+                        } else {
+                            state.cursor - 1
+                        };
                         self.ask_user_state.as_mut().unwrap().cursor = cursor;
                         let s = self.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
-                            s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                            s.option_line_start,
+                            &s.options,
+                            s.cursor,
+                            s.multi_select,
+                            &s.selected,
                         );
                     }
                 }
@@ -185,7 +237,11 @@ impl App {
                         self.ask_user_state.as_mut().unwrap().cursor = cursor;
                         let s = self.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
-                            s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                            s.option_line_start,
+                            &s.options,
+                            s.cursor,
+                            s.multi_select,
+                            &s.selected,
                         );
                     }
                 }
@@ -194,14 +250,21 @@ impl App {
                     self.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
                     let s = self.ask_user_state.as_ref().unwrap();
                     self.output_area.update_ask_user_options(
-                        s.option_line_start, &s.options, s.cursor, s.multi_select, &s.selected,
+                        s.option_line_start,
+                        &s.options,
+                        s.cursor,
+                        s.multi_select,
+                        &s.selected,
                     );
                 }
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                     let state = self.ask_user_state.take().unwrap();
                     let answer = if multi_select {
                         // 多选：返回所有选中项的文本，逗号分隔
-                        let selected: Vec<&str> = state.selected.iter().enumerate()
+                        let selected: Vec<&str> = state
+                            .selected
+                            .iter()
+                            .enumerate()
                             .filter(|(_, s)| **s)
                             .map(|(i, _)| state.options[i].as_str())
                             .collect();
@@ -239,28 +302,45 @@ impl App {
                 _ => {
                     // 普通按键传递给 input_area（用于自由输入模式）
                     // Shift+Enter / Alt+Enter = 换行
-                    if key.code == KeyCode::Enter && key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                    if key.code == KeyCode::Enter
+                        && key
+                            .modifiers
+                            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+                    {
                         self.input_area.enter(true);
                     } else {
                         match (key.modifiers, key.code) {
                             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                                 let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
                                     c.to_ascii_uppercase()
-                                } else { c };
+                                } else {
+                                    c
+                                };
                                 self.input_area.input(ch);
                             }
-                            (KeyModifiers::NONE, KeyCode::Backspace) => { self.input_area.backspace(); }
+                            (KeyModifiers::NONE, KeyCode::Backspace) => {
+                                self.input_area.backspace();
+                            }
                             (KeyModifiers::NONE, KeyCode::Left) => self.input_area.move_left(),
                             (KeyModifiers::NONE, KeyCode::Right) => self.input_area.move_right(),
-                            (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
-                            (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
-                            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
+                            (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+                                self.input_area.move_home()
+                            }
+                            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                                self.input_area.move_end()
+                            }
+                            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                                self.input_area.delete_word()
+                            }
                             _ => {}
                         }
                     }
                 }
             }
-            return UpdateResult { cmd: Cmd::None, pending_slash: None };
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            };
         }
 
         // AskUserQuestion 自由输入模式（无选项列表，等待 reply_tx）
@@ -276,7 +356,10 @@ impl App {
                             self.output_area.set_spinner_phase("Generating...");
                         }
                     }
-                    return UpdateResult { cmd: Cmd::None, pending_slash: None };
+                    return UpdateResult {
+                        cmd: Cmd::None,
+                        pending_slash: None,
+                    };
                 }
                 KeyCode::Esc => {
                     if let Some(reply_tx) = self.ask_user_reply_tx.take() {
@@ -284,41 +367,65 @@ impl App {
                         let _ = reply_tx.send(String::new());
                         self.output_area.set_spinner_phase("Generating...");
                     }
-                    return UpdateResult { cmd: Cmd::None, pending_slash: None };
+                    return UpdateResult {
+                        cmd: Cmd::None,
+                        pending_slash: None,
+                    };
                 }
                 // 其他按键传递给 input_area
                 _ => {
                     // Shift+Enter / Alt+Enter = 换行
-                    if key.code == KeyCode::Enter && key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                    if key.code == KeyCode::Enter
+                        && key
+                            .modifiers
+                            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+                    {
                         self.input_area.enter(true);
-                        return UpdateResult { cmd: Cmd::None, pending_slash: None };
+                        return UpdateResult {
+                            cmd: Cmd::None,
+                            pending_slash: None,
+                        };
                     }
                     match (key.modifiers, key.code) {
                         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                             let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 c.to_ascii_uppercase()
-                            } else { c };
+                            } else {
+                                c
+                            };
                             self.input_area.input(ch);
                         }
-                        (KeyModifiers::NONE, KeyCode::Backspace) => { self.input_area.backspace(); }
+                        (KeyModifiers::NONE, KeyCode::Backspace) => {
+                            self.input_area.backspace();
+                        }
                         (KeyModifiers::NONE, KeyCode::Left) => self.input_area.move_left(),
                         (KeyModifiers::NONE, KeyCode::Right) => self.input_area.move_right(),
                         (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
                         (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
-                        (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
+                        (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                            self.input_area.delete_word()
+                        }
                         _ => {}
                     }
-                    return UpdateResult { cmd: Cmd::None, pending_slash: None };
+                    return UpdateResult {
+                        cmd: Cmd::None,
+                        pending_slash: None,
+                    };
                 }
             }
         }
 
         // Shift+Enter / Alt+Enter = insert newline
         if (key.code == KeyCode::Enter || key.code == KeyCode::Char('\n'))
-            && key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+            && key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
             self.input_area.enter(true);
-            return UpdateResult { cmd: Cmd::None, pending_slash: None };
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            };
         }
 
         match (key.modifiers, key.code) {
@@ -326,7 +433,9 @@ impl App {
                 if *is_processing {
                     spawn_refs.interrupted.store(true, Ordering::Relaxed);
                     if let Ok(guard) = active_cancel.lock() {
-                        if let Some(token) = guard.as_ref() { token.cancel(); }
+                        if let Some(token) = guard.as_ref() {
+                            token.cancel();
+                        }
                     }
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
@@ -335,7 +444,10 @@ impl App {
                     let now = std::time::Instant::now();
                     if let Some(last) = self.last_ctrlc {
                         if now.duration_since(last).as_secs_f64() < 3.0 {
-                            return UpdateResult { cmd: Cmd::Quit, pending_slash: None };
+                            return UpdateResult {
+                                cmd: Cmd::Quit,
+                                pending_slash: None,
+                            };
                         } else {
                             self.last_ctrlc = Some(now);
                             self.status_bar.set_warning("Press Ctrl+C again to exit");
@@ -362,7 +474,9 @@ impl App {
                 // Esc during processing: interrupt current LLM turn + tool calls
                 spawn_refs.interrupted.store(true, Ordering::Relaxed);
                 if let Ok(guard) = active_cancel.lock() {
-                    if let Some(token) = guard.as_ref() { token.cancel(); }
+                    if let Some(token) = guard.as_ref() {
+                        token.cancel();
+                    }
                 }
                 self.status_bar.set_warning("Interrupted");
             }
@@ -374,7 +488,8 @@ impl App {
                     self.input_queue.push_back(input.clone());
                     self.output_area.queued_messages.push(input);
                     let n = self.input_queue.len();
-                    self.status_bar.set_warning(&format!("{n} message(s) queued"));
+                    self.status_bar
+                        .set_warning(&format!("{n} message(s) queued"));
                 }
             }
             (_, KeyCode::Enter) if !*is_processing => {
@@ -388,41 +503,68 @@ impl App {
             (KeyModifiers::NONE, KeyCode::PageDown) => self.output_area.scroll_down(10),
             (KeyModifiers::SHIFT, KeyCode::Up) => self.output_area.scroll_up(1),
             (KeyModifiers::SHIFT, KeyCode::Down) => self.output_area.scroll_down(1),
-            (KeyModifiers::SHIFT, KeyCode::Home) => self.output_area.scroll_up(self.output_area.line_count()),
+            (KeyModifiers::SHIFT, KeyCode::Home) => {
+                self.output_area.scroll_up(self.output_area.line_count())
+            }
             (KeyModifiers::SHIFT, KeyCode::End) => self.output_area.scroll_to_bottom(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
                     c.to_ascii_uppercase()
-                } else { c };
+                } else {
+                    c
+                };
                 self.input_area.input(ch);
-                if !*is_processing { self.update_suggestions(); }
+                if !*is_processing {
+                    self.update_suggestions();
+                }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 self.input_area.backspace();
-                if !*is_processing { self.update_suggestions(); }
+                if !*is_processing {
+                    self.update_suggestions();
+                }
             }
-            (KeyModifiers::NONE, KeyCode::Left) => { self.input_area.move_left(); self.input_area.clear_suggestions(); }
-            (KeyModifiers::NONE, KeyCode::Right) => { self.input_area.move_right(); self.input_area.clear_suggestions(); }
+            (KeyModifiers::NONE, KeyCode::Left) => {
+                self.input_area.move_left();
+                self.input_area.clear_suggestions();
+            }
+            (KeyModifiers::NONE, KeyCode::Right) => {
+                self.input_area.move_right();
+                self.input_area.clear_suggestions();
+            }
             (KeyModifiers::NONE, KeyCode::Up) => self.input_area.move_up(),
             (KeyModifiers::NONE, KeyCode::Down) => self.input_area.move_down(),
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
-            (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v')) if !*is_processing && !self.just_pasted => {
+            (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
+                if !*is_processing && !self.just_pasted =>
+            {
                 self.just_pasted = true;
                 let tx = ui_tx.clone();
                 tokio::spawn(async move {
-                    tx.send(UiEvent::SystemMessage("[reading clipboard image...]".to_string())).await.ok();
+                    tx.send(UiEvent::SystemMessage(
+                        "[reading clipboard image...]".to_string(),
+                    ))
+                    .await
+                    .ok();
                     match crate::image::read_clipboard_image().await {
                         Ok(img) => {
                             let size = img.final_size;
                             tx.send(UiEvent::ClipboardImage(img)).await.ok();
                             tx.send(UiEvent::SystemMessage(format!(
-                                "[clipboard image added ({} bytes). Type message to send.]", size
-                            ))).await.ok();
+                                "[clipboard image added ({} bytes). Type message to send.]",
+                                size
+                            )))
+                            .await
+                            .ok();
                         }
                         Err(e) => {
-                            tx.send(UiEvent::SystemMessage(format!("No image in clipboard: {e}"))).await.ok();
+                            tx.send(UiEvent::SystemMessage(format!(
+                                "No image in clipboard: {e}"
+                            )))
+                            .await
+                            .ok();
                         }
                     }
                 });
@@ -431,7 +573,10 @@ impl App {
             _ => {}
         }
 
-        UpdateResult { cmd: Cmd::None, pending_slash: None }
+        UpdateResult {
+            cmd: Cmd::None,
+            pending_slash: None,
+        }
     }
 
     /// Handle Enter when not processing
@@ -447,21 +592,26 @@ impl App {
             self.input_area.add_history(&input);
             self.input_area.clear();
             self.input_queue.push_back(input.clone());
-            return UpdateResult { cmd: Cmd::None, pending_slash: Some(input) };
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: Some(input),
+            };
         }
 
         self.output_area.push_user_message(&input);
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self.pending_images
+        let images: Vec<(String, String)> = self
+            .pending_images
             .drain(..)
             .map(|img| (img.base64, img.media_type))
             .collect();
         if images.is_empty() {
             self.messages.push(Message::user(&input));
         } else {
-            self.messages.push(Message::user_with_images(&input, images));
+            self.messages
+                .push(Message::user_with_images(&input, images));
         }
 
         let spawn_ctx = self.build_spawn_context(ui_tx, active_cancel, spawn_refs);
@@ -472,7 +622,10 @@ impl App {
         self.output_area.set_spinner_phase("Thinking...");
         *is_processing = true;
 
-        UpdateResult { cmd: Cmd::SpawnProcessing(spawn_ctx), pending_slash: None }
+        UpdateResult {
+            cmd: Cmd::SpawnProcessing(spawn_ctx),
+            pending_slash: None,
+        }
     }
 
     /// Handle UI events from background processing
@@ -496,7 +649,9 @@ impl App {
             }
             UiEvent::Thinking(text) => {
                 if self.tool_call_active {
-                    log::debug!("[SPINNER] Thinking: tool_call_active was true, resetting to false");
+                    log::debug!(
+                        "[SPINNER] Thinking: tool_call_active was true, resetting to false"
+                    );
                     self.tool_call_active = false;
                     self.active_tool_call_ids.clear();
                 }
@@ -508,30 +663,50 @@ impl App {
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
-                log::debug!("[SPINNER] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] ToolCallStart({name}): tool_call_active {} -> true",
+                    self.tool_call_active
+                );
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.output_area.start_spinner();
-                    self.output_area.set_spinner_phase(format!("Calling {name}..."));
+                    self.output_area
+                        .set_spinner_phase(format!("Calling {name}..."));
                 }
             }
             UiEvent::ToolCall { id, name, summary } => {
-                log::debug!("[SPINNER] ToolCall({name}): tool_call_active={}", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] ToolCall({name}): tool_call_active={}",
+                    self.tool_call_active
+                );
                 self.tool_call_active = true;
                 self.active_tool_call_ids.insert(id.clone());
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
-                self.output_area.set_spinner_phase(format!("Calling {name}..."));
+                self.output_area
+                    .set_spinner_phase(format!("Calling {name}..."));
             }
-            UiEvent::ToolResult { id, tool_name, output, is_error, images } => {
+            UiEvent::ToolResult {
+                id,
+                tool_name,
+                output,
+                is_error,
+                images,
+            } => {
                 let image_note = if images.is_empty() {
                     String::new()
                 } else {
                     format!("  │  [{} image(s) attached]\n", images.len())
                 };
-                self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
+                self.output_area.push_tool_result_with_diff(
+                    &id,
+                    &tool_name,
+                    &output,
+                    is_error,
+                    &image_note,
+                );
                 let had_active_id = self.active_tool_call_ids.remove(&id);
                 let remaining = self.active_tool_call_ids.len();
                 log::debug!(
@@ -541,20 +716,30 @@ impl App {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
                     self.tool_call_active = false;
-                              self.output_area.start_spinner();
+                    self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
                 } else {
                     self.tool_call_active = true;
                     self.output_area.start_spinner();
-                    self.output_area.set_spinner_phase(format!("Calling tools... ({remaining} running)"));
+                    self.output_area
+                        .set_spinner_phase(format!("Calling tools... ({remaining} running)"));
                 }
             }
-            UiEvent::Usage { input, output, last_input, elapsed_secs } => {
+            UiEvent::Usage {
+                input,
+                output,
+                last_input,
+                elapsed_secs,
+            } => {
                 self.total_input_tokens += input as u64;
                 self.total_output_tokens += output as u64;
                 self.total_api_calls += 1;
                 self.last_input_tokens = last_input as u64;
-                let tps = if elapsed_secs > 0.0 { output as f64 / elapsed_secs } else { 0.0 };
+                let tps = if elapsed_secs > 0.0 {
+                    output as f64 / elapsed_secs
+                } else {
+                    0.0
+                };
                 self.status_bar.set_tps(tps);
             }
             UiEvent::LiveTps(tps) => {
@@ -566,18 +751,21 @@ impl App {
                 self.output_area.set_spinner_phase("Agent working...");
             }
             UiEvent::Error(msg) => {
-                    log::debug!("[SPINNER] Error: tool_call_active {} -> false", self.tool_call_active);
-                    let hook_runner = spawn_refs.hook_runner.clone();
-                    let msg_clone = msg.clone();
-                    tokio::spawn(async move {
-                        let _ = hook_runner.on_notification(&msg_clone, "error").await;
-                    });
-                    self.output_area.push_error(&msg);
-                    self.output_area.stop_spinner();
-                    self.tool_call_active = false;
-                    self.active_tool_call_ids.clear();
-                    *is_processing = false;
-                }
+                log::debug!(
+                    "[SPINNER] Error: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
+                let hook_runner = spawn_refs.hook_runner.clone();
+                let msg_clone = msg.clone();
+                tokio::spawn(async move {
+                    let _ = hook_runner.on_notification(&msg_clone, "error").await;
+                });
+                self.output_area.push_error(&msg);
+                self.output_area.stop_spinner();
+                self.tool_call_active = false;
+                self.active_tool_call_ids.clear();
+                *is_processing = false;
+            }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
@@ -587,34 +775,46 @@ impl App {
             }
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
-                return UpdateResult { cmd: Cmd::SaveSession(self.messages.clone()), pending_slash: None };
+                return UpdateResult {
+                    cmd: Cmd::SaveSession(self.messages.clone()),
+                    pending_slash: None,
+                };
             }
             UiEvent::ClipboardImage(img) => {
                 self.pending_images.push(img);
-                self.input_area.set_pending_images(self.pending_images.len());
+                self.input_area
+                    .set_pending_images(self.pending_images.len());
             }
             UiEvent::SystemMessage(msg) => {
                 let hook_runner = spawn_refs.hook_runner.clone();
                 let msg_clone = msg.clone();
                 tokio::spawn(async move {
-                    let _ = hook_runner.on_notification(&msg_clone, "system_message").await;
+                    let _ = hook_runner
+                        .on_notification(&msg_clone, "system_message")
+                        .await;
                 });
                 self.output_area.push_system(&msg);
             }
-            UiEvent::AskUser { id, question, options, allow_free_input, multi_select, default, reply_tx } => {
+            UiEvent::AskUser {
+                id,
+                question,
+                options,
+                allow_free_input,
+                multi_select,
+                default,
+                reply_tx,
+            } => {
                 self.active_tool_call_ids.remove(&id);
                 self.tool_call_active = !self.active_tool_call_ids.is_empty();
                 self.output_area.stop_spinner();
                 let default_ref = default.as_deref();
-                let option_line_start = self.output_area.push_ask_user(
-                    &question,
-                    &options,
-                    default_ref,
-                    multi_select,
-                );
+                let option_line_start =
+                    self.output_area
+                        .push_ask_user(&question, &options, default_ref, multi_select);
 
                 if let Some(start) = option_line_start {
-                    let cursor = default.as_ref()
+                    let cursor = default
+                        .as_ref()
                         .and_then(|d| options.iter().position(|o| o == d))
                         .unwrap_or(0);
                     self.ask_user_state = Some(super::AskUserState {
@@ -632,17 +832,23 @@ impl App {
                 }
                 self.output_area.set_spinner_phase("Waiting for user");
             }
-            UiEvent::StopFailureHook { system_message, additional_context } => {
+            UiEvent::StopFailureHook {
+                system_message,
+                additional_context,
+            } => {
                 if let Some(ref msg) = system_message {
                     let hook_runner = spawn_refs.hook_runner.clone();
                     let msg_clone = msg.clone();
                     tokio::spawn(async move {
-                        let _ = hook_runner.on_notification(&msg_clone, "system_message").await;
+                        let _ = hook_runner
+                            .on_notification(&msg_clone, "system_message")
+                            .await;
                     });
                     self.output_area.push_system(msg);
                 }
                 if let Some(ref ctx) = additional_context {
-                    self.output_area.push_system(&format!("[Additional Context] {ctx}"));
+                    self.output_area
+                        .push_system(&format!("[Additional Context] {ctx}"));
                 }
             }
             UiEvent::DrainQueuedInput { reply_tx } => {
@@ -652,31 +858,39 @@ impl App {
                     for msg in &flushed {
                         self.output_area.push_user_message(msg);
                     }
-                    self.output_area.set_spinner_phase("Thinking with queued input...");
+                    self.output_area
+                        .set_spinner_phase("Thinking with queued input...");
                 }
                 let _ = reply_tx.send(queued);
             }
             UiEvent::HookStart { event, command } => {
                 self.output_area.start_spinner();
-                self.output_area.set_spinner_phase(format!(
-                    "Hook {event}: {}",
-                    short_hook_command(&command)
-                ));
+                self.output_area
+                    .set_spinner_phase(format!("Hook {event}: {}", short_hook_command(&command)));
             }
-            UiEvent::HookEnd { event, blocked, error } => {
+            UiEvent::HookEnd {
+                event,
+                blocked,
+                error,
+            } => {
                 if blocked {
-                    self.output_area.set_spinner_phase(format!("Hook {event} blocked"));
+                    self.output_area
+                        .set_spinner_phase(format!("Hook {event} blocked"));
                 } else if let Some(error) = error {
                     self.output_area.set_spinner_phase(format!(
                         "Hook {event} failed: {}",
                         truncate_for_spinner(&error, 48)
                     ));
                 } else {
-                    self.output_area.set_spinner_phase(format!("Hook {event} done"));
+                    self.output_area
+                        .set_spinner_phase(format!("Hook {event} done"));
                 }
             }
             UiEvent::Done => {
-                log::debug!("[SPINNER] Done: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] Done: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -690,7 +904,10 @@ impl App {
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
-                log::debug!("[SPINNER] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
@@ -706,7 +923,10 @@ impl App {
             }
         }
 
-        UpdateResult { cmd: Cmd::None, pending_slash: None }
+        UpdateResult {
+            cmd: Cmd::None,
+            pending_slash: None,
+        }
     }
 
     /// Build an owned SpawnContext from borrowed refs

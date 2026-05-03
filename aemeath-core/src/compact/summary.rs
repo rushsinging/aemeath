@@ -3,10 +3,10 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::message::{ContentBlock, Message, Role};
-use crate::compact::truncate::safe_slice;
 use crate::compact::micro::microcompact;
 use crate::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
+use crate::compact::truncate::safe_slice;
+use crate::message::{ContentBlock, Message, Role};
 
 // 向后兼容的 re-export
 pub use crate::token_estimation::needs_compaction;
@@ -93,7 +93,8 @@ pub fn compact_messages(
 
     let summary_text = format!(
         "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
-        early_messages.len(), summary
+        early_messages.len(),
+        summary
     );
     compacted.push(Message::user(summary_text));
     compacted.push(Message {
@@ -131,8 +132,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                     } else {
                         input_str
                     };
-                    conversation_text
-                        .push_str(&format!("[{role} calls {name}]: {truncated}\n\n"));
+                    conversation_text.push_str(&format!("[{role} calls {name}]: {truncated}\n\n"));
                 }
                 ContentBlock::ToolResult {
                     content, is_error, ..
@@ -201,10 +201,7 @@ pub fn build_summary_text(messages: &[Message]) -> String {
         let tool_uses = msg.extract_tool_uses();
         if !tool_uses.is_empty() {
             let tool_names: Vec<&str> = tool_uses.iter().map(|(_, name, _)| *name).collect();
-            summary.push_str(&format!(
-                "- {role} used tools: {}\n",
-                tool_names.join(", ")
-            ));
+            summary.push_str(&format!("- {role} used tools: {}\n", tool_names.join(", ")));
         }
     }
     summary

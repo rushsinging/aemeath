@@ -15,9 +15,7 @@ const PREVIEW_SIZE_BYTES: usize = 2_000;
 /// Get the tool-results directory for a session.
 fn tool_results_dir(session_id: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".aemeath")
-        .join("tool-results")
-        .join(session_id)
+    home.join(".aemeath").join("tool-results").join(session_id)
 }
 
 /// Result of persisting a tool output to disk.
@@ -69,7 +67,10 @@ pub fn persist_tool_result(
 
     // Validate tool_use_id to prevent path traversal
     if tool_use_id.contains('/') || tool_use_id.contains('\\') || tool_use_id.contains("..") {
-        log::warn!("rejecting tool_use_id with path separators: {}", tool_use_id);
+        log::warn!(
+            "rejecting tool_use_id with path separators: {}",
+            tool_use_id
+        );
         return None;
     }
 

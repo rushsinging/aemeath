@@ -123,7 +123,11 @@ impl PermissionManager {
     }
 
     /// Check permission for a tool call
-    pub fn check_permission(&mut self, tool_name: &str, input: &serde_json::Value) -> PermissionDecision {
+    pub fn check_permission(
+        &mut self,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> PermissionDecision {
         // Check deny list first
         if self.denied_tools.contains(tool_name) {
             return PermissionDecision::Deny;

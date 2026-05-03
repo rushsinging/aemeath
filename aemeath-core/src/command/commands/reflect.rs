@@ -28,7 +28,9 @@ fn reflect_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
     match args.trim() {
         "" => run_reflection(ctx),
         "apply" => CommandResult::Success("暂无待应用的 Reflection 建议。".to_string()),
-        "stats" | "history" => CommandResult::Success("Reflection stats/history 将在打磨阶段支持。".to_string()),
+        "stats" | "history" => {
+            CommandResult::Success("Reflection stats/history 将在打磨阶段支持。".to_string())
+        }
         other => CommandResult::Error(format!("未知 reflect 子命令: {other}")),
     }
 }

@@ -9,18 +9,20 @@ impl super::App {
             .spawn()
             .map_err(|e| format!("Failed to spawn pbcopy: {e}"))?;
         use std::io::Write;
-        cmd.stdin.take()
+        cmd.stdin
+            .take()
             .ok_or_else(|| "Failed to open stdin".to_string())?
             .write_all(text.as_bytes())
             .map_err(|e| format!("Failed to write to clipboard: {e}"))?;
-        cmd.wait().map_err(|e| format!("Failed to wait for pbcopy: {e}"))?;
+        cmd.wait()
+            .map_err(|e| format!("Failed to wait for pbcopy: {e}"))?;
         Ok(())
     }
 
     /// Accept the currently highlighted suggestion
     pub fn apply_current_suggestion(&mut self) {
-        use crate::tui::completion::SuggestionType;
         use crate::tui::completion::extract_completion_token;
+        use crate::tui::completion::SuggestionType;
 
         if let Some(suggestion) = self.input_area.accept_suggestion() {
             let current = self.input_area.get_text();
@@ -36,9 +38,14 @@ impl super::App {
                 SuggestionType::Session => {
                     // display_text = "session_id  summary [Nmsg]"
                     // 只取 session_id 部分，替换 /resume 后的参数
-                    let id = suggestion.display_text.split_whitespace().next().unwrap_or("");
+                    let id = suggestion
+                        .display_text
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("");
                     if let Some(space_pos) = current.find(' ') {
-                        self.input_area.set_text(&format!("{}{}", &current[..=space_pos], id));
+                        self.input_area
+                            .set_text(&format!("{}{}", &current[..=space_pos], id));
                     } else {
                         self.input_area.set_text(&format!("/resume {}", id));
                     }

@@ -2,7 +2,9 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -59,8 +61,16 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         let mut sorted: Vec<_> = skills.iter().collect();
         sorted.sort_by_key(|(name, _)| *name);
         for (name, skill) in sorted {
-            let desc = if skill.description.is_empty() { String::new() } else { format!(" — {}", skill.description) };
-            let aliases = if skill.aliases.is_empty() { String::new() } else { format!(" (aliases: {})", skill.aliases.join(", ")) };
+            let desc = if skill.description.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", skill.description)
+            };
+            let aliases = if skill.aliases.is_empty() {
+                String::new()
+            } else {
+                format!(" (aliases: {})", skill.aliases.join(", "))
+            };
             lines.push(format!("  /{}{}", name, desc));
             if !aliases.is_empty() {
                 lines.push(aliases);
@@ -76,7 +86,9 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         let skills = crate::skill::load_all_skills(&cwd, &[]);
         // Look up by name or alias
         let skill = skills.get(name).or_else(|| {
-            skills.values().find(|s| s.aliases.iter().any(|a| a == name))
+            skills
+                .values()
+                .find(|s| s.aliases.iter().any(|a| a == name))
         });
         match skill {
             Some(s) => {
@@ -91,7 +103,11 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
                 CommandResult::Error(format!(
                     "Skill '{}' not found. Available: {}",
                     name,
-                    if available.is_empty() { "(none)".to_string() } else { available.join(", ") }
+                    if available.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        available.join(", ")
+                    }
                 ))
             }
         }
@@ -99,9 +115,9 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         // Treat bare name as "run" for convenience
         let cwd = std::env::current_dir().unwrap_or_default();
         let skills = crate::skill::load_all_skills(&cwd, &[]);
-        let skill = skills.get(arg).or_else(|| {
-            skills.values().find(|s| s.aliases.iter().any(|a| a == arg))
-        });
+        let skill = skills
+            .get(arg)
+            .or_else(|| skills.values().find(|s| s.aliases.iter().any(|a| a == arg)));
         match skill {
             Some(s) => {
                 if s.content.is_empty() {

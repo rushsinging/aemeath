@@ -27,14 +27,12 @@ pub use crate::token_estimation::{
 // truncate 模块
 pub use truncate::{
     apply_tool_result_budget, safe_slice, safe_slice_tail, truncate_tool_result,
-    truncate_tool_results, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+    truncate_tool_results, MAX_TOOL_RESULTS_PER_MESSAGE_CHARS, MAX_TOOL_RESULT_CHARS,
     TRUNCATION_PREVIEW_HEAD, TRUNCATION_PREVIEW_TAIL,
 };
 
 // autocompact 模块
-pub use autocompact::{
-    AutoCompactState, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
-};
+pub use autocompact::{AutoCompactState, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES};
 
 // micro 模块
 pub use micro::microcompact;
@@ -47,7 +45,7 @@ pub use summary::{
 
 // restore 模块
 pub use restore::{
-    assemble_compacted, assemble_compacted_with_files, build_file_restoration, fix_role_alternation,
-    sanitize_tool_pairs, POST_COMPACT_MAX_FILES, POST_COMPACT_MAX_TOKENS_PER_FILE,
-    POST_COMPACT_TOKEN_BUDGET,
+    assemble_compacted, assemble_compacted_with_files, build_file_restoration,
+    fix_role_alternation, sanitize_tool_pairs, POST_COMPACT_MAX_FILES,
+    POST_COMPACT_MAX_TOKENS_PER_FILE, POST_COMPACT_TOKEN_BUDGET,
 };

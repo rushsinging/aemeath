@@ -6,7 +6,9 @@ pub fn injection_score(entry: &MemoryEntry, now: u64) -> i64 {
     let ttl_penalty = if entry.is_ttl_expired(now) { 5_000 } else { 0 };
     let outdated_penalty = if entry.outdated { 2_000 } else { 0 };
 
-    pinned_bonus + access_score + recency_score(entry.accessed_at, now) - ttl_penalty - outdated_penalty
+    pinned_bonus + access_score + recency_score(entry.accessed_at, now)
+        - ttl_penalty
+        - outdated_penalty
 }
 
 pub fn eviction_score(entry: &MemoryEntry, now: u64) -> i64 {

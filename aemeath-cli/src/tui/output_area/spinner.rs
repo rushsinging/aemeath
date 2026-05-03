@@ -7,21 +7,40 @@ use ratatui::{
 use crate::tui::output_area::SpinnerState;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
-const SPINNER_FRAMES: &[char] = &[
-    '·', '✢', '✳', '✶', '✻', '✽',
-    '✻', '✶', '✳', '✢', '·',
-];
+const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];
 
 /// Fun verbs shown while the LLM is thinking
 const SPINNER_VERBS: &[&str] = &[
-    "Thinking",    "Pondering",    "Crafting",     "Computing",
-    "Brewing",     "Weaving",      "Conjuring",    "Forging",
-    "Hatching",    "Cooking",      "Channeling",   "Ruminating",
-    "Composing",   "Imagining",    "Processing",   "Puzzling",
-    "Mulling",     "Noodling",     "Tinkering",    "Crystallizing",
-    "Synthesizing","Architecting", "Orchestrating","Incubating",
-    "Fermenting",  "Simmering",    "Percolating",  "Cogitating",
-    "Meandering",  "Harmonizing",
+    "Thinking",
+    "Pondering",
+    "Crafting",
+    "Computing",
+    "Brewing",
+    "Weaving",
+    "Conjuring",
+    "Forging",
+    "Hatching",
+    "Cooking",
+    "Channeling",
+    "Ruminating",
+    "Composing",
+    "Imagining",
+    "Processing",
+    "Puzzling",
+    "Mulling",
+    "Noodling",
+    "Tinkering",
+    "Crystallizing",
+    "Synthesizing",
+    "Architecting",
+    "Orchestrating",
+    "Incubating",
+    "Fermenting",
+    "Simmering",
+    "Percolating",
+    "Cogitating",
+    "Meandering",
+    "Harmonizing",
 ];
 
 /// Spinner colors (warm orange theme)
@@ -45,13 +64,19 @@ impl super::OutputArea {
     /// Start the animated spinner in the output area
     pub fn start_spinner(&mut self) {
         if self.spinner.is_some() {
-            log::debug!("[SPINNER] start_spinner: already running, frame={}", self.spinner.as_ref().unwrap().frame);
+            log::debug!(
+                "[SPINNER] start_spinner: already running, frame={}",
+                self.spinner.as_ref().unwrap().frame
+            );
             return;
         }
         let mut rng = rand::rng();
         self.spinner = Some(SpinnerState {
             frame: 0,
-            verb: SPINNER_VERBS.choose(&mut rng).unwrap_or(&"Thinking").to_string(),
+            verb: SPINNER_VERBS
+                .choose(&mut rng)
+                .unwrap_or(&"Thinking")
+                .to_string(),
             start: std::time::Instant::now(),
             phase: None,
         });
@@ -86,7 +111,9 @@ impl super::OutputArea {
         let glyph = SPINNER_FRAMES[(s.frame / 3) as usize % SPINNER_FRAMES.len()];
         spans.push(Span::styled(
             format!(" {} ", glyph),
-            Style::default().fg(SPINNER_BASE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(SPINNER_BASE)
+                .add_modifier(Modifier::BOLD),
         ));
 
         let text = format!("{}…", s.verb);

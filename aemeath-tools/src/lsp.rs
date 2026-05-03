@@ -88,11 +88,7 @@ fn detect_language(file_path: &str) -> String {
     .to_string()
 }
 
-async fn get_diagnostics(
-    file_path: &str,
-    language: &str,
-    cwd: &std::path::Path,
-) -> ToolResult {
+async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path) -> ToolResult {
     let output = match language {
         "rust" => {
             Command::new("cargo")
@@ -154,11 +150,7 @@ async fn get_diagnostics(
     }
 }
 
-async fn get_symbols(
-    file_path: &str,
-    language: &str,
-    cwd: &std::path::Path,
-) -> ToolResult {
+async fn get_symbols(file_path: &str, language: &str, cwd: &std::path::Path) -> ToolResult {
     let output = match language {
         "rust" => {
             // Use grep to find fn/struct/enum/impl/trait/mod definitions
@@ -187,24 +179,14 @@ async fn get_symbols(
         }
         "python" => {
             Command::new("grep")
-                .args([
-                    "-n",
-                    "-E",
-                    r"^(class|def|async def)\s+",
-                    file_path,
-                ])
+                .args(["-n", "-E", r"^(class|def|async def)\s+", file_path])
                 .current_dir(cwd)
                 .output()
                 .await
         }
         "go" => {
             Command::new("grep")
-                .args([
-                    "-n",
-                    "-E",
-                    r"^(func|type|var|const)\s+",
-                    file_path,
-                ])
+                .args(["-n", "-E", r"^(func|type|var|const)\s+", file_path])
                 .current_dir(cwd)
                 .output()
                 .await

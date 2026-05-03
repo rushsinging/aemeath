@@ -21,13 +21,13 @@ fn highlight_line(line: &str) -> Vec<((u8, u8, u8), String)> {
     let syntax = SYNTAX_SET
         .find_syntax_by_extension("rs")
         .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
-    
+
     let theme = SyntectTheme::default();
     let mut highlighter = HighlightLines::new(syntax, &theme);
     let highlighted = highlighter
         .highlight_line(line, &SYNTAX_SET)
         .unwrap_or_default();
-    
+
     highlighted
         .into_iter()
         .map(|(style, text)| {
@@ -51,7 +51,7 @@ pub fn print_diff(old: &str, new: &str) {
     for change in &changes {
         let tag = change.tag();
         let is_change = tag == ChangeTag::Delete || tag == ChangeTag::Insert;
-        
+
         if let Some(ct) = current_type {
             let same_type = (ct == ChangeTag::Equal && tag == ChangeTag::Equal)
                 || (ct != ChangeTag::Equal && is_change);
@@ -60,14 +60,14 @@ pub fn print_diff(old: &str, new: &str) {
                 continue;
             }
         }
-        
+
         if !current_block.is_empty() {
             blocks.push((current_type.unwrap_or(ChangeTag::Equal), current_block));
         }
         current_block = vec![*change];
         current_type = Some(tag);
     }
-    
+
     if !current_block.is_empty() {
         blocks.push((current_type.unwrap_or(ChangeTag::Equal), current_block));
     }
@@ -81,13 +81,16 @@ pub fn print_diff(old: &str, new: &str) {
                 let _ = stdout.execute(Print(format!("    {change}")));
                 let _ = stdout.execute(ResetColor);
             }
-            
+
             // 折叠指示器
             let collapsed_count = block.len() - 10;
             let _ = stdout.execute(SetForegroundColor(Theme::INFO));
-            let _ = stdout.execute(Print(format!("    ⋮ ... {} lines omitted ...\n", collapsed_count)));
+            let _ = stdout.execute(Print(format!(
+                "    ⋮ ... {} lines omitted ...\n",
+                collapsed_count
+            )));
             let _ = stdout.execute(ResetColor);
-            
+
             // 显示尾部
             for change in block.iter().rev().take(5).rev() {
                 let _ = stdout.execute(SetForegroundColor(Theme::INFO));
@@ -109,7 +112,7 @@ pub fn print_diff(old: &str, new: &str) {
                         // 新增行：深绿色背景，带语法高亮
                         let _ = stdout.execute(SetBackgroundColor(Theme::DIFF_ADD_BG));
                         print!("  + ");
-                        
+
                         // 对新增内容进行语法高亮
                         let highlighted = highlight_line(&change.to_string());
                         for ((r, g, b), text) in highlighted {

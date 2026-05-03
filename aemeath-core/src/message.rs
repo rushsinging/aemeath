@@ -17,10 +17,7 @@ pub enum IntegrityIssue {
         tool_ids: Vec<String>,
     },
     /// Back-to-back messages with the same role (user→user or assistant→assistant).
-    RoleOrder {
-        msg_index: usize,
-        role: String,
-    },
+    RoleOrder { msg_index: usize, role: String },
 }
 
 /// Results of a message integrity check.
@@ -75,10 +72,7 @@ pub enum ContentBlock {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ImageSource {
-    Base64 {
-        media_type: String,
-        data: String,
-    },
+    Base64 { media_type: String, data: String },
 }
 
 /// Image dimensions for display and coordinate mapping
@@ -104,7 +98,11 @@ impl Message {
         }
     }
 
-    pub fn user_with_image(text: impl Into<String>, image_base64: String, media_type: String) -> Self {
+    pub fn user_with_image(
+        text: impl Into<String>,
+        image_base64: String,
+        media_type: String,
+    ) -> Self {
         Self {
             role: Role::User,
             content: vec![
@@ -138,18 +136,22 @@ impl Message {
             role: Role::User,
             content: results
                 .into_iter()
-                .map(|(tool_use_id, content, is_error)| ContentBlock::ToolResult {
-                    tool_use_id,
-                    content: serde_json::Value::String(content),
-                    is_error,
-                })
+                .map(
+                    |(tool_use_id, content, is_error)| ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: serde_json::Value::String(content),
+                        is_error,
+                    },
+                )
                 .collect(),
         }
     }
 
     /// Create tool results with optional image attachments.
     /// Each result is (tool_use_id, text_content, is_error, images).
-    pub fn tool_results_rich(results: Vec<(String, String, bool, Vec<crate::tool::ImageData>)>) -> Self {
+    pub fn tool_results_rich(
+        results: Vec<(String, String, bool, Vec<crate::tool::ImageData>)>,
+    ) -> Self {
         Self {
             role: Role::User,
             content: results
@@ -160,14 +162,16 @@ impl Message {
                     } else {
                         let mut blocks: Vec<serde_json::Value> = images
                             .into_iter()
-                            .map(|img| serde_json::json!({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": img.media_type,
-                                    "data": img.base64,
-                                }
-                            }))
+                            .map(|img| {
+                                serde_json::json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": img.media_type,
+                                        "data": img.base64,
+                                    }
+                                })
+                            })
                             .collect();
                         blocks.push(serde_json::json!({
                             "type": "text",
@@ -210,7 +214,9 @@ impl Message {
 
     /// Returns true if this message contains any ToolUse blocks.
     pub fn has_tool_uses(&self) -> bool {
-        self.content.iter().any(|b| matches!(b, ContentBlock::ToolUse { .. }))
+        self.content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolUse { .. }))
     }
 
     /// Returns the ToolUse IDs in this message.
@@ -226,7 +232,9 @@ impl Message {
 
     /// Returns true if this message contains ToolResult blocks.
     pub fn has_tool_results(&self) -> bool {
-        self.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        self.content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolResult { .. }))
     }
 
     /// Returns the tool_use_ids of ToolResult blocks in this message.
@@ -813,7 +821,8 @@ mod tests {
         // The orphaned ToolResult message should be gone
         assert!(msgs
             .iter()
-            .all(|m| !m.has_tool_results() || m.tool_result_ids().into_iter().any(|id| id != "orphan")));
+            .all(|m| !m.has_tool_results()
+                || m.tool_result_ids().into_iter().any(|id| id != "orphan")));
     }
 
     #[test]
@@ -834,10 +843,7 @@ mod tests {
 
     #[test]
     fn test_deep_clean_handles_trailing_orphaned_tool_use() {
-        let mut msgs = vec![
-            Message::user("go"),
-            assistant_with_tools(&["tool_1"]),
-        ];
+        let mut msgs = vec![Message::user("go"), assistant_with_tools(&["tool_1"])];
         let removed = deep_clean_messages(&mut msgs);
         assert!(removed > 0);
         // Trailing orphaned ToolUse assistant should have been removed

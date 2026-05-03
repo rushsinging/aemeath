@@ -23,9 +23,10 @@ pub fn microcompact(messages: &mut Vec<Message>, keep_recent: usize) {
                     _ => content.to_string().len(),
                 };
                 if content_len > 100 {
-                    *content = serde_json::Value::String(
-                        format!("[output truncated, was {} chars]", content_len)
-                    );
+                    *content = serde_json::Value::String(format!(
+                        "[output truncated, was {} chars]",
+                        content_len
+                    ));
                 }
             }
         }

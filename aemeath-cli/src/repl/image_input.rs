@@ -17,8 +17,9 @@ pub(crate) async fn extract_image_paths(input: &str, cwd: &Path) -> (String, Vec
 
     for token in &tokens {
         // Strip surrounding brackets, quotes, parens
-        let stripped = token
-            .trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')' || c == '"' || c == '\'');
+        let stripped = token.trim_matches(|c| {
+            c == '[' || c == ']' || c == '(' || c == ')' || c == '"' || c == '\''
+        });
 
         if !is_image_file(stripped) {
             continue;

@@ -7,9 +7,9 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
+use super::STREAM_IDLE_TIMEOUT;
 use crate::provider::StreamHandler;
 use crate::types::StreamResponse;
-use super::STREAM_IDLE_TIMEOUT;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -113,9 +113,7 @@ pub(crate) async fn parse_ollama_stream(
                         let input = function
                             .get("arguments")
                             .cloned()
-                            .unwrap_or_else(|| {
-                                serde_json::Value::Object(serde_json::Map::new())
-                            });
+                            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
                         if !name.is_empty() {
                             final_tool_calls.push((id, name, input));
                         }
@@ -153,9 +151,7 @@ pub(crate) async fn parse_ollama_stream(
     // Build final content blocks
     if !current_text.is_empty() {
         handler.on_text_block_complete(&current_text);
-        content_blocks.push(ContentBlock::Text {
-            text: current_text,
-        });
+        content_blocks.push(ContentBlock::Text { text: current_text });
     }
 
     for (id, name, input) in final_tool_calls {
@@ -165,7 +161,11 @@ pub(crate) async fn parse_ollama_stream(
 
     log::debug!(
         "[ollama stream] done text_bytes={} tool_calls={} stop={:?} in_tok={} out_tok={}",
-        text_len, tool_count, stop_reason, usage.input_tokens, usage.output_tokens
+        text_len,
+        tool_count,
+        stop_reason,
+        usage.input_tokens,
+        usage.output_tokens
     );
 
     Ok(StreamResponse {

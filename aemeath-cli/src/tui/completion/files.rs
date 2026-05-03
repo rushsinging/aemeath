@@ -56,7 +56,11 @@ pub fn list_directory_contents(dir: &PathBuf) -> Vec<Suggestion> {
 }
 
 /// 列出目录内容并按前缀过滤
-pub fn list_and_filter_directory(dir: &PathBuf, prefix: &str, base_dir: &PathBuf) -> Vec<Suggestion> {
+pub fn list_and_filter_directory(
+    dir: &PathBuf,
+    prefix: &str,
+    base_dir: &PathBuf,
+) -> Vec<Suggestion> {
     let mut suggestions = Vec::new();
 
     if !dir.exists() || !dir.is_dir() {
@@ -73,10 +77,7 @@ pub fn list_and_filter_directory(dir: &PathBuf, prefix: &str, base_dir: &PathBuf
     if let Ok(entries) = entries {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // 按前缀过滤
             if !prefix_lower.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
@@ -126,12 +127,10 @@ pub fn list_and_filter_directory(dir: &PathBuf, prefix: &str, base_dir: &PathBuf
     }
 
     // 排序：目录优先，然后文件，按字母顺序
-    suggestions.sort_by(|a, b| {
-        match (&a.suggestion_type, &b.suggestion_type) {
-            (SuggestionType::Directory, SuggestionType::File) => std::cmp::Ordering::Less,
-            (SuggestionType::File, SuggestionType::Directory) => std::cmp::Ordering::Greater,
-            _ => a.display_text.cmp(&b.display_text),
-        }
+    suggestions.sort_by(|a, b| match (&a.suggestion_type, &b.suggestion_type) {
+        (SuggestionType::Directory, SuggestionType::File) => std::cmp::Ordering::Less,
+        (SuggestionType::File, SuggestionType::Directory) => std::cmp::Ordering::Greater,
+        _ => a.display_text.cmp(&b.display_text),
     });
 
     // 限制最多 15 条建议

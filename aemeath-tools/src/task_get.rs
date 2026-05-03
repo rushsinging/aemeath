@@ -10,7 +10,9 @@ pub struct TaskGetTool {
 
 #[async_trait]
 impl Tool for TaskGetTool {
-    fn name(&self) -> &str { "TaskGet" }
+    fn name(&self) -> &str {
+        "TaskGet"
+    }
     fn description(&self) -> &str {
         "Retrieve a task by ID. Returns task details including subject, description, status, and dependencies."
     }
@@ -26,8 +28,12 @@ impl Tool for TaskGetTool {
             "required": ["taskId"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let task_id = input["taskId"].as_str().unwrap_or("");
@@ -62,7 +68,9 @@ impl Tool for TaskGetTool {
         // Progress
         if task.progress > 0 {
             let progress_str = format!("Progress: {}%", task.progress);
-            let msg_str = task.progress_message.as_ref()
+            let msg_str = task
+                .progress_message
+                .as_ref()
                 .map(|m| format!(" - {}", m))
                 .unwrap_or_default();
             lines.push(format!("{}{}", progress_str, msg_str));
@@ -90,7 +98,9 @@ impl Tool for TaskGetTool {
 
         // Dependencies
         if !task.blocked_by.is_empty() {
-            let blocked_by = task.blocked_by.iter()
+            let blocked_by = task
+                .blocked_by
+                .iter()
                 .map(|id| format!("#{}", id))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -103,7 +113,9 @@ impl Tool for TaskGetTool {
         }
 
         if !task.blocks.is_empty() {
-            let blocks = task.blocks.iter()
+            let blocks = task
+                .blocks
+                .iter()
                 .map(|id| format!("#{}", id))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -132,19 +144,48 @@ fn format_timestamp(ts: u64) -> String {
     let mut y = 1970i64;
     let mut d = days as i64;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < days_in_year { break; }
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if d < days_in_year {
+            break;
+        }
         d -= days_in_year;
         y += 1;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0usize;
     for days_in_month in &month_days {
-        if d < *days_in_month as i64 { break; }
+        if d < *days_in_month as i64 {
+            break;
+        }
         d -= *days_in_month as i64;
         m += 1;
     }
 
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m + 1, d + 1, hours, mins, s)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        y,
+        m + 1,
+        d + 1,
+        hours,
+        mins,
+        s
+    )
 }

@@ -177,11 +177,12 @@ fn parse_add_args(args: &str) -> Result<(MemoryLayer, MemoryCategory, String), S
             "--project" => layer = MemoryLayer::Project,
             "--layer" => {
                 let value = iter.next().ok_or_else(|| "--layer 需要参数".to_string())?;
-                layer = parse_layer(value)
-                    .ok_or_else(|| format!("无效 memory layer: {value}"))?;
+                layer = parse_layer(value).ok_or_else(|| format!("无效 memory layer: {value}"))?;
             }
             "--category" | "--cat" => {
-                let value = iter.next().ok_or_else(|| "--category 需要参数".to_string())?;
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--category 需要参数".to_string())?;
                 category = parse_category(value)
                     .ok_or_else(|| format!("无效 memory category: {value}"))?;
             }
@@ -211,10 +212,8 @@ mod tests {
 
     #[test]
     fn test_parse_add_args_global_decision() {
-        let (layer, category, content) = parse_add_args(
-            "--global --category decision 使用中文回复",
-        )
-        .unwrap();
+        let (layer, category, content) =
+            parse_add_args("--global --category decision 使用中文回复").unwrap();
 
         assert_eq!(layer, MemoryLayer::Global);
         assert_eq!(category, MemoryCategory::Decision);

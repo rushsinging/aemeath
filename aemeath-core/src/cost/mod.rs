@@ -4,7 +4,7 @@ pub mod pricing;
 pub mod summary;
 pub mod tracker;
 
-pub use pricing::{ModelPricing, default_pricing, format_tokens, get_pricing};
+pub use pricing::{default_pricing, format_tokens, get_pricing, ModelPricing};
 pub use summary::{CostSummary, SessionCostSummary};
 pub use tracker::{CostTracker, UsageRecord};
 

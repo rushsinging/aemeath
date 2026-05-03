@@ -9,24 +9,19 @@ use tokio::process::Command;
 const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 
 /// List of commands allowed at the start of a chain (directory changes, etc.)
-const CHAIN_START_COMMANDS: &[&str] = &[
-    "cd", "pushd", "popd", "dirs",
-];
+const CHAIN_START_COMMANDS: &[&str] = &["cd", "pushd", "popd", "dirs"];
 
 /// Detect redirection to a real device path (excluding the safe sinks
 /// `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/*`, `/dev/tty`).
 /// Writes to these are universally safe; writes to e.g. `/dev/sda` are
 /// genuinely destructive and must be blocked.
 fn is_suspicious_dev_write(cmd: &str) -> bool {
-    const SAFE_DEVS: &[&str] = &[
-        "/dev/null",
-        "/dev/stdout",
-        "/dev/stderr",
-        "/dev/tty",
-    ];
+    const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
     let mut rest = cmd;
     loop {
-        let Some(pos) = rest.find("/dev/") else { return false };
+        let Some(pos) = rest.find("/dev/") else {
+            return false;
+        };
         // Look backwards to check this is a `>` or `>>` redirection target
         let before = &rest[..pos];
         let is_redirect = before
@@ -35,11 +30,12 @@ fn is_suspicious_dev_write(cmd: &str) -> bool {
         if is_redirect {
             // Check the specific device path
             let after = &rest[pos..];
-            let end = after.find(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == ')')
+            let end = after
+                .find(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == ')')
                 .unwrap_or(after.len());
             let dev_path = &after[..end];
-            let is_safe = SAFE_DEVS.iter().any(|s| dev_path == *s)
-                || dev_path.starts_with("/dev/fd/");
+            let is_safe =
+                SAFE_DEVS.iter().any(|s| dev_path == *s) || dev_path.starts_with("/dev/fd/");
             if !is_safe {
                 return true;
             }
@@ -99,10 +95,10 @@ fn extract_command_substitution_contents(command: &str) -> Vec<String> {
                 if !inner.is_empty() {
                     results.push(inner);
                 }
-              }
-            } else if chars[i] == '`' {
-        // Look for backtick substitution (no nesting in standard backticks;
-        // backticks cannot be nested in bash, so we just find the next closing backtick)
+            }
+        } else if chars[i] == '`' {
+            // Look for backtick substitution (no nesting in standard backticks;
+            // backticks cannot be nested in bash, so we just find the next closing backtick)
             let start = i + 1;
             i += 1;
             while i < len && chars[i] != '`' {
@@ -157,11 +153,15 @@ fn check_shell_injection(command: &str) -> Option<&'static str> {
     // Background execution: standalone & with spaces around it (not >&1 or 2>&1)
     // Only block true background execution like "sleep 10 &"
     // Handle redirections like 2>&1 and >&2 which are fd redirections, not background
-    let cmd_for_bg_check = cmd.replace("2>&1", "").replace(">&2", "").replace(">&1", "").replace("1>&2", "");
+    let cmd_for_bg_check = cmd
+        .replace("2>&1", "")
+        .replace(">&2", "")
+        .replace(">&1", "")
+        .replace("1>&2", "");
     for (i, ch) in cmd_for_bg_check.char_indices() {
         if ch == '&' {
             let before = cmd_for_bg_check[..i].trim_end();
-            let after = cmd_for_bg_check[i+1..].trim_start();
+            let after = cmd_for_bg_check[i + 1..].trim_start();
             if !before.is_empty() && !after.is_empty() && after != ">" && after != ">&" {
                 return Some("background execution");
             }
@@ -182,7 +182,8 @@ fn check_shell_injection(command: &str) -> Option<&'static str> {
 
     // Check command chains for dangerous patterns
     // Split by && and ||, but preserve the operators for checking
-    let segments: Vec<&str> = cmd.split(|c| c == '&' || c == '|' || c == ';')
+    let segments: Vec<&str> = cmd
+        .split(|c| c == '&' || c == '|' || c == ';')
         .filter(|s| !s.trim().is_empty())
         .collect();
 
@@ -209,34 +210,60 @@ fn check_command_safety(command: &str) -> Option<&'static str> {
     if lower.contains("rm -rf") || lower.contains("rm -fr") {
         return Some("recursive force delete");
     }
-    if lower.contains("mkfs") { return Some("format filesystem"); }
-    if lower.contains("dd if=") { return Some("raw disk write"); }
-    if is_suspicious_dev_write(cmd) { return Some("write to device"); }
+    if lower.contains("mkfs") {
+        return Some("format filesystem");
+    }
+    if lower.contains("dd if=") {
+        return Some("raw disk write");
+    }
+    if is_suspicious_dev_write(cmd) {
+        return Some("write to device");
+    }
 
     // === Git dangerous operations ===
-    if lower.contains("git reset --hard") { return Some("discard all changes"); }
-    if lower.contains("git clean -f") { return Some("delete untracked files"); }
+    if lower.contains("git reset --hard") {
+        return Some("discard all changes");
+    }
+    if lower.contains("git clean -f") {
+        return Some("delete untracked files");
+    }
     if lower.contains("git checkout -- .") || lower.contains("git checkout .") {
         return Some("discard all changes");
     }
     if lower.contains("git push --force") || lower.contains("git push -f") {
         return Some("force push (may overwrite remote history)");
     }
-    if lower.contains("git branch -D") { return Some("force delete branch"); }
-    if lower.contains("git restore .") { return Some("discard all changes"); }
+    if lower.contains("git branch -D") {
+        return Some("force delete branch");
+    }
+    if lower.contains("git restore .") {
+        return Some("discard all changes");
+    }
 
     // === Database destruction ===
-    if lower.contains("drop table") { return Some("drop database table"); }
-    if lower.contains("drop database") { return Some("drop database"); }
-    if lower.contains("truncate table") { return Some("truncate table"); }
+    if lower.contains("drop table") {
+        return Some("drop database table");
+    }
+    if lower.contains("drop database") {
+        return Some("drop database");
+    }
+    if lower.contains("truncate table") {
+        return Some("truncate table");
+    }
     if lower.contains("delete from") && !lower.contains("where") {
         return Some("delete all rows (no WHERE clause)");
     }
 
     // === System-level danger ===
-    if lower.contains("chmod -r 777") { return Some("open permissions recursively"); }
-    if lower.contains("chown -r") { return Some("recursive ownership change"); }
-    if cmd.contains(":(){ :|:& };:") { return Some("fork bomb"); }
+    if lower.contains("chmod -r 777") {
+        return Some("open permissions recursively");
+    }
+    if lower.contains("chown -r") {
+        return Some("recursive ownership change");
+    }
+    if cmd.contains(":(){ :|:& };:") {
+        return Some("fork bomb");
+    }
     if lower.contains("/proc/") && lower.contains("environ") {
         return Some("access process environment");
     }
@@ -289,20 +316,70 @@ fn check_command_safety(command: &str) -> Option<&'static str> {
 /// - `gh api`: can make POST/PUT/DELETE requests
 /// - `command`: shell builtin that can bypass command lookup
 const READONLY_COMMANDS: &[&str] = &[
-    "ls", "cat", "head", "tail", "wc", "nl", "stat", "file", "du", "df",
-    "pwd", "whoami", "hostname", "uname", "date", "uptime", "env", "printenv",
-    "echo", "printf", "which", "where", "type",
-    "find", "locate", "tree",
-    "grep", "rg", "ag", "ack",
-    "git status", "git log", "git diff", "git show", "git branch",
-    "git remote", "git tag", "git blame", "git stash list",
-    "cargo check", "cargo test", "cargo clippy", "cargo doc",
-    "npm test", "npm run lint", "npx tsc --noEmit",
-    "jq", "yq", "sort", "uniq", "cut", "tr",
-    "docker ps", "docker images", "docker logs",
-    "kubectl get", "kubectl describe", "kubectl logs",
-    "gh pr view", "gh issue view",
-    "man", "help", "less", "more",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "nl",
+    "stat",
+    "file",
+    "du",
+    "df",
+    "pwd",
+    "whoami",
+    "hostname",
+    "uname",
+    "date",
+    "uptime",
+    "env",
+    "printenv",
+    "echo",
+    "printf",
+    "which",
+    "where",
+    "type",
+    "find",
+    "locate",
+    "tree",
+    "grep",
+    "rg",
+    "ag",
+    "ack",
+    "git status",
+    "git log",
+    "git diff",
+    "git show",
+    "git branch",
+    "git remote",
+    "git tag",
+    "git blame",
+    "git stash list",
+    "cargo check",
+    "cargo test",
+    "cargo clippy",
+    "cargo doc",
+    "npm test",
+    "npm run lint",
+    "npx tsc --noEmit",
+    "jq",
+    "yq",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "docker ps",
+    "docker images",
+    "docker logs",
+    "kubectl get",
+    "kubectl describe",
+    "kubectl logs",
+    "gh pr view",
+    "gh issue view",
+    "man",
+    "help",
+    "less",
+    "more",
 ];
 
 /// Check if a command is read-only (safe to auto-approve)
@@ -332,7 +409,9 @@ pub struct BashTool;
 
 #[async_trait]
 impl Tool for BashTool {
-    fn name(&self) -> &str { "Bash" }
+    fn name(&self) -> &str {
+        "Bash"
+    }
     fn description(&self) -> &str {
         "Executes a given bash command and returns its output.\n\nThe working directory persists between commands, but shell state does not.\n\nIMPORTANT: Avoid using this tool to run `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands. Instead, use the appropriate dedicated tool:\n\n - File search: Use Glob (NOT find or ls)\n - Content search: Use Grep (NOT grep or rg)\n - Read files: Use Read (NOT cat/head/tail)\n - Edit files: Use Edit (NOT sed/awk)\n - Write files: Use Write (NOT echo >/cat <<EOF)\n\n# Instructions\n - Always quote file paths that contain spaces with double quotes\n - You may specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). Default timeout is 120000ms (2 minutes).\n - When issuing multiple commands, use && to chain them together.\n - For git commands, prefer creating a new commit rather than amending."
     }
@@ -346,8 +425,12 @@ impl Tool for BashTool {
             "required": ["command"]
         })
     }
-    fn is_read_only(&self) -> bool { false }
-    fn is_concurrency_safe(&self) -> bool { false }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        false
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
@@ -369,7 +452,10 @@ impl Tool for BashTool {
                 ));
             }
         }
-        let timeout_ms = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(120_000);
+        let timeout_ms = input
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000);
 
         let mut child = match Command::new("bash")
             .arg("-c")
@@ -448,15 +534,28 @@ impl Tool for BashTool {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let stderr = String::from_utf8_lossy(&stderr);
                 let mut out = String::new();
-                if !stdout.is_empty() { out.push_str(&stdout); }
+                if !stdout.is_empty() {
+                    out.push_str(&stdout);
+                }
                 if !stderr.is_empty() {
-                    if !out.is_empty() { out.push('\n'); }
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
                     out.push_str("stderr:\n");
                     out.push_str(&stderr);
                 }
-                if out.is_empty() { out.push_str("(no output)"); }
-                if status.success() { ToolResult::success(out) }
-                else { ToolResult::error(format!("exit code: {}\n{}", status.code().unwrap_or(-1), out)) }
+                if out.is_empty() {
+                    out.push_str("(no output)");
+                }
+                if status.success() {
+                    ToolResult::success(out)
+                } else {
+                    ToolResult::error(format!(
+                        "exit code: {}\n{}",
+                        status.code().unwrap_or(-1),
+                        out
+                    ))
+                }
             }
             Ok(Err(e)) => ToolResult::error(format!("failed to execute: {e}")),
             Err(_) => {

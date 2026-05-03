@@ -1,14 +1,14 @@
+use super::tools::handle_commit;
+use super::PendingImages;
+use crate::image::process_image_file;
 use aemeath_core::command::{cmd, CommandAction, CommandContext, CommandRegistry, CommandResult};
 use aemeath_core::compact;
 use aemeath_core::message::Message;
 use aemeath_core::session::{self, Session};
 use aemeath_core::skill::Skill;
 use aemeath_core::state::AppState;
-use crate::image::process_image_file;
 use std::path::Path;
 use std::sync::Arc;
-use super::tools::handle_commit;
-use super::PendingImages;
 
 pub(crate) enum SlashResult {
     Continue,
@@ -19,19 +19,19 @@ pub(crate) enum SlashResult {
 }
 
 pub(crate) async fn handle_slash_command(
-      input: &str,
-      messages: &mut Vec<Message>,
-      system_prompt: &str,
-      context_size: usize,
-      total_input: u64,
-      total_output: u64,
-      total_calls: u64,
-      session_id: &str,
-      cwd: &Path,
-      pending_images: &PendingImages,
-      resumed_session: Option<&Session>,
-      allow_all: &mut bool,
-      skills: &std::collections::HashMap<String, Skill>,
+    input: &str,
+    messages: &mut Vec<Message>,
+    system_prompt: &str,
+    context_size: usize,
+    total_input: u64,
+    total_output: u64,
+    total_calls: u64,
+    session_id: &str,
+    cwd: &Path,
+    pending_images: &PendingImages,
+    resumed_session: Option<&Session>,
+    allow_all: &mut bool,
+    skills: &std::collections::HashMap<String, Skill>,
 ) -> SlashResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = *parts.first().unwrap_or(&"");
@@ -52,7 +52,8 @@ pub(crate) async fn handle_slash_command(
             SlashResult::Continue
         }
         c if is_compact(&c) => {
-            let (compacted, was_compacted) = compact::compact_messages(messages, system_prompt, context_size);
+            let (compacted, was_compacted) =
+                compact::compact_messages(messages, system_prompt, context_size);
             if was_compacted {
                 let old_len = messages.len();
                 *messages = compacted;
@@ -63,7 +64,10 @@ pub(crate) async fn handle_slash_command(
             SlashResult::Continue
         }
         c if is_help(&c) => {
-            println!("{}", crate::render::StyledText::header("Available Commands"));
+            println!(
+                "{}",
+                crate::render::StyledText::header("Available Commands")
+            );
             println!("{}", crate::render::StyledText::separator());
             println!("  /help     - Show this help message");
             println!("  /exit     - Exit the agent");
@@ -84,7 +88,10 @@ pub(crate) async fn handle_slash_command(
             println!("  /clear-images   - Clear pending images");
             println!();
             println!("{}", crate::render::StyledText::separator());
-            println!("{}", crate::render::StyledText::info("Press Ctrl+C to interrupt current request"));
+            println!(
+                "{}",
+                crate::render::StyledText::info("Press Ctrl+C to interrupt current request")
+            );
             SlashResult::Continue
         }
         c if is_usage(&c) => {
@@ -96,9 +103,13 @@ pub(crate) async fn handle_slash_command(
             SlashResult::Continue
         }
         "/context" => {
-            let estimated = compact::estimate_messages_tokens(messages) + compact::estimate_tokens(system_prompt);
+            let estimated = compact::estimate_messages_tokens(messages)
+                + compact::estimate_tokens(system_prompt);
             let pct = estimated * 100 / context_size.max(1);
-            println!("Context window: ~{} / {} tokens ({}%)", estimated, context_size, pct);
+            println!(
+                "Context window: ~{} / {} tokens ({}%)",
+                estimated, context_size, pct
+            );
             println!("Messages: {}", messages.len());
             if pct > 80 {
                 println!("[auto-compaction will trigger at 80%]");
@@ -136,7 +147,13 @@ pub(crate) async fn handle_slash_command(
                 println!("Saved sessions:");
                 for (i, s) in sessions.iter().take(10).enumerate() {
                     let msg_count = s.messages.len();
-                    println!("  {}. {} ({} msgs, {})", i + 1, s.id, msg_count, s.updated_at);
+                    println!(
+                        "  {}. {} ({} msgs, {})",
+                        i + 1,
+                        s.id,
+                        msg_count,
+                        s.updated_at
+                    );
                 }
                 println!("\nResume with: aemeath --resume <session-id>");
             }
@@ -198,10 +215,7 @@ pub(crate) async fn handle_slash_command(
             println!("[reading image from clipboard...]");
             match crate::image::read_clipboard_image().await {
                 Ok(img) => {
-                    println!(
-                        "[clipboard image added ({} bytes)]",
-                        img.final_size
-                    );
+                    println!("[clipboard image added ({} bytes)]", img.final_size);
                     pending_images.lock().unwrap().push(img);
                     println!("Image queued. Type your message to send it.");
                 }
@@ -231,43 +245,42 @@ pub(crate) async fn handle_slash_command(
                 match cmd_obj.execute(&args, &mut ctx).await {
                     CommandResult::Success(msg) => println!("{}", msg),
                     CommandResult::Error(msg) => eprintln!("error: {}", msg),
-                    CommandResult::Action(action) => {
-                        match action {
-                            CommandAction::Exit => return SlashResult::Exit,
-                            CommandAction::Clear => {
-                                messages.clear();
-                                println!("[cleared]");
-                            }
-                            CommandAction::InjectMessage(prompt) => {
-                                println!("[reviewing code changes...]");
-                                return SlashResult::InjectMessage(prompt);
-                            }
-                            CommandAction::ChangeMode(mode) => {
-                                match mode.as_str() {
-                                    "ask" => {
-                                        *allow_all = false;
-                                        println!("Permission mode set to: ask");
-                                    }
-                                    "auto-read" => {
-                                        *allow_all = false;
-                                        println!("Permission mode set to: auto-read");
-                                    }
-                                    "allow-all" => {
-                                        *allow_all = true;
-                                        println!("Permission mode set to: allow-all (warning: all tools will be auto-approved)");
-                                    }
-                                    _ => eprintln!("Unknown permission mode: {}", mode),
-                                }
-                            }
-                            _ => println!("[action: {:?}]", action),
+                    CommandResult::Action(action) => match action {
+                        CommandAction::Exit => return SlashResult::Exit,
+                        CommandAction::Clear => {
+                            messages.clear();
+                            println!("[cleared]");
                         }
-                    }
+                        CommandAction::InjectMessage(prompt) => {
+                            println!("[reviewing code changes...]");
+                            return SlashResult::InjectMessage(prompt);
+                        }
+                        CommandAction::ChangeMode(mode) => match mode.as_str() {
+                            "ask" => {
+                                *allow_all = false;
+                                println!("Permission mode set to: ask");
+                            }
+                            "auto-read" => {
+                                *allow_all = false;
+                                println!("Permission mode set to: auto-read");
+                            }
+                            "allow-all" => {
+                                *allow_all = true;
+                                println!("Permission mode set to: allow-all (warning: all tools will be auto-approved)");
+                            }
+                            _ => eprintln!("Unknown permission mode: {}", mode),
+                        },
+                        _ => println!("[action: {:?}]", action),
+                    },
                     CommandResult::Confirm { message, .. } => {
                         println!("[confirm: {}]", message);
                     }
                 }
                 SlashResult::Continue
-            } else if let Some(skill) = skills.values().find(|s| s.name == cmd_name || s.aliases.iter().any(|a| a == cmd_name)) {
+            } else if let Some(skill) = skills
+                .values()
+                .find(|s| s.name == cmd_name || s.aliases.iter().any(|a| a == cmd_name))
+            {
                 // Match skill alias — inject skill content as user message
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
                 let mut content = skill.content.clone();

@@ -1,13 +1,15 @@
+use crate::path_security::validate_and_normalize_path;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use crate::path_security::validate_and_normalize_path;
 use serde_json::Value;
 
 pub struct FileWriteTool;
 
 #[async_trait]
 impl Tool for FileWriteTool {
-    fn name(&self) -> &str { "Write" }
+    fn name(&self) -> &str {
+        "Write"
+    }
     fn description(&self) -> &str {
         "Writes a file to the local filesystem.\n\nRequired arguments (BOTH must be present):\n- `file_path`: absolute or workspace-relative path of the file to create or overwrite\n- `content`: the full text to write into that file\n\nExample call:\n  Write({\"file_path\": \"src/foo.rs\", \"content\": \"fn main() {}\\n\"})\n\nRules:\n- Overwrites the existing file at `file_path` if it exists.\n- For existing files you MUST call Read first; this tool fails otherwise.\n- Prefer the Edit tool for modifying existing files — it only sends the diff. Use Write only for new files or complete rewrites.\n- NEVER create documentation files (*.md) or README files unless explicitly requested by the user.\n- DO NOT call Write with empty arguments — both `file_path` and `content` are required strings."
     }
@@ -29,7 +31,9 @@ impl Tool for FileWriteTool {
             "additionalProperties": false
         })
     }
-    fn is_concurrency_safe(&self) -> bool { false }
+    fn is_concurrency_safe(&self) -> bool {
+        false
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {

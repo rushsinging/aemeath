@@ -68,7 +68,7 @@ fn format_tags(tags: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{MemorySource, MemoryEntry};
+    use crate::memory::{MemoryEntry, MemorySource};
 
     #[test]
     fn test_parse_layer_valid() {

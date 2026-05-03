@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Task priority levels
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Ord, PartialOrd, Hash)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Ord, PartialOrd, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskPriority {
     #[default]
@@ -220,8 +222,7 @@ impl TaskStore {
     /// Load tasks from disk (async)
     pub async fn load(&self) -> Result<(), String> {
         let default_path = Self::default_path();
-        let path = self.persistence_path.as_ref()
-            .unwrap_or(&default_path);
+        let path = self.persistence_path.as_ref().unwrap_or(&default_path);
 
         if !path.exists() {
             return Ok(());
@@ -243,8 +244,7 @@ impl TaskStore {
     /// Save tasks to disk (async)
     pub async fn save(&self) -> Result<(), String> {
         let default_path = Self::default_path();
-        let path = self.persistence_path.as_ref()
-            .unwrap_or(&default_path);
+        let path = self.persistence_path.as_ref().unwrap_or(&default_path);
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
@@ -270,51 +270,56 @@ impl TaskStore {
     }
 
     /// Create a new task with all fields (async for auto-save)
-      pub async fn create(&self, subject: String, description: String, active_form: Option<String>) -> Task {
-          let id = {
-              let mut next_id = self.next_id.lock().await;
-              let id = next_id.to_string();
-              *next_id += 1;
-              id
-              // next_id lock released here
-          };
+    pub async fn create(
+        &self,
+        subject: String,
+        description: String,
+        active_form: Option<String>,
+    ) -> Task {
+        let id = {
+            let mut next_id = self.next_id.lock().await;
+            let id = next_id.to_string();
+            *next_id += 1;
+            id
+            // next_id lock released here
+        };
 
-          // Bump batch if all existing tasks are completed (new turn)
-          let batch = {
-              let (has_active, has_any) = {
-                  let tasks = self.tasks.lock().await;
-                  let has_any = !tasks.is_empty();
-                  let has_active = tasks.values().any(|t| {
-                      t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted
-                  });
-                  (has_active, has_any)
-              };
-              let mut batch = self.current_batch.lock().await;
-              if has_any && !has_active {
-                  *batch += 1;
-              }
-              *batch
-          };
+        // Bump batch if all existing tasks are completed (new turn)
+        let batch = {
+            let (has_active, has_any) = {
+                let tasks = self.tasks.lock().await;
+                let has_any = !tasks.is_empty();
+                let has_active = tasks
+                    .values()
+                    .any(|t| t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted);
+                (has_active, has_any)
+            };
+            let mut batch = self.current_batch.lock().await;
+            if has_any && !has_active {
+                *batch += 1;
+            }
+            *batch
+        };
 
-          let now = default_timestamp();
-          let task = Task {
-              id: id.clone(),
-              subject,
-              description,
-              status: TaskStatus::Pending,
-              active_form,
-              owner: None,
-              blocked_by: Vec::new(),
-              blocks: Vec::new(),
-              priority: TaskPriority::default(),
-              progress: 0,
-              progress_message: None,
-              created_at: now,
-              updated_at: now,
-              session_id: None,
-              tags: Vec::new(),
-              batch,
-          };
+        let now = default_timestamp();
+        let task = Task {
+            id: id.clone(),
+            subject,
+            description,
+            status: TaskStatus::Pending,
+            active_form,
+            owner: None,
+            blocked_by: Vec::new(),
+            blocks: Vec::new(),
+            priority: TaskPriority::default(),
+            progress: 0,
+            progress_message: None,
+            created_at: now,
+            updated_at: now,
+            session_id: None,
+            tags: Vec::new(),
+            batch,
+        };
 
         self.tasks.lock().await.insert(id, task.clone());
         // Auto-save (safe now: no locks held)
@@ -344,9 +349,9 @@ impl TaskStore {
             let (has_active, has_any) = {
                 let tasks = self.tasks.lock().await;
                 let has_any = !tasks.is_empty();
-                let has_active = tasks.values().any(|t| {
-                    t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted
-                });
+                let has_active = tasks
+                    .values()
+                    .any(|t| t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted);
                 (has_active, has_any)
             };
             let mut batch = self.current_batch.lock().await;
@@ -415,7 +420,8 @@ impl TaskStore {
             .collect();
         // Sort by priority (urgent first), then by created_at
         result.sort_by(|a, b| {
-            b.priority.cmp(&a.priority)
+            b.priority
+                .cmp(&a.priority)
                 .then_with(|| a.created_at.cmp(&b.created_at))
         });
         result
@@ -423,63 +429,69 @@ impl TaskStore {
 
     /// List tasks by status (async)
     pub async fn list_by_status(&self, status: TaskStatus) -> Vec<Task> {
-        self.list().await.into_iter()
+        self.list()
+            .await
+            .into_iter()
             .filter(|t| t.status == status)
             .collect()
     }
 
     /// List tasks by priority (async)
     pub async fn list_by_priority(&self, priority: TaskPriority) -> Vec<Task> {
-        self.list().await.into_iter()
+        self.list()
+            .await
+            .into_iter()
             .filter(|t| t.priority == priority)
             .collect()
     }
 
     /// List tasks for a session (async)
     pub async fn list_by_session(&self, session_id: &str) -> Vec<Task> {
-        self.list().await.into_iter()
+        self.list()
+            .await
+            .into_iter()
             .filter(|t| t.session_id.as_ref() == Some(&session_id.to_string()))
             .collect()
     }
 
     /// Delete a task (soft delete by setting status to Deleted, async for auto-save)
     pub async fn delete(&self, id: &str) -> bool {
-        self.update(id, |t| t.status = TaskStatus::Deleted).await.is_some()
+        self.update(id, |t| t.status = TaskStatus::Deleted)
+            .await
+            .is_some()
     }
 
     /// Clear all tasks
-      pub async fn clear(&self) {
-          {
-              let mut tasks = self.tasks.lock().await;
-              tasks.clear();
-          }
-          // Release tasks lock before acquiring next_id lock
-          {
-              let mut next_id = self.next_id.lock().await;
-              *next_id = 1;
-          }
-      }
+    pub async fn clear(&self) {
+        {
+            let mut tasks = self.tasks.lock().await;
+            tasks.clear();
+        }
+        // Release tasks lock before acquiring next_id lock
+        {
+            let mut next_id = self.next_id.lock().await;
+            *next_id = 1;
+        }
+    }
 
-      /// List tasks belonging to the latest batch only.
-      /// This shows the current turn's task list, including completed ones,
-      /// but hides tasks from previous turns.
-      pub async fn list_current_batch(&self) -> Vec<Task> {
-          let tasks = self.tasks.lock().await;
-          let max_batch = tasks.values()
-              .map(|t| t.batch)
-              .max()
-              .unwrap_or(0);
-          let mut result: Vec<Task> = tasks
-              .values()
-              .filter(|t| t.batch == max_batch && t.status != TaskStatus::Deleted)
-              .cloned()
-              .collect();
-          result.sort_by(|a, b| {
-              b.priority.cmp(&a.priority)
-                  .then_with(|| a.created_at.cmp(&b.created_at))
-          });
-          result
-      }
+    /// List tasks belonging to the latest batch only.
+    /// This shows the current turn's task list, including completed ones,
+    /// but hides tasks from previous turns.
+    pub async fn list_current_batch(&self) -> Vec<Task> {
+        let tasks = self.tasks.lock().await;
+        let max_batch = tasks.values().map(|t| t.batch).max().unwrap_or(0);
+        let mut result: Vec<Task> = tasks
+            .values()
+            .filter(|t| t.batch == max_batch && t.status != TaskStatus::Deleted)
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
+        result
+    }
 
     /// Clear all deleted tasks from memory (async for auto-save)
     pub async fn purge_deleted(&self) {
@@ -495,12 +507,25 @@ impl TaskStore {
     pub async fn stats(&self) -> TaskStoreStats {
         let tasks = self.tasks.lock().await;
         let total = tasks.len();
-        let pending = tasks.values().filter(|t| t.status == TaskStatus::Pending).count();
-        let in_progress = tasks.values().filter(|t| t.status == TaskStatus::InProgress).count();
-        let completed = tasks.values().filter(|t| t.status == TaskStatus::Completed).count();
-        let deleted = tasks.values().filter(|t| t.status == TaskStatus::Deleted).count();
+        let pending = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Pending)
+            .count();
+        let in_progress = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::InProgress)
+            .count();
+        let completed = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Completed)
+            .count();
+        let deleted = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Deleted)
+            .count();
 
-        let by_priority = tasks.values()
+        let by_priority = tasks
+            .values()
             .filter(|t| t.status != TaskStatus::Deleted)
             .fold(HashMap::new(), |mut acc, t| {
                 *acc.entry(t.priority).or_insert(0) += 1;

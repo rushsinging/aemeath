@@ -90,7 +90,11 @@ impl super::OutputArea {
 
         // 渲染片段
         for (segment, is_thinking) in &segments {
-            let style = if *is_thinking { LineStyle::Thinking } else { LineStyle::Assistant };
+            let style = if *is_thinking {
+                LineStyle::Thinking
+            } else {
+                LineStyle::Assistant
+            };
             let prefix = if *is_thinking { "💭 " } else { "" };
             for text_line in segment.lines() {
                 let display_line = if *is_thinking && !text_line.is_empty() {
@@ -127,7 +131,9 @@ impl super::OutputArea {
             if new_line_count > old_line_count {
                 self.scroll_offset += new_line_count - old_line_count;
             } else if new_line_count < old_line_count {
-                self.scroll_offset = self.scroll_offset.saturating_sub(old_line_count - new_line_count);
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_sub(old_line_count - new_line_count);
             }
         }
     }

@@ -73,7 +73,10 @@ impl Tool for ReadMcpResourceTool {
             .get("server")
             .and_then(|s| s.as_str())
             .unwrap_or_default();
-        let uri = input.get("uri").and_then(|s| s.as_str()).unwrap_or_default();
+        let uri = input
+            .get("uri")
+            .and_then(|s| s.as_str())
+            .unwrap_or_default();
 
         if server_name.is_empty() {
             return ToolResult::error("server parameter is required");
@@ -153,7 +156,8 @@ impl Tool for ReadMcpResourceTool {
                                 });
                             }
                             // Handle blob content (base64 encoded binary)
-                            else if let Some(blob) = content.get("blob").and_then(|b| b.as_str()) {
+                            else if let Some(blob) = content.get("blob").and_then(|b| b.as_str())
+                            {
                                 // For now, we just note that binary content exists
                                 // In a full implementation, we would decode and save to a file
                                 let uri_ref = content_uri.clone();

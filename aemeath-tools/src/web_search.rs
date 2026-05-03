@@ -1,13 +1,15 @@
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC, percent_decode_str};
+use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
 
 pub struct WebSearchTool;
 
 #[async_trait]
 impl Tool for WebSearchTool {
-    fn name(&self) -> &str { "WebSearch" }
+    fn name(&self) -> &str {
+        "WebSearch"
+    }
     fn description(&self) -> &str {
         "Search the web for information. Returns search results with titles, URLs, and snippets.\n\nUsage:\n- Use this tool when you need to find current information, documentation, or answers to questions\n- Results include titles, URLs, and brief snippets\n- You can then use WebFetch to get full content from specific URLs"
     }
@@ -29,23 +31,24 @@ impl Tool for WebSearchTool {
             "required": ["query"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("");
         let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
-        
+
         if query.is_empty() {
             return ToolResult::error("Search query is required");
         }
-        
+
         let encoded_query = utf8_percent_encode(query, NON_ALPHANUMERIC).to_string();
-        let url = format!(
-            "https://html.duckduckgo.com/html/?q={}",
-            encoded_query
-        );
-        
+        let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
+
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .user_agent("Mozilla/5.0 (compatible; AemeathCLI/1.0)")
@@ -54,21 +57,24 @@ impl Tool for WebSearchTool {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to create HTTP client: {}", e)),
         };
-        
+
         match client.get(&url).send().await {
             Ok(resp) => {
                 if !resp.status().is_success() {
-                    return ToolResult::error(format!("Search failed with status: {}", resp.status()));
+                    return ToolResult::error(format!(
+                        "Search failed with status: {}",
+                        resp.status()
+                    ));
                 }
-                
+
                 match resp.text().await {
                     Ok(html_content) => {
                         let results = parse_duckduckgo_html(&html_content, limit);
-                        
+
                         if results.is_empty() {
                             return ToolResult::success("No search results found");
                         }
-                        
+
                         let output = results
                             .iter()
                             .enumerate()
@@ -83,7 +89,7 @@ impl Tool for WebSearchTool {
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
-                        
+
                         ToolResult::success(output)
                     }
                     Err(e) => ToolResult::error(format!("Failed to read response: {}", e)),
@@ -168,9 +174,7 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
         let raw_url = &block[href_start..href_start + href_end];
 
         // DuckDuckGo wraps URLs: extract the actual URL from uddg= parameter
-        let decoded_url = percent_decode_str(raw_url)
-            .decode_utf8_lossy()
-            .to_string();
+        let decoded_url = percent_decode_str(raw_url).decode_utf8_lossy().to_string();
         let actual_url = if let Some(idx) = decoded_url.find("uddg=") {
             &decoded_url[idx + 5..]
         } else {
@@ -192,9 +196,8 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let title = decode_html_entities(
-            &block[title_text_start..title_text_start + title_text_end]
-        );
+        let title =
+            decode_html_entities(&block[title_text_start..title_text_start + title_text_end]);
 
         let snippet = if let Some(snippet_pos) = block.find(snippet_pattern) {
             if let Some(text_pos) = block[snippet_pos..].find('>') {

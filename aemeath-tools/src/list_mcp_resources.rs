@@ -72,14 +72,15 @@ impl Tool for ListMcpResourcesTool {
         }
 
         // Filter by server name if provided
-        let clients_to_process: Vec<(String, Arc<Mutex<McpClient>>)> = if let Some(server_name) = server_filter {
-            client_info
-                .into_iter()
-                .filter(|(name, _)| name == server_name)
-                .collect()
-        } else {
-            client_info
-        };
+        let clients_to_process: Vec<(String, Arc<Mutex<McpClient>>)> =
+            if let Some(server_name) = server_filter {
+                client_info
+                    .into_iter()
+                    .filter(|(name, _)| name == server_name)
+                    .collect()
+            } else {
+                client_info
+            };
 
         if let Some(filter) = server_filter {
             if clients_to_process.is_empty() {

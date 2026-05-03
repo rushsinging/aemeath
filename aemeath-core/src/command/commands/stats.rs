@@ -2,7 +2,7 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -24,7 +24,10 @@ inventory::submit! {
     })
 }
 
-fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+fn stats_execute(
+    args: String,
+    ctx: &mut CommandContext,
+) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
     let session_id = ctx.session_id.clone();
     let model_name = ctx.config.model.name.clone();
     let max_tokens = ctx.config.model.max_tokens;
@@ -42,7 +45,12 @@ fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<O
                      Configuration:\n  Model: {}\n  Max tokens: {}\n  Context size: {}\n\n\
                      Cost Tracking:\n  Use /cost for detailed cost information\n\n\
                      Tokens:\n  Use /stats tokens for token estimate",
-                    total_sessions, session_id, total_messages, model_name, max_tokens, context_size
+                    total_sessions,
+                    session_id,
+                    total_messages,
+                    model_name,
+                    max_tokens,
+                    context_size
                 );
                 CommandResult::Success(output)
             }
@@ -52,7 +60,10 @@ fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<O
                 for sess in sessions.iter().take(10) {
                     output.push_str(&format!(
                         "Session {}:\n  Messages: {}\n  Created: {}\n  Updated: {}\n\n",
-                        sess.id, sess.messages.len(), sess.created_at, sess.updated_at
+                        sess.id,
+                        sess.messages.len(),
+                        sess.created_at,
+                        sess.updated_at
                     ));
                 }
                 if sessions.len() > 10 {
@@ -60,9 +71,8 @@ fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<O
                 }
                 CommandResult::Success(output)
             }
-            "tools" => {
-                CommandResult::Success(
-                    "Tool Usage Statistics:\n\n\
+            "tools" => CommandResult::Success(
+                "Tool Usage Statistics:\n\n\
                      Tool usage tracking is not yet implemented.\n\
                      Future feature: Track which tools are used most frequently.\n\n\
                      Available tools: 27\n\
@@ -75,9 +85,9 @@ fn stats_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<O
                      - Plan Mode: EnterPlanMode, ExitPlanMode\n\
                      - Utility: Config, Sleep, AskUserQuestion, ToolSearch, Brief\n\
                      - Skills: Skill\n\
-                     - Dev: LSP".to_string()
-                )
-            }
+                     - Dev: LSP"
+                    .to_string(),
+            ),
             "tokens" => {
                 let sessions = crate::session::list_sessions().await;
                 let current_session = sessions.iter().find(|s| s.id == session_id);

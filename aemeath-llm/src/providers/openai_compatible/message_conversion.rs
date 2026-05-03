@@ -1,8 +1,8 @@
 //! 消息格式转换：将 Anthropic 风格的消息转换为 OpenAI 格式
 
-use aemeath_core::message::{ContentBlock, Message, Role};
-use crate::types::SystemBlock;
 use super::OpenAICompatibleProvider;
+use crate::types::SystemBlock;
+use aemeath_core::message::{ContentBlock, Message, Role};
 
 /// 在 OpenAI 消息序列发送前的最后一致性检查 + 自动修复。
 ///
@@ -45,7 +45,10 @@ fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
         true
     });
     if messages.len() != before {
-        log::warn!("[openai-compat] dropped {} orphan tool messages", before - messages.len());
+        log::warn!(
+            "[openai-compat] dropped {} orphan tool messages",
+            before - messages.len()
+        );
     }
 
     // Step 3: 对每条带 tool_calls 的 assistant，检查紧跟的 tool messages 是否覆盖全部 id；
@@ -73,8 +76,7 @@ fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
         let mut covered: HashSet<String> = HashSet::new();
         let mut last_tool_idx = i;
         let mut j = i + 1;
-        while j < messages.len()
-            && messages[j].get("role").and_then(|r| r.as_str()) == Some("tool")
+        while j < messages.len() && messages[j].get("role").and_then(|r| r.as_str()) == Some("tool")
         {
             if let Some(id) = messages[j].get("tool_call_id").and_then(|v| v.as_str()) {
                 covered.insert(id.to_string());
@@ -92,11 +94,14 @@ fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
             );
             let insert_after = last_tool_idx;
             for (offset, mid) in missing.iter().enumerate() {
-                messages.insert(insert_after + 1 + offset, serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": mid,
-                    "content": "[result missing — auto-filled to satisfy tool_calls schema]"
-                }));
+                messages.insert(
+                    insert_after + 1 + offset,
+                    serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": mid,
+                        "content": "[result missing — auto-filled to satisfy tool_calls schema]"
+                    }),
+                );
             }
             i = insert_after + 1 + missing.len();
         } else {
@@ -147,21 +152,23 @@ impl OpenAICompatibleProvider {
                             "text": text
                         }));
                     }
-                    ContentBlock::Image { source } => {
-                        match source {
-                            aemeath_core::message::ImageSource::Base64 { media_type, data } => {
-                                content_parts.push(serde_json::json!({
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": format!("data:{};base64,{}", media_type, data)
-                                    }
-                                }));
-                            }
+                    ContentBlock::Image { source } => match source {
+                        aemeath_core::message::ImageSource::Base64 { media_type, data } => {
+                            content_parts.push(serde_json::json!({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": format!("data:{};base64,{}", media_type, data)
+                                }
+                            }));
                         }
-                    }
+                    },
                     ContentBlock::ToolUse { id, name, input } => {
-                        let args = serde_json::to_string(input)
-                            .map_err(|e| crate::LlmError::Config(format!("Failed to serialize tool input: {}", e)))?;
+                        let args = serde_json::to_string(input).map_err(|e| {
+                            crate::LlmError::Config(format!(
+                                "Failed to serialize tool input: {}",
+                                e
+                            ))
+                        })?;
                         tool_calls.push(serde_json::json!({
                             "id": id,
                             "type": "function",
@@ -171,7 +178,11 @@ impl OpenAICompatibleProvider {
                             }
                         }));
                     }
-                    ContentBlock::ToolResult { tool_use_id, content, is_error } => {
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } => {
                         // Tool result 在 OpenAI 格式中是独立的消息
                         openai_messages.push(serde_json::json!({
                             "role": "tool",
@@ -222,7 +233,9 @@ impl OpenAICompatibleProvider {
             });
 
             if !content_parts.is_empty() {
-                if content_parts.len() == 1 && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+                if content_parts.len() == 1
+                    && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
+                {
                     message["content"] = content_parts[0]["text"].clone();
                 } else {
                     message["content"] = serde_json::Value::Array(content_parts);
@@ -239,7 +252,9 @@ impl OpenAICompatibleProvider {
             // DeepSeek 拒绝省略该字段的历史记录（"thinking 模式下的
             // `reasoning_content` 必须回传给 API"），即使模型未输出推理内容的轮次也是如此。
             // 空字符串可以接受。其他 OpenAI 兼容 provider 会静默忽略未知字段。
-            if msg.role == Role::Assistant && self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
+            if msg.role == Role::Assistant
+                && self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
+            {
                 let rc = reasoning_content.unwrap_or_default();
                 message["reasoning_content"] = serde_json::Value::String(rc);
             }
@@ -262,7 +277,10 @@ impl OpenAICompatibleProvider {
                 // Anthropic 格式: { "name": "...", "description": "...", "input_schema": {...} }
                 // OpenAI 格式: { "type": "function", "function": { "name": "...", "description": "...", "parameters": {...} } }
                 let name = schema.get("name")?.as_str()?;
-                let description = schema.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                let description = schema
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
                 let input_schema = schema.get("input_schema")?;
 
                 Some(serde_json::json!({

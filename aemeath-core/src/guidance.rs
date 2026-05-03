@@ -208,8 +208,8 @@ pub async fn resolve_guidance_async(
 
     // 2. Try prefix-matched file from guidance dir
     // 3. Fallback to config guidance map
-    if let Some(content) = resolve_model_guidance_async(model_id, config_guidance, hook_runner)
-        .await
+    if let Some(content) =
+        resolve_model_guidance_async(model_id, config_guidance, hook_runner).await
     {
         parts.push(content);
     }
@@ -249,9 +249,7 @@ pub async fn resolve_model_guidance_async(
     hook_runner: Option<&HookRunner>,
 ) -> Option<String> {
     // Try guidance dir: prefix-matched file (longest match wins) with hook
-    if let Some(content) =
-        load_prefix_matched_file_async(model_id, hook_runner).await
-    {
+    if let Some(content) = load_prefix_matched_file_async(model_id, hook_runner).await {
         return Some(content);
     }
 
@@ -295,8 +293,7 @@ async fn load_prefix_matched_file_async(
         // Trigger hook for prefix-matched guidance file
         if let Some(hr) = hook_runner {
             let file_path_str = path.to_string_lossy().to_string();
-            hr.on_instructions_loaded(&file_path_str, "guidance")
-                .await;
+            hr.on_instructions_loaded(&file_path_str, "guidance").await;
         }
         std::fs::read_to_string(&path).ok()
     } else {
@@ -310,10 +307,7 @@ fn load_named_file(name: &str) -> Option<String> {
 }
 
 /// Load a file by exact name with optional hook runner (async version).
-pub async fn load_named_file_async(
-    name: &str,
-    hook_runner: Option<&HookRunner>,
-) -> Option<String> {
+pub async fn load_named_file_async(name: &str, hook_runner: Option<&HookRunner>) -> Option<String> {
     load_named_file_impl_async(name, hook_runner).await
 }
 

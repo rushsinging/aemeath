@@ -1,5 +1,5 @@
-pub mod markdown;
 pub mod diff;
+pub mod markdown;
 pub mod progress;
 pub mod theme;
 
@@ -40,10 +40,14 @@ impl TerminalRenderer {
     }
 
     pub fn print_tool_result(output: &str, is_error: bool) {
-        let color = if is_error { Theme::TOOL_ERROR } else { Theme::INFO };
+        let color = if is_error {
+            Theme::TOOL_ERROR
+        } else {
+            Theme::INFO
+        };
         let mut stdout = io::stdout();
         let _ = stdout.execute(SetForegroundColor(color));
-        
+
         let lines: Vec<&str> = output.lines().collect();
         let display_lines = if lines.len() > 5 {
             let mut v: Vec<&str> = lines[..5].to_vec();
@@ -52,11 +56,11 @@ impl TerminalRenderer {
         } else {
             lines
         };
-        
+
         for line in display_lines {
             println!("  {}", ST::info(line));
         }
-        
+
         let _ = stdout.execute(ResetColor);
     }
 
@@ -189,13 +193,19 @@ impl TerminalRenderer {
     }
 
     pub fn print_session_saved(session_id: &str) {
-        println!("{}", ST::success(&format!("[session saved: {}]", session_id)));
+        println!(
+            "{}",
+            ST::success(&format!("[session saved: {}]", session_id))
+        );
     }
 
     pub fn print_compaction(old_len: usize, new_len: usize) {
         println!(
             "{}",
-            ST::warning(&format!("[auto-compacted: {} → {} messages]", old_len, new_len))
+            ST::warning(&format!(
+                "[auto-compacted: {} → {} messages]",
+                old_len, new_len
+            ))
         );
     }
 
@@ -210,14 +220,20 @@ impl TerminalRenderer {
     pub fn print_resumed_session(session_id: &str, msg_count: usize) {
         println!(
             "{}",
-            ST::success(&format!("[resumed session {}, {} messages]", session_id, msg_count))
+            ST::success(&format!(
+                "[resumed session {}, {} messages]",
+                session_id, msg_count
+            ))
         );
     }
 
     pub fn print_pending_images(count: usize) {
         let mut stdout = io::stdout();
         let _ = stdout.execute(SetForegroundColor(Theme::INFO));
-        let _ = stdout.execute(Print(format!("[{} image(s) pending - will be sent with next message]\n", count)));
+        let _ = stdout.execute(Print(format!(
+            "[{} image(s) pending - will be sent with next message]\n",
+            count
+        )));
         let _ = stdout.execute(ResetColor);
     }
 }

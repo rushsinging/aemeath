@@ -14,14 +14,16 @@
 //! 2. Add `pub mod <name>;` to `commands/mod.rs`
 //! 3. Done — the command appears in autocomplete automatically.
 
-pub mod registry;
-pub mod parser;
 pub mod commands;
+pub mod parser;
+pub mod registry;
 
-pub use registry::CommandRegistry;
-pub use registry::CommandDescriptor;
+pub use commands::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction,
+};
 pub use parser::{CommandParser, ParseResult};
-pub use commands::{Command, CommandContext, CommandResult, CommandAction, ConfirmAction, CommandCategory};
+pub use registry::CommandDescriptor;
+pub use registry::CommandRegistry;
 
 /// Builtin command names (without leading slash)
 pub mod cmd {

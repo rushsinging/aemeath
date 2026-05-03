@@ -2,7 +2,9 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -25,7 +27,12 @@ fn think_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         "on" | "true" | "1" => Some(true),
         "off" | "false" | "0" => Some(false),
         "" => None, // toggle — handled by the caller
-        other => return CommandResult::Error(format!("Unknown argument: {}. Use on/off or omit to toggle.", other)),
+        other => {
+            return CommandResult::Error(format!(
+                "Unknown argument: {}. Use on/off or omit to toggle.",
+                other
+            ))
+        }
     };
     CommandResult::Action(CommandAction::SetThinking(new_state))
 }

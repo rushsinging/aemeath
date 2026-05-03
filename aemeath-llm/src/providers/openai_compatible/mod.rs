@@ -5,8 +5,8 @@ mod message_conversion;
 mod non_stream;
 mod stream;
 
-use async_trait::async_trait;
 use aemeath_core::message::Message;
+use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use std::error::Error as StdError;
 use tokio_util::sync::CancellationToken;
@@ -28,7 +28,7 @@ pub struct OpenAICompatibleProvider {
     max_retries: u32,
     timeout_secs: u64,
     reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    reasoning_effort: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    openai_reasoning_effort: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl OpenAICompatibleProvider {
@@ -43,7 +43,9 @@ impl OpenAICompatibleProvider {
         Self {
             base_url: {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
-                url.trim_end_matches('/').trim_end_matches("/v1").to_string()
+                url.trim_end_matches('/')
+                    .trim_end_matches("/v1")
+                    .to_string()
             },
             model: model.unwrap_or_else(|| "gpt-4o".to_string()),
             config,
@@ -57,7 +59,7 @@ impl OpenAICompatibleProvider {
             max_retries: 10,
             timeout_secs: 120,
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
-            reasoning_effort: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            openai_reasoning_effort: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -83,19 +85,80 @@ impl OpenAICompatibleProvider {
         format!("{}{}", self.base_url, self.config.chat_api_suffix)
     }
 
+    fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
+        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
+        if self.config.is_deepseek || self.config.is_zhipu {
+            let thinking_type = if reasoning_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            request_body["thinking"] = serde_json::json!({"type": thinking_type});
+        } else if self.config.supports_enable_thinking {
+            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
+        }
+
+        // OpenAI GPT-5.x / o-series: inject official `reasoning` object.
+        if self.config.is_openai {
+            if let Ok(guard) = self.openai_reasoning_effort.lock() {
+                if let Some(ref effort) = *guard {
+                    if aemeath_core::config::models::supports_openai_reasoning(&self.model) {
+                        request_body["reasoning"] = serde_json::json!({ "effort": effort });
+                    } else {
+                        log::debug!(
+                            "[openai-compat] reasoning.effort='{}' set but model '{}' does not support it, ignoring",
+                            effort, self.model
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn build_chat_request_body(
+        &self,
+        openai_messages: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        stream: bool,
+    ) -> serde_json::Value {
+        let mut request_body = serde_json::json!({
+            "model": self.model,
+            "messages": openai_messages,
+            "max_tokens": self.max_tokens,
+            "stream": stream
+        });
+        if stream {
+            request_body["stream_options"] = serde_json::json!({ "include_usage": true });
+        }
+        self.apply_reasoning_fields(&mut request_body);
+        if !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools);
+        }
+        request_body
+    }
+
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", self.api_key))
-            .map_err(|e| crate::LlmError::Config(e.to_string()))?);
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}", self.api_key))
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
 
         if self.config.is_openrouter {
-            headers.insert("HTTP-Referer", HeaderValue::from_static("https://github.com/aemeath"));
+            headers.insert(
+                "HTTP-Referer",
+                HeaderValue::from_static("https://github.com/aemeath"),
+            );
         }
 
-        headers.insert(USER_AGENT, HeaderValue::from_str(&self.user_agent)
-            .map_err(|e| crate::LlmError::Config(e.to_string()))?);
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&self.user_agent)
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
         Ok(headers)
     }
 }
@@ -113,50 +176,16 @@ impl LlmProvider for OpenAICompatibleProvider {
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "max_tokens": self.max_tokens,
-            "stream": true,
-            "stream_options": { "include_usage": true }
-        });
+        let request_body = self.build_chat_request_body(openai_messages, tools, true);
 
-        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        if self.config.is_deepseek || self.config.is_zhipu {
-            let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
-            request_body["thinking"] = serde_json::json!({"type": thinking_type});
-        } else if self.config.supports_enable_thinking {
-            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
-        }
-
-        // OpenAI GPT-5.x / o-series: inject reasoning_effort
-        if self.config.is_openai {
-            if let Ok(guard) = self.reasoning_effort.lock() {
-                if let Some(ref effort) = *guard {
-                    if aemeath_core::config::models::supports_reasoning_effort(&self.model) {
-                        request_body["reasoning_effort"] = serde_json::json!(effort);
-                    } else {
-                        log::debug!(
-                            "[openai-compat] reasoning_effort='{}' set but model '{}' does not support it, ignoring",
-                            effort, self.model
-                        );
-                    }
-                }
-            }
-        }
-
-        if !tools.is_empty() {
-            request_body["tools"] = serde_json::Value::Array(tools);
-        }
-
-        if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {
-            let mut summary = String::with_capacity(256);
+        if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {            let mut summary = String::with_capacity(256);
             for (i, m) in msgs.iter().enumerate() {
                 let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
                 match role {
                     "assistant" => {
                         let has_tc = m.get("tool_calls").is_some();
-                        let rc_len = m.get("reasoning_content")
+                        let rc_len = m
+                            .get("reasoning_content")
                             .and_then(|r| r.as_str())
                             .map(|s| s.len() as i32)
                             .unwrap_or(-1);
@@ -166,9 +195,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         ));
                     }
                     "tool" => {
-                        let tcid = m.get("tool_call_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let tcid = m.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
                         let tcid_short: String = tcid.chars().take(24).collect();
                         summary.push_str(&format!("\n  [{i}] tool id={tcid_short}"));
                     }
@@ -198,7 +225,8 @@ impl LlmProvider for OpenAICompatibleProvider {
             }
 
             if attempt > 0 {
-                let delay = std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
+                let delay =
+                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
@@ -268,7 +296,8 @@ impl LlmProvider for OpenAICompatibleProvider {
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "rate limited (429), retrying ({}/{})...",
-                        attempt + 2, self.max_retries
+                        attempt + 2,
+                        self.max_retries
                     ));
                 }
                 last_error = Some(crate::LlmError::RateLimited);
@@ -281,7 +310,9 @@ impl LlmProvider for OpenAICompatibleProvider {
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "server error ({}), retrying ({}/{})...",
-                        status, attempt + 2, self.max_retries
+                        status,
+                        attempt + 2,
+                        self.max_retries
                     ));
                 }
                 last_error = Some(crate::LlmError::Api {
@@ -320,7 +351,9 @@ impl LlmProvider for OpenAICompatibleProvider {
         if let Some(ref err) = last_error {
             if matches!(err, crate::LlmError::Stream(_)) {
                 handler.on_error("All streaming retries failed, attempting non-streaming fallback");
-                return self.send_message_non_stream(system, messages, tool_schemas, handler).await;
+                return self
+                    .send_message_non_stream(system, messages, tool_schemas, handler)
+                    .await;
             }
         }
         Err(last_error.unwrap_or(crate::LlmError::Network("max retries exceeded".to_string())))
@@ -335,7 +368,8 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn set_reasoning(&self, enabled: bool) {
-        self.reasoning.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn is_reasoning(&self) -> bool {
@@ -343,12 +377,59 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn set_reasoning_effort(&self, effort: Option<String>) {
-        if let Ok(mut guard) = self.reasoning_effort.lock() {
+        if let Ok(mut guard) = self.openai_reasoning_effort.lock() {
             *guard = effort;
         }
     }
 
     fn reasoning_effort(&self) -> Option<String> {
-        self.reasoning_effort.lock().ok().and_then(|g| g.clone())
+        self.openai_reasoning_effort
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::OpenAIProviderConfig;
+
+    fn provider(provider_name: &str, reasoning: bool) -> OpenAICompatibleProvider {
+        OpenAICompatibleProvider::new(
+            OpenAIProviderConfig::from_provider_name(provider_name),
+            "test-key".to_string(),
+            Some("https://example.com".to_string()),
+            Some("test-model".to_string()),
+            1024,
+            reasoning,
+        )
+    }
+
+    #[test]
+    fn test_build_chat_request_body_zhipu_reasoning_enabled_sets_thinking_enabled() {
+        let request_body = provider("zhipu", true).build_chat_request_body(vec![], vec![], true);
+
+        assert_eq!(request_body["thinking"], serde_json::json!({"type": "enabled"}));
+        assert!(request_body.get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn test_build_chat_request_body_zhipu_reasoning_disabled_sets_thinking_disabled() {
+        let request_body = provider("zhipu", false).build_chat_request_body(vec![], vec![], false);
+
+        assert_eq!(
+            request_body["thinking"],
+            serde_json::json!({"type": "disabled"})
+        );
+        assert_eq!(request_body["stream"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_build_chat_request_body_litellm_does_not_add_zhipu_thinking() {
+        let request_body = provider("litellm", true).build_chat_request_body(vec![], vec![], true);
+
+        assert!(request_body.get("thinking").is_none());
+        assert!(request_body.get("enable_thinking").is_none());
     }
 }

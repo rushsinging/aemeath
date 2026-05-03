@@ -44,7 +44,9 @@ impl MemoryStore {
             return Err(MemoryError::config("max_entries 必须大于 0"));
         }
         if !(0.0..=1.0).contains(&similarity_threshold) {
-            return Err(MemoryError::config("similarity_threshold 必须在 0 到 1 之间"));
+            return Err(MemoryError::config(
+                "similarity_threshold 必须在 0 到 1 之间",
+            ));
         }
 
         Ok(Self {
@@ -82,7 +84,13 @@ impl MemoryStore {
             entry.id = uuid::Uuid::now_v7().to_string();
         }
         entries.push(entry);
-        self.write_active(entries.last().map(|e| e.layer).unwrap_or(MemoryLayer::Project), &entries)?;
+        self.write_active(
+            entries
+                .last()
+                .map(|e| e.layer)
+                .unwrap_or(MemoryLayer::Project),
+            &entries,
+        )?;
         Ok(AddResult::Added)
     }
 
@@ -182,7 +190,10 @@ impl MemoryStore {
         for layer in [MemoryLayer::Global, MemoryLayer::Project] {
             if self.needs_eviction(layer)? {
                 let candidates = self.eviction_candidates(layer, 10)?;
-                let ids = candidates.into_iter().map(|entry| entry.id).collect::<Vec<_>>();
+                let ids = candidates
+                    .into_iter()
+                    .map(|entry| entry.id)
+                    .collect::<Vec<_>>();
                 archived += ids.len();
                 self.archive_entries(&ids)?;
             }
@@ -313,7 +324,9 @@ impl MemoryStore {
     fn archive_path(&self, layer: MemoryLayer) -> PathBuf {
         match layer {
             MemoryLayer::Global => self.base_dir.join("_global_archive.json"),
-            MemoryLayer::Project => self.base_dir.join(format!("{}_archive.json", self.project_hash)),
+            MemoryLayer::Project => self
+                .base_dir
+                .join(format!("{}_archive.json", self.project_hash)),
         }
     }
 }
@@ -323,7 +336,12 @@ fn entry_matches(entry: &MemoryEntry, query: &str) -> bool {
         return true;
     }
     entry.content.to_lowercase().contains(query)
-        || entry.tags.iter().any(|tag| tag.to_lowercase().contains(query))
-        || format!("{:?}", entry.category).to_lowercase().contains(query)
+        || entry
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(query))
+        || format!("{:?}", entry.category)
+            .to_lowercase()
+            .contains(query)
         || format!("{:?}", entry.layer).to_lowercase().contains(query)
 }

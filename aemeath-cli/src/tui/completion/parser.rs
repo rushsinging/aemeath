@@ -4,7 +4,10 @@ use super::types::TriggerType;
 
 /// 提取光标位置处的补全 token
 /// 如果找到触发器，返回 (token, 起始位置, 触发类型)
-pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(String, usize, TriggerType)> {
+pub fn extract_completion_token(
+    input: &str,
+    cursor_offset: usize,
+) -> Option<(String, usize, TriggerType)> {
     if input.is_empty() || cursor_offset == 0 {
         return None;
     }
@@ -47,7 +50,9 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
         let arg_start = 7; // "/model " 的长度
         let after_cmd = &input[arg_start..];
         // 不为 "/model list" 或 "/model list ..." 触发
-        if after_cmd.starts_with("list") && (after_cmd.len() == 4 || after_cmd.as_bytes()[4] == b' ') {
+        if after_cmd.starts_with("list")
+            && (after_cmd.len() == 4 || after_cmd.as_bytes()[4] == b' ')
+        {
             // 继续检查其他触发器
         } else {
             let arg_part = &input[arg_start..cursor_offset];
@@ -84,8 +89,8 @@ pub fn extract_completion_token(input: &str, cursor_offset: usize) -> Option<(St
 
     // 检查 @ 触发器（文件/路径补全）
     if let Some(at_pos) = before_cursor.rfind('@') {
-        let is_start_or_after_space = at_pos == 0
-            || before_cursor[..at_pos].ends_with(char::is_whitespace);
+        let is_start_or_after_space =
+            at_pos == 0 || before_cursor[..at_pos].ends_with(char::is_whitespace);
         if is_start_or_after_space {
             let after_at = &before_cursor[at_pos + 1..]; // '@' 是 ASCII，+1 安全
             let after_cursor = &input[cursor_offset..];

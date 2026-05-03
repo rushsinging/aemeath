@@ -2,7 +2,9 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -39,12 +41,23 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 output.push_str(&format!("\n  [{}]\n", provider_name));
                 current_provider = provider_name.clone();
             }
-            let display_name = if model.name.is_empty() { &model.id } else { &model.name };
-            let marker = if format!("{}/{}", provider_name, display_name) == ctx.current_model { " ←" } else { "" };
+            let display_name = if model.name.is_empty() {
+                &model.id
+            } else {
+                &model.name
+            };
+            let marker = if format!("{}/{}", provider_name, display_name) == ctx.current_model {
+                " ←"
+            } else {
+                ""
+            };
             output.push_str(&format!(
                 "    {}/{} ctx:{}k max:{}k{}\n",
-                provider_name, display_name,
-                model.context_window / 1000, model.max_tokens / 1000, marker,
+                provider_name,
+                display_name,
+                model.context_window / 1000,
+                model.max_tokens / 1000,
+                marker,
             ));
         }
         return CommandResult::Success(output);
@@ -60,7 +73,7 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 api_type: provider_config.api.clone(),
                 max_tokens: model.max_tokens,
                 context_window: model.context_window,
-                reasoning: model.reasoning,
+                reasoning: model.reasoning.as_ref().and_then(|r| r.enabled()),
             })
         }
         None => {

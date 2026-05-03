@@ -3,7 +3,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
-| 25 | /clear 命令未清空 status line 数据 | 中 | 待确认 | 未确认 | 2026-04 | clear 仅重置消息历史，未联动重置 status bar 任务/成本/spinner 状态 |
+| 26 | 几乎每次对话都触发 superpowers skill 调用 | 中 | 活动中 | 未确认 | 2026-05 | SessionStart hook 注入提示过强或 skill 触发条件过宽 |
 
 ## 详情
 
@@ -28,43 +28,25 @@
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
 
-### #25 /clear 命令未清空 status line 数据
-**症状**：在 TUI 中执行 `/clear` 命令清空对话历史后，output area 的消息已经被清空，但底部 **status line / status bar** 仍然显示上一轮残留信息：
-- task 汇总（`✓` / `■` / `□` + subject 行）
-- cost / token 用量数字
-- spinner 状态或 "Generating..." / "Calling xxx..." 文本
-- 当前 tool call 标题
-- 等等（具体哪些字段残留待复现确认）
-
-用户预期 `/clear` 不仅清空消息列表，也应该把状态栏复位回初始空白态（保留模型/provider 等环境信息，清掉本会话累计的运行态）。
-
-**根因方向**：待调查。可能方向：
-1. `/clear` 命令的 handler（`aemeath-core/src/command/commands/` 或 TUI 层）只调用了 `output_area.clear()` 之类的清空消息接口，未联动调用 `status_bar` / `App` 的状态重置方法
-2. status bar 的状态字段（task list、cost、active tool calls、spinner 状态）作为 App / TUI state 的独立字段持有，没有统一的 "reset" 入口
-3. cost / token 累计可能是 session 级状态（与 `Session` 结构体绑定），`/clear` 是否应该也重置 session 累计？需决策（一般 `/clear` 只清显示，不动 session 累计；但 task 状态应该清）
-
+### #26 几乎每次对话都触发 superpowers skill 调用
+**症状**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。
+**疑似根因**：
+1. SessionStart hook（`~/.aemeath/hooks/superpowers-inject.sh` 由 Feature #17 改成短提示）的提示文本可能仍然过强（"if there is even a 1% chance..."），让 LLM 把"调用 skill"当作默认动作
+2. `superpowers:using-superpowers` skill 的 description 包含 "Use when starting any conversation"，被 LLM 解读成"每轮都要调用"
+3. Skill 列表注入到 system prompt 后，LLM 倾向于用 skill 而非直接回答
 **修复方向**：
-1. 定位 `/clear` 命令实现：搜 `commands/clear` / `CommandAction::Clear` / `output_area.clear`
-2. 列出 status bar 当前展示的所有动态字段，明确哪些应在 `/clear` 时复位：
-   - 必须复位：active tool calls、当前 tool call 名、spinner 状态、task summary 行
-   - 可选复位：cost / token 累计（建议保留，因为是 session 级数据）
-   - 不复位：model、provider、cwd 等环境信息
-3. 在 App 中暴露统一的 `reset_runtime_state()`，由 `/clear` 调用
-4. 测试场景：执行多轮对话产生 task / tool call / spinner → `/clear` → 状态栏除模型信息外应全部清空
+1. 调整 SessionStart hook 提示语，从"必须检查 skill"改为"如有明确匹配场景再考虑调用"
+2. 评估是否对 `using-superpowers` 这类元 skill 做特殊处理（不在每轮提示中暴露）
+3. 增加配置开关 `skill.auto_suggest = false`，让用户主动用 `/skill` 命令调用而非 LLM 自主决定
+4. 观察并记录哪些用户输入触发了不必要的 skill 调用，形成 ban list
+**涉及路径**：`~/.aemeath/hooks/superpowers-inject.sh`、`aemeath-core/src/skill.rs`（skill description 是否参与 system prompt 构建）、`aemeath-core/src/config/`（`skill.auto_suggest` 配置）
 
-**涉及路径**：
-- `aemeath-core/src/command/commands/`（`/clear` 命令实现）
-- `aemeath-cli/src/tui/app/update.rs`（`CommandAction::Clear` 分支处理）
-- `aemeath-cli/src/tui/app/mod.rs`（App 状态字段）
-- `aemeath-cli/src/tui/status_bar.rs`（status bar 渲染来源）
-
-**关联**：Bug #24（spinner 生命周期）— 复位逻辑需考虑 active tool call set 一并清空
-
-**涉及路径**：`aemeath-cli/src/tui/app/mod.rs`、`aemeath-cli/src/tui/app/update.rs`、`aemeath-cli/src/tui/output_area/mod.rs`
-
----
 
 # 已归档 Bug
+
+### #25 /clear 命令未清空 status line 数据（已确认修复）
+**根因**：`/clear` 仅清空消息历史，未联动复位 status bar 的 task list / active tool calls / spinner 状态等运行态字段。
+**修复**：App 暴露统一的运行态复位入口，`CommandAction::Clear` 同时清空 active tool call set、task summary、spinner 与当前 tool call 名；保留 model / provider / cwd / cost 等环境与累计信息。详见 `docs/bug/archived/025-clear-status-line.md`。
 
 ### #3 优化 tool call TUI 显示（已确认修复）
 **根因**：`UiEvent::Thinking` 在 `tool_call_active == true` 时被跳过；`UiEvent::AgentProgress` 字段错写为 `_tool_id` / `_text` 被忽略；sub-agent tool call 名称延迟发送。

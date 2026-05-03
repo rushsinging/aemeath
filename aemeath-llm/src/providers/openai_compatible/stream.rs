@@ -1,13 +1,13 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
+use crate::provider::StreamHandler;
+use crate::types::StreamResponse;
 use aemeath_core::message::{ContentBlock, Message, Role};
 use futures_util::StreamExt;
 use std::io;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
-use crate::provider::StreamHandler;
-use crate::types::StreamResponse;
 
 /// 流空闲超时：90 秒无数据则中止
 pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
@@ -24,8 +24,12 @@ pub(crate) async fn parse_openai_stream(
     let mut current_text = String::new();
     let mut current_reasoning = String::new();
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
-    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> = std::collections::HashMap::new();
-    let mut usage = crate::types::Usage { input_tokens: 0, output_tokens: 0 };
+    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
+        std::collections::HashMap::new();
+    let mut usage = crate::types::Usage {
+        input_tokens: 0,
+        output_tokens: 0,
+    };
     let mut stop_reason = crate::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
 
@@ -86,7 +90,10 @@ pub(crate) async fn parse_openai_stream(
 
         // 检查错误
         if let Some(error) = chunk.get("error") {
-            let error_msg = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+            let error_msg = error
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
             handler.on_error(error_msg);
             return Err(crate::LlmError::Api {
                 error_type: "api_error".to_string(),
@@ -97,8 +104,14 @@ pub(crate) async fn parse_openai_stream(
         // 提取 usage（某些 provider 在最后一个 chunk 中包含）
         if let Some(usage_obj) = chunk.get("usage") {
             if !usage_obj.is_null() {
-                let in_tok = usage_obj.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let out_tok = usage_obj.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let in_tok = usage_obj
+                    .get("prompt_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let out_tok = usage_obj
+                    .get("completion_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
                 if in_tok > 0 || out_tok > 0 {
                     usage.input_tokens = in_tok;
                     usage.output_tokens = out_tok;
@@ -122,7 +135,8 @@ pub(crate) async fn parse_openai_stream(
                 // 处理 delta
                 if let Some(delta) = choice.get("delta") {
                     // Reasoning 内容（例如 glm-5.1, DeepSeek-R1）
-                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str()) {
+                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str())
+                    {
                         if !reasoning.is_empty() {
                             handler.on_thinking(reasoning);
                             current_reasoning.push_str(reasoning);
@@ -138,7 +152,8 @@ pub(crate) async fn parse_openai_stream(
                     // Tool calls
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                         for tc in tool_calls {
-                            let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            let index =
+                                tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
 
                             // 获取或创建 tool call 条目
                             let entry = current_tool_calls.entry(index).or_insert_with(|| {
@@ -159,7 +174,9 @@ pub(crate) async fn parse_openai_stream(
                                         entry.0 = format!("call_{}", index);
                                     }
                                 }
-                                if let Some(args) = function.get("arguments").and_then(|a| a.as_str()) {
+                                if let Some(args) =
+                                    function.get("arguments").and_then(|a| a.as_str())
+                                {
                                     entry.2.push_str(args);
                                     entry.3 += 1;
                                 }
@@ -181,9 +198,7 @@ pub(crate) async fn parse_openai_stream(
     }
     if !current_text.is_empty() {
         handler.on_text_block_complete(&current_text);
-        content_blocks.push(ContentBlock::Text {
-            text: current_text,
-        });
+        content_blocks.push(ContentBlock::Text { text: current_text });
     }
 
     // 按 index 排序 tool calls 并添加到 content
@@ -215,10 +230,18 @@ pub(crate) async fn parse_openai_stream(
                         );
                         log::warn!(
                             "[openai-compat stream] truncated args tail: {}",
-                            arguments.chars().rev().take(200).collect::<String>().chars().rev().collect::<String>()
+                            arguments
+                                .chars()
+                                .rev()
+                                .take(200)
+                                .collect::<String>()
+                                .chars()
+                                .rev()
+                                .collect::<String>()
                         );
                         if is_eof && truncated_tool.is_none() {
-                            truncated_tool = Some((id.clone(), name.clone(), arguments.len(), delta_count));
+                            truncated_tool =
+                                Some((id.clone(), name.clone(), arguments.len(), delta_count));
                         }
                         serde_json::Value::Object(serde_json::Map::new())
                     }

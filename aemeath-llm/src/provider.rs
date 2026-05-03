@@ -1,7 +1,7 @@
 //! LLM Provider trait and common types
 
-use async_trait::async_trait;
 use aemeath_core::message::Message;
+use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::types::{StreamResponse, SystemBlock};
@@ -66,10 +66,12 @@ pub trait LlmProvider: Send + Sync {
     /// Get current reasoning/thinking mode
     fn is_reasoning(&self) -> bool;
 
-    /// Set reasoning_effort level (e.g. "low", "medium", "high") at runtime.
+    /// Set OpenAI reasoning object effort at runtime.
     /// Ignored by providers that don't support it.
     fn set_reasoning_effort(&self, _effort: Option<String>) {}
 
-    /// Get current reasoning_effort level.
-    fn reasoning_effort(&self) -> Option<String> { None }
+    /// Get current OpenAI reasoning object effort.
+    fn reasoning_effort(&self) -> Option<String> {
+        None
+    }
 }

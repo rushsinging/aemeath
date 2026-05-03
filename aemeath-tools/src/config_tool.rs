@@ -6,7 +6,9 @@ pub struct ConfigTool;
 
 #[async_trait]
 impl Tool for ConfigTool {
-    fn name(&self) -> &str { "Config" }
+    fn name(&self) -> &str {
+        "Config"
+    }
     fn description(&self) -> &str {
         "View or modify configuration settings. Supports getting, setting, and listing config values."
     }
@@ -31,14 +33,18 @@ impl Tool for ConfigTool {
             "required": ["action"]
         })
     }
-    fn is_read_only(&self) -> bool { false }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let action = input["action"].as_str().unwrap_or("list");
         let key = input["key"].as_str();
         let value = input["value"].as_str();
-        
+
         match action {
             "list" => {
                 // 列出所有可配置项
@@ -51,13 +57,13 @@ impl Tool for ConfigTool {
                     ("cwd", "Working directory"),
                     ("mcp_servers", "MCP server configurations"),
                 ];
-                
+
                 let output = config_items
                     .iter()
                     .map(|(k, d)| format!("{}: {}", k, d))
                     .collect::<Vec<_>>()
                     .join("\n");
-                
+
                 ToolResult::success(format!("Available configuration options:\n{}", output))
             }
             "get" => {
@@ -65,7 +71,7 @@ impl Tool for ConfigTool {
                     return ToolResult::error("Key is required for 'get' action");
                 }
                 let key = key;
-                
+
                 // 这里应该实际读取配置，但由于 Config 可能不在 context 中
                 // 返回提示信息
                 let key = key.unwrap_or("unknown");
@@ -101,9 +107,10 @@ impl Tool for ConfigTool {
                     key.to_uppercase()
                 ))
             }
-            _ => {
-                ToolResult::error(format!("Unknown action: {}. Valid actions: get, set, list, reset", action))
-            }
+            _ => ToolResult::error(format!(
+                "Unknown action: {}. Valid actions: get, set, list, reset",
+                action
+            )),
         }
     }
 }

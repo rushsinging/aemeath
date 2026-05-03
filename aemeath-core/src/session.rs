@@ -114,7 +114,10 @@ impl Session {
         if let Some(title) = &self.metadata.title {
             return title.chars().take(40).collect();
         }
-        let first_user = self.messages.iter().find(|m| m.role == crate::message::Role::User);
+        let first_user = self
+            .messages
+            .iter()
+            .find(|m| m.role == crate::message::Role::User);
         if let Some(msg) = first_user {
             let text = msg.text_content();
             let first_line = text.lines().next().unwrap_or("").trim();
@@ -123,7 +126,11 @@ impl Session {
                 return trunc;
             }
         }
-        self.metadata.project.as_deref().unwrap_or("unknown").to_string()
+        self.metadata
+            .project
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_string()
     }
 }
 
@@ -329,7 +336,10 @@ pub async fn search_sessions(filter: &SessionFilter) -> Vec<Session> {
         .filter(|s| {
             // Title filter (partial match)
             if let Some(title) = &filter.title {
-                let matches = s.metadata.title.as_ref()
+                let matches = s
+                    .metadata
+                    .title
+                    .as_ref()
                     .map(|t| t.to_lowercase().contains(&title.to_lowercase()))
                     .unwrap_or(false);
                 if !matches {
@@ -339,14 +349,22 @@ pub async fn search_sessions(filter: &SessionFilter) -> Vec<Session> {
 
             // Tag filter (exact match)
             if let Some(tag) = &filter.tag {
-                if !s.metadata.tags.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+                if !s
+                    .metadata
+                    .tags
+                    .iter()
+                    .any(|t| t.to_lowercase() == tag.to_lowercase())
+                {
                     return false;
                 }
             }
 
             // Project filter (partial match)
             if let Some(project) = &filter.project {
-                let matches = s.metadata.project.as_ref()
+                let matches = s
+                    .metadata
+                    .project
+                    .as_ref()
                     .map(|p| p.to_lowercase().contains(&project.to_lowercase()))
                     .unwrap_or(false);
                 if !matches {
@@ -363,7 +381,12 @@ pub async fn search_sessions(filter: &SessionFilter) -> Vec<Session> {
 
             // Model filter (exact match)
             if let Some(model) = &filter.model {
-                if s.metadata.model.as_ref().map(|m| m != model).unwrap_or(true) {
+                if s.metadata
+                    .model
+                    .as_ref()
+                    .map(|m| m != model)
+                    .unwrap_or(true)
+                {
                     return false;
                 }
             }

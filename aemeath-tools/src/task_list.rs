@@ -10,7 +10,9 @@ pub struct TaskListTool {
 
 #[async_trait]
 impl Tool for TaskListTool {
-    fn name(&self) -> &str { "TaskList" }
+    fn name(&self) -> &str {
+        "TaskList"
+    }
     fn description(&self) -> &str {
         "List all tasks and their status. Use to discover available work.\n\n\
          Look for tasks that are pending with no unresolved blocked_by dependencies — \
@@ -39,20 +41,29 @@ impl Tool for TaskListTool {
             },
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         // Parse filters
-        let status_filter = input.get("status").and_then(|v| v.as_str()).and_then(|s| match s {
-            "pending" => Some(TaskStatus::Pending),
-            "in_progress" => Some(TaskStatus::InProgress),
-            "completed" => Some(TaskStatus::Completed),
-            "deleted" => Some(TaskStatus::Deleted),
-            _ => None,
-        });
+        let status_filter = input
+            .get("status")
+            .and_then(|v| v.as_str())
+            .and_then(|s| match s {
+                "pending" => Some(TaskStatus::Pending),
+                "in_progress" => Some(TaskStatus::InProgress),
+                "completed" => Some(TaskStatus::Completed),
+                "deleted" => Some(TaskStatus::Deleted),
+                _ => None,
+            });
 
-        let priority_filter = input.get("priority").and_then(|v| v.as_str())
+        let priority_filter = input
+            .get("priority")
+            .and_then(|v| v.as_str())
             .and_then(|p| TaskPriority::from_str(p));
 
         let session_filter = input.get("sessionId").and_then(|v| v.as_str());
@@ -64,10 +75,14 @@ impl Tool for TaskListTool {
             tasks = tasks.into_iter().filter(|t| t.status == status).collect();
         }
         if let Some(priority) = priority_filter {
-            tasks = tasks.into_iter().filter(|t| t.priority == priority).collect();
+            tasks = tasks
+                .into_iter()
+                .filter(|t| t.priority == priority)
+                .collect();
         }
         if let Some(session_id) = session_filter {
-            tasks = tasks.into_iter()
+            tasks = tasks
+                .into_iter()
                 .filter(|t| t.session_id.as_ref() == Some(&session_id.to_string()))
                 .collect();
         }
@@ -79,7 +94,10 @@ impl Tool for TaskListTool {
         let stats = self.store.stats().await;
         let mut output = format!(
             "Tasks: {} total ({} pending, {} in_progress, {} completed)\n\n",
-            stats.total - stats.deleted, stats.pending, stats.in_progress, stats.completed
+            stats.total - stats.deleted,
+            stats.pending,
+            stats.in_progress,
+            stats.completed
         );
 
         for task in &tasks {
@@ -113,12 +131,27 @@ impl Tool for TaskListTool {
             } else {
                 ""
             };
-            let owner = task.owner.as_deref().map(|o| format!(" (@{})", o)).unwrap_or_default();
+            let owner = task
+                .owner
+                .as_deref()
+                .map(|o| format!(" (@{})", o))
+                .unwrap_or_default();
 
             output.push_str(&format!(
                 "{} #{} {}{}{} [{}]{}{}{}\n   {}\n",
-                icon, task.id, task.subject, priority_label, progress, status_label, owner, blocked,
-                if !task.tags.is_empty() { format!(" [{}]", task.tags.join(", ")) } else { "".to_string() },
+                icon,
+                task.id,
+                task.subject,
+                priority_label,
+                progress,
+                status_label,
+                owner,
+                blocked,
+                if !task.tags.is_empty() {
+                    format!(" [{}]", task.tags.join(", "))
+                } else {
+                    "".to_string()
+                },
                 task.description
             ));
         }

@@ -2,7 +2,10 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+    ConfirmAction,
+};
 use crate::config::PermissionModeConfig;
 
 inventory::submit! {
@@ -53,7 +56,11 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
              Storage:\n  Persist sessions: {}\n",
             ctx.config.model.name,
             ctx.config.model.max_tokens,
-            ctx.config.api.base_url.as_deref().unwrap_or("https://api.anthropic.com"),
+            ctx.config
+                .api
+                .base_url
+                .as_deref()
+                .unwrap_or("https://api.anthropic.com"),
             ctx.config.ui.markdown,
             ctx.config.ui.color,
             ctx.config.ui.tui,
@@ -71,20 +78,24 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 if parts.len() < 2 {
                     return CommandResult::Error("Usage: /config get <key>".to_string());
                 }
-                CommandResult::Success(format!("{} = {}", parts[1], get_config_value(&ctx.config, parts[1])))
+                CommandResult::Success(format!(
+                    "{} = {}",
+                    parts[1],
+                    get_config_value(&ctx.config, parts[1])
+                ))
             }
-            "set" => {
-                CommandResult::Error("`/config set` is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string())
-            }
-            "reset" => {
-                CommandResult::Confirm {
-                    message: "Reset configuration to defaults?".to_string(),
-                    action: ConfirmAction::ResetConfig,
-                }
-            }
-            "save" => {
-                CommandResult::Error("`/config save` is not yet implemented. Edit ~/.aemeath/config.json directly.".to_string())
-            }
+            "set" => CommandResult::Error(
+                "`/config set` is not yet implemented. Edit ~/.aemeath/config.json directly."
+                    .to_string(),
+            ),
+            "reset" => CommandResult::Confirm {
+                message: "Reset configuration to defaults?".to_string(),
+                action: ConfirmAction::ResetConfig,
+            },
+            "save" => CommandResult::Error(
+                "`/config save` is not yet implemented. Edit ~/.aemeath/config.json directly."
+                    .to_string(),
+            ),
             _ => CommandResult::Error(format!("Unknown config command: {}", parts[0])),
         }
     }
@@ -94,8 +105,16 @@ fn get_config_value(config: &crate::config::Config, key: &str) -> String {
     match key {
         "model" => config.model.name.clone(),
         "max_tokens" => config.model.max_tokens.to_string(),
-        "base_url" => config.api.base_url.clone().unwrap_or_else(|| "default".to_string()),
-        "temperature" => config.model.temperature.map(|t| t.to_string()).unwrap_or_else(|| "default".to_string()),
+        "base_url" => config
+            .api
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "default".to_string()),
+        "temperature" => config
+            .model
+            .temperature
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "default".to_string()),
         "context_size" => config.model.context_size.to_string(),
         "permission_mode" => match config.permissions.mode {
             PermissionModeConfig::Ask => "ask".to_string(),

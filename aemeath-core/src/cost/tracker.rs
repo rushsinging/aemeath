@@ -131,12 +131,14 @@ impl CostTracker {
 
     /// 指定会话的 token 数
     pub fn session_tokens(&self, session_id: &str) -> (u32, u32) {
-        let input = self.records
+        let input = self
+            .records
             .iter()
             .filter(|r| r.session_id == session_id)
             .map(|r| r.input_tokens)
             .sum();
-        let output = self.records
+        let output = self
+            .records
             .iter()
             .filter(|r| r.session_id == session_id)
             .map(|r| r.output_tokens)

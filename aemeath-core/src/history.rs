@@ -53,8 +53,8 @@ impl HistoryManager {
             return Ok(()); // No history file yet
         }
 
-        let content = fs::read_to_string(&self.path)
-            .map_err(|e| format!("Failed to read history: {}", e))?;
+        let content =
+            fs::read_to_string(&self.path).map_err(|e| format!("Failed to read history: {}", e))?;
 
         let entries: Vec<HistoryEntry> = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse history: {}", e))?;
@@ -74,8 +74,7 @@ impl HistoryManager {
         let content = serde_json::to_string_pretty(&self.entries)
             .map_err(|e| format!("Failed to serialize history: {}", e))?;
 
-        fs::write(&self.path, content)
-            .map_err(|e| format!("Failed to write history: {}", e))?;
+        fs::write(&self.path, content).map_err(|e| format!("Failed to write history: {}", e))?;
 
         Ok(())
     }
@@ -215,8 +214,7 @@ impl HistoryManager {
             }
         }
 
-        let mut most_common_commands: Vec<(String, usize)> =
-            command_counts.into_iter().collect();
+        let mut most_common_commands: Vec<(String, usize)> = command_counts.into_iter().collect();
         most_common_commands.sort_by(|a, b| b.1.cmp(&a.1));
         most_common_commands.truncate(10);
 

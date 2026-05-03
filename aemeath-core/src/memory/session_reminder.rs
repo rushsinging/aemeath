@@ -119,7 +119,10 @@ mod tests {
         reminders.add("任务一").unwrap();
         reminders.add("任务二").unwrap();
 
-        assert_eq!(reminders.recap_line().as_deref(), Some("* recap: 任务一 | 任务二"));
+        assert_eq!(
+            reminders.recap_line().as_deref(),
+            Some("* recap: 任务一 | 任务二")
+        );
     }
 
     #[test]

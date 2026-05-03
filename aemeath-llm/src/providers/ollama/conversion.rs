@@ -1,8 +1,8 @@
 //! 消息格式转换：将 Anthropic 风格转换为 Ollama 原生 /api/chat 格式。
 
-use aemeath_core::message::{ContentBlock, Message, Role};
-use crate::types::SystemBlock;
 use super::OllamaProvider;
+use crate::types::SystemBlock;
+use aemeath_core::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。
 pub(crate) trait OllamaProviderConversion {
@@ -42,8 +42,12 @@ impl OllamaProviderConversion for OllamaProvider {
         let mut system_extras: Vec<String> = Vec::new();
         let mut first_non_reminder = 0;
         for msg in messages {
-            if msg.role != Role::User { break; }
-            let all_text: String = msg.content.iter()
+            if msg.role != Role::User {
+                break;
+            }
+            let all_text: String = msg
+                .content
+                .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(text.as_str()),
                     _ => None,
@@ -58,9 +62,8 @@ impl OllamaProviderConversion for OllamaProvider {
         }
 
         // Build system message: original system blocks + extracted reminders
-        let mut system_parts: Vec<String> = system.iter()
-            .map(|b| b.text.as_str().to_string())
-            .collect();
+        let mut system_parts: Vec<String> =
+            system.iter().map(|b| b.text.as_str().to_string()).collect();
         system_parts.extend(system_extras);
 
         if !system_parts.is_empty() {
@@ -141,7 +144,7 @@ impl OllamaProviderConversion for OllamaProvider {
 
             if !images.is_empty() {
                 message["images"] = serde_json::Value::Array(
-                    images.into_iter().map(serde_json::Value::String).collect()
+                    images.into_iter().map(serde_json::Value::String).collect(),
                 );
             }
 

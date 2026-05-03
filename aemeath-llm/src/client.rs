@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::provider::{CallbackHandler, LlmProvider, ApiType, StreamHandler};
+use crate::provider::{ApiType, CallbackHandler, LlmProvider, StreamHandler};
 use crate::types::{StreamResponse, SystemBlock};
 use aemeath_core::message::Message;
 use tokio_util::sync::CancellationToken;
@@ -74,17 +74,30 @@ impl LlmClient {
         reasoning: bool,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> = match api_type {
-            ApiType::Anthropic => {
-                Arc::new(crate::providers::AnthropicProvider::new(api_key, base_url, model, max_tokens))
-            }
+            ApiType::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
+                api_key, base_url, model, max_tokens,
+            )),
             ApiType::OpenAICompatible => {
                 let config = OpenAIProviderConfig::from_provider_name("openai-compatible");
                 Arc::new(crate::providers::OpenAICompatibleProvider::new(
                     config, api_key, base_url, model, max_tokens, reasoning,
                 ))
             }
-        };
-        Self { provider: provider_impl }
+            ApiType::Zhipu => {
+                let config = OpenAIProviderConfig::from_provider_name("zhipu");
+                Arc::new(crate::providers::OpenAICompatibleProvider::new(
+                    config, api_key, base_url, model, max_tokens, reasoning,
+                ))
+            }
+            ApiType::LiteLLM => {
+                let config = OpenAIProviderConfig::from_provider_name("litellm");
+                Arc::new(crate::providers::OpenAICompatibleProvider::new(
+                    config, api_key, base_url, model, max_tokens, reasoning,
+                ))
+            }        };
+        Self {
+            provider: provider_impl,
+        }
     }
 
     pub fn with_openai_config(
@@ -95,10 +108,13 @@ impl LlmClient {
         max_tokens: u32,
         reasoning: bool,
     ) -> Self {
-        let provider_impl: Arc<dyn LlmProvider> = Arc::new(
-            crate::providers::OpenAICompatibleProvider::new(config, api_key, base_url, model, max_tokens, reasoning),
-        );
-        Self { provider: provider_impl }
+        let provider_impl: Arc<dyn LlmProvider> =
+            Arc::new(crate::providers::OpenAICompatibleProvider::new(
+                config, api_key, base_url, model, max_tokens, reasoning,
+            ));
+        Self {
+            provider: provider_impl,
+        }
     }
 
     pub fn from_config(
@@ -111,9 +127,23 @@ impl LlmClient {
         openai_config: Option<OpenAIProviderConfig>,
     ) -> Self {
         if let Some(config) = openai_config {
-            Self::with_openai_config(config, api_key, base_url, Some(model), max_tokens, reasoning)
+            Self::with_openai_config(
+                config,
+                api_key,
+                base_url,
+                Some(model),
+                max_tokens,
+                reasoning,
+            )
         } else {
-            Self::with_provider(api_type, api_key, base_url, Some(model), max_tokens, reasoning)
+            Self::with_provider(
+                api_type,
+                api_key,
+                base_url,
+                Some(model),
+                max_tokens,
+                reasoning,
+            )
         }
     }
 
@@ -126,7 +156,10 @@ impl LlmClient {
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         self.log_request(system, messages, tool_schemas);
-        let result = self.provider.stream_message(system, messages, tool_schemas, handler, cancel).await;
+        let result = self
+            .provider
+            .stream_message(system, messages, tool_schemas, handler, cancel)
+            .await;
         self.log_response(&result);
         result
     }
@@ -141,13 +174,23 @@ impl LlmClient {
     ) -> Result<StreamResponse, crate::LlmError> {
         self.log_request(system, messages, tool_schemas);
         let mut handler = CallbackHandler::new(callback);
-        let result = self.provider.stream_message(system, messages, tool_schemas, &mut handler, cancel).await;
+        let result = self
+            .provider
+            .stream_message(system, messages, tool_schemas, &mut handler, cancel)
+            .await;
         self.log_response(&result);
         result
     }
 
-    fn log_request(&self, system: &[SystemBlock], messages: &[Message], tool_schemas: &[serde_json::Value]) {
-        if !log::log_enabled!(log::Level::Debug) { return; }
+    fn log_request(
+        &self,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+    ) {
+        if !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
         let msg_summary: Vec<serde_json::Value> = messages.iter().enumerate().map(|(i, msg)| {
             let blocks: Vec<serde_json::Value> = msg.content.iter().map(|block| match block {
                 aemeath_core::message::ContentBlock::Text { text } => {
@@ -170,7 +213,10 @@ impl LlmClient {
             }).collect();
             serde_json::json!({"index":i,"role":format!("{:?}",msg.role).to_lowercase(),"blocks":blocks})
         }).collect();
-        let system_preview: Vec<String> = system.iter().map(|b| truncate_preview(&b.text, 200)).collect();
+        let system_preview: Vec<String> = system
+            .iter()
+            .map(|b| truncate_preview(&b.text, 200))
+            .collect();
         log::debug!(
             "[LLM REQUEST] provider={} model={} system_blocks={} messages={} tools={}\n  system: {:?}\n  messages: {}",
             self.provider_name(), self.model_name(), system.len(), messages.len(), tool_schemas.len(),
@@ -179,7 +225,9 @@ impl LlmClient {
     }
 
     fn log_response(&self, result: &Result<StreamResponse, crate::LlmError>) {
-        if !log::log_enabled!(log::Level::Debug) { return; }
+        if !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
         match result {
             Ok(resp) => {
                 let text = resp.assistant_message.text_content();
@@ -195,14 +243,81 @@ impl LlmClient {
                     tool_uses.len(), text_preview, serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
                 );
             }
-            Err(e) => { log::debug!("[LLM RESPONSE ERROR] {}", e); }
+            Err(e) => {
+                log::debug!("[LLM RESPONSE ERROR] {}", e);
+            }
         }
     }
 
-    pub fn model_name(&self) -> &str { self.provider.model_name() }
-    pub fn provider_name(&self) -> &str { self.provider.provider_name() }
-    pub fn set_reasoning(&self, enabled: bool) { self.provider.set_reasoning(enabled); }
-    pub fn is_reasoning(&self) -> bool { self.provider.is_reasoning() }
-    pub fn set_reasoning_effort(&self, effort: Option<String>) { self.provider.set_reasoning_effort(effort); }
-    pub fn reasoning_effort(&self) -> Option<String> { self.provider.reasoning_effort() }
+    pub fn model_name(&self) -> &str {
+        self.provider.model_name()
+    }
+    pub fn provider_name(&self) -> &str {
+        self.provider.provider_name()
+    }
+    pub fn set_reasoning(&self, enabled: bool) {
+        self.provider.set_reasoning(enabled);
+    }
+    pub fn is_reasoning(&self) -> bool {
+        self.provider.is_reasoning()
+    }
+    pub fn set_reasoning_effort(&self, effort: Option<String>) {
+        self.provider.set_reasoning_effort(effort);
+    }
+    pub fn reasoning_effort(&self) -> Option<String> {
+        self.provider.reasoning_effort()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_with_provider_zhipu_uses_zhipu_openai_config() {
+        let client = LlmClient::with_provider(
+            ApiType::Zhipu,
+            "test-key".to_string(),
+            Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
+            Some("glm-5.1".to_string()),
+            8192,
+            true,
+        );
+
+        assert_eq!(client.provider_name(), "zhipu");
+        assert_eq!(client.model_name(), "glm-5.1");
+        assert!(client.is_reasoning());
+    }
+
+    #[test]
+    fn test_with_provider_litellm_uses_litellm_openai_config() {
+        let client = LlmClient::with_provider(
+            ApiType::LiteLLM,
+            "test-key".to_string(),
+            Some("https://litellm.example.com".to_string()),
+            Some("anthropic/claude-opus-4-7".to_string()),
+            4096,
+            false,
+        );
+
+        assert_eq!(client.provider_name(), "litellm");
+        assert_eq!(client.model_name(), "anthropic/claude-opus-4-7");
+        assert!(!client.is_reasoning());
+    }
+
+    #[test]
+    fn test_openai_provider_config_zhipu_uses_unversioned_chat_suffix() {
+        let config = OpenAIProviderConfig::from_provider_name("zhipu");
+        assert_eq!(config.provider_name, "zhipu");
+        assert_eq!(config.chat_api_suffix, "/chat/completions");
+        assert!(config.is_zhipu);
+    }
+
+    #[test]
+    fn test_openai_provider_config_litellm_uses_openai_v1_chat_suffix() {
+        let config = OpenAIProviderConfig::from_provider_name("litellm");
+        assert_eq!(config.provider_name, "litellm");
+        assert_eq!(config.chat_api_suffix, "/v1/chat/completions");
+        assert!(!config.is_zhipu);
+    }
 }

@@ -46,10 +46,7 @@ pub async fn load_mcp_tools(
         let config: serde_json::Value = match serde_json::from_str(&content) {
             Ok(c) => c,
             Err(e) => {
-                log::warn!(
-                    "invalid MCP config {}: {e}",
-                    config_path.display()
-                );
+                log::warn!("invalid MCP config {}: {e}", config_path.display());
                 continue;
             }
         };
@@ -72,16 +69,14 @@ pub async fn load_mcp_tools(
             log::info!("[MCP] connecting to {}...", name);
             match McpClient::connect(name, &mcp_config).await {
                 Ok(client) => {
-                    let client =
-                        std::sync::Arc::new(tokio::sync::Mutex::new(client));
+                    let client = std::sync::Arc::new(tokio::sync::Mutex::new(client));
 
                     // Fetch and register tools
                     match client.lock().await.list_tools().await {
                         Ok(tools) => {
                             log::info!("[MCP] {} registered {} tools", name, tools.len());
                             for tool_def in tools {
-                                let qualified =
-                                    format!("mcp__{}_{}", name, tool_def.name);
+                                let qualified = format!("mcp__{}_{}", name, tool_def.name);
                                 registry.register(Box::new(McpTool {
                                     tool_name: tool_def.name,
                                     qualified_name: qualified,

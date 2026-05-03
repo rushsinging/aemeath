@@ -107,18 +107,23 @@ impl AgentRunner for CliAgentRunner {
             .as_deref()
             .and_then(|spec| {
                 // Try find_model to get the ModelEntryConfig for reasoning lookup
-                let query = if spec.contains('/') { spec.to_string() } else { format!("{}/{}", self.client.provider_name(), spec) };
+                let query = if spec.contains('/') {
+                    spec.to_string()
+                } else {
+                    format!("{}/{}", self.client.provider_name(), spec)
+                };
                 self.models_config.find_model(&query)
             })
-            .map(|(_, _, entry)| entry.reasoning)
+            .map(|(_, _, entry)| entry.reasoning.and_then(|r| r.enabled()))
             .flatten();
-        let reasoning = role_reasoning
-            .or(model_reasoning)
-            .unwrap_or(self.reasoning);
+        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
         log::info!(
             "[SubAgent] reasoning={} (role={:?}, model={:?}, default={})",
-            reasoning, role_reasoning, model_reasoning, self.reasoning
+            reasoning,
+            role_reasoning,
+            model_reasoning,
+            self.reasoning
         );
 
         // Extract hook_runner to avoid borrow conflicts with closure
@@ -172,7 +177,7 @@ impl AgentRunner for CliAgentRunner {
                 "agent",
                 msg,
             );
-        };        // Helper to call SubagentStop hook and send system messages
+        }; // Helper to call SubagentStop hook and send system messages
         let hook_runner_clone = hook_runner.clone();
         let progress_tx_clone = progress_tx.clone();
         let system_for_hook = system.clone();
@@ -184,14 +189,16 @@ impl AgentRunner for CliAgentRunner {
             let system = system_for_hook.clone();
             let resolved_spec = resolved_spec_for_hook.clone();
             async move {
-                let hook_results = hook_runner.on_subagent_stop(
-                    &prompt,
-                    &system,
-                    resolved_spec.as_deref(),
-                    &result,
-                    turns,
-                    is_error,
-                ).await;
+                let hook_results = hook_runner
+                    .on_subagent_stop(
+                        &prompt,
+                        &system,
+                        resolved_spec.as_deref(),
+                        &result,
+                        turns,
+                        is_error,
+                    )
+                    .await;
                 // Send any system messages from hook results to progress_tx
                 for (_, _, json_output) in &hook_results {
                     if let Some(ref output) = json_output {
@@ -207,14 +214,19 @@ impl AgentRunner for CliAgentRunner {
 
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
         let sub_task_store = std::sync::Arc::new(TaskStore::new());
-        let sub_skills = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let sub_skills =
+            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        aemeath_tools::register_all_tools_except_agent(&mut sub_registry, sub_task_store, sub_skills);
+        aemeath_tools::register_all_tools_except_agent(
+            &mut sub_registry,
+            sub_task_store,
+            sub_skills,
+        );
 
         let sub_schemas = sub_registry.schemas();
         let mut messages = vec![Message::user(prompt)];
         let mut handler = SilentHandler;
-  
+
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
         let log_request_messages = |turn: usize, messages: &[Message]| {
@@ -238,13 +250,13 @@ impl AgentRunner for CliAgentRunner {
                 payload,
             );
         };
-  
+
         let sub_ctx = ToolContext {
             cwd: ctx.cwd.clone(),
             cancel: ctx.cancel.clone(),
-            read_files: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
-            )),
+            read_files: std::sync::Arc::new(
+                std::sync::Mutex::new(std::collections::HashSet::new()),
+            ),
             agent_runner: None, // No nested agents
             session_reminders: ctx.session_reminders.clone(),
             plan_mode: ctx.plan_mode,
@@ -261,7 +273,10 @@ impl AgentRunner for CliAgentRunner {
         };
 
         let model_display = resolved_spec.as_deref().unwrap_or("default");
-        progress(None, &format!("Sub-agent started with model: {}", model_display));
+        progress(
+            None,
+            &format!("Sub-agent started with model: {}", model_display),
+        );
 
         // Sub-agents use a conservative context size for compaction decisions
         let ctx_context_size: usize = 128_000;
@@ -277,38 +292,63 @@ impl AgentRunner for CliAgentRunner {
                 return result;
             }
             if start_time.elapsed() > max_duration {
-                progress(Some(turn_number), &format!("Agent timed out after {}s", start_time.elapsed().as_secs()));
+                progress(
+                    Some(turn_number),
+                    &format!("Agent timed out after {}s", start_time.elapsed().as_secs()),
+                );
                 // Return whatever text we have so far
                 for msg in messages.iter().rev() {
                     let text = msg.text_content();
                     if !text.is_empty() {
-                        let result = format!("{}\n\n[Sub-agent timed out after {}s]", text, start_time.elapsed().as_secs());
+                        let result = format!(
+                            "{}\n\n[Sub-agent timed out after {}s]",
+                            text,
+                            start_time.elapsed().as_secs()
+                        );
                         call_subagent_stop_hook(result.clone(), turn, true).await;
                         return result;
                     }
                 }
-                let result = format!("Sub-agent timed out after {}s", start_time.elapsed().as_secs());
+                let result = format!(
+                    "Sub-agent timed out after {}s",
+                    start_time.elapsed().as_secs()
+                );
                 call_subagent_stop_hook(result.clone(), turn, true).await;
                 return result;
             }
             let msg_tokens = aemeath_core::compact::estimate_messages_tokens(&messages);
-            progress(Some(turn_number), &format!(
-                "Agent turn {}/{}, messages: {}, est_tokens: {}",
-                turn + 1, max_turns, messages.len(), msg_tokens
-            ));
+            progress(
+                Some(turn_number),
+                &format!(
+                    "Agent turn {}/{}, messages: {}, est_tokens: {}",
+                    turn + 1,
+                    max_turns,
+                    messages.len(),
+                    msg_tokens
+                ),
+            );
 
             log_request_messages(turn_number, &messages);
             let response = client
-                .stream_message(&system_blocks, &messages, &sub_schemas, &mut handler, &ctx.cancel)
+                .stream_message(
+                    &system_blocks,
+                    &messages,
+                    &sub_schemas,
+                    &mut handler,
+                    &ctx.cancel,
+                )
                 .await;
 
             match response {
                 Ok(resp) => {
                     let api_input = resp.usage.input_tokens as u64;
-                    progress(Some(turn_number), &format!(
-                        "API ok: in={} out={} stop={:?}",
-                        resp.usage.input_tokens, resp.usage.output_tokens, resp.stop_reason
-                    ));
+                    progress(
+                        Some(turn_number),
+                        &format!(
+                            "API ok: in={} out={} stop={:?}",
+                            resp.usage.input_tokens, resp.usage.output_tokens, resp.stop_reason
+                        ),
+                    );
                     messages.push(resp.assistant_message.clone());
 
                     // Send text output to TUI progress channel (if available)
@@ -350,15 +390,24 @@ impl AgentRunner for CliAgentRunner {
                     // Send tool call names before execution so the TUI shows progress
                     // while long-running sub-agent tools are still in flight.
                     if let Some(ref tx) = progress_tx {
-                        let tool_names: Vec<&str> = tool_calls.iter().map(|c| c.name.as_str()).collect();
-                        let _ = tx.try_send(format!("[Turn {}] calling: {}", turn + 1, tool_names.join(", ")));
+                        let tool_names: Vec<&str> =
+                            tool_calls.iter().map(|c| c.name.as_str()).collect();
+                        let _ = tx.try_send(format!(
+                            "[Turn {}] calling: {}",
+                            turn + 1,
+                            tool_names.join(", ")
+                        ));
                     }
 
                     let mut results = agent.execute_tools(&tool_calls).await;
-                    progress(Some(turn_number), &format!(
-                        "Tools done ({}s elapsed), {} results",
-                        start_time.elapsed().as_secs(), results.len()
-                    ));
+                    progress(
+                        Some(turn_number),
+                        &format!(
+                            "Tools done ({}s elapsed), {} results",
+                            start_time.elapsed().as_secs(),
+                            results.len()
+                        ),
+                    );
 
                     // Log each call followed by its result (interleaved)
                     for (id, output, is_error, _) in results.iter() {
@@ -371,10 +420,14 @@ impl AgentRunner for CliAgentRunner {
                         } else {
                             output.clone()
                         };
-                        let tool_name = call_info.get(id.as_str())
+                        let tool_name = call_info
+                            .get(id.as_str())
                             .map(|(n, _)| n.as_str())
                             .unwrap_or("?");
-                        progress(Some(turn_number), &format!("  ← {}[{}]: {}", tool_name, label, out_short));
+                        progress(
+                            Some(turn_number),
+                            &format!("  ← {}[{}]: {}", tool_name, label, out_short),
+                        );
                     }
 
                     // Truncate oversized tool results to keep sub-agent context lean
@@ -394,16 +447,31 @@ impl AgentRunner for CliAgentRunner {
                     // Auto-compact using actual API token count
                     // Sub-agents compact more aggressively than the main loop
                     let ctx_pct = api_input * 100 / ctx_context_size as u64;
-                    let urgency = if ctx_pct >= 50 { 2 } else if ctx_pct >= 35 { 1 } else { 0 };
+                    let urgency = if ctx_pct >= 50 {
+                        2
+                    } else if ctx_pct >= 35 {
+                        1
+                    } else {
+                        0
+                    };
                     if urgency >= 2 {
                         // Full local compaction — aggressively trim old messages
                         let old_len = messages.len();
                         let (compacted, was_compacted) = aemeath_core::compact::compact_messages(
-                            &messages, &system, ctx_context_size,
+                            &messages,
+                            &system,
+                            ctx_context_size,
                         );
                         if was_compacted {
                             messages = compacted;
-                            progress(Some(turn_number), &format!("Agent compacted: {} → {} messages", old_len, messages.len()));
+                            progress(
+                                Some(turn_number),
+                                &format!(
+                                    "Agent compacted: {} → {} messages",
+                                    old_len,
+                                    messages.len()
+                                ),
+                            );
                         }
                     } else if urgency >= 1 {
                         aemeath_core::compact::microcompact(&mut messages, 4);
@@ -419,7 +487,13 @@ impl AgentRunner for CliAgentRunner {
             }
         }
 
-        progress(Some(max_turns), &format!("Agent reached max turns ({}), returning partial result", max_turns));
+        progress(
+            Some(max_turns),
+            &format!(
+                "Agent reached max turns ({}), returning partial result",
+                max_turns
+            ),
+        );
         // Return the last assistant text if available
         for msg in messages.iter().rev() {
             let text = msg.text_content();
@@ -434,12 +508,7 @@ impl AgentRunner for CliAgentRunner {
         result
     }
 
-    async fn complete(
-        &self,
-        prompt: &str,
-        system: &str,
-        ctx: &ToolContext,
-    ) -> String {
+    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String {
         let system_blocks = vec![SystemBlock::cached(system.to_string())];
         let messages = vec![Message::user(prompt)];
         let mut handler = SilentHandler;

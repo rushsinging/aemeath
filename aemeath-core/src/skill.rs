@@ -74,7 +74,10 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
     // Name resolution priority: frontmatter name > file stem
     // Special case: when the file is named "SKILL.md" (case-insensitive),
     // use the parent directory name instead (e.g. cm/SKILL.md → name "cm").
-    let dir_name = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string());
+    let dir_name = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string());
     let file_stem = path.file_stem()?.to_string_lossy().to_string();
     let is_generic_name = file_stem.eq_ignore_ascii_case("skill")
         || file_stem.eq_ignore_ascii_case("index")
@@ -117,7 +120,10 @@ pub fn read_skill_content(skill: &Skill) -> String {
     let text = match std::fs::read_to_string(&skill.source_path) {
         Ok(t) => t,
         Err(e) => {
-            log::warn!("failed to read skill content from {}: {e}", skill.source_path.display());
+            log::warn!(
+                "failed to read skill content from {}: {e}",
+                skill.source_path.display()
+            );
             return String::new();
         }
     };
@@ -212,49 +218,54 @@ fn scan_subdir_md(dir: &Path, skills: &mut Vec<Skill>, namespace: Option<&str>) 
 /// Extra directories are scanned after standard locations, so their skills
 /// take lower priority (won't override same-name skills from project/global).
 pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Skill> {
-      let mut map = HashMap::new();
-      let home = dirs::home_dir();
+    let mut map = HashMap::new();
+    let home = dirs::home_dir();
 
-      // Project-level skills (highest priority)
-      // 1. {cwd}/.aemeath/skills/
-      let project_dir = cwd.join(".aemeath").join("skills");
-      for skill in load_skills_from_dir(&project_dir) {
-          map.insert(skill.name.clone(), skill);
-      }
+    // Project-level skills (highest priority)
+    // 1. {cwd}/.aemeath/skills/
+    let project_dir = cwd.join(".aemeath").join("skills");
+    for skill in load_skills_from_dir(&project_dir) {
+        map.insert(skill.name.clone(), skill);
+    }
 
-      // Global skills
-      if let Some(ref home) = home {
-          // 2. ~/.aemeath/skills/
-          let aemeath_global = home.join(".aemeath").join("skills");
-          for skill in load_skills_from_dir(&aemeath_global) {
-              map.entry(skill.name.clone()).or_insert(skill);
-          }
-          // 3. ~/.agents/skills/
-          let agents_global = home.join(".agents").join("skills");
-          for skill in load_skills_from_dir(&agents_global) {
-              map.entry(skill.name.clone()).or_insert(skill);
-          }
-      }
+    // Global skills
+    if let Some(ref home) = home {
+        // 2. ~/.aemeath/skills/
+        let aemeath_global = home.join(".aemeath").join("skills");
+        for skill in load_skills_from_dir(&aemeath_global) {
+            map.entry(skill.name.clone()).or_insert(skill);
+        }
+        // 3. ~/.agents/skills/
+        let agents_global = home.join(".agents").join("skills");
+        for skill in load_skills_from_dir(&agents_global) {
+            map.entry(skill.name.clone()).or_insert(skill);
+        }
+    }
 
-      // Extra skill directories from config.json (lowest priority)
-      for dir in extra_dirs {
-          // Expand `~` to home directory
-          let expanded = if dir.starts_with("~") {
-              if let Some(ref home) = home {
-                  home.join(dir.strip_prefix("~").unwrap_or(dir).strip_prefix("/").unwrap_or(dir))
-              } else {
-                  dir.clone()
-              }
-          } else {
-              dir.clone()
-          };
-          for skill in load_skills_from_dir(&expanded) {
-              map.entry(skill.name.clone()).or_insert(skill);
-          }
-      }
+    // Extra skill directories from config.json (lowest priority)
+    for dir in extra_dirs {
+        // Expand `~` to home directory
+        let expanded = if dir.starts_with("~") {
+            if let Some(ref home) = home {
+                home.join(
+                    dir.strip_prefix("~")
+                        .unwrap_or(dir)
+                        .strip_prefix("/")
+                        .unwrap_or(dir),
+                )
+            } else {
+                dir.clone()
+            }
+        } else {
+            dir.clone()
+        };
+        for skill in load_skills_from_dir(&expanded) {
+            map.entry(skill.name.clone()).or_insert(skill);
+        }
+    }
 
-      map
-  }
+    map
+}
 
 /// Load skills and filter based on available tools and other skills.
 pub fn load_and_filter_skills(
@@ -263,15 +274,17 @@ pub fn load_and_filter_skills(
     extra_dirs: &[PathBuf],
 ) -> HashMap<String, Skill> {
     let all_skills = load_all_skills(cwd, extra_dirs);
-    let skill_names: std::collections::HashSet<String> =
-        all_skills.keys().cloned().collect();
+    let skill_names: std::collections::HashSet<String> = all_skills.keys().cloned().collect();
 
     all_skills
         .into_iter()
         .filter(|(_, skill)| {
             // Check requires_tools
             if !skill.requires_tools.is_empty()
-                && !skill.requires_tools.iter().all(|t| available_tools.contains(t))
+                && !skill
+                    .requires_tools
+                    .iter()
+                    .all(|t| available_tools.contains(t))
             {
                 return false;
             }
@@ -343,7 +356,10 @@ mod tests {
         let skill = parse_skill(&path).unwrap();
         assert_eq!(skill.name, "cm", "expected name from parent dir");
         assert!(skill.aliases.is_empty());
-        assert!(skill.content.is_empty(), "content should not be loaded at scan time");
+        assert!(
+            skill.content.is_empty(),
+            "content should not be loaded at scan time"
+        );
 
         std::fs::remove_dir_all(&base).unwrap();
     }
@@ -373,7 +389,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("SKILL.md");
         let mut f = std::fs::File::create(&path).unwrap();
-        write!(f, "---\nname: my-skill\ndescription: test\n---\nFull body content here!").unwrap();
+        write!(
+            f,
+            "---\nname: my-skill\ndescription: test\n---\nFull body content here!"
+        )
+        .unwrap();
 
         let skill = parse_skill(&path).unwrap();
         assert!(skill.content.is_empty(), "scan should not load content");
@@ -401,7 +421,11 @@ mod tests {
         write!(f, "---\ndescription: review skill\n---\nreview").unwrap();
 
         let skills = load_skills_from_dir(&base);
-        assert_eq!(skills.len(), 2, "should load both direct and sub-dir skills");
+        assert_eq!(
+            skills.len(),
+            2,
+            "should load both direct and sub-dir skills"
+        );
         assert!(skills.iter().any(|s| s.name == "hello"), "direct skill");
         assert!(skills.iter().any(|s| s.name == "review"), "sub-dir skill");
 
@@ -412,18 +436,27 @@ mod tests {
     fn test_load_skills_nested_with_namespace() {
         // Simulate: ~/.aemeath/skills/superpowers/skills/brainstorming/SKILL.md
         let base = std::env::temp_dir().join("aemeath_test_skill_ns");
-        let deep = base.join("superpowers").join("skills").join("brainstorming");
+        let deep = base
+            .join("superpowers")
+            .join("skills")
+            .join("brainstorming");
         std::fs::create_dir_all(&deep).unwrap();
 
         let skill_file = deep.join("SKILL.md");
         let mut f = std::fs::File::create(&skill_file).unwrap();
-        write!(f, "---\nname: brainstorming\ndescription: test\n---\nbrainstorm content").unwrap();
+        write!(
+            f,
+            "---\nname: brainstorming\ndescription: test\n---\nbrainstorm content"
+        )
+        .unwrap();
 
         let skills = load_skills_from_dir(&base);
         assert_eq!(skills.len(), 1, "should find nested skill");
         assert_eq!(skills[0].name, "superpowers:brainstorming");
-        assert!(skills[0].aliases.contains(&"brainstorming".to_string()),
-            "original name should be an alias");
+        assert!(
+            skills[0].aliases.contains(&"brainstorming".to_string()),
+            "original name should be an alias"
+        );
 
         std::fs::remove_dir_all(&base).unwrap();
     }
@@ -448,15 +481,27 @@ mod tests {
         // Agent file (should be ignored — agents/ is not "skills")
         let agent_file = agents_dir.join("code-reviewer.md");
         let mut f = std::fs::File::create(&agent_file).unwrap();
-        write!(f, "---\nname: code-reviewer\ndescription: agent\n---\nagent content").unwrap();
+        write!(
+            f,
+            "---\nname: code-reviewer\ndescription: agent\n---\nagent content"
+        )
+        .unwrap();
 
         // GitHub issue template (should be ignored)
         let issue_file = github_dir.join("bug_report.md");
         let mut f = std::fs::File::create(&issue_file).unwrap();
-        write!(f, "---\nname: bug_report\ndescription: template\n---\ntemplate").unwrap();
+        write!(
+            f,
+            "---\nname: bug_report\ndescription: template\n---\ntemplate"
+        )
+        .unwrap();
 
         let skills = load_skills_from_dir(&base);
-        assert_eq!(skills.len(), 1, "should only find the skill, not agent/template");
+        assert_eq!(
+            skills.len(),
+            1,
+            "should only find the skill, not agent/template"
+        );
         assert_eq!(skills[0].name, "superpowers:my-skill");
 
         std::fs::remove_dir_all(&base).unwrap();
@@ -475,7 +520,10 @@ mod tests {
 
         let skills = load_skills_from_dir(&base);
         assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "review", "no namespace prefix for regular dirs");
+        assert_eq!(
+            skills[0].name, "review",
+            "no namespace prefix for regular dirs"
+        );
 
         std::fs::remove_dir_all(&base).unwrap();
     }

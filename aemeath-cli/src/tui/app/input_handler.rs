@@ -2,7 +2,7 @@ use super::UiEvent;
 use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{HookData, PromptHookData};
 use aemeath_core::message::Message;
-use crossterm::event::{KeyCode, KeyModifiers, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -38,8 +38,16 @@ impl super::App {
         // Dialog mode
         if self.active_dialog.is_some() {
             match key.code {
-                KeyCode::Up => { if let Some(ref mut d) = self.active_dialog { d.select_prev(); } }
-                KeyCode::Down => { if let Some(ref mut d) = self.active_dialog { d.select_next(); } }
+                KeyCode::Up => {
+                    if let Some(ref mut d) = self.active_dialog {
+                        d.select_prev();
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(ref mut d) = self.active_dialog {
+                        d.select_next();
+                    }
+                }
                 KeyCode::Enter => {
                     let selected = self.active_dialog.as_ref().and_then(|d| d.get_selected());
                     if let Some(idx) = selected {
@@ -65,7 +73,9 @@ impl super::App {
 
         // Shift+Enter / Alt+Enter = insert newline
         if (key.code == KeyCode::Enter || key.code == KeyCode::Char('\n'))
-            && key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+            && key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
             self.input_area.enter(true);
             return KeyResult::None;
@@ -76,7 +86,9 @@ impl super::App {
                 if *is_processing {
                     spawn_ctx.interrupted.store(true, Ordering::Relaxed);
                     if let Ok(guard) = active_cancel.lock() {
-                        if let Some(token) = guard.as_ref() { token.cancel(); }
+                        if let Some(token) = guard.as_ref() {
+                            token.cancel();
+                        }
                     }
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
@@ -126,7 +138,8 @@ impl super::App {
                     self.input_queue.push_back(input.clone());
                     self.output_area.queued_messages.push(input);
                     let n = self.input_queue.len();
-                    self.status_bar.set_warning(&format!("{n} message(s) queued"));
+                    self.status_bar
+                        .set_warning(&format!("{n} message(s) queued"));
                 }
             }
             (_, KeyCode::Enter) if !*is_processing => {
@@ -134,7 +147,10 @@ impl super::App {
                     self.apply_current_suggestion();
                 } else if !self.input_area.is_empty() {
                     return self.handle_enter_not_processing(
-                        is_processing, ui_tx, active_cancel, spawn_ctx,
+                        is_processing,
+                        ui_tx,
+                        active_cancel,
+                        spawn_ctx,
                     );
                 }
             }
@@ -142,41 +158,68 @@ impl super::App {
             (KeyModifiers::NONE, KeyCode::PageDown) => self.output_area.scroll_down(10),
             (KeyModifiers::SHIFT, KeyCode::Up) => self.output_area.scroll_up(1),
             (KeyModifiers::SHIFT, KeyCode::Down) => self.output_area.scroll_down(1),
-            (KeyModifiers::SHIFT, KeyCode::Home) => self.output_area.scroll_up(self.output_area.line_count()),
+            (KeyModifiers::SHIFT, KeyCode::Home) => {
+                self.output_area.scroll_up(self.output_area.line_count())
+            }
             (KeyModifiers::SHIFT, KeyCode::End) => self.output_area.scroll_to_bottom(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
                     c.to_ascii_uppercase()
-                } else { c };
+                } else {
+                    c
+                };
                 self.input_area.input(ch);
-                if !*is_processing { self.update_suggestions(); }
+                if !*is_processing {
+                    self.update_suggestions();
+                }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 self.input_area.backspace();
-                if !*is_processing { self.update_suggestions(); }
+                if !*is_processing {
+                    self.update_suggestions();
+                }
             }
-            (KeyModifiers::NONE, KeyCode::Left) => { self.input_area.move_left(); self.input_area.clear_suggestions(); }
-            (KeyModifiers::NONE, KeyCode::Right) => { self.input_area.move_right(); self.input_area.clear_suggestions(); }
+            (KeyModifiers::NONE, KeyCode::Left) => {
+                self.input_area.move_left();
+                self.input_area.clear_suggestions();
+            }
+            (KeyModifiers::NONE, KeyCode::Right) => {
+                self.input_area.move_right();
+                self.input_area.clear_suggestions();
+            }
             (KeyModifiers::NONE, KeyCode::Up) => self.input_area.move_up(),
             (KeyModifiers::NONE, KeyCode::Down) => self.input_area.move_down(),
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
-            (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v')) if !*is_processing && !self.just_pasted => {
+            (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
+                if !*is_processing && !self.just_pasted =>
+            {
                 self.just_pasted = true;
                 let tx = ui_tx.clone();
                 tokio::spawn(async move {
-                    tx.send(UiEvent::SystemMessage("[reading clipboard image...]".to_string())).await.ok();
+                    tx.send(UiEvent::SystemMessage(
+                        "[reading clipboard image...]".to_string(),
+                    ))
+                    .await
+                    .ok();
                     match crate::image::read_clipboard_image().await {
                         Ok(img) => {
                             let size = img.final_size;
                             tx.send(UiEvent::ClipboardImage(img)).await.ok();
                             tx.send(UiEvent::SystemMessage(format!(
-                                "[clipboard image added ({} bytes). Type message to send.]", size
-                            ))).await.ok();
+                                "[clipboard image added ({} bytes). Type message to send.]",
+                                size
+                            )))
+                            .await
+                            .ok();
                         }
                         Err(e) => {
-                            tx.send(UiEvent::SystemMessage(format!("No image in clipboard: {e}"))).await.ok();
+                            tx.send(UiEvent::SystemMessage(format!(
+                                "No image in clipboard: {e}"
+                            )))
+                            .await
+                            .ok();
                         }
                     }
                 });
@@ -211,24 +254,20 @@ impl super::App {
         // Run hooks before sending user input to LLM. Hooks can block the
         // input, inject additional context, or display system messages.
         let rt_handle = tokio::runtime::Handle::current();
-        let hook_results = rt_handle.block_on(
-            spawn_ctx.hook_runner.run_hooks_with_json(
-                HookEvent::UserPromptSubmit,
-                None,
-                HookData::Prompt(PromptHookData {
-                    prompt: input.clone(),
-                }),
-            ),
-        );
+        let hook_results = rt_handle.block_on(spawn_ctx.hook_runner.run_hooks_with_json(
+            HookEvent::UserPromptSubmit,
+            None,
+            HookData::Prompt(PromptHookData {
+                prompt: input.clone(),
+            }),
+        ));
 
         for (_hook, _result, json_output) in &hook_results {
             if let Some(json) = json_output {
                 // ── Block decision ──
                 if json.decision.as_deref() == Some("block") {
                     let reason = json.reason.as_deref().unwrap_or("Blocked by hook");
-                    let _ = ui_tx.try_send(UiEvent::SystemMessage(format!(
-                        "[blocked] {reason}"
-                    )));
+                    let _ = ui_tx.try_send(UiEvent::SystemMessage(format!("[blocked] {reason}")));
                     self.status_bar.set_warning(&format!("Blocked: {reason}"));
                     return KeyResult::None;
                 }
@@ -250,14 +289,16 @@ impl super::App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self.pending_images
+        let images: Vec<(String, String)> = self
+            .pending_images
             .drain(..)
             .map(|img| (img.base64, img.media_type))
             .collect();
         if images.is_empty() {
             self.messages.push(Message::user(&input));
         } else {
-            self.messages.push(Message::user_with_images(&input, images));
+            self.messages
+                .push(Message::user_with_images(&input, images));
         }
 
         spawn_ctx.interrupted.store(false, Ordering::Relaxed);

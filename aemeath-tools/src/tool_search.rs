@@ -9,7 +9,9 @@ pub struct ToolSearchTool;
 
 #[async_trait]
 impl Tool for ToolSearchTool {
-    fn name(&self) -> &str { "ToolSearch" }
+    fn name(&self) -> &str {
+        "ToolSearch"
+    }
     fn description(&self) -> &str {
         "Search for available tools by name or functionality. Use this to discover tools that can help with specific tasks."
     }
@@ -25,21 +27,31 @@ impl Tool for ToolSearchTool {
             "required": ["query"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
-        
+
         // 预定义的工具列表及其描述
         let all_tools = [
             ("Bash", "Execute bash commands with timeout support"),
             ("Read", "Read file contents (alias: FileRead)"),
             ("Write", "Write file contents (alias: FileWrite)"),
-            ("Edit", "Edit file with exact string replacement (alias: FileEdit)"),
+            (
+                "Edit",
+                "Edit file with exact string replacement (alias: FileEdit)",
+            ),
             ("Glob", "Fast file pattern matching tool"),
             ("Grep", "Search file contents with regex support"),
-            ("LSP", "Language server protocol operations (diagnostics, definitions, references)"),
+            (
+                "LSP",
+                "Language server protocol operations (diagnostics, definitions, references)",
+            ),
             ("WebFetch", "Fetch content from URLs"),
             ("WebSearch", "Search the web for information"),
             ("Agent", "Launch a sub-agent for complex multi-step tasks"),
@@ -48,7 +60,10 @@ impl Tool for ToolSearchTool {
             ("TaskList", "List all tasks and their status"),
             ("TaskGet", "Retrieve a specific task by ID"),
             ("TaskStop", "Stop a running or pending task"),
-            ("TodoWrite", "Create or update a todo list for tracking progress"),
+            (
+                "TodoWrite",
+                "Create or update a todo list for tracking progress",
+            ),
             ("MCP", "Call MCP server tools"),
             ("Skill", "Execute a skill template"),
             ("Config", "View or modify configuration settings"),
@@ -56,44 +71,48 @@ impl Tool for ToolSearchTool {
             ("AskUserQuestion", "Ask user for input or confirmation"),
             ("ToolSearch", "Search for available tools"),
         ];
-        
+
         if query.is_empty() {
             // Return all available tools
             let output = format!(
                 "Available tools ({}):\n{}",
                 all_tools.len(),
-                all_tools.iter().map(|(name, desc)| format!("  - {}: {}", name, desc)).collect::<Vec<_>>().join("\n")
+                all_tools
+                    .iter()
+                    .map(|(name, desc)| format!("  - {}: {}", name, desc))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             );
             return ToolResult::success(output);
         }
-        
+
         // Search for matching tools
         let matching_tools: Vec<(&str, &str)> = all_tools
             .iter()
             .filter(|(name, desc)| {
                 let name_lower = name.to_lowercase();
                 let desc_lower = desc.to_lowercase();
-                name_lower.contains(&query) || 
-                    desc_lower.contains(&query) ||
-                    match_keywords(&query, name)
+                name_lower.contains(&query)
+                    || desc_lower.contains(&query)
+                    || match_keywords(&query, name)
             })
             .copied()
             .collect();
-        
+
         if matching_tools.is_empty() {
             return ToolResult::success(format!(
                 "No tools found matching '{}'\n\nUse ToolSearch with empty query to see all available tools.",
                 query
             ));
         }
-        
+
         // 显示匹配工具的详细信息
         let output = matching_tools
             .iter()
             .map(|(name, desc)| format!("  - {}: {}", name, desc))
             .collect::<Vec<_>>()
             .join("\n");
-        
+
         ToolResult::success(format!(
             "Found {} tool(s) matching '{}':\n{}",
             matching_tools.len(),
@@ -105,7 +124,7 @@ impl Tool for ToolSearchTool {
 
 fn match_keywords(query: &str, tool_name: &str) -> bool {
     let tool_lower = tool_name.to_lowercase();
-    
+
     // 关键词映射
     let keyword_mappings = [
         ("file", vec!["file", "read", "write", "edit"]),
@@ -121,7 +140,7 @@ fn match_keywords(query: &str, tool_name: &str) -> bool {
         ("sleep", vec!["sleep", "wait", "delay"]),
         ("lsp", vec!["lsp", "language", "intellisense"]),
     ];
-    
+
     for (keyword, tools) in keyword_mappings {
         if query.contains(keyword) || keyword.contains(query) {
             for t in tools {
@@ -131,6 +150,6 @@ fn match_keywords(query: &str, tool_name: &str) -> bool {
             }
         }
     }
-    
+
     false
 }

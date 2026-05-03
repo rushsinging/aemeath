@@ -11,7 +11,10 @@ impl super::OutputArea {
 
         log::debug!(
             "sel: rect.y={}, row={}, rel_row={}, screen_map.len={}",
-            rect.y, row, rel_row, self.screen_line_map.len()
+            rect.y,
+            row,
+            rel_row,
+            self.screen_line_map.len()
         );
 
         // 将屏幕行映射到逻辑行+char偏移
@@ -21,7 +24,8 @@ impl super::OutputArea {
                 let line = &self.lines[logic_idx].content;
                 let byte_start = char_to_byte(line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-                    line.bslice_from(byte_start), rel_col,
+                    line.bslice_from(byte_start),
+                    rel_col,
                 );
                 self.selection_start = Some((logic_idx, char_start.add(char_col.as_usize())));
                 self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
@@ -44,14 +48,19 @@ impl super::OutputArea {
                 let line = &self.lines[logic_idx].content;
                 let byte_start = char_to_byte(line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-                    line.bslice_from(byte_start), rel_col,
+                    line.bslice_from(byte_start),
+                    rel_col,
                 );
                 self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
             }
         } else {
             // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
             if let Some(&(_, _, char_end)) = self.screen_line_map.last() {
-                let last_logic = self.screen_line_map.last().map(|(li, _, _)| *li).unwrap_or(0);
+                let last_logic = self
+                    .screen_line_map
+                    .last()
+                    .map(|(li, _, _)| *li)
+                    .unwrap_or(0);
                 self.selection_end = Some((last_logic, char_end));
             }
         }
@@ -63,7 +72,9 @@ impl super::OutputArea {
         let selected = self.get_selected_text();
         log::debug!(
             "end_selection: start={:?}, end={:?}, selected={:?}",
-            self.selection_start, self.selection_end, selected.as_deref().map(|s| {
+            self.selection_start,
+            self.selection_end,
+            selected.as_deref().map(|s| {
                 if s.len() > 100 {
                     // find a safe UTF-8 boundary at or before byte 100
                     let mut end = 100;
@@ -99,7 +110,8 @@ impl super::OutputArea {
         let line = &self.lines[logic_idx].content;
         let byte_start = char_to_byte(line, char_start);
         let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
-            line.bslice_from(byte_start), rel_col,
+            line.bslice_from(byte_start),
+            rel_col,
         );
         let abs_char_idx = char_start.add(char_col.as_usize());
 
@@ -137,13 +149,12 @@ impl super::OutputArea {
         let (start_logic, start_col) = self.selection_start?;
         let (end_logic, end_col) = self.selection_end?;
 
-        let (start_logic, start_col, end_logic, end_col) = if start_logic < end_logic
-            || (start_logic == end_logic && start_col < end_col)
-        {
-            (start_logic, start_col, end_logic, end_col)
-        } else {
-            (end_logic, end_col, start_logic, start_col)
-        };
+        let (start_logic, start_col, end_logic, end_col) =
+            if start_logic < end_logic || (start_logic == end_logic && start_col < end_col) {
+                (start_logic, start_col, end_logic, end_col)
+            } else {
+                (end_logic, end_col, start_logic, start_col)
+            };
 
         if start_logic == end_logic && start_col == end_col {
             return None;
@@ -153,7 +164,11 @@ impl super::OutputArea {
 
         for logic_idx in start_logic..=end_logic {
             if logic_idx >= self.lines.len() {
-                log::debug!("get_selected_text: logic_idx {} >= lines len {}, breaking", logic_idx, self.lines.len());
+                log::debug!(
+                    "get_selected_text: logic_idx {} >= lines len {}, breaking",
+                    logic_idx,
+                    self.lines.len()
+                );
                 break;
             }
 
@@ -175,8 +190,15 @@ impl super::OutputArea {
             };
             log::debug!(
                 "get_selected_text: logic={}, from={}, to={}, chars_len={}, content={:?}",
-                logic_idx, from, to, chars.len(),
-                &self.lines[logic_idx].content.chars().take(60).collect::<String>()
+                logic_idx,
+                from,
+                to,
+                chars.len(),
+                &self.lines[logic_idx]
+                    .content
+                    .chars()
+                    .take(60)
+                    .collect::<String>()
             );
             result.extend(chars[from..to].iter());
         }
@@ -191,7 +213,8 @@ impl super::OutputArea {
     /// Copy text to system clipboard
     fn copy_to_clipboard(&self, text: &str) {
         if let Ok(mut child) = std::process::Command::new("pbcopy")
-            .stdin(std::process::Stdio::piped()).spawn()
+            .stdin(std::process::Stdio::piped())
+            .spawn()
         {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());

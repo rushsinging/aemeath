@@ -59,12 +59,7 @@ pub trait AgentRunner: Send + Sync {
     ) -> String;
 
     /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
-    async fn complete(
-        &self,
-        prompt: &str,
-        system: &str,
-        ctx: &ToolContext,
-    ) -> String;
+    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String;
 }
 
 #[derive(Clone)]

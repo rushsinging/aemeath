@@ -16,9 +16,21 @@ impl Theme {
     pub const DIFF_REMOVE_FG_RGB: (u8, u8, u8) = (220, 100, 110);
 
     // crossterm Color accessors
-    pub const DIFF_ADD_BG: Color = Color::Rgb { r: Self::DIFF_ADD_BG_RGB.0, g: Self::DIFF_ADD_BG_RGB.1, b: Self::DIFF_ADD_BG_RGB.2 };
-    pub const DIFF_REMOVE_BG: Color = Color::Rgb { r: Self::DIFF_REMOVE_BG_RGB.0, g: Self::DIFF_REMOVE_BG_RGB.1, b: Self::DIFF_REMOVE_BG_RGB.2 };
-    pub const DIFF_REMOVE_FG: Color = Color::Rgb { r: Self::DIFF_REMOVE_FG_RGB.0, g: Self::DIFF_REMOVE_FG_RGB.1, b: Self::DIFF_REMOVE_FG_RGB.2 };
+    pub const DIFF_ADD_BG: Color = Color::Rgb {
+        r: Self::DIFF_ADD_BG_RGB.0,
+        g: Self::DIFF_ADD_BG_RGB.1,
+        b: Self::DIFF_ADD_BG_RGB.2,
+    };
+    pub const DIFF_REMOVE_BG: Color = Color::Rgb {
+        r: Self::DIFF_REMOVE_BG_RGB.0,
+        g: Self::DIFF_REMOVE_BG_RGB.1,
+        b: Self::DIFF_REMOVE_BG_RGB.2,
+    };
+    pub const DIFF_REMOVE_FG: Color = Color::Rgb {
+        r: Self::DIFF_REMOVE_FG_RGB.0,
+        g: Self::DIFF_REMOVE_FG_RGB.1,
+        b: Self::DIFF_REMOVE_FG_RGB.2,
+    };
 }
 
 /// Styled text helpers using console crate
@@ -30,7 +42,11 @@ impl StyledText {
     }
 
     pub fn tool_call(name: &str, summary: &str) -> String {
-        format!("{} {}", style(format!("[{}]", name)).cyan().bold(), style(summary).white())
+        format!(
+            "{} {}",
+            style(format!("[{}]", name)).cyan().bold(),
+            style(summary).white()
+        )
     }
 
     pub fn info(text: &str) -> String {

@@ -14,11 +14,17 @@ pub struct SecurityWarning {
 
 /// Known prompt injection patterns: (regex_pattern, threat_type_label)
 const THREAT_PATTERNS: &[(&str, &str)] = &[
-    (r"(?i)ignore\s+(previous|all|above|prior)\s+instructions", "prompt_injection"),
+    (
+        r"(?i)ignore\s+(previous|all|above|prior)\s+instructions",
+        "prompt_injection",
+    ),
     (r"(?i)do\s+not\s+tell\s+the\s+user", "deception"),
     (r"(?i)you\s+are\s+now\s+(?:a|an|DAN)", "jailbreak"),
     (r"(?i)system:\s*", "role_hijack"),
-    (r"(?i)forget\s+(everything|all|your)\s+(above|previous|prior)", "prompt_injection"),
+    (
+        r"(?i)forget\s+(everything|all|your)\s+(above|previous|prior)",
+        "prompt_injection",
+    ),
     (r"(?i)new\s+instructions?\s*:", "prompt_injection"),
 ];
 
@@ -79,7 +85,12 @@ pub fn format_warnings(warnings: &[SecurityWarning]) -> Option<String> {
 
     let details: Vec<String> = warnings
         .iter()
-        .map(|w| format!("  - [{}] line {}: \"{}\"", w.threat_type, w.line_number, w.matched_text))
+        .map(|w| {
+            format!(
+                "  - [{}] line {}: \"{}\"",
+                w.threat_type, w.line_number, w.matched_text
+            )
+        })
         .collect();
 
     Some(format!(

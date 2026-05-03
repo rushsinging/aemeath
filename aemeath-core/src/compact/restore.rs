@@ -54,7 +54,11 @@ pub fn build_file_restoration(read_files: &HashSet<String>) -> Option<String> {
             while boundary > 0 && !content.is_char_boundary(boundary) {
                 boundary -= 1;
             }
-            format!("{}...\n[truncated, {} total chars]", &content[..boundary], content.len())
+            format!(
+                "{}...\n[truncated, {} total chars]",
+                &content[..boundary],
+                content.len()
+            )
         } else {
             content
         };
@@ -64,9 +68,7 @@ pub fn build_file_restoration(read_files: &HashSet<String>) -> Option<String> {
             break;
         }
 
-        restored_content.push_str(&format!(
-            "\n<file path=\"{path}\">\n{truncated}\n</file>\n"
-        ));
+        restored_content.push_str(&format!("\n<file path=\"{path}\">\n{truncated}\n</file>\n"));
         total_tokens += entry_tokens;
         file_count += 1;
     }
@@ -163,9 +165,7 @@ pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
                 .into_iter()
                 .map(|id| ContentBlock::ToolResult {
                     tool_use_id: id,
-                    content: serde_json::json!(
-                        "[result removed during compaction]"
-                    ),
+                    content: serde_json::json!("[result removed during compaction]"),
                     is_error: false,
                 })
                 .collect();
@@ -228,9 +228,7 @@ pub fn assemble_compacted_with_files(
 
     compacted.push(Message {
         role: Role::User,
-        content: vec![ContentBlock::Text {
-            text: summary_text,
-        }],
+        content: vec![ContentBlock::Text { text: summary_text }],
     });
 
     compacted.push(Message {
@@ -459,8 +457,7 @@ mod tests {
             text_msg(Role::User, "hello"),
             text_msg(Role::Assistant, "hi"),
         ];
-        let (compacted, did_compact) =
-            assemble_compacted("summary text".to_string(), &recent, 5);
+        let (compacted, did_compact) = assemble_compacted("summary text".to_string(), &recent, 5);
         assert!(did_compact);
 
         // First message is User with summary
@@ -484,10 +481,7 @@ mod tests {
     #[test]
     fn assemble_compacted_role_alternation_enforced() {
         // Both recent messages are User — should get placeholders inserted
-        let recent = vec![
-            text_msg(Role::User, "q1"),
-            text_msg(Role::User, "q2"),
-        ];
+        let recent = vec![text_msg(Role::User, "q1"), text_msg(Role::User, "q2")];
         let (compacted, _) = assemble_compacted("sum".to_string(), &recent, 3);
 
         for w in compacted.windows(2) {

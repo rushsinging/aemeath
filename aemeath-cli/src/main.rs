@@ -53,7 +53,11 @@ async fn main() {
             run_models_command(json);
             return;
         }
-        Some(Commands::Sessions { delete, json, limit }) => {
+        Some(Commands::Sessions {
+            delete,
+            json,
+            limit,
+        }) => {
             run_sessions_command(delete, json, limit).await;
             return;
         }
@@ -144,36 +148,79 @@ fn run_models_command(json: bool) {
                 std::process::exit(1);
             }
             if json {
-                let output: Vec<serde_json::Value> = models.iter().map(|(provider, m)| {
-                    serde_json::json!({
-                        "provider": provider,
-                        "id": m.id,
-                        "name": m.name,
-                        "context_window": m.context_window,
-                        "max_tokens": m.max_tokens,
+                let output: Vec<serde_json::Value> = models
+                    .iter()
+                    .map(|(provider, m)| {
+                        serde_json::json!({
+                            "provider": provider,
+                            "id": m.id,
+                            "name": m.name,
+                            "context_window": m.context_window,
+                            "max_tokens": m.max_tokens,
+                        })
                     })
-                }).collect();
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&output).unwrap());
             } else {
                 // 表格输出 — 自适应列宽
                 let header = ("PROVIDER", "ID", "NAME", "CTX");
-                let rows: Vec<(&str, &str, &str, String)> = models.iter().map(|(provider, m)| {
-                    let name = if m.name.is_empty() { "-" } else { m.name.as_str() };
-                    let ctx = if m.context_window > 0 {
-                        format!("{}k", m.context_window / 1000)
-                    } else {
-                        "-".to_string()
-                    };
-                    (provider.as_str(), m.id.as_str(), name, ctx)
-                }).collect();
+                let rows: Vec<(&str, &str, &str, String)> = models
+                    .iter()
+                    .map(|(provider, m)| {
+                        let name = if m.name.is_empty() {
+                            "-"
+                        } else {
+                            m.name.as_str()
+                        };
+                        let ctx = if m.context_window > 0 {
+                            format!("{}k", m.context_window / 1000)
+                        } else {
+                            "-".to_string()
+                        };
+                        (provider.as_str(), m.id.as_str(), name, ctx)
+                    })
+                    .collect();
 
-                let w0 = rows.iter().map(|r| r.0.len()).chain(std::iter::once(header.0.len())).max().unwrap_or(0);
-                let w1 = rows.iter().map(|r| r.1.len()).chain(std::iter::once(header.1.len())).max().unwrap_or(0);
-                let w2 = rows.iter().map(|r| r.2.len()).chain(std::iter::once(header.2.len())).max().unwrap_or(0);
+                let w0 = rows
+                    .iter()
+                    .map(|r| r.0.len())
+                    .chain(std::iter::once(header.0.len()))
+                    .max()
+                    .unwrap_or(0);
+                let w1 = rows
+                    .iter()
+                    .map(|r| r.1.len())
+                    .chain(std::iter::once(header.1.len()))
+                    .max()
+                    .unwrap_or(0);
+                let w2 = rows
+                    .iter()
+                    .map(|r| r.2.len())
+                    .chain(std::iter::once(header.2.len()))
+                    .max()
+                    .unwrap_or(0);
 
-                println!("{:<w$}  {:<w2$}  {:<w3$}  {}", header.0, header.1, header.2, header.3, w = w0, w2 = w1, w3 = w2);
+                println!(
+                    "{:<w$}  {:<w2$}  {:<w3$}  {}",
+                    header.0,
+                    header.1,
+                    header.2,
+                    header.3,
+                    w = w0,
+                    w2 = w1,
+                    w3 = w2
+                );
                 for (provider, id, name, ctx) in &rows {
-                    println!("{:<w$}  {:<w2$}  {:<w3$}  {}", provider, id, name, ctx, w = w0, w2 = w1, w3 = w2);
+                    println!(
+                        "{:<w$}  {:<w2$}  {:<w3$}  {}",
+                        provider,
+                        id,
+                        name,
+                        ctx,
+                        w = w0,
+                        w2 = w1,
+                        w3 = w2
+                    );
                 }
             }
         }
@@ -209,35 +256,83 @@ async fn run_sessions_command(delete: Option<String>, json: bool, limit: usize) 
     let display: Vec<_> = sessions.into_iter().take(limit).collect();
 
     if json {
-        let output: Vec<serde_json::Value> = display.iter().map(|s| {
-            serde_json::json!({
-                "id": s.id,
-                "title": s.metadata.title,
-                "project": s.metadata.project,
-                "model": s.metadata.model,
-                "messages": s.messages.len(),
-                "created_at": s.created_at,
-                "updated_at": s.updated_at,
+        let output: Vec<serde_json::Value> = display
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "id": s.id,
+                    "title": s.metadata.title,
+                    "project": s.metadata.project,
+                    "model": s.metadata.model,
+                    "messages": s.messages.len(),
+                    "created_at": s.created_at,
+                    "updated_at": s.updated_at,
+                })
             })
-        }).collect();
+            .collect();
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     } else {
         let header = ("ID", "SUMMARY", "PROJECT", "MSG", "UPDATED");
-        let rows: Vec<(&str, String, &str, usize, &str)> = display.iter().map(|s| {
-            let summary = s.summary();
-            let summary_display: String = summary.chars().take(80).collect();
-            let project = s.metadata.project.as_deref().unwrap_or("-");
-            let updated = s.updated_at.get(..16).unwrap_or(&s.updated_at);
-            (s.id.as_str(), summary_display, project, s.messages.len(), updated)
-        }).collect();
+        let rows: Vec<(&str, String, &str, usize, &str)> = display
+            .iter()
+            .map(|s| {
+                let summary = s.summary();
+                let summary_display: String = summary.chars().take(80).collect();
+                let project = s.metadata.project.as_deref().unwrap_or("-");
+                let updated = s.updated_at.get(..16).unwrap_or(&s.updated_at);
+                (
+                    s.id.as_str(),
+                    summary_display,
+                    project,
+                    s.messages.len(),
+                    updated,
+                )
+            })
+            .collect();
 
-        let w0 = rows.iter().map(|r| r.0.len()).chain(std::iter::once(header.0.len())).max().unwrap_or(0);
-        let w1 = rows.iter().map(|r| r.1.len()).chain(std::iter::once(header.1.len())).max().unwrap_or(0).min(60);
-        let w2 = rows.iter().map(|r| r.2.len()).chain(std::iter::once(header.2.len())).max().unwrap_or(0);
+        let w0 = rows
+            .iter()
+            .map(|r| r.0.len())
+            .chain(std::iter::once(header.0.len()))
+            .max()
+            .unwrap_or(0);
+        let w1 = rows
+            .iter()
+            .map(|r| r.1.len())
+            .chain(std::iter::once(header.1.len()))
+            .max()
+            .unwrap_or(0)
+            .min(60);
+        let w2 = rows
+            .iter()
+            .map(|r| r.2.len())
+            .chain(std::iter::once(header.2.len()))
+            .max()
+            .unwrap_or(0);
 
-        println!("{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}", header.0, header.1, header.2, header.3, header.4, w = w0, w2 = w1, w3 = w2);
+        println!(
+            "{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}",
+            header.0,
+            header.1,
+            header.2,
+            header.3,
+            header.4,
+            w = w0,
+            w2 = w1,
+            w3 = w2
+        );
         for (id, summary, project, msg, updated) in &rows {
-            println!("{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}", id, summary, project, msg, updated, w = w0, w2 = w1, w3 = w2);
+            println!(
+                "{:<w$}  {:<w2$}  {:<w3$}  {:>3}  {}",
+                id,
+                summary,
+                project,
+                msg,
+                updated,
+                w = w0,
+                w2 = w1,
+                w3 = w2
+            );
         }
     }
 }
@@ -245,7 +340,9 @@ async fn run_sessions_command(delete: Option<String>, json: bool, limit: usize) 
 /// 加载配置文件（供子命令复用）
 fn load_config() -> Option<aemeath_core::config::Config> {
     let paths = [
-        dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+        dirs::home_dir()
+            .map(|h| h.join(".aemeath").join("config.json"))
+            .unwrap_or_default(),
         std::path::PathBuf::from(".aemeath/config.json"),
     ];
     for path in &paths {
@@ -262,7 +359,6 @@ fn load_config() -> Option<aemeath_core::config::Config> {
 
 /// 主聊天逻辑（原 main 主体）
 async fn run_chat(mut args: Args) {
-
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
     aemeath_core::command::commands::init_all();
 
@@ -315,16 +411,23 @@ async fn run_chat(mut args: Args) {
                 if let Some((provider_name, model_query)) = cfg.models.default.split_once('/') {
                     args.provider = provider_name.to_string();
                     if args.model.is_none() && std::env::var("AEMEATH_MODEL").is_err() {
-                        if let Some((_pn, _pc, model_entry)) = cfg.models.find_model(&cfg.models.default) {
+                        if let Some((_pn, _pc, model_entry)) =
+                            cfg.models.find_model(&cfg.models.default)
+                        {
                             config_default_model = Some((model_entry.id.clone(), model_entry));
                         } else {
                             // 未匹配 — 拒绝将 display name 作为 model id 发送到 API（会导致 "Model Not Exist"）
                             // 列出可用模型帮助用户修正配置
-                            let available: Vec<String> = cfg.models.providers
+                            let available: Vec<String> = cfg
+                                .models
+                                .providers
                                 .get(provider_name)
-                                .map(|p| p.models.iter()
-                                    .map(|m| format!("{} (id: {})", m.name, m.id))
-                                    .collect())
+                                .map(|p| {
+                                    p.models
+                                        .iter()
+                                        .map(|m| format!("{} (id: {})", m.name, m.id))
+                                        .collect()
+                                })
                                 .unwrap_or_default();
                             log::error!(
                                 "models.default '{}' does not match any configured model under provider '{}'.\n  query: {}\n  available models:\n    {}",
@@ -398,7 +501,10 @@ async fn run_chat(mut args: Args) {
             }
         }
         // 硬编码默认值
-        eprintln!("Error: No model configured for provider '{}'. Add model config or specify --model.", args.provider);
+        eprintln!(
+            "Error: No model configured for provider '{}'. Add model config or specify --model.",
+            args.provider
+        );
         std::process::exit(1);
     });
 
@@ -428,8 +534,8 @@ async fn run_chat(mut args: Args) {
         32000 // 保守默认值
     });
 
-    // 构建 OpenAI provider config (用于 OpenAI-compatible 提供者)
-    let openai_config = if matches!(api_type, ApiType::OpenAICompatible) {
+    // 构建 OpenAI-compatible provider config（包含 openai/zhipu/litellm 等 Chat Completions 路径）
+    let openai_config = if !matches!(api_type, ApiType::Anthropic) {
         Some(OpenAIProviderConfig::from_provider_name(&args.provider))
     } else {
         None
@@ -442,19 +548,24 @@ async fn run_chat(mut args: Args) {
     });
     let reasoning = current_model_entry
         .as_ref()
-        .and_then(|entry| entry.reasoning)
+        .and_then(|entry| entry.reasoning.as_ref().and_then(|r| r.enabled()))
         .unwrap_or(!args.no_think);
 
-    // reasoning_effort: CLI args > config.json model entry > env var > None
-    let reasoning_effort = args.reasoning_effort.clone()
+    // OpenAI reasoning effort: CLI args > config.json model.reasoning.effort > env var > None
+    let openai_reasoning_effort = args
+        .reasoning_effort
+        .clone()
         .or_else(|| {
-            current_model_entry
-                .as_ref()
-                .and_then(|entry| entry.reasoning_effort.clone())
+            current_model_entry.as_ref().and_then(|entry| {
+                entry
+                    .reasoning
+                    .as_ref()
+                    .and_then(|r| r.effort().map(str::to_string))
+            })
         })
         .or_else(|| std::env::var("AEMEATH_REASONING_EFFORT").ok())
         .filter(|e| !e.is_empty());
-    if let Some(ref effort) = reasoning_effort {
+    if let Some(ref effort) = openai_reasoning_effort {
         if let Err(e) = aemeath_core::config::models::validate_reasoning_effort(effort) {
             log::error!("{}", e);
             std::process::exit(1);
@@ -462,10 +573,12 @@ async fn run_chat(mut args: Args) {
     }
 
     log::info!(
-        "[main] reasoning={} effort={:?} (current_model={:?}, args.no_think={})",
+        "[main] reasoning={} openai_reasoning_effort={:?} (current_model={:?}, args.no_think={})",
         reasoning,
-        reasoning_effort,
-        current_model_entry.as_ref().map(|entry| format!("id={}, reasoning={:?}", entry.id, entry.reasoning)),
+        openai_reasoning_effort,
+        current_model_entry
+            .as_ref()
+            .map(|entry| format!("id={}, reasoning={:?}", entry.id, entry.reasoning)),
         args.no_think
     );
 
@@ -478,7 +591,7 @@ async fn run_chat(mut args: Args) {
         reasoning,
         openai_config,
     );
-    if let Some(effort) = reasoning_effort {
+    if let Some(effort) = openai_reasoning_effort {
         client.set_reasoning_effort(Some(effort));
     }
 
@@ -501,51 +614,54 @@ async fn run_chat(mut args: Args) {
 
     let _mcp_clients = load_mcp_tools(&mut registry, &cwd).await;
 
-          // Create hook runner before agent_runner so it can be shared
-          let cwd_str = cwd.display().to_string();
-          let hook_runner = if let Some(ref cfg) = config_file {
-              aemeath_core::hook::HookRunner::from_config(cfg, cwd_str.clone())
-          } else {
-              aemeath_core::hook::HookRunner::empty(cwd_str.clone())
-          };
+    // Create hook runner before agent_runner so it can be shared
+    let cwd_str = cwd.display().to_string();
+    let hook_runner = if let Some(ref cfg) = config_file {
+        aemeath_core::hook::HookRunner::from_config(cfg, cwd_str.clone())
+    } else {
+        aemeath_core::hook::HookRunner::empty(cwd_str.clone())
+    };
 
-          let agent_runner = {
-              // Build LlmClientPool if there are multiple providers configured
-              let models_config_arc = std::sync::Arc::new(
-                  config_file
-                      .as_ref()
-                      .map(|c| c.models.clone())
-                      .unwrap_or_default()
-              );
-              let has_multi_providers = models_config_arc.providers.len() > 1
-                  || !config_file.as_ref().map(|c| c.agents.roles.is_empty()).unwrap_or(true);
+    let agent_runner = {
+        // Build LlmClientPool if there are multiple providers configured
+        let models_config_arc = std::sync::Arc::new(
+            config_file
+                .as_ref()
+                .map(|c| c.models.clone())
+                .unwrap_or_default(),
+        );
+        let has_multi_providers = models_config_arc.providers.len() > 1
+            || !config_file
+                .as_ref()
+                .map(|c| c.agents.roles.is_empty())
+                .unwrap_or(true);
 
-              let pool = if has_multi_providers {
-                  Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
-                      client.clone(),
-                      models_config_arc.clone(),
-                  )))
-              } else {
-                  None
-              };
-              let agents_config = std::sync::Arc::new(
-                  config_file
-                      .as_ref()
-                      .map(|c| c.agents.clone())
-                      .unwrap_or_default()
-              );
+        let pool = if has_multi_providers {
+            Some(std::sync::Arc::new(aemeath_llm::LlmClientPool::new(
+                client.clone(),
+                models_config_arc.clone(),
+            )))
+        } else {
+            None
+        };
+        let agents_config = std::sync::Arc::new(
+            config_file
+                .as_ref()
+                .map(|c| c.agents.clone())
+                .unwrap_or_default(),
+        );
 
-              std::sync::Arc::new(agent_runner::CliAgentRunner {
-                  client: client.clone(),
-                  pool,
-                  agents_config,
-                  hook_runner: hook_runner.clone(),
-                  reasoning,
-                  models_config: models_config_arc.clone(),
-              })
-          };
+        std::sync::Arc::new(agent_runner::CliAgentRunner {
+            client: client.clone(),
+            pool,
+            agents_config,
+            hook_runner: hook_runner.clone(),
+            reasoning,
+            models_config: models_config_arc.clone(),
+        })
+    };
 
-          let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner).await;
+    let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner).await;
 
     // Skills 列表加入 static part（仅在启动时变化）
     let static_prompt = {
@@ -568,7 +684,8 @@ async fn run_chat(mut args: Args) {
         let mut prompt = prompt_parts.static_part;
         prompt.push_str(aemeath_core::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
         if !skills_guard.is_empty() {
-            let skill_list: Vec<String> = skills_guard.values()
+            let skill_list: Vec<String> = skills_guard
+                .values()
                 .map(|s| {
                     let alias_str = if s.aliases.is_empty() {
                         String::new()
@@ -587,7 +704,10 @@ async fn run_chat(mut args: Args) {
         // Inject agent roles into system prompt so the main LLM knows what's available
         if let Some(ref cfg) = config_file {
             if !cfg.agents.roles.is_empty() {
-                let role_lines: Vec<String> = cfg.agents.roles.iter()
+                let role_lines: Vec<String> = cfg
+                    .agents
+                    .roles
+                    .iter()
                     .map(|(name, role)| {
                         let desc = if role.description.is_empty() {
                             String::new()
@@ -628,40 +748,100 @@ async fn run_chat(mut args: Args) {
     let user_context = prompt_parts.claude_md;
 
     // 用于 compact 估算，拼接为纯文本
-    let system_prompt_text = system_blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+    let system_prompt_text = system_blocks
+        .iter()
+        .map(|b| b.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     // 确定 session ID
-    let session_id = args.resume.clone().unwrap_or_else(|| aemeath_core::session::new_session_id());
+    let session_id = args
+        .resume
+        .clone()
+        .unwrap_or_else(|| aemeath_core::session::new_session_id());
     set_session_id(session_id.clone());
     log::info!("session started");
 
     // 解析并发限制: CLI args > config file > defaults
-    let max_tool_concurrency = args.max_tool_concurrency
+    let max_tool_concurrency = args
+        .max_tool_concurrency
         .filter(|&v| v > 0)
-        .or_else(|| config_file.as_ref().map(|c| c.tools.max_concurrency).filter(|&v| v > 0))
+        .or_else(|| {
+            config_file
+                .as_ref()
+                .map(|c| c.tools.max_concurrency)
+                .filter(|&v| v > 0)
+        })
         .unwrap_or(10);
-    let max_agent_concurrency = args.max_agent_concurrency
+    let max_agent_concurrency = args
+        .max_agent_concurrency
         .filter(|&v| v > 0)
-        .or_else(|| config_file.as_ref().map(|c| c.agents.max_concurrency).filter(|&v| v > 0))
+        .or_else(|| {
+            config_file
+                .as_ref()
+                .map(|c| c.agents.max_concurrency)
+                .filter(|&v| v > 0)
+        })
         .unwrap_or(4);
     let agent_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
 
     // 将并发限制记录到 debug.log 以便诊断
     {
         use std::io::Write;
-        let debug_path = dirs::home_dir().unwrap_or_default().join(".aemeath").join("debug.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&debug_path) {
-            let _ = writeln!(f, "[{}] concurrency limits: max_tool={}, max_agent={}",
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-                max_tool_concurrency, max_agent_concurrency);
+        let debug_path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".aemeath")
+            .join("debug.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&debug_path)
+        {
+            let _ = writeln!(
+                f,
+                "[{}] concurrency limits: max_tool={}, max_agent={}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                max_tool_concurrency,
+                max_agent_concurrency
+            );
         }
     }
-    log::info!("concurrency limits: max_tool={}, max_agent={}", max_tool_concurrency, max_agent_concurrency);
+    log::info!(
+        "concurrency limits: max_tool={}, max_agent={}",
+        max_tool_concurrency,
+        max_agent_concurrency
+    );
 
-          // 以 TUI 模式或旧版 REPL 模式运行
+    // 以 TUI 模式或旧版 REPL 模式运行
     if args.no_tui {
-        let memory_config = config_file.as_ref().map(|c| c.memory.clone()).unwrap_or_default();
-        repl::run_repl(client, registry, system_blocks.clone(), system_prompt_text.clone(), user_context.clone(), cwd, args.verbose, !args.no_markdown, args.context_size, args.resume, Some(agent_runner), args.allow_all, task_store.clone(), max_tool_concurrency, agent_semaphore.clone(), skills_map.clone(), hook_runner.clone(), memory_config).await;
+        let memory_config = config_file
+            .as_ref()
+            .map(|c| c.memory.clone())
+            .unwrap_or_default();
+        repl::run_repl(
+            client,
+            registry,
+            system_blocks.clone(),
+            system_prompt_text.clone(),
+            user_context.clone(),
+            cwd,
+            args.verbose,
+            !args.no_markdown,
+            args.context_size,
+            args.resume,
+            Some(agent_runner),
+            args.allow_all,
+            task_store.clone(),
+            max_tool_concurrency,
+            agent_semaphore.clone(),
+            skills_map.clone(),
+            hook_runner.clone(),
+            memory_config,
+        )
+        .await;
     } else {
         // 构建显示名: provider/name (来自 config) 或仅 model id
         // provider 名称以原始 config 形式显示（不转小写），
@@ -671,13 +851,22 @@ async fn run_chat(mut args: Args) {
             let display_name = config_default_model
                 .as_ref()
                 .and_then(|(_, entry)| {
-                    if entry.name.is_empty() { None } else { Some(entry.name.as_str()) }
+                    if entry.name.is_empty() {
+                        None
+                    } else {
+                        Some(entry.name.as_str())
+                    }
                 })
                 .or_else(|| {
                     config_file.as_ref().and_then(|cfg| {
                         cfg.models.provider_ci(provider_name).and_then(|pcfg| {
-                            pcfg.models.iter().find(|m| m.id == model)
-                                .and_then(|m| if m.name.is_empty() { None } else { Some(m.name.as_str()) })
+                            pcfg.models.iter().find(|m| m.id == model).and_then(|m| {
+                                if m.name.is_empty() {
+                                    None
+                                } else {
+                                    Some(m.name.as_str())
+                                }
+                            })
                         })
                     })
                 })
@@ -685,10 +874,32 @@ async fn run_chat(mut args: Args) {
             format!("{}/{}", provider_name, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
-        app.memory_config = config_file.as_ref().map(|c| c.memory.clone()).unwrap_or_default();
+        app.memory_config = config_file
+            .as_ref()
+            .map(|c| c.memory.clone())
+            .unwrap_or_default();
         app.set_skills(skills_map);
         app.hook_runner = hook_runner.clone();
-        if let Err(e) = app.run(client, registry, system_blocks, system_prompt_text, user_context, args.context_size, args.verbose, !args.no_markdown, Some(agent_runner), args.allow_all, args.resume, task_store, max_tool_concurrency, max_agent_concurrency, agent_semaphore).await {
+        if let Err(e) = app
+            .run(
+                client,
+                registry,
+                system_blocks,
+                system_prompt_text,
+                user_context,
+                args.context_size,
+                args.verbose,
+                !args.no_markdown,
+                Some(agent_runner),
+                args.allow_all,
+                args.resume,
+                task_store,
+                max_tool_concurrency,
+                max_agent_concurrency,
+                agent_semaphore,
+            )
+            .await
+        {
             log::error!("TUI error: {e}");
             std::process::exit(1);
         }
@@ -698,14 +909,65 @@ async fn run_chat(mut args: Args) {
 
 /// Determine the API type from config.json based on provider name.
 /// Falls back to OpenAICompatible if provider not found in config.
-fn determine_api_type(provider_name: &str, config_file: Option<&aemeath_core::config::Config>) -> ApiType {
-  if let Some(cfg) = config_file {
-      if let Some(pcfg) = cfg.models.provider_ci(provider_name) {
-          match pcfg.api.as_str() {
-              "anthropic" => return ApiType::Anthropic,
-              _ => return ApiType::OpenAICompatible,
-          }
-      }
-  }
-  ApiType::OpenAICompatible
+fn determine_api_type(
+    provider_name: &str,
+    config_file: Option<&aemeath_core::config::Config>,
+) -> ApiType {
+    if let Some(cfg) = config_file {
+        if let Some(pcfg) = cfg.models.provider_ci(provider_name) {
+            if let Some(api_type) = ApiType::from_str(pcfg.api.as_str()) {
+                return api_type;
+            }
+        }
+    }
+    ApiType::OpenAICompatible
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::config::{Config, ModelsConfig, ProviderModelsConfig};
+    use std::collections::HashMap;
+
+    fn config_with_provider(provider_name: &str, api: &str) -> Config {
+        let mut providers = HashMap::new();
+        providers.insert(
+            provider_name.to_string(),
+            ProviderModelsConfig {
+                api: api.to_string(),
+                ..Default::default()
+            },
+        );
+        Config {
+            models: ModelsConfig {
+                providers,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_determine_api_type_zhipu() {
+        let config = config_with_provider("Zhipu", "zhipu");
+        assert_eq!(determine_api_type("zhipu", Some(&config)), ApiType::Zhipu);
+    }
+
+    #[test]
+    fn test_determine_api_type_litellm() {
+        let config = config_with_provider("litellm-prod", "litellm");
+        assert_eq!(
+            determine_api_type("litellm-prod", Some(&config)),
+            ApiType::LiteLLM
+        );
+    }
+
+    #[test]
+    fn test_determine_api_type_unknown_api_falls_back_openai_compatible() {
+        let config = config_with_provider("custom", "unknown");
+        assert_eq!(
+            determine_api_type("custom", Some(&config)),
+            ApiType::OpenAICompatible
+        );
+    }
 }

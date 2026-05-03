@@ -5,12 +5,14 @@
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
 | 8 | Memory 系统 | - | 重新设计中 | 未确认 | 跨会话持久化记忆，记忆作为一等公民，LLM 自主管理 + Hook 兜底。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 重新设计中 | 未确认 | 关键节点自动反思，发现偏差并提炼经验写入 Memory（依赖 #8）。详见 [spec](specs/009-reflection-system.md) |
-| 11 | OpenAI reasoning_effort 配置支持 | - | ✅ 已完成 | 未确认 | 支持 GPT-5.x 系列 `reasoning_effort` (none/low/medium/high/xhigh)，可在 config.json 配置 |
+| 11 | OpenAI reasoning 对象配置支持 | - | ✅ 已完成 | 未确认 | 仅对官方 OpenAI 发送 `reasoning: { effort: ... }` 对象参数，不再使用顶层 `reasoning_effort` |
 | 13 | Task list 显示在 spinner 下方 | - | ✅ 已完成 | 未确认 | 临时区域渲染顺序调整为：queued messages → spinner → task status lines，让 task list 出现在 spinner 下方而非上方 |
 | 15 | 通过 max_tokens 限制 LLM thinking 长度 | - | 待实施 | 未确认 | 用户可配置 thinking 阶段最大 token 数，避免模型在简单问题上过度思考浪费 token / 时间；映射到各 provider 的 thinking budget 字段 |
-| 16 | Spinner 行合并状态显示 + Hook 调用信息 | - | 待确认 | 未确认 | 把 status line 的 Thinking / Calling xxx 等运行态搬到 output area spinner 行（如 `✻ cooking ... 2s (Thinking ...)`），并在 spinner 行展示当前 hook 调用信息 |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
+| 19 | config model 支持 zhipu api 类型 | - | 待实施 | 未确认 | provider 的 `api` 字段支持显式 `"zhipu"`，路由到 zhipu 专用请求/响应处理（区分于通用 openai），便于针对 GLM 系列做特殊参数与限制（如 body size、thinking 字段差异） |
+| 20 | config model 支持 litellm api 类型 | - | 待实施 | 未确认 | provider 的 `api` 字段支持显式 `"litellm"`，对接 LiteLLM Proxy 的统一接口（OpenAI 兼容 + 扩展），支持 `model="<provider>/<model>"` 透传、`api_key` 共用、自动透传 thinking/reasoning 等扩展字段 |
+| 21 | TUI 优化 Agent 调用输出展示 | - | 待实施 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -50,6 +52,267 @@
 - `aemeath-core/src/task.rs`（batch 字段、current_batch 计数器、list_current_batch）
 - `aemeath-cli/src/tui/app/mod.rs`（update_task_status 使用 list_current_batch）
 - `aemeath-cli/src/tui/app/stream.rs`（移除 clear 调用）
+
+---
+
+### #19 config model 支持 zhipu api 类型
+
+**目标**：让 `~/.aemeath/config.json` 中 provider 的 `api` 字段可显式声明为 `"zhipu"`，路由到 zhipu 专用请求/响应处理路径，与通用 `openai` 解耦，便于针对 GLM 系列做特殊处理（已知 Bug #13：超大请求体静默返回空响应、thinking 字段语义、计费字段差异等）。
+
+**当前现状**：
+- `aemeath-core/src/provider.rs::ApiType` 仅有 `Anthropic` 和 `OpenAICompatible` 两种
+- Zhipu 通过 `OpenAICompatible` + `is_zhipu` 布尔标记走通用 OpenAI Chat Completions 路径（`aemeath-llm/src/client.rs:49`、`OpenAIProviderConfig::from_provider_name` 中通过 provider name 字符串匹配 `"zhipu" | "zhipuai"` 推断）
+- `/model list` / `/model <id>` 命令的 SwitchModel 分支 (`aemeath-cli/src/tui/app/slash.rs:244-247`) 只识别 `"anthropic"`，其他都 fallback 到 OpenAICompatible
+- 配置层无法显式声明 zhipu，对 zhipu 的特化处理散落在 provider name 字符串匹配里
+
+**预期设计**：
+
+1. **`ApiType` 新增 `Zhipu` 变体**
+   - `from_str` / `as_str` 增加 `"zhipu"` 映射
+   - 默认行为退化为 OpenAI 兼容请求路径，但保留独立 dispatch 钩子
+2. **config.json 支持显式 `"api": "zhipu"`**
+   - 现有用户的 `"api": "openai"` + provider name `"zhipu"` 配置仍兼容（向后兼容）
+   - 新建议格式：`"api": "zhipu"`，让 zhipu 成为一等 api 类型
+3. **请求/响应处理路由**
+   - `aemeath-llm/src/client.rs::LlmClient::from_config` 接收 `ApiType::Zhipu` 时构造专用 client（可短期复用 OpenAI 路径，长期为 GLM 特化）
+   - `aemeath-llm/src/providers/` 新增 `zhipu/` 子目录或继续在 `openai_compatible/` 内分支处理
+4. **TUI SwitchModel 分支扩展**
+   - `aemeath-cli/src/tui/app/slash.rs` 中 `match api_type.as_str()` 增加 `"zhipu" => ApiType::Zhipu` 分支
+5. **针对 GLM 系列的特化处理（依赖 Bug #13 修复方向）**
+   - 请求 body size 检测与超大 tool result 截断
+   - thinking 字段：GLM 5.x 是 `thinking: { type: "enabled" }`（on/off），区别于 Anthropic 的 budget_tokens
+   - `input_tokens=0 output_tokens=0` 空响应识别为错误并重试
+
+**涉及路径**：
+- `aemeath-core/src/provider.rs`（`ApiType::Zhipu` 变体）
+- `aemeath-core/src/config/models.rs`（api 字段校验）
+- `aemeath-llm/src/client.rs`（dispatch 到 zhipu 路径）
+- `aemeath-llm/src/providers/`（zhipu 专用模块或 openai_compatible 内分支）
+- `aemeath-cli/src/tui/app/slash.rs`（SwitchModel 分支匹配）
+- `aemeath-core/src/command/commands/model.rs`（如需 `/model list` 显示 api 类型）
+
+**关联**：
+- Bug #13（Zhipu 超大请求体返回空响应）— 本 feature 落地后可在 zhipu 专用路径里针对性修
+- Feature #11（OpenAI reasoning_effort）— 本 feature 不影响 OpenAI 路径，但同样思路：把 provider 特殊参数收敛到独立 api 类型
+
+**开放问题**：
+- zhipu 与 OpenAI Chat Completions 的请求体差异是否大到需要独立 module？还是仅在 openai_compatible 内 if-else 分支即可
+- 现有用户 config 是否需要自动迁移（`provider_name == "zhipu"` + `api == "openai"` → 提示改为 `api == "zhipu"`）
+- `/model list` 输出是否要标注 api 类型（如 `[zhipu] glm-4.5 ctx:128k max:8k`）
+
+---
+
+### #20 config model 支持 litellm api 类型
+
+**目标**：让 `~/.aemeath/config.json` 中 provider 的 `api` 字段可显式声明为 `"litellm"`，对接 [LiteLLM Proxy](https://github.com/BerriAI/litellm) 的统一接口，让 aemeath 通过一个 LiteLLM endpoint 同时访问多家模型（OpenAI / Anthropic / Bedrock / Vertex / Azure 等），由 LiteLLM 统一管理 key、计费、限流、fallback。
+
+**LiteLLM Proxy 接口要点**：
+- 暴露 OpenAI 兼容的 `/chat/completions` 与 `/v1/messages`（双协议）
+- 模型名格式：`"<provider>/<model_id>"`，如 `"anthropic/claude-opus-4-7"`、`"openai/gpt-5.5"`、`"bedrock/anthropic.claude-3-5-sonnet"`
+- 统一 `Authorization: Bearer <litellm_master_key>` 鉴权
+- 透传 provider 特有字段（如 `reasoning_effort`、`thinking.budget_tokens`）由 LiteLLM 转译给底层 provider
+- 支持 streaming（SSE，与 OpenAI 一致）和 cost tracking header（`x-litellm-response-cost`）
+
+**当前现状**：
+- `ApiType` 仅有 `Anthropic` / `OpenAICompatible`，配 LiteLLM 当前只能伪装成 `openai`
+- 模型名无法体现 `<provider>/<model>` 这种带斜杠的 LiteLLM 命名规则（aemeath 内部 `current_model` 显示就是 `provider/model_id`，可能与 LiteLLM 命名冲突）
+- 没有针对 LiteLLM 特有响应字段（cost header、retry logic、fallback metadata）的处理
+
+**预期设计**：
+
+1. **`ApiType` 新增 `LiteLLM` 变体**
+   - `from_str` / `as_str` 增加 `"litellm"` 映射
+   - 默认走 OpenAI Chat Completions 协议（LiteLLM 主推），可选 `litellm-anthropic`（走 `/v1/messages` 协议）
+2. **config.json 示例**
+   ```json
+   {
+     "models": {
+       "providers": {
+         "litellm-prod": {
+           "api": "litellm",
+           "base_url": "https://litellm.example.com",
+           "api_key_env": "LITELLM_MASTER_KEY",
+           "models": [
+             { "id": "anthropic/claude-opus-4-7", "context_window": 200000, "max_tokens": 8192 },
+             { "id": "openai/gpt-5.5", "context_window": 128000, "max_tokens": 4096, "reasoning": true }
+           ]
+         }
+       }
+     }
+   }
+   ```
+3. **请求/响应处理**
+   - 短期：复用 `openai_compatible` 路径，仅在 dispatch 上新增分支
+   - 中期：解析 `x-litellm-response-cost` header 注入到 `cost.rs`，避免每个底层 provider 各自维护 pricing
+   - 长期：支持 LiteLLM 的 `fallbacks` 字段、`router` 路由元信息
+4. **TUI SwitchModel 分支扩展**
+   - `aemeath-cli/src/tui/app/slash.rs` 中 `match api_type.as_str()` 增加 `"litellm" => ApiType::LiteLLM` 分支
+5. **模型名展示**
+   - LiteLLM 模型 id 含 `/`，`/model list` 显示需要避免与 `provider/model` 内部分隔符混淆，可考虑改用 `[litellm-prod] anthropic/claude-opus-4-7` 或对 `/` 做转义
+
+**与 zhipu (#19) 的关系**：
+- 都是「让 `ApiType` 从二元（Anthropic / OpenAICompatible）扩展到多 provider 子类型」
+- 建议**先做 #19 验证 ApiType 扩展机制**，再做 #20 follow up
+- LiteLLM 接管后，可让 zhipu / openai / anthropic 等都通过 LiteLLM 统一访问，降低 aemeath 内 provider 适配负担
+
+**涉及路径**：
+- `aemeath-core/src/provider.rs`（`ApiType::LiteLLM` 变体）
+- `aemeath-core/src/config/models.rs`（api 字段校验）
+- `aemeath-llm/src/client.rs`（dispatch 到 litellm 路径）
+- `aemeath-llm/src/providers/`（litellm 专用模块或 openai_compatible 内分支）
+- `aemeath-cli/src/tui/app/slash.rs`（SwitchModel 分支匹配）
+- `aemeath-core/src/cost/`（解析 LiteLLM 响应 cost header）
+- `aemeath-cli/src/tui/status_bar.rs`（cost 来源标注 LiteLLM 上报值 vs 本地估算）
+
+**关联**：
+- Feature #19（zhipu api 类型）— 共享 ApiType 扩展机制
+- Feature #11（OpenAI reasoning）— LiteLLM 透传 reasoning 字段，需确认 LiteLLM 对 `reasoning: { effort }` 对象格式的支持
+- Feature #15（thinking max_tokens）— LiteLLM 透传 `thinking.budget_tokens`
+
+**开放问题**：
+- 是否同时支持 LiteLLM 的两种协议（`/chat/completions` 与 `/v1/messages`）？还是只支持前者
+- LiteLLM 上报 cost 与 aemeath 本地估算冲突时如何展示（LiteLLM 优先 + 降级到本地估算？）
+- 是否支持 LiteLLM 的 `team_id` / `user_id` header 透传（多租户场景）
+- 模型名带 `/` 与 aemeath 内部 `provider/model` 分隔符的兼容方案
+
+---
+
+### #21 TUI 优化 Agent 调用输出展示
+
+**目标**：让 Agent 子任务在 TUI 中的执行输出更可读、更能反映"agent 正在做什么"，而不是堆砌 Turn 编号和工具名缩写。当前形式信息密度高但语义低，长任务时屏幕被几十条 `Turn N calling: Read, Read, Grep` 占满，用户既看不出在读哪些文件，也看不出当前阶段。
+
+**当前现状**：
+
+```
+Agent(Implement task 7)  [role: coder]
+  你在隔离工作树中工作：/Users/guoyuqi/.../.worktrees/provider-driver-refactor
+  必须遵守：使用中文回复；修改前先 Read 文件；遵循 TDD；只...
+  ↳ [Turn 1] calling: Read, Read, Read
+  ↳ [Turn 2] calling: Read, Read, Grep
+  ↳ [Turn 3] calling: Read, Read, Grep
+  ↳ [Turn 4] calling: Grep, Grep, Read
+  ↳ [Turn 5] calling: Grep, Grep, Read
+  ↳ [Turn 6] calling: Read
+  ↳ [Turn 7] calling: Read
+  ↳ [Turn 8] calling: Read
+  ↳ [Turn 9] calling: Grep, Grep, Grep
+  ↳ [Turn 10] calling: Bash
+  ↳ [Turn 11] calling: Read
+  ...
+```
+
+痛点：
+1. 工具名重复，看不出读了哪个文件 / grep 了什么 pattern / 跑了什么 bash
+2. 长任务下条目数膨胀（一个 task 几十 turn 都不奇怪），把主对话区挤掉
+3. 没有阶段感（探索 → 编辑 → 验证），用户难以判断进度
+4. 失败/被 reject 的 tool call 没有视觉区分
+5. 子 agent 内部嵌套调用 sub-sub agent 时层级不清
+
+**预期设计**：
+
+#### 1. 单 turn 显示从工具名 → 工具+目标摘要
+
+| 现状 | 改进 |
+|------|------|
+| `calling: Read, Read, Grep` | `Read aemeath-llm/src/client.rs · Read provider.rs · Grep "ApiType"` |
+| `calling: Edit` | `Edit aemeath-core/src/provider.rs +12 / -3` |
+| `calling: Bash` | `Bash cargo check -p aemeath-core` |
+
+每个 tool 后面附 1 行的目标参数（截断到 50~60 列），多个 tool 用 `·` 分隔。
+
+#### 2. 连续同类型工具合并
+
+连续多 turn 全部是 Read/Grep（探索阶段）合并为一段：
+
+```
+↳ [Turn 1-5] explored 12 files (Read × 8, Grep × 4)
+   └─ aemeath-llm/src/client.rs, aemeath-core/src/provider.rs, ...
+```
+
+展开后逐 turn 显示明细。
+
+#### 3. 阶段标签（自动推断）
+
+按 tool 类型给 turn 打阶段：
+- **探索**：Read / Grep / Glob / Bash(只读如 ls/cat)
+- **编辑**：Edit / Write / NotebookEdit
+- **验证**：Bash(cargo / npm / pytest 等编译/测试命令)
+- **决策**：Thinking / TaskCreate / TaskUpdate
+
+显示形态：
+```
+Agent(Implement task 7)  [role: coder]
+  ─ 探索 (Turn 1-9, 18s) ─ 12 files / 6 grep
+  ─ 编辑 (Turn 13-19, 24s) ─ 4 files modified
+  ─ 验证 (Turn 20, 8s) ─ cargo check ✓
+```
+
+#### 4. 失败/拒绝的视觉区分
+
+- tool 执行失败 → 红色 `✗`
+- 被 permission 拒绝 → 黄色 `⚠`
+- 成功 → 默认色或绿色 `✓`（仅在重要 tool 如 Edit/Write/Bash 上显示）
+
+#### 5. 折叠/展开
+
+子 agent 整块默认折叠为单行摘要：
+```
+▶ Agent(Implement task 7) coder · 19 turns · 4 edits · 1m 32s · ✓
+```
+
+按键展开（如 `Tab` 或鼠标点击）显示完整 turn 列表。完成后默认折叠，进行中默认展开。
+
+#### 6. 嵌套子 agent 缩进
+
+sub-sub agent 用更深的缩进 + 不同颜色边框：
+```
+Agent(parent)
+  ↳ Agent(child)
+      ↳ Agent(grandchild)
+```
+
+#### 7. 配置项
+
+`config.json`：
+```json
+{
+  "ui": {
+    "agent_output": {
+      "show_tool_args": true,        // tool 名后是否带参数摘要
+      "merge_consecutive_tools": true,// 合并连续同类工具
+      "phase_labels": true,          // 显示阶段标签
+      "default_folded": "completed",  // never | completed | always
+      "max_arg_len": 60              // 参数摘要最大列宽
+    }
+  }
+}
+```
+
+**实施分解**：
+
+1. **数据层**：在 sub-agent 事件流上挂 `AgentTurnSummary { turn, tools: Vec<ToolInvocation>, phase, started_at, ended_at }`，`ToolInvocation` 含 tool name + 关键参数（Read 的 file_path、Grep 的 pattern、Bash 的 command 头部、Edit 的目标文件）
+2. **渲染层**：output_area 新增 `AgentBlock` 行类型，集中渲染整块（含阶段、可折叠、嵌套缩进）
+3. **合并算法**：streaming 期间持续追加，每 N 个连续探索类 turn 合并为段；编辑/验证类不合并
+4. **快捷键**：Tab 切换当前光标所在 AgentBlock 的折叠态；`zR` 全部展开 / `zM` 全部折叠（vim 风）
+5. **复制**：选中折叠态 AgentBlock 复制时展开为完整文本
+
+**涉及路径**：
+- `aemeath-cli/src/tui/output_area/`（新增 AgentBlock LineKind、render、selection、copy）
+- `aemeath-cli/src/tui/app/event_handler.rs`（聚合 sub-agent 事件为 AgentTurnSummary）
+- `aemeath-cli/src/tui/app/update.rs`（折叠/展开消息处理）
+- `aemeath-tools/src/agent.rs`（事件携带 tool 关键参数，便于摘要）
+- `aemeath-core/src/config/`（`ui.agent_output` 配置）
+
+**关联**：
+- 已归档 Bug #3（tool call TUI 显示）— 解决了 sub-agent 事件路由，本 feature 在其基础上做语义化展示
+- Feature #16（spinner 行合并状态）— spinner 显示当前阶段时可与本 feature 的阶段标签同源
+- Feature #18（task list batch）— task list 与 agent block 是两条线：task list 表达 LLM 主动声明的工作分解，agent block 表达 sub-agent 的执行轨迹
+
+**开放问题**：
+- 阶段推断完全靠 tool 类型够准吗？比如 Bash 既可能是探索（cat）也可能是验证（cargo test），需要按命令前缀做更细分类
+- 折叠默认态：`completed` 合理还是应该 `always`（更激进）？长 task 用户可能宁愿默认看不见
+- 多 tool 并发执行同一 turn 时，参数摘要怎么排序（按 tool 名？按完成时间？）
+- 子 agent 失败时整块折叠是否应该自动展开到失败的那个 turn
 
 ---
 
@@ -246,92 +509,6 @@ struct ReflectionEntry {
 
 ---
 
-### #16 Spinner 行合并状态显示 + Hook 调用信息
-
-**目标**：把 status line 上承担的 "Thinking..." / "Calling xxx..." / "Generating..." 等运行态信息搬到 output area 的 spinner 行展示，让用户视线只需要盯一个地方就能掌握 agent 正在做什么；同时把 hook 触发信息（哪个 event 跑了哪个 hook）也并入 spinner 行展示。
-
-**当前状态**：
-- spinner 行只有 spinner 字符 + 一句固定 "Generating..."（或类似），细分阶段（thinking、calling、tool 名）写在底部 status bar 里
-- 用户需要在 output area 与 status bar 之间来回扫视
-- hook 调用对用户完全不可见，只能事后翻 `aemeath.log`，无法在交互中确认 hook 是否生效
-
-**预期形态**：
-
-spinner 行组合显示：
-
-```
-✻ cooking ... 2s (Thinking ...)
-✻ cooking ... 8s (Calling Read foo.rs)
-✻ cooking ... 12s (Hook PreToolUse: lint-shell.sh)
-```
-
-- 主词：`cooking` / `working`（统一占位词，配置可选）
-- 计时：从当前 turn 开始的秒数
-- 括号：当前细分阶段
-  - `Thinking ...` — LLM thinking 阶段
-  - `Calling <ToolName> <param_summary>` — 当前 tool call
-  - `Hook <Event>: <hook_name>` — hook 正在执行
-  - `Generating ...` — LLM 生成普通文本中
-  - `Compacting ...` — 压缩阶段
-  - `Waiting for user` — AskUser 等待中（spinner 暂停）
-
-status bar 仍保留：
-- 模型 / provider / cwd / token / cost 等环境与累计数据
-- 不再承担"当前在做什么"的瞬时状态
-
-**Hook 调用信息展示**：
-
-| 事件 | spinner 行表现 |
-|------|----------------|
-| PreToolUse / PostToolUse / PostToolUseFailure / PreCompact / PostToolBatch / Stop / StopFailure / SessionStart | `Hook <Event>: <hook_command_short>` 持续期内显示 |
-| UserPromptSubmit | 在 input area 提交后短暂显示 1 秒，再切回正常 spinner |
-
-补充考虑：
-- hook 退出后保留 1 秒"已完成"状态再切走，避免短 hook 一闪而过看不见
-- hook 阻止操作（exit 2 或 `decision: block`）时，spinner 行变红色 + `Hook <Event> blocked: <reason 摘要>`
-- 多个 hook 排队执行时，依次显示当前正在跑的那个，不堆栈
-
-**实施分解**：
-
-1. 抽取 spinner 行 model：`SpinnerLine { phase: Phase, started_at: Instant, hook: Option<HookSnapshot> }`，phase 涵盖 Thinking / Calling / Hook / Generating / Compacting / WaitingUser
-2. UI 事件层：
-   - 现有 `UiEvent::Thinking` / `ToolCall` / `ToolResult` 复用，但 update.rs 不再写入 status bar 文字，只更新 SpinnerLine.phase
-   - 新增 `UiEvent::HookStart { event, name }` / `UiEvent::HookEnd { result }`，由 HookRunner 在执行前后发送
-3. 渲染：output_area/spinner.rs 的 render 拼接 `<spinner> <main> ... <elapsed>s (<phase desc>)`
-4. status_bar.rs 移除 thinking_text / tool_call_name / generating 字段，只保留环境 + 累计数据
-5. 颜色：hook block / 错误用红色，hook 普通用 cyan，thinking 用 dim，calling 用 magenta，generating 用绿
-6. 配置开关：`config.json` 加 `spinner.merge_status: true`（默认开），`spinner.label: "cooking"`
-
-**与已归档 / 现有 feature 的关系**：
-- Feature #1 Hook 系统已落地事件，本 feature 把 hook 运行态可视化
-- Feature #13（task list 在 spinner 下方）已确定 spinner 行的相对位置，本 feature 不动布局，只改 spinner 行内容
-- Bug #25（/clear 未清空 status line）：本 feature 简化了 status bar 字段，复位逻辑相应简化
-- Feature #11 / #15 reasoning effort：spinner 行可在 Thinking 阶段附带 effort 等级，如 `Thinking high ...`
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/spinner.rs`（spinner 行 model + render）
-- `aemeath-cli/src/tui/app/update.rs`（事件路由调整 + 新增 HookStart/HookEnd）
-- `aemeath-cli/src/tui/app/mod.rs`（SpinnerLine 状态字段）
-- `aemeath-cli/src/tui/status_bar.rs`（移除瞬时态字段）
-- `aemeath-core/src/hook.rs` / `aemeath-cli/` 中 HookRunner 调用处（发送 HookStart/HookEnd UI 事件）
-- `aemeath-core/src/config/`（spinner.merge_status / spinner.label 配置）
-
-**测试场景**：
-- 普通对话 → spinner 显示 Thinking → Generating → 消失
-- 多 tool call → spinner 在 Calling A / Calling B / Calling C 之间切换，elapsed 持续累计
-- PreToolUse hook 拦截 → spinner 红色 + "Hook PreToolUse blocked: ..." 后切回 Thinking
-- 长 hook（>1s）→ spinner 期间显示 hook 名称 + elapsed
-- AskUser 等待 → spinner 暂停 + "Waiting for user"
-- /clear → spinner 行清空，status bar 环境信息保留
-
-**开放问题**：
-- spinner 主词 `cooking` 是否需要在用户语境下可关（一些用户可能觉得不专业）→ 默认配置 `spinner.label = "thinking"` 可能更稳，需决策
-- hook 名称太长时如何截断（路径很长的 shell 脚本）
-- elapsed 计时从哪里起算？建议从当前 turn 用户提交时刻起算，跨多 tool call 不重置
-- 多个 hook 并行跑（PostToolBatch + PostToolUse）时显示策略：聚合显示 `Hook x2 running` 或只显示最后一个
-
----
-
 
 **目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
 
@@ -390,15 +567,21 @@ status bar 仍保留：
 
 ---
 
-### #11 OpenAI reasoning_effort 配置支持
+### #11 OpenAI reasoning 对象配置支持
 
-**目标**：支持 GPT-5.x 系列模型（GPT-5、GPT-5.2、GPT-5.4、GPT-5.5）的 `reasoning_effort` 参数，让用户能精确控制 thinking 强度（速度/质量权衡），并通过 `config.json` 持久化配置。
+**目标**：支持 OpenAI 官方格式的 `reasoning` 对象参数，让用户能精确控制 thinking 强度（速度/质量权衡），并通过 `config.json` 持久化配置。
+
+**范围决策**：
+- 本 feature 只适配官方 OpenAI 的 `reasoning` 对象字段。
+- OpenAI 请求体使用 `reasoning: {"effort": "..."}`，不再使用顶层 `reasoning_effort`。
+- `openai_compatible` 实现文件可以复用，但只有 provider 明确为官方 `openai` 时才发送 OpenAI 专属字段。
+- LiteLLM / OpenRouter / 其他 OpenAI-compatible 路径不自动发送 OpenAI reasoning 对象，避免把 OpenAI 专属参数错误传给不兼容接口。
 
 **背景**：
-- OpenAI GPT-5.x 通过 `reasoning_effort` 控制思考深度，取值：`none` / `low` / `medium`（默认）/ `high` / `xhigh`
-- 当前 aemeath 在 `openai_compatible` provider 只发 `enable_thinking: false` 兼容字段，未传 `reasoning_effort`，所以接到 GPT-5.5 时只能拿到默认 medium 行为
-- 不同 reasoning provider 控制方式不同：
-  - **OpenAI GPT-5.x**：`reasoning_effort: "low"|"medium"|"high"|"xhigh"|"none"` 或 Responses API 的 `reasoning: {"effort": "..."}`
+- OpenAI reasoning 模型通过 `reasoning.effort` 控制思考深度，取值：`none` / `low` / `medium`（默认）/ `high` / `xhigh`
+- 当前 aemeath 在 OpenAI 路径未传 `reasoning` 对象，所以只能使用 OpenAI 默认 medium 行为
+- 不同 reasoning provider 控制方式不同，本 feature 不尝试统一这些方言：
+  - **OpenAI**：`reasoning: {"effort": "low"|"medium"|"high"|"xhigh"|"none"}`
   - **DeepSeek**：`thinking: {"type": "enabled"|"disabled"}`（仅 on/off）
   - **GLM/Qwen 等**：`enable_thinking: true|false`（仅 on/off）
   - **Anthropic**：`thinking: {"type": "enabled", "budget_tokens": N}`（带 budget）
@@ -407,34 +590,32 @@ status bar 仍保留：
 
 #### 1. config.json 字段
 
-新增模型级配置 `reasoning_effort`，与现有 `reasoning` 开关并存：
+新增模型级配置 `reasoning` 对象；其中 `effort` 字段会直接映射为 OpenAI 的 `reasoning.effort`：
 
 ```json
 {
   "models": {
-    "default": "gpt-5.5",
-    "list": [
-      {
-        "name": "gpt-5.5",
-        "provider": "openai",
-        "model": "gpt-5.5",
-        "reasoning": true,
-        "reasoning_effort": "low"
-      },
-      {
-        "name": "deepseek-r1",
-        "provider": "deepseek",
-        "model": "deepseek-r1",
-        "reasoning": true
+    "default": "OpenAI/gpt-5.5",
+    "providers": {
+      "OpenAI": {
+        "api": "openai",
+        "models": [
+          {
+            "id": "gpt-5.5",
+            "reasoning": {
+              "effort": "low"
+            }
+          }
+        ]
       }
-    ]
+    }
   }
 }
 ```
 
-- `reasoning_effort` 为可选字段，类型 `Option<String>`
+- `reasoning` 可为 bool（仅 on/off）或对象；OpenAI effort 使用对象形态：`{"effort":"low"}`
 - 取值校验：`none|low|medium|high|xhigh`，非法值启动时报错
-- 仅对支持的 provider 生效（OpenAI / OpenRouter / OpenAICompatible 路由到 OpenAI 模型时）；其他 provider 收到后忽略 + 日志 warn
+- 仅对官方 OpenAI provider 生效；其他 provider 沿用自身 on/off 逻辑，不自动发送 OpenAI reasoning 对象
 
 #### 2. CLI / 环境变量 / 命令
 
@@ -448,8 +629,8 @@ status bar 仍保留：
 **OpenAI 路径**（`aemeath-llm/src/providers/openai_compatible/non_stream.rs` + `stream.rs`）：
 ```rust
 if reasoning_enabled && self.config.is_openai_reasoning_capable() {
-    if let Some(effort) = &self.config.reasoning_effort {
-        request_body["reasoning_effort"] = json!(effort);
+    if let Some(effort) = self.reasoning.as_ref().and_then(|r| r.effort()) {
+        request_body["reasoning"] = json!({ "effort": effort });
     }
 }
 ```
@@ -461,32 +642,32 @@ if reasoning_enabled && self.config.is_openai_reasoning_capable() {
 - `xhigh` → 32768
 - `none` → 不发 thinking 字段
 
-**其他 provider**：忽略 `reasoning_effort`，沿用 on/off 开关。
+**其他 provider**：忽略 OpenAI `reasoning.effort` 对象配置，沿用 on/off 开关。
 
 #### 4. UI 反馈
 
 - status bar 在 reasoning 启用时显示当前 effort 等级（如 `reasoning: high`）
 - `/think` 命令保持兼容（仅 on/off），与 `/effort` 互补：
-  - `/think off` → 等价于 `reasoning_effort = none`
+  - `/think off` → 等价于关闭 `reasoning`
   - `/think on` → 恢复上次 effort（默认 medium）
 
 #### 5. 模型能力检测
 
-在 `aemeath-core/src/provider.rs` 增加 `supports_reasoning_effort(model: &str) -> bool`：
+在 `aemeath-core/src/provider.rs` 增加 `supports_openai_reasoning(model: &str) -> bool`：
 - GPT-5 / GPT-5.2 / GPT-5.4 / GPT-5.5 / o1 / o3 / o3-mini → true
 - 其他 OpenAI 模型 → false（GPT-4o 等不支持）
-- 检测时按模型 id 前缀匹配，不匹配时静默忽略 `reasoning_effort` 字段
+- 检测时按模型 id 前缀匹配，不匹配时静默忽略 `reasoning` 对象字段
 
 **测试场景**：
-- 配置 `reasoning_effort=low` + GPT-5.5 → 请求体包含 `"reasoning_effort": "low"`
-- 配置 `reasoning_effort=high` + GPT-4o → 请求体不包含该字段（不支持）
-- 配置 `reasoning_effort=invalid` → 启动报错
+- 配置 `reasoning={"effort":"low"}` + GPT-5.5 → 请求体包含 `"reasoning": {"effort": "low"}`
+- 配置 `reasoning={"effort":"high"}` + GPT-4o → 请求体不包含 `reasoning` 对象字段（不支持）
+- 配置 `reasoning={"effort":"invalid"}` → 启动报错
 - `/effort high` 后切换模型到 deepseek → effort 字段被忽略，日志 warn
-- 不配置 `reasoning_effort` → 行为与现状一致（OpenAI 默认 medium）
+- 不配置 `reasoning.effort` → 行为与现状一致（OpenAI 默认 medium）
 
 **涉及路径**：
-- `aemeath-core/src/config/models.rs`（新增 `reasoning_effort` 字段）
-- `aemeath-core/src/provider.rs`（`supports_reasoning_effort` 能力检测）
+- `aemeath-core/src/config/models.rs`（`reasoning` 对象配置）
+- `aemeath-core/src/provider.rs`（`supports_openai_reasoning` 能力检测）
 - `aemeath-llm/src/providers/openai_compatible/non_stream.rs` + `stream.rs` + `mod.rs`（构造请求体）
 - `aemeath-cli/src/cli.rs`（`--reasoning-effort` flag）
 - `aemeath-cli/src/main.rs`（env 变量读取 + 配置合并）
@@ -495,39 +676,18 @@ if reasoning_enabled && self.config.is_openai_reasoning_capable() {
 
 **关联**：与 `/think` 命令、`reasoning` 配置字段并存；后续可扩展到 Anthropic 的 `budget_tokens`。
 
-#### 6. 待确认：GPT 思考内容当前不显示
+#### 6. OpenAI thinking 内容展示限制
 
 **现象**：当前调用 OpenAI（含 GPT-5.x / o1 / o3 等具备 reasoning 能力的模型）时，TUI 中**看不到 thinking 内容**——只看到最终回答，没有任何 `> thinking…` 段或 reasoning 流式输出，与 Anthropic / DeepSeek 等 provider 行为不一致。
 
-**需要确认的问题**：
-1. **是否预期？**
-   - OpenAI Chat Completions API 对 GPT-5.x 系列的 reasoning 内容**默认不返回**（出于费用 / 内容安全），仅在 Responses API 或显式开启 `reasoning.summary` 时才透出 reasoning summary
-   - o1 / o3 系列 Chat Completions 同样不返回 thinking 文本，只返回 `usage.completion_tokens_details.reasoning_tokens`（计费用）
-   - 因此"OpenAI 不显示 thinking"很可能是 **API 限制**而非 aemeath bug
-2. **能否绕开？**
-   - **方案 A**：切到 Responses API（`/v1/responses`），请求带 `reasoning: { "effort": "...", "summary": "auto" }`，响应里 `output[].type == "reasoning"` 段含 summary 文本——可作为 thinking 展示
-   - **方案 B**：保留 Chat Completions，仅显示 reasoning_tokens 计数（"模型思考了 1234 tokens"），无文本内容
-   - **方案 C**：维持现状，文档说明 OpenAI thinking 不可见
+**决策**：
+- 这是 OpenAI 接口限制，不作为本 feature 解决范围。
+- 本 feature 只发送官方 `reasoning` 对象控制思考强度，不处理 thinking 文本展示。
+- 若后续要展示 OpenAI reasoning summary，应单独登记 feature，明确 summary 字段、响应解析和 TUI 展示策略。
 
-**排查行动**（与 #11 主体合并实施）：
-1. 抓一次 GPT-5.5 + reasoning_effort=high 的实际响应体，确认 `choices[0].message` / `delta` 中是否真的没有 thinking 字段
-2. 检查 `aemeath-llm/src/providers/openai_compatible/{stream,non_stream}.rs` 是否漏解析了 `reasoning_content` / `reasoning` / `thinking` 等字段
-3. 对比 DeepSeek / Anthropic 路径如何把 thinking 推到 `UiEvent::Thinking`，确认 OpenAI 路径有无对应分支
-4. 决策方案：是接 Responses API（方案 A）还是只显示 token 数（方案 B）
-
-**测试场景**（确认后补充到 #11 主测试）：
-- GPT-5.5 + effort=high → 抓包响应体，确认有/无 reasoning 段
-- 切到 Responses API → reasoning summary 是否完整流式
-- DeepSeek-R1（已知能显示 thinking）作为对照基线
-
-**涉及路径**（额外）：
-- `aemeath-llm/src/providers/openai_compatible/stream.rs`（流式 reasoning 解析）
-- `aemeath-llm/src/providers/openai_compatible/non_stream.rs`（非流式 reasoning 解析）
-- 可能新增：Responses API 路径（`providers/openai_responses/`）
-
-**开放问题**：
-- 是否同期切到 Responses API？切换会影响所有 OpenAI 请求路径，是 #11 + 一个独立 feature 的工作量
-- 若维持 Chat Completions，是否在 status bar 显示 "reasoning: 1234 tokens"（替代不可见的 thinking 文本）
+**可做补充**：
+- 若响应 usage 中包含 `completion_tokens_details.reasoning_tokens`，可在后续 feature 中考虑展示 token 计数。
+- 当前 #11 不要求显示 OpenAI thinking 文本。
 
 **开放问题**：
 - 是否需要把"按 effort 估算 budget_tokens"的 Anthropic 映射也一起做？还是分两期？

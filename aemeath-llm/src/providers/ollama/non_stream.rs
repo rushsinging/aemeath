@@ -1,10 +1,10 @@
 //! 非流式请求：通过 `/api/chat` 端点发送一次性请求。
 
-use aemeath_core::message::{ContentBlock, Message, Role};
-use crate::provider::StreamHandler;
-use crate::types::{StreamResponse, SystemBlock};
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
+use crate::provider::StreamHandler;
+use crate::types::{StreamResponse, SystemBlock};
+use aemeath_core::message::{ContentBlock, Message, Role};
 
 pub(crate) trait OllamaProviderNonStream {
     async fn send_message_non_stream(
@@ -35,7 +35,9 @@ impl OllamaProviderNonStream for OllamaProvider {
             self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
             messages.len(),
             tool_schemas.len(),
-            serde_json::to_string(&request_body).map(|s| s.len()).unwrap_or(0),
+            serde_json::to_string(&request_body)
+                .map(|s| s.len())
+                .unwrap_or(0),
         );
 
         let response = self
@@ -86,10 +88,7 @@ impl OllamaProviderNonStream for OllamaProvider {
             .get("prompt_eval_count")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32;
-        let output_tokens = body
-            .get("eval_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let output_tokens = body.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
         let mut stop_reason = crate::types::StopReason::EndTurn;
 
         if let Some(done_reason) = body.get("done_reason").and_then(|v| v.as_str()) {
@@ -138,9 +137,7 @@ impl OllamaProviderNonStream for OllamaProvider {
                         let input = function
                             .get("arguments")
                             .cloned()
-                            .unwrap_or_else(|| {
-                                serde_json::Value::Object(serde_json::Map::new())
-                            });
+                            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
 
                         handler.on_tool_use_start(&name);
                         content_blocks.push(ContentBlock::ToolUse { id, name, input });

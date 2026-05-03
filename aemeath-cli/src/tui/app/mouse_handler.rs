@@ -7,7 +7,11 @@ fn point_in_rect(row: u16, col: u16, rect: &ratatui::layout::Rect) -> bool {
 }
 
 impl super::App {
-    pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent, output_area: ratatui::layout::Rect) {
+    pub(super) fn handle_mouse_event(
+        &mut self,
+        mouse: MouseEvent,
+        output_area: ratatui::layout::Rect,
+    ) {
         let row = mouse.row;
         let col = mouse.column;
 
@@ -33,9 +37,12 @@ impl super::App {
                 if point_in_rect(row, col, &output_area) {
                     // 双击检测
                     let now = Instant::now();
-                    let is_double = self.last_click
+                    let is_double = self
+                        .last_click
                         .map(|(t, prev_row, prev_col)| {
-                            prev_row == row && prev_col == col && t.elapsed() < std::time::Duration::from_millis(500)
+                            prev_row == row
+                                && prev_col == col
+                                && t.elapsed() < std::time::Duration::from_millis(500)
                         })
                         .unwrap_or(false);
 
@@ -59,7 +66,8 @@ impl super::App {
                     // 清除其他区域的选中
                     self.output_area.clear_selection();
                     self.input_area.clear_selection();
-                    self.status_bar.start_selection(col.saturating_sub(status_bar.x));
+                    self.status_bar
+                        .start_selection(col.saturating_sub(status_bar.x));
                 }
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
@@ -69,7 +77,8 @@ impl super::App {
                     let inner = self.input_area.get_inner_area(&input_area);
                     self.input_area.update_selection(row, col, &inner);
                 } else if self.status_bar.is_selecting() {
-                    self.status_bar.update_selection(col.saturating_sub(status_bar.x));
+                    self.status_bar
+                        .update_selection(col.saturating_sub(status_bar.x));
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {

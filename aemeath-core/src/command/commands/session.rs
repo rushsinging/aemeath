@@ -2,7 +2,10 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, ConfirmAction, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+    ConfirmAction,
+};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -58,7 +61,10 @@ inventory::submit! {
     })
 }
 
-fn resume_execute(args: String, _ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+fn resume_execute(
+    args: String,
+    _ctx: &mut CommandContext,
+) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
     Box::pin(async move {
         let arg = args.trim();
         if arg.is_empty() {
@@ -117,7 +123,10 @@ fn relative_time(iso: &str) -> String {
     }
 }
 
-fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
+fn session_execute(
+    args: String,
+    ctx: &mut CommandContext,
+) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
     let session_id = ctx.session_id.clone();
     Box::pin(async move {
         let parts: Vec<&str> = args.trim().split_whitespace().collect();
@@ -152,7 +161,15 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
                 if parts.len() < 3 {
                     return CommandResult::Error("Usage: /session rename <id> <name>".to_string());
                 }
-                match crate::session::update_session_metadata(parts[1], Some(parts[2..].join(" ")), None, None, None).await {
+                match crate::session::update_session_metadata(
+                    parts[1],
+                    Some(parts[2..].join(" ")),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
                     Ok(_) => CommandResult::Success(format!("Session {} renamed", parts[1])),
                     Err(e) => CommandResult::Error(format!("Failed to rename: {}", e)),
                 }
@@ -173,9 +190,14 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
                 match crate::session::load_session(parts[1]).await {
                     Ok(s) => {
                         let export_id = format!("{}-export", parts[1]);
-                        let export_session = crate::session::Session { id: export_id.clone(), ..s };
+                        let export_session = crate::session::Session {
+                            id: export_id.clone(),
+                            ..s
+                        };
                         match crate::session::save_session(&export_session).await {
-                            Ok(_) => CommandResult::Success(format!("Exported as session {}", export_id)),
+                            Ok(_) => {
+                                CommandResult::Success(format!("Exported as session {}", export_id))
+                            }
                             Err(e) => CommandResult::Error(format!("Failed to export: {}", e)),
                         }
                     }
@@ -189,7 +211,10 @@ fn session_execute(args: String, ctx: &mut CommandContext) -> Pin<Box<dyn Future
                 match tokio::fs::read_to_string(parts[1]).await {
                     Ok(json) => match serde_json::from_str::<crate::session::Session>(&json) {
                         Ok(s) => match crate::session::save_session(&s).await {
-                            Ok(_) => CommandResult::Success(format!("Imported session {} from {}", s.id, parts[1])),
+                            Ok(_) => CommandResult::Success(format!(
+                                "Imported session {} from {}",
+                                s.id, parts[1]
+                            )),
                             Err(e) => CommandResult::Error(format!("Failed to import: {}", e)),
                         },
                         Err(e) => CommandResult::Error(format!("Failed to parse session: {}", e)),

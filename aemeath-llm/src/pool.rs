@@ -60,7 +60,10 @@ impl LlmClientPool {
         match self.create_client(spec) {
             Ok(client) => {
                 let client = Arc::new(client);
-                self.clients.lock().await.insert(spec.to_string(), client.clone());
+                self.clients
+                    .lock()
+                    .await
+                    .insert(spec.to_string(), client.clone());
                 log::info!("[LlmClientPool] created new client for {:?}", spec);
                 client
             }
@@ -77,9 +80,12 @@ impl LlmClientPool {
 
     /// Resolve a `"provider/model_id"` spec and create an `LlmClient`.
     fn create_client(&self, spec: &str) -> Result<LlmClient, String> {
-        let (provider_name, model_query) = spec
-            .split_once('/')
-            .ok_or_else(|| format!("invalid model spec '{}', expected 'provider/model_id'", spec))?;
+        let (provider_name, model_query) = spec.split_once('/').ok_or_else(|| {
+            format!(
+                "invalid model spec '{}', expected 'provider/model_id'",
+                spec
+            )
+        })?;
 
         // Look up in ModelsConfig
         let (provider_config, model_entry) = self
@@ -111,13 +117,11 @@ impl LlmClientPool {
             })?;
 
         // Resolve ApiType from config (the `api` field)
-        let api_type = match provider_config.api.as_str() {
-            "anthropic" => ApiType::Anthropic,
-            _ => ApiType::OpenAICompatible,
-        };
+        let api_type = ApiType::from_str(provider_config.api.as_str())
+            .unwrap_or(ApiType::OpenAICompatible);
 
-        // Build OpenAI provider config for OpenAI-compatible providers
-        let openai_config = if matches!(api_type, ApiType::OpenAICompatible) {
+        // Build OpenAI provider config for Chat Completions compatible providers
+        let openai_config = if !matches!(api_type, ApiType::Anthropic) {
             Some(OpenAIProviderConfig::from_provider_name(provider_name))
         } else {
             None
@@ -152,15 +156,19 @@ impl LlmClientPool {
                 spec
             );
         }
-        let max_tokens = if max_tokens > 0 {
-            max_tokens
-        } else {
-            200000
-        };
+        let max_tokens = if max_tokens > 0 { max_tokens } else { 200000 };
 
-        let reasoning = true; // reasoning is now a runtime toggle, always start enabled
+        let reasoning = model_entry
+            .reasoning
+            .as_ref()
+            .and_then(|r| r.enabled())
+            .unwrap_or(true);
+        let openai_reasoning_effort = model_entry
+            .reasoning
+            .as_ref()
+            .and_then(|r| r.effort().map(str::to_string));
 
-        Ok(LlmClient::from_config(
+        let client = LlmClient::from_config(
             api_type,
             api_key,
             base_url,
@@ -168,7 +176,11 @@ impl LlmClientPool {
             max_tokens,
             reasoning,
             openai_config,
-        ))
+        );
+        if let Some(effort) = openai_reasoning_effort {
+            client.set_reasoning_effort(Some(effort));
+        }
+        Ok(client)
     }
 
     /// Get the default client.

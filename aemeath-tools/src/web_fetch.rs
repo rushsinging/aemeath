@@ -19,11 +19,18 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
     // Only allow http/https
     match url.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("scheme '{}' is not allowed. Only http and https are supported.", other)),
+        other => {
+            return Err(format!(
+                "scheme '{}' is not allowed. Only http and https are supported.",
+                other
+            ))
+        }
     }
 
     // Resolve host and check against private ranges
-    let host = url.host_str().ok_or_else(|| "URL has no host".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
 
     // Block known cloud metadata hosts
     if host == "169.254.169.254" || host.ends_with("169.254.169.254") {
@@ -78,7 +85,10 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
 
     // Block well-known localhost hostnames
     if host == "localhost" || host.ends_with(".localhost") || host == "localtest.me" {
-        return Err(format!("hostname '{}' resolves to localhost and is not allowed", host));
+        return Err(format!(
+            "hostname '{}' resolves to localhost and is not allowed",
+            host
+        ));
     }
 
     Ok(url)
@@ -159,11 +169,14 @@ impl Tool for WebFetchTool {
             Duration::from_millis(timeout_ms),
             Command::new("curl")
                 .args([
-                    "-sL",           // silent, follow redirects
-                    "--max-time", &(timeout_ms / 1000).max(5).to_string(),
-                    "-A", "aemeath/0.1.0",
+                    "-sL", // silent, follow redirects
+                    "--max-time",
+                    &(timeout_ms / 1000).max(5).to_string(),
+                    "-A",
+                    "aemeath/0.1.0",
                     // Limit redirect count to reduce SSRF surface
-                    "--max-redirs", "5",
+                    "--max-redirs",
+                    "5",
                     url.as_str(),
                 ])
                 .output(),

@@ -24,7 +24,10 @@ pub async fn parse_stream(
     let mut current_tool_id = String::new();
     let mut current_tool_name = String::new();
     let mut current_tool_json = String::new();
-    let mut usage = Usage { input_tokens: 0, output_tokens: 0 };
+    let mut usage = Usage {
+        input_tokens: 0,
+        output_tokens: 0,
+    };
     let mut stop_reason = StopReason::EndTurn;
 
     const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
@@ -128,8 +131,7 @@ pub async fn parse_stream(
                     DeltaPayload::ThinkingDelta { thinking } => {
                         current_thinking.push_str(&thinking);
                     }
-                    DeltaPayload::SignatureDelta { .. }
-                    | DeltaPayload::Unknown => {
+                    DeltaPayload::SignatureDelta { .. } | DeltaPayload::Unknown => {
                         // ignored
                     }
                 }
@@ -155,7 +157,10 @@ pub async fn parse_stream(
                     });
                 }
             }
-            StreamEvent::MessageDelta { delta, usage: delta_usage } => {
+            StreamEvent::MessageDelta {
+                delta,
+                usage: delta_usage,
+            } => {
                 if let Some(reason) = delta.stop_reason {
                     stop_reason = StopReason::from_str(&reason);
                 }

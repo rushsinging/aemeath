@@ -21,10 +21,8 @@ mod tests {
     use super::*;
 
     fn temp_store(max_entries: usize) -> (MemoryStore, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "aemeath-memory-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("aemeath-memory-test-{}", uuid::Uuid::new_v4()));
         let store = MemoryStore::new(&dir, "project", max_entries, 0.8).unwrap();
         (store, dir)
     }
@@ -41,7 +39,9 @@ mod tests {
     #[test]
     fn test_memory_store_add_and_search() {
         let (mut store, dir) = temp_store(10);
-        store.add(project_entry("统一使用 AemeathError 处理错误")).unwrap();
+        store
+            .add(project_entry("统一使用 AemeathError 处理错误"))
+            .unwrap();
 
         let results = store.search("AemeathError", 10).unwrap();
 
@@ -62,8 +62,12 @@ mod tests {
     #[test]
     fn test_memory_store_add_similar_merges() {
         let (mut store, dir) = temp_store(10);
-        store.add(project_entry("rust error handling pattern")).unwrap();
-        let result = store.add(project_entry("rust error handling pattern")).unwrap();
+        store
+            .add(project_entry("rust error handling pattern"))
+            .unwrap();
+        let result = store
+            .add(project_entry("rust error handling pattern"))
+            .unwrap();
 
         assert!(matches!(result, AddResult::Merged { .. }));
         assert_eq!(store.list(None).unwrap().len(), 1);
@@ -119,7 +123,12 @@ mod tests {
         store.add(entry).unwrap();
 
         let top = store.top_for_inject(1).unwrap();
-        let stored = store.list(None).unwrap().into_iter().find(|entry| entry.id == id).unwrap();
+        let stored = store
+            .list(None)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
 
         assert_eq!(top.len(), 1);
         assert_eq!(stored.access_count, 1);

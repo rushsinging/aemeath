@@ -225,12 +225,10 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
             ContentBlock::ToolUse { name, input, .. } => {
                 estimate_tokens(name) + estimate_json_tokens(&input.to_string())
             }
-            ContentBlock::ToolResult { content, .. } => {
-                match content {
-                    serde_json::Value::String(s) => estimate_tokens(s),
-                    _ => estimate_tokens(&content.to_string()),
-                }
-            }
+            ContentBlock::ToolResult { content, .. } => match content {
+                serde_json::Value::String(s) => estimate_tokens(s),
+                _ => estimate_tokens(&content.to_string()),
+            },
             ContentBlock::Image { .. } => 85, // ~85 tokens overhead for image reference
             ContentBlock::Thinking { thinking } => estimate_tokens(thinking),
         })

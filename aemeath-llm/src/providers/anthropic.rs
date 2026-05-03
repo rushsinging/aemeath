@@ -1,7 +1,7 @@
 //! Anthropic Claude provider implementation
 
-use async_trait::async_trait;
 use aemeath_core::message::Message;
+use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tokio_util::sync::CancellationToken;
 
@@ -19,7 +19,10 @@ struct TrackingHandler<'a> {
 
 impl<'a> TrackingHandler<'a> {
     fn new(inner: &'a mut dyn StreamHandler) -> Self {
-        Self { inner, emitted: false }
+        Self {
+            inner,
+            emitted: false,
+        }
     }
 }
 
@@ -61,7 +64,12 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(api_key: String, base_url: Option<String>, model: Option<String>, max_tokens: u32) -> Self {
+    pub fn new(
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        max_tokens: u32,
+    ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
@@ -92,12 +100,21 @@ impl AnthropicProvider {
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert("x-api-key", HeaderValue::from_str(&self.api_key)
-            .map_err(|e| crate::LlmError::Config(e.to_string()))?);
+        headers.insert(
+            "x-api-key",
+            HeaderValue::from_str(&self.api_key)
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-        headers.insert("anthropic-beta", HeaderValue::from_static("prompt-caching-2024-07-31"));
-        headers.insert(USER_AGENT, HeaderValue::from_str(&self.user_agent)
-            .map_err(|e| crate::LlmError::Config(e.to_string()))?);
+        headers.insert(
+            "anthropic-beta",
+            HeaderValue::from_static("prompt-caching-2024-07-31"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&self.user_agent)
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
         Ok(headers)
     }
 
@@ -153,7 +170,9 @@ impl AnthropicProvider {
             });
         }
 
-        let body: serde_json::Value = response.json().await
+        let body: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
 
         // Parse the non-streaming response into StreamResponse
@@ -172,11 +191,26 @@ impl AnthropicProvider {
                         }
                     }
                     "tool_use" => {
-                        let id = block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let input = block.get("input").cloned().unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                        let id = block
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = block
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let input = block
+                            .get("input")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
                         handler.on_tool_use_start(&name);
-                        content_blocks.push(aemeath_core::message::ContentBlock::ToolUse { id, name, input });
+                        content_blocks.push(aemeath_core::message::ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input,
+                        });
                     }
                     _ => {}
                 }
@@ -184,11 +218,22 @@ impl AnthropicProvider {
         }
 
         let usage = crate::types::Usage {
-            input_tokens: body.get("usage").and_then(|u| u.get("input_tokens")).and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-            output_tokens: body.get("usage").and_then(|u| u.get("output_tokens")).and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            input_tokens: body
+                .get("usage")
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32,
+            output_tokens: body
+                .get("usage")
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32,
         };
 
-        let stop_reason_str = body.get("stop_reason").and_then(|v| v.as_str()).unwrap_or("end_turn");
+        let stop_reason_str = body
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("end_turn");
 
         Ok(StreamResponse {
             assistant_message: aemeath_core::message::Message {
@@ -234,7 +279,8 @@ impl LlmProvider for AnthropicProvider {
             }
 
             if attempt > 0 {
-                let delay = std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
+                let delay =
+                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
@@ -304,7 +350,8 @@ impl LlmProvider for AnthropicProvider {
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "rate limited (429), retrying ({}/{})...",
-                        attempt + 2, self.max_retries
+                        attempt + 2,
+                        self.max_retries
                     ));
                 }
                 last_error = Some(crate::LlmError::RateLimited);
@@ -318,7 +365,9 @@ impl LlmProvider for AnthropicProvider {
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "server error ({}), retrying ({}/{})...",
-                        status, attempt + 2, self.max_retries
+                        status,
+                        attempt + 2,
+                        self.max_retries
                     ));
                 }
                 last_error = Some(crate::LlmError::Api {
@@ -357,7 +406,9 @@ impl LlmProvider for AnthropicProvider {
                             "stream interrupted after partial output: {msg}"
                         )));
                     }
-                    return self.send_message_non_stream(system, messages, tool_schemas, handler).await;
+                    return self
+                        .send_message_non_stream(system, messages, tool_schemas, handler)
+                        .await;
                 }
                 Err(e) => return Err(e),
             }

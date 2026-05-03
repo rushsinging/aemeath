@@ -28,9 +28,24 @@ pub enum UiEvent {
     Thinking(String),
     TextBlockComplete(String),
     ToolCallStart(String),
-    ToolCall { id: String, name: String, summary: String },
-    ToolResult { id: String, tool_name: String, output: String, is_error: bool, images: Vec<ImageData> },
-    Usage { input: u32, output: u32, last_input: u32, elapsed_secs: f64 },
+    ToolCall {
+        id: String,
+        name: String,
+        summary: String,
+    },
+    ToolResult {
+        id: String,
+        tool_name: String,
+        output: String,
+        is_error: bool,
+        images: Vec<ImageData>,
+    },
+    Usage {
+        input: u32,
+        output: u32,
+        last_input: u32,
+        elapsed_secs: f64,
+    },
     Error(String),
     Cancelled,
     MessagesSync(Vec<Message>),
@@ -65,10 +80,18 @@ pub enum UiEvent {
         reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
     /// Lifecycle hook execution started.
-    HookStart { event: String, command: String },
+    HookStart {
+        event: String,
+        command: String,
+    },
     /// Lifecycle hook execution finished.
-    HookEnd { event: String, blocked: bool, error: Option<String> },
-}/// Main TUI application
+    HookEnd {
+        event: String,
+        blocked: bool,
+        error: Option<String>,
+    },
+}
+/// Main TUI application
 pub struct App {
     pub output_area: OutputArea,
     pub input_area: InputArea,
@@ -212,9 +235,9 @@ impl App {
 
     /// Find a skill by its name or alias
     fn find_skill_by_alias(&self, alias: &str) -> Option<&Skill> {
-        self.skills.values().find(|s| {
-            s.name == alias || s.aliases.iter().any(|a| a == alias)
-        })
+        self.skills
+            .values()
+            .find(|s| s.name == alias || s.aliases.iter().any(|a| a == alias))
     }
 
     /// Run the TUI event loop
@@ -247,40 +270,44 @@ impl App {
             match aemeath_core::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
-                        self.session_created_at = Some(s.created_at);
-                        let mut msgs = s.messages;
-                        aemeath_core::message::sanitize_messages(&mut msgs);
-                        let trimmed = msg_count - msgs.len();
-                        // Check for deeper integrity issues (orphaned tool results
-                        // in the middle, role order violations, etc.)
-                        let integrity = aemeath_core::message::check_message_integrity(&msgs);
-                        let auto_repaired = if integrity.has_issues() {
-                            let n = aemeath_core::message::deep_clean_messages(&mut msgs);
-                            n
+                    self.session_created_at = Some(s.created_at);
+                    let mut msgs = s.messages;
+                    aemeath_core::message::sanitize_messages(&mut msgs);
+                    let trimmed = msg_count - msgs.len();
+                    // Check for deeper integrity issues (orphaned tool results
+                    // in the middle, role order violations, etc.)
+                    let integrity = aemeath_core::message::check_message_integrity(&msgs);
+                    let auto_repaired = if integrity.has_issues() {
+                        let n = aemeath_core::message::deep_clean_messages(&mut msgs);
+                        n
+                    } else {
+                        0
+                    };
+                    for i in 0..msgs.len() {
+                        let subsequent = if i + 1 < msgs.len() {
+                            Some(&msgs[i + 1])
                         } else {
-                            0
+                            None
                         };
-                        for i in 0..msgs.len() {
-                            let subsequent = if i + 1 < msgs.len() { Some(&msgs[i + 1]) } else { None };
-                            self.render_history_message(&msgs[i], subsequent);
-                        }
-                        self.messages = msgs;
+                        self.render_history_message(&msgs[i], subsequent);
+                    }
+                    self.messages = msgs;
+                    self.output_area.push_system(&format!(
+                        "[resumed session {} ({} messages)]",
+                        id, msg_count
+                    ));
+                    if trimmed > 0 {
                         self.output_area.push_system(&format!(
-                            "[resumed session {} ({} messages)]",
-                            id, msg_count
+                            "[trimmed {} incomplete tool-call message(s)]",
+                            trimmed
                         ));
-                        if trimmed > 0 {
-                            self.output_area.push_system(&format!(
-                                "[trimmed {} incomplete tool-call message(s)]",
-                                trimmed
-                            ));
-                        }
-                        if auto_repaired > 0 {
-                            self.output_area.push_system(&format!(
+                    }
+                    if auto_repaired > 0 {
+                        self.output_area.push_system(&format!(
                                 "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
                                 auto_repaired
                             ));
-                        }
+                    }
                 }
                 Err(e) => {
                     self.output_area.push_system(&format!(
@@ -293,13 +320,17 @@ impl App {
 
         // Load models config from config files
         let config_paths = [
-            dirs::home_dir().map(|h| h.join(".aemeath").join("config.json")).unwrap_or_default(),
+            dirs::home_dir()
+                .map(|h| h.join(".aemeath").join("config.json"))
+                .unwrap_or_default(),
             std::path::PathBuf::from(".aemeath/config.json"),
         ];
         for path in &config_paths {
             if path.exists() {
                 if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(config) = serde_json::from_str::<aemeath_core::config::Config>(&content) {
+                    if let Ok(config) =
+                        serde_json::from_str::<aemeath_core::config::Config>(&content)
+                    {
                         if !config.models.providers.is_empty() {
                             self.models_config = config.models;
                             break;
@@ -331,11 +362,14 @@ impl App {
         {
             use aemeath_core::config::hooks::HookEvent;
             use aemeath_core::hook::{HookData, SessionHookData};
-            let hook_results = self.hook_runner.run_hooks_with_json(
-                HookEvent::SessionStart,
-                None,
-                HookData::Session(SessionHookData {}),
-            ).await;
+            let hook_results = self
+                .hook_runner
+                .run_hooks_with_json(
+                    HookEvent::SessionStart,
+                    None,
+                    HookData::Session(SessionHookData {}),
+                )
+                .await;
             for (_, result, json_output) in &hook_results {
                 if let Some(json) = json_output {
                     if let Some(ref ctx) = json.additional_context {
@@ -350,33 +384,36 @@ impl App {
                     }
                 }
                 if result.blocked {
-                    self.output_area.push_system("[SessionStart hook blocked session start]");
+                    self.output_area
+                        .push_system("[SessionStart hook blocked session start]");
                 }
             }
         }
 
-        let result = self.run_loop(
-            &mut terminal,
-            client,
-            registry,
-            system_blocks,
-            system_prompt_text,
-            user_context,
-            context_size,
-            verbose,
-            use_markdown,
-            agent_runner,
-            allow_all,
-            interrupted,
-            task_store,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            agent_semaphore,
-        ).await;
+        let result = self
+            .run_loop(
+                &mut terminal,
+                client,
+                registry,
+                system_blocks,
+                system_prompt_text,
+                user_context,
+                context_size,
+                verbose,
+                use_markdown,
+                agent_runner,
+                allow_all,
+                interrupted,
+                task_store,
+                max_tool_concurrency,
+                max_agent_concurrency,
+                agent_semaphore,
+            )
+            .await;
 
         // Auto-save session on exit
         if !self.messages.is_empty() {
-            use aemeath_core::session::{self as sess, Session, now_iso};
+            use aemeath_core::session::{self as sess, now_iso, Session};
             let s = Session {
                 id: self.session_id.clone(),
                 cwd: self.cwd.to_string_lossy().to_string(),
@@ -573,7 +610,7 @@ impl App {
                 }
                 Cmd::SaveSession(msgs) => {
                     if !msgs.is_empty() {
-                        use aemeath_core::session::{self as sess, Session, now_iso};
+                        use aemeath_core::session::{self as sess, now_iso, Session};
                         let s = Session {
                             id: self.session_id.clone(),
                             cwd: self.cwd.to_string_lossy().to_string(),
@@ -590,7 +627,9 @@ impl App {
             }
 
             self.just_pasted = false;
-            if self.should_exit { break; }
+            if self.should_exit {
+                break;
+            }
         }
         Ok(())
     }
@@ -602,11 +641,13 @@ impl App {
         _is_processing: bool,
     ) {
         let tasks = task_store.list_current_batch().await;
-        let mut active: Vec<_> = tasks.iter()
+        let mut active: Vec<_> = tasks
+            .iter()
             .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
             .collect();
         active.sort_by(|a, b| {
-            a.id.parse::<u64>().unwrap_or(u64::MAX)
+            a.id.parse::<u64>()
+                .unwrap_or(u64::MAX)
                 .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
         });
         // Note: we intentionally do NOT call start_spinner() here.
@@ -616,7 +657,10 @@ impl App {
         if active.is_empty() {
             self.output_area.set_task_status(Vec::new());
         } else {
-            let completed = active.iter().filter(|t| t.status == aemeath_core::task::TaskStatus::Completed).count();
+            let completed = active
+                .iter()
+                .filter(|t| t.status == aemeath_core::task::TaskStatus::Completed)
+                .count();
             let total = active.len();
             let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed, total)];
             for t in &active {
@@ -626,7 +670,11 @@ impl App {
                     aemeath_core::task::TaskStatus::Pending => "□",
                     _ => continue,
                 };
-                let owner = t.owner.as_deref().map(|o| format!(" (@{})", o)).unwrap_or_default();
+                let owner = t
+                    .owner
+                    .as_deref()
+                    .map(|o| format!(" (@{})", o))
+                    .unwrap_or_default();
                 lines.push(format!("{} #{} {}{}", icon, t.id, t.subject, owner));
             }
             self.output_area.set_task_status(lines);
@@ -647,21 +695,26 @@ impl App {
     }
 
     /// Draw the TUI frame.
-    fn draw(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    ) -> io::Result<()> {
+    fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         let mut output_rect = Rect::default();
         let mut input_rect = Rect::default();
         let mut status_rect = Rect::default();
         terminal.draw(|f| {
             let size = f.area();
-            if size.height < 8 || size.width < 20 { return; }
+            if size.height < 8 || size.width < 20 {
+                return;
+            }
 
             let suggestions_height = if self.input_area.is_showing_suggestions() {
                 let count = self.input_area.get_suggestions().len().min(5) as u16;
-                if count > 0 { count + 1 } else { 0 }
-            } else { 0 };
+                if count > 0 {
+                    count + 1
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
 
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -676,15 +729,20 @@ impl App {
             output_rect = chunks[0];
             input_rect = chunks[1];
             status_rect = chunks[3];
-            if chunks.iter().any(|c| c.height == 0 && c.width == 0) { return; }
+            if chunks.iter().any(|c| c.height == 0 && c.width == 0) {
+                return;
+            }
 
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.output_area.render(chunks[0], buf);
-            })).is_err() {
+            }))
+            .is_err()
+            {
                 self.status_bar.set_warning("Render error, try resizing");
             }
-            self.input_area.set_pending_images(self.pending_images.len());
+            self.input_area
+                .set_pending_images(self.pending_images.len());
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.input_area.render(chunks[1], buf);
             }));
@@ -693,7 +751,11 @@ impl App {
                     self.input_area.render_suggestions_in_area(chunks[2], buf);
                 }));
             }
-            self.status_bar.set_tokens(self.total_input_tokens, self.total_output_tokens, self.last_input_tokens);
+            self.status_bar.set_tokens(
+                self.total_input_tokens,
+                self.total_output_tokens,
+                self.last_input_tokens,
+            );
             self.status_bar.set_api_calls(self.total_api_calls);
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.status_bar.render(chunks[3], buf);
@@ -716,8 +778,8 @@ fn build_session_summary(session: &aemeath_core::session::Session) -> String {
 }
 
 pub mod input_handler;
-pub mod msg;
 pub mod mouse_handler;
+pub mod msg;
 pub mod paste_handler;
 pub mod processing;
 pub mod render;

@@ -93,7 +93,13 @@ impl super::OutputArea {
 
     /// 添加 AskUserQuestion 确认界面
     /// 添加 AskUserQuestion 界面，返回选项行在 lines 中的起始索引（无选项返回 None）
-    pub fn push_ask_user(&mut self, question: &str, options: &[String], default: Option<&str>, multi_select: bool) -> Option<usize> {
+    pub fn push_ask_user(
+        &mut self,
+        question: &str,
+        options: &[String],
+        default: Option<&str>,
+        multi_select: bool,
+    ) -> Option<usize> {
         self.finish_streaming();
 
         // 问题文本
@@ -136,7 +142,11 @@ impl super::OutputArea {
             };
             self.push_line(OutputLine {
                 content,
-                style: if is_default { LineStyle::Assistant } else { LineStyle::Normal },
+                style: if is_default {
+                    LineStyle::Assistant
+                } else {
+                    LineStyle::Normal
+                },
                 ..Default::default()
             });
         }
@@ -145,7 +155,14 @@ impl super::OutputArea {
     }
 
     /// 原地更新 AskUser 选项行的显示
-    pub fn update_ask_user_options(&mut self, start: usize, options: &[String], cursor: usize, multi_select: bool, selected: &[bool]) {
+    pub fn update_ask_user_options(
+        &mut self,
+        start: usize,
+        options: &[String],
+        cursor: usize,
+        multi_select: bool,
+        selected: &[bool],
+    ) {
         for (i, opt) in options.iter().enumerate() {
             let content = if multi_select {
                 let check = if selected[i] { "✓" } else { " " };
@@ -158,7 +175,11 @@ impl super::OutputArea {
             let is_highlight = i == cursor || (multi_select && selected[i]);
             if let Some(line) = self.lines.get_mut(start + i) {
                 line.content = content;
-                line.style = if is_highlight { LineStyle::Assistant } else { LineStyle::Normal };
+                line.style = if is_highlight {
+                    LineStyle::Assistant
+                } else {
+                    LineStyle::Normal
+                };
             }
         }
     }
@@ -186,10 +207,26 @@ impl super::OutputArea {
     /// 添加带有随机烹饪动词和耗时的"完成"消息
     pub fn push_done(&mut self, elapsed: std::time::Duration) {
         let verbs = [
-            "Sautéed", "Baked", "Grilled", "Simmered", "Roasted",
-            "Brewed", "Toasted", "Stewed", "Marinated", "Charred",
-            "Poached", "Steamed", "Smoked", "Brûléed", "Flambéed",
-            "Fermented", "Pickled", "Cured", "Seared", "Blanched",
+            "Sautéed",
+            "Baked",
+            "Grilled",
+            "Simmered",
+            "Roasted",
+            "Brewed",
+            "Toasted",
+            "Stewed",
+            "Marinated",
+            "Charred",
+            "Poached",
+            "Steamed",
+            "Smoked",
+            "Brûléed",
+            "Flambéed",
+            "Fermented",
+            "Pickled",
+            "Cured",
+            "Seared",
+            "Blanched",
         ];
         use std::sync::atomic::{AtomicUsize, Ordering};
         static COUNTER: AtomicUsize = AtomicUsize::new(0);

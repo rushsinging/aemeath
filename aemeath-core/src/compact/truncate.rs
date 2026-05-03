@@ -62,7 +62,10 @@ pub fn apply_tool_result_budget(message: &mut Message) {
         if total_chars <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS {
             break;
         }
-        if let ContentBlock::ToolResult { ref mut content, .. } = message.content[idx] {
+        if let ContentBlock::ToolResult {
+            ref mut content, ..
+        } = message.content[idx]
+        {
             let old_text = match content {
                 serde_json::Value::String(s) => s.clone(),
                 _ => content.to_string(),

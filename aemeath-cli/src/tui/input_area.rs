@@ -1,37 +1,37 @@
 use crate::tui::completion::{Suggestion, SuggestionType};
 use ratatui::{
-      buffer::Buffer,
-      layout::Rect,
-      style::{Color, Style},
-      widgets::{Block, Borders, Widget},
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Style},
+    widgets::{Block, Borders, Widget},
 };
 use tui_textarea::{CursorMove, TextArea};
 use unicode_width::UnicodeWidthChar;
 
 /// The input area with a multi-line text editor and autocomplete
 pub struct InputArea {
-        textarea: TextArea<'static>,
-        focused: bool,
-        pending_images: usize,
-        /// Active suggestions for autocomplete
-        suggestions: Vec<Suggestion>,
-        /// Currently selected suggestion index (-1 means none)
-        selected_suggestion: i32,
-        /// Whether suggestions are visible
-        show_suggestions: bool,
-        /// Command history
-        history: Vec<String>,
-        /// Current position in history (None means not browsing history)
-        history_index: Option<usize>,
-        /// Saved input before browsing history (to restore when navigating back)
-        saved_input: String,
-        /// 鼠标选中状态
-        is_selecting: bool,
-        selection_start: Option<(usize, usize)>, // (row, col) in textarea
-        selection_end: Option<(usize, usize)>,   // (row, col) in textarea
-        /// textarea 渲染区域宽度（用于自动换行）
-        content_width: u16,
-  }
+    textarea: TextArea<'static>,
+    focused: bool,
+    pending_images: usize,
+    /// Active suggestions for autocomplete
+    suggestions: Vec<Suggestion>,
+    /// Currently selected suggestion index (-1 means none)
+    selected_suggestion: i32,
+    /// Whether suggestions are visible
+    show_suggestions: bool,
+    /// Command history
+    history: Vec<String>,
+    /// Current position in history (None means not browsing history)
+    history_index: Option<usize>,
+    /// Saved input before browsing history (to restore when navigating back)
+    saved_input: String,
+    /// 鼠标选中状态
+    is_selecting: bool,
+    selection_start: Option<(usize, usize)>, // (row, col) in textarea
+    selection_end: Option<(usize, usize)>,   // (row, col) in textarea
+    /// textarea 渲染区域宽度（用于自动换行）
+    content_width: u16,
+}
 
 impl Default for InputArea {
     fn default() -> Self {
@@ -45,7 +45,7 @@ impl InputArea {
         textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
         textarea.set_cursor_line_style(Style::default().bg(Color::Reset));
         textarea.set_cursor_style(Style::default().bg(Color::Cyan));
-        
+
         Self {
             textarea,
             focused: true,
@@ -151,13 +151,13 @@ impl InputArea {
         if self.history.is_empty() {
             return;
         }
-        
+
         // Save current input if starting to browse history
         if self.history_index.is_none() {
             self.saved_input = self.get_text();
             self.history_index = Some(self.history.len());
         }
-        
+
         // Move to older message (decrease index)
         if let Some(idx) = self.history_index {
             if idx > 0 {
@@ -174,7 +174,7 @@ impl InputArea {
         if self.history.is_empty() || self.history_index.is_none() {
             return;
         }
-        
+
         if let Some(idx) = self.history_index {
             if idx < self.history.len() - 1 {
                 let new_idx = idx + 1;
@@ -204,9 +204,12 @@ impl InputArea {
     /// Clear the input
     pub fn clear(&mut self) {
         self.textarea = TextArea::default();
-        self.textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
-        self.textarea.set_cursor_line_style(Style::default().bg(Color::Reset));
-        self.textarea.set_cursor_style(Style::default().bg(Color::Cyan));
+        self.textarea
+            .set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
+        self.textarea
+            .set_cursor_line_style(Style::default().bg(Color::Reset));
+        self.textarea
+            .set_cursor_style(Style::default().bg(Color::Cyan));
         self.clear_suggestions();
         self.reset_history_nav();
     }
@@ -233,8 +236,15 @@ impl InputArea {
         }
         let line = &lines[row];
         let chars: Vec<char> = line.chars().collect();
-        let display_width: usize = chars.iter()
-            .map(|c| if *c == '\t' { 4 } else { c.width().unwrap_or(1) })
+        let display_width: usize = chars
+            .iter()
+            .map(|c| {
+                if *c == '\t' {
+                    4
+                } else {
+                    c.width().unwrap_or(1)
+                }
+            })
             .sum();
         if display_width <= max_w {
             return;
@@ -244,7 +254,11 @@ impl InputArea {
         let mut best_break = 0;
         let mut current_width = 0;
         for (i, ch) in chars.iter().enumerate() {
-            let w = if *ch == '\t' { 4 } else { ch.width().unwrap_or(1) };
+            let w = if *ch == '\t' {
+                4
+            } else {
+                ch.width().unwrap_or(1)
+            };
             if current_width + w > max_w {
                 break;
             }
@@ -258,7 +272,11 @@ impl InputArea {
             // 没有空格，硬折行
             let mut w = 0;
             for (i, ch) in chars.iter().enumerate() {
-                w += if *ch == '\t' { 4 } else { ch.width().unwrap_or(1) };
+                w += if *ch == '\t' {
+                    4
+                } else {
+                    ch.width().unwrap_or(1)
+                };
                 if w > max_w {
                     best_break = i;
                     break;
@@ -448,14 +466,15 @@ impl InputArea {
         self.textarea.render(inner_area, buf);
 
         // 叠加选中高亮
-        if let Some(((start_row, start_col), (end_row, end_col))) = self.get_normalized_selection() {
+        if let Some(((start_row, start_col), (end_row, end_col))) = self.get_normalized_selection()
+        {
             let lines = self.textarea.lines();
             let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
-  
+
             for (row, line_text) in lines.iter().enumerate() {
                 let line_chars: Vec<char> = line_text.chars().collect();
                 let line_len = line_chars.len();
-  
+
                 // 计算本行的选中列范围
                 if row < start_row || row > end_row {
                     continue;
@@ -463,10 +482,14 @@ impl InputArea {
                 if row == start_row && row == end_row && start_col == end_col {
                     continue;
                 }
-  
+
                 let col_from = if row == start_row { start_col } else { 0 };
-                let col_to = if row == end_row { end_col.min(line_len) } else { line_len };
-  
+                let col_to = if row == end_row {
+                    end_col.min(line_len)
+                } else {
+                    line_len
+                };
+
                 // 在 buf 上设置选中高亮
                 let screen_y = inner_area.y + row as u16;
                 if screen_y >= inner_area.bottom() {
@@ -502,11 +525,19 @@ impl InputArea {
         for (i, suggestion) in self.suggestions.iter().take(max_visible).enumerate() {
             let is_selected = i as i32 == self.selected_suggestion;
             let y = area.y + i as u16;
-            
+
             // Background color for selected item
-            let bg_color = if is_selected { Color::Cyan } else { Color::Reset };
-            let fg_color = if is_selected { Color::Black } else { Color::White };
-            
+            let bg_color = if is_selected {
+                Color::Cyan
+            } else {
+                Color::Reset
+            };
+            let fg_color = if is_selected {
+                Color::Black
+            } else {
+                Color::White
+            };
+
             // Icon based on suggestion type
             let icon = match suggestion.suggestion_type {
                 SuggestionType::Command => "/",
@@ -518,13 +549,18 @@ impl InputArea {
 
             // Build the suggestion text, truncate by display width
             let text = format!(" {} {}", icon, suggestion.display_text);
-            let truncated = crate::tui::output_area::display::truncate_unicode_width(&text, max_cols.saturating_sub(2));
+            let truncated = crate::tui::output_area::display::truncate_unicode_width(
+                &text,
+                max_cols.saturating_sub(2),
+            );
 
             // Fill the entire row: walk chars by display width, not by char index
             let style = Style::default().fg(fg_color).bg(bg_color);
             let mut col: usize = 0;
             for ch in truncated.chars() {
-                if col >= max_cols { break; }
+                if col >= max_cols {
+                    break;
+                }
                 let ch_w = ch.width().unwrap_or(1) as usize;
                 // Wide char that would overflow → fill remaining with spaces and stop
                 if col + ch_w > max_cols {
@@ -544,7 +580,9 @@ impl InputArea {
                 if ch_w > 1 {
                     let next_col = col + 1;
                     if next_col < max_cols && area.x + (next_col as u16) < buf.area.width {
-                        buf[(area.x + next_col as u16, y)].set_char('\0').set_style(style);
+                        buf[(area.x + next_col as u16, y)]
+                            .set_char('\0')
+                            .set_style(style);
                     }
                 }
                 col += ch_w;
@@ -557,7 +595,7 @@ impl InputArea {
             }
         }
     }
-  
+
     /// 开始选中。row/col 是相对于 input_area inner rect 的偏移
     pub fn start_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
         let ta_row = row.saturating_sub(inner_area.y) as usize;
@@ -566,7 +604,7 @@ impl InputArea {
         self.selection_end = Some((ta_row, ta_col));
         self.is_selecting = true;
     }
-  
+
     /// 更新选中位置
     pub fn update_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
         if !self.is_selecting {
@@ -576,7 +614,7 @@ impl InputArea {
         let ta_col = col.saturating_sub(inner_area.x) as usize;
         self.selection_end = Some((ta_row, ta_col));
     }
-  
+
     /// 结束选中并复制到剪贴板
     pub fn end_selection(&mut self) -> Option<String> {
         self.is_selecting = false;
@@ -588,47 +626,56 @@ impl InputArea {
         self.selection_end = None;
         text
     }
-  
+
     /// 获取选中的文本
     pub fn get_selected_text(&self) -> Option<String> {
         let (start_row, start_col) = self.selection_start?;
         let (end_row, end_col) = self.selection_end?;
-  
-        let (start_row, start_col, end_row, end_col) = 
+
+        let (start_row, start_col, end_row, end_col) =
             if start_row < end_row || (start_row == end_row && start_col < end_col) {
                 (start_row, start_col, end_row, end_col)
             } else {
                 (end_row, end_col, start_row, start_col)
             };
-  
+
         if start_row == end_row && start_col == end_col {
             return None;
         }
-  
+
         let lines = self.textarea.lines();
         let mut result = String::new();
-  
+
         for row in start_row..=end_row {
             if row >= lines.len() {
                 break;
             }
             let line_chars: Vec<char> = lines[row].chars().collect();
             let from = if row == start_row { start_col } else { 0 };
-            let to = if row == end_row { end_col.min(line_chars.len()) } else { line_chars.len() };
+            let to = if row == end_row {
+                end_col.min(line_chars.len())
+            } else {
+                line_chars.len()
+            };
             if row > start_row {
                 result.push('\n');
             }
             result.extend(line_chars[from..to].iter());
         }
-  
-        if result.is_empty() { None } else { Some(result) }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
-  
+
     /// 复制到剪贴板
     fn copy_to_clipboard(&self, text: &str) {
         use std::io::Write;
         if let Ok(mut child) = std::process::Command::new("pbcopy")
-            .stdin(std::process::Stdio::piped()).spawn()
+            .stdin(std::process::Stdio::piped())
+            .spawn()
         {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
@@ -636,19 +683,19 @@ impl InputArea {
             let _ = child.wait();
         }
     }
-  
+
     /// 清除选中
     pub fn clear_selection(&mut self) {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
     }
-  
+
     /// 是否正在选中
     pub fn is_selecting(&self) -> bool {
         self.is_selecting
     }
-  
+
     /// 获取归一化的选中范围 (start <= end)
     fn get_normalized_selection(&self) -> Option<((usize, usize), (usize, usize))> {
         let (start_row, start_col) = self.selection_start?;
@@ -665,8 +712,7 @@ impl InputArea {
 
     /// 获取 inner area（textarea 的实际渲染区域，去掉 border）
     pub fn get_inner_area(&self, area: &Rect) -> Rect {
-        let block = ratatui::widgets::Block::default()
-            .borders(ratatui::widgets::Borders::ALL);
+        let block = ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL);
         block.inner(*area)
     }
 }

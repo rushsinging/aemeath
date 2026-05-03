@@ -17,10 +17,10 @@
 use crate::task::{TaskStatus, TaskStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, Notify};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{Mutex, Notify};
 
 /// Background task execution context
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,7 +124,7 @@ impl TaskScheduler {
             execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-  
+
     /// Create with custom configuration
     pub fn with_config(task_store: Arc<TaskStore>, config: SchedulerConfig) -> Self {
         Self {
@@ -150,10 +150,10 @@ impl TaskScheduler {
         // Add to queue
         let mut queue = self.task_queue.lock().await;
         queue.push(task_id.clone());
-        
+
         // Notify scheduler
         self.task_available.notify_one();
-        
+
         Ok(())
     }
 
@@ -181,7 +181,7 @@ impl TaskScheduler {
                     }
                 }
             }
-            
+
             if all_blockers_done {
                 // Remove from queue and return
                 let mut queue = self.task_queue.lock().await;
@@ -189,16 +189,20 @@ impl TaskScheduler {
                 return Some(task_id.clone());
             }
         }
-        
+
         None
     }
 
     /// Start executing a task in background
-    pub async fn start_task(&self, task_id: String, agent_id: Option<String>) -> Result<BackgroundTaskContext, String> {
+    pub async fn start_task(
+        &self,
+        task_id: String,
+        agent_id: Option<String>,
+    ) -> Result<BackgroundTaskContext, String> {
         // Phase 1: Check capacity and compute context while holding active_tasks
         let context = {
             let mut active = self.active_tasks.lock().await;
-        
+
             if active.len() >= self.config.max_concurrent {
                 return Err("Maximum concurrent tasks reached".to_string());
             }
@@ -221,9 +225,11 @@ impl TaskScheduler {
         }; // active_tasks lock released
 
         // Phase 2: Update task store WITHOUT holding active_tasks
-        self.task_store.update(&context.task_id, |t| {
-            t.status = TaskStatus::InProgress;
-        }).await;
+        self.task_store
+            .update(&context.task_id, |t| {
+                t.status = TaskStatus::InProgress;
+            })
+            .await;
 
         Ok(context)
     }
@@ -248,7 +254,7 @@ impl TaskScheduler {
         }
         let post_action = {
             let mut active = self.active_tasks.lock().await;
-  
+
             if result.success {
                 active.remove(task_id);
                 Some(PostAction::MarkCompleted)
@@ -259,7 +265,7 @@ impl TaskScheduler {
                 } else {
                     false
                 };
-  
+
                 if should_retry {
                     if let Some(ctx) = active.get_mut(task_id) {
                         ctx.retry_count += 1;
@@ -275,14 +281,18 @@ impl TaskScheduler {
         // --- Phase 2: Update task store WITHOUT holding active_tasks ---
         match post_action {
             Some(PostAction::MarkCompleted) => {
-                self.task_store.update(task_id, |t| {
-                    t.status = TaskStatus::Completed;
-                }).await;
+                self.task_store
+                    .update(task_id, |t| {
+                        t.status = TaskStatus::Completed;
+                    })
+                    .await;
             }
             Some(PostAction::MarkFailed) => {
-                self.task_store.update(task_id, |t| {
-                    t.status = TaskStatus::Pending;
-                }).await;
+                self.task_store
+                    .update(task_id, |t| {
+                        t.status = TaskStatus::Pending;
+                    })
+                    .await;
             }
             _ => {}
         }
@@ -292,13 +302,14 @@ impl TaskScheduler {
             let mut queue = self.task_queue.lock().await;
             queue.push(task_id.to_string());
         }
-  
+
         // Record in history
         let mut history = self.execution_history.lock().await;
-        history.entry(task_id.to_string())
+        history
+            .entry(task_id.to_string())
             .or_insert_with(Vec::new)
             .push(result);
-  
+
         // Notify for next task
         self.task_available.notify_one();
     }
@@ -308,7 +319,7 @@ impl TaskScheduler {
         // Phase 1: Check and remove from active_tasks
         {
             let mut active = self.active_tasks.lock().await;
-        
+
             if let Some(ctx) = active.get(task_id) {
                 if !ctx.interruptible {
                     return Err("Task is not interruptible".to_string());
@@ -319,9 +330,11 @@ impl TaskScheduler {
         } // active_tasks lock released
 
         // Phase 2: Update task store WITHOUT holding active_tasks
-        self.task_store.update(task_id, |t| {
-            t.status = TaskStatus::Deleted;
-        }).await;
+        self.task_store
+            .update(task_id, |t| {
+                t.status = TaskStatus::Deleted;
+            })
+            .await;
 
         Ok(())
     }
@@ -342,9 +355,10 @@ impl TaskScheduler {
     pub async fn check_timeouts(&self) -> Vec<String> {
         let now = current_timestamp();
         let timeout_seconds = self.config.task_timeout_seconds;
-        
+
         let active = self.active_tasks.lock().await;
-        active.iter()
+        active
+            .iter()
             .filter(|(_, ctx)| now - ctx.last_heartbeat > timeout_seconds)
             .map(|(id, _)| id.clone())
             .collect()
@@ -356,7 +370,10 @@ impl TaskScheduler {
             return Ok(());
         }
 
-        let path = self.config.persistence_path.clone()
+        let path = self
+            .config
+            .persistence_path
+            .clone()
             .unwrap_or_else(|| "task_scheduler_state.json".to_string());
 
         // Acquire locks one at a time and clone data, then release
@@ -370,8 +387,8 @@ impl TaskScheduler {
             execution_history,
         };
 
-        let json = serde_json::to_string(&state)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+        let json =
+            serde_json::to_string(&state).map_err(|e| format!("Failed to serialize: {}", e))?;
 
         tokio::fs::write(&path, json)
             .await
@@ -386,7 +403,10 @@ impl TaskScheduler {
             return Ok(());
         }
 
-        let path = self.config.persistence_path.clone()
+        let path = self
+            .config
+            .persistence_path
+            .clone()
             .unwrap_or_else(|| "task_scheduler_state.json".to_string());
 
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
@@ -397,8 +417,8 @@ impl TaskScheduler {
             .await
             .map_err(|e| format!("Failed to read file: {}", e))?;
 
-        let state: SchedulerState = serde_json::from_str(&json)
-            .map_err(|e| format!("Failed to deserialize: {}", e))?;
+        let state: SchedulerState =
+            serde_json::from_str(&json).map_err(|e| format!("Failed to deserialize: {}", e))?;
 
         *self.active_tasks.lock().await = state.active_tasks;
         *self.task_queue.lock().await = state.task_queue;
@@ -411,9 +431,11 @@ impl TaskScheduler {
         }; // active_tasks lock released
 
         for task_id in &task_ids {
-            self.task_store.update(task_id, |t| {
-                t.status = TaskStatus::Pending;
-            }).await;
+            self.task_store
+                .update(task_id, |t| {
+                    t.status = TaskStatus::Pending;
+                })
+                .await;
         }
 
         Ok(())
@@ -430,8 +452,10 @@ impl TaskScheduler {
             // Wait for task or timeout
             tokio::time::timeout(
                 Duration::from_secs(self.config.heartbeat_interval_seconds),
-                self.task_available.notified()
-            ).await.ok();
+                self.task_available.notified(),
+            )
+            .await
+            .ok();
 
             // Check for timeouts
             let timed_out = self.check_timeouts().await;
@@ -452,7 +476,7 @@ impl TaskScheduler {
     pub async fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
         self.task_available.notify_one();
-        
+
         // Persist final state
         if let Err(e) = self.persist().await {
             log::warn!("Failed to persist scheduler state on shutdown: {}", e);

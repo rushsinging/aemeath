@@ -2,7 +2,7 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
 
 inventory::submit! {
     CommandDescriptor::new(|| {

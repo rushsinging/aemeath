@@ -2,7 +2,9 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::command::{Command, CommandAction, CommandCategory, CommandContext, CommandResult, CommandDescriptor};
+use crate::command::{
+    Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -23,7 +25,9 @@ fn init_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     let force = args.trim().to_lowercase() == "force";
     let aemeath_dir = std::path::Path::new(".aemeath");
     if aemeath_dir.exists() && !force {
-        return CommandResult::Error("Already initialized. Use /init force to re-initialize".to_string());
+        return CommandResult::Error(
+            "Already initialized. Use /init force to re-initialize".to_string(),
+        );
     }
     let mut output = String::from("Initializing project...\n\n");
     if std::fs::create_dir_all(".aemeath").is_ok() {
@@ -33,7 +37,12 @@ fn init_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     }
     let claude_md = std::path::Path::new("CLAUDE.md");
     if !claude_md.exists() {
-        if std::fs::write(claude_md, "# Project Context\n\nThis file provides context for aemeath.\n").is_ok() {
+        if std::fs::write(
+            claude_md,
+            "# Project Context\n\nThis file provides context for aemeath.\n",
+        )
+        .is_ok()
+        {
             output.push_str("✓ Created CLAUDE.md\n");
         }
     } else {
@@ -66,7 +75,10 @@ fn commit_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     let prompt = if args.trim().is_empty() {
         "请查看当前的 git diff 和 status，生成合适的 commit message，然后执行 git commit。如果有未暂存的文件，先确认是否需要 git add。commit message 使用中文，遵循 conventional commits 格式。".to_string()
     } else {
-        format!("请执行 git commit，使用以下 commit message：\n\n{}", args.trim())
+        format!(
+            "请执行 git commit，使用以下 commit message：\n\n{}",
+            args.trim()
+        )
     };
     CommandResult::Action(CommandAction::InjectMessage(prompt))
 }
@@ -98,17 +110,20 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     let arg = args.trim().to_lowercase();
     let cwd = std::env::current_dir().unwrap_or_default();
     let diff_text = match arg.as_str() {
-        "" | "changes" | "diff" => {
-            run_git(&cwd, &["diff", "HEAD"])
-                .or_else(|| run_git(&cwd, &["diff"]))
-                .unwrap_or_default()
-        }
+        "" | "changes" | "diff" => run_git(&cwd, &["diff", "HEAD"])
+            .or_else(|| run_git(&cwd, &["diff"]))
+            .unwrap_or_default(),
         "staged" => run_git(&cwd, &["diff", "--cached"]).unwrap_or_default(),
-        "last" | "last-commit" => run_git(&cwd, &["show", "HEAD", "--format=fuller", "--patch"]).unwrap_or_default(),
+        "last" | "last-commit" => {
+            run_git(&cwd, &["show", "HEAD", "--format=fuller", "--patch"]).unwrap_or_default()
+        }
         _ => {
             let original_arg = args.trim();
             if original_arg.starts_with('-') {
-                return CommandResult::Error(format!("Invalid argument: {:?}. Flags are not allowed here.", original_arg));
+                return CommandResult::Error(format!(
+                    "Invalid argument: {:?}. Flags are not allowed here.",
+                    original_arg
+                ));
             }
             if original_arg.contains("..") {
                 run_git(&cwd, &["diff", original_arg]).unwrap_or_default()
@@ -138,7 +153,8 @@ fn review_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     review_prompt.push_str("## Diff\n```diff\n");
     let max_diff = 50_000;
     if diff_text.len() > max_diff {
-        let start_byte = diff_text.char_indices()
+        let start_byte = diff_text
+            .char_indices()
             .nth(diff_text.chars().count().saturating_sub(max_diff))
             .map(|(i, _)| i)
             .unwrap_or(0);

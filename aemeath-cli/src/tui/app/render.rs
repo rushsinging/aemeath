@@ -24,9 +24,13 @@ impl super::App {
                 }
 
                 if has_text {
-                    let user_text = msg.content.iter()
+                    let user_text = msg
+                        .content
+                        .iter()
                         .filter_map(|block| match block {
-                            aemeath_core::message::ContentBlock::Text { text } => Some(text.as_str()),
+                            aemeath_core::message::ContentBlock::Text { text } => {
+                                Some(text.as_str())
+                            }
                             _ => None,
                         })
                         .collect::<Vec<_>>()
@@ -42,10 +46,15 @@ impl super::App {
                 // Collect ToolResult blocks from the following user message for pairing.
                 let tool_results: std::collections::HashMap<&str, (&serde_json::Value, bool)> =
                     if let Some(user_msg) = subsequent_msg {
-                        user_msg.content.iter()
+                        user_msg
+                            .content
+                            .iter()
                             .filter_map(|block| match block {
                                 aemeath_core::message::ContentBlock::ToolResult {
-                                    tool_use_id, content, is_error, ..
+                                    tool_use_id,
+                                    content,
+                                    is_error,
+                                    ..
                                 } => Some((tool_use_id.as_str(), (content, *is_error))),
                                 _ => None,
                             })
@@ -65,25 +74,27 @@ impl super::App {
                                 });
                             }
                         }
-                        aemeath_core::message::ContentBlock::ToolUse { id, name, input, .. } => {
+                        aemeath_core::message::ContentBlock::ToolUse {
+                            id, name, input, ..
+                        } => {
                             let input_json = input.to_string();
                             // Use the same tool_id as live path so styles match.
                             let tool_id = format!("resume:{id}");
                             let name_str = name.as_str();
 
                             // Render tool call header + details (live-path style)
-                            self.output_area.push_tool_call(&tool_id, name_str, &input_json);
+                            self.output_area
+                                .push_tool_call(&tool_id, name_str, &input_json);
 
                             // Pair with the corresponding ToolResult if available
                             if let Some((content, is_error)) = tool_results.get(id.as_str()) {
                                 let result_str = match content {
                                     serde_json::Value::String(s) => s.clone(),
-                                    serde_json::Value::Array(arr) => {
-                                        arr.iter()
-                                            .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
-                                            .collect::<Vec<_>>()
-                                            .join("\n")
-                                    }
+                                    serde_json::Value::Array(arr) => arr
+                                        .iter()
+                                        .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
+                                        .collect::<Vec<_>>()
+                                        .join("\n"),
                                     _ => content.to_string(),
                                 };
                                 self.output_area.push_tool_result_with_diff(

@@ -28,21 +28,26 @@ impl super::App {
                 self.output_area.stop_spinner();
                 self.output_area.append_assistant_text(&text);
             }
-              UiEvent::Thinking(text) => {
-                  if self.tool_call_active {
-                      log::debug!("[SPINNER] Thinking: tool_call_active was true, resetting to false");
-                      self.tool_call_active = false;
-                  }
-                  self.output_area.set_spinner_phase("Thinking...");
-                  self.output_area.stop_spinner();
-                  self.output_area.append_thinking_text(&text);
-              }
+            UiEvent::Thinking(text) => {
+                if self.tool_call_active {
+                    log::debug!(
+                        "[SPINNER] Thinking: tool_call_active was true, resetting to false"
+                    );
+                    self.tool_call_active = false;
+                }
+                self.output_area.set_spinner_phase("Thinking...");
+                self.output_area.stop_spinner();
+                self.output_area.append_thinking_text(&text);
+            }
             UiEvent::TextBlockComplete(_text) => {
                 self.output_area.finish_streaming();
                 self.output_area.push_system("");
             }
             UiEvent::ToolCallStart(name) => {
-                log::debug!("[SPINNER] ToolCallStart({name}): tool_call_active {} -> true", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] ToolCallStart({name}): tool_call_active {} -> true",
+                    self.tool_call_active
+                );
                 self.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
@@ -51,35 +56,62 @@ impl super::App {
                 }
             }
             UiEvent::ToolCall { id, name, summary } => {
-                log::debug!("[SPINNER] ToolCall({name}): tool_call_active={}", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] ToolCall({name}): tool_call_active={}",
+                    self.tool_call_active
+                );
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
             }
-            UiEvent::ToolResult { id, tool_name, output, is_error, images } => {
+            UiEvent::ToolResult {
+                id,
+                tool_name,
+                output,
+                is_error,
+                images,
+            } => {
                 let image_note = if images.is_empty() {
                     String::new()
                 } else {
                     format!("  │  [{} image(s) attached]\n", images.len())
                 };
-                self.output_area.push_tool_result_with_diff(&id, &tool_name, &output, is_error, &image_note);
+                self.output_area.push_tool_result_with_diff(
+                    &id,
+                    &tool_name,
+                    &output,
+                    is_error,
+                    &image_note,
+                );
                 log::debug!("[BUG#24] ToolResult({tool_name}): restarting spinner for next turn");
                 self.tool_call_active = false;
                 self.output_area.set_spinner_phase("Thinking...");
                 self.output_area.start_spinner();
             }
-            UiEvent::Usage { input, output, last_input, elapsed_secs } => {
+            UiEvent::Usage {
+                input,
+                output,
+                last_input,
+                elapsed_secs,
+            } => {
                 self.total_input_tokens += input as u64;
                 self.total_output_tokens += output as u64;
                 self.total_api_calls += 1;
                 self.last_input_tokens = last_input as u64;
-                let tps = if elapsed_secs > 0.0 { output as f64 / elapsed_secs } else { 0.0 };
+                let tps = if elapsed_secs > 0.0 {
+                    output as f64 / elapsed_secs
+                } else {
+                    0.0
+                };
                 self.status_bar.set_tps(tps);
             }
             UiEvent::LiveTps(tps) => {
                 self.status_bar.set_tps(tps);
             }
             UiEvent::Error(msg) => {
-                log::debug!("[SPINNER] Error: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] Error: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -95,9 +127,15 @@ impl super::App {
                 self.messages = msgs;
                 if !self.messages.is_empty() {
                     use aemeath_core::session::{self as sess, Session};
-                    let mut s = Session::new(self.session_id.clone(), self.cwd.to_string_lossy().to_string());
+                    let mut s = Session::new(
+                        self.session_id.clone(),
+                        self.cwd.to_string_lossy().to_string(),
+                    );
                     s.messages = self.messages.clone();
-                    s.created_at = self.session_created_at.clone().unwrap_or_else(|| aemeath_core::session::now_iso());
+                    s.created_at = self
+                        .session_created_at
+                        .clone()
+                        .unwrap_or_else(|| aemeath_core::session::now_iso());
                     s.updated_at = aemeath_core::session::now_iso();
                     if let Err(e) = sess::save_session(&s).await {
                         log::warn!("failed to auto-save session on sync: {e}");
@@ -106,17 +144,29 @@ impl super::App {
             }
             UiEvent::ClipboardImage(img) => {
                 self.pending_images.push(img);
-                self.input_area.set_pending_images(self.pending_images.len());
+                self.input_area
+                    .set_pending_images(self.pending_images.len());
             }
             UiEvent::SystemMessage(msg) => {
                 self.output_area.push_system(&msg);
             }
-            UiEvent::AskUser { id, question, options, allow_free_input: _, multi_select: _, default, reply_tx } => {
-                  // DEPRECATED path — logic moved to update.rs; keep for compilation
-                  let _ = (id, question, options, default, reply_tx);
-              }
+            UiEvent::AskUser {
+                id,
+                question,
+                options,
+                allow_free_input: _,
+                multi_select: _,
+                default,
+                reply_tx,
+            } => {
+                // DEPRECATED path — logic moved to update.rs; keep for compilation
+                let _ = (id, question, options, default, reply_tx);
+            }
             UiEvent::Done => {
-                log::debug!("[SPINNER] Done: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] Done: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -128,11 +178,20 @@ impl super::App {
                         self.output_area.push_user_message(msg);
                     }
                     let queued: Vec<String> = self.input_queue.drain(..).collect();
-                    self.start_queued_processing_batch(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
+                    self.start_queued_processing_batch(
+                        queued,
+                        is_processing,
+                        ui_tx,
+                        active_cancel,
+                        spawn_ctx,
+                    );
                 }
             }
             UiEvent::DoneWithDuration(elapsed) => {
-                log::debug!("[SPINNER] DoneWithDuration: tool_call_active {} -> false", self.tool_call_active);
+                log::debug!(
+                    "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
+                    self.tool_call_active
+                );
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
@@ -145,7 +204,13 @@ impl super::App {
                         self.output_area.push_user_message(msg);
                     }
                     let queued: Vec<String> = self.input_queue.drain(..).collect();
-                    self.start_queued_processing_batch(queued, is_processing, ui_tx, active_cancel, spawn_ctx);
+                    self.start_queued_processing_batch(
+                        queued,
+                        is_processing,
+                        ui_tx,
+                        active_cancel,
+                        spawn_ctx,
+                    );
                 }
             }
             UiEvent::AgentProgress { .. } => {

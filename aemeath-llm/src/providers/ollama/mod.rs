@@ -1,8 +1,8 @@
 //! Ollama provider implementation — 主模块
 //! 本地 Ollama 推理服务优化：更长超时、可选认证、无 stream_options、空响应检测。
 
-use async_trait::async_trait;
 use aemeath_core::message::Message;
+use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +47,9 @@ impl OllamaProvider {
         Self {
             base_url: {
                 let url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
-                url.trim_end_matches('/').trim_end_matches("/v1").to_string()
+                url.trim_end_matches('/')
+                    .trim_end_matches("/v1")
+                    .to_string()
             },
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
@@ -111,7 +113,9 @@ impl LlmProvider for OllamaProvider {
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
-        let body_bytes = serde_json::to_string(&request_body).map(|s| s.len()).unwrap_or(0);
+        let body_bytes = serde_json::to_string(&request_body)
+            .map(|s| s.len())
+            .unwrap_or(0);
         log::debug!(
             "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
@@ -129,10 +133,13 @@ impl LlmProvider for OllamaProvider {
             }
 
             if attempt > 0 {
-                let delay = std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
+                let delay =
+                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
                 log::debug!(
                     "[ollama stream] retry {}/{} after {:?}",
-                    attempt, self.max_retries, delay
+                    attempt,
+                    self.max_retries,
+                    delay
                 );
                 tokio::select! {
                     biased;
@@ -186,7 +193,9 @@ impl LlmProvider for OllamaProvider {
                 "[ollama stream] attempt={} HTTP {} content-type={:?}",
                 attempt,
                 status,
-                response.headers().get(reqwest::header::CONTENT_TYPE)
+                response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
             );
 
@@ -219,7 +228,9 @@ impl LlmProvider for OllamaProvider {
                     // Check for empty response — Ollama sometimes returns valid stream
                     // with no actual content
                     if resp.assistant_message.content.is_empty() {
-                        handler.on_error("Ollama stream returned no content, falling back to non-streaming");
+                        handler.on_error(
+                            "Ollama stream returned no content, falling back to non-streaming",
+                        );
                         return self
                             .send_message_non_stream(system, messages, tool_schemas, handler)
                             .await;
@@ -230,7 +241,10 @@ impl LlmProvider for OllamaProvider {
                     return Err(crate::LlmError::Stream(msg.clone()));
                 }
                 Err(crate::LlmError::Stream(e)) => {
-                    handler.on_error(&format!("Ollama streaming failed, falling back to non-streaming: {}", e));
+                    handler.on_error(&format!(
+                        "Ollama streaming failed, falling back to non-streaming: {}",
+                        e
+                    ));
                     return self
                         .send_message_non_stream(system, messages, tool_schemas, handler)
                         .await;
@@ -253,7 +267,8 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn set_reasoning(&self, enabled: bool) {
-        self.reasoning.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn is_reasoning(&self) -> bool {

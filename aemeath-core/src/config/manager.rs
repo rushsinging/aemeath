@@ -101,8 +101,12 @@ impl ConfigManager {
         if let Ok(mode) = std::env::var("AEMEATH_PERMISSION_MODE") {
             match mode.to_lowercase().as_str() {
                 "ask" => config.permissions.mode = PermissionModeConfig::Ask,
-                "auto_read" | "autoread" => config.permissions.mode = PermissionModeConfig::AutoRead,
-                "allow_all" | "auto_all" | "autoall" => config.permissions.mode = PermissionModeConfig::AllowAll,
+                "auto_read" | "autoread" => {
+                    config.permissions.mode = PermissionModeConfig::AutoRead
+                }
+                "allow_all" | "auto_all" | "autoall" => {
+                    config.permissions.mode = PermissionModeConfig::AllowAll
+                }
                 _ => {}
             }
         }
@@ -199,8 +203,16 @@ impl ConfigManager {
                     guidance.insert(k, v);
                 }
                 ModelsConfig {
-                    mode: if overlay.models.mode.is_empty() { base.models.mode } else { overlay.models.mode },
-                    default: if overlay.models.default.is_empty() { base.models.default } else { overlay.models.default },
+                    mode: if overlay.models.mode.is_empty() {
+                        base.models.mode
+                    } else {
+                        overlay.models.mode
+                    },
+                    default: if overlay.models.default.is_empty() {
+                        base.models.default
+                    } else {
+                        overlay.models.default
+                    },
                     providers,
                     guidance,
                 }
@@ -217,14 +229,18 @@ impl ConfigManager {
                     base.tools.disabled
                 },
                 settings: Self::merge_maps(base.tools.settings, overlay.tools.settings),
-                max_concurrency: if overlay.tools.max_concurrency != tools::default_max_tool_concurrency() {
+                max_concurrency: if overlay.tools.max_concurrency
+                    != tools::default_max_tool_concurrency()
+                {
                     overlay.tools.max_concurrency
                 } else {
                     base.tools.max_concurrency
                 },
             },
             agents: AgentsConfig {
-                max_concurrency: if overlay.agents.max_concurrency != tools::default_max_agent_concurrency() {
+                max_concurrency: if overlay.agents.max_concurrency
+                    != tools::default_max_agent_concurrency()
+                {
                     overlay.agents.max_concurrency
                 } else {
                     base.agents.max_concurrency
@@ -424,7 +440,10 @@ mod tests {
 
         let overlay = config_with_hooks(HashMap::from([(
             HookEvent::PreToolUse,
-            vec![hook_entry("Bash", "overlay-hook"), hook_entry("Read", "overlay-read")],
+            vec![
+                hook_entry("Bash", "overlay-hook"),
+                hook_entry("Read", "overlay-read"),
+            ],
         )]));
 
         let merged = ConfigManager::merge_config(base, overlay);

@@ -6,7 +6,9 @@ pub struct AskUserQuestionTool;
 
 #[async_trait]
 impl Tool for AskUserQuestionTool {
-    fn name(&self) -> &str { "AskUserQuestion" }
+    fn name(&self) -> &str {
+        "AskUserQuestion"
+    }
     fn description(&self) -> &str {
         "Ask the user a question and wait for their response. Use this when you need clarification, confirmation, or user input to proceed with a task."
     }
@@ -35,27 +37,35 @@ impl Tool for AskUserQuestionTool {
             "required": ["question"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let question = input["question"].as_str().unwrap_or("");
-        
+
         if question.is_empty() {
             return ToolResult::error("Question is required");
         }
-        
+
         // 构建提示消息
         let options: Vec<String> = input["options"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         let allow_free_input = input["allow_free_input"].as_bool().unwrap_or(true);
         let default = input["default"].as_str();
-        
+
         let mut prompt = question.to_string();
-        
+
         if !options.is_empty() {
             prompt.push_str("\n\nOptions:\n");
             for (i, opt) in options.iter().enumerate() {
@@ -65,28 +75,32 @@ impl Tool for AskUserQuestionTool {
                 prompt.push_str("\nYou can also provide a custom answer.");
             }
         }
-        
+
         if let Some(default_val) = default {
             prompt.push_str(&format!("\n(Default: {})", default_val));
         }
-        
+
         // 这里需要实际的 UI 层来实现用户输入
         // 由于当前在 tool 层，我们返回一个需要用户响应的提示
         // CLI 层应该处理这个交互
-        
+
         // 使用取消令牌来检测是否被中断
         if ctx.cancel.is_cancelled() {
             return ToolResult::error("Question cancelled by user");
         }
-        
+
         // 返回特殊格式的结果，让 CLI 层知道需要用户输入
         // 格式: __ASK_USER__: question
         let response = if !options.is_empty() && !allow_free_input {
-            ToolResult::success(format!("__ASK_USER_SELECT__: {}\nOptions: {}", question, options.join(",")))
+            ToolResult::success(format!(
+                "__ASK_USER_SELECT__: {}\nOptions: {}",
+                question,
+                options.join(",")
+            ))
         } else {
             ToolResult::success(format!("__ASK_USER__: {}", question))
         };
-        
+
         response
     }
 }

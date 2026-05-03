@@ -1,6 +1,6 @@
+use crate::path_security::validate_and_normalize_path;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use crate::path_security::validate_and_normalize_path;
 use serde_json::Value;
 use std::path::Path;
 
@@ -8,7 +8,9 @@ pub struct FileReadTool;
 
 #[async_trait]
 impl Tool for FileReadTool {
-    fn name(&self) -> &str { "Read" }
+    fn name(&self) -> &str {
+        "Read"
+    }
     fn description(&self) -> &str {
         "Reads a file from the local filesystem.\n\nUsage:\n- The file_path parameter must be an absolute path, not a relative path\n- By default, it reads up to 2000 lines starting from the beginning of the file\n- When you already know which part of the file you need, only read that part. This can be important for larger files.\n- Results are returned using cat -n format, with line numbers starting at 1\n- This tool allows reading images (PNG, JPG, GIF, WebP). When reading an image file the contents are presented visually.\n- This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.\n- If you read a file that exists but has empty contents you will receive a warning."
     }
@@ -23,22 +25,28 @@ impl Tool for FileReadTool {
             "required": ["file_path"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: file_path"),
         };
-          
+
         // Validate path is within workspace boundary
         let path = match validate_and_normalize_path(file_path, &ctx.cwd, ctx.allow_all) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };
-          
-        if !path.exists() { return ToolResult::error(format!("file not found: {file_path}")); }
+
+        if !path.exists() {
+            return ToolResult::error(format!("file not found: {file_path}"));
+        }
 
         // Check if the file is an image
         if is_image_extension(file_path) {
@@ -55,15 +63,23 @@ impl Tool for FileReadTool {
                 let end = (start + limit).min(total);
                 // Use fixed-width line numbers (no tab) to avoid TUI rendering issues
                 let num_width = format!("{}", end).len();
-                let numbered: String = lines[start..end].iter().enumerate()
-                    .map(|(i, line)| format!("{:>width$}  {}", start + i + 1, line, width = num_width))
-                    .collect::<Vec<_>>().join("\n");
+                let numbered: String = lines[start..end]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        format!("{:>width$}  {}", start + i + 1, line, width = num_width)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 // Track this file as read
                 if let Ok(mut read_files) = ctx.read_files.lock() {
                     read_files.insert(file_path.to_string());
                 }
-                if numbered.is_empty() { ToolResult::success("(empty file)") }
-                else { ToolResult::success(numbered) }
+                if numbered.is_empty() {
+                    ToolResult::success("(empty file)")
+                } else {
+                    ToolResult::success(numbered)
+                }
             }
             Err(e) => ToolResult::error(format!("failed to read file: {e}")),
         }
@@ -81,7 +97,7 @@ fn is_image_extension(path: &str) -> bool {
 }
 
 async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let data = match tokio::fs::read(path).await {
         Ok(d) => d,
@@ -100,13 +116,13 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
     if base64.len() > 5 * 1024 * 1024 {
         return ToolResult::error(format!(
             "image too large: {} bytes (base64: {} bytes, max: 5MB)",
-            size, base64.len()
+            size,
+            base64.len()
         ));
     }
 
     let description = format!("Image: {} ({} bytes, {})", file_path, size, media_type);
-    ToolResult::success(&description)
-        .with_image(base64, media_type)
+    ToolResult::success(&description).with_image(base64, media_type)
 }
 
 fn detect_media_type(data: &[u8], path: &str) -> String {
@@ -131,5 +147,6 @@ fn detect_media_type(data: &[u8], path: &str) -> String {
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
         _ => "image/png",
-    }.to_string()
+    }
+    .to_string()
 }

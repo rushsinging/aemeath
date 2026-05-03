@@ -13,7 +13,10 @@ pub struct SystemPromptParts {
     pub claude_md: String,
 }
 
-pub async fn build_system_prompt_parts(cwd: &PathBuf, hook_runner: &HookRunner) -> SystemPromptParts {
+pub async fn build_system_prompt_parts(
+    cwd: &PathBuf,
+    hook_runner: &HookRunner,
+) -> SystemPromptParts {
     let cwd_str = cwd.to_string_lossy();
     let is_git = is_git_repo(cwd).await;
 
@@ -92,7 +95,7 @@ GOOD: TodoWrite(3 todos with dependencies) → TodoRun()
         dynamic.push_str("\n\n");
         dynamic.push_str(&memory_context);
     }
-  
+
     // --- CLAUDE.md: will be injected as a separate user-context message ---
     let claude_md = load_claude_md(cwd, hook_runner).await;
 
@@ -112,16 +115,37 @@ pub fn current_date() -> String {
     let mut y = 1970i64;
     let mut d = days as i64;
     loop {
-        let diy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < diy { break; }
+        let diy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if d < diy {
+            break;
+        }
         d -= diy;
         y += 1;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let md = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let md = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0usize;
     for dim in &md {
-        if d < *dim as i64 { break; }
+        if d < *dim as i64 {
+            break;
+        }
         d -= *dim as i64;
         m += 1;
     }
@@ -148,7 +172,9 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
         if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
             // Trigger InstructionsLoaded hook
             let file_path_str = project_path.to_string_lossy().to_string();
-            hook_runner.on_instructions_loaded(&file_path_str, "claude_md").await;
+            hook_runner
+                .on_instructions_loaded(&file_path_str, "claude_md")
+                .await;
             parts.push(content);
         }
     }
@@ -160,7 +186,9 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
             if let Ok(content) = tokio::fs::read_to_string(&global_path).await {
                 // Trigger InstructionsLoaded hook
                 let file_path_str = global_path.to_string_lossy().to_string();
-                hook_runner.on_instructions_loaded(&file_path_str, "claude_md").await;
+                hook_runner
+                    .on_instructions_loaded(&file_path_str, "claude_md")
+                    .await;
                 parts.push(content);
             }
         }
@@ -172,7 +200,13 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     let warnings = aemeath_core::security::scan_content("CLAUDE.md", &claude_md);
     if !warnings.is_empty() {
         for w in &warnings {
-            log::warn!("[Security] {} in {} line {}: {}", w.threat_type, w.filename, w.line_number, w.matched_text);
+            log::warn!(
+                "[Security] {} in {} line {}: {}",
+                w.threat_type,
+                w.filename,
+                w.line_number,
+                w.matched_text
+            );
         }
         if let Some(prefix) = aemeath_core::security::format_warnings(&warnings) {
             claude_md = format!("{}\n\n{}", prefix, claude_md);
@@ -191,7 +225,8 @@ async fn collect_memory_context_with_limit(cwd: &PathBuf, limit: usize) -> Optio
         return None;
     }
 
-    let mut store = MemoryStore::new(memory_base_dir(), project_hash_from_path(cwd), 100, 0.8).ok()?;
+    let mut store =
+        MemoryStore::new(memory_base_dir(), project_hash_from_path(cwd), 100, 0.8).ok()?;
     let entries = store.top_for_inject(limit).ok()?;
     format_memory_context(&entries)
 }
@@ -303,33 +338,33 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use aemeath_core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+    use super::*;
+    use aemeath_core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 
-  #[test]
-  fn test_format_memory_context_empty() {
-      assert!(format_memory_context(&[]).is_none());
-  }
+    #[test]
+    fn test_format_memory_context_empty() {
+        assert!(format_memory_context(&[]).is_none());
+    }
 
-  #[test]
-  fn test_format_memory_context_with_entries() {
-      let entry = MemoryEntry::new(
-          MemoryLayer::Project,
-          MemoryCategory::Decision,
-          "使用 JSON 存储 Memory",
-          MemorySource::User,
-      );
-      let output = format_memory_context(&[entry]).unwrap();
+    #[test]
+    fn test_format_memory_context_with_entries() {
+        let entry = MemoryEntry::new(
+            MemoryLayer::Project,
+            MemoryCategory::Decision,
+            "使用 JSON 存储 Memory",
+            MemorySource::User,
+        );
+        let output = format_memory_context(&[entry]).unwrap();
 
-      assert!(output.contains("# Project Memory"));
-      assert!(output.contains("[Decision]"));
-      assert!(output.contains("使用 JSON 存储 Memory"));
-  }
+        assert!(output.contains("# Project Memory"));
+        assert!(output.contains("[Decision]"));
+        assert!(output.contains("使用 JSON 存储 Memory"));
+    }
 
-  #[tokio::test]
-  async fn test_collect_memory_context_zero_limit() {
-      let cwd = PathBuf::from("/tmp/aemeath-no-memory");
+    #[tokio::test]
+    async fn test_collect_memory_context_zero_limit() {
+        let cwd = PathBuf::from("/tmp/aemeath-no-memory");
 
-      assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
-  }
+        assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
+    }
 }

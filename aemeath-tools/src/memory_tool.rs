@@ -83,7 +83,7 @@ impl Tool for MemoryTool {
             "pin" => pin_memory(input, ctx),
             "list" => list_memory(input, ctx),
             "add_reminder" => add_reminder(input, ctx),
-          "complete_reminder" => complete_reminder(input, ctx),
+            "complete_reminder" => complete_reminder(input, ctx),
             "" => ToolResult::error("缺少必需参数: action"),
             other => ToolResult::error(format!("未知 memory action: {other}")),
         }
@@ -113,7 +113,10 @@ fn add_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     };
 
     let mut entry = MemoryEntry::new(layer, category, content, MemorySource::Llm).with_tags(tags);
-    entry.pinned = input.get("pinned").and_then(|value| value.as_bool()).unwrap_or(false);
+    entry.pinned = input
+        .get("pinned")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(session_id) = &ctx.parent_session_id {
         entry.source_ref = Some(session_id.clone());
     }
@@ -149,7 +152,10 @@ fn search_memory(input: Value, ctx: &ToolContext) -> ToolResult {
         Ok(query) => query,
         Err(error) => return ToolResult::error(error),
     };
-    let limit = input.get("limit").and_then(|value| value.as_u64()).unwrap_or(10) as usize;
+    let limit = input
+        .get("limit")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(10) as usize;
     let store = match open_store(ctx) {
         Ok(store) => store,
         Err(error) => return ToolResult::error(error),
@@ -166,7 +172,10 @@ fn pin_memory(input: Value, ctx: &ToolContext) -> ToolResult {
         Ok(id) => id,
         Err(error) => return ToolResult::error(error),
     };
-    let pinned = input.get("pinned").and_then(|value| value.as_bool()).unwrap_or(true);
+    let pinned = input
+        .get("pinned")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
     let mut store = match open_store(ctx) {
         Ok(store) => store,
         Err(error) => return ToolResult::error(error),

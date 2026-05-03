@@ -61,7 +61,10 @@ impl HookData {
         match self {
             HookData::Tool(d) => vec![
                 ("AEMEATH_TOOL_NAME", d.tool_name.clone()),
-                ("AEMEATH_TOOL_INPUT", serde_json::to_string(&d.tool_input).unwrap_or_default()),
+                (
+                    "AEMEATH_TOOL_INPUT",
+                    serde_json::to_string(&d.tool_input).unwrap_or_default(),
+                ),
             ],
             HookData::Prompt(d) => vec![("AEMEATH_PROMPT", d.prompt.clone())],
             HookData::Stop(d) => vec![("AEMEATH_STOP_TURNS", d.turns.to_string())],
@@ -181,8 +184,7 @@ pub struct StopHookData {
 
 /// SessionStart 事件数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionHookData {
-}
+pub struct SessionHookData {}
 
 /// PreCompact / PostCompact 事件数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,11 +362,7 @@ impl HookRunner {
     }
 
     /// 获取匹配指定事件和工具名的 hook 列表
-    pub fn matching_hooks(
-        &self,
-        event: HookEvent,
-        tool_name: Option<&str>,
-    ) -> Vec<&HookEntry> {
+    pub fn matching_hooks(&self, event: HookEvent, tool_name: Option<&str>) -> Vec<&HookEntry> {
         self.config
             .events
             .get(&event)
@@ -373,8 +371,7 @@ impl HookRunner {
                     .iter()
                     .filter(|h| {
                         // 空 matcher 匹配所有
-                        h.matcher.is_empty()
-                            || tool_name.is_some_and(|name| name == h.matcher)
+                        h.matcher.is_empty() || tool_name.is_some_and(|name| name == h.matcher)
                     })
                     .collect()
             })
@@ -382,11 +379,7 @@ impl HookRunner {
     }
 
     /// 执行单个 hook 命令
-    pub async fn execute_hook(
-        &self,
-        hook: &HookEntry,
-        input: &HookInput,
-    ) -> HookResult {
+    pub async fn execute_hook(&self, hook: &HookEntry, input: &HookInput) -> HookResult {
         let input_json = match serde_json::to_string(input) {
             Ok(json) => json,
             Err(e) => {
@@ -407,14 +400,17 @@ impl HookRunner {
             command,
             self.project_dir
         );
-  
+
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .env("AEMEATH_HOOK_EVENT", serde_json::to_string(&input.event).unwrap_or_default())
+            .env(
+                "AEMEATH_HOOK_EVENT",
+                serde_json::to_string(&input.event).unwrap_or_default(),
+            )
             .env("AEMEATH_PROJECT_DIR", &self.project_dir)
             .envs(input.data.to_env_vars())
             .spawn()
@@ -484,7 +480,7 @@ impl HookRunner {
                     stdout.len(),
                     stderr.len()
                 );
-  
+
                 HookResult {
                     blocked,
                     output: stdout,
@@ -518,10 +514,7 @@ impl HookRunner {
                 HookResult {
                     blocked: false,
                     output: String::new(),
-                    error: Some(format!(
-                        "hook '{}' 超时（{}秒）",
-                        command, hook.timeout
-                    )),
+                    error: Some(format!("hook '{}' 超时（{}秒）", command, hook.timeout)),
                 }
             }
         }
@@ -546,16 +539,22 @@ impl HookRunner {
             return Vec::new();
         }
 
-        let input = HookInput {
-            event,
-            data,
-        };
+        let input = HookInput { event, data };
 
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
-            log::debug!("running hook: event={:?} matcher={} cmd={}", event, hook.matcher, hook.command);
+            log::debug!(
+                "running hook: event={:?} matcher={} cmd={}",
+                event,
+                hook.matcher,
+                hook.command
+            );
             let result = self.execute_hook(hook, &input).await;
-            log::debug!("hook result: blocked={} error={:?}", result.blocked, result.error);
+            log::debug!(
+                "hook result: blocked={} error={:?}",
+                result.blocked,
+                result.error
+            );
             results.push(result);
             // 如果被阻止，跳过后续 hook
             if results.last().is_some_and(|r| r.blocked) {
@@ -718,267 +717,263 @@ impl HookRunner {
     }
 
     /// 便捷方法：运行 SubagentStop hooks，返回 JSON 输出
-  pub async fn on_subagent_stop(
-      &self,
-      prompt: &str,
-      system: &str,
-      model_spec: Option<&str>,
-      result: &str,
-      turns: usize,
-      is_error: bool,
-  ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
-      self.run_hooks_with_json(
-          HookEvent::SubagentStop,
-          None,
-          HookData::Subagent(SubagentHookData {
-              prompt: prompt.to_string(),
-              system: system.to_string(),
-              model_spec: model_spec.map(String::from),
-              result: Some(result.to_string()),
-              turns: Some(turns),
-              is_error: Some(is_error),
-          }),
-      )
-      .await
-  }
+    pub async fn on_subagent_stop(
+        &self,
+        prompt: &str,
+        system: &str,
+        model_spec: Option<&str>,
+        result: &str,
+        turns: usize,
+        is_error: bool,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::SubagentStop,
+            None,
+            HookData::Subagent(SubagentHookData {
+                prompt: prompt.to_string(),
+                system: system.to_string(),
+                model_spec: model_spec.map(String::from),
+                result: Some(result.to_string()),
+                turns: Some(turns),
+                is_error: Some(is_error),
+            }),
+        )
+        .await
+    }
 
-  /// 便捷方法：运行 TaskCreated hooks，返回 JSON 输出
-  pub async fn on_task_created(
-      &self,
-      tool_input: serde_json::Value,
-      tool_output: &str,
-  ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
-      self.run_hooks_with_json(
-          HookEvent::TaskCreated,
-          None,
-          HookData::Tool(ToolHookData {
-              tool_name: "TaskCreate".to_string(),
-              tool_input,
-              tool_output: Some(tool_output.to_string()),
-              is_error: Some(false),
-          }),
-      )
-      .await
-  }
+    /// 便捷方法：运行 TaskCreated hooks，返回 JSON 输出
+    pub async fn on_task_created(
+        &self,
+        tool_input: serde_json::Value,
+        tool_output: &str,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::TaskCreated,
+            None,
+            HookData::Tool(ToolHookData {
+                tool_name: "TaskCreate".to_string(),
+                tool_input,
+                tool_output: Some(tool_output.to_string()),
+                is_error: Some(false),
+            }),
+        )
+        .await
+    }
 
-  /// 便捷方法：运行 TaskCompleted hooks，返回 JSON 输出
-      pub async fn on_task_completed(
-          &self,
-          tool_input: serde_json::Value,
-          tool_output: &str,
-      ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
-          self.run_hooks_with_json(
-              HookEvent::TaskCompleted,
-              None,
-              HookData::Tool(ToolHookData {
-                  tool_name: "TaskUpdate".to_string(),
-                  tool_input,
-                  tool_output: Some(tool_output.to_string()),
-                  is_error: Some(false),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 TaskCompleted hooks，返回 JSON 输出
+    pub async fn on_task_completed(
+        &self,
+        tool_input: serde_json::Value,
+        tool_output: &str,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_hooks_with_json(
+            HookEvent::TaskCompleted,
+            None,
+            HookData::Tool(ToolHookData {
+                tool_name: "TaskUpdate".to_string(),
+                tool_input,
+                tool_output: Some(tool_output.to_string()),
+                is_error: Some(false),
+            }),
+        )
+        .await
+    }
 
-      // ========== P2 便捷方法 ==========
+    // ========== P2 便捷方法 ==========
 
-      /// 便捷方法：运行 PermissionRequest hooks，返回是否应阻止
-      pub async fn on_permission_request(
-          &self,
-          tool_name: &str,
-          permission_rule: &str,
-      ) -> (bool, Vec<HookResult>) {
-          let results = self
-              .run_hooks(
-                  HookEvent::PermissionRequest,
-                  None,
-                  HookData::Permission(PermissionHookData {
-                      tool_name: tool_name.to_string(),
-                      permission_rule: permission_rule.to_string(),
-                  }),
-              )
-              .await;
-          let blocked = results.iter().any(|r| r.blocked);
-          (blocked, results)
-      }
+    /// 便捷方法：运行 PermissionRequest hooks，返回是否应阻止
+    pub async fn on_permission_request(
+        &self,
+        tool_name: &str,
+        permission_rule: &str,
+    ) -> (bool, Vec<HookResult>) {
+        let results = self
+            .run_hooks(
+                HookEvent::PermissionRequest,
+                None,
+                HookData::Permission(PermissionHookData {
+                    tool_name: tool_name.to_string(),
+                    permission_rule: permission_rule.to_string(),
+                }),
+            )
+            .await;
+        let blocked = results.iter().any(|r| r.blocked);
+        (blocked, results)
+    }
 
-      /// 便捷方法：运行 PermissionDenied hooks
-      pub async fn on_permission_denied(
-          &self,
-          tool_name: &str,
-          permission_rule: &str,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::PermissionDenied,
-              None,
-              HookData::Permission(PermissionHookData {
-                  tool_name: tool_name.to_string(),
-                  permission_rule: permission_rule.to_string(),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 PermissionDenied hooks
+    pub async fn on_permission_denied(
+        &self,
+        tool_name: &str,
+        permission_rule: &str,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::PermissionDenied,
+            None,
+            HookData::Permission(PermissionHookData {
+                tool_name: tool_name.to_string(),
+                permission_rule: permission_rule.to_string(),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 Notification hooks
-      pub async fn on_notification(
-          &self,
-          notification_text: &str,
-          notification_type: &str,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::Notification,
-              None,
-              HookData::Notification(NotificationHookData {
-                  notification_text: notification_text.to_string(),
-                  notification_type: notification_type.to_string(),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 Notification hooks
+    pub async fn on_notification(
+        &self,
+        notification_text: &str,
+        notification_type: &str,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::Notification,
+            None,
+            HookData::Notification(NotificationHookData {
+                notification_text: notification_text.to_string(),
+                notification_type: notification_type.to_string(),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 InstructionsLoaded hooks
-      pub async fn on_instructions_loaded(
-          &self,
-          file_path: &str,
-          instruction_type: &str,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::InstructionsLoaded,
-              None,
-              HookData::InstructionsLoaded(InstructionsLoadedHookData {
-                  file_path: file_path.to_string(),
-                  instruction_type: instruction_type.to_string(),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 InstructionsLoaded hooks
+    pub async fn on_instructions_loaded(
+        &self,
+        file_path: &str,
+        instruction_type: &str,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::InstructionsLoaded,
+            None,
+            HookData::InstructionsLoaded(InstructionsLoadedHookData {
+                file_path: file_path.to_string(),
+                instruction_type: instruction_type.to_string(),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 ConfigChange hooks
-      pub async fn on_config_change(
-          &self,
-          config_file: &str,
-          changed_field: Option<&str>,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::ConfigChange,
-              None,
-              HookData::ConfigChange(ConfigChangeHookData {
-                  config_file: config_file.to_string(),
-                  changed_field: changed_field.map(String::from),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 ConfigChange hooks
+    pub async fn on_config_change(
+        &self,
+        config_file: &str,
+        changed_field: Option<&str>,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::ConfigChange,
+            None,
+            HookData::ConfigChange(ConfigChangeHookData {
+                config_file: config_file.to_string(),
+                changed_field: changed_field.map(String::from),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 Elicitation hooks，返回是否应阻止
-      pub async fn on_elicitation(
-          &self,
-          server_name: &str,
-          elicitation_text: &str,
-      ) -> (bool, Vec<HookResult>) {
-          let results = self
-              .run_hooks(
-                  HookEvent::Elicitation,
-                  None,
-                  HookData::Elicitation(ElicitationHookData {
-                      server_name: server_name.to_string(),
-                      elicitation_text: Some(elicitation_text.to_string()),
-                      user_response: None,
-                  }),
-              )
-              .await;
-          let blocked = results.iter().any(|r| r.blocked);
-          (blocked, results)
-      }
+    /// 便捷方法：运行 Elicitation hooks，返回是否应阻止
+    pub async fn on_elicitation(
+        &self,
+        server_name: &str,
+        elicitation_text: &str,
+    ) -> (bool, Vec<HookResult>) {
+        let results = self
+            .run_hooks(
+                HookEvent::Elicitation,
+                None,
+                HookData::Elicitation(ElicitationHookData {
+                    server_name: server_name.to_string(),
+                    elicitation_text: Some(elicitation_text.to_string()),
+                    user_response: None,
+                }),
+            )
+            .await;
+        let blocked = results.iter().any(|r| r.blocked);
+        (blocked, results)
+    }
 
-      /// 便捷方法：运行 ElicitationResult hooks
-      pub async fn on_elicitation_result(
-          &self,
-          server_name: &str,
-          user_response: &str,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::ElicitationResult,
-              None,
-              HookData::Elicitation(ElicitationHookData {
-                  server_name: server_name.to_string(),
-                  elicitation_text: None,
-                  user_response: Some(user_response.to_string()),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 ElicitationResult hooks
+    pub async fn on_elicitation_result(
+        &self,
+        server_name: &str,
+        user_response: &str,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::ElicitationResult,
+            None,
+            HookData::Elicitation(ElicitationHookData {
+                server_name: server_name.to_string(),
+                elicitation_text: None,
+                user_response: Some(user_response.to_string()),
+            }),
+        )
+        .await
+    }
 
-      // ========== P3 便捷方法 ==========
+    // ========== P3 便捷方法 ==========
 
-      /// 便捷方法：运行 UserPromptExpansion hooks，返回是否应拒绝
-      pub async fn on_user_prompt_expansion(
-          &self,
-          original_input: &str,
-          expanded_input: &str,
-      ) -> (bool, Vec<HookResult>) {
-          let results = self
-              .run_hooks(
-                  HookEvent::UserPromptExpansion,
-                  None,
-                  HookData::UserPromptExpansion(UserPromptExpansionHookData {
-                      original_input: original_input.to_string(),
-                      expanded_input: expanded_input.to_string(),
-                  }),
-              )
-              .await;
-          let blocked = results.iter().any(|r| r.blocked);
-          (blocked, results)
-      }
+    /// 便捷方法：运行 UserPromptExpansion hooks，返回是否应拒绝
+    pub async fn on_user_prompt_expansion(
+        &self,
+        original_input: &str,
+        expanded_input: &str,
+    ) -> (bool, Vec<HookResult>) {
+        let results = self
+            .run_hooks(
+                HookEvent::UserPromptExpansion,
+                None,
+                HookData::UserPromptExpansion(UserPromptExpansionHookData {
+                    original_input: original_input.to_string(),
+                    expanded_input: expanded_input.to_string(),
+                }),
+            )
+            .await;
+        let blocked = results.iter().any(|r| r.blocked);
+        (blocked, results)
+    }
 
-      /// 便捷方法：运行 CwdChanged hooks
-      pub async fn on_cwd_changed(&self, old_cwd: &str, new_cwd: &str) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::CwdChanged,
-              None,
-              HookData::CwdChanged(CwdChangedHookData {
-                  old_cwd: old_cwd.to_string(),
-                  new_cwd: new_cwd.to_string(),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 CwdChanged hooks
+    pub async fn on_cwd_changed(&self, old_cwd: &str, new_cwd: &str) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::CwdChanged,
+            None,
+            HookData::CwdChanged(CwdChangedHookData {
+                old_cwd: old_cwd.to_string(),
+                new_cwd: new_cwd.to_string(),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 FileChanged hooks
-      pub async fn on_file_changed(
-          &self,
-          file_path: &str,
-          change_type: &str,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::FileChanged,
-              None,
-              HookData::FileChanged(FileChangedHookData {
-                  file_path: file_path.to_string(),
-                  change_type: change_type.to_string(),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 FileChanged hooks
+    pub async fn on_file_changed(&self, file_path: &str, change_type: &str) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::FileChanged,
+            None,
+            HookData::FileChanged(FileChangedHookData {
+                file_path: file_path.to_string(),
+                change_type: change_type.to_string(),
+            }),
+        )
+        .await
+    }
 
-      /// 便捷方法：运行 TeammateIdle hooks
-      pub async fn on_teammate_idle(
-          &self,
-          teammate_name: &str,
-          idle_reason: Option<&str>,
-      ) -> Vec<HookResult> {
-          self.run_hooks(
-              HookEvent::TeammateIdle,
-              None,
-              HookData::TeammateIdle(TeammateIdleHookData {
-                  teammate_name: teammate_name.to_string(),
-                  idle_reason: idle_reason.map(String::from),
-              }),
-          )
-          .await
-      }
+    /// 便捷方法：运行 TeammateIdle hooks
+    pub async fn on_teammate_idle(
+        &self,
+        teammate_name: &str,
+        idle_reason: Option<&str>,
+    ) -> Vec<HookResult> {
+        self.run_hooks(
+            HookEvent::TeammateIdle,
+            None,
+            HookData::TeammateIdle(TeammateIdleHookData {
+                teammate_name: teammate_name.to_string(),
+                idle_reason: idle_reason.map(String::from),
+            }),
+        )
+        .await
+    }
 
-      /// 运行匹配的 hook 并解析 JSON 输出
+    /// 运行匹配的 hook 并解析 JSON 输出
     ///
     /// 对每个 hook 结果尝试解析 JSON 输出，如果某个 hook 的 JSON 中
     /// `continue` 为 false 或 exit_code 为 2，则中断后续 hook。
@@ -993,19 +988,22 @@ impl HookRunner {
             return Vec::new();
         }
 
-        let input = HookInput {
-            event,
-            data,
-        };
+        let input = HookInput { event, data };
 
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
-            log::debug!("running hook (with json): event={:?} matcher={} cmd={}", event, hook.matcher, hook.command);
+            log::debug!(
+                "running hook (with json): event={:?} matcher={} cmd={}",
+                event,
+                hook.matcher,
+                hook.command
+            );
             let result = self.execute_hook(hook, &input).await;
             let json_output = result.parse_json_output();
-            let should_break = result.blocked
-                || json_output.as_ref().is_some_and(|j| !j.r#continue);
-            log::debug!("hook result (json): blocked={} continue={:?} error={:?}",
+            let should_break =
+                result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
+            log::debug!(
+                "hook result (json): blocked={} continue={:?} error={:?}",
                 result.blocked,
                 json_output.as_ref().map(|j| j.r#continue),
                 result.error,
@@ -1046,7 +1044,9 @@ pub struct HookJsonOutput {
     pub hook_specific_output: Option<serde_json::Value>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl HookResult {
     /// 从 output 字段解析 JSON 输出
@@ -1203,9 +1203,8 @@ mod tests {
     #[test]
     fn test_expand_command_placeholders_project_dir() {
         let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
-        let command = runner.expand_command_placeholders(
-            "\"{AEMEATH_PROJECT_DIR}/build.sh\" --check",
-        );
+        let command =
+            runner.expand_command_placeholders("\"{AEMEATH_PROJECT_DIR}/build.sh\" --check");
 
         assert_eq!(command, "\"/tmp/aemeath-project/build.sh\" --check");
     }
@@ -1220,10 +1219,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_hook_expands_project_dir_placeholder() {
-        let project_dir = std::env::current_dir()
-            .unwrap()
-            .display()
-            .to_string();
+        let project_dir = std::env::current_dir().unwrap().display().to_string();
         let hook = HookEntry {
             matcher: String::new(),
             command: "printf '%s' \"{AEMEATH_PROJECT_DIR}\"".to_string(),
@@ -1244,10 +1240,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_on_stop_runs_configured_hook_with_event_and_project_dir() {
-        let project_dir = std::env::temp_dir().join(format!(
-            "aemeath-stop-hook-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let project_dir =
+            std::env::temp_dir().join(format!("aemeath-stop-hook-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&project_dir).unwrap();
         let marker = project_dir.join("stop-hook.marker");
         let marker_path = marker.display().to_string();

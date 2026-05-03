@@ -67,7 +67,8 @@ impl Tool for EnterPlanModeTool {
         // Note: The actual mode change happens in the agent runner
         ToolResult::success(
             "Entered plan mode. Tool calls will be simulated and not executed. \
-             Use ExitPlanMode to return to normal execution mode.".to_string()
+             Use ExitPlanMode to return to normal execution mode."
+                .to_string(),
         )
     }
 
@@ -117,11 +118,13 @@ impl Tool for ExitPlanModeTool {
         if args.execute {
             ToolResult::success(
                 "Exited plan mode. The planned actions will now be executed. \
-                 Note: Simulated tool calls need to be re-invoked.".to_string()
+                 Note: Simulated tool calls need to be re-invoked."
+                    .to_string(),
             )
         } else {
             ToolResult::success(
-                "Exited plan mode. Returning to normal execution without running planned actions.".to_string()
+                "Exited plan mode. Returning to normal execution without running planned actions."
+                    .to_string(),
             )
         }
     }

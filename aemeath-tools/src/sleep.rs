@@ -6,7 +6,9 @@ pub struct SleepTool;
 
 #[async_trait]
 impl Tool for SleepTool {
-    fn name(&self) -> &str { "Sleep" }
+    fn name(&self) -> &str {
+        "Sleep"
+    }
     fn description(&self) -> &str {
         "Pause execution for a specified duration. Useful for waiting for asynchronous operations or rate limiting."
     }
@@ -24,27 +26,31 @@ impl Tool for SleepTool {
             "required": ["duration_ms"]
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let duration_ms = input["duration_ms"].as_u64().unwrap_or(1000);
-        
+
         // Limit sleep duration to 60 seconds
         let duration_ms = duration_ms.min(60000);
-        
+
         // Check for cancellation
         if ctx.cancel.is_cancelled() {
             return ToolResult::error("Sleep cancelled");
         }
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
-        
+
         // Check again after sleep
         if ctx.cancel.is_cancelled() {
             return ToolResult::error("Sleep cancelled");
         }
-        
+
         ToolResult::success(format!("Slept for {}ms", duration_ms))
     }
 }

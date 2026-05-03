@@ -9,7 +9,10 @@ use thiserror::Error;
 pub enum AemeathError {
     /// API error
     #[error("API error: {message}")]
-    Api { message: String, code: Option<String> },
+    Api {
+        message: String,
+        code: Option<String>,
+    },
 
     /// Authentication error
     #[error("Authentication error: {message}")]
@@ -80,7 +83,10 @@ impl<'a> ErrorDisplay<'a> {
     pub fn user_message(&self) -> String {
         match self.0 {
             AemeathError::Api { message, code } => {
-                let code_part = code.as_ref().map(|c| format!(" (code: {})", c)).unwrap_or_default();
+                let code_part = code
+                    .as_ref()
+                    .map(|c| format!(" (code: {})", c))
+                    .unwrap_or_default();
                 format!("API 调用失败: {}{}", message, code_part)
             }
             AemeathError::Auth { message } => {
@@ -111,14 +117,15 @@ impl<'a> ErrorDisplay<'a> {
                 format!("API 请求频率超限。请等待 {} 秒后重试。", retry_after)
             }
             AemeathError::TokenLimit { used, limit } => {
-                format!("Token 超限: 已使用 {}, 限制 {}. 请精简输入或增加上下文大小。", used, limit)
+                format!(
+                    "Token 超限: 已使用 {}, 限制 {}. 请精简输入或增加上下文大小。",
+                    used, limit
+                )
             }
             AemeathError::Timeout { seconds, message } => {
                 format!("操作超时 ({}秒): {}", seconds, message)
             }
-            AemeathError::Internal { .. } => {
-                "内部错误，请稍后重试或联系开发者。".to_string()
-            }
+            AemeathError::Internal { .. } => "内部错误，请稍后重试或联系开发者。".to_string(),
             AemeathError::Unknown { message } => {
                 format!("未知错误: {}", message)
             }
@@ -333,13 +340,17 @@ mod tests {
         let error = AemeathError::RateLimit { retry_after: 60 };
         assert!(error.is_retryable());
 
-        let error = AemeathError::Auth { message: "test".to_string() };
+        let error = AemeathError::Auth {
+            message: "test".to_string(),
+        };
         assert!(!error.is_retryable());
     }
 
     #[test]
     fn test_suggestions() {
-        let error = AemeathError::Auth { message: "test".to_string() };
+        let error = AemeathError::Auth {
+            message: "test".to_string(),
+        };
         let display = error.display();
         let suggestions = display.suggestions();
         assert!(!suggestions.is_empty());

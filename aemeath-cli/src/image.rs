@@ -63,7 +63,12 @@ pub fn detect_image_format(data: &[u8]) -> ImageFormat {
 
     // WebP: RIFF....WEBP
     if data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 {
-        if data.len() >= 12 && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50 {
+        if data.len() >= 12
+            && data[8] == 0x57
+            && data[9] == 0x45
+            && data[10] == 0x42
+            && data[11] == 0x50
+        {
             return ImageFormat::Webp;
         }
     }
@@ -184,8 +189,7 @@ fn resize_image(data: &[u8], _format: ImageFormat) -> Result<Vec<u8>, ImageError
     let output_path = temp_dir.join("aemeath_output_image.jpg");
 
     // Write input file
-    std::fs::write(&input_path, data)
-        .map_err(|e| ImageError::WriteError(e.to_string()))?;
+    std::fs::write(&input_path, data).map_err(|e| ImageError::WriteError(e.to_string()))?;
 
     let resize_result = resize_with_external_tool(&input_path, &output_path);
 
@@ -195,8 +199,7 @@ fn resize_image(data: &[u8], _format: ImageFormat) -> Result<Vec<u8>, ImageError
     resize_result?;
 
     // Read resized output
-    let result = std::fs::read(&output_path)
-        .map_err(|e| ImageError::ReadError(e.to_string()))?;
+    let result = std::fs::read(&output_path).map_err(|e| ImageError::ReadError(e.to_string()))?;
 
     // Cleanup output file
     std::fs::remove_file(&output_path).ok();
@@ -205,14 +208,25 @@ fn resize_image(data: &[u8], _format: ImageFormat) -> Result<Vec<u8>, ImageError
 }
 
 #[cfg(target_os = "macos")]
-fn resize_with_external_tool(input_path: &std::path::Path, output_path: &std::path::Path) -> Result<(), ImageError> {
-    let output_str = output_path.to_str().ok_or_else(|| ImageError::ResizeError("output path is not valid UTF-8".to_string()))?;
-    let input_str = input_path.to_str().ok_or_else(|| ImageError::ResizeError("input path is not valid UTF-8".to_string()))?;
+fn resize_with_external_tool(
+    input_path: &std::path::Path,
+    output_path: &std::path::Path,
+) -> Result<(), ImageError> {
+    let output_str = output_path
+        .to_str()
+        .ok_or_else(|| ImageError::ResizeError("output path is not valid UTF-8".to_string()))?;
+    let input_str = input_path
+        .to_str()
+        .ok_or_else(|| ImageError::ResizeError("input path is not valid UTF-8".to_string()))?;
     let status = std::process::Command::new("sips")
         .args([
-            "-s", "format", "jpeg",
-            "-Z", &IMAGE_MAX_WIDTH.to_string(),
-            "--out", output_str,
+            "-s",
+            "format",
+            "jpeg",
+            "-Z",
+            &IMAGE_MAX_WIDTH.to_string(),
+            "--out",
+            output_str,
             input_str,
         ])
         .status()
@@ -225,14 +239,23 @@ fn resize_with_external_tool(input_path: &std::path::Path, output_path: &std::pa
 }
 
 #[cfg(target_os = "linux")]
-fn resize_with_external_tool(input_path: &std::path::Path, output_path: &std::path::Path) -> Result<(), ImageError> {
-    let input_str = input_path.to_str().ok_or_else(|| ImageError::ResizeError("input path is not valid UTF-8".to_string()))?;
-    let output_str = output_path.to_str().ok_or_else(|| ImageError::ResizeError("output path is not valid UTF-8".to_string()))?;
+fn resize_with_external_tool(
+    input_path: &std::path::Path,
+    output_path: &std::path::Path,
+) -> Result<(), ImageError> {
+    let input_str = input_path
+        .to_str()
+        .ok_or_else(|| ImageError::ResizeError("input path is not valid UTF-8".to_string()))?;
+    let output_str = output_path
+        .to_str()
+        .ok_or_else(|| ImageError::ResizeError("output path is not valid UTF-8".to_string()))?;
     let status = std::process::Command::new("convert")
         .args([
             input_str,
-            "-resize", &format!("{}x{}>", IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT),
-            "-quality", "80",
+            "-resize",
+            &format!("{}x{}>", IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT),
+            "-quality",
+            "80",
             output_str,
         ])
         .status()
@@ -245,13 +268,18 @@ fn resize_with_external_tool(input_path: &std::path::Path, output_path: &std::pa
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn resize_with_external_tool(_input_path: &std::path::Path, _output_path: &std::path::Path) -> Result<(), ImageError> {
-    Err(ImageError::ResizeError("no resize tool available on this platform".to_string()))
+fn resize_with_external_tool(
+    _input_path: &std::path::Path,
+    _output_path: &std::path::Path,
+) -> Result<(), ImageError> {
+    Err(ImageError::ResizeError(
+        "no resize tool available on this platform".to_string(),
+    ))
 }
 
 /// Base64 encode data
 fn base64_encode(data: &[u8]) -> String {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     STANDARD.encode(data)
 }
 
@@ -275,9 +303,15 @@ impl std::fmt::Display for ImageError {
             ImageError::ReadError(e) => write!(f, "Failed to read image: {}", e),
             ImageError::WriteError(e) => write!(f, "Failed to write temporary file: {}", e),
             ImageError::EmptyFile => write!(f, "Image file is empty"),
-            ImageError::TooLarge { original_size, base64_size } => {
-                write!(f, "Image too large: {} bytes (base64: {} bytes). Max base64 size: {} bytes",
-                    original_size, base64_size, API_IMAGE_MAX_BASE64_SIZE)
+            ImageError::TooLarge {
+                original_size,
+                base64_size,
+            } => {
+                write!(
+                    f,
+                    "Image too large: {} bytes (base64: {} bytes). Max base64 size: {} bytes",
+                    original_size, base64_size, API_IMAGE_MAX_BASE64_SIZE
+                )
             }
             ImageError::ResizeError(e) => write!(f, "Failed to resize image: {}", e),
         }

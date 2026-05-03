@@ -17,7 +17,7 @@ mod context;
 mod image_input;
 mod tools;
 
-use commands::{SlashResult, handle_slash_command};
+use commands::{handle_slash_command, SlashResult};
 use compact_handler::SilentCompactHandler;
 use context::build_user_context_message;
 use image_input::extract_image_paths;
@@ -60,11 +60,13 @@ pub async fn run_repl(
     {
         use aemeath_core::config::hooks::HookEvent;
         use aemeath_core::hook::{HookData, SessionHookData};
-        let hook_results = hook_runner.run_hooks_with_json(
-            HookEvent::SessionStart,
-            None,
-            HookData::Session(SessionHookData {}),
-        ).await;
+        let hook_results = hook_runner
+            .run_hooks_with_json(
+                HookEvent::SessionStart,
+                None,
+                HookData::Session(SessionHookData {}),
+            )
+            .await;
         for (_, result, json_output) in &hook_results {
             if let Some(json) = json_output {
                 if let Some(ref ctx) = json.additional_context {
@@ -143,7 +145,7 @@ pub async fn run_repl(
     let session_reminders = Arc::new(std::sync::Mutex::new(
         aemeath_core::memory::SessionReminders::new(),
     ));
-    
+
     loop {
         skip_message_build = false;
 
@@ -188,7 +190,9 @@ pub async fn run_repl(
                 resumed_session.as_ref(),
                 &mut allow_all,
                 &skills,
-            ).await {
+            )
+            .await
+            {
                 SlashResult::Continue => continue,
                 SlashResult::Exit => break,
                 SlashResult::NotFound => {
@@ -235,7 +239,11 @@ pub async fn run_repl(
 
         if !skip_message_build {
             let images = pending_images.lock().unwrap().drain(..).collect::<Vec<_>>();
-            let msg_text = if clean_input.is_empty() { &input } else { &clean_input };
+            let msg_text = if clean_input.is_empty() {
+                &input
+            } else {
+                &clean_input
+            };
             if images.is_empty() {
                 messages.push(Message::user(msg_text));
             } else {
@@ -252,13 +260,25 @@ pub async fn run_repl(
 
         // Auto-compact before sending to API
         if compact_state.should_attempt()
-            && compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens)
+            && compact::needs_compaction_full(
+                &messages,
+                &system_prompt_text,
+                context_size,
+                tool_schema_tokens,
+            )
             && messages.len() > 4
         {
             compact_messages_inner(
-                &mut messages, &system_prompt_text, context_size,
-                &client, &hook_runner, turn_count, &mut compact_state, &read_files,
-            ).await;
+                &mut messages,
+                &system_prompt_text,
+                context_size,
+                &client,
+                &hook_runner,
+                turn_count,
+                &mut compact_state,
+                &read_files,
+            )
+            .await;
         }
 
         let cancel = CancellationToken::new();
@@ -318,7 +338,13 @@ pub async fn run_repl(
             let indicator = ThinkingIndicator::start("thinking...");
             let mut handler = TerminalStreamHandler::new(verbose, markdown);
             let response = client
-                .stream_message(&system_blocks, &messages_for_api, &tool_schemas, &mut handler, &cancel)
+                .stream_message(
+                    &system_blocks,
+                    &messages_for_api,
+                    &tool_schemas,
+                    &mut handler,
+                    &cancel,
+                )
                 .await;
             let elapsed = indicator.elapsed();
             indicator.stop();
@@ -336,7 +362,11 @@ pub async fn run_repl(
                     total_input_tokens += last_api_input_tokens;
                     total_output_tokens += resp.usage.output_tokens as u64;
                     total_api_calls += 1;
-                    TerminalRenderer::print_usage(resp.usage.input_tokens, resp.usage.output_tokens, elapsed);
+                    TerminalRenderer::print_usage(
+                        resp.usage.input_tokens,
+                        resp.usage.output_tokens,
+                        elapsed,
+                    );
 
                     messages.push(resp.assistant_message.clone());
 
@@ -358,7 +388,9 @@ pub async fn run_repl(
                     let mut approved_calls: Vec<&aemeath_core::agent::ToolCall> = Vec::new();
                     let mut denied_results: Vec<aemeath_core::agent::ToolResultTuple> = Vec::new();
 
-                    let pending_tasks: Vec<String> = _task_store.list().await
+                    let pending_tasks: Vec<String> = _task_store
+                        .list()
+                        .await
                         .iter()
                         .filter(|t| t.status == aemeath_core::task::TaskStatus::Pending)
                         .map(|t| {
@@ -371,30 +403,37 @@ pub async fn run_repl(
                         })
                         .collect();
 
-                    let call_summaries: std::collections::HashMap<String, (String, String)> = tool_calls
-                        .iter()
-                        .map(|call| {
-                            let summary = if call.name == "TodoRun" {
-                                if pending_tasks.is_empty() {
-                                    format_tool_summary(&call.name, &call.input)
+                    let call_summaries: std::collections::HashMap<String, (String, String)> =
+                        tool_calls
+                            .iter()
+                            .map(|call| {
+                                let summary = if call.name == "TodoRun" {
+                                    if pending_tasks.is_empty() {
+                                        format_tool_summary(&call.name, &call.input)
+                                    } else {
+                                        format!(
+                                            "{} todo(s)\n{}",
+                                            pending_tasks.len(),
+                                            pending_tasks.join("\n")
+                                        )
+                                    }
                                 } else {
-                                    format!("{} todo(s)\n{}", pending_tasks.len(), pending_tasks.join("\n"))
-                                }
-                            } else {
-                                format_tool_summary(&call.name, &call.input)
-                            };
-                            (call.id.clone(), (call.name.clone(), summary))
-                        })
-                        .collect();
+                                    format_tool_summary(&call.name, &call.input)
+                                };
+                                (call.id.clone(), (call.name.clone(), summary))
+                            })
+                            .collect();
 
                     for call in &tool_calls {
                         let is_safe = if call.name == "Bash" {
-                            call.input.get("command")
+                            call.input
+                                .get("command")
                                 .and_then(|v| v.as_str())
                                 .map(aemeath_tools::bash::is_readonly_command)
                                 .unwrap_or(false)
                         } else {
-                            registry.get(&call.name)
+                            registry
+                                .get(&call.name)
                                 .map(|t| t.is_read_only())
                                 .unwrap_or(false)
                         };
@@ -468,7 +507,8 @@ pub async fn run_repl(
                     }
 
                     let persisted = aemeath_core::tool_result_storage::persist_oversized_results(
-                        &session_id, &mut results,
+                        &session_id,
+                        &mut results,
                     );
                     if persisted > 0 {
                         println!("[{persisted} tool result(s) persisted to disk]");
@@ -478,7 +518,8 @@ pub async fn run_repl(
                         if let Some((name, summary)) = call_summaries.get(_id) {
                             TerminalRenderer::print_tool_call(name, summary);
                         }
-                        let tool_name = call_summaries.get(_id)
+                        let tool_name = call_summaries
+                            .get(_id)
                             .map(|(n, _): &(String, String)| n.as_str())
                             .unwrap_or("");
                         TerminalRenderer::print_tool_result_with_diff(tool_name, output, *is_error);
@@ -497,11 +538,20 @@ pub async fn run_repl(
 
                     // Inner-loop auto-compact
                     let urgency = if last_api_input_tokens > 0 {
-                        let new_tokens = messages.last()
+                        let new_tokens = messages
+                            .last()
                             .map(|m| compact::estimate_messages_tokens(std::slice::from_ref(m)))
                             .unwrap_or(0) as u64;
-                        compact::compaction_urgency(last_api_input_tokens + new_tokens, context_size)
-                    } else if compact::needs_compaction_full(&messages, &system_prompt_text, context_size, tool_schema_tokens) {
+                        compact::compaction_urgency(
+                            last_api_input_tokens + new_tokens,
+                            context_size,
+                        )
+                    } else if compact::needs_compaction_full(
+                        &messages,
+                        &system_prompt_text,
+                        context_size,
+                        tool_schema_tokens,
+                    ) {
                         2
                     } else {
                         0
@@ -513,9 +563,16 @@ pub async fn run_repl(
 
                         if urgency >= 2 && compact_state.should_attempt() {
                             compact_messages_inner(
-                                &mut messages, &system_prompt_text, context_size,
-                                &client, &hook_runner, turn_count, &mut compact_state, &read_files,
-                            ).await;
+                                &mut messages,
+                                &system_prompt_text,
+                                context_size,
+                                &client,
+                                &hook_runner,
+                                turn_count,
+                                &mut compact_state,
+                                &read_files,
+                            )
+                            .await;
                         } else {
                             TerminalRenderer::print_compaction(old_len, messages.len());
                         }
@@ -536,7 +593,7 @@ pub async fn run_repl(
         ctrlc_handle.abort();
         interrupted.store(false, Ordering::Release);
         turn_count += turns;
-  
+
         TerminalRenderer::print_done(turn_start.elapsed());
         if let Ok(reminders) = session_reminders.lock() {
             if let Some(line) = reminders.recap_line() {
@@ -640,11 +697,18 @@ async fn compact_messages_inner(
     let mut silent_handler = SilentCompactHandler;
     let compact_cancel = CancellationToken::new();
     match client
-        .stream_message(&compact_system, &compact_request, &[], &mut silent_handler, &compact_cancel)
+        .stream_message(
+            &compact_system,
+            &compact_request,
+            &[],
+            &mut silent_handler,
+            &compact_cancel,
+        )
         .await
     {
         Ok(compact_resp) => {
-            let summary = compact::parse_compact_response(&compact_resp.assistant_message.text_content());
+            let summary =
+                compact::parse_compact_response(&compact_resp.assistant_message.text_content());
             let recent = messages[split_point..].to_vec();
             let files = read_files.lock().unwrap().clone();
             let (compacted, _) =
@@ -653,7 +717,9 @@ async fn compact_messages_inner(
             compact_state.record_success();
             TerminalRenderer::print_compaction(old_len, messages.len());
             log_post_compact_results(
-                hook_runner.post_compact(turn_count, old_len, messages.len()).await,
+                hook_runner
+                    .post_compact(turn_count, old_len, messages.len())
+                    .await,
             );
         }
         Err(_) => {
@@ -664,7 +730,9 @@ async fn compact_messages_inner(
                 *messages = compacted;
                 TerminalRenderer::print_compaction(old_len, messages.len());
                 log_post_compact_results(
-                    hook_runner.post_compact(turn_count, old_len, messages.len()).await,
+                    hook_runner
+                        .post_compact(turn_count, old_len, messages.len())
+                        .await,
                 );
             }
         }
@@ -702,7 +770,9 @@ async fn auto_reflection_text(
         config.similarity_threshold,
     )
     .ok()?;
-    let entries = store.list(Some(aemeath_core::memory::MemoryLayer::Project)).ok()?;
+    let entries = store
+        .list(Some(aemeath_core::memory::MemoryLayer::Project))
+        .ok()?;
     let mut output = aemeath_core::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
@@ -718,5 +788,7 @@ async fn auto_reflection_text(
             .deviations
             .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
     }
-    Some(aemeath_core::reflection::ReflectionEngine::format_output(&output))
+    Some(aemeath_core::reflection::ReflectionEngine::format_output(
+        &output,
+    ))
 }

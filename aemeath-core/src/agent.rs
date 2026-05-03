@@ -31,10 +31,7 @@ impl<'a> Agent<'a> {
             .collect()
     }
 
-    pub async fn execute_tools(
-        &self,
-        tool_calls: &[ToolCall],
-    ) -> Vec<ToolResultTuple> {
+    pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolResultTuple> {
         let mut concurrent_calls: Vec<&ToolCall> = Vec::new();
         let mut sequential_calls: Vec<&ToolCall> = Vec::new();
 
@@ -66,7 +63,8 @@ impl<'a> Agent<'a> {
 
         // Execute concurrent-safe tools in parallel using join_all
         if !concurrent_calls.is_empty() {
-            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(self.ctx.max_tool_concurrency));
+            let semaphore =
+                std::sync::Arc::new(tokio::sync::Semaphore::new(self.ctx.max_tool_concurrency));
 
             let futures: Vec<_> = concurrent_calls
                 .iter()
@@ -85,9 +83,19 @@ impl<'a> Agent<'a> {
                             match tokio::time::timeout(
                                 std::time::Duration::from_secs(timeout),
                                 tool.call(input, &ctx),
-                            ).await {
-                                Ok(result) => (pos, id, result.output, result.is_error, result.images),
-                                Err(_) => (pos, id, format!("Tool {} timed out after {}s", name, timeout), true, Vec::new()),
+                            )
+                            .await
+                            {
+                                Ok(result) => {
+                                    (pos, id, result.output, result.is_error, result.images)
+                                }
+                                Err(_) => (
+                                    pos,
+                                    id,
+                                    format!("Tool {} timed out after {}s", name, timeout),
+                                    true,
+                                    Vec::new(),
+                                ),
                             }
                         }
                     })
@@ -117,12 +125,24 @@ impl<'a> Agent<'a> {
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(timeout),
                     tool.call(call.input.clone(), &self.ctx),
-                ).await {
+                )
+                .await
+                {
                     Ok(result) => {
-                        results[pos] = Some((call.id.clone(), result.output, result.is_error, result.images));
+                        results[pos] = Some((
+                            call.id.clone(),
+                            result.output,
+                            result.is_error,
+                            result.images,
+                        ));
                     }
                     Err(_) => {
-                        results[pos] = Some((call.id.clone(), format!("Tool {} timed out after {}s", call.name, timeout), true, Vec::new()));
+                        results[pos] = Some((
+                            call.id.clone(),
+                            format!("Tool {} timed out after {}s", call.name, timeout),
+                            true,
+                            Vec::new(),
+                        ));
                     }
                 }
             } else {
@@ -140,22 +160,24 @@ impl<'a> Agent<'a> {
         results
             .into_iter()
             .enumerate()
-            .map(|(i, r)| r.unwrap_or_else(|| {
-                panic!("agent::execute_tools: result slot {i} was not filled — this is a bug")
-            }))
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| {
+                    panic!("agent::execute_tools: result slot {i} was not filled — this is a bug")
+                })
+            })
             .collect()
     }
 
     /// Execute only the given tool calls (subset of all calls)
-    pub async fn execute_tools_filtered(
-        &self,
-        tool_calls: &[&ToolCall],
-    ) -> Vec<ToolResultTuple> {
-        let owned: Vec<ToolCall> = tool_calls.iter().map(|c| ToolCall {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            input: c.input.clone(),
-        }).collect();
+    pub async fn execute_tools_filtered(&self, tool_calls: &[&ToolCall]) -> Vec<ToolResultTuple> {
+        let owned: Vec<ToolCall> = tool_calls
+            .iter()
+            .map(|c| ToolCall {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                input: c.input.clone(),
+            })
+            .collect();
         self.execute_tools(&owned).await
     }
 }

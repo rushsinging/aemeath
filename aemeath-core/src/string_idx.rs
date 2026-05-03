@@ -490,15 +490,15 @@ mod tests {
     #[test]
     fn test_col_to_char_cjk() {
         let s = "你好"; // 每个字2列宽
-        // 列2 → 第二个字符'好'的字符索引1
+                        // 列2 → 第二个字符'好'的字符索引1
         assert_eq!(col_to_char(s, ColIdx::new(2)).as_usize(), 1);
     }
 
     #[test]
     fn test_col_to_char_emoji() {
         let s = "a🚀b"; // 'a'=1列, '🚀'=2列, 'b'=1列
-        // 列0='a', 列1-2='🚀', 列3='b'
-        // ColIdx(2) 落在 '🚀' 内 → char idx 1
+                        // 列0='a', 列1-2='🚀', 列3='b'
+                        // ColIdx(2) 落在 '🚀' 内 → char idx 1
         assert_eq!(col_to_char(s, ColIdx::new(2)).as_usize(), 1);
     }
 
@@ -553,9 +553,9 @@ mod tests {
     fn test_cslice_emoji() {
         let s = "a🚀b🚀c";
         let start = CharIdx::new(2); // 'b'
-        let end = CharIdx::new(4);   // '🚀c' → 但实际是第3和第4个字符'b'和'🚀c'... wait
-        // s.chars(): ['a', '🚀', 'b', '🚀', 'c'] → CharIdx 2='b', CharIdx 4='c'
-        // 但 end=4 是排他边界，所以 2..4 = ['b', '🚀']
+        let end = CharIdx::new(4); // '🚀c' → 但实际是第3和第4个字符'b'和'🚀c'... wait
+                                   // s.chars(): ['a', '🚀', 'b', '🚀', 'c'] → CharIdx 2='b', CharIdx 4='c'
+                                   // 但 end=4 是排他边界，所以 2..4 = ['b', '🚀']
         assert_eq!(s.cslice(start..end), "b🚀");
     }
 

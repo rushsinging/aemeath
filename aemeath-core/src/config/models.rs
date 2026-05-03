@@ -46,14 +46,20 @@ impl ModelsConfig {
     /// Normalization keeps only alphanumerics, `-`, `_`, `.` and lowercases,
     /// so trailing ⚡/emoji decoration in display names doesn't require the
     /// user to type the exact symbol when setting `"default"`.
-    pub fn find_model(&self, query: &str) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
+    pub fn find_model(
+        &self,
+        query: &str,
+    ) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
         if let Some((provider_name, model_query)) = query.split_once('/') {
             if let Some((actual_provider_name, provider_config)) = self
                 .providers
                 .iter()
                 .find(|(name, _)| name.to_lowercase() == provider_name.to_lowercase())
             {
-                if let Some(model) = provider_config.models.iter().find(|m| m.name == model_query)
+                if let Some(model) = provider_config
+                    .models
+                    .iter()
+                    .find(|m| m.name == model_query)
                     .or_else(|| provider_config.models.iter().find(|m| m.id == model_query))
                 {
                     return Some((
@@ -64,10 +70,16 @@ impl ModelsConfig {
                 }
                 // Fuzzy fallback
                 let norm = normalize_model_key(model_query);
-                if let Some(model) = provider_config.models.iter()
+                if let Some(model) = provider_config
+                    .models
+                    .iter()
                     .find(|m| normalize_model_key(&m.name) == norm)
-                    .or_else(|| provider_config.models.iter()
-                        .find(|m| normalize_model_key(&m.id) == norm))
+                    .or_else(|| {
+                        provider_config
+                            .models
+                            .iter()
+                            .find(|m| normalize_model_key(&m.id) == norm)
+                    })
                 {
                     return Some((
                         actual_provider_name.to_string(),
@@ -97,30 +109,64 @@ impl ModelsConfig {
 /// `-_.`, drop spaces / emoji / decoration, lowercase. Lets
 /// `"DeepSeek-V4-Pro"` match `"DeepSeek-V4-Pro ⚡"`.
 pub(crate) fn normalize_model_key(s: &str) -> String {
-      s.chars()
-          .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-          .flat_map(|c| c.to_lowercase())
-          .collect()
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
-/// Valid reasoning_effort values.
+/// Valid OpenAI reasoning effort values.
 const VALID_REASONING_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 
-/// Validate a reasoning_effort value. Returns `Ok(())` if valid.
+/// OpenAI-style reasoning configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ReasoningConfig {
+    /// Backward-compatible on/off form: `"reasoning": true|false`.
+    Enabled(bool),
+    /// OpenAI object form: `"reasoning": { "effort": "low" }`.
+    Options(ReasoningOptions),
+}
+
+impl ReasoningConfig {
+    pub fn enabled(&self) -> Option<bool> {
+        match self {
+            Self::Enabled(value) => Some(*value),
+            Self::Options(_) => Some(true),
+        }
+    }
+
+    pub fn effort(&self) -> Option<&str> {
+        match self {
+            Self::Enabled(_) => None,
+            Self::Options(options) => options.effort.as_deref(),
+        }
+    }
+}
+
+/// Options for OpenAI `reasoning` request object.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ReasoningOptions {
+    /// Reasoning effort level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
+/// Validate a reasoning effort level. Returns `Ok(())` if valid.
 pub fn validate_reasoning_effort(effort: &str) -> Result<(), String> {
     if VALID_REASONING_EFFORTS.contains(&effort) {
         Ok(())
     } else {
         Err(format!(
-            "Invalid reasoning_effort '{}'. Valid values: {}",
+            "Invalid reasoning.effort '{}'. Valid values: {}",
             effort,
             VALID_REASONING_EFFORTS.join(", ")
         ))
     }
 }
 
-/// Check whether a model id supports reasoning_effort (OpenAI GPT-5.x / o-series).
-pub fn supports_reasoning_effort(model_id: &str) -> bool {
+/// Check whether a model id supports OpenAI `reasoning` object (GPT-5.x / o-series).
+pub fn supports_openai_reasoning(model_id: &str) -> bool {
     let lower = model_id.to_lowercase();
     lower.starts_with("gpt-5")
         || lower.starts_with("o1")
@@ -139,7 +185,7 @@ pub struct ProviderModelsConfig {
     #[serde(default, rename = "apiKey")]
     pub api_key: String,
 
-    /// API type: "openai-completions" or "anthropic"
+    /// API type: "openai" or "anthropic"
     #[serde(default)]
     pub api: String,
 
@@ -172,17 +218,11 @@ pub struct ModelEntryConfig {
 
     /// Reasoning / thinking mode for this model.
     /// - `None` (default) — use CLI flag / global default
-    /// - `Some(true)` — force enable thinking
-    /// - `Some(false)` — force disable thinking
+    /// - `Some(Enabled(true))` — force enable thinking
+    /// - `Some(Enabled(false))` — force disable thinking
+    /// - `Some(Options { effort })` — configure OpenAI `reasoning.effort`
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<bool>,
-
-    /// Reasoning effort level (only effective for models that support it,
-    /// e.g. OpenAI GPT-5.x / o-series).
-    /// - `None` (default) — use provider default (usually "medium")
-    /// - Valid values: `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
+    pub reasoning: Option<ReasoningConfig>,
 }
 
 #[cfg(test)]
@@ -197,15 +237,14 @@ mod tests {
             ProviderModelsConfig {
                 base_url: "http://localhost:4000".to_string(),
                 api_key: String::new(),
-                api: "openai-completions".to_string(),
+                api: "openai".to_string(),
                 models: vec![ModelEntryConfig {
                     id: "gpt-5.5".to_string(),
                     name: "GPT-5.5".to_string(),
                     input: vec!["text".to_string()],
                     context_window: 200_000,
                     max_tokens: 32_000,
-                    reasoning: Some(false),
-                    reasoning_effort: None,
+                    reasoning: Some(ReasoningConfig::Enabled(false)),
                 }],
             },
         );
@@ -225,7 +264,10 @@ mod tests {
         let (provider, _, model) = result.unwrap();
         assert_eq!(provider, "LiteLLM");
         assert_eq!(model.id, "gpt-5.5");
-        assert_eq!(model.reasoning, Some(false));
+        assert_eq!(
+            model.reasoning.as_ref().and_then(|r| r.enabled()),
+            Some(false)
+        );
     }
 
     #[test]
@@ -259,29 +301,54 @@ mod tests {
     }
 
     #[test]
-    fn test_supports_reasoning_effort() {
-        assert!(supports_reasoning_effort("gpt-5.5"));
-        assert!(supports_reasoning_effort("gpt-5"));
-        assert!(supports_reasoning_effort("o1"));
-        assert!(supports_reasoning_effort("o3-mini"));
-        assert!(supports_reasoning_effort("o4-mini"));
-        assert!(!supports_reasoning_effort("gpt-4o"));
-        assert!(!supports_reasoning_effort("deepseek-r1"));
-        assert!(!supports_reasoning_effort("claude-opus-4"));
+    fn test_supports_openai_reasoning() {
+        assert!(supports_openai_reasoning("gpt-5.5"));
+        assert!(supports_openai_reasoning("gpt-5"));
+        assert!(supports_openai_reasoning("o1"));
+        assert!(supports_openai_reasoning("o3-mini"));
+        assert!(supports_openai_reasoning("o4-mini"));
+        assert!(!supports_openai_reasoning("gpt-4o"));
+        assert!(!supports_openai_reasoning("deepseek-r1"));
+        assert!(!supports_openai_reasoning("claude-opus-4"));
     }
 
     #[test]
-    fn test_model_entry_reasoning_effort_deserialize() {
-        let json = r#"{"id":"gpt-5.5","reasoning_effort":"low"}"#;
+    fn test_model_entry_reasoning_object_deserialize() {
+        let json = r#"{"id":"gpt-5.5","reasoning":{"effort":"low"}}"#;
         let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(entry.reasoning_effort, Some("low".to_string()));
+        assert_eq!(
+            entry.reasoning.as_ref().and_then(|r| r.effort()),
+            Some("low")
+        );
+        assert_eq!(
+            entry.reasoning.as_ref().and_then(|r| r.enabled()),
+            Some(true)
+        );
         assert_eq!(entry.id, "gpt-5.5");
     }
 
     #[test]
-    fn test_model_entry_reasoning_effort_default_none() {
-        let json = r#"{"id":"gpt-4o"}"#;
+    fn test_model_entry_reasoning_bool_deserialize() {
+        let json = r#"{"id":"deepseek-r1","reasoning":false}"#;
         let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
-        assert!(entry.reasoning_effort.is_none());
+        assert_eq!(
+            entry.reasoning.as_ref().and_then(|r| r.enabled()),
+            Some(false)
+        );
+        assert_eq!(entry.reasoning.as_ref().and_then(|r| r.effort()), None);
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_serializes_without_legacy_effort_key() {
+        let entry = ModelEntryConfig {
+            id: "gpt-5.5".to_string(),
+            reasoning: Some(ReasoningConfig::Options(ReasoningOptions {
+                effort: Some("high".to_string()),
+            })),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(entry).unwrap();
+        assert!(value.get("reasoning_effort").is_none());
+        assert_eq!(value["reasoning"]["effort"], "high");
     }
 }

@@ -44,16 +44,22 @@ impl LineStyle {
             LineStyle::ToolCallError => Style::default().fg(Color::Red),
             LineStyle::Error => Style::default().fg(Color::Red),
             LineStyle::System => Style::default().fg(Color::DarkGray),
-            LineStyle::Thinking => Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            LineStyle::Thinking => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
             LineStyle::DiffAdd => {
                 let (r, g, b) = crate::render::theme::Theme::DIFF_ADD_BG_RGB;
                 let (fr, fg, fb) = crate::render::theme::Theme::DIFF_ADD_FG_RGB;
-                Style::default().bg(Color::Rgb(r, g, b)).fg(Color::Rgb(fr, fg, fb))
+                Style::default()
+                    .bg(Color::Rgb(r, g, b))
+                    .fg(Color::Rgb(fr, fg, fb))
             }
             LineStyle::DiffRemove => {
                 let (r, g, b) = crate::render::theme::Theme::DIFF_REMOVE_BG_RGB;
                 let (fr, fg, fb) = crate::render::theme::Theme::DIFF_REMOVE_FG_RGB;
-                Style::default().bg(Color::Rgb(r, g, b)).fg(Color::Rgb(fr, fg, fb))
+                Style::default()
+                    .bg(Color::Rgb(r, g, b))
+                    .fg(Color::Rgb(fr, fg, fb))
             }
         }
     }

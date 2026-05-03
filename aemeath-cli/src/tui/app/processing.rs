@@ -60,14 +60,30 @@ pub(crate) struct SpawnContextRefs<'a> {
 pub(super) fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
         super::stream::process_in_background(
-            ctx.tx, ctx.queue_request_tx, ctx.client, ctx.registry, ctx.system_blocks,
-            ctx.system_prompt_text, ctx.user_context, ctx.messages,
-            ctx.context_size, ctx.cwd, ctx.session_id, ctx.read_files,
+            ctx.tx,
+            ctx.queue_request_tx,
+            ctx.client,
+            ctx.registry,
+            ctx.system_blocks,
+            ctx.system_prompt_text,
+            ctx.user_context,
+            ctx.messages,
+            ctx.context_size,
+            ctx.cwd,
+            ctx.session_id,
+            ctx.read_files,
             ctx.session_reminders,
-            ctx.agent_runner, ctx.allow_all, ctx.interrupted, ctx.cancel,
+            ctx.agent_runner,
+            ctx.allow_all,
+            ctx.interrupted,
+            ctx.cancel,
             ctx.task_store,
-            ctx.max_tool_concurrency, ctx.max_agent_concurrency, ctx.agent_semaphore,
-            ctx.hook_runner, ctx.memory_config,
-        ).await;
+            ctx.max_tool_concurrency,
+            ctx.max_agent_concurrency,
+            ctx.agent_semaphore,
+            ctx.hook_runner,
+            ctx.memory_config,
+        )
+        .await;
     });
 }

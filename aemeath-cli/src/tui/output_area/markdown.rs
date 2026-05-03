@@ -23,7 +23,10 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 match find_closing(&chars, "**") {
                     Some(inner) => {
                         flush_plain(&mut spans, &mut buf, base_style);
-                        spans.push(Span::styled(inner.clone(), base_style.add_modifier(Modifier::BOLD)));
+                        spans.push(Span::styled(
+                            inner.clone(),
+                            base_style.add_modifier(Modifier::BOLD),
+                        ));
                         advance_chars(&mut chars, inner.chars().count() + 2);
                     }
                     None => buf.push_str("**"),
@@ -35,7 +38,10 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 match find_closing(&chars, "__") {
                     Some(inner) => {
                         flush_plain(&mut spans, &mut buf, base_style);
-                        spans.push(Span::styled(inner.clone(), base_style.add_modifier(Modifier::BOLD)));
+                        spans.push(Span::styled(
+                            inner.clone(),
+                            base_style.add_modifier(Modifier::BOLD),
+                        ));
                         advance_chars(&mut chars, inner.chars().count() + 2);
                     }
                     None => buf.push_str("__"),
@@ -45,7 +51,10 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
             '*' => match find_closing(&chars, "*") {
                 Some(inner) => {
                     flush_plain(&mut spans, &mut buf, base_style);
-                    spans.push(Span::styled(inner.clone(), base_style.add_modifier(Modifier::ITALIC)));
+                    spans.push(Span::styled(
+                        inner.clone(),
+                        base_style.add_modifier(Modifier::ITALIC),
+                    ));
                     advance_chars(&mut chars, inner.chars().count() + 1);
                 }
                 None => buf.push('*'),
@@ -54,7 +63,10 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
             '_' => match find_closing(&chars, "_") {
                 Some(inner) => {
                     flush_plain(&mut spans, &mut buf, base_style);
-                    spans.push(Span::styled(inner.clone(), base_style.add_modifier(Modifier::ITALIC)));
+                    spans.push(Span::styled(
+                        inner.clone(),
+                        base_style.add_modifier(Modifier::ITALIC),
+                    ));
                     advance_chars(&mut chars, inner.chars().count() + 1);
                 }
                 None => buf.push('_'),
@@ -65,7 +77,9 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                     flush_plain(&mut spans, &mut buf, base_style);
                     spans.push(Span::styled(
                         inner.clone(),
-                        base_style.bg(Color::Rgb(40, 44, 52)).fg(Color::Rgb(171, 178, 191)),
+                        base_style
+                            .bg(Color::Rgb(40, 44, 52))
+                            .fg(Color::Rgb(171, 178, 191)),
                     ));
                     advance_chars(&mut chars, inner.chars().count() + 1);
                 }
@@ -77,7 +91,10 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 match find_closing(&chars, "~~") {
                     Some(inner) => {
                         flush_plain(&mut spans, &mut buf, base_style);
-                        spans.push(Span::styled(inner.clone(), base_style.add_modifier(Modifier::CROSSED_OUT)));
+                        spans.push(Span::styled(
+                            inner.clone(),
+                            base_style.add_modifier(Modifier::CROSSED_OUT),
+                        ));
                         advance_chars(&mut chars, inner.chars().count() + 2);
                     }
                     None => buf.push_str("~~"),
@@ -95,10 +112,15 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                                 flush_plain(&mut spans, &mut buf, base_style);
                                 spans.push(Span::styled(
                                     inner.to_string(),
-                                    base_style.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED),
+                                    base_style
+                                        .fg(Color::Cyan)
+                                        .add_modifier(Modifier::UNDERLINED),
                                 ));
                                 // advance: inner + "]" + "(" + url + ")"
-                                advance_chars(&mut chars, inner.chars().count() + 1 + 1 + _url.chars().count() + 1);
+                                advance_chars(
+                                    &mut chars,
+                                    inner.chars().count() + 1 + 1 + _url.chars().count() + 1,
+                                );
                                 continue; // consumed through the ')', keep going
                             }
                         }
@@ -157,7 +179,10 @@ pub fn is_table_separator(line: &str) -> bool {
 /// 检测 Markdown 表格数据行，如 `| hello | world |`
 pub fn is_table_row(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() > 2 && !is_table_separator(line)
+    trimmed.starts_with('|')
+        && trimmed.ends_with('|')
+        && trimmed.len() > 2
+        && !is_table_separator(line)
 }
 
 /// 解析表格行中的单元格内容
@@ -189,13 +214,21 @@ pub fn render_table_block(lines: &[&str], base_style: Style) -> Vec<Vec<Span<'st
         if is_table_separator(line) {
             separator_idx = Some(i);
         } else {
-            all_cells.push(parse_table_cells(line).into_iter().map(|s| s.to_string()).collect());
+            all_cells.push(
+                parse_table_cells(line)
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            );
         }
     }
 
     let num_cols = all_cells.iter().map(|r| r.len()).max().unwrap_or(0);
     if num_cols == 0 {
-        return lines.iter().map(|l| vec![Span::styled(l.to_string(), base_style)]).collect();
+        return lines
+            .iter()
+            .map(|l| vec![Span::styled(l.to_string(), base_style)])
+            .collect();
     }
 
     // 计算每列最大宽度
@@ -375,7 +408,10 @@ mod tests {
 
     #[test]
     fn test_parse_table_cells() {
-        assert_eq!(parse_table_cells("| hello | world |"), vec!["hello", "world"]);
+        assert_eq!(
+            parse_table_cells("| hello | world |"),
+            vec!["hello", "world"]
+        );
         assert_eq!(parse_table_cells("| a | b | c |"), vec!["a", "b", "c"]);
         assert_eq!(parse_table_cells("| single |"), vec!["single"]);
     }
@@ -383,11 +419,7 @@ mod tests {
     #[test]
     fn test_render_simple_table() {
         let base = Style::default().fg(Color::Green);
-        let lines = &[
-            "| Name | Value |",
-            "| --- | --- |",
-            "| foo  | bar   |",
-        ];
+        let lines = &["| Name | Value |", "| --- | --- |", "| foo  | bar   |"];
         let rendered = render_table_block(lines, base);
         assert_eq!(rendered.len(), 3);
         // header should be bold

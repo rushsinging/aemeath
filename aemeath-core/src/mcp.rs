@@ -115,7 +115,10 @@ fn validate_command(command: &str) -> Result<(), String> {
 
     // Block obvious shell invocations
     let basename = command.rsplit('/').next().unwrap_or(command);
-    let blocked_commands = ["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "python", "python3", "node", "ruby", "perl", "lua"];
+    let blocked_commands = [
+        "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "python", "python3", "node",
+        "ruby", "perl", "lua",
+    ];
     if blocked_commands.contains(&basename) {
         return Err(format!(
             "MCP command '{}' is a shell/interpreter — use the actual executable path instead",
@@ -127,7 +130,9 @@ fn validate_command(command: &str) -> Result<(), String> {
 }
 
 /// Filter out dangerous environment variables from the MCP server config.
-fn filter_env(env: &std::collections::HashMap<String, String>) -> std::collections::HashMap<String, String> {
+fn filter_env(
+    env: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
     env.iter()
         .filter(|(k, _)| {
             let upper = k.to_uppercase();

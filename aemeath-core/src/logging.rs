@@ -29,9 +29,7 @@ impl LogFile {
 }
 
 pub fn log_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".aemeath")
+    dirs::home_dir().unwrap_or_default().join(".aemeath")
 }
 
 pub fn log_path(log_file: LogFile) -> PathBuf {
@@ -65,7 +63,9 @@ pub fn format_text_line_with_turn(
     module: &str,
     message: &str,
 ) -> String {
-    let turn = turn.map(|value| value.to_string()).unwrap_or_else(|| "-".to_string());
+    let turn = turn
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
     format!(
         "[{}] [session:{}] [turn:{}] [{}] [{}] {}",
         timestamp_rfc3339(),
@@ -96,7 +96,9 @@ pub fn format_agent_line(
     module: &str,
     message: &str,
 ) -> String {
-    let turn = turn.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+    let turn = turn
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string());
     format!(
         "[{}] [session:{}] [turn:{}] [role:{}] [model:{}] [{}] [{}] {}",
         timestamp_rfc3339(),
@@ -120,7 +122,10 @@ pub fn append_agent_line(
     module: &str,
     message: &str,
 ) -> std::io::Result<()> {
-    append_line(log_file, &format_agent_line(session_id, turn, role, model, level, module, message))
+    append_line(
+        log_file,
+        &format_agent_line(session_id, turn, role, model, level, module, message),
+    )
 }
 
 pub fn append_text_line_with_turn(
@@ -296,7 +301,15 @@ mod tests {
 
     #[test]
     fn test_format_agent_line_happy_path() {
-        let line = format_agent_line("sess-1", Some(2), "coder", "deepseek/deepseek-chat", "INFO", "agent", "started");
+        let line = format_agent_line(
+            "sess-1",
+            Some(2),
+            "coder",
+            "deepseek/deepseek-chat",
+            "INFO",
+            "agent",
+            "started",
+        );
         assert!(line.contains("[session:sess-1]"));
         assert!(line.contains("[turn:2]"));
         assert!(line.contains("[role:coder]"));

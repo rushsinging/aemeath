@@ -55,11 +55,7 @@ impl SessionCostSummary {
     pub fn format(&self) -> String {
         format!(
             "Session {}:\n  Cost: ${:.4}\n  Input: {} tokens\n  Output: {} tokens\n  Calls: {}",
-            self.session_id,
-            self.cost,
-            self.input_tokens,
-            self.output_tokens,
-            self.calls
+            self.session_id, self.cost, self.input_tokens, self.output_tokens, self.calls
         )
     }
 }

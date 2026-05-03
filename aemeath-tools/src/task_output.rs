@@ -12,7 +12,9 @@ pub struct TaskOutputTool {
 
 #[async_trait]
 impl Tool for TaskOutputTool {
-    fn name(&self) -> &str { "TaskOutput" }
+    fn name(&self) -> &str {
+        "TaskOutput"
+    }
     fn description(&self) -> &str {
         "Get task output and results. Use this to retrieve the output from completed or in-progress tasks."
     }
@@ -37,8 +39,12 @@ impl Tool for TaskOutputTool {
             "required": []
         })
     }
-    fn is_read_only(&self) -> bool { true }
-    fn is_concurrency_safe(&self) -> bool { true }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let all = input["all"].as_bool().unwrap_or(false);
@@ -53,7 +59,7 @@ impl Tool for TaskOutputTool {
 
             let mut output = String::new();
             let count = tasks.len().min(limit);
-            
+
             for task in tasks.iter().take(count) {
                 let status = match task.status {
                     aemeath_core::task::TaskStatus::Pending => "pending",
@@ -61,30 +67,30 @@ impl Tool for TaskOutputTool {
                     aemeath_core::task::TaskStatus::Completed => "completed",
                     aemeath_core::task::TaskStatus::Deleted => "deleted",
                 };
-                
-                output.push_str(&format!(
-                    "#{} [{}] {}\n",
-                    task.id, status, task.subject
-                ));
+
+                output.push_str(&format!("#{} [{}] {}\n", task.id, status, task.subject));
                 output.push_str(&format!("  Description: {}\n", task.description));
-                
+
                 if let Some(owner) = &task.owner {
                     output.push_str(&format!("  Owner: {}\n", owner));
                 }
-                
+
                 if !task.blocked_by.is_empty() {
                     output.push_str(&format!("  Blocked by: {}\n", task.blocked_by.join(", ")));
                 }
-                
+
                 if !task.blocks.is_empty() {
                     output.push_str(&format!("  Blocks: {}\n", task.blocks.join(", ")));
                 }
-                
+
                 output.push('\n');
             }
 
             if tasks.len() > limit {
-                output.push_str(&format!("\n... and {} more tasks (use limit parameter to see more)", tasks.len() - limit));
+                output.push_str(&format!(
+                    "\n... and {} more tasks (use limit parameter to see more)",
+                    tasks.len() - limit
+                ));
             }
 
             ToolResult::success(output.trim_end())
@@ -103,19 +109,19 @@ impl Tool for TaskOutputTool {
                     output.push_str(&format!("Task #{} [{}]\n", task.id, status));
                     output.push_str(&format!("Subject: {}\n", task.subject));
                     output.push_str(&format!("Description: {}\n", task.description));
-                    
+
                     if let Some(owner) = &task.owner {
                         output.push_str(&format!("Owner: {}\n", owner));
                     }
-                    
+
                     if let Some(active_form) = &task.active_form {
                         output.push_str(&format!("Active Form: {}\n", active_form));
                     }
-                    
+
                     if !task.blocked_by.is_empty() {
                         output.push_str(&format!("Blocked by: {}\n", task.blocked_by.join(", ")));
                     }
-                    
+
                     if !task.blocks.is_empty() {
                         output.push_str(&format!("Blocks: {}\n", task.blocks.join(", ")));
                     }
@@ -131,9 +137,10 @@ impl Tool for TaskOutputTool {
                 return ToolResult::success("No tasks found. Use TaskCreate to create a task.");
             }
 
-            let mut output = String::from("Recent tasks (use task_id parameter to get details):\n\n");
+            let mut output =
+                String::from("Recent tasks (use task_id parameter to get details):\n\n");
             let count = tasks.len().min(limit);
-            
+
             for task in tasks.iter().take(count) {
                 let status = match task.status {
                     aemeath_core::task::TaskStatus::Pending => "pending",
@@ -141,11 +148,8 @@ impl Tool for TaskOutputTool {
                     aemeath_core::task::TaskStatus::Completed => "completed",
                     aemeath_core::task::TaskStatus::Deleted => "deleted",
                 };
-                
-                output.push_str(&format!(
-                    "#{} [{}] {}\n",
-                    task.id, status, task.subject
-                ));
+
+                output.push_str(&format!("#{} [{}] {}\n", task.id, status, task.subject));
             }
 
             if tasks.len() > limit {

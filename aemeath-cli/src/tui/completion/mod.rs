@@ -14,7 +14,7 @@ pub use commands::generate_command_suggestions;
 #[allow(unused_imports)]
 pub use commands::generate_command_suggestions as get_slash_commands_compat;
 pub use files::generate_file_suggestions;
-pub use models::{generate_model_suggestions, generate_model_subcommand_suggestions};
+pub use models::{generate_model_subcommand_suggestions, generate_model_suggestions};
 pub use parser::extract_completion_token;
 pub use sessions::generate_resume_suggestions;
 
@@ -24,7 +24,9 @@ pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
         extract_completion_token(&ctx.input, ctx.cursor_offset)
     {
         match trigger_type {
-            TriggerType::SlashCommand => generate_command_suggestions(&token, &ctx.skills, &ctx.commands),
+            TriggerType::SlashCommand => {
+                generate_command_suggestions(&token, &ctx.skills, &ctx.commands)
+            }
             TriggerType::AtSymbol => generate_file_suggestions(&token, &ctx.cwd),
             TriggerType::ModelArg => generate_model_suggestions(&token, &ctx.models),
             TriggerType::ModelSubCommand => generate_model_subcommand_suggestions(&token),
@@ -44,8 +46,16 @@ mod tests {
             ("help".into(), "Show available commands".into(), vec![]),
             ("exit".into(), "Exit the agent".into(), vec!["quit".into()]),
             ("clear".into(), "Clear conversation history".into(), vec![]),
-            ("compact".into(), "Manually compact conversation".into(), vec![]),
-            ("commit".into(), "Stage changes and create git commit".into(), vec![]),
+            (
+                "compact".into(),
+                "Manually compact conversation".into(),
+                vec![],
+            ),
+            (
+                "commit".into(),
+                "Stage changes and create git commit".into(),
+                vec![],
+            ),
             ("context".into(), "Show context window usage".into(), vec![]),
             ("model".into(), "Show/switch model".into(), vec![]),
             ("resume".into(), "Resume a previous session".into(), vec![]),

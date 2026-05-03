@@ -22,19 +22,19 @@ pub(crate) fn ask_permission(tool_name: &str) -> bool {
 
 pub(crate) fn format_tool_summary(name: &str, input: &serde_json::Value) -> String {
     match name {
-        "TodoRun" => {
-            "execute all pending todos".to_string()
-        }
+        "TodoRun" => "execute all pending todos".to_string(),
         "TodoWrite" => {
             if let Some(todos) = input.get("todos").and_then(|t| t.as_array()) {
                 let count = todos.len();
-                let first = todos.first()
+                let first = todos
+                    .first()
                     .and_then(|t| t.get("subject").and_then(|s| s.as_str()))
                     .unwrap_or("?");
                 if count == 1 {
                     format!("{} todo: {}", count, first)
                 } else if count <= 3 {
-                    let subjects: Vec<&str> = todos.iter()
+                    let subjects: Vec<&str> = todos
+                        .iter()
                         .filter_map(|t| t.get("subject").and_then(|s| s.as_str()))
                         .collect();
                     format!("{} todos: {}", count, subjects.join(", "))
@@ -50,10 +50,10 @@ pub(crate) fn format_tool_summary(name: &str, input: &serde_json::Value) -> Stri
 }
 
 pub(crate) async fn handle_commit(cwd: &Path) {
-    use tokio::process::Command;
     use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
     use crossterm::ExecutableCommand;
     use std::io::Write;
+    use tokio::process::Command;
 
     // Check if git repo
     let is_git = Command::new("git")

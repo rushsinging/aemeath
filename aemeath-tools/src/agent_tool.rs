@@ -20,37 +20,37 @@ impl Tool for AgentTool {
     }
 
     fn input_schema(&self) -> Value {
-          serde_json::json!({
-              "type": "object",
-              "properties": {
-                  "prompt": {
-                      "type": "string",
-                      "description": "The task for the agent to perform"
-                  },
-                  "description": {
-                      "type": "string",
-                      "description": "A short (3-5 word) description of the task"
-                  },
-                  "role": {
-                      "type": "string",
-                      "description": "Agent role name defined in config (e.g. 'coder', 'reviewer'). Resolves to the model and settings configured for that role."
-                  },
-                  "model": {
-                      "type": "string",
-                      "description": "Direct model override in 'provider/model_id' format (e.g. 'deepseek/deepseek-chat', 'ollama/llama3.2'). Takes precedence over 'role' if both are specified."
-                  },
-                  "max_turns": {
-                      "type": "integer",
-                      "description": "Maximum number of tool-call rounds (default 50, max 100)"
-                  },
-                  "taskId": {
-                      "type": "string",
-                      "description": "Optional task ID from TaskCreate. When provided, the dispatcher manages this task's status automatically (InProgress when the agent actually starts, Completed on success). Do NOT manually set task status to in_progress/completed if you pass taskId."
-                  }
-              },
-              "required": ["prompt", "description"]
-          })
-      }
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "The task for the agent to perform"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "A short (3-5 word) description of the task"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Agent role name defined in config (e.g. 'coder', 'reviewer'). Resolves to the model and settings configured for that role."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Direct model override in 'provider/model_id' format (e.g. 'deepseek/deepseek-chat', 'ollama/llama3.2'). Takes precedence over 'role' if both are specified."
+                },
+                "max_turns": {
+                    "type": "integer",
+                    "description": "Maximum number of tool-call rounds (default 50, max 100)"
+                },
+                "taskId": {
+                    "type": "string",
+                    "description": "Optional task ID from TaskCreate. When provided, the dispatcher manages this task's status automatically (InProgress when the agent actually starts, Completed on success). Do NOT manually set task status to in_progress/completed if you pass taskId."
+                }
+            },
+            "required": ["prompt", "description"]
+        })
+    }
 
     fn is_read_only(&self) -> bool {
         false
@@ -88,16 +88,13 @@ impl Tool for AgentTool {
 
         // Hard block: prompt is far too large for a sub-agent
         if scope.level == ScopeLevel::Block {
-              return ToolResult::error(format!(
-                  "Task is too large for a sub-agent. Please break it down:\n{}",
-                  scope.warnings.join("\n")
-              ));
+            return ToolResult::error(format!(
+                "Task is too large for a sub-agent. Please break it down:\n{}",
+                scope.warnings.join("\n")
+            ));
         }
 
-        let _model = input
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let _model = input.get("model").and_then(|v| v.as_str()).unwrap_or("");
 
         let max_turns = input
             .get("max_turns")
@@ -186,138 +183,158 @@ Instructions:
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ScopeLevel {
-  /// Task looks well-scoped
-  Ok,
-  /// Task has warning signs — let it proceed but inject hints
-  Warn,
-  /// Task is too large — block and ask the caller to break it down
-  Block,
+    /// Task looks well-scoped
+    Ok,
+    /// Task has warning signs — let it proceed but inject hints
+    Warn,
+    /// Task is too large — block and ask the caller to break it down
+    Block,
 }
 
 struct ScopeResult {
-  level: ScopeLevel,
-  warnings: Vec<String>,
+    level: ScopeLevel,
+    warnings: Vec<String>,
 }
 
 /// Extract file path-like tokens from the prompt text.
 /// Matches patterns like `src/foo.rs`, `./bar.ts`, `/absolute/path`, `path/to/file.ext`.
 fn extract_file_paths(prompt: &str) -> Vec<&str> {
-  let mut paths = Vec::new();
-  // Match sequences containing a '/' and ending with a typical source extension or config extension
-  for line in prompt.lines() {
-      for word in line.split_whitespace() {
-          // Strip surrounding punctuation like brackets, parens, backticks, quotes, commas
-          let w = word.trim_matches(|c: char| c == '`' || c == '"' || c == '\'' || c == ',' || c == ')' || c == ']' || c == ':');
-          if w.contains('/') && (w.contains('.') || w.contains("::")) {
-              // Only include if it looks like a file path (has a dot extension or is a crate path)
-              if w.rsplit('.').next().map(|ext| ext.len() <= 10).unwrap_or(false) {
-                  paths.push(w);
-              }
-          }
-      }
-  }
-  paths
+    let mut paths = Vec::new();
+    // Match sequences containing a '/' and ending with a typical source extension or config extension
+    for line in prompt.lines() {
+        for word in line.split_whitespace() {
+            // Strip surrounding punctuation like brackets, parens, backticks, quotes, commas
+            let w = word.trim_matches(|c: char| {
+                c == '`' || c == '"' || c == '\'' || c == ',' || c == ')' || c == ']' || c == ':'
+            });
+            if w.contains('/') && (w.contains('.') || w.contains("::")) {
+                // Only include if it looks like a file path (has a dot extension or is a crate path)
+                if w.rsplit('.')
+                    .next()
+                    .map(|ext| ext.len() <= 10)
+                    .unwrap_or(false)
+                {
+                    paths.push(w);
+                }
+            }
+        }
+    }
+    paths
 }
 
 /// Broad patterns that indicate the task is too vague or too large.
 const LARGE_TASK_PATTERNS: &[&str] = &[
-  "entire codebase",
-  "whole project",
-  "all files",
-  "the entire",
-  "every file",
-  "review everything",
-  "review all",
-  "audit everything",
-  "audit all",
-  "refactor everything",
-  "refactor all",
+    "entire codebase",
+    "whole project",
+    "all files",
+    "the entire",
+    "every file",
+    "review everything",
+    "review all",
+    "audit everything",
+    "audit all",
+    "refactor everything",
+    "refactor all",
 ];
 
 /// Patterns that indicate the task might be single-step and doesn't need a sub-agent.
 const SIMPLE_TASK_PATTERNS: &[&str] = &[
-  "read the file",
-  "show me the content",
-  "what does this file do",
-  "cat the file",
-  "print the file",
+    "read the file",
+    "show me the content",
+    "what does this file do",
+    "cat the file",
+    "print the file",
 ];
 
 fn analyze_task_scope(prompt: &str, cwd: &Path) -> ScopeResult {
-  let mut warnings = Vec::new();
-  let mut level = ScopeLevel::Ok;
+    let mut warnings = Vec::new();
+    let mut level = ScopeLevel::Ok;
 
-  let prompt_lower = prompt.to_lowercase();
+    let prompt_lower = prompt.to_lowercase();
 
-  // --- 1. Prompt size check ---
-  // Very long prompt consumes too much of the sub-agent's context window
-  // No size limit on prompt — the calling agent may need to pass full file contents
+    // --- 1. Prompt size check ---
+    // Very long prompt consumes too much of the sub-agent's context window
+    // No size limit on prompt — the calling agent may need to pass full file contents
 
-  // --- 2. File path enumeration ---
-  let file_paths = extract_file_paths(prompt);
-  let existing_paths: Vec<&str> = file_paths.iter().copied().filter(|p| {
-      let full = if p.starts_with('/') { Path::new(p).to_path_buf() } else { cwd.join(p) };
-      full.exists()
-  }).collect();
+    // --- 2. File path enumeration ---
+    let file_paths = extract_file_paths(prompt);
+    let existing_paths: Vec<&str> = file_paths
+        .iter()
+        .copied()
+        .filter(|p| {
+            let full = if p.starts_with('/') {
+                Path::new(p).to_path_buf()
+            } else {
+                cwd.join(p)
+            };
+            full.exists()
+        })
+        .collect();
 
-  if existing_paths.len() > 10 {
-      level = ScopeLevel::Block;
-      warnings.push(format!(
+    if existing_paths.len() > 10 {
+        level = ScopeLevel::Block;
+        warnings.push(format!(
           "Prompt references {} file paths. A sub-agent cannot effectively process this many files in ~128K tokens. Break into 2-4 smaller agents, each handling a subset of files.",
           existing_paths.len()
       ));
-  } else if existing_paths.len() > 5 {
-      if level != ScopeLevel::Block {
-          level = ScopeLevel::Warn;
-      }
-      warnings.push(format!(
+    } else if existing_paths.len() > 5 {
+        if level != ScopeLevel::Block {
+            level = ScopeLevel::Warn;
+        }
+        warnings.push(format!(
           "Prompt references {} file paths. This is on the edge of what a sub-agent can handle — consider splitting if files are large.",
           existing_paths.len()
       ));
-  }
+    }
 
-  // --- 3. Vague / oversized task patterns ---
-  for pattern in LARGE_TASK_PATTERNS {
-      if prompt_lower.contains(pattern) {
-          level = ScopeLevel::Block;
-          warnings.push(format!(
+    // --- 3. Vague / oversized task patterns ---
+    for pattern in LARGE_TASK_PATTERNS {
+        if prompt_lower.contains(pattern) {
+            level = ScopeLevel::Block;
+            warnings.push(format!(
               "Task description contains \"{}\" — this is too broad for a sub-agent. Use a two-phase approach: (1) YOU do the overview with Glob/Grep, (2) launch focused agents for specific files.",
               pattern
           ));
-          break;
-      }
-  }
+            break;
+        }
+    }
 
-  // --- 4. Simple task that doesn't need a sub-agent ---
-  for pattern in SIMPLE_TASK_PATTERNS {
-      if prompt_lower.contains(pattern) {
-          if level == ScopeLevel::Ok {
-              level = ScopeLevel::Warn;
-          }
-          warnings.push(format!(
+    // --- 4. Simple task that doesn't need a sub-agent ---
+    for pattern in SIMPLE_TASK_PATTERNS {
+        if prompt_lower.contains(pattern) {
+            if level == ScopeLevel::Ok {
+                level = ScopeLevel::Warn;
+            }
+            warnings.push(format!(
               "This looks like a simple task (\"{}\"). Use Read/Grep/Glob directly instead of launching a sub-agent.",
               pattern
           ));
-          break;
-      }
-  }
+            break;
+        }
+    }
 
-  // --- 5. Multiple distinct tasks in one prompt ---
-  // Heuristic: count numbered items or bullet points
-  let numbered_items = prompt.lines().filter(|l| {
-      let trimmed = l.trim();
-      trimmed.starts_with("1.") || trimmed.starts_with("2.") || trimmed.starts_with("3.")
-          || trimmed.starts_with("4.") || trimmed.starts_with("5.")
-  }).count();
-  if numbered_items >= 4 {
-      if level != ScopeLevel::Block {
-          level = ScopeLevel::Warn;
-      }
-      warnings.push(format!(
+    // --- 5. Multiple distinct tasks in one prompt ---
+    // Heuristic: count numbered items or bullet points
+    let numbered_items = prompt
+        .lines()
+        .filter(|l| {
+            let trimmed = l.trim();
+            trimmed.starts_with("1.")
+                || trimmed.starts_with("2.")
+                || trimmed.starts_with("3.")
+                || trimmed.starts_with("4.")
+                || trimmed.starts_with("5.")
+        })
+        .count();
+    if numbered_items >= 4 {
+        if level != ScopeLevel::Block {
+            level = ScopeLevel::Warn;
+        }
+        warnings.push(format!(
           "Prompt contains {}+ numbered tasks. Consider splitting into separate sub-agents, one per task.",
           numbered_items
       ));
-  }
+    }
 
-  ScopeResult { level, warnings }
+    ScopeResult { level, warnings }
 }

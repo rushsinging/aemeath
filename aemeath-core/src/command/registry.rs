@@ -79,7 +79,9 @@ impl CommandRegistry {
             return Some(cmd);
         }
         let name = name.trim_start_matches('/');
-        self.commands.values().find(|cmd| cmd.aliases.contains(&name.to_string()))
+        self.commands
+            .values()
+            .find(|cmd| cmd.aliases.contains(&name.to_string()))
     }
 
     /// Get a command by main name only.
@@ -99,7 +101,10 @@ impl CommandRegistry {
         if let Some(command) = self.find(name) {
             command.execute(args, ctx).await
         } else {
-            CommandResult::Error(format!("Unknown command: /{}", name.trim_start_matches('/')))
+            CommandResult::Error(format!(
+                "Unknown command: /{}",
+                name.trim_start_matches('/')
+            ))
         }
     }
 
@@ -109,8 +114,7 @@ impl CommandRegistry {
         self.commands
             .values()
             .filter(|cmd| {
-                cmd.name.starts_with(prefix)
-                    || cmd.aliases.iter().any(|a| a.starts_with(prefix))
+                cmd.name.starts_with(prefix) || cmd.aliases.iter().any(|a| a.starts_with(prefix))
             })
             .collect()
     }

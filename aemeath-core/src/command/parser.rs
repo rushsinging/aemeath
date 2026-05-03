@@ -8,10 +8,7 @@ pub enum ParseResult {
     /// Not a command (normal input)
     NotCommand(String),
     /// A valid command
-    Command {
-        name: String,
-        args: String,
-    },
+    Command { name: String, args: String },
     /// Invalid command format
     Invalid(String),
 }
