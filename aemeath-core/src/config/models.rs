@@ -1,6 +1,8 @@
 //! 多供应商模型配置
 
+use crate::provider::ApiDriverKind;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Multi-provider model configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,7 +25,200 @@ pub struct ModelsConfig {
     pub guidance: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModel {
+    pub source_key: String,
+    pub source_config: ProviderModelsConfig,
+    pub model: ModelEntryConfig,
+    pub api: ApiDriverKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelResolveError {
+    MissingSelection {
+        available_sources: Vec<String>,
+    },
+    InvalidFormat {
+        selection: String,
+    },
+    UnknownSource {
+        source: String,
+        available_sources: Vec<String>,
+    },
+    UnknownModel {
+        source: String,
+        query: String,
+        available_models: Vec<String>,
+    },
+    UnknownApi {
+        source: String,
+        api: String,
+    },
+}
+
+impl fmt::Display for ModelResolveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSelection { available_sources } => write!(
+                f,
+                "未指定模型。请使用 --model <来源>/<模型>。可用来源：\n  {}",
+                available_sources.join("\n  ")
+            ),
+            Self::InvalidFormat { selection } => {
+                write!(f, "模型选择 '{}' 格式无效，请使用 <来源>/<模型>", selection)
+            }
+            Self::UnknownSource {
+                source,
+                available_sources,
+            } => write!(
+                f,
+                "未找到模型来源 '{}'。\n可用来源：\n  {}",
+                source,
+                available_sources.join("\n  ")
+            ),
+            Self::UnknownModel {
+                source,
+                query,
+                available_models,
+            } => write!(
+                f,
+                "来源 '{}' 中未找到模型 '{}'。\n可用模型：\n  {}",
+                source,
+                query,
+                available_models.join("\n  ")
+            ),
+            Self::UnknownApi { source, api } => write!(
+                f,
+                "来源 '{}' 的 api '{}' 不受支持。支持的 api：anthropic, openai, zhipu, litellm",
+                source, api
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ModelResolveError {}
+
 impl ModelsConfig {
+    pub fn resolve_model_selection(
+        &self,
+        selection: &str,
+    ) -> Result<ResolvedModel, ModelResolveError> {
+        let (source_query, model_query) =
+            selection
+                .split_once('/')
+                .ok_or_else(|| ModelResolveError::InvalidFormat {
+                    selection: selection.to_string(),
+                })?;
+        if source_query.is_empty() || model_query.is_empty() {
+            return Err(ModelResolveError::InvalidFormat {
+                selection: selection.to_string(),
+            });
+        }
+
+        let available_sources = self.available_source_keys();
+        let (source_key, source_config) = self
+            .providers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(source_query))
+            .ok_or_else(|| ModelResolveError::UnknownSource {
+                source: source_query.to_string(),
+                available_sources: available_sources.clone(),
+            })?;
+
+        let model = source_config
+            .models
+            .iter()
+            .find(|m| m.name == model_query)
+            .or_else(|| source_config.models.iter().find(|m| m.id == model_query))
+            .or_else(|| {
+                let norm = normalize_model_key(model_query);
+                source_config
+                    .models
+                    .iter()
+                    .find(|m| normalize_model_key(&m.name) == norm)
+            })
+            .or_else(|| {
+                let norm = normalize_model_key(model_query);
+                source_config
+                    .models
+                    .iter()
+                    .find(|m| normalize_model_key(&m.id) == norm)
+            })
+            .cloned()
+            .ok_or_else(|| ModelResolveError::UnknownModel {
+                source: source_key.clone(),
+                query: model_query.to_string(),
+                available_models: source_config
+                    .models
+                    .iter()
+                    .map(|m| {
+                        if m.name.is_empty() || m.name == m.id {
+                            m.id.clone()
+                        } else {
+                            format!("{} (id: {})", m.name, m.id)
+                        }
+                    })
+                    .collect(),
+            })?;
+
+        let api = ApiDriverKind::from_str(source_config.api.as_str()).ok_or_else(|| {
+            ModelResolveError::UnknownApi {
+                source: source_key.clone(),
+                api: source_config.api.clone(),
+            }
+        })?;
+
+        Ok(ResolvedModel {
+            source_key: source_key.clone(),
+            source_config: source_config.clone(),
+            model,
+            api,
+        })
+    }
+
+    pub fn resolve_default_model(&self) -> Result<ResolvedModel, ModelResolveError> {
+        if !self.default.is_empty() {
+            return self.resolve_model_selection(&self.default);
+        }
+
+        let mut candidates = self
+            .providers
+            .iter()
+            .filter_map(|(source_key, source_config)| {
+                source_config
+                    .models
+                    .first()
+                    .map(|model| (source_key, source_config, model))
+            });
+        let first = candidates.next();
+        if let Some((source_key, source_config, model)) = first {
+            if candidates.next().is_none() && source_config.models.len() == 1 {
+                let api = ApiDriverKind::from_str(source_config.api.as_str()).ok_or_else(|| {
+                    ModelResolveError::UnknownApi {
+                        source: source_key.clone(),
+                        api: source_config.api.clone(),
+                    }
+                })?;
+                return Ok(ResolvedModel {
+                    source_key: source_key.clone(),
+                    source_config: source_config.clone(),
+                    model: model.clone(),
+                    api,
+                });
+            }
+        }
+
+        Err(ModelResolveError::MissingSelection {
+            available_sources: self.available_source_keys(),
+        })
+    }
+
+    pub fn available_source_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.providers.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
     /// List all available models as (provider_name, model_entry) pairs
     pub fn list_models(&self) -> Vec<(String, ModelEntryConfig)> {
         let mut result = Vec::new();
@@ -46,14 +241,20 @@ impl ModelsConfig {
     /// Normalization keeps only alphanumerics, `-`, `_`, `.` and lowercases,
     /// so trailing ⚡/emoji decoration in display names doesn't require the
     /// user to type the exact symbol when setting `"default"`.
-    pub fn find_model(&self, query: &str) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
+    pub fn find_model(
+        &self,
+        query: &str,
+    ) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
         if let Some((provider_name, model_query)) = query.split_once('/') {
             if let Some((actual_provider_name, provider_config)) = self
                 .providers
                 .iter()
                 .find(|(name, _)| name.to_lowercase() == provider_name.to_lowercase())
             {
-                if let Some(model) = provider_config.models.iter().find(|m| m.name == model_query)
+                if let Some(model) = provider_config
+                    .models
+                    .iter()
+                    .find(|m| m.name == model_query)
                     .or_else(|| provider_config.models.iter().find(|m| m.id == model_query))
                 {
                     return Some((
@@ -64,10 +265,16 @@ impl ModelsConfig {
                 }
                 // Fuzzy fallback
                 let norm = normalize_model_key(model_query);
-                if let Some(model) = provider_config.models.iter()
+                if let Some(model) = provider_config
+                    .models
+                    .iter()
                     .find(|m| normalize_model_key(&m.name) == norm)
-                    .or_else(|| provider_config.models.iter()
-                        .find(|m| normalize_model_key(&m.id) == norm))
+                    .or_else(|| {
+                        provider_config
+                            .models
+                            .iter()
+                            .find(|m| normalize_model_key(&m.id) == norm)
+                    })
                 {
                     return Some((
                         actual_provider_name.to_string(),
@@ -97,10 +304,10 @@ impl ModelsConfig {
 /// `-_.`, drop spaces / emoji / decoration, lowercase. Lets
 /// `"DeepSeek-V4-Pro"` match `"DeepSeek-V4-Pro ⚡"`.
 pub(crate) fn normalize_model_key(s: &str) -> String {
-      s.chars()
-          .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-          .flat_map(|c| c.to_lowercase())
-          .collect()
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 /// Valid reasoning_effort values.
@@ -129,7 +336,7 @@ pub fn supports_reasoning_effort(model_id: &str) -> bool {
 }
 
 /// Configuration for a single provider within models config
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderModelsConfig {
     /// Base URL for the provider API
     #[serde(default, rename = "baseUrl")]
@@ -149,7 +356,7 @@ pub struct ProviderModelsConfig {
 }
 
 /// A single model entry within a provider
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModelEntryConfig {
     /// Model ID (used in API calls)
     pub id: String,
@@ -283,5 +490,97 @@ mod tests {
         let json = r#"{"id":"gpt-4o"}"#;
         let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
         assert!(entry.reasoning_effort.is_none());
+    }
+
+    fn resolver_config() -> ModelsConfig {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "Zhipu".to_string(),
+            ProviderModelsConfig {
+                base_url: "https://zhipu.example.com".to_string(),
+                api_key: "zhipu-key".to_string(),
+                api: "zhipu".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.1".to_string(),
+                    name: "GLM 5.1".to_string(),
+                    context_window: 128_000,
+                    max_tokens: 32_000,
+                    reasoning: Some(true),
+                    ..Default::default()
+                }],
+            },
+        );
+        providers.insert(
+            "LiteLLM".to_string(),
+            ProviderModelsConfig {
+                base_url: "https://litellm.example.com".to_string(),
+                api_key: "litellm-key".to_string(),
+                api: "litellm".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "anthropic/claude-opus-4-7".to_string(),
+                    name: "Claude via LiteLLM".to_string(),
+                    context_window: 200_000,
+                    max_tokens: 16_000,
+                    reasoning: None,
+                    ..Default::default()
+                }],
+            },
+        );
+        ModelsConfig {
+            mode: String::new(),
+            default: "Zhipu/glm-5.1".to_string(),
+            providers,
+            guidance: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_resolve_model_selection_zhipu() {
+        let config = resolver_config();
+        let resolved = config.resolve_model_selection("zhipu/glm-5.1").unwrap();
+        assert_eq!(resolved.source_key, "Zhipu");
+        assert_eq!(resolved.model.id, "glm-5.1");
+        assert_eq!(resolved.api, crate::provider::ApiDriverKind::Zhipu);
+        assert_eq!(resolved.source_config.api, "zhipu");
+    }
+
+    #[test]
+    fn test_resolve_model_selection_litellm_model_id_with_slash() {
+        let config = resolver_config();
+        let resolved = config
+            .resolve_model_selection("LiteLLM/anthropic/claude-opus-4-7")
+            .unwrap();
+        assert_eq!(resolved.source_key, "LiteLLM");
+        assert_eq!(resolved.model.id, "anthropic/claude-opus-4-7");
+        assert_eq!(resolved.api, crate::provider::ApiDriverKind::LiteLLM);
+    }
+
+    #[test]
+    fn test_resolve_model_selection_unknown_source_lists_available() {
+        let config = resolver_config();
+        let err = config
+            .resolve_model_selection("Missing/glm-5.1")
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("未找到模型来源 'Missing'"));
+        assert!(message.contains("Zhipu"));
+        assert!(message.contains("LiteLLM"));
+    }
+
+    #[test]
+    fn test_resolve_model_selection_unknown_model_lists_available() {
+        let config = resolver_config();
+        let err = config.resolve_model_selection("Zhipu/glm-x").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("来源 'Zhipu' 中未找到模型 'glm-x'"));
+        assert!(message.contains("glm-5.1"));
+    }
+
+    #[test]
+    fn test_resolve_default_model_uses_config_default() {
+        let config = resolver_config();
+        let resolved = config.resolve_default_model().unwrap();
+        assert_eq!(resolved.source_key, "Zhipu");
+        assert_eq!(resolved.model.id, "glm-5.1");
     }
 }
