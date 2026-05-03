@@ -1,9 +1,9 @@
 //! 非流式请求：发送消息并等待完整响应
 
-use aemeath_core::message::{ContentBlock, Message, Role};
+use super::OpenAICompatibleProvider;
 use crate::provider::StreamHandler;
 use crate::types::{StreamResponse, SystemBlock};
-use super::OpenAICompatibleProvider;
+use aemeath_core::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
     pub(crate) async fn send_message_non_stream(
@@ -23,26 +23,7 @@ impl OpenAICompatibleProvider {
             "stream": false
         });
 
-        // 根据 provider 和 config 控制 reasoning/thinking 模式
-        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        if self.config.is_deepseek || self.config.is_zhipu {
-            let thinking_type = if reasoning_enabled { "enabled" } else { "disabled" };
-            request_body["thinking"] = serde_json::json!({"type": thinking_type});
-        } else if self.config.supports_enable_thinking {
-            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
-        }
-
-        // OpenAI GPT-5.x / o-series: inject reasoning_effort
-        if self.config.is_openai {
-            if let Ok(guard) = self.reasoning_effort.lock() {
-                if let Some(ref effort) = *guard {
-                    if aemeath_core::config::models::supports_reasoning_effort(&self.model) {
-                        request_body["reasoning_effort"] = serde_json::json!(effort);
-                    }
-                }
-            }
-        }
-
+        self.apply_reasoning_fields(&mut request_body);
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
         }
@@ -67,7 +48,9 @@ impl OpenAICompatibleProvider {
             });
         }
 
-        let body: serde_json::Value = response.json().await
+        let body: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
 
         // 解析响应
@@ -78,8 +61,14 @@ impl OpenAICompatibleProvider {
 
         // 提取 usage
         if let Some(usage) = body.get("usage") {
-            input_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            output_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            input_tokens = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            output_tokens = usage
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
         }
 
         // 从 choices 中提取内容
@@ -100,7 +89,9 @@ impl OpenAICompatibleProvider {
                     // 作为 Thinking 块保留在 content_blocks 中，以便下一轮
                     // convert_messages 可以将其作为 `reasoning_content` 字段重发——
                     // DeepSeek 的 thinking 模式拒绝省略此字段的 assistant 消息。
-                    if let Some(reasoning) = message.get("reasoning_content").and_then(|c| c.as_str()) {
+                    if let Some(reasoning) =
+                        message.get("reasoning_content").and_then(|c| c.as_str())
+                    {
                         if !reasoning.is_empty() {
                             handler.on_thinking(reasoning);
                             content_blocks.push(ContentBlock::Thinking {
@@ -124,9 +115,20 @@ impl OpenAICompatibleProvider {
                     if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
                         for tool_call in tool_calls {
                             if let Some(function) = tool_call.get("function") {
-                                let id = tool_call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                let name = function.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-                                let arguments = function.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}");
+                                let id = tool_call
+                                    .get("id")
+                                    .and_then(|i| i.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = function
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let arguments = function
+                                    .get("arguments")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or("{}");
                                 let input: serde_json::Value = serde_json::from_str(arguments)
                                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 

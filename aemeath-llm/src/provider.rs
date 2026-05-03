@@ -1,13 +1,13 @@
 //! LLM Provider trait and common types
 
-use async_trait::async_trait;
 use aemeath_core::message::Message;
+use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::types::{StreamResponse, SystemBlock};
 
 // Re-export Provider from aemeath_core
-pub use aemeath_core::provider::ApiType;
+pub use aemeath_core::provider::ApiDriverKind;
 
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
@@ -71,5 +71,7 @@ pub trait LlmProvider: Send + Sync {
     fn set_reasoning_effort(&self, _effort: Option<String>) {}
 
     /// Get current reasoning_effort level.
-    fn reasoning_effort(&self) -> Option<String> { None }
+    fn reasoning_effort(&self) -> Option<String> {
+        None
+    }
 }

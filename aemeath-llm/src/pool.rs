@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aemeath_core::config::ModelsConfig;
-use aemeath_core::provider::ApiType;
+use aemeath_core::provider::ApiDriverKind;
 
 use crate::client::{LlmClient, OpenAIProviderConfig};
 
@@ -60,7 +60,10 @@ impl LlmClientPool {
         match self.create_client(spec) {
             Ok(client) => {
                 let client = Arc::new(client);
-                self.clients.lock().await.insert(spec.to_string(), client.clone());
+                self.clients
+                    .lock()
+                    .await
+                    .insert(spec.to_string(), client.clone());
                 log::info!("[LlmClientPool] created new client for {:?}", spec);
                 client
             }
@@ -77,9 +80,12 @@ impl LlmClientPool {
 
     /// Resolve a `"provider/model_id"` spec and create an `LlmClient`.
     fn create_client(&self, spec: &str) -> Result<LlmClient, String> {
-        let (provider_name, model_query) = spec
-            .split_once('/')
-            .ok_or_else(|| format!("invalid model spec '{}', expected 'provider/model_id'", spec))?;
+        let (provider_name, model_query) = spec.split_once('/').ok_or_else(|| {
+            format!(
+                "invalid model spec '{}', expected 'provider/model_id'",
+                spec
+            )
+        })?;
 
         // Look up in ModelsConfig
         let (provider_config, model_entry) = self
@@ -110,19 +116,15 @@ impl LlmClientPool {
                 )
             })?;
 
-        // Resolve ApiType from config (the `api` field)
-        let api_type = match provider_config.api.as_str() {
-            "anthropic" => ApiType::Anthropic,
-            _ => ApiType::OpenAICompatible,
-        };
+        // Resolve ApiDriverKind from config (the `api` field)
+        let api = ApiDriverKind::from_str(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
 
         // Build OpenAI provider config for OpenAI-compatible providers
-        let openai_config = if matches!(api_type, ApiType::OpenAICompatible) {
-            Some(OpenAIProviderConfig::from_provider_name(provider_name))
+        let openai_config = if !matches!(api, ApiDriverKind::Anthropic) {
+            Some(OpenAIProviderConfig::from_api_driver(api, provider_name))
         } else {
             None
         };
-
         // API key — config first, then env var
         let api_key = if provider_config.api_key.is_empty() {
             // Fall back to generic env var for now (config.json already handles per-provider keys)
@@ -152,21 +154,18 @@ impl LlmClientPool {
                 spec
             );
         }
-        let max_tokens = if max_tokens > 0 {
-            max_tokens
-        } else {
-            200000
-        };
+        let max_tokens = if max_tokens > 0 { max_tokens } else { 200000 };
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
         Ok(LlmClient::from_config(
-            api_type,
+            api,
             api_key,
             base_url,
             model_entry.id,
             max_tokens,
             reasoning,
+            None,
             openai_config,
         ))
     }
