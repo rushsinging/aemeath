@@ -1,26 +1,26 @@
-//! 多供应商模型配置
+//! 多来源模型配置
 
 use crate::provider::ApiDriverKind;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Multi-provider model configuration
+/// Multi-source model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelsConfig {
-    /// Merge mode: "merge" to combine with env/CLI settings
+    /// Merge mode: "merge" to combine with env/CLI settings.
     #[serde(default)]
     pub mode: String,
 
-    /// Default provider and model in "provider/model_id" format (e.g. "zhipu/glm-5.1")
-    /// Used when no --provider or AEMEATH_PROVIDER is set
+    /// Default source and model in "<source>/<model>" format (e.g. "zhipu/glm-5.1").
+    /// Used when no --model / AEMEATH_MODEL selection is set.
     #[serde(default)]
     pub default: String,
 
-    /// Provider configurations keyed by provider name
+    /// Source configurations keyed by source key (stored in JSON as `models.providers`).
     #[serde(default)]
     pub providers: std::collections::HashMap<String, ProviderModelsConfig>,
 
-    /// Guidance file overrides, keyed by glob pattern (e.g. "zhipu/*" → "~/.aemeath/guidance/glm.md")
+    /// Guidance file overrides, keyed by glob pattern (e.g. "zhipu/*" → "~/.aemeath/guidance/glm.md").
     #[serde(default)]
     pub guidance: std::collections::HashMap<String, String>,
 }
@@ -219,19 +219,19 @@ impl ModelsConfig {
         keys
     }
 
-    /// List all available models as (provider_name, model_entry) pairs
+    /// List all available models as (source_key, model_entry) pairs.
     pub fn list_models(&self) -> Vec<(String, ModelEntryConfig)> {
         let mut result = Vec::new();
-        for (provider_name, provider_config) in &self.providers {
-            for model in &provider_config.models {
-                result.push((provider_name.clone(), model.clone()));
+        for (source_key, source_config) in &self.providers {
+            for model in &source_config.models {
+                result.push((source_key.clone(), model.clone()));
             }
         }
         result.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
         result
     }
 
-    /// Find a model by "provider/model_query" string. Matches in order:
+    /// Find a model by "<source>/<model>" selection string. Matches in order:
     ///  1. exact `name`
     ///  2. exact `id`
     ///  3. normalized `name` (case-insensitive, decorative chars stripped —
@@ -245,40 +245,40 @@ impl ModelsConfig {
         &self,
         query: &str,
     ) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
-        if let Some((provider_name, model_query)) = query.split_once('/') {
-            if let Some((actual_provider_name, provider_config)) = self
+        if let Some((source_query, model_query)) = query.split_once('/') {
+            if let Some((actual_source_key, source_config)) = self
                 .providers
                 .iter()
-                .find(|(name, _)| name.to_lowercase() == provider_name.to_lowercase())
+                .find(|(name, _)| name.to_lowercase() == source_query.to_lowercase())
             {
-                if let Some(model) = provider_config
+                if let Some(model) = source_config
                     .models
                     .iter()
                     .find(|m| m.name == model_query)
-                    .or_else(|| provider_config.models.iter().find(|m| m.id == model_query))
+                    .or_else(|| source_config.models.iter().find(|m| m.id == model_query))
                 {
                     return Some((
-                        actual_provider_name.to_string(),
-                        provider_config.clone(),
+                        actual_source_key.to_string(),
+                        source_config.clone(),
                         model.clone(),
                     ));
                 }
                 // Fuzzy fallback
                 let norm = normalize_model_key(model_query);
-                if let Some(model) = provider_config
+                if let Some(model) = source_config
                     .models
                     .iter()
                     .find(|m| normalize_model_key(&m.name) == norm)
                     .or_else(|| {
-                        provider_config
+                        source_config
                             .models
                             .iter()
                             .find(|m| normalize_model_key(&m.id) == norm)
                     })
                 {
                     return Some((
-                        actual_provider_name.to_string(),
-                        provider_config.clone(),
+                        actual_source_key.to_string(),
+                        source_config.clone(),
                         model.clone(),
                     ));
                 }
@@ -287,10 +287,10 @@ impl ModelsConfig {
         None
     }
 
-    /// Look up a provider entry case-insensitively. Guards against a
+    /// Look up a source entry case-insensitively. Guards against a
     /// silent fallback bug where a lowercased lookup misses a config
-    /// key spelled "Zhipu" (capital) and callers pick a stale/unrelated
-    /// provider's credentials from a HashMap iteration instead.
+    /// key spelled "Zhipu" (capital) and callers pick stale/unrelated
+    /// source credentials from a HashMap iteration instead.
     pub fn provider_ci(&self, name: &str) -> Option<&ProviderModelsConfig> {
         let lc = name.to_lowercase();
         self.providers
@@ -335,27 +335,27 @@ pub fn supports_reasoning_effort(model_id: &str) -> bool {
         || lower.starts_with("o4")
 }
 
-/// Configuration for a single provider within models config
+/// Configuration for a single model source within models config.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderModelsConfig {
-    /// Base URL for the provider API
+    /// Base URL for the source API.
     #[serde(default, rename = "baseUrl")]
     pub base_url: String,
 
-    /// API key for this provider
+    /// API key for this source.
     #[serde(default, rename = "apiKey")]
     pub api_key: String,
 
-    /// API type: "openai-completions" or "anthropic"
+    /// API driver: "openai", "anthropic", "zhipu", or "litellm".
     #[serde(default)]
     pub api: String,
 
-    /// Available models for this provider
+    /// Available models for this source.
     #[serde(default)]
     pub models: Vec<ModelEntryConfig>,
 }
 
-/// A single model entry within a provider
+/// A single model entry within a source
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModelEntryConfig {
     /// Model ID (used in API calls)
@@ -386,7 +386,7 @@ pub struct ModelEntryConfig {
 
     /// Reasoning effort level (only effective for models that support it,
     /// e.g. OpenAI GPT-5.x / o-series).
-    /// - `None` (default) — use provider default (usually "medium")
+    /// - `None` (default) — use source default (usually "medium")
     /// - Valid values: `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -404,7 +404,7 @@ mod tests {
             ProviderModelsConfig {
                 base_url: "http://localhost:4000".to_string(),
                 api_key: String::new(),
-                api: "openai-completions".to_string(),
+                api: "openai".to_string(),
                 models: vec![ModelEntryConfig {
                     id: "gpt-5.5".to_string(),
                     name: "GPT-5.5".to_string(),
@@ -425,18 +425,18 @@ mod tests {
     }
 
     #[test]
-    fn test_find_model_exact_provider_case_insensitive() {
+    fn test_find_model_exact_source_case_insensitive() {
         let config = test_config();
         let result = config.find_model("litellm/gpt-5.5");
         assert!(result.is_some());
-        let (provider, _, model) = result.unwrap();
-        assert_eq!(provider, "LiteLLM");
+        let (source, _, model) = result.unwrap();
+        assert_eq!(source, "LiteLLM");
         assert_eq!(model.id, "gpt-5.5");
         assert_eq!(model.reasoning, Some(false));
     }
 
     #[test]
-    fn test_find_model_display_name_case_insensitive_provider() {
+    fn test_find_model_display_name_case_insensitive_source() {
         let config = test_config();
         let result = config.find_model("litellm/GPT-5.5");
         assert!(result.is_some());
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_model_unknown_provider_returns_none() {
+    fn test_find_model_unknown_source_returns_none() {
         let config = test_config();
         let result = config.find_model("openai/gpt-5.5");
         assert!(result.is_none());
@@ -574,6 +574,23 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("来源 'Zhipu' 中未找到模型 'glm-x'"));
         assert!(message.contains("glm-5.1"));
+    }
+
+    #[test]
+    fn test_resolve_model_selection_rejects_openai_compatible_api() {
+        let mut config = resolver_config();
+        let source = config.providers.get_mut("Zhipu").unwrap();
+        source.api = "openai-compatible".to_string();
+
+        let err = config.resolve_model_selection("Zhipu/glm-5.1").unwrap_err();
+
+        assert_eq!(
+            err,
+            ModelResolveError::UnknownApi {
+                source: "Zhipu".to_string(),
+                api: "openai-compatible".to_string(),
+            }
+        );
     }
 
     #[test]

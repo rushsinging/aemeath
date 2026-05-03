@@ -44,7 +44,7 @@ use serde::{Deserialize, Serialize};
 /// ## Legacy vs. new config
 /// The `api` and `model` fields are **legacy** and only kept for backward
 /// compatibility with older config files. New configurations should use the
-/// `models` field with the `"provider/model_id"` format.
+/// `models` field with the `"<source>/<model>"` selection format.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// **Legacy** — prefer `models` field. Still used by `/model`, `/config` commands.
@@ -55,7 +55,7 @@ pub struct Config {
     #[serde(default)]
     pub model: ModelConfig,
 
-    /// Multi-provider model configuration (preferred).
+    /// Multi-source model configuration (preferred).
     #[serde(default)]
     pub models: ModelsConfig,
 

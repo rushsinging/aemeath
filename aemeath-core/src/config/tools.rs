@@ -39,7 +39,7 @@ pub struct ToolsConfig {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentRoleConfig {
-    /// LLM to use for this role, in "provider/model_id" format (e.g. "deepseek/deepseek-chat").
+    /// LLM to use for this role, in "<source>/<model>" format (e.g. "deepseek/deepseek-chat").
     /// Resolved via ModelsConfig::find_model at runtime.
     #[serde(default, rename = "model")]
     pub model: String,
@@ -72,12 +72,12 @@ pub struct AgentsConfig {
     ///
     /// When the `Agent` tool is called with `model` matching a role name,
     /// the role's LLM config is used. Otherwise `model` is treated as a
-    /// "provider/model_id" spec directly.
+    /// "<source>/<model>" selection directly.
     #[serde(default)]
     pub roles: HashMap<String, AgentRoleConfig>,
 
     /// Default LLM for sub-agents when no model is specified.
-    /// Format: "provider/model_id". Falls back to the main agent's client if empty.
+    /// Format: "<source>/<model>". Falls back to the main agent's client if empty.
     #[serde(default, rename = "defaultModel")]
     pub default_model: String,
 }
