@@ -15,10 +15,6 @@ pub struct Cli {
 /// Run options (shared between top-level `aemeath` and `aemeath run` subcommand)
 #[derive(ClapArgs)]
 pub struct RunArgs {
-    /// LLM provider to use (anthropic, openai, openrouter, deepseek, moonshot, zhipu, dashscope, minimax, ollama, openai-compatible)
-    #[arg(long, env = "AEMEATH_PROVIDER", default_value = "anthropic")]
-    pub provider: String,
-
     /// API key (overrides provider-specific env var)
     #[arg(long, env = "AEMEATH_API_KEY")]
     pub api_key: Option<String>,
@@ -27,7 +23,7 @@ pub struct RunArgs {
     #[arg(long, env = "AEMEATH_BASE_URL")]
     pub base_url: Option<String>,
 
-    /// Model to use (overrides AEMEATH_MODEL env var)
+    /// Model selection in <source>/<model> format (overrides AEMEATH_MODEL)
     #[arg(long, env = "AEMEATH_MODEL")]
     pub model: Option<String>,
 
@@ -118,7 +114,6 @@ pub enum Commands {
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.
 pub struct Args {
-    pub provider: String,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
@@ -140,7 +135,6 @@ pub struct Args {
 impl From<RunArgs> for Args {
     fn from(r: RunArgs) -> Self {
         Self {
-            provider: r.provider,
             api_key: r.api_key,
             base_url: r.base_url,
             model: r.model,
@@ -158,5 +152,34 @@ impl From<RunArgs> for Args {
             no_think: r.no_think,
             reasoning_effort: r.reasoning_effort,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_rejects_provider_argument() {
+        assert!(Cli::try_parse_from(["aemeath", "--provider", "Zhipu"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_accepts_model_selection() {
+        let cli = Cli::try_parse_from(["aemeath", "--model", "Zhipu/glm-5.1"]).unwrap();
+
+        assert_eq!(cli.run_args.model.as_deref(), Some("Zhipu/glm-5.1"));
+    }
+
+    #[test]
+    fn test_args_from_run_args_has_no_provider_field_requirement() {
+        let cli = Cli::try_parse_from(["aemeath", "--model", "LiteLLM/anthropic/claude-opus-4-7"])
+            .unwrap();
+        let args = Args::from(cli.run_args);
+
+        assert_eq!(
+            args.model.as_deref(),
+            Some("LiteLLM/anthropic/claude-opus-4-7")
+        );
     }
 }
