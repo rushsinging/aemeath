@@ -24,6 +24,7 @@ Thumbs.db
 # AI tools
 .claude/
 .serena/
+.worktrees/
 
 # Build artifacts
 *.exe
