@@ -11,6 +11,8 @@
 | 16 | Spinner 行合并状态显示 + Hook 调用信息 | - | 待确认 | 未确认 | 把 status line 的 Thinking / Calling xxx 等运行态搬到 output area spinner 行（如 `✻ cooking ... 2s (Thinking ...)`），并在 spinner 行展示当前 hook 调用信息 |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
+| 19 | config model 支持 zhipu api 类型 | - | 待确认 | 未确认 | provider 的 `api` 字段支持显式 `"zhipu"`，路由到 zhipu 专用请求/响应处理（区分于通用 openai），便于针对 GLM 系列做特殊参数与限制（如 body size、thinking 字段差异） |
+| 20 | config model 支持 litellm api 类型 | - | 待确认 | 未确认 | provider 的 `api` 字段支持显式 `"litellm"`，对接 LiteLLM Proxy 的统一接口（OpenAI 兼容 + 扩展），支持 `model="<provider>/<model>"` 透传、`api_key` 共用、自动透传 thinking/reasoning 等扩展字段 |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
