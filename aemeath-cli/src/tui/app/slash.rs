@@ -1,6 +1,6 @@
-use crate::tui::completion::{SuggestionContext, generate_suggestions};
+use crate::tui::completion::{generate_suggestions, SuggestionContext};
 use aemeath_core::command::cmd;
-use aemeath_core::command::{CommandRegistry, CommandContext, CommandResult};
+use aemeath_core::command::{CommandContext, CommandRegistry, CommandResult};
 use aemeath_core::session;
 use aemeath_core::state::AppState;
 use std::sync::Arc;
@@ -16,14 +16,19 @@ impl super::App {
         if cmd == "/model" && !has_args {
             let models = self.models_config.list_models();
             if models.is_empty() {
-                self.output_area.push_system("No models configured. Add models to ~/.aemeath/config.json");
+                self.output_area
+                    .push_system("No models configured. Add models to ~/.aemeath/config.json");
                 return None;
             }
             let current = self.current_model_display.clone();
             let mut options = Vec::new();
             let mut keys = Vec::new();
             for (provider_name, model) in &models {
-                let display_name = if model.name.is_empty() { &model.id } else { &model.name };
+                let display_name = if model.name.is_empty() {
+                    &model.id
+                } else {
+                    &model.name
+                };
                 let key = format!("{}/{}", provider_name, display_name);
                 let marker = if key == current { " ←" } else { "" };
                 options.push(format!(
@@ -79,18 +84,27 @@ impl super::App {
                     .push_system("  /paste  /images  /clear-images  /context  /review  /think");
                 self.output_area.push_system("");
                 self.output_area.push_system("Scrolling:");
-                self.output_area.push_system("  Mouse wheel     - scroll 3 lines");
-                self.output_area.push_system("  PageUp/PageDown - scroll 10 lines");
-                self.output_area.push_system("  Shift+Up/Down   - scroll 1 line");
-                self.output_area.push_system("  Shift+Home      - scroll to top");
-                self.output_area.push_system("  Shift+End       - scroll to bottom");
+                self.output_area
+                    .push_system("  Mouse wheel     - scroll 3 lines");
+                self.output_area
+                    .push_system("  PageUp/PageDown - scroll 10 lines");
+                self.output_area
+                    .push_system("  Shift+Up/Down   - scroll 1 line");
+                self.output_area
+                    .push_system("  Shift+Home      - scroll to top");
+                self.output_area
+                    .push_system("  Shift+End       - scroll to bottom");
                 self.output_area.push_system("");
                 self.output_area.push_system("Input:");
-                self.output_area.push_system("  Enter           - send message");
+                self.output_area
+                    .push_system("  Enter           - send message");
                 self.output_area.push_system("  Alt+Enter       - new line");
-                self.output_area.push_system("  Tab             - accept suggestion");
-                self.output_area.push_system("  Ctrl+C          - interrupt / exit");
-                self.output_area.push_system("  Ctrl+V          - paste image from clipboard");
+                self.output_area
+                    .push_system("  Tab             - accept suggestion");
+                self.output_area
+                    .push_system("  Ctrl+C          - interrupt / exit");
+                self.output_area
+                    .push_system("  Ctrl+V          - paste image from clipboard");
             }
             cmd if cmd == format!("/{}", cmd::USAGE) => {
                 use aemeath_core::cost::format_tokens;
@@ -104,7 +118,7 @@ impl super::App {
                 ));
             }
             "/save" => {
-                use aemeath_core::session::{Session, now_iso};
+                use aemeath_core::session::{now_iso, Session};
                 let s = Session {
                     id: self.session_id.clone(),
                     cwd: self.cwd.to_string_lossy().to_string(),
@@ -114,10 +128,9 @@ impl super::App {
                     metadata: Default::default(),
                 };
                 match session::save_session(&s).await {
-                    Ok(()) => {
-                        self.output_area
-                            .push_system(&format!("[session saved: {}]", self.session_id))
-                    }
+                    Ok(()) => self
+                        .output_area
+                        .push_system(&format!("[session saved: {}]", self.session_id)),
                     Err(e) => self
                         .output_area
                         .push_error(&format!("Failed to save session: {e}")),
@@ -148,7 +161,8 @@ impl super::App {
                     Ok(img) => {
                         let size = img.final_size;
                         self.pending_images.push(img);
-                        self.input_area.set_pending_images(self.pending_images.len());
+                        self.input_area
+                            .set_pending_images(self.pending_images.len());
                         self.output_area
                             .push_system(&format!("[clipboard image added ({} bytes)]", size));
                     }
@@ -162,10 +176,8 @@ impl super::App {
                 if self.pending_images.is_empty() {
                     self.output_area.push_system("No pending images.");
                 } else {
-                    self.output_area.push_system(&format!(
-                        "Pending images: {}",
-                        self.pending_images.len()
-                    ));
+                    self.output_area
+                        .push_system(&format!("Pending images: {}", self.pending_images.len()));
                     for (i, img) in self.pending_images.iter().enumerate() {
                         self.output_area.push_system(&format!(
                             "  {}. [image {}] ({} bytes)",
@@ -206,7 +218,9 @@ impl super::App {
                         CommandResult::Error(msg) => self.output_area.push_error(&msg),
                         CommandResult::Action(action) => {
                             match action {
-                                aemeath_core::command::CommandAction::Exit => self.should_exit = true,
+                                aemeath_core::command::CommandAction::Exit => {
+                                    self.should_exit = true
+                                }
                                 aemeath_core::command::CommandAction::Clear => {
                                     self.messages.clear();
                                     self.pending_images.clear();
@@ -216,7 +230,8 @@ impl super::App {
                                     self.output_area.push_system("[cleared]");
                                 }
                                 aemeath_core::command::CommandAction::Compact => {
-                                    use aemeath_core::compact;                                    let (compacted, was_compacted) = compact::compact_messages(
+                                    use aemeath_core::compact;
+                                    let (compacted, was_compacted) = compact::compact_messages(
                                         &mut self.messages,
                                         &self.system_prompt_text,
                                         self.context_size,
@@ -225,8 +240,7 @@ impl super::App {
                                         self.messages = compacted;
                                         self.output_area.push_system("[compacted]");
                                     } else {
-                                        self.output_area
-                                            .push_system("[no compaction needed]");
+                                        self.output_area.push_system("[no compaction needed]");
                                     }
                                 }
                                 aemeath_core::command::CommandAction::SwitchModel {
@@ -240,23 +254,36 @@ impl super::App {
                                     context_window,
                                     reasoning,
                                 } => {
-                                    // Determine api type from config's api_type field
-                                    let api_type = match api_type.as_str() {
-                                        "anthropic" => aemeath_core::provider::ApiType::Anthropic,
-                                        _ => aemeath_core::provider::ApiType::OpenAICompatible,
-                                    };
+                                    // Determine API driver from config's api field.
+                                    let api_type = aemeath_core::provider::ApiDriverKind::from_str(
+                                        api_type.as_str(),
+                                    )
+                                    .unwrap_or(aemeath_core::provider::ApiDriverKind::OpenAI);
 
-                                    // Build OpenAI provider config
-                                    let openai_config = if matches!(api_type, aemeath_core::provider::ApiType::OpenAICompatible) {
-                                        Some(aemeath_llm::client::OpenAIProviderConfig::from_provider_name(&provider_name))
-                                    } else {
+                                    // Build OpenAI chat provider config for Chat Completions drivers.
+                                    let openai_config = if matches!(
+                                        api_type,
+                                        aemeath_core::provider::ApiDriverKind::Anthropic
+                                    ) {
                                         None
+                                    } else {
+                                        Some(
+                                            aemeath_llm::client::OpenAIProviderConfig::from_api_driver(
+                                                api_type,
+                                                &provider_name,
+                                            ),
+                                        )
                                     };
 
                                     // Model config takes priority; keep current reasoning only when unset.
-                                    let reasoning = reasoning.or_else(|| {
-                                        self.client.as_ref().map(|c| c.is_reasoning())
-                                    }).unwrap_or(true);
+                                    let reasoning = reasoning
+                                        .or_else(|| self.client.as_ref().map(|c| c.is_reasoning()))
+                                        .unwrap_or(true);
+                                    let reasoning_config = Some(
+                                        aemeath_llm::providers::openai_compatible::ReasoningConfig::Bool(
+                                            reasoning,
+                                        ),
+                                    );
                                     let new_client = aemeath_llm::client::LlmClient::from_config(
                                         api_type,
                                         api_key,
@@ -264,17 +291,20 @@ impl super::App {
                                         model_id.clone(),
                                         max_tokens,
                                         reasoning,
+                                        reasoning_config,
                                         openai_config,
                                     );
 
                                     self.client = Some(Arc::new(new_client));
                                     if context_window > 0 {
                                         self.context_size = context_window;
-                                        self.status_bar
-                                            .set_context_size(context_window as u64);
+                                        self.status_bar.set_context_size(context_window as u64);
                                     }
-                                    let display_name =
-                                        if model_name.is_empty() { &model_id } else { &model_name };
+                                    let display_name = if model_name.is_empty() {
+                                        &model_id
+                                    } else {
+                                        &model_name
+                                    };
                                     let display = format!("{}/{}", provider_name, display_name);
                                     self.current_model_display = display.clone();
                                     self.status_bar.set_model(&display);
@@ -283,23 +313,26 @@ impl super::App {
                                         .push_system(&format!("[switched to {}]", display));
                                 }
                                 aemeath_core::command::CommandAction::InjectMessage(prompt) => {
-                                    self.output_area
-                                        .push_system("[reviewing code changes...]");
+                                    self.output_area.push_system("[reviewing code changes...]");
                                     return Some(prompt);
                                 }
                                 aemeath_core::command::CommandAction::RunSkill(content) => {
-                                    self.output_area
-                                        .push_system("[running skill...]");
+                                    self.output_area.push_system("[running skill...]");
                                     return Some(content);
                                 }
                                 aemeath_core::command::CommandAction::SetThinking(desired) => {
-                                    let current = self.client.as_ref().map(|c| c.is_reasoning()).unwrap_or(true);
+                                    let current = self
+                                        .client
+                                        .as_ref()
+                                        .map(|c| c.is_reasoning())
+                                        .unwrap_or(true);
                                     let new_state = desired.unwrap_or(!current);
                                     if let Some(ref client) = self.client {
                                         client.set_reasoning(new_state);
                                     }
                                     let label = if new_state { "ON" } else { "OFF" };
-                                    self.output_area.push_system(&format!("[thinking mode: {}]", label));
+                                    self.output_area
+                                        .push_system(&format!("[thinking mode: {}]", label));
                                     self.status_bar.set_thinking(new_state);
                                 }
                                 aemeath_core::command::CommandAction::ResumeSession(session_id) => {
@@ -315,15 +348,24 @@ impl super::App {
                                             aemeath_core::message::sanitize_messages(&mut msgs);
                                             let trimmed = msg_count - msgs.len();
                                             // Check for deeper integrity issues
-                                            let integrity = aemeath_core::message::check_message_integrity(&msgs);
+                                            let integrity =
+                                                aemeath_core::message::check_message_integrity(
+                                                    &msgs,
+                                                );
                                             let auto_repaired = if integrity.has_issues() {
-                                                aemeath_core::message::deep_clean_messages(&mut msgs)
+                                                aemeath_core::message::deep_clean_messages(
+                                                    &mut msgs,
+                                                )
                                             } else {
                                                 0
                                             };
                                             // Render history into output_area
                                             for i in 0..msgs.len() {
-                                                let subsequent = if i + 1 < msgs.len() { Some(&msgs[i + 1]) } else { None };
+                                                let subsequent = if i + 1 < msgs.len() {
+                                                    Some(&msgs[i + 1])
+                                                } else {
+                                                    None
+                                                };
                                                 self.render_history_message(&msgs[i], subsequent);
                                             }
                                             self.messages = msgs;
@@ -410,7 +452,13 @@ impl super::App {
         let commands: Vec<(String, String, Vec<String>)> = registry
             .list()
             .into_iter()
-            .map(|cmd| (cmd.name.clone(), cmd.description.clone(), cmd.aliases.clone()))
+            .map(|cmd| {
+                (
+                    cmd.name.clone(),
+                    cmd.description.clone(),
+                    cmd.aliases.clone(),
+                )
+            })
             .collect();
 
         let ctx = SuggestionContext {
@@ -427,4 +475,3 @@ impl super::App {
         self.input_area.set_suggestions(suggestions);
     }
 }
-
