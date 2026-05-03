@@ -13,7 +13,7 @@ pub mod types;
 
 pub use client::LlmClient;
 pub use pool::LlmClientPool;
-pub use provider::{ApiType, CallbackHandler, LlmProvider, StreamHandler};
+pub use provider::{ApiDriverKind, CallbackHandler, LlmProvider, StreamHandler};
 pub use providers::{AnthropicProvider, OpenAICompatibleProvider};
 
 #[derive(Debug, thiserror::Error)]

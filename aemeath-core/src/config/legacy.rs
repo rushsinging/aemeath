@@ -4,21 +4,21 @@
 
 use serde::{Deserialize, Serialize};
 
-/// **Legacy** API configuration. Prefer using `models.providers` instead.
+/// **Legacy** API configuration. Prefer using `models.providers` source entries instead.
 ///
 /// This is kept for backward compatibility with existing config files and
 /// commands (`/model`, `/config`). New configurations should use `ModelsConfig`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
-    /// LLM provider name (None = unset; Some = e.g. "anthropic", "deepseek")
+    /// Legacy LLM provider name (None = unset; Some = e.g. "anthropic", "deepseek").
     #[serde(default)]
     pub provider: Option<String>,
 
-    /// API key (can also be set via provider-specific env var)
+    /// API key (can also be set via driver-specific env var)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 
-    /// API base URL (default: provider-specific)
+    /// API base URL (default: driver-specific)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
@@ -63,7 +63,7 @@ pub(crate) fn default_retries() -> u32 {
 /// **Legacy** model configuration. Prefer using `models.providers[].models[]` instead.
 ///
 /// This is kept for backward compatibility. New configurations should define
-/// models under `models.providers.<name>.models` in config.json.
+/// models under source entries in `models.providers` in config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     /// Model name to use

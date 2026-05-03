@@ -6,9 +6,11 @@ mod non_stream;
 mod stream;
 
 use aemeath_core::message::Message;
+use aemeath_core::provider::ApiDriverKind;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use std::error::Error as StdError;
+use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::client::OpenAIProviderConfig;
@@ -16,6 +18,94 @@ use crate::provider::{LlmProvider, StreamHandler};
 use crate::types::SystemBlock;
 
 pub(crate) use stream::parse_openai_stream;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReasoningConfig {
+    Bool(bool),
+    Object(serde_json::Value),
+}
+
+impl ReasoningConfig {
+    fn as_effort(&self) -> Option<String> {
+        match self {
+            Self::Object(value) => value
+                .get("effort")
+                .or_else(|| value.get("reasoning_effort"))
+                .and_then(|v| v.as_str())
+                .map(ToOwned::to_owned),
+            Self::Bool(_) => None,
+        }
+    }
+}
+
+pub trait ChatApiDriver: Send + Sync {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        reasoning_enabled: bool,
+    );
+}
+
+#[derive(Debug)]
+pub struct OpenAiDriver;
+
+#[derive(Debug)]
+pub struct ZhipuDriver;
+
+#[derive(Debug)]
+pub struct LiteLlmDriver;
+
+impl ChatApiDriver for OpenAiDriver {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        _reasoning_enabled: bool,
+    ) {
+        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
+            request_body["reasoning"] = reasoning.clone();
+        }
+    }
+}
+
+impl ChatApiDriver for ZhipuDriver {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        reasoning_enabled: bool,
+    ) {
+        let enabled = match reasoning_config {
+            Some(ReasoningConfig::Bool(value)) => *value,
+            _ => reasoning_enabled,
+        };
+        let thinking_type = if enabled { "enabled" } else { "disabled" };
+        request_body["thinking"] = serde_json::json!({"type": thinking_type});
+    }
+}
+
+impl ChatApiDriver for LiteLlmDriver {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        _reasoning_enabled: bool,
+    ) {
+        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
+            request_body["reasoning"] = reasoning.clone();
+        }
+    }
+}
+
+fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send + Sync> {
+    match api {
+        ApiDriverKind::OpenAI => Box::new(OpenAiDriver),
+        ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
+        ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
+        ApiDriverKind::Anthropic => Box::new(OpenAiDriver),
+    }
+}
 
 pub struct OpenAICompatibleProvider {
     config: OpenAIProviderConfig,
@@ -27,8 +117,9 @@ pub struct OpenAICompatibleProvider {
     http: reqwest::Client,
     max_retries: u32,
     timeout_secs: u64,
-    reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    openai_reasoning_effort: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    reasoning: Arc<std::sync::atomic::AtomicBool>,
+    reasoning_config: Arc<Mutex<Option<ReasoningConfig>>>,
+    driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
 
 impl OpenAICompatibleProvider {
@@ -39,7 +130,9 @@ impl OpenAICompatibleProvider {
         model: Option<String>,
         max_tokens: u32,
         reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
+        let driver = driver_for_api(config.api);
         Self {
             base_url: {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
@@ -58,12 +151,13 @@ impl OpenAICompatibleProvider {
                 .expect("failed to create HTTP client"),
             max_retries: 10,
             timeout_secs: 120,
-            reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
-            openai_reasoning_effort: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            reasoning: Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
+            reasoning_config: Arc::new(Mutex::new(reasoning_config)),
+            driver,
         }
     }
 
-    pub fn reasoning_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    pub fn reasoning_handle(&self) -> Arc<std::sync::atomic::AtomicBool> {
         self.reasoning.clone()
     }
 
@@ -81,63 +175,11 @@ impl OpenAICompatibleProvider {
         self
     }
 
-    fn chat_url(&self) -> String {
+    pub(crate) fn chat_url(&self) -> String {
         format!("{}{}", self.base_url, self.config.chat_api_suffix)
     }
 
-    fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
-        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        if self.config.is_deepseek || self.config.is_zhipu {
-            let thinking_type = if reasoning_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            };
-            request_body["thinking"] = serde_json::json!({"type": thinking_type});
-        } else if self.config.supports_enable_thinking {
-            request_body["enable_thinking"] = serde_json::json!(reasoning_enabled);
-        }
-
-        // OpenAI GPT-5.x / o-series: inject official `reasoning` object.
-        if self.config.is_openai {
-            if let Ok(guard) = self.openai_reasoning_effort.lock() {
-                if let Some(ref effort) = *guard {
-                    if aemeath_core::config::models::supports_openai_reasoning(&self.model) {
-                        request_body["reasoning"] = serde_json::json!({ "effort": effort });
-                    } else {
-                        log::debug!(
-                            "[openai-compat] reasoning.effort='{}' set but model '{}' does not support it, ignoring",
-                            effort, self.model
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn build_chat_request_body(
-        &self,
-        openai_messages: Vec<serde_json::Value>,
-        tools: Vec<serde_json::Value>,
-        stream: bool,
-    ) -> serde_json::Value {
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "max_tokens": self.max_tokens,
-            "stream": stream
-        });
-        if stream {
-            request_body["stream_options"] = serde_json::json!({ "include_usage": true });
-        }
-        self.apply_reasoning_fields(&mut request_body);
-        if !tools.is_empty() {
-            request_body["tools"] = serde_json::Value::Array(tools);
-        }
-        request_body
-    }
-
-    fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
+    pub(crate) fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -147,19 +189,20 @@ impl OpenAICompatibleProvider {
                 .map_err(|e| crate::LlmError::Config(e.to_string()))?,
         );
 
-        if self.config.is_openrouter {
-            headers.insert(
-                "HTTP-Referer",
-                HeaderValue::from_static("https://github.com/aemeath"),
-            );
-        }
-
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&self.user_agent)
                 .map_err(|e| crate::LlmError::Config(e.to_string()))?,
         );
         Ok(headers)
+    }
+
+    pub(crate) fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
+        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
+        if let Ok(guard) = self.reasoning_config.lock() {
+            self.driver
+                .apply_reasoning_fields(request_body, guard.as_ref(), reasoning_enabled);
+        }
     }
 }
 
@@ -176,9 +219,22 @@ impl LlmProvider for OpenAICompatibleProvider {
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let request_body = self.build_chat_request_body(openai_messages, tools, true);
+        let mut request_body = serde_json::json!({
+            "model": self.model,
+            "messages": openai_messages,
+            "max_tokens": self.max_tokens,
+            "stream": true,
+            "stream_options": { "include_usage": true }
+        });
 
-        if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {            let mut summary = String::with_capacity(256);
+        self.apply_reasoning_fields(&mut request_body);
+
+        if !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools);
+        }
+
+        if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {
+            let mut summary = String::with_capacity(256);
             for (i, m) in msgs.iter().enumerate() {
                 let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
                 match role {
@@ -209,7 +265,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                 .unwrap_or(0);
             log::debug!(
                 "[openai-compat stream] POST provider={} body_bytes={} messages={}:{}",
-                self.config.provider_name,
+                self.config.source_key,
                 body_bytes,
                 msgs.len(),
                 summary,
@@ -364,12 +420,17 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn provider_name(&self) -> &str {
-        &self.config.provider_name
+        &self.config.source_key
     }
 
     fn set_reasoning(&self, enabled: bool) {
         self.reasoning
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut guard) = self.reasoning_config.lock() {
+            if matches!(*guard, Some(ReasoningConfig::Bool(_))) {
+                *guard = Some(ReasoningConfig::Bool(enabled));
+            }
+        }
     }
 
     fn is_reasoning(&self) -> bool {
@@ -377,59 +438,110 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn set_reasoning_effort(&self, effort: Option<String>) {
-        if let Ok(mut guard) = self.openai_reasoning_effort.lock() {
-            *guard = effort;
+        if let Ok(mut guard) = self.reasoning_config.lock() {
+            *guard = effort
+                .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })));
         }
     }
 
     fn reasoning_effort(&self) -> Option<String> {
-        self.openai_reasoning_effort
+        self.reasoning_config
             .lock()
             .ok()
-            .and_then(|g| g.clone())
+            .and_then(|guard| guard.as_ref().and_then(ReasoningConfig::as_effort))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::OpenAIProviderConfig;
+    use serde_json::json;
 
-    fn provider(provider_name: &str, reasoning: bool) -> OpenAICompatibleProvider {
-        OpenAICompatibleProvider::new(
-            OpenAIProviderConfig::from_provider_name(provider_name),
-            "test-key".to_string(),
-            Some("https://example.com".to_string()),
-            Some("test-model".to_string()),
-            1024,
-            reasoning,
-        )
+    fn base_body() -> serde_json::Value {
+        json!({"model":"test-model","messages":[],"max_tokens":10,"stream":true})
+    }
+
+    fn assert_no_reasoning_fields(body: &serde_json::Value) {
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("enable_thinking").is_none());
     }
 
     #[test]
-    fn test_build_chat_request_body_zhipu_reasoning_enabled_sets_thinking_enabled() {
-        let request_body = provider("zhipu", true).build_chat_request_body(vec![], vec![], true);
+    fn openai_object_reasoning_sends_reasoning_only() {
+        let config = ReasoningConfig::Object(json!({"effort":"medium"}));
+        let mut body = base_body();
 
-        assert_eq!(request_body["thinking"], serde_json::json!({"type": "enabled"}));
-        assert!(request_body.get("enable_thinking").is_none());
+        OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_eq!(body.get("reasoning"), Some(&json!({"effort":"medium"})));
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("enable_thinking").is_none());
     }
 
     #[test]
-    fn test_build_chat_request_body_zhipu_reasoning_disabled_sets_thinking_disabled() {
-        let request_body = provider("zhipu", false).build_chat_request_body(vec![], vec![], false);
+    fn openai_bool_reasoning_sends_no_reasoning_fields() {
+        let config = ReasoningConfig::Bool(true);
+        let mut body = base_body();
 
-        assert_eq!(
-            request_body["thinking"],
-            serde_json::json!({"type": "disabled"})
-        );
-        assert_eq!(request_body["stream"], serde_json::json!(false));
+        OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_no_reasoning_fields(&body);
     }
 
     #[test]
-    fn test_build_chat_request_body_litellm_does_not_add_zhipu_thinking() {
-        let request_body = provider("litellm", true).build_chat_request_body(vec![], vec![], true);
+    fn zhipu_bool_true_sends_enabled_thinking() {
+        let config = ReasoningConfig::Bool(true);
+        let mut body = base_body();
 
-        assert!(request_body.get("thinking").is_none());
-        assert!(request_body.get("enable_thinking").is_none());
+        ZhipuDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_eq!(body.get("thinking"), Some(&json!({"type":"enabled"})));
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn zhipu_bool_false_sends_disabled_thinking() {
+        let config = ReasoningConfig::Bool(false);
+        let mut body = base_body();
+
+        ZhipuDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+        assert_eq!(body.get("thinking"), Some(&json!({"type":"disabled"})));
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn litellm_object_reasoning_passes_through_reasoning() {
+        let config = ReasoningConfig::Object(json!({"effort":"high"}));
+        let mut body = base_body();
+
+        LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_eq!(body.get("reasoning"), Some(&json!({"effort":"high"})));
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn litellm_bool_reasoning_sends_no_reasoning_fields() {
+        let config = ReasoningConfig::Bool(true);
+        let mut body = base_body();
+
+        LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_no_reasoning_fields(&body);
+    }
+
+    #[test]
+    fn openai_provider_config_from_api_driver_sets_fields() {
+        let openai = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "source-openai");
+        assert_eq!(openai.source_key, "source-openai");
+        assert_eq!(openai.api, ApiDriverKind::OpenAI);
+        assert_eq!(openai.chat_api_suffix, "/v1/chat/completions");
+
+        let zhipu = OpenAIProviderConfig::from_api_driver(ApiDriverKind::Zhipu, "source-zhipu");
+        assert_eq!(zhipu.source_key, "source-zhipu");
+        assert_eq!(zhipu.api, ApiDriverKind::Zhipu);
+        assert_eq!(zhipu.chat_api_suffix, "/chat/completions");
     }
 }

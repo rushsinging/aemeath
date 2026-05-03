@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use crate::types::{StreamResponse, SystemBlock};
 
 // Re-export Provider from aemeath_core
-pub use aemeath_core::provider::ApiType;
+pub use aemeath_core::provider::ApiDriverKind;
 
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
@@ -66,11 +66,11 @@ pub trait LlmProvider: Send + Sync {
     /// Get current reasoning/thinking mode
     fn is_reasoning(&self) -> bool;
 
-    /// Set OpenAI reasoning object effort at runtime.
+    /// Set reasoning_effort level (e.g. "low", "medium", "high") at runtime.
     /// Ignored by providers that don't support it.
     fn set_reasoning_effort(&self, _effort: Option<String>) {}
 
-    /// Get current OpenAI reasoning object effort.
+    /// Get current reasoning_effort level.
     fn reasoning_effort(&self) -> Option<String> {
         None
     }

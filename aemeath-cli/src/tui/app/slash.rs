@@ -254,28 +254,36 @@ impl super::App {
                                     context_window,
                                     reasoning,
                                 } => {
-                                    // Determine api type from config's api_type field
-                                    let api_type = aemeath_core::provider::ApiType::from_str(
+                                    // Determine API driver from config's api field.
+                                    let api_type = aemeath_core::provider::ApiDriverKind::from_str(
                                         api_type.as_str(),
                                     )
-                                    .unwrap_or(
-                                        aemeath_core::provider::ApiType::OpenAICompatible,
-                                    );
+                                    .unwrap_or(aemeath_core::provider::ApiDriverKind::OpenAI);
 
-                                    // Build OpenAI-compatible provider config
-                                    let openai_config = if !matches!(
+                                    // Build OpenAI chat provider config for Chat Completions drivers.
+                                    let openai_config = if matches!(
                                         api_type,
-                                        aemeath_core::provider::ApiType::Anthropic
+                                        aemeath_core::provider::ApiDriverKind::Anthropic
                                     ) {
-                                        Some(aemeath_llm::client::OpenAIProviderConfig::from_provider_name(&provider_name))
-                                    } else {
                                         None
+                                    } else {
+                                        Some(
+                                            aemeath_llm::client::OpenAIProviderConfig::from_api_driver(
+                                                api_type,
+                                                &provider_name,
+                                            ),
+                                        )
                                     };
 
                                     // Model config takes priority; keep current reasoning only when unset.
                                     let reasoning = reasoning
                                         .or_else(|| self.client.as_ref().map(|c| c.is_reasoning()))
                                         .unwrap_or(true);
+                                    let reasoning_config = Some(
+                                        aemeath_llm::providers::openai_compatible::ReasoningConfig::Bool(
+                                            reasoning,
+                                        ),
+                                    );
                                     let new_client = aemeath_llm::client::LlmClient::from_config(
                                         api_type,
                                         api_key,
@@ -283,6 +291,7 @@ impl super::App {
                                         model_id.clone(),
                                         max_tokens,
                                         reasoning,
+                                        reasoning_config,
                                         openai_config,
                                     );
 

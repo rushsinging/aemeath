@@ -7,10 +7,12 @@ mod render;
 mod repl;
 mod tui;
 
+use aemeath_core::config::{models::ResolvedModel, Config};
 use aemeath_core::logging::{self, LogFile};
-use aemeath_core::provider::ApiType;
+use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
+use aemeath_llm::providers::openai_compatible::ReasoningConfig;
 use clap::Parser;
 use std::env;
 use std::path::PathBuf;
@@ -357,6 +359,25 @@ fn load_config() -> Option<aemeath_core::config::Config> {
     None
 }
 
+fn select_model_for_run(
+    requested_model: Option<&str>,
+    config_file: Option<&Config>,
+) -> Result<ResolvedModel, String> {
+    let cfg = config_file.ok_or_else(|| {
+        "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.aemeath/config.json 配置 models.default".to_string()
+    })?;
+
+    if let Some(selection) = requested_model.filter(|s| !s.trim().is_empty()) {
+        cfg.models
+            .resolve_model_selection(selection)
+            .map_err(|e| e.to_string())
+    } else {
+        cfg.models
+            .resolve_default_model()
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// 主聊天逻辑（原 main 主体）
 async fn run_chat(mut args: Args) {
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
@@ -400,172 +421,54 @@ async fn run_chat(mut args: Args) {
         }
     }
 
-    // 应用 config.json 默认值（当 CLI/env 未指定时）
-    // Provider + model: 仅在 CLI 使用默认值且未设置 env var 时覆盖
-    // 保存已解析的 ModelEntryConfig 以便获取 id 和 reasoning 标志
-    let mut config_default_model: Option<(String, aemeath_core::config::ModelEntryConfig)> = None;
-    if args.provider == "anthropic" && std::env::var("AEMEATH_PROVIDER").is_err() {
-        if let Some(ref cfg) = config_file {
-            if !cfg.models.default.is_empty() {
-                // 解析 "provider/model_query" 格式 — find_model 先按 id 再按 name 匹配（含模糊回退）
-                if let Some((provider_name, model_query)) = cfg.models.default.split_once('/') {
-                    args.provider = provider_name.to_string();
-                    if args.model.is_none() && std::env::var("AEMEATH_MODEL").is_err() {
-                        if let Some((_pn, _pc, model_entry)) =
-                            cfg.models.find_model(&cfg.models.default)
-                        {
-                            config_default_model = Some((model_entry.id.clone(), model_entry));
-                        } else {
-                            // 未匹配 — 拒绝将 display name 作为 model id 发送到 API（会导致 "Model Not Exist"）
-                            // 列出可用模型帮助用户修正配置
-                            let available: Vec<String> = cfg
-                                .models
-                                .providers
-                                .get(provider_name)
-                                .map(|p| {
-                                    p.models
-                                        .iter()
-                                        .map(|m| format!("{} (id: {})", m.name, m.id))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            log::error!(
-                                "models.default '{}' does not match any configured model under provider '{}'.\n  query: {}\n  available models:\n    {}",
-                                cfg.models.default,
-                                provider_name,
-                                model_query,
-                                if available.is_empty() {
-                                    "(none — no models configured for this provider)".to_string()
-                                } else {
-                                    available.join("\n    ")
-                                },
-                            );
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    // 仅有 provider 名，无 model
-                    args.provider = cfg.models.default.clone();
-                }
-            } else {
-                // 回退: 使用第一个有 models 的 provider
-                for (name, pcfg) in &cfg.models.providers {
-                    if !pcfg.models.is_empty() {
-                        args.provider = name.clone();
-                        break;
-                    }
-                }
-            }
-        }
-    }
+    let requested_model = args.model.as_deref();
+    let resolved_model = select_model_for_run(requested_model, config_file.as_ref())
+        .unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        });
+    let api_type = resolved_model.api;
 
-    // 解析 provider —— 从 config.json 获取 api type，不再使用 Provider enum
-    // 确定 api_type: 从 config.json models.default 或 models.providers 中查找
-    let api_type = determine_api_type(&args.provider, config_file.as_ref());
-
-    // 获取 API key: CLI args > env vars > config.json
-    let api_key = args.api_key.unwrap_or_else(|| {
-        // 尝试通用 env var
-        std::env::var("ANTHROPIC_API_KEY")
+    // 获取 API key: CLI args > env vars > resolved config
+    let api_key = args.api_key.take().unwrap_or_else(|| {
+        std::env::var("AEMEATH_API_KEY")
+            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .or_else(|_| std::env::var("OPENAI_API_KEY"))
             .or_else(|_| std::env::var("LLM_API_KEY"))
             .unwrap_or_else(|_| {
-                // 回退: 尝试 config.json 中配置的 key
-                if let Some(ref cfg) = config_file {
-                    if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
-                        if !pcfg.api_key.is_empty() {
-                            return pcfg.api_key.clone();
-                        }
-                    }
-                    for (_, pcfg) in &cfg.models.providers {
-                        if !pcfg.api_key.is_empty() {
-                            return pcfg.api_key.clone();
-                        }
-                    }
+                if !resolved_model.source_config.api_key.is_empty() {
+                    return resolved_model.source_config.api_key.clone();
                 }
                 eprintln!("Error: API key not set. Use --api-key, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
                 std::process::exit(1);
             })
     });
 
-    // 获取 model: CLI args > env var > config.json default > config.json provider
-    let model = args.model.unwrap_or_else(|| {
-        if let Some((ref model_id, _)) = config_default_model {
-            return model_id.clone();
+    let base_url = args.base_url.clone().or_else(|| {
+        if resolved_model.source_config.base_url.is_empty() {
+            None
+        } else {
+            Some(resolved_model.source_config.base_url.clone())
         }
-        if let Some(ref cfg) = config_file {
-            if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
-                if let Some(first_model) = pcfg.models.first() {
-                    return first_model.id.clone();
-                }
-            }
-        }
-        // 硬编码默认值
-        eprintln!(
-            "Error: No model configured for provider '{}'. Add model config or specify --model.",
-            args.provider
-        );
-        std::process::exit(1);
     });
-
-    // 获取 base_url: CLI args > env var > config.json > provider default
-    if args.base_url.is_none() && std::env::var("AEMEATH_BASE_URL").is_err() {
-        if let Some(ref cfg) = config_file {
-            if let Some(pcfg) = cfg.models.provider_ci(&args.provider) {
-                if !pcfg.base_url.is_empty() {
-                    args.base_url = Some(pcfg.base_url.clone());
-                }
-            }
-        }
-    }
-
-    // max_tokens: CLI args > config.json model.maxTokens > 32000 default
+    let model = resolved_model.model.id.clone();
     let max_tokens = args.max_tokens.unwrap_or_else(|| {
-        // 从 config.json 中查找当前 model 的 maxTokens
-        if let Some(ref cfg) = config_file {
-            // 用 "provider/model_id" 格式查找 model entry
-            let query = format!("{}/{}", args.provider, model);
-            if let Some((_, _, model_entry)) = cfg.models.find_model(&query) {
-                if model_entry.max_tokens > 0 {
-                    return model_entry.max_tokens;
-                }
-            }
+        if resolved_model.model.max_tokens > 0 {
+            resolved_model.model.max_tokens
+        } else {
+            32000
         }
-        32000 // 保守默认值
     });
+    let reasoning = resolved_model.model.reasoning.unwrap_or(!args.no_think);
 
-    // 构建 OpenAI-compatible provider config（包含 openai/zhipu/litellm 等 Chat Completions 路径）
-    let openai_config = if !matches!(api_type, ApiType::Anthropic) {
-        Some(OpenAIProviderConfig::from_provider_name(&args.provider))
-    } else {
-        None
-    };
-
-    // 提前计算 reasoning（当前实际模型配置优先于 CLI flag）
-    let current_model_entry = config_file.as_ref().and_then(|cfg| {
-        let query = format!("{}/{}", args.provider, model);
-        cfg.models.find_model(&query).map(|(_, _, entry)| entry)
-    });
-    let reasoning = current_model_entry
-        .as_ref()
-        .and_then(|entry| entry.reasoning.as_ref().and_then(|r| r.enabled()))
-        .unwrap_or(!args.no_think);
-
-    // OpenAI reasoning effort: CLI args > config.json model.reasoning.effort > env var > None
-    let openai_reasoning_effort = args
+    // reasoning_effort: CLI args > config.json model entry > env var > None
+    let reasoning_effort = args
         .reasoning_effort
         .clone()
-        .or_else(|| {
-            current_model_entry.as_ref().and_then(|entry| {
-                entry
-                    .reasoning
-                    .as_ref()
-                    .and_then(|r| r.effort().map(str::to_string))
-            })
-        })
+        .or_else(|| resolved_model.model.reasoning_effort.clone())
         .or_else(|| std::env::var("AEMEATH_REASONING_EFFORT").ok())
         .filter(|e| !e.is_empty());
-    if let Some(ref effort) = openai_reasoning_effort {
+    if let Some(ref effort) = reasoning_effort {
         if let Err(e) = aemeath_core::config::models::validate_reasoning_effort(effort) {
             log::error!("{}", e);
             std::process::exit(1);
@@ -573,25 +476,39 @@ async fn run_chat(mut args: Args) {
     }
 
     log::info!(
-        "[main] reasoning={} openai_reasoning_effort={:?} (current_model={:?}, args.no_think={})",
+        "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
+        resolved_model.source_key,
+        api_type.as_str(),
+        model,
         reasoning,
-        openai_reasoning_effort,
-        current_model_entry
-            .as_ref()
-            .map(|entry| format!("id={}, reasoning={:?}", entry.id, entry.reasoning)),
+        reasoning_effort,
         args.no_think
     );
+
+    let openai_config = if matches!(api_type, ApiDriverKind::Anthropic) {
+        None
+    } else {
+        Some(OpenAIProviderConfig::from_api_driver(
+            api_type,
+            &resolved_model.source_key,
+        ))
+    };
+    let reasoning_config = reasoning_effort
+        .as_ref()
+        .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
+        .or_else(|| resolved_model.model.reasoning.map(ReasoningConfig::Bool));
 
     let client = LlmClient::from_config(
         api_type,
         api_key,
-        args.base_url,
+        base_url,
         model.clone(),
         max_tokens,
         reasoning,
+        reasoning_config,
         openai_config,
     );
-    if let Some(effort) = openai_reasoning_effort {
+    if let Some(effort) = reasoning_effort {
         client.set_reasoning_effort(Some(effort));
     }
 
@@ -847,31 +764,12 @@ async fn run_chat(mut args: Args) {
         // provider 名称以原始 config 形式显示（不转小写），
         // 因此 `Zhipu/GLM-5.1 ⚡` 保持 `Zhipu/GLM-5.1 ⚡`
         let model_display = {
-            let provider_name = args.provider.as_str();
-            let display_name = config_default_model
-                .as_ref()
-                .and_then(|(_, entry)| {
-                    if entry.name.is_empty() {
-                        None
-                    } else {
-                        Some(entry.name.as_str())
-                    }
-                })
-                .or_else(|| {
-                    config_file.as_ref().and_then(|cfg| {
-                        cfg.models.provider_ci(provider_name).and_then(|pcfg| {
-                            pcfg.models.iter().find(|m| m.id == model).and_then(|m| {
-                                if m.name.is_empty() {
-                                    None
-                                } else {
-                                    Some(m.name.as_str())
-                                }
-                            })
-                        })
-                    })
-                })
-                .unwrap_or(&model);
-            format!("{}/{}", provider_name, display_name)
+            let display_name = if resolved_model.model.name.is_empty() {
+                resolved_model.model.id.as_str()
+            } else {
+                resolved_model.model.name.as_str()
+            };
+            format!("{}/{}", resolved_model.source_key, display_name)
         };
         let mut app = tui::App::new(session_id.clone(), cwd, model_display);
         app.memory_config = config_file
@@ -907,39 +805,43 @@ async fn run_chat(mut args: Args) {
     }
 }
 
-/// Determine the API type from config.json based on provider name.
-/// Falls back to OpenAICompatible if provider not found in config.
-fn determine_api_type(
-    provider_name: &str,
-    config_file: Option<&aemeath_core::config::Config>,
-) -> ApiType {
-    if let Some(cfg) = config_file {
-        if let Some(pcfg) = cfg.models.provider_ci(provider_name) {
-            if let Some(api_type) = ApiType::from_str(pcfg.api.as_str()) {
-                return api_type;
-            }
-        }
-    }
-    ApiType::OpenAICompatible
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aemeath_core::config::{Config, ModelsConfig, ProviderModelsConfig};
+    use aemeath_core::config::{Config, ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
     use std::collections::HashMap;
 
-    fn config_with_provider(provider_name: &str, api: &str) -> Config {
+    fn test_config_for_model_selection() -> Config {
         let mut providers = HashMap::new();
         providers.insert(
-            provider_name.to_string(),
+            "Zhipu".to_string(),
             ProviderModelsConfig {
-                api: api.to_string(),
-                ..Default::default()
+                api: "zhipu".to_string(),
+                api_key: "zhipu-key".to_string(),
+                base_url: "https://zhipu.example.com".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.1".to_string(),
+                    max_tokens: 128000,
+                    ..Default::default()
+                }],
+            },
+        );
+        providers.insert(
+            "LiteLLM".to_string(),
+            ProviderModelsConfig {
+                api: "litellm".to_string(),
+                api_key: "litellm-key".to_string(),
+                base_url: "https://litellm.example.com".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "anthropic/claude-opus-4-7".to_string(),
+                    max_tokens: 16000,
+                    ..Default::default()
+                }],
             },
         );
         Config {
             models: ModelsConfig {
+                default: "Zhipu/glm-5.1".to_string(),
                 providers,
                 ..Default::default()
             },
@@ -948,26 +850,25 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_api_type_zhipu() {
-        let config = config_with_provider("Zhipu", "zhipu");
-        assert_eq!(determine_api_type("zhipu", Some(&config)), ApiType::Zhipu);
+    fn test_select_model_prefers_cli_model() {
+        let cfg = test_config_for_model_selection();
+        let selected =
+            select_model_for_run(Some("LiteLLM/anthropic/claude-opus-4-7"), Some(&cfg)).unwrap();
+        assert_eq!(selected.source_key, "LiteLLM");
+        assert_eq!(selected.model.id, "anthropic/claude-opus-4-7");
     }
 
     #[test]
-    fn test_determine_api_type_litellm() {
-        let config = config_with_provider("litellm-prod", "litellm");
-        assert_eq!(
-            determine_api_type("litellm-prod", Some(&config)),
-            ApiType::LiteLLM
-        );
+    fn test_select_model_uses_config_default() {
+        let cfg = test_config_for_model_selection();
+        let selected = select_model_for_run(None, Some(&cfg)).unwrap();
+        assert_eq!(selected.source_key, "Zhipu");
+        assert_eq!(selected.model.id, "glm-5.1");
     }
 
     #[test]
-    fn test_determine_api_type_unknown_api_falls_back_openai_compatible() {
-        let config = config_with_provider("custom", "unknown");
-        assert_eq!(
-            determine_api_type("custom", Some(&config)),
-            ApiType::OpenAICompatible
-        );
+    fn test_select_model_without_config_errors() {
+        let err = select_model_for_run(None, None).unwrap_err();
+        assert!(err.contains("未指定模型"));
     }
 }

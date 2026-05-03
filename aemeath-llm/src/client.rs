@@ -2,9 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::provider::{ApiType, CallbackHandler, LlmProvider, StreamHandler};
+use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
+use crate::providers::openai_compatible::ReasoningConfig;
 use crate::types::{StreamResponse, SystemBlock};
 use aemeath_core::message::Message;
+use aemeath_core::provider::ApiDriverKind;
 use tokio_util::sync::CancellationToken;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
@@ -19,39 +21,27 @@ fn truncate_preview(s: &str, max_bytes: usize) -> String {
     format!("{}…", &s[..end])
 }
 
-/// Configuration for OpenAI-compatible providers, replacing the old Provider enum
-/// special-casing. All fields are derived from the config.json provider name.
+/// Configuration for OpenAI-compatible providers. The source key is used only
+/// for display/logging; API behavior comes from `api`.
 #[derive(Debug, Clone)]
 pub struct OpenAIProviderConfig {
-    pub provider_name: String,
+    pub source_key: String,
+    pub api: ApiDriverKind,
     pub chat_api_suffix: String,
-    pub is_openrouter: bool,
-    pub is_deepseek: bool,
-    pub is_zhipu: bool,
-    /// Whether this provider supports the non-standard `enable_thinking` request parameter.
-    /// OpenAI, OpenRouter, and others reject this parameter with a 400 error.
-    pub supports_enable_thinking: bool,
-    /// Whether this is the official OpenAI provider (sends `reasoning_effort`).
-    pub is_openai: bool,
 }
 
 impl OpenAIProviderConfig {
-    pub fn from_provider_name(name: &str) -> Self {
-        let lc = name.to_lowercase();
+    pub fn from_api_driver(api: ApiDriverKind, source_key: &str) -> Self {
         Self {
-            provider_name: name.to_string(),
-            chat_api_suffix: match lc.as_str() {
-                "zhipu" | "zhipuai" => "/chat/completions".to_string(),
-                _ => "/v1/chat/completions".to_string(),
+            source_key: source_key.to_string(),
+            api,
+            chat_api_suffix: match api {
+                ApiDriverKind::Zhipu => "/chat/completions".to_string(),
+                ApiDriverKind::Anthropic => "/v1/messages".to_string(),
+                ApiDriverKind::OpenAI | ApiDriverKind::LiteLLM => {
+                    "/v1/chat/completions".to_string()
+                }
             },
-            is_openrouter: lc == "openrouter",
-            is_deepseek: lc == "deepseek",
-            is_zhipu: lc == "zhipu" || lc == "zhipuai",
-            supports_enable_thinking: matches!(
-                lc.as_str(),
-                "minimax" | "moonshot" | "kimi" | "dashscope" | "qwen" | "openai-compatible"
-            ),
-            is_openai: lc == "openai",
         }
     }
 }
@@ -62,39 +52,43 @@ pub struct LlmClient {
 
 impl LlmClient {
     pub fn new(api_key: String) -> Self {
-        Self::with_provider(ApiType::Anthropic, api_key, None, None, 200000, false)
+        Self::with_provider(
+            ApiDriverKind::Anthropic,
+            api_key,
+            None,
+            None,
+            200000,
+            false,
+            None,
+        )
     }
 
     pub fn with_provider(
-        api_type: ApiType,
+        api: ApiDriverKind,
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
         reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
-        let provider_impl: Arc<dyn LlmProvider> = match api_type {
-            ApiType::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
+        let provider_impl: Arc<dyn LlmProvider> = match api {
+            ApiDriverKind::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
                 api_key, base_url, model, max_tokens,
             )),
-            ApiType::OpenAICompatible => {
-                let config = OpenAIProviderConfig::from_provider_name("openai-compatible");
+            ApiDriverKind::OpenAI | ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => {
+                let config = OpenAIProviderConfig::from_api_driver(api, api.as_str());
                 Arc::new(crate::providers::OpenAICompatibleProvider::new(
-                    config, api_key, base_url, model, max_tokens, reasoning,
+                    config,
+                    api_key,
+                    base_url,
+                    model,
+                    max_tokens,
+                    reasoning,
+                    reasoning_config,
                 ))
             }
-            ApiType::Zhipu => {
-                let config = OpenAIProviderConfig::from_provider_name("zhipu");
-                Arc::new(crate::providers::OpenAICompatibleProvider::new(
-                    config, api_key, base_url, model, max_tokens, reasoning,
-                ))
-            }
-            ApiType::LiteLLM => {
-                let config = OpenAIProviderConfig::from_provider_name("litellm");
-                Arc::new(crate::providers::OpenAICompatibleProvider::new(
-                    config, api_key, base_url, model, max_tokens, reasoning,
-                ))
-            }        };
+        };
         Self {
             provider: provider_impl,
         }
@@ -107,10 +101,17 @@ impl LlmClient {
         model: Option<String>,
         max_tokens: u32,
         reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> =
             Arc::new(crate::providers::OpenAICompatibleProvider::new(
-                config, api_key, base_url, model, max_tokens, reasoning,
+                config,
+                api_key,
+                base_url,
+                model,
+                max_tokens,
+                reasoning,
+                reasoning_config,
             ));
         Self {
             provider: provider_impl,
@@ -118,12 +119,13 @@ impl LlmClient {
     }
 
     pub fn from_config(
-        api_type: ApiType,
+        api: ApiDriverKind,
         api_key: String,
         base_url: Option<String>,
         model: String,
         max_tokens: u32,
         reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
         openai_config: Option<OpenAIProviderConfig>,
     ) -> Self {
         if let Some(config) = openai_config {
@@ -134,15 +136,17 @@ impl LlmClient {
                 Some(model),
                 max_tokens,
                 reasoning,
+                reasoning_config,
             )
         } else {
             Self::with_provider(
-                api_type,
+                api,
                 api_key,
                 base_url,
                 Some(model),
                 max_tokens,
                 reasoning,
+                reasoning_config,
             )
         }
     }
@@ -266,58 +270,5 @@ impl LlmClient {
     }
     pub fn reasoning_effort(&self) -> Option<String> {
         self.provider.reasoning_effort()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_with_provider_zhipu_uses_zhipu_openai_config() {
-        let client = LlmClient::with_provider(
-            ApiType::Zhipu,
-            "test-key".to_string(),
-            Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
-            Some("glm-5.1".to_string()),
-            8192,
-            true,
-        );
-
-        assert_eq!(client.provider_name(), "zhipu");
-        assert_eq!(client.model_name(), "glm-5.1");
-        assert!(client.is_reasoning());
-    }
-
-    #[test]
-    fn test_with_provider_litellm_uses_litellm_openai_config() {
-        let client = LlmClient::with_provider(
-            ApiType::LiteLLM,
-            "test-key".to_string(),
-            Some("https://litellm.example.com".to_string()),
-            Some("anthropic/claude-opus-4-7".to_string()),
-            4096,
-            false,
-        );
-
-        assert_eq!(client.provider_name(), "litellm");
-        assert_eq!(client.model_name(), "anthropic/claude-opus-4-7");
-        assert!(!client.is_reasoning());
-    }
-
-    #[test]
-    fn test_openai_provider_config_zhipu_uses_unversioned_chat_suffix() {
-        let config = OpenAIProviderConfig::from_provider_name("zhipu");
-        assert_eq!(config.provider_name, "zhipu");
-        assert_eq!(config.chat_api_suffix, "/chat/completions");
-        assert!(config.is_zhipu);
-    }
-
-    #[test]
-    fn test_openai_provider_config_litellm_uses_openai_v1_chat_suffix() {
-        let config = OpenAIProviderConfig::from_provider_name("litellm");
-        assert_eq!(config.provider_name, "litellm");
-        assert_eq!(config.chat_api_suffix, "/v1/chat/completions");
-        assert!(!config.is_zhipu);
     }
 }

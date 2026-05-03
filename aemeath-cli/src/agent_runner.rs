@@ -114,9 +114,8 @@ impl AgentRunner for CliAgentRunner {
                 };
                 self.models_config.find_model(&query)
             })
-            .map(|(_, _, entry)| entry.reasoning.and_then(|r| r.enabled()))
-            .flatten();
-        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
+            .map(|(_, _, entry)| entry.reasoning)
+            .flatten();        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
         log::info!(
             "[SubAgent] reasoning={} (role={:?}, model={:?}, default={})",

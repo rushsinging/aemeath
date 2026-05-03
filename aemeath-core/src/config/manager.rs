@@ -61,12 +61,12 @@ impl ConfigManager {
 
     /// Apply environment variable overrides
     fn apply_env_vars(mut config: Config) -> Config {
-        // Provider
+        // Legacy provider env var
         if let Ok(provider_str) = std::env::var("AEMEATH_PROVIDER") {
             config.api.provider = Some(provider_str);
         }
 
-        // API key - check provider-specific env var first, then generic
+        // API key - check driver-specific env var first, then generic
         if let Ok(key) = std::env::var("LLM_API_KEY") {
             config.api.key = Some(key);
         }
@@ -192,7 +192,7 @@ impl ConfigManager {
                 },
             },
             models: {
-                // Merge providers from both configs
+                // Merge sources from both configs (JSON field remains models.providers)
                 let mut providers = base.models.providers;
                 for (k, v) in overlay.models.providers {
                     providers.insert(k, v);

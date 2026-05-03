@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aemeath_core::config::ModelsConfig;
-use aemeath_core::provider::ApiType;
+use aemeath_core::provider::ApiDriverKind;
 
 use crate::client::{LlmClient, OpenAIProviderConfig};
 
@@ -116,17 +116,15 @@ impl LlmClientPool {
                 )
             })?;
 
-        // Resolve ApiType from config (the `api` field)
-        let api_type = ApiType::from_str(provider_config.api.as_str())
-            .unwrap_or(ApiType::OpenAICompatible);
+        // Resolve ApiDriverKind from config (the `api` field)
+        let api = ApiDriverKind::from_str(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
 
-        // Build OpenAI provider config for Chat Completions compatible providers
-        let openai_config = if !matches!(api_type, ApiType::Anthropic) {
-            Some(OpenAIProviderConfig::from_provider_name(provider_name))
+        // Build OpenAI provider config for OpenAI-compatible providers
+        let openai_config = if !matches!(api, ApiDriverKind::Anthropic) {
+            Some(OpenAIProviderConfig::from_api_driver(api, provider_name))
         } else {
             None
         };
-
         // API key — config first, then env var
         let api_key = if provider_config.api_key.is_empty() {
             // Fall back to generic env var for now (config.json already handles per-provider keys)
@@ -158,29 +156,18 @@ impl LlmClientPool {
         }
         let max_tokens = if max_tokens > 0 { max_tokens } else { 200000 };
 
-        let reasoning = model_entry
-            .reasoning
-            .as_ref()
-            .and_then(|r| r.enabled())
-            .unwrap_or(true);
-        let openai_reasoning_effort = model_entry
-            .reasoning
-            .as_ref()
-            .and_then(|r| r.effort().map(str::to_string));
+        let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
-        let client = LlmClient::from_config(
-            api_type,
+        Ok(LlmClient::from_config(
+            api,
             api_key,
             base_url,
             model_entry.id,
             max_tokens,
             reasoning,
+            None,
             openai_config,
-        );
-        if let Some(effort) = openai_reasoning_effort {
-            client.set_reasoning_effort(Some(effort));
-        }
-        Ok(client)
+        ))
     }
 
     /// Get the default client.

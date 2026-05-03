@@ -1,49 +1,43 @@
-//! LLM API types - core definitions for API protocol selection
+//! LLM API driver kinds - core definitions for API protocol selection.
 //!
-//! The canonical provider list lives in config.json (`models.providers`).
-//! This module only defines the two API protocol types.
+//! The canonical model source list lives in config.json (`models.providers`).
+//! This module only defines API driver types understood by code.
 
 use serde::{Deserialize, Serialize};
 
-/// API protocol type. Every provider in config.json maps to one of these.
-///
-/// An `OpenAICompatible` provider uses `/chat/completions` — this covers
-/// OpenAI, DeepSeek, Moonshot, Zhipu, DashScope, Ollama, OpenRouter, etc.
+/// API driver kind. Every model source in config.json maps to one of these via its `api` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ApiType {
+pub enum ApiDriverKind {
     Anthropic,
-    OpenAICompatible,
+    OpenAI,
     Zhipu,
     LiteLLM,
 }
 
-impl Default for ApiType {
+impl Default for ApiDriverKind {
     fn default() -> Self {
-        ApiType::Anthropic
+        ApiDriverKind::Anthropic
     }
 }
 
-impl ApiType {
-    /// Parse from a config string ("anthropic" or "openai").
-    ///
-    /// The legacy "openai-completions" spelling is accepted for compatibility
-    /// when reading old config files, but new config should use "openai".
-    pub fn from_str(s: &str) -> Option<ApiType> {
+impl ApiDriverKind {
+    /// Parse from a config string.
+    pub fn from_str(s: &str) -> Option<ApiDriverKind> {
         match s {
-            "anthropic" => Some(ApiType::Anthropic),
-            "openai" | "openai-completions" => Some(ApiType::OpenAICompatible),
-            "zhipu" => Some(ApiType::Zhipu),
-            "litellm" => Some(ApiType::LiteLLM),
+            "anthropic" => Some(ApiDriverKind::Anthropic),
+            "openai" => Some(ApiDriverKind::OpenAI),
+            "zhipu" => Some(ApiDriverKind::Zhipu),
+            "litellm" => Some(ApiDriverKind::LiteLLM),
             _ => None,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            ApiType::Anthropic => "anthropic",
-            ApiType::OpenAICompatible => "openai",
-            ApiType::Zhipu => "zhipu",
-            ApiType::LiteLLM => "litellm",
+            ApiDriverKind::Anthropic => "anthropic",
+            ApiDriverKind::OpenAI => "openai",
+            ApiDriverKind::Zhipu => "zhipu",
+            ApiDriverKind::LiteLLM => "litellm",
         }
     }
 }
@@ -54,49 +48,48 @@ mod tests {
 
     #[test]
     fn test_from_str_openai() {
-        assert_eq!(ApiType::from_str("openai"), Some(ApiType::OpenAICompatible));
-    }
-
-    #[test]
-    fn test_from_str_legacy_openai_completions() {
         assert_eq!(
-            ApiType::from_str("openai-completions"),
-            Some(ApiType::OpenAICompatible)
+            ApiDriverKind::from_str("openai"),
+            Some(ApiDriverKind::OpenAI)
         );
     }
 
     #[test]
     fn test_from_str_zhipu() {
-        assert_eq!(ApiType::from_str("zhipu"), Some(ApiType::Zhipu));
+        assert_eq!(ApiDriverKind::from_str("zhipu"), Some(ApiDriverKind::Zhipu));
     }
 
     #[test]
     fn test_from_str_litellm() {
-        assert_eq!(ApiType::from_str("litellm"), Some(ApiType::LiteLLM));
+        assert_eq!(
+            ApiDriverKind::from_str("litellm"),
+            Some(ApiDriverKind::LiteLLM)
+        );
     }
 
     #[test]
-    fn test_from_str_unknown() {
-        assert_eq!(ApiType::from_str("unknown"), None);
+    fn test_from_str_rejects_openai_compatible() {
+        assert_eq!(ApiDriverKind::from_str("openai-compatible"), None);
+        assert_eq!(ApiDriverKind::from_str("openai-completions"), None);
     }
 
     #[test]
     fn test_as_str_openai() {
-        assert_eq!(ApiType::OpenAICompatible.as_str(), "openai");
+        assert_eq!(ApiDriverKind::OpenAI.as_str(), "openai");
     }
 
     #[test]
     fn test_as_str_anthropic() {
-        assert_eq!(ApiType::Anthropic.as_str(), "anthropic");
+        assert_eq!(ApiDriverKind::Anthropic.as_str(), "anthropic");
     }
 
     #[test]
     fn test_as_str_zhipu() {
-        assert_eq!(ApiType::Zhipu.as_str(), "zhipu");
+        assert_eq!(ApiDriverKind::Zhipu.as_str(), "zhipu");
     }
 
     #[test]
     fn test_as_str_litellm() {
-        assert_eq!(ApiType::LiteLLM.as_str(), "litellm");
+        assert_eq!(ApiDriverKind::LiteLLM.as_str(), "litellm");
     }
 }
