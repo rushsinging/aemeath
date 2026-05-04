@@ -1,29 +1,21 @@
 use aemeath_core::string_idx::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
+use crate::tui::safe_text;
+
 /// Truncate a string to fit within `max_width` Unicode display columns,
 /// appending "..." if truncated.
 pub fn truncate_unicode_width(s: &str, max_width: usize) -> String {
-    use unicode_width::UnicodeWidthStr;
-    let width = s.width();
-    if width <= max_width {
+    let (_, total_width) = safe_text::truncate_unicode_width(s, usize::MAX);
+    if total_width <= max_width {
         return s.to_string();
     }
     if max_width <= 3 {
         return "...".chars().take(max_width).collect();
     }
     let target = max_width - 3;
-    let mut end = 0;
-    let mut w = 0;
-    for (i, ch) in s.char_indices() {
-        let cw = ch.width().unwrap_or(0);
-        if w + cw > target {
-            break;
-        }
-        w += cw;
-        end = i + ch.len_utf8();
-    }
-    format!("{}...", &s[..end])
+    let (prefix, _) = safe_text::truncate_unicode_width(s, target);
+    format!("{prefix}...")
 }
 
 /// Sanitize a string for TUI display: expand tabs, strip ANSI escapes and control characters.
@@ -55,15 +47,7 @@ pub fn sanitize_for_display(text: &str) -> String {
 
 /// Convert a screen column position (display column) to a char index within the string.
 pub fn screen_col_to_char_idx(text: &str, screen_col: usize) -> CharIdx {
-    let mut display_width = 0usize;
-    for (char_idx, ch) in text.chars().enumerate() {
-        let ch_w = ch.width().unwrap_or(1) as usize;
-        if display_width + ch_w > screen_col {
-            return CharIdx::new(char_idx);
-        }
-        display_width += ch_w;
-    }
-    CharIdx::new(text.chars().count())
+    CharIdx::new(safe_text::col_to_char_idx(text, screen_col))
 }
 
 /// Split a string into lines that fit within `max_width` display columns.
