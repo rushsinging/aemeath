@@ -1,6 +1,8 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
+use crate::tui::safe_text;
+
 /// 将纯文本中的内联 Markdown 标记转换为 styled Span 列表。
 ///
 /// 支持的语法：
@@ -106,8 +108,12 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 if let Some(close_bracket) = rest.find(']') {
                     if rest[close_bracket + 1..].starts_with('(') {
                         if let Some(close_paren) = rest[close_bracket + 2..].find(')') {
-                            let inner = &rest[..close_bracket];
-                            let _url = &rest[close_bracket + 2..close_bracket + 2 + close_paren];
+                            let inner = safe_text::safe_str_slice_by_char(&rest, 0, close_bracket);
+                            let _url = safe_text::safe_str_slice_by_char(
+                                &rest,
+                                close_bracket + 2,
+                                close_bracket + 2 + close_paren,
+                            );
                             if !inner.is_empty() && !_url.is_empty() {
                                 flush_plain(&mut spans, &mut buf, base_style);
                                 spans.push(Span::styled(
@@ -168,7 +174,7 @@ pub fn is_table_separator(line: &str) -> bool {
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') || trimmed.len() <= 2 {
         return false;
     }
-    let inner = trimmed[1..trimmed.len() - 1].trim();
+    let inner = trimmed.get(1..trimmed.len() - 1).unwrap_or("").trim();
     // 每个段必须是 :-+(-*:)? 形式
     inner.split('|').all(|seg| {
         let seg = seg.trim();
@@ -191,7 +197,7 @@ pub fn parse_table_cells(line: &str) -> Vec<&str> {
     if trimmed.len() <= 2 {
         return vec![];
     }
-    let trimmed = &trimmed[1..trimmed.len() - 1]; // strip leading/trailing |
+    let trimmed = trimmed.get(1..trimmed.len() - 1).unwrap_or(""); // strip leading/trailing |
     trimmed.split('|').map(|s| s.trim()).collect()
 }
 

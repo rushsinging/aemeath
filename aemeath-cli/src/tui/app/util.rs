@@ -44,8 +44,8 @@ impl super::App {
                         .next()
                         .unwrap_or("");
                     if let Some(space_pos) = current.find(' ') {
-                        self.input_area
-                            .set_text(&format!("{}{}", &current[..=space_pos], id));
+                        let prefix = current.get(..=space_pos).unwrap_or("");
+                        self.input_area.set_text(&format!("{}{}", prefix, id));
                     } else {
                         self.input_area.set_text(&format!("/resume {}", id));
                     }
@@ -61,31 +61,31 @@ impl super::App {
                             // 所以需要保留 @ 前缀，只替换 @ 后面的路径部分
                             crate::tui::completion::TriggerType::AtSymbol => {
                                 // start_pos 是 @ 的位置
-                                let before = &current[..start_pos];
+                                let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
-                                let after = &current[after_end..];
+                                let after = current.get(after_end..).unwrap_or("");
                                 format!("{}@{}{}", before, replacement, after)
                             }
                             // / 命令补全：start_pos 是 / 的位置，display_text 包含 /
                             crate::tui::completion::TriggerType::SlashCommand => {
-                                let before = &current[..start_pos];
+                                let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
-                                let after = &current[after_end..];
+                                let after = current.get(after_end..).unwrap_or("");
                                 format!("{}{}{}", before, replacement, after)
                             }
                             // /model 或 /model 子命令补全：起始位置是参数开始处
                             crate::tui::completion::TriggerType::ModelArg
                             | crate::tui::completion::TriggerType::ModelSubCommand => {
-                                let before = &current[..start_pos];
+                                let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
-                                let after = &current[after_end..];
+                                let after = current.get(after_end..).unwrap_or("");
                                 format!("{}{}{}", before, replacement, after)
                             }
                             // /resume 参数补全：起始位置是参数开始处
                             crate::tui::completion::TriggerType::ResumeArg => {
-                                let before = &current[..start_pos];
+                                let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
-                                let after = &current[after_end..];
+                                let after = current.get(after_end..).unwrap_or("");
                                 format!("{}{}{}", before, replacement, after)
                             }
                         }
@@ -104,7 +104,7 @@ impl super::App {
 
 /// 找到光标位置处当前 token 的结束字节位置（到空格或行尾）
 fn find_token_end(input: &str, cursor_offset: usize) -> usize {
-    let remaining = &input[cursor_offset..];
+    let remaining = input.get(cursor_offset..).unwrap_or("");
     if let Some(space_pos) = remaining.find(' ') {
         cursor_offset + space_pos
     } else {

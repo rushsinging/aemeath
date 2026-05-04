@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use aemeath_core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 use crate::tui::output_area::{build_diff_lines, display, LineStyle, OutputLine, INDENT};
+use crate::tui::safe_text;
 
 // ── ToolDisplay trait ──────────────────────────────────────────────
 
@@ -266,13 +267,8 @@ impl ToolDisplay for AgentDisplay {
         }
         let max_prompt = 200usize.saturating_sub(INDENT.len());
         let preview = if prompt.len() > max_prompt {
-            let end = prompt
-                .char_indices()
-                .take_while(|(i, _)| *i < max_prompt)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(max_prompt);
-            format!("{}...", &prompt[..end])
+            let (prefix, _) = safe_text::truncate_unicode_width(prompt, max_prompt);
+            format!("{}...", prefix)
         } else {
             prompt.to_string()
         };
@@ -327,13 +323,8 @@ impl ToolDisplay for TaskCreateDisplay {
         }
         let max = 80usize;
         let preview = if desc.len() > max {
-            let end = desc
-                .char_indices()
-                .take_while(|(i, _)| *i < max)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(max);
-            format!("{}...", &desc[..end])
+            let (prefix, _) = safe_text::truncate_unicode_width(desc, max);
+            format!("{}...", prefix)
         } else {
             desc.to_string()
         };
@@ -605,13 +596,8 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
 
 fn truncate_json(raw: &str) -> String {
     if raw.len() > 100 {
-        let end = raw
-            .char_indices()
-            .take_while(|(i, _)| *i < 100)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(100);
-        format!("{}...", &raw[..end])
+        let (prefix, _) = safe_text::truncate_unicode_width(raw, 100);
+        format!("{}...", prefix)
     } else {
         raw.to_string()
     }
