@@ -6,7 +6,7 @@ use crate::tui::safe_text;
 /// Truncate a string to fit within `max_width` Unicode display columns,
 /// appending "..." if truncated.
 pub fn truncate_unicode_width(s: &str, max_width: usize) -> String {
-    let (_, total_width) = safe_text::truncate_unicode_width(s, usize::MAX);
+    let total_width = safe_text::str_display_width(s);
     if total_width <= max_width {
         return s.to_string();
     }
@@ -79,4 +79,23 @@ pub fn wrap_line(text: &str, max_width: usize) -> Vec<String> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_unicode_width_regression() {
+        assert_eq!(truncate_unicode_width("hello", 3), "...");
+        assert_eq!(truncate_unicode_width("hello", 4), "h...");
+        assert_eq!(truncate_unicode_width("你好世界", 5), "你...");
+    }
+
+    #[test]
+    fn test_screen_col_to_char_idx_regression() {
+        assert_eq!(screen_col_to_char_idx("a🚀b", 0), CharIdx::new(0));
+        assert_eq!(screen_col_to_char_idx("a🚀b", 1), CharIdx::new(1));
+        assert_eq!(screen_col_to_char_idx("a🚀b", 3), CharIdx::new(2));
+    }
 }

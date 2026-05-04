@@ -38,7 +38,7 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
         return ("", 0);
     }
 
-    let total_width = unicode_width_by_char(s);
+    let total_width = str_display_width(s);
     if total_width <= max_cols {
         return (s, total_width);
     }
@@ -46,7 +46,7 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
     let mut width = 0usize;
     let mut end = 0usize;
     for (byte_idx, ch) in s.char_indices() {
-        let ch_width = ch.width().unwrap_or(0);
+        let ch_width = char_display_width(ch);
         if width + ch_width > max_cols {
             break;
         }
@@ -56,10 +56,15 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
     (&s[..end], width)
 }
 
+pub fn str_display_width(s: &str) -> usize {
+    s.chars().map(char_display_width).sum()
+}
+
 pub fn col_to_char_idx(s: &str, col: usize) -> usize {
     let mut width = 0usize;
     for (char_idx, ch) in s.chars().enumerate() {
-        let ch_width = ch.width().unwrap_or(0);
+        // Control and zero-width chars do not advance TUI display columns.
+        let ch_width = char_display_width(ch);
         if width + ch_width > col {
             return char_idx;
         }
@@ -72,8 +77,8 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize {
     offset.min(len)
 }
 
-fn unicode_width_by_char(s: &str) -> usize {
-    s.chars().map(|ch| ch.width().unwrap_or(0)).sum()
+fn char_display_width(ch: char) -> usize {
+    ch.width().unwrap_or(0)
 }
 
 fn char_to_byte_clamped(s: &str, char_idx: usize) -> usize {
@@ -191,6 +196,12 @@ mod tests {
     fn test_truncate_unicode_width_control_and_zero_width() {
         assert_eq!(truncate_unicode_width("a\u{0000}b", 2), ("a\u{0000}b", 2));
         assert_eq!(truncate_unicode_width("a\u{0301}b", 2), ("a\u{0301}b", 2));
+    }
+
+    #[test]
+    fn test_str_display_width_control_and_zero_width() {
+        assert_eq!(str_display_width("a\u{0000}b"), 2);
+        assert_eq!(str_display_width("a\u{0301}b"), 2);
     }
 
     #[test]
