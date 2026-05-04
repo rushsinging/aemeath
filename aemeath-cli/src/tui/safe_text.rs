@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 pub fn clamp_char_range(from: usize, to: usize, chars_len: usize) -> Option<Range<usize>> {
     let from = from.min(chars_len);
@@ -37,8 +37,10 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
     if max_cols == 0 {
         return ("", 0);
     }
-    if s.width() <= max_cols {
-        return (s, s.width());
+
+    let total_width = unicode_width_by_char(s);
+    if total_width <= max_cols {
+        return (s, total_width);
     }
 
     let mut width = 0usize;
@@ -57,7 +59,7 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
 pub fn col_to_char_idx(s: &str, col: usize) -> usize {
     let mut width = 0usize;
     for (char_idx, ch) in s.chars().enumerate() {
-        let ch_width = ch.width().unwrap_or(1);
+        let ch_width = ch.width().unwrap_or(0);
         if width + ch_width > col {
             return char_idx;
         }
@@ -68,6 +70,10 @@ pub fn col_to_char_idx(s: &str, col: usize) -> usize {
 
 pub fn clamp_split_index(offset: usize, len: usize) -> usize {
     offset.min(len)
+}
+
+fn unicode_width_by_char(s: &str) -> usize {
+    s.chars().map(|ch| ch.width().unwrap_or(0)).sum()
 }
 
 fn char_to_byte_clamped(s: &str, char_idx: usize) -> usize {
@@ -120,8 +126,22 @@ mod tests {
     }
 
     #[test]
+    fn test_safe_char_slice_empty_slice_returns_empty() {
+        let chars: Vec<char> = Vec::new();
+        assert!(safe_char_slice(&chars, 0, 0).is_empty());
+        assert!(safe_char_slice(&chars, 0, 1).is_empty());
+    }
+
+    #[test]
     fn test_safe_str_slice_by_char_ascii() {
         assert_eq!(safe_str_slice_by_char("hello", 1, 4), "ell");
+        assert_eq!(safe_str_slice_by_char("hello", 1, 5), "ello");
+    }
+
+    #[test]
+    fn test_safe_str_slice_by_char_empty_string_returns_empty() {
+        assert_eq!(safe_str_slice_by_char("", 0, 0), "");
+        assert_eq!(safe_str_slice_by_char("", 0, 1), "");
     }
 
     #[test]
@@ -162,11 +182,36 @@ mod tests {
     }
 
     #[test]
+    fn test_truncate_unicode_width_empty_string() {
+        assert_eq!(truncate_unicode_width("", 0), ("", 0));
+        assert_eq!(truncate_unicode_width("", 3), ("", 0));
+    }
+
+    #[test]
+    fn test_truncate_unicode_width_control_and_zero_width() {
+        assert_eq!(truncate_unicode_width("a\u{0000}b", 2), ("a\u{0000}b", 2));
+        assert_eq!(truncate_unicode_width("a\u{0301}b", 2), ("a\u{0301}b", 2));
+    }
+
+    #[test]
     fn test_col_to_char_idx_ascii_cjk_emoji() {
         assert_eq!(col_to_char_idx("hello", 2), 2);
+        assert_eq!(col_to_char_idx("你好", 1), 0);
         assert_eq!(col_to_char_idx("你好", 2), 1);
         assert_eq!(col_to_char_idx("a🚀b", 2), 1);
         assert_eq!(col_to_char_idx("a🚀b", 99), 3);
+    }
+
+    #[test]
+    fn test_col_to_char_idx_empty_string() {
+        assert_eq!(col_to_char_idx("", 0), 0);
+        assert_eq!(col_to_char_idx("", 3), 0);
+    }
+
+    #[test]
+    fn test_col_to_char_idx_control_and_zero_width() {
+        assert_eq!(col_to_char_idx("a\u{0000}b", 1), 2);
+        assert_eq!(col_to_char_idx("a\u{0301}b", 1), 2);
     }
 
     #[test]
