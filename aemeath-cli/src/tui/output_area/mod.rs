@@ -11,6 +11,7 @@ use aemeath_core::string_idx::CharIdx;
 
 use crate::tui::output_area::display::wrap_line;
 use crate::tui::output_area::types::DEFAULT_WIDTH;
+use crate::tui::safe_text::clamp_split_index;
 
 pub mod content;
 pub mod diff;
@@ -471,7 +472,7 @@ impl OutputArea {
                 offset,
                 self.screen_line_map.len()
             );
-            let mapped_drop = offset.min(self.screen_line_map.len());
+            let mapped_drop = clamp_split_index(offset, self.screen_line_map.len());
             self.screen_line_map = self.screen_line_map.split_off(mapped_drop);
             let visible_map_len = self.screen_line_map.len().min(area.height as usize);
             self.screen_line_map.truncate(visible_map_len);

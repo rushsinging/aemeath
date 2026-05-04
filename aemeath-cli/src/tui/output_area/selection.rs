@@ -2,6 +2,8 @@ use std::io::Write;
 
 use aemeath_core::string_idx::{char_to_byte, CharIdx, StrSlice};
 
+use crate::tui::safe_text::{safe_char_slice, safe_str_slice_by_char};
+
 impl super::OutputArea {
     /// Start a selection at the given screen position
     /// row/col 是相对于输出区域 rect 的偏移
@@ -74,18 +76,9 @@ impl super::OutputArea {
             "end_selection: start={:?}, end={:?}, selected={:?}",
             self.selection_start,
             self.selection_end,
-            selected.as_deref().map(|s| {
-                if s.len() > 100 {
-                    // find a safe UTF-8 boundary at or before byte 100
-                    let mut end = 100;
-                    while end > 0 && !s.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &s[..end]
-                } else {
-                    s
-                }
-            })
+            selected
+                .as_deref()
+                .map(|s| safe_str_slice_by_char(s, 0, 100))
         );
         if let Some(ref text) = selected {
             self.copy_to_clipboard(text);
@@ -188,9 +181,10 @@ impl super::OutputArea {
             } else {
                 chars.len()
             };
-            if from > to {
+            let selected_chars = safe_char_slice(&chars, from, to);
+            if selected_chars.is_empty() {
                 log::debug!(
-                    "get_selected_text: clamped invalid range logic={}, from={}, to={}, chars_len={}",
+                    "get_selected_text: empty clamped range logic={}, from={}, to={}, chars_len={}",
                     logic_idx,
                     from,
                     to,
@@ -204,13 +198,9 @@ impl super::OutputArea {
                 from,
                 to,
                 chars.len(),
-                &self.lines[logic_idx]
-                    .content
-                    .chars()
-                    .take(60)
-                    .collect::<String>()
+                safe_str_slice_by_char(&self.lines[logic_idx].content, 0, 60)
             );
-            result.extend(chars[from..to].iter());
+            result.extend(selected_chars.iter());
         }
 
         if result.is_empty() {
