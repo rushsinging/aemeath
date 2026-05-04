@@ -1,4 +1,4 @@
-use aemeath_core::task::TaskStore;
+use aemeath_core::task::{TaskStatus, TaskStore};
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -117,6 +117,22 @@ impl Tool for AgentTool {
         let model = input.get("model").and_then(|v| v.as_str());
         let model_spec = if model.is_some() { model } else { role };
 
+        // --- Task status management ---
+        // If `taskId` is provided, automatically manage its lifecycle:
+        //   Pending → InProgress (before run_agent)
+        //   InProgress → Completed (on success) or Pending (on failure)
+        let task_id = input
+            .get("taskId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(ref tid) = task_id {
+            self.store
+                .update(tid, |t| {
+                    t.status = TaskStatus::InProgress;
+                })
+                .await;
+        }
+
         // Prepend scope warnings as guidance so the sub-agent can adjust its strategy
         let scope_hint = if scope.warnings.is_empty() {
             String::new()
@@ -173,6 +189,21 @@ Instructions:
                 .join("\n");
             format!("[scope warnings]\n{banner}\n\n{result}")
         };
+
+        // Update task status based on agent outcome
+        if let Some(ref tid) = task_id {
+            let is_failure = is_agent_failure(&final_output);
+            self.store
+                .update(tid, |t| {
+                    t.status = if is_failure {
+                        TaskStatus::Pending
+                    } else {
+                        TaskStatus::Completed
+                    };
+                })
+                .await;
+        }
+
         ToolResult::success(final_output)
     }
 }
@@ -313,28 +344,77 @@ fn analyze_task_scope(prompt: &str, cwd: &Path) -> ScopeResult {
         }
     }
 
-    // --- 5. Multiple distinct tasks in one prompt ---
-    // Heuristic: count numbered items or bullet points
-    let numbered_items = prompt
-        .lines()
-        .filter(|l| {
-            let trimmed = l.trim();
-            trimmed.starts_with("1.")
-                || trimmed.starts_with("2.")
-                || trimmed.starts_with("3.")
-                || trimmed.starts_with("4.")
-                || trimmed.starts_with("5.")
-        })
-        .count();
-    if numbered_items >= 4 {
-        if level != ScopeLevel::Block {
-            level = ScopeLevel::Warn;
-        }
-        warnings.push(format!(
-          "Prompt contains {}+ numbered tasks. Consider splitting into separate sub-agents, one per task.",
-          numbered_items
-      ));
+    ScopeResult { level, warnings }
+}
+
+/// Detect whether a sub-agent result indicates failure (error, timeout,
+/// cancellation, or max-turns exhaustion). These markers are produced by
+/// `CliAgentRunner::run_agent` in `agent_runner.rs`.
+fn is_agent_failure(result: &str) -> bool {
+    result.contains("Cancelled by user")
+        || result.contains("[Sub-agent timed out")
+        || result.contains("Sub-agent error:")
+        || result.contains("[Sub-agent reached max turns")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_analyze_task_scope_numbered_list_has_no_warning() {
+        let prompt =
+            "请按以下步骤执行：\n1. 读取文件\n2. 分析问题\n3. 修改代码\n4. 运行测试\n5. 汇报结果";
+
+        let result = analyze_task_scope(prompt, &PathBuf::from("."));
+
+        assert_eq!(result.level, ScopeLevel::Ok);
+        assert!(result.warnings.is_empty());
     }
 
-    ScopeResult { level, warnings }
+    #[test]
+    fn test_analyze_task_scope_large_task_pattern_still_blocks() {
+        let prompt = "review all files in the entire codebase";
+
+        let result = analyze_task_scope(prompt, &PathBuf::from("."));
+
+        assert_eq!(result.level, ScopeLevel::Block);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("entire codebase")));
+    }
+
+    #[test]
+    fn test_analyze_task_scope_simple_task_still_warns() {
+        let prompt = "read the file and summarize it";
+
+        let result = analyze_task_scope(prompt, &PathBuf::from("."));
+
+        assert_eq!(result.level, ScopeLevel::Warn);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("simple task")));
+    }
+
+    #[test]
+    fn test_is_agent_failure_detects_known_markers() {
+        assert!(is_agent_failure("Cancelled by user"));
+        assert!(is_agent_failure(
+            "Some text\n\n[Sub-agent timed out after 600s]"
+        ));
+        assert!(is_agent_failure("Sub-agent error: connection refused"));
+        assert!(is_agent_failure(
+            "Done\n\n[Sub-agent reached max turns (50)]"
+        ));
+    }
+
+    #[test]
+    fn test_is_agent_failure_normal_result_is_not_failure() {
+        assert!(!is_agent_failure("Successfully refactored the module."));
+        assert!(!is_agent_failure(""));
+        assert!(!is_agent_failure("No issues found in the reviewed files."));
+    }
 }

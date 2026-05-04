@@ -471,9 +471,14 @@ impl OutputArea {
                 offset,
                 self.screen_line_map.len()
             );
-            self.screen_line_map = self.screen_line_map.split_off(offset);
+            let mapped_drop = offset.min(self.screen_line_map.len());
+            self.screen_line_map = self.screen_line_map.split_off(mapped_drop);
+            let visible_map_len = self.screen_line_map.len().min(area.height as usize);
+            self.screen_line_map.truncate(visible_map_len);
             lines.into_iter().skip(offset).collect()
         } else {
+            let visible_map_len = self.screen_line_map.len().min(lines.len());
+            self.screen_line_map.truncate(visible_map_len);
             lines
         };
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -800,6 +805,33 @@ fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(CharIdx, CharIdx)>
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_render_clamps_screen_line_map_when_reserved_lines_overflow_height() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "content".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.start_spinner();
+        output.task_status_lines = vec![
+            "task 1".to_string(),
+            "task 2".to_string(),
+            "task 3".to_string(),
+            "task 4".to_string(),
+        ];
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 2,
+        };
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf);
+
+        assert!(output.screen_line_map.len() <= area.height as usize);
+    }
     #[test]
     fn todowrite_real_input_from_session() {
         let raw = r#"{"todos":[{"activeForm":"Reviewing aemeath-core","description":"Read","id":"1","status":"in_progress","subject":"Review aemeath-core (核心逻辑)"},{"activeForm":"Reviewing aemeath-llm","description":"Read","id":"2","status":"pending","subject":"Review aemeath-llm (LLM 抽象层)"},{"activeForm":"Reviewing aemeath-tools","description":"Read","id":"3","status":"pending","subject":"Review aemeath-tools (工具实现)"}]}"#;

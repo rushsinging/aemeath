@@ -1,12 +1,12 @@
 //! OpenAI 兼容 provider 实现
 //! 使用 OpenAIProviderConfig 替代旧 Provider enum
 
+mod driver;
 mod message_conversion;
 mod non_stream;
 mod stream;
 
 use aemeath_core::message::Message;
-use aemeath_core::provider::ApiDriverKind;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use std::error::Error as StdError;
@@ -18,7 +18,13 @@ use crate::client::OpenAIProviderConfig;
 use crate::provider::{LlmProvider, StreamHandler};
 use crate::types::SystemBlock;
 
+use driver::{driver_for_api, ChatApiDriver};
+
 pub(crate) use stream::parse_openai_stream;
+// Re-export driver types for tests and external use
+pub use driver::{
+    effort_from_thinking_tokens, ChatApiDriver as _, LiteLlmDriver, OpenAiDriver, ZhipuDriver,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReasoningConfig {
@@ -38,90 +44,6 @@ impl ReasoningConfig {
             Self::ThinkingBudget(tokens) => Some(effort_from_thinking_tokens(*tokens).to_string()),
             Self::Bool(_) => None,
         }
-    }
-}
-
-fn effort_from_thinking_tokens(tokens: u32) -> &'static str {
-    match tokens {
-        0..=1024 => "low",
-        1025..=8192 => "medium",
-        8193..=32768 => "high",
-        _ => "xhigh",
-    }
-}
-
-pub trait ChatApiDriver: Send + Sync {
-    fn apply_reasoning_fields(
-        &self,
-        request_body: &mut serde_json::Value,
-        reasoning_config: Option<&ReasoningConfig>,
-        reasoning_enabled: bool,
-    );
-}
-
-#[derive(Debug)]
-pub struct OpenAiDriver;
-
-#[derive(Debug)]
-pub struct ZhipuDriver;
-
-#[derive(Debug)]
-pub struct LiteLlmDriver;
-
-impl ChatApiDriver for OpenAiDriver {
-    fn apply_reasoning_fields(
-        &self,
-        request_body: &mut serde_json::Value,
-        reasoning_config: Option<&ReasoningConfig>,
-        _reasoning_enabled: bool,
-    ) {
-        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
-            request_body["reasoning"] = reasoning.clone();
-        } else if let Some(ReasoningConfig::ThinkingBudget(tokens)) = reasoning_config {
-            request_body["reasoning"] =
-                serde_json::json!({"effort": effort_from_thinking_tokens(*tokens)});
-        }
-    }
-}
-
-impl ChatApiDriver for ZhipuDriver {
-    fn apply_reasoning_fields(
-        &self,
-        request_body: &mut serde_json::Value,
-        reasoning_config: Option<&ReasoningConfig>,
-        reasoning_enabled: bool,
-    ) {
-        let enabled = match reasoning_config {
-            Some(ReasoningConfig::Bool(value)) => *value,
-            _ => reasoning_enabled,
-        };
-        let thinking_type = if enabled { "enabled" } else { "disabled" };
-        request_body["thinking"] = serde_json::json!({"type": thinking_type});
-    }
-}
-
-impl ChatApiDriver for LiteLlmDriver {
-    fn apply_reasoning_fields(
-        &self,
-        request_body: &mut serde_json::Value,
-        reasoning_config: Option<&ReasoningConfig>,
-        _reasoning_enabled: bool,
-    ) {
-        // LiteLLM proxy does not support the `reasoning` parameter.
-        // Extract effort and pass it as top-level `reasoning_effort` instead,
-        // which LiteLLM forwards to the upstream OpenAI-compatible endpoint.
-        if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
-            request_body["reasoning_effort"] = serde_json::Value::String(effort);
-        }
-    }
-}
-
-fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send + Sync> {
-    match api {
-        ApiDriverKind::OpenAI => Box::new(OpenAiDriver),
-        ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
-        ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
-        ApiDriverKind::Anthropic => Box::new(OpenAiDriver),
     }
 }
 
@@ -610,6 +532,7 @@ mod tests {
 
     #[test]
     fn openai_provider_config_from_api_driver_sets_fields() {
+        use aemeath_core::provider::ApiDriverKind;
         let openai = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "source-openai");
         assert_eq!(openai.source_key, "source-openai");
         assert_eq!(openai.api, ApiDriverKind::OpenAI);
@@ -623,7 +546,10 @@ mod tests {
 
     #[test]
     fn openai_provider_set_max_tokens_updates_request_body() {
-        let config = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "openai");
+        let config = OpenAIProviderConfig::from_api_driver(
+            aemeath_core::provider::ApiDriverKind::OpenAI,
+            "openai",
+        );
         let provider = OpenAICompatibleProvider::new(
             config,
             "test-key".to_string(),
@@ -641,7 +567,10 @@ mod tests {
 
     #[test]
     fn openai_provider_set_max_tokens_zero_is_ignored() {
-        let config = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "openai");
+        let config = OpenAIProviderConfig::from_api_driver(
+            aemeath_core::provider::ApiDriverKind::OpenAI,
+            "openai",
+        );
         let provider = OpenAICompatibleProvider::new(
             config,
             "test-key".to_string(),

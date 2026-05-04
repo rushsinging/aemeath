@@ -4,6 +4,9 @@
 |---|------|--------|------|----------|----------|----------|
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
 | 26 | 几乎每次对话都触发 superpowers skill 调用 | 中 | 活动中 | 未确认 | 2026-05 | SessionStart hook 注入提示过强或 skill 触发条件过宽 |
+| 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
+| 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
+| 28 | Output Area 选中/渲染时 panic：slice/split_off 越界 | 高 | 待确认 | 未确认 | 2026-05 | selection 坐标和 screen_line_map 在动态内容变化时未做边界收敛 |
 
 ## 详情
 
@@ -27,6 +30,84 @@
 2. compaction 阶段主动截断过长的 tool result 内容
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
+
+### #28 Output Area 选中/渲染时 panic：slice/split_off 越界
+**症状**：TUI 中选中并尝试复制文本时崩溃，状态行/spinner 行显示：
+```
+[PANIC] range start index 4 out of range for slice of length 2 at aemeath-cli/src/tui/output_area/selection.rs:203:32
+```
+同一 session / turn 中还出现大量相似 panic：
+```
+[PANIC] `at` split index (is 4) should be <= len (is 0) at aemeath-cli/src/tui/output_area/mod.rs:474:57
+```
+**根因**：OutputArea 有两类动态状态未在读取/裁剪前做统一边界收敛：
+1. `get_selected_text()` 使用 selection 保存的 `(logic_idx, char_col)` 对当前 `lines[logic_idx].content` 切片。动态 streaming、tool progress 替换、行重排后，原来的 `start_col` 可能大于当前 `chars.len()`，导致 `chars[from..to]` 越界。
+2. `render()` 中 `lines` 追加 queued/spinner/task 临时行后，`lines.len()` 可能大于 `area.height`，但这些临时行没有对应的 `screen_line_map` 项。用 `lines.len() - area.height` 直接裁剪 `screen_line_map.split_off(offset)` 时，`offset` 可能大于 `screen_line_map.len()`，导致 split 越界。
+**复现路径**：
+1. 选中一段文本或正在渲染带 spinner/task/status 的 output area
+2. 内容因 streaming、tool call progress、spinner/task 临时行、窗口高度变化等发生变化
+3. selection 坐标或 screen_line_map 与当前可见行数量不再一致
+4. 触发复制或下一帧 render → panic
+**修复方向**：
+1. `get_selected_text()` 中 `from` 和 `to` 都裁剪到 `chars.len()`，并在 `from > to` 时跳过该行，避免反向/越界切片。
+2. `render()` 裁剪 `screen_line_map` 时使用 `offset.min(screen_line_map.len())`，并将最终 map 长度截断到实际可见高度，确保临时行过多时不会越界。
+3. 增加回归测试覆盖 selection 行变短、反向 selection clamp、reserved 临时行超过高度三类场景。
+**涉及路径**：
+- `aemeath-cli/src/tui/output_area/selection.rs`（`get_selected_text` 切片裁剪）
+- `aemeath-cli/src/tui/output_area/mod.rs`（`render` 中 `screen_line_map` 与临时渲染行裁剪）
+
+### #27 Sub-agent 已执行 tool call 但 task list 状态不更新
+**症状**：父 agent 创建 7 个 task（"#1 拆分 task.rs (509→<400)" ... "#7 ..."），通过 Agent tool 派发 sub-agent 执行其中某个（如 "拆分 state.rs 到400行以下"）。sub-agent 已完成 Read / Bash / Write / Bash / Bash 等多个 tool call（屏幕可见），但临时区域的 task list 仍显示 `Tasks: 0/7`，所有 7 项保持 `☐`（pending）状态。
+**复现路径**：
+1. LLM 通过 TaskCreate 一次创建多条 task
+2. LLM 通过 Agent tool 派发 sub-agent 处理其中一个 task
+3. sub-agent 在隔离 context 内调用工具完成工作
+4. 父 agent 一侧 task list 未变化，无 in_progress / completed 反馈
+**疑似根因**：
+1. AgentTool 派发时未读取 / 不接受 `task_id` 参数，无法把"对应哪个父 task"传递下去
+2. sub-agent 完成回报后，父 agent 一侧没有自动 `TaskUpdate(completed)` 联动
+3. sub-agent 的 TaskStore 与父隔离：即便 sub-agent 自己调用 TaskUpdate，也写到自己的 store，父看不到
+4. 父 agent 自身在派发前也没有 `TaskUpdate(in_progress)`（这部分与 #29 共因）
+**修复方向**：
+1. **AgentTool 自动桥接 taskId**：Agent tool 接受 `task_id` 参数，执行前把对应 task 标 in_progress，执行成功后标 completed，失败时标 cancelled / 留 in_progress
+2. **TaskStore 父子共享**：让 sub-agent 通过引用看到父的 TaskStore，TaskUpdate 直接写父
+3. **system prompt 增强**：派发 sub-agent 时必须在 prompt 中绑定 task_id，并在 sub-agent 完成后由父 agent 自检状态
+4. **UI 兜底**：sub-agent 期间在对应 task 旁显示 `(agent working)` 标记
+**涉及路径**：
+- `aemeath-tools/src/agent.rs`（AgentTool 接受 `task_id` 并在 run_agent 前后自动联动）
+- `aemeath-core/src/task.rs`（TaskStore 父子共享 / 引用语义）
+- `aemeath-cli/src/agent_runner.rs`（sub-agent 与父 TaskStore 的关系）
+**关联**：
+- Bug #29（主 agent 路径同样不更新）—— 共因之一是 LLM 不主动 update，但 sub-agent 路径还多 AgentTool 桥接 + TaskStore 隔离两条独立修复线
+- Feature #18（Task list 跨轮次 batch 机制）—— batch 机制本身工作正常
+
+### #29 主 agent tool call 执行后 task list 状态不更新
+**症状**：task 列表只有 1 条 `#1 拆分 hook.rs → hook/ 目录`，状态 `☐`（pending）。LLM（主 agent，不是 sub-agent）已通过 Bash tool 执行 `mkdir -p .../aemeath-core/src/hook`（属于该 task 的第一步），并进入 Thinking 阶段（spinner 显示 `Cogitating... 389s (Thinking...)`）。task list 仍显示 `Tasks: 0/1`，#1 仍为 `☐`，没有任何 in_progress / completed 联动。
+
+**复现路径**：
+1. LLM 创建 task（TaskCreate）
+2. LLM 直接调用 Bash / Edit / Write 等核心 tool 开始执行该 task 的工作
+3. 观察 task 状态：始终停在 `☐`，从未变成 `⟳`（in_progress）或 `✓`（completed）
+
+**根因**：当前架构完全依赖 LLM 自觉调用 TaskUpdate，但：
+1. **system prompt 缺少强约束**：task 系统的指引可能只是"鼓励"而非"强制"维护状态，LLM 倾向跳过
+2. **核心 tool 无自动联动**：Bash / Edit / Write 等核心 tool 执行前后没有任何机制把"当前正在处理哪个 task"标 in_progress
+3. 与 sub-agent 路径（#27）的差异：主 agent 路径 **不能** 走 AgentTool 桥接 taskId 的方案——主 agent 一次回复可能跨多个 task，没有显式"哪个 tool call 对应哪个 task"的语义信号
+
+**修复方向**（按介入强度排序）：
+1. **system prompt 强约束**（最小改动，主推）：明确规定"开始任何实质性 tool call 前必须先 TaskUpdate(in_progress)；完成后必须 TaskUpdate(completed)"，并在 prompt 中给反例 / 失败示例
+2. **任务文本启发式联动**（中等激进）：tool call 执行时若有 in_progress task，不动；若没有 in_progress 但有 pending task，且 LLM 在 thinking 文本或 tool input 中提到该 task 标题关键词，自动标 in_progress
+3. **UI 兜底**：tool call 期间在第一个 pending task 旁显示 `(working?)` 提示，让用户知道存在 task/work 错配
+4. **Hook 兜底**：PostToolUse hook 检查"是否有 in_progress task"，若无则在日志或 UI 警告
+
+**涉及路径**：
+- system prompt 中 task 维护指引（`aemeath-core/src/context.rs` 或专用 task prompt 文件）
+- `aemeath-core/src/task.rs`（如做启发式联动需要 query 接口）
+- `aemeath-cli/src/tui/output_area/`（UI 兜底显示）
+
+**关联**：
+- Bug #27（sub-agent 路径）—— 共因是 LLM 不主动 update task 状态，但修复路径不同
+- Feature #18（Task list 跨轮次 batch 机制）—— batch 工作正常，问题在状态推进
 
 ### #26 几乎每次对话都触发 superpowers skill 调用
 **症状**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。

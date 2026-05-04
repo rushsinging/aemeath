@@ -1,5 +1,7 @@
 //! Anthropic Claude provider implementation
 
+mod message_conversion;
+
 use aemeath_core::message::Message;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
@@ -11,46 +13,7 @@ use crate::provider::{LlmProvider, StreamHandler};
 use crate::stream::parse_stream;
 use crate::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 
-/// Handler wrapper that tracks whether any user-visible content was emitted.
-/// Used to decide if a non-stream fallback is safe on stream errors — if any
-/// text/tool_use was already shown, falling back would duplicate it.
-struct TrackingHandler<'a> {
-    inner: &'a mut dyn StreamHandler,
-    emitted: bool,
-}
-
-impl<'a> TrackingHandler<'a> {
-    fn new(inner: &'a mut dyn StreamHandler) -> Self {
-        Self {
-            inner,
-            emitted: false,
-        }
-    }
-}
-
-impl<'a> StreamHandler for TrackingHandler<'a> {
-    fn on_text(&mut self, text: &str) {
-        self.emitted = true;
-        self.inner.on_text(text);
-    }
-    fn on_tool_use_start(&mut self, name: &str) {
-        self.emitted = true;
-        self.inner.on_tool_use_start(name);
-    }
-    fn on_error(&mut self, error: &str) {
-        self.inner.on_error(error);
-    }
-    fn on_raw_line(&mut self, line: &str) {
-        self.inner.on_raw_line(line);
-    }
-    fn on_text_block_complete(&mut self, full_text: &str) {
-        self.inner.on_text_block_complete(full_text);
-    }
-    fn on_thinking(&mut self, text: &str) {
-        self.emitted = true;
-        self.inner.on_thinking(text);
-    }
-}
+use message_conversion::{send_message_non_stream, RequestParams, TrackingHandler};
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -129,134 +92,6 @@ impl AnthropicProvider {
                 .map_err(|e| crate::LlmError::Config(e.to_string()))?,
         );
         Ok(headers)
-    }
-
-    async fn send_message_non_stream(
-        &self,
-        system: &[SystemBlock],
-        messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
-    ) -> Result<StreamResponse, crate::LlmError> {
-        let api_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .filter_map(|m| serde_json::to_value(m).ok())
-            .collect();
-
-        let request = CreateMessageRequest::new(
-            self.model.clone(),
-            self.current_max_tokens(),
-            self.thinking_max_tokens,
-            system.to_vec(),
-            api_messages,
-            tool_schemas.to_vec(),
-            false,
-        );
-
-        let headers = self.build_headers()?;
-
-        let url = format!("{}/v1/messages", self.base_url);
-        let response = self
-            .http
-            .post(&url)
-            .headers(headers)
-            .json(&request.clone().into_json())
-            .send()
-            .await
-            .map_err(|e| {
-                let mut msg = format!("{}\n  URL: {}", e, url);
-                let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
-                let mut depth = 1;
-                while let Some(cause) = source {
-                    msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
-                    source = cause.source();
-                    depth += 1;
-                }
-                crate::LlmError::Network(msg)
-            })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(crate::LlmError::Api {
-                error_type: status.to_string(),
-                message: body,
-            });
-        }
-
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
-
-        // Parse the non-streaming response into StreamResponse
-        let mut content_blocks = Vec::new();
-        if let Some(content) = body.get("content").and_then(|v| v.as_array()) {
-            for block in content {
-                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match block_type {
-                    "text" => {
-                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                            handler.on_text(text);
-                            handler.on_text_block_complete(text);
-                            content_blocks.push(aemeath_core::message::ContentBlock::Text {
-                                text: text.to_string(),
-                            });
-                        }
-                    }
-                    "tool_use" => {
-                        let id = block
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let name = block
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let input = block
-                            .get("input")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-                        handler.on_tool_use_start(&name);
-                        content_blocks.push(aemeath_core::message::ContentBlock::ToolUse {
-                            id,
-                            name,
-                            input,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        let usage = crate::types::Usage {
-            input_tokens: body
-                .get("usage")
-                .and_then(|u| u.get("input_tokens"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            output_tokens: body
-                .get("usage")
-                .and_then(|u| u.get("output_tokens"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-        };
-
-        let stop_reason_str = body
-            .get("stop_reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("end_turn");
-
-        Ok(StreamResponse {
-            assistant_message: aemeath_core::message::Message {
-                role: aemeath_core::message::Role::Assistant,
-                content: content_blocks,
-            },
-            usage,
-            stop_reason: crate::types::StopReason::from_str(stop_reason_str),
-        })
     }
 }
 
@@ -421,9 +256,22 @@ impl LlmProvider for AnthropicProvider {
                             "stream interrupted after partial output: {msg}"
                         )));
                     }
-                    return self
-                        .send_message_non_stream(system, messages, tool_schemas, handler)
-                        .await;
+                    let params = RequestParams {
+                        model: self.model.clone(),
+                        max_tokens: self.current_max_tokens(),
+                        thinking_max_tokens: self.thinking_max_tokens,
+                        base_url: self.base_url.clone(),
+                        headers: self.build_headers()?,
+                        http: &self.http,
+                    };
+                    return send_message_non_stream(
+                        params,
+                        system,
+                        messages,
+                        tool_schemas,
+                        handler,
+                    )
+                    .await;
                 }
                 Err(e) => return Err(e),
             }
@@ -461,7 +309,7 @@ impl LlmProvider for AnthropicProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::types::CreateMessageRequest;
 
     #[test]
     fn anthropic_request_serializes_thinking_budget() {

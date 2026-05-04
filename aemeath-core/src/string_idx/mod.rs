@@ -23,166 +23,15 @@
 //! s.bslice_from(byte_start)
 //! ```
 
+mod byte_idx;
+mod char_idx;
+mod col_idx;
+
+pub use byte_idx::ByteIdx;
+pub use char_idx::CharIdx;
+pub use col_idx::ColIdx;
+
 use std::ops;
-
-// ---------------------------------------------------------------------------
-// 类型定义
-// ---------------------------------------------------------------------------
-
-/// 字节偏移。
-///
-/// 表示一个字符串中的字节位置，**必须**落在 UTF-8 char boundary 上。
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct ByteIdx(pub(crate) usize);
-
-/// 字符位置。
-///
-/// 表示一个字符串中的第 N 个字符（0-indexed）。
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct CharIdx(pub(crate) usize);
-
-/// 显示列宽位置。
-///
-/// 表示终端显示中的第 N 列（0-indexed），基于 Unicode 显示宽度。
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct ColIdx(pub(crate) usize);
-
-// ---------------------------------------------------------------------------
-// ByteIdx
-// ---------------------------------------------------------------------------
-
-impl ByteIdx {
-    pub const ZERO: Self = ByteIdx(0);
-
-    /// 直接构造（不校验 char boundary，调用方需确保合法性）。
-    pub fn new(n: usize) -> Self {
-        ByteIdx(n)
-    }
-
-    /// 字符串末尾的字节位置，即 `s.len()`。
-    pub fn end_of(s: &str) -> Self {
-        ByteIdx(s.len())
-    }
-
-    /// 返回将字面量 `lit` 追加到当前字节位置之后的 ByteIdx。
-    ///
-    /// # 安全
-    ///
-    /// `lit` 必须是固定字面量（如 `<think>`），其在 `&str` 中的字节长度是确定的。
-    pub fn after_str(self, lit: &str) -> Self {
-        ByteIdx(self.0 + lit.len())
-    }
-
-    /// 在 `s` 中校验 `n` 是否是一个合法的 char boundary，若是则返回对应的 ByteIdx。
-    pub fn new_at_boundary(s: &str, n: usize) -> Option<Self> {
-        if s.is_char_boundary(n) {
-            Some(ByteIdx(n))
-        } else {
-            None
-        }
-    }
-
-    /// 取出裸 `usize`。
-    pub fn as_usize(self) -> usize {
-        self.0
-    }
-
-    /// 安全的字节偏移加法。
-    pub fn checked_add(self, n: usize) -> Option<Self> {
-        self.0.checked_add(n).map(ByteIdx)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CharIdx
-// ---------------------------------------------------------------------------
-
-impl CharIdx {
-    pub const ZERO: Self = CharIdx(0);
-
-    /// 直接构造。
-    pub fn new(n: usize) -> Self {
-        CharIdx(n)
-    }
-
-    /// 统计 `s` 中的字符数。
-    pub fn count_in(s: &str) -> Self {
-        CharIdx(s.chars().count())
-    }
-
-    /// 前进 `n` 个字符（不校验边界）。
-    pub fn add(self, n: usize) -> Self {
-        CharIdx(self.0 + n)
-    }
-
-    /// 安全前进，不超过 `s` 的字符总数。
-    pub fn checked_add(self, n: usize, s: &str) -> Option<Self> {
-        let total = s.chars().count();
-        let result = self.0 + n;
-        if result <= total {
-            Some(CharIdx(result))
-        } else {
-            None
-        }
-    }
-
-    /// 两个 CharIdx 之间的距离（字符数）。
-    pub fn saturating_sub(self, other: CharIdx) -> usize {
-        self.0.saturating_sub(other.0)
-    }
-
-    /// 取出裸 `usize`。
-    pub fn as_usize(self) -> usize {
-        self.0
-    }
-}
-
-impl ops::Sub for CharIdx {
-    type Output = usize;
-    fn sub(self, rhs: CharIdx) -> usize {
-        self.0.saturating_sub(rhs.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ColIdx
-// ---------------------------------------------------------------------------
-
-impl ColIdx {
-    pub const ZERO: Self = ColIdx(0);
-
-    /// 直接构造。
-    pub fn new(n: usize) -> Self {
-        ColIdx(n)
-    }
-
-    /// 计算 `s` 的 Unicode 显示宽度。
-    pub fn width_of(s: &str) -> Self {
-        ColIdx(unicode_width::UnicodeWidthStr::width(s))
-    }
-
-    /// 前进 `n` 列。
-    pub fn add(self, n: usize) -> Self {
-        ColIdx(self.0 + n)
-    }
-
-    /// 两个 ColIdx 之间的距离。
-    pub fn saturating_sub(self, other: ColIdx) -> usize {
-        self.0.saturating_sub(other.0)
-    }
-
-    /// 取出裸 `usize`。
-    pub fn as_usize(self) -> usize {
-        self.0
-    }
-}
-
-impl ops::Sub for ColIdx {
-    type Output = usize;
-    fn sub(self, rhs: ColIdx) -> usize {
-        self.0.saturating_sub(rhs.0)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 跨类型转换：必须带 &str 上下文
@@ -194,8 +43,8 @@ impl ops::Sub for ColIdx {
 pub fn char_to_byte(s: &str, c: CharIdx) -> ByteIdx {
     s.char_indices()
         .nth(c.0)
-        .map(|(b, _)| ByteIdx(b))
-        .unwrap_or_else(|| ByteIdx(s.len()))
+        .map(|(b, _)| ByteIdx::new(b))
+        .unwrap_or_else(|| ByteIdx::end_of(s))
 }
 
 /// 将字节偏移转换为字符位置（O(n)）。
@@ -203,10 +52,10 @@ pub fn char_to_byte(s: &str, c: CharIdx) -> ByteIdx {
 /// 如果 `b` 超出字符串长度，返回末尾的 CharIdx。
 pub fn byte_to_char(s: &str, b: ByteIdx) -> CharIdx {
     if b.0 >= s.len() {
-        return CharIdx(s.chars().count());
+        return CharIdx::count_in(s);
     }
     // char_indices 的索引 i 是字节偏移，count 是字符计数
-    CharIdx(
+    CharIdx::new(
         s.char_indices()
             .take_while(|(byte_pos, _)| *byte_pos < b.0)
             .count(),
@@ -220,11 +69,11 @@ pub fn col_to_char(s: &str, c: ColIdx) -> CharIdx {
     for (ch_idx, ch) in s.chars().enumerate() {
         let ch_w = ch.width().unwrap_or(1) as usize;
         if width + ch_w > c.0 {
-            return CharIdx(ch_idx);
+            return CharIdx::new(ch_idx);
         }
         width += ch_w;
     }
-    CharIdx(s.chars().count())
+    CharIdx::count_in(s)
 }
 
 /// 将字符位置转换为显示列位置（O(n)）。
@@ -237,7 +86,7 @@ pub fn char_to_col(s: &str, c: CharIdx) -> ColIdx {
         }
         col += ch.width().unwrap_or(1) as usize;
     }
-    ColIdx(col)
+    ColIdx::new(col)
 }
 
 // ---------------------------------------------------------------------------
@@ -279,164 +128,12 @@ impl StrSlice for str {
 }
 
 // ---------------------------------------------------------------------------
-// 测试
+// 测试：跨类型转换 + StrSlice + 混合场景
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // -- ByteIdx 测试 --
-
-    #[test]
-    fn test_byte_idx_zero() {
-        assert_eq!(ByteIdx::ZERO.as_usize(), 0);
-    }
-
-    #[test]
-    fn test_byte_idx_new() {
-        assert_eq!(ByteIdx::new(42).as_usize(), 42);
-    }
-
-    #[test]
-    fn test_byte_idx_end_of_ascii() {
-        assert_eq!(ByteIdx::end_of("hello").as_usize(), 5);
-    }
-
-    #[test]
-    fn test_byte_idx_end_of_cjk() {
-        assert_eq!(ByteIdx::end_of("你好").as_usize(), 6);
-    }
-
-    #[test]
-    fn test_byte_idx_after_str() {
-        let start = ByteIdx::new(10);
-        let next = start.after_str("<think>");
-        assert_eq!(next.as_usize(), 17); // 10 + "<think>".len()
-    }
-
-    #[test]
-    fn test_byte_idx_new_at_boundary_valid() {
-        let s = "你好世界";
-        let b = ByteIdx::new_at_boundary(s, 3).unwrap();
-        assert_eq!(b.as_usize(), 3);
-    }
-
-    #[test]
-    fn test_byte_idx_new_at_boundary_invalid() {
-        let s = "你好世界";
-        assert!(ByteIdx::new_at_boundary(s, 1).is_none());
-        assert!(ByteIdx::new_at_boundary(s, 2).is_none());
-    }
-
-    #[test]
-    fn test_byte_idx_checked_add_overflow() {
-        let b = ByteIdx::new(usize::MAX);
-        assert!(b.checked_add(1).is_none());
-    }
-
-    #[test]
-    fn test_byte_idx_checked_add_ok() {
-        let b = ByteIdx::new(10);
-        assert_eq!(b.checked_add(5).unwrap().as_usize(), 15);
-    }
-
-    // -- CharIdx 测试 --
-
-    #[test]
-    fn test_char_idx_zero() {
-        assert_eq!(CharIdx::ZERO.as_usize(), 0);
-    }
-
-    #[test]
-    fn test_char_idx_new() {
-        assert_eq!(CharIdx::new(5).as_usize(), 5);
-    }
-
-    #[test]
-    fn test_char_idx_count_in_ascii() {
-        assert_eq!(CharIdx::count_in("hello").as_usize(), 5);
-    }
-
-    #[test]
-    fn test_char_idx_count_in_cjk() {
-        assert_eq!(CharIdx::count_in("你好世界").as_usize(), 4);
-    }
-
-    #[test]
-    fn test_char_idx_count_in_emoji() {
-        assert_eq!(CharIdx::count_in("a🚀b").as_usize(), 3);
-    }
-
-    #[test]
-    fn test_char_idx_add() {
-        let c = CharIdx::new(3);
-        assert_eq!(c.add(5).as_usize(), 8);
-    }
-
-    #[test]
-    fn test_char_idx_checked_add_within_bounds() {
-        let c = CharIdx::new(2);
-        assert_eq!(c.checked_add(3, "hello").unwrap().as_usize(), 5);
-    }
-
-    #[test]
-    fn test_char_idx_checked_add_out_of_bounds() {
-        let c = CharIdx::new(3);
-        assert!(c.checked_add(3, "hello").is_none());
-    }
-
-    #[test]
-    fn test_char_idx_sub() {
-        let a = CharIdx::new(10);
-        let b = CharIdx::new(3);
-        assert_eq!(a - b, 7);
-    }
-
-    #[test]
-    fn test_char_idx_saturating_sub() {
-        let a = CharIdx::new(3);
-        let b = CharIdx::new(10);
-        assert_eq!(a.saturating_sub(b), 0);
-    }
-
-    // -- ColIdx 测试 --
-
-    #[test]
-    fn test_col_idx_zero() {
-        assert_eq!(ColIdx::ZERO.as_usize(), 0);
-    }
-
-    #[test]
-    fn test_col_idx_new() {
-        assert_eq!(ColIdx::new(80).as_usize(), 80);
-    }
-
-    #[test]
-    fn test_col_idx_width_of_ascii() {
-        assert_eq!(ColIdx::width_of("hello").as_usize(), 5);
-    }
-
-    #[test]
-    fn test_col_idx_width_of_cjk() {
-        assert_eq!(ColIdx::width_of("你好").as_usize(), 4);
-    }
-
-    #[test]
-    fn test_col_idx_width_of_emoji() {
-        assert_eq!(ColIdx::width_of("🚀").as_usize(), 2);
-    }
-
-    #[test]
-    fn test_col_idx_add() {
-        let c = ColIdx::new(10);
-        assert_eq!(c.add(5).as_usize(), 15);
-    }
-
-    #[test]
-    fn test_col_idx_sub() {
-        assert_eq!(ColIdx::new(10) - ColIdx::new(3), 7);
-    }
 
     // -- 跨类型转换测试 --
 
@@ -596,11 +293,11 @@ mod tests {
 
     /// byte_to_char 落在 char 内部应向前对齐到最近的完整 char 边界
     fn byte_to_char_floor(s: &str, b: ByteIdx) -> CharIdx {
-        let mut byte = b.0.min(s.len());
+        let mut byte = b.as_usize().min(s.len());
         while byte > 0 && !s.is_char_boundary(byte) {
             byte -= 1;
         }
-        CharIdx(s[..byte].chars().count())
+        CharIdx::count_in(&s[..byte])
     }
 
     #[test]
@@ -625,12 +322,5 @@ mod tests {
         let col = char_to_col(s, CharIdx::new(100));
         // 走到末尾，只累计到字符串末尾
         assert_eq!(col.as_usize(), 2);
-    }
-
-    #[test]
-    fn test_after_str_on_byte_idx() {
-        let start = ByteIdx::end_of("prefix_");
-        let after = start.after_str("suffix");
-        assert_eq!(after.as_usize(), 7 + 6); // prefix_(7) + suffix(6)
     }
 }

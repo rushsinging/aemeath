@@ -2,7 +2,9 @@
 //!
 //! Provides persistent state storage and session management.
 
-use serde::{Deserialize, Serialize};
+pub mod settings;
+pub use settings::{PermissionMode, Settings};
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
@@ -40,103 +42,8 @@ pub fn validate_session_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Application settings that persist across sessions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Settings {
-    /// API key (stored encrypted in the future)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-
-    /// Base URL for API
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-
-    /// Model to use
-    #[serde(default = "default_model")]
-    pub model: String,
-
-    /// Max tokens for responses
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: u32,
-
-    /// Context window size
-    #[serde(default = "default_context_size")]
-    pub context_size: usize,
-
-    /// Permission mode
-    #[serde(default)]
-    pub permission_mode: PermissionMode,
-
-    /// Auto-approve tools (by name)
-    #[serde(default)]
-    pub auto_approve_tools: Vec<String>,
-
-    /// Denied tools (by name)
-    #[serde(default)]
-    pub deny_tools: Vec<String>,
-
-    /// Custom system prompt additions
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_prompt: Option<String>,
-
-    /// Enable markdown rendering
-    #[serde(default = "default_true")]
-    pub markdown: bool,
-
-    /// Verbose output
-    #[serde(default)]
-    pub verbose: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            api_key: None,
-            base_url: None,
-            model: default_model(),
-            max_tokens: default_max_tokens(),
-            context_size: default_context_size(),
-            permission_mode: PermissionMode::default(),
-            auto_approve_tools: Vec::new(),
-            deny_tools: Vec::new(),
-            custom_prompt: None,
-            markdown: true,
-            verbose: false,
-        }
-    }
-}
-
-fn default_model() -> String {
-    "claude-sonnet-4-6".to_string()
-}
-
-fn default_max_tokens() -> u32 {
-    200000
-}
-
-fn default_context_size() -> usize {
-    128000
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Permission modes for tool execution
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionMode {
-    /// Ask for permission on every tool call
-    #[default]
-    Ask,
-    /// Auto-approve read-only tools
-    AutoRead,
-    /// Auto-approve all tools (dangerous)
-    AllowAll,
-}
-
 /// A single message in a session
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionMessage {
     /// Role: user, assistant, or tool
     pub role: String,
@@ -155,7 +62,7 @@ pub struct SessionMessage {
 /// A saved session (internal use only, distinct from session::Session)
 /// This is used by AppState for runtime session management.
 /// For CLI persistence, use crate::session::Session instead.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InternalSession {
     /// Unique session ID
     pub id: SessionId,
@@ -179,13 +86,17 @@ pub struct InternalSession {
 )]
 pub type Session = InternalSession;
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 impl InternalSession {
     /// Create a new session
     pub fn new(cwd: &Path) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now = now_ms();
         Self {
             id: new_session_id(),
             cwd: cwd.to_string_lossy().to_string(),
@@ -198,15 +109,11 @@ impl InternalSession {
 
     /// Add a message to the session
     pub fn add_message(&mut self, role: &str, content: &str) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        self.updated_at = now;
+        self.updated_at = now_ms();
         self.messages.push(SessionMessage {
             role: role.to_string(),
             content: content.to_string(),
-            timestamp: now,
+            timestamp: self.updated_at,
             tool_name: None,
             tool_result: None,
         });
@@ -214,15 +121,11 @@ impl InternalSession {
 
     /// Add a tool call message
     pub fn add_tool_call(&mut self, tool_name: &str, input: &str) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        self.updated_at = now;
+        self.updated_at = now_ms();
         self.messages.push(SessionMessage {
             role: "tool".to_string(),
             content: input.to_string(),
-            timestamp: now,
+            timestamp: self.updated_at,
             tool_name: Some(tool_name.to_string()),
             tool_result: None,
         });
@@ -230,15 +133,11 @@ impl InternalSession {
 
     /// Add a tool result
     pub fn add_tool_result(&mut self, tool_name: &str, result: &str, is_error: bool) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        self.updated_at = now;
+        self.updated_at = now_ms();
         self.messages.push(SessionMessage {
             role: "tool_result".to_string(),
             content: result.to_string(),
-            timestamp: now,
+            timestamp: self.updated_at,
             tool_name: Some(tool_name.to_string()),
             tool_result: if is_error {
                 Some("error".to_string())
@@ -281,35 +180,28 @@ impl AppState {
         if !self.settings_path.exists() {
             return Ok(());
         }
-
         let content = tokio::fs::read_to_string(&self.settings_path)
             .await
             .map_err(|e| format!("Failed to read settings: {e}"))?;
-
         let settings: Settings =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse settings: {e}"))?;
-
         *self.settings.write().await = settings;
         Ok(())
     }
 
     /// Save settings to disk
     pub async fn save_settings(&self) -> Result<(), String> {
-        // Ensure parent directory exists
         if let Some(parent) = self.settings_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create config directory: {e}"))?;
         }
-
         let settings = self.settings.read().await.clone();
         let content = serde_json::to_string_pretty(&settings)
             .map_err(|e| format!("Failed to serialize settings: {e}"))?;
-
         tokio::fs::write(&self.settings_path, content)
             .await
             .map_err(|e| format!("Failed to write settings: {e}"))?;
-
         Ok(())
     }
 
@@ -336,74 +228,51 @@ impl AppState {
         cwd: &Path,
     ) -> InternalSession {
         if let Some(id) = session_id {
-            // Try to load existing session
             if let Some(session) = self.load_session(id).await {
                 return session;
             }
         }
-
-        // Create new session
         let session = InternalSession::new(cwd);
-
-        // Persist to disk and cache in memory
         if let Err(e) = self.save_session(&session).await {
             log::warn!("failed to persist new session {}: {e}", session.id);
         }
-
         session
     }
 
     /// Load a session from disk
     pub async fn load_session(&self, session_id: &str) -> Option<InternalSession> {
         validate_session_id(session_id).ok()?;
-
         // Use write lock directly to avoid TOCTOU race between read and write
         let mut sessions = self.sessions.write().await;
-
-        // Check in-memory cache first
         if let Some(session) = sessions.get(session_id) {
             return Some(session.clone());
         }
-
-        // Try to load from disk
         let session_path = self.sessions_dir.join(format!("{session_id}.json"));
         if !session_path.exists() {
             return None;
         }
-
         let content = tokio::fs::read_to_string(&session_path).await.ok()?;
         let session: InternalSession = serde_json::from_str(&content).ok()?;
-
-        // Cache in memory
         sessions.insert(session_id.to_string(), session.clone());
-
         Some(session)
     }
 
     /// Save a session to disk
     pub async fn save_session(&self, session: &InternalSession) -> Result<(), String> {
         validate_session_id(&session.id)?;
-
-        // Ensure sessions directory exists
         tokio::fs::create_dir_all(&self.sessions_dir)
             .await
             .map_err(|e| format!("Failed to create sessions directory: {e}"))?;
-
-        // Save to disk first — if this fails, memory stays consistent with disk
         let session_path = self.sessions_dir.join(format!("{}.json", session.id));
         let content = serde_json::to_string_pretty(session)
             .map_err(|e| format!("Failed to serialize session: {e}"))?;
-
         tokio::fs::write(&session_path, content)
             .await
             .map_err(|e| format!("Failed to write session: {e}"))?;
-
-        // Cache in memory only after disk write succeeds
         self.sessions
             .write()
             .await
             .insert(session.id.clone(), session.clone());
-
         Ok(())
     }
 
@@ -412,24 +281,19 @@ impl AppState {
         if !self.sessions_dir.exists() {
             return Ok(Vec::new());
         }
-
         let mut entries = tokio::fs::read_dir(&self.sessions_dir)
             .await
             .map_err(|e| format!("Failed to read sessions directory: {e}"))?;
-
         let mut sessions = Vec::new();
         let mem_cache = self.sessions.read().await;
-
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().map(|e| e == "json").unwrap_or(false) {
-                // Extract session ID from filename to check in-memory cache first
                 let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 if let Some(cached) = mem_cache.get(file_stem) {
                     sessions.push(cached.clone());
                     continue;
                 }
-                // Not in cache — load from disk
                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
                     if let Ok(session) = serde_json::from_str::<InternalSession>(&content) {
                         sessions.push(session);
@@ -437,28 +301,20 @@ impl AppState {
                 }
             }
         }
-
-        // Sort by updated_at descending
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-
         Ok(sessions)
     }
 
     /// Delete a session
     pub async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         validate_session_id(session_id)?;
-
-        // Remove from memory
         self.sessions.write().await.remove(session_id);
-
-        // Remove from disk
         let session_path = self.sessions_dir.join(format!("{session_id}.json"));
         if session_path.exists() {
             tokio::fs::remove_file(&session_path)
                 .await
                 .map_err(|e| format!("Failed to delete session: {e}"))?;
         }
-
         Ok(())
     }
 }
@@ -472,6 +328,7 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::{NoContext, Timestamp, Uuid};
 
     #[test]
     fn test_session_creation() {
@@ -513,13 +370,5 @@ mod tests {
     #[test]
     fn test_validate_session_id_accepts_legacy_hex_id() {
         assert!(validate_session_id("0000019dc93bab86dfd7032f").is_ok());
-    }
-
-    #[test]
-    fn test_settings_default() {
-        let settings = Settings::default();
-        assert_eq!(settings.model, "claude-sonnet-4-6");
-        assert_eq!(settings.max_tokens, 200000);
-        assert_eq!(settings.permission_mode, PermissionMode::Ask);
     }
 }

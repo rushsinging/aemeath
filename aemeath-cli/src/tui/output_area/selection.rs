@@ -179,7 +179,7 @@ impl super::OutputArea {
 
             let chars: Vec<char> = self.lines[logic_idx].content.chars().collect();
             let from = if logic_idx == start_logic {
-                start_col.as_usize()
+                start_col.as_usize().min(chars.len())
             } else {
                 0
             };
@@ -188,6 +188,16 @@ impl super::OutputArea {
             } else {
                 chars.len()
             };
+            if from > to {
+                log::debug!(
+                    "get_selected_text: clamped invalid range logic={}, from={}, to={}, chars_len={}",
+                    logic_idx,
+                    from,
+                    to,
+                    chars.len()
+                );
+                continue;
+            }
             log::debug!(
                 "get_selected_text: logic={}, from={}, to={}, chars_len={}, content={:?}",
                 logic_idx,
@@ -228,5 +238,43 @@ impl super::OutputArea {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{LineStyle, OutputArea, OutputLine};
+    use aemeath_core::string_idx::CharIdx;
+
+    #[test]
+    fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "短".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.selection_start = Some((0, CharIdx::new(4)));
+        output.selection_end = Some((0, CharIdx::new(6)));
+
+        let selected = output.get_selected_text();
+
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_get_selected_text_skips_line_when_clamped_start_exceeds_end() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "ab".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.selection_start = Some((0, CharIdx::new(4)));
+        output.selection_end = Some((0, CharIdx::new(1)));
+
+        let selected = output.get_selected_text();
+
+        assert_eq!(selected, Some("b".to_string()));
     }
 }
