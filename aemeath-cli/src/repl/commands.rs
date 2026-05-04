@@ -126,6 +126,7 @@ pub(crate) async fn handle_slash_command(
                     created_at: existing.created_at.clone(),
                     updated_at: session::now_iso(),
                     metadata: existing.metadata.clone(),
+                    tasks: None,
                 }
             } else {
                 let mut s = Session::new(session_id.to_string(), cwd.to_string_lossy().to_string());

@@ -4,6 +4,8 @@
 use aemeath_core::message::Message;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::provider::{LlmProvider, StreamHandler};
@@ -21,7 +23,7 @@ pub struct OllamaProvider {
     pub(crate) api_key: String,
     pub(crate) base_url: String,
     pub(crate) model: String,
-    pub(crate) max_tokens: u32,
+    pub(crate) max_tokens: Arc<AtomicU32>,
     /// If false, send `think: false` to disable reasoning mode for models
     /// that support it (qwen3, deepseek-r1, gpt-oss, etc.)
     pub(crate) reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -53,7 +55,7 @@ impl OllamaProvider {
             },
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
-            max_tokens,
+            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
             http: reqwest::Client::builder()
@@ -96,6 +98,10 @@ impl OllamaProvider {
                 .map_err(|e| crate::LlmError::Config(e.to_string()))?,
         );
         Ok(headers)
+    }
+
+    pub(crate) fn current_max_tokens(&self) -> u32 {
+        self.max_tokens.load(Ordering::Relaxed)
     }
 }
 
@@ -273,5 +279,15 @@ impl LlmProvider for OllamaProvider {
 
     fn is_reasoning(&self) -> bool {
         self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_max_tokens(&self, max_tokens: u32) {
+        if max_tokens > 0 {
+            self.max_tokens.store(max_tokens, Ordering::Relaxed);
+        }
+    }
+
+    fn max_tokens(&self) -> u32 {
+        self.current_max_tokens()
     }
 }

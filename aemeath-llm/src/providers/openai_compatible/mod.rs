@@ -10,6 +10,7 @@ use aemeath_core::provider::ApiDriverKind;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use std::error::Error as StdError;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -23,6 +24,7 @@ pub(crate) use stream::parse_openai_stream;
 pub enum ReasoningConfig {
     Bool(bool),
     Object(serde_json::Value),
+    ThinkingBudget(u32),
 }
 
 impl ReasoningConfig {
@@ -33,8 +35,18 @@ impl ReasoningConfig {
                 .or_else(|| value.get("reasoning_effort"))
                 .and_then(|v| v.as_str())
                 .map(ToOwned::to_owned),
+            Self::ThinkingBudget(tokens) => Some(effort_from_thinking_tokens(*tokens).to_string()),
             Self::Bool(_) => None,
         }
+    }
+}
+
+fn effort_from_thinking_tokens(tokens: u32) -> &'static str {
+    match tokens {
+        0..=1024 => "low",
+        1025..=8192 => "medium",
+        8193..=32768 => "high",
+        _ => "xhigh",
     }
 }
 
@@ -65,6 +77,9 @@ impl ChatApiDriver for OpenAiDriver {
     ) {
         if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
             request_body["reasoning"] = reasoning.clone();
+        } else if let Some(ReasoningConfig::ThinkingBudget(tokens)) = reasoning_config {
+            request_body["reasoning"] =
+                serde_json::json!({"effort": effort_from_thinking_tokens(*tokens)});
         }
     }
 }
@@ -92,8 +107,11 @@ impl ChatApiDriver for LiteLlmDriver {
         reasoning_config: Option<&ReasoningConfig>,
         _reasoning_enabled: bool,
     ) {
-        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
-            request_body["reasoning"] = reasoning.clone();
+        // LiteLLM proxy does not support the `reasoning` parameter.
+        // Extract effort and pass it as top-level `reasoning_effort` instead,
+        // which LiteLLM forwards to the upstream OpenAI-compatible endpoint.
+        if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
+            request_body["reasoning_effort"] = serde_json::Value::String(effort);
         }
     }
 }
@@ -112,7 +130,7 @@ pub struct OpenAICompatibleProvider {
     api_key: String,
     base_url: String,
     model: String,
-    max_tokens: u32,
+    max_tokens: Arc<AtomicU32>,
     user_agent: String,
     http: reqwest::Client,
     max_retries: u32,
@@ -143,7 +161,7 @@ impl OpenAICompatibleProvider {
             model: model.unwrap_or_else(|| "gpt-4o".to_string()),
             config,
             api_key,
-            max_tokens,
+            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -177,6 +195,29 @@ impl OpenAICompatibleProvider {
 
     pub(crate) fn chat_url(&self) -> String {
         format!("{}{}", self.base_url, self.config.chat_api_suffix)
+    }
+
+    pub(crate) fn current_max_tokens(&self) -> u32 {
+        self.max_tokens.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn base_request_body(
+        &self,
+        messages: Vec<serde_json::Value>,
+        stream: bool,
+    ) -> serde_json::Value {
+        let mut request_body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.current_max_tokens(),
+            "stream": stream,
+        });
+
+        if stream {
+            request_body["stream_options"] = serde_json::json!({ "include_usage": true });
+        }
+
+        request_body
     }
 
     pub(crate) fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
@@ -219,13 +260,7 @@ impl LlmProvider for OpenAICompatibleProvider {
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "max_tokens": self.max_tokens,
-            "stream": true,
-            "stream_options": { "include_usage": true }
-        });
+        let mut request_body = self.base_request_body(openai_messages, true);
 
         self.apply_reasoning_fields(&mut request_body);
 
@@ -450,6 +485,16 @@ impl LlmProvider for OpenAICompatibleProvider {
             .ok()
             .and_then(|guard| guard.as_ref().and_then(ReasoningConfig::as_effort))
     }
+
+    fn set_max_tokens(&self, max_tokens: u32) {
+        if max_tokens > 0 {
+            self.max_tokens.store(max_tokens, Ordering::Relaxed);
+        }
+    }
+
+    fn max_tokens(&self) -> u32 {
+        self.current_max_tokens()
+    }
 }
 
 #[cfg(test)]
@@ -512,13 +557,14 @@ mod tests {
     }
 
     #[test]
-    fn litellm_object_reasoning_passes_through_reasoning() {
+    fn litellm_object_reasoning_sends_reasoning_effort() {
         let config = ReasoningConfig::Object(json!({"effort":"high"}));
         let mut body = base_body();
 
         LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
-        assert_eq!(body.get("reasoning"), Some(&json!({"effort":"high"})));
+        assert_eq!(body.get("reasoning_effort"), Some(&json!("high")));
+        assert!(body.get("reasoning").is_none());
         assert!(body.get("thinking").is_none());
     }
 
@@ -530,6 +576,36 @@ mod tests {
         LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
         assert_no_reasoning_fields(&body);
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn openai_thinking_budget_maps_to_medium_reasoning_effort() {
+        let config = ReasoningConfig::ThinkingBudget(4096);
+        let mut body = base_body();
+
+        OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_eq!(body.get("reasoning"), Some(&json!({"effort":"medium"})));
+    }
+
+    #[test]
+    fn litellm_thinking_budget_maps_to_top_level_reasoning_effort() {
+        let config = ReasoningConfig::ThinkingBudget(40000);
+        let mut body = base_body();
+
+        LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+        assert_eq!(body.get("reasoning_effort"), Some(&json!("xhigh")));
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn thinking_budget_effort_boundaries() {
+        assert_eq!(effort_from_thinking_tokens(1024), "low");
+        assert_eq!(effort_from_thinking_tokens(1025), "medium");
+        assert_eq!(effort_from_thinking_tokens(8193), "high");
+        assert_eq!(effort_from_thinking_tokens(32769), "xhigh");
     }
 
     #[test]
@@ -543,5 +619,41 @@ mod tests {
         assert_eq!(zhipu.source_key, "source-zhipu");
         assert_eq!(zhipu.api, ApiDriverKind::Zhipu);
         assert_eq!(zhipu.chat_api_suffix, "/chat/completions");
+    }
+
+    #[test]
+    fn openai_provider_set_max_tokens_updates_request_body() {
+        let config = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "openai");
+        let provider = OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            None,
+            Some("test-model".to_string()),
+            32000,
+            false,
+            None,
+        );
+
+        provider.set_max_tokens(8192);
+        let body = provider.base_request_body(Vec::new(), false);
+        assert_eq!(body.get("max_tokens"), Some(&json!(8192)));
+    }
+
+    #[test]
+    fn openai_provider_set_max_tokens_zero_is_ignored() {
+        let config = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "openai");
+        let provider = OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            None,
+            Some("test-model".to_string()),
+            32000,
+            false,
+            None,
+        );
+
+        provider.set_max_tokens(0);
+        let body = provider.base_request_body(Vec::new(), false);
+        assert_eq!(body.get("max_tokens"), Some(&json!(32000)));
     }
 }

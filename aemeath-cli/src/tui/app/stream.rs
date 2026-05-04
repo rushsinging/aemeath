@@ -779,18 +779,20 @@ pub async fn process_in_background(
                                     // Set up progress channel so CliAgentRunner can stream
                                     // per-turn output back to the TUI while the sub-agent runs.
                                     let (prog_tx, mut prog_rx) =
-                                        tokio::sync::mpsc::channel::<String>(32);
+                                        tokio::sync::mpsc::channel::<
+                                            aemeath_core::tool::AgentProgressEvent,
+                                        >(32);
                                     ag_ctx.progress_tx = Some(prog_tx);
 
                                     let call_id = call.id.clone();
                                     let ui_tx = tx.clone();
                                     // Spawn a task that forwards progress to the UI
                                     let forward_handle = tokio::spawn(async move {
-                                        while let Some(text) = prog_rx.recv().await {
+                                        while let Some(event) = prog_rx.recv().await {
                                             let _ = ui_tx
                                                 .send(UiEvent::AgentProgress {
                                                     tool_id: call_id.clone(),
-                                                    text,
+                                                    event,
                                                 })
                                                 .await;
                                         }

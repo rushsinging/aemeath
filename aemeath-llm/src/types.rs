@@ -42,11 +42,57 @@ impl SystemBlock {
 pub struct CreateMessageRequest {
     pub model: String,
     pub max_tokens: u32,
-    pub system: Vec<SystemBlock>,
-    pub messages: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub thinking_max_tokens: u32,
+    system: Vec<SystemBlock>,
+    messages: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<serde_json::Value>,
-    pub stream: bool,
+    tools: Vec<serde_json::Value>,
+    stream: bool,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+impl CreateMessageRequest {
+    pub fn new(
+        model: String,
+        max_tokens: u32,
+        thinking_max_tokens: u32,
+        system: Vec<SystemBlock>,
+        messages: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        stream: bool,
+    ) -> Self {
+        Self {
+            model,
+            max_tokens,
+            thinking_max_tokens,
+            system,
+            messages,
+            tools,
+            stream,
+        }
+    }
+
+    pub fn into_json(self) -> serde_json::Value {
+        let mut value = serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(tokens) = value
+            .get("thinking_max_tokens")
+            .and_then(|v| v.as_u64())
+            .filter(|tokens| *tokens > 0)
+        {
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove("thinking_max_tokens");
+                obj.insert(
+                    "thinking".to_string(),
+                    serde_json::json!({"type": "enabled", "budget_tokens": tokens}),
+                );
+            }
+        }
+        value
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

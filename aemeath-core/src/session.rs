@@ -1,5 +1,6 @@
 use crate::message::Message;
 use crate::state;
+use crate::task::TaskSnapshot;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -36,6 +37,9 @@ pub struct Session {
     /// Session metadata for organization
     #[serde(default)]
     pub metadata: SessionMetadata,
+    /// Task snapshot for resuming in-progress tasks
+    #[serde(default)]
+    pub tasks: Option<TaskSnapshot>,
 }
 
 impl Session {
@@ -52,6 +56,7 @@ impl Session {
                 project,
                 ..Default::default()
             },
+            tasks: None,
         }
     }
 

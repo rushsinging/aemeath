@@ -74,4 +74,12 @@ pub trait LlmProvider: Send + Sync {
     fn reasoning_effort(&self) -> Option<String> {
         None
     }
+
+    /// Set max_tokens override at runtime. `0` means inherit/default and should be ignored.
+    fn set_max_tokens(&self, _max_tokens: u32) {}
+
+    /// Get current runtime max_tokens override. `0` means inherit/default.
+    fn max_tokens(&self) -> u32 {
+        0
+    }
 }

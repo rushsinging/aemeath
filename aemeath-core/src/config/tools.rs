@@ -59,6 +59,16 @@ pub struct AgentRoleConfig {
     /// - `Some(false)` — force disable thinking for this role
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<bool>,
+
+    /// Maximum output token budget for sub-agents using this role.
+    /// `None` and `Some(0)` both inherit/default; `Some(n > 0)` overrides.
+    #[serde(
+        default,
+        rename = "max_tokens",
+        alias = "maxTokens",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_tokens: Option<u32>,
 }
 
 /// Agent configuration
@@ -100,5 +110,34 @@ impl Default for AgentsConfig {
             roles: HashMap::new(),
             default_model: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_role_config_max_tokens_snake_case() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{ "max_tokens": 8192 }"#).unwrap();
+        assert_eq!(config.max_tokens, Some(8192));
+    }
+
+    #[test]
+    fn test_agent_role_config_max_tokens_zero_inherits() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{ "max_tokens": 0 }"#).unwrap();
+        assert_eq!(config.max_tokens, Some(0));
+    }
+
+    #[test]
+    fn test_agent_role_config_max_tokens_default_none() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(config.max_tokens, None);
+    }
+
+    #[test]
+    fn test_agent_role_config_max_tokens_camel_case_alias() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{ "maxTokens": 4096 }"#).unwrap();
+        assert_eq!(config.max_tokens, Some(4096));
     }
 }

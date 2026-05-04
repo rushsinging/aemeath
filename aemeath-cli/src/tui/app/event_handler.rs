@@ -126,18 +126,8 @@ impl super::App {
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
                 if !self.messages.is_empty() {
-                    use aemeath_core::session::{self as sess, Session};
-                    let mut s = Session::new(
-                        self.session_id.clone(),
-                        self.cwd.to_string_lossy().to_string(),
-                    );
-                    s.messages = self.messages.clone();
-                    s.created_at = self
-                        .session_created_at
-                        .clone()
-                        .unwrap_or_else(|| aemeath_core::session::now_iso());
-                    s.updated_at = aemeath_core::session::now_iso();
-                    if let Err(e) = sess::save_session(&s).await {
+                    let s = self.build_session(self.messages.clone()).await;
+                    if let Err(e) = aemeath_core::session::save_session(&s).await {
                         log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }

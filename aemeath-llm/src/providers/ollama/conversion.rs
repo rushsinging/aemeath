@@ -203,9 +203,10 @@ impl OllamaProviderConversion for OllamaProvider {
         });
 
         // ollama uses `options.num_predict` for max tokens
-        if self.max_tokens > 0 && self.max_tokens <= 128000 {
+        let max_tokens = self.current_max_tokens();
+        if max_tokens > 0 && max_tokens <= 128000 {
             request_body["options"] = serde_json::json!({
-                "num_predict": self.max_tokens
+                "num_predict": max_tokens
             });
         }
 

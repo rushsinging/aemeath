@@ -1,7 +1,7 @@
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use aemeath_core::message::Message;
 use aemeath_core::skill::Skill;
-use aemeath_core::tool::{ImageData, ToolRegistry};
+use aemeath_core::tool::{AgentProgressEvent, ImageData, ToolRegistry};
 use crossterm::{
     event::{Event, EventStream},
     execute,
@@ -68,7 +68,7 @@ pub enum UiEvent {
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
         tool_id: String,
-        text: String,
+        event: AgentProgressEvent,
     },
     /// Results from StopFailure hook (API error导致 agent 循环结束)
     StopFailureHook {
@@ -136,6 +136,8 @@ pub struct App {
     /// Session-local reminders for MemoryTool recap.
     pub session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     pub memory_config: aemeath_core::config::MemoryConfig,
+    /// Task store (shared with tools), cleared on /clear
+    pub task_store: Option<Arc<aemeath_core::task::TaskStore>>,
 }
 
 /// State for interactive AskUserQuestion option selection
@@ -207,11 +209,12 @@ impl App {
                 aemeath_core::memory::SessionReminders::new(),
             )),
             memory_config: aemeath_core::config::MemoryConfig::default(),
+            task_store: None,
         }
     }
 
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
-    pub(crate) fn reset_runtime_state(&mut self) {
+    pub(crate) async fn reset_runtime_state(&mut self) {
         self.total_input_tokens = 0;
         self.total_output_tokens = 0;
         self.total_api_calls = 0;
@@ -225,6 +228,10 @@ impl App {
         self.ask_user_state = None;
         if let Ok(mut reminders) = self.session_reminders.lock() {
             reminders.clear();
+        }
+        // Clear task store so stale tasks don't leak into new conversations
+        if let Some(ref ts) = self.task_store {
+            ts.clear().await;
         }
     }
 
@@ -264,13 +271,18 @@ impl App {
         self.context_size = context_size;
         self.status_bar.set_context_size(context_size as u64);
         self.status_bar.set_thinking(client.is_reasoning());
+        self.task_store = Some(task_store.clone());
 
         // Resume existing session if requested
         if let Some(ref id) = resume_id {
             match aemeath_core::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
-                    self.session_created_at = Some(s.created_at);
+                    self.session_created_at = Some(s.created_at.clone());
+                    // Restore task snapshot if present
+                    if let (Some(ts), Some(snapshot)) = (&self.task_store, s.tasks) {
+                        ts.restore(snapshot).await;
+                    }
                     let mut msgs = s.messages;
                     aemeath_core::message::sanitize_messages(&mut msgs);
                     let trimmed = msg_count - msgs.len();
@@ -413,16 +425,8 @@ impl App {
 
         // Auto-save session on exit
         if !self.messages.is_empty() {
-            use aemeath_core::session::{self as sess, now_iso, Session};
-            let s = Session {
-                id: self.session_id.clone(),
-                cwd: self.cwd.to_string_lossy().to_string(),
-                messages: self.messages.clone(),
-                created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
-                updated_at: now_iso(),
-                metadata: Default::default(),
-            };
-            if let Err(e) = sess::save_session(&s).await {
+            let s = self.build_session(self.messages.clone()).await;
+            if let Err(e) = aemeath_core::session::save_session(&s).await {
                 log::warn!("failed to auto-save session: {e}");
             }
         }
@@ -610,16 +614,8 @@ impl App {
                 }
                 Cmd::SaveSession(msgs) => {
                     if !msgs.is_empty() {
-                        use aemeath_core::session::{self as sess, now_iso, Session};
-                        let s = Session {
-                            id: self.session_id.clone(),
-                            cwd: self.cwd.to_string_lossy().to_string(),
-                            messages: msgs,
-                            created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
-                            updated_at: now_iso(),
-                            metadata: Default::default(),
-                        };
-                        if let Err(e) = sess::save_session(&s).await {
+                        let s = self.build_session(msgs).await;
+                        if let Err(e) = aemeath_core::session::save_session(&s).await {
                             log::warn!("failed to auto-save session on sync: {e}");
                         }
                     }
@@ -678,6 +674,34 @@ impl App {
                 lines.push(format!("{} #{} {}{}", icon, t.id, t.subject, owner));
             }
             self.output_area.set_task_status(lines);
+        }
+    }
+
+    /// Build a Session from current state, including task snapshot.
+    async fn build_session(
+        &self,
+        messages: Vec<aemeath_core::message::Message>,
+    ) -> aemeath_core::session::Session {
+        use aemeath_core::session::{now_iso, Session};
+        let task_snapshot = match &self.task_store {
+            Some(ts) => {
+                let snap = ts.snapshot().await;
+                if snap.tasks.is_empty() {
+                    None
+                } else {
+                    Some(snap)
+                }
+            }
+            None => None,
+        };
+        Session {
+            id: self.session_id.clone(),
+            cwd: self.cwd.to_string_lossy().to_string(),
+            messages,
+            created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+            updated_at: now_iso(),
+            metadata: Default::default(),
+            tasks: task_snapshot,
         }
     }
 

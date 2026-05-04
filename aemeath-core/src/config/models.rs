@@ -1,7 +1,7 @@
 //! 多来源模型配置
 
 use crate::provider::ApiDriverKind;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 /// Multi-source model configuration.
@@ -356,7 +356,7 @@ pub struct ProviderModelsConfig {
 }
 
 /// A single model entry within a source
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
 pub struct ModelEntryConfig {
     /// Model ID (used in API calls)
     pub id: String,
@@ -374,8 +374,12 @@ pub struct ModelEntryConfig {
     pub context_window: usize,
 
     /// Maximum output tokens
-    #[serde(default, rename = "maxTokens")]
+    #[serde(default, rename = "max_tokens", alias = "maxTokens")]
     pub max_tokens: u32,
+
+    /// Maximum thinking tokens
+    #[serde(default, rename = "thinking_max_tokens", alias = "thinkingMaxTokens")]
+    pub thinking_max_tokens: u32,
 
     /// Reasoning / thinking mode for this model.
     /// - `None` (default) — use CLI flag / global default
@@ -390,6 +394,69 @@ pub struct ModelEntryConfig {
     /// - Valid values: `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+}
+
+/// Serde helper: deserialize `ModelEntryConfig` with flexible `reasoning` field.
+///
+/// Accepts:
+/// - `"reasoning": true/false`  → `Option<bool>` as-is
+/// - `"reasoning": { "effort": "medium" }` → `reasoning: Some(true)`,
+///   `reasoning_effort: Some("medium")` (merges into existing field)
+impl<'de> Deserialize<'de> for ModelEntryConfig {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            id: String,
+            #[serde(default)]
+            name: String,
+            #[serde(default)]
+            input: Vec<String>,
+            #[serde(default, rename = "contextWindow")]
+            context_window: usize,
+            #[serde(default, rename = "max_tokens", alias = "maxTokens")]
+            max_tokens: u32,
+            #[serde(default, rename = "thinking_max_tokens", alias = "thinkingMaxTokens")]
+            thinking_max_tokens: u32,
+            #[serde(default)]
+            reasoning: FlexReasoning,
+            #[serde(default)]
+            reasoning_effort: Option<String>,
+        }
+
+        /// Flexible reasoning: accepts bool or { "effort": "..." } object.
+        #[derive(Deserialize, Default)]
+        #[serde(untagged)]
+        enum FlexReasoning {
+            #[default]
+            None,
+            Bool(bool),
+            Effort {
+                effort: String,
+            },
+        }
+
+        let raw = Raw::deserialize(de)?;
+        let (reasoning, reasoning_effort) = match raw.reasoning {
+            FlexReasoning::None => (None, raw.reasoning_effort),
+            FlexReasoning::Bool(b) => (Some(b), raw.reasoning_effort),
+            FlexReasoning::Effort { effort } => {
+                // Object form implies reasoning is enabled; effort merges
+                // (field-level value wins over object-level)
+                (Some(true), Some(raw.reasoning_effort.unwrap_or(effort)))
+            }
+        };
+
+        Ok(ModelEntryConfig {
+            id: raw.id,
+            name: raw.name,
+            input: raw.input,
+            context_window: raw.context_window,
+            max_tokens: raw.max_tokens,
+            thinking_max_tokens: raw.thinking_max_tokens,
+            reasoning,
+            reasoning_effort,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -411,6 +478,7 @@ mod tests {
                     input: vec!["text".to_string()],
                     context_window: 200_000,
                     max_tokens: 32_000,
+                    thinking_max_tokens: 0,
                     reasoning: Some(false),
                     reasoning_effort: None,
                 }],
@@ -490,6 +558,99 @@ mod tests {
         let json = r#"{"id":"gpt-4o"}"#;
         let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
         assert!(entry.reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_object_effort() {
+        let json = r#"{"id":"gpt-5.5","reasoning":{"effort":"medium"}}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.reasoning, Some(true));
+        assert_eq!(entry.reasoning_effort, Some("medium".to_string()));
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_object_effort_field_wins() {
+        // reasoning_effort field takes precedence over object effort
+        let json = r#"{"id":"gpt-5.5","reasoning":{"effort":"low"},"reasoning_effort":"high"}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.reasoning, Some(true));
+        assert_eq!(entry.reasoning_effort, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_bool_true() {
+        let json = r#"{"id":"glm-5.1","reasoning":true}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.reasoning, Some(true));
+        assert!(entry.reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_bool_false() {
+        let json = r#"{"id":"gpt-5.5","reasoning":false}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.reasoning, Some(false));
+        assert!(entry.reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn test_model_entry_reasoning_absent() {
+        let json = r#"{"id":"gpt-4o","name":"GPT-4o"}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert!(entry.reasoning.is_none());
+        assert!(entry.reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn test_model_entry_thinking_max_tokens_deserialize() {
+        let json = r#"{"id":"claude-sonnet-4-6","thinking_max_tokens":4096}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.thinking_max_tokens, 4096);
+    }
+
+    #[test]
+    fn test_model_entry_camel_case_token_aliases_deserialize() {
+        let json = r#"{"id":"claude-sonnet-4-6","maxTokens":8192,"thinkingMaxTokens":4096}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.max_tokens, 8192);
+        assert_eq!(entry.thinking_max_tokens, 4096);
+    }
+
+    #[test]
+    fn test_model_entry_thinking_max_tokens_default_zero() {
+        let json = r#"{"id":"claude-sonnet-4-6"}"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.thinking_max_tokens, 0);
+    }
+
+    #[test]
+    fn test_full_config_with_reasoning_object() {
+        let json = r#"{
+            "models": {
+                "providers": {
+                    "LiteLLM": {
+                        "baseUrl": "https://litellm.example.com",
+                        "api": "litellm",
+                        "models": [
+                            {
+                                "id": "gpt-5.5",
+                                "reasoning": { "effort": "medium" },
+                                "contextWindow": 1000000,
+                                "maxTokens": 128000
+                            }
+                        ]
+                    }
+                }
+            }
+        }"#;
+        use crate::config::Config;
+        let config: Config = serde_json::from_str(json).unwrap();
+        let resolved = config
+            .models
+            .resolve_model_selection("LiteLLM/gpt-5.5")
+            .unwrap();
+        assert_eq!(resolved.model.reasoning, Some(true));
+        assert_eq!(resolved.model.reasoning_effort, Some("medium".to_string()));
     }
 
     fn resolver_config() -> ModelsConfig {

@@ -16,12 +16,7 @@ impl OpenAICompatibleProvider {
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let mut request_body = serde_json::json!({
-            "model": self.model,
-            "messages": openai_messages,
-            "max_tokens": self.max_tokens,
-            "stream": false
-        });
+        let mut request_body = self.base_request_body(openai_messages, false);
 
         self.apply_reasoning_fields(&mut request_body);
         if !tools.is_empty() {

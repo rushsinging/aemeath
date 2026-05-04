@@ -3,6 +3,8 @@
 use aemeath_core::message::Message;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::provider::{LlmProvider, StreamHandler};
@@ -54,7 +56,8 @@ pub struct AnthropicProvider {
     api_key: String,
     base_url: String,
     model: String,
-    max_tokens: u32,
+    max_tokens: Arc<AtomicU32>,
+    thinking_max_tokens: u32,
     user_agent: String,
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
@@ -69,12 +72,14 @@ impl AnthropicProvider {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
+        thinking_max_tokens: u32,
     ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
-            max_tokens,
+            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
+            thinking_max_tokens,
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -94,7 +99,15 @@ impl AnthropicProvider {
     /// Set request timeout in seconds
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self.http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(secs))
+            .build()
+            .expect("failed to create HTTP client with custom timeout");
         self
+    }
+
+    pub(crate) fn current_max_tokens(&self) -> u32 {
+        self.max_tokens.load(Ordering::Relaxed)
     }
 
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
@@ -130,14 +143,15 @@ impl AnthropicProvider {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
 
-        let request = CreateMessageRequest {
-            model: self.model.clone(),
-            max_tokens: self.max_tokens,
-            system: system.to_vec(),
-            messages: api_messages,
-            tools: tool_schemas.to_vec(),
-            stream: false,
-        };
+        let request = CreateMessageRequest::new(
+            self.model.clone(),
+            self.current_max_tokens(),
+            self.thinking_max_tokens,
+            system.to_vec(),
+            api_messages,
+            tool_schemas.to_vec(),
+            false,
+        );
 
         let headers = self.build_headers()?;
 
@@ -146,7 +160,7 @@ impl AnthropicProvider {
             .http
             .post(&url)
             .headers(headers)
-            .json(&request)
+            .json(&request.clone().into_json())
             .send()
             .await
             .map_err(|e| {
@@ -261,14 +275,15 @@ impl LlmProvider for AnthropicProvider {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
 
-        let request = CreateMessageRequest {
-            model: self.model.clone(),
-            max_tokens: self.max_tokens,
-            system: system.to_vec(),
-            messages: api_messages,
-            tools: tool_schemas.to_vec(),
-            stream: true,
-        };
+        let request = CreateMessageRequest::new(
+            self.model.clone(),
+            self.current_max_tokens(),
+            self.thinking_max_tokens,
+            system.to_vec(),
+            api_messages,
+            tool_schemas.to_vec(),
+            true,
+        );
 
         let headers = self.build_headers()?;
 
@@ -294,7 +309,7 @@ impl LlmProvider for AnthropicProvider {
                 .http
                 .post(format!("{}/v1/messages", self.base_url))
                 .headers(headers.clone())
-                .json(&request)
+                .json(&request.clone().into_json())
                 .send();
 
             let response = tokio::select! {
@@ -430,6 +445,60 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn is_reasoning(&self) -> bool {
-        true // Anthropic always supports thinking
+        self.thinking_max_tokens > 0
+    }
+
+    fn set_max_tokens(&self, max_tokens: u32) {
+        if max_tokens > 0 {
+            self.max_tokens.store(max_tokens, Ordering::Relaxed);
+        }
+    }
+
+    fn max_tokens(&self) -> u32 {
+        self.current_max_tokens()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_request_serializes_thinking_budget() {
+        let request = CreateMessageRequest::new(
+            "claude-sonnet-4-6".to_string(),
+            8192,
+            4096,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            true,
+        );
+
+        let value = request.into_json();
+        assert_eq!(
+            value.get("thinking").unwrap().get("type"),
+            Some(&serde_json::json!("enabled"))
+        );
+        assert_eq!(
+            value.get("thinking").unwrap().get("budget_tokens"),
+            Some(&serde_json::json!(4096))
+        );
+    }
+
+    #[test]
+    fn anthropic_request_omits_thinking_when_budget_zero() {
+        let request = CreateMessageRequest::new(
+            "claude-sonnet-4-6".to_string(),
+            8192,
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            true,
+        );
+
+        let value = request.into_json();
+        assert!(value.get("thinking").is_none());
     }
 }

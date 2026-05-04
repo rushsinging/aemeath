@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use aemeath_core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+
 use crate::tui::output_area::{build_diff_lines, display, LineStyle, OutputLine, INDENT};
 
 // ── ToolDisplay trait ──────────────────────────────────────────────
@@ -490,6 +492,81 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskOutputDisplay)
 });
 
+struct EnterPlanModeDisplay;
+impl ToolDisplay for EnterPlanModeDisplay {
+    fn name(&self) -> &str {
+        "EnterPlanMode"
+    }
+    fn format_header(&self, input: &serde_json::Value) -> String {
+        let reason = input.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+        if reason.is_empty() {
+            "📋 Enter Plan Mode".to_string()
+        } else {
+            format!("📋 Plan: {reason}")
+        }
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec!["Tool calls will be simulated, not executed.".to_string()]
+    }
+    fn result_max_lines(&self) -> usize {
+        0
+    }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ Failed to enter plan mode".to_string()]
+        } else {
+            vec![]
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "EnterPlanMode",
+    display: || Box::new(EnterPlanModeDisplay)
+});
+
+struct ExitPlanModeDisplay;
+impl ToolDisplay for ExitPlanModeDisplay {
+    fn name(&self) -> &str {
+        "ExitPlanMode"
+    }
+    fn format_header(&self, input: &serde_json::Value) -> String {
+        let execute = input
+            .get("execute")
+            .and_then(|e| e.as_bool())
+            .unwrap_or(false);
+        if execute {
+            "▶ Execute Plan".to_string()
+        } else {
+            "▶ Exit Plan Mode".to_string()
+        }
+    }
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let execute = input
+            .get("execute")
+            .and_then(|e| e.as_bool())
+            .unwrap_or(false);
+        if execute {
+            vec!["Planned actions will now be executed.".to_string()]
+        } else {
+            vec!["Returning to normal execution.".to_string()]
+        }
+    }
+    fn result_max_lines(&self) -> usize {
+        0
+    }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ Failed to exit plan mode".to_string()]
+        } else {
+            vec![]
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "ExitPlanMode",
+    display: || Box::new(ExitPlanModeDisplay)
+});
+
 fn debug_log(msg: &str) {
     use std::io::Write;
     let path = dirs::home_dir()
@@ -538,6 +615,45 @@ fn truncate_json(raw: &str) -> String {
     } else {
         raw.to_string()
     }
+}
+
+fn format_agent_tool_calls(calls: &[AgentToolCallProgress]) -> String {
+    let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();
+    for call in calls {
+        if let Some((_, summaries)) = grouped.iter_mut().find(|(name, _)| *name == call.name) {
+            summaries.push(call.summary.as_str());
+        } else {
+            grouped.push((call.name.as_str(), vec![call.summary.as_str()]));
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(name, summaries)| {
+            let count = summaries.len();
+            let visible = summaries
+                .iter()
+                .filter(|summary| !summary.is_empty())
+                .take(3)
+                .copied()
+                .collect::<Vec<_>>();
+            let suffix = if visible.is_empty() {
+                String::new()
+            } else {
+                let mut text = visible.join(", ");
+                if count > 3 {
+                    text.push_str(&format!(" +{} more", count - 3));
+                }
+                format!(": {text}")
+            };
+            if count > 1 {
+                format!("{name} ×{count}{suffix}")
+            } else {
+                format!("{name}{suffix}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 impl super::OutputArea {
@@ -639,6 +755,42 @@ impl super::OutputArea {
         }
 
         format_tool_call("TodoWrite", raw_json)
+    }
+
+    pub fn push_agent_progress(&mut self, tool_id: &str, event: AgentProgressEvent) {
+        match event.kind {
+            AgentProgressKind::ToolCalls { calls } => {
+                self.finish_streaming();
+                let summary = format_agent_tool_calls(&calls);
+                let content = format!("{INDENT}↳ {summary}");
+                if let Some(line) = self.lines.iter_mut().rev().find(|line| {
+                    line.tool_id.as_deref() == Some(tool_id)
+                        && line.content.starts_with(&format!("{INDENT}↳ "))
+                }) {
+                    line.content = content;
+                    line.style = LineStyle::System;
+                    return;
+                }
+
+                let progress_line = OutputLine {
+                    content,
+                    style: LineStyle::System,
+                    tool_id: Some(tool_id.to_string()),
+                };
+                let insert_at = self
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, line)| line.tool_id.as_deref() == Some(tool_id))
+                    .map(|(idx, _)| idx + 1)
+                    .unwrap_or(self.lines.len());
+                self.insert_lines_at(insert_at, vec![progress_line]);
+            }
+            AgentProgressKind::Message { text } => {
+                self.push_tool_progress(tool_id, &text);
+            }
+        }
     }
 
     pub fn push_tool_progress(&mut self, tool_id: &str, text: &str) {
@@ -814,5 +966,132 @@ impl super::OutputArea {
         };
 
         self.insert_lines_at(insert_at, result_lines);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::OutputArea;
+    use aemeath_core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+
+    #[test]
+    fn test_push_agent_progress_replaces_tool_calls_for_same_agent() {
+        let mut output = OutputArea::new();
+
+        output.push_agent_progress(
+            "agent-1",
+            tool_calls_event(1, vec![call("1", "Read", "old.rs")]),
+        );
+        output.push_agent_progress(
+            "agent-1",
+            tool_calls_event(
+                2,
+                vec![
+                    call("2", "Read", "new.rs"),
+                    call("3", "Grep", "\"needle\" in src"),
+                ],
+            ),
+        );
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref() == Some("agent-1"))
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching, vec!["  ↳ Read: new.rs | Grep: \"needle\" in src"]);
+    }
+
+    #[test]
+    fn test_push_agent_progress_keeps_different_agent_tool_calls_separate() {
+        let mut output = OutputArea::new();
+
+        output.push_agent_progress(
+            "agent-1",
+            tool_calls_event(1, vec![call("1", "Read", "a.rs")]),
+        );
+        output.push_agent_progress(
+            "agent-2",
+            tool_calls_event(1, vec![call("2", "Bash", "cargo check")]),
+        );
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref().is_some())
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching, vec!["  ↳ Read: a.rs", "  ↳ Bash: cargo check"]);
+    }
+
+    #[test]
+    fn test_push_agent_progress_groups_duplicate_tools_without_showing_turn() {
+        let mut output = OutputArea::new();
+
+        output.push_agent_progress(
+            "agent-1",
+            tool_calls_event(
+                7,
+                vec![
+                    call("1", "Read", "a.rs"),
+                    call("2", "Read", "b.rs"),
+                    call("3", "Read", "c.rs"),
+                    call("4", "Read", "d.rs"),
+                ],
+            ),
+        );
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref() == Some("agent-1"))
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching, vec!["  ↳ Read ×4: a.rs, b.rs, c.rs +1 more"]);
+    }
+
+    #[test]
+    fn test_push_agent_progress_appends_message_events() {
+        let mut output = OutputArea::new();
+
+        output.push_agent_progress("agent-1", message_event(1, "plain progress"));
+        output.push_agent_progress("agent-1", message_event(2, "another progress"));
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref() == Some("agent-1"))
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching, vec!["  ↳ plain progress", "  ↳ another progress"]);
+    }
+
+    fn tool_calls_event(sequence: usize, calls: Vec<AgentToolCallProgress>) -> AgentProgressEvent {
+        AgentProgressEvent {
+            sequence,
+            kind: AgentProgressKind::ToolCalls { calls },
+        }
+    }
+
+    fn message_event(sequence: usize, text: &str) -> AgentProgressEvent {
+        AgentProgressEvent {
+            sequence,
+            kind: AgentProgressKind::Message {
+                text: text.to_string(),
+            },
+        }
+    }
+
+    fn call(id: &str, name: &str, summary: &str) -> AgentToolCallProgress {
+        AgentToolCallProgress {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({}),
+            summary: summary.to_string(),
+        }
     }
 }

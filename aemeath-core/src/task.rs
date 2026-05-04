@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -183,8 +182,6 @@ impl Task {
 pub struct TaskStore {
     tasks: Arc<Mutex<HashMap<String, Task>>>,
     next_id: Arc<Mutex<u64>>,
-    /// Path for persistence
-    persistence_path: Option<PathBuf>,
     /// Monotonically increasing batch ID. Each `create()` call checks if a new
     /// turn has started (no non-completed tasks exist) and bumps the batch.
     current_batch: Arc<Mutex<u64>>,
@@ -195,81 +192,11 @@ impl TaskStore {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(Mutex::new(1)),
-            persistence_path: None,
             current_batch: Arc::new(Mutex::new(0)),
         }
     }
 
-    /// Create a TaskStore with persistence
-    pub async fn with_persistence(path: PathBuf) -> Self {
-        let store = Self {
-            tasks: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(Mutex::new(1)),
-            persistence_path: Some(path.clone()),
-            current_batch: Arc::new(Mutex::new(0)),
-        };
-        // Try to load existing data (async version for init)
-        store.load().await.ok();
-        store
-    }
-
-    /// Get default tasks file path (~/.aemeath/tasks.json)
-    pub fn default_path() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(".aemeath").join("tasks.json")
-    }
-
-    /// Load tasks from disk (async)
-    pub async fn load(&self) -> Result<(), String> {
-        let default_path = Self::default_path();
-        let path = self.persistence_path.as_ref().unwrap_or(&default_path);
-
-        if !path.exists() {
-            return Ok(());
-        }
-
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| format!("Failed to read tasks file: {}", e))?;
-
-        let data: TaskStoreData = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse tasks file: {}", e))?;
-
-        *self.tasks.lock().await = data.tasks;
-        *self.next_id.lock().await = data.next_id;
-
-        Ok(())
-    }
-
-    /// Save tasks to disk (async)
-    pub async fn save(&self) -> Result<(), String> {
-        let default_path = Self::default_path();
-        let path = self.persistence_path.as_ref().unwrap_or(&default_path);
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("Failed to create tasks directory: {}", e))?;
-        }
-
-        let data = TaskStoreData {
-            version: 1,
-            tasks: self.tasks.lock().await.clone(),
-            next_id: *self.next_id.lock().await,
-        };
-
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("Failed to serialize tasks: {}", e))?;
-
-        tokio::fs::write(path, content)
-            .await
-            .map_err(|e| format!("Failed to write tasks file: {}", e))?;
-
-        Ok(())
-    }
-
-    /// Create a new task with all fields (async for auto-save)
+    /// Create a new task with all fields
     pub async fn create(
         &self,
         subject: String,
@@ -322,14 +249,10 @@ impl TaskStore {
         };
 
         self.tasks.lock().await.insert(id, task.clone());
-        // Auto-save (safe now: no locks held)
-        if let Err(e) = self.save().await {
-            log::warn!("Failed to save task store: {}", e);
-        }
         task
     }
 
-    /// Create a task with priority (async for auto-save)
+    /// Create a task with priority
     pub async fn create_with_priority(
         &self,
         subject: String,
@@ -382,9 +305,6 @@ impl TaskStore {
         };
 
         self.tasks.lock().await.insert(id, task.clone());
-        if let Err(e) = self.save().await {
-            log::warn!("Failed to save task store: {}", e);
-        }
         task
     }
 
@@ -393,18 +313,12 @@ impl TaskStore {
         self.tasks.lock().await.get(id).cloned()
     }
 
-    /// Update a task (async for auto-save)
+    /// Update a task
     pub async fn update(&self, id: &str, f: impl FnOnce(&mut Task)) -> Option<Task> {
         let mut tasks = self.tasks.lock().await;
         if let Some(task) = tasks.get_mut(id) {
             f(task);
-            let task = task.clone();
-            // Auto-save on update
-            drop(tasks);
-            if let Err(e) = self.save().await {
-                log::warn!("Failed to save task store: {}", e);
-            }
-            Some(task)
+            Some(task.clone())
         } else {
             None
         }
@@ -474,6 +388,36 @@ impl TaskStore {
         }
     }
 
+    /// Take a snapshot of all non-deleted tasks for session persistence.
+    pub async fn snapshot(&self) -> TaskSnapshot {
+        let tasks = self.tasks.lock().await;
+        let next_id = *self.next_id.lock().await;
+        let current_batch = *self.current_batch.lock().await;
+        let tasks: Vec<Task> = tasks
+            .values()
+            .filter(|t| t.status != TaskStatus::Deleted)
+            .cloned()
+            .collect();
+        TaskSnapshot {
+            tasks,
+            next_id,
+            current_batch,
+        }
+    }
+
+    /// Restore tasks from a snapshot (e.g. on session resume).
+    pub async fn restore(&self, snapshot: TaskSnapshot) {
+        let mut tasks = self.tasks.lock().await;
+        let mut next_id = self.next_id.lock().await;
+        let mut batch = self.current_batch.lock().await;
+        tasks.clear();
+        for t in snapshot.tasks {
+            tasks.insert(t.id.clone(), t);
+        }
+        *next_id = snapshot.next_id;
+        *batch = snapshot.current_batch;
+    }
+
     /// List tasks belonging to the latest batch only.
     /// This shows the current turn's task list, including completed ones,
     /// but hides tasks from previous turns.
@@ -493,14 +437,10 @@ impl TaskStore {
         result
     }
 
-    /// Clear all deleted tasks from memory (async for auto-save)
+    /// Clear all deleted tasks from memory
     pub async fn purge_deleted(&self) {
         let mut tasks = self.tasks.lock().await;
         tasks.retain(|_, t| t.status != TaskStatus::Deleted);
-        drop(tasks);
-        if let Err(e) = self.save().await {
-            log::warn!("Failed to save task store: {}", e);
-        }
     }
 
     /// Get statistics (async)
@@ -549,20 +489,6 @@ impl Default for TaskStore {
     }
 }
 
-/// Serializable task store data with version for migration support
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TaskStoreData {
-    /// Schema version for migrations
-    #[serde(default = "default_version")]
-    pub version: u32,
-    tasks: HashMap<String, Task>,
-    next_id: u64,
-}
-
-fn default_version() -> u32 {
-    1
-}
-
 /// Task store statistics
 #[derive(Debug, Clone)]
 pub struct TaskStoreStats {
@@ -572,4 +498,12 @@ pub struct TaskStoreStats {
     pub completed: usize,
     pub deleted: usize,
     pub by_priority: HashMap<TaskPriority, usize>,
+}
+
+/// Serializable snapshot of a TaskStore for session persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSnapshot {
+    pub tasks: Vec<Task>,
+    pub next_id: u64,
+    pub current_batch: u64,
 }

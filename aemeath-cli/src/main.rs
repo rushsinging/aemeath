@@ -7,7 +7,7 @@ mod render;
 mod repl;
 mod tui;
 
-use aemeath_core::config::{models::ResolvedModel, Config};
+use aemeath_core::config::{models::ResolvedModel, Config, ModelEntryConfig};
 use aemeath_core::logging::{self, LogFile};
 use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
@@ -140,6 +140,32 @@ fn init_panic_hook() {
 }
 
 /// 处理 `aemeath models` 子命令
+fn format_token_limit_k(tokens: u32) -> String {
+    if tokens > 0 {
+        format!("{}k", tokens / 1000)
+    } else {
+        "-".to_string()
+    }
+}
+
+fn model_row_display(
+    provider: &str,
+    model: &ModelEntryConfig,
+) -> (String, String, String, String, String) {
+    let name = if model.name.is_empty() {
+        "-".to_string()
+    } else {
+        model.name.clone()
+    };
+    (
+        provider.to_string(),
+        model.id.clone(),
+        name,
+        format_token_limit_k(model.context_window as u32),
+        format_token_limit_k(model.max_tokens),
+    )
+}
+
 fn run_models_command(json: bool) {
     let config_file = load_config();
     match config_file {
@@ -165,22 +191,10 @@ fn run_models_command(json: bool) {
                 println!("{}", serde_json::to_string_pretty(&output).unwrap());
             } else {
                 // 表格输出 — 自适应列宽
-                let header = ("PROVIDER", "ID", "NAME", "CTX");
-                let rows: Vec<(&str, &str, &str, String)> = models
+                let header = ("PROVIDER", "ID", "NAME", "CTX", "MAX");
+                let rows: Vec<(String, String, String, String, String)> = models
                     .iter()
-                    .map(|(provider, m)| {
-                        let name = if m.name.is_empty() {
-                            "-"
-                        } else {
-                            m.name.as_str()
-                        };
-                        let ctx = if m.context_window > 0 {
-                            format!("{}k", m.context_window / 1000)
-                        } else {
-                            "-".to_string()
-                        };
-                        (provider.as_str(), m.id.as_str(), name, ctx)
-                    })
+                    .map(|(provider, m)| model_row_display(provider, m))
                     .collect();
 
                 let w0 = rows
@@ -203,25 +217,29 @@ fn run_models_command(json: bool) {
                     .unwrap_or(0);
 
                 println!(
-                    "{:<w$}  {:<w2$}  {:<w3$}  {}",
+                    "{:<w$}  {:<w2$}  {:<w3$}  {:<w4$}  {}",
                     header.0,
                     header.1,
                     header.2,
                     header.3,
+                    header.4,
                     w = w0,
                     w2 = w1,
-                    w3 = w2
+                    w3 = w2,
+                    w4 = header.3.len()
                 );
-                for (provider, id, name, ctx) in &rows {
+                for (provider, id, name, ctx, max) in &rows {
                     println!(
-                        "{:<w$}  {:<w2$}  {:<w3$}  {}",
+                        "{:<w$}  {:<w2$}  {:<w3$}  {:<w4$}  {}",
                         provider,
                         id,
                         name,
                         ctx,
+                        max,
                         w = w0,
                         w2 = w1,
-                        w3 = w2
+                        w3 = w2,
+                        w4 = header.3.len()
                     );
                 }
             }
@@ -455,10 +473,17 @@ async fn run_chat(mut args: Args) {
     let max_tokens = args.max_tokens.unwrap_or_else(|| {
         if resolved_model.model.max_tokens > 0 {
             resolved_model.model.max_tokens
+        } else if config_file
+            .as_ref()
+            .map(|c| c.model.max_tokens > 0)
+            .unwrap_or(false)
+        {
+            config_file.as_ref().unwrap().model.max_tokens
         } else {
             32000
         }
     });
+    let thinking_max_tokens = resolved_model.model.thinking_max_tokens;
     let reasoning = resolved_model.model.reasoning.unwrap_or(!args.no_think);
 
     // reasoning_effort: CLI args > config.json model entry > env var > None
@@ -496,7 +521,13 @@ async fn run_chat(mut args: Args) {
     let reasoning_config = reasoning_effort
         .as_ref()
         .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
-        .or_else(|| resolved_model.model.reasoning.map(ReasoningConfig::Bool));
+        .or_else(|| {
+            if thinking_max_tokens > 0 {
+                Some(ReasoningConfig::ThinkingBudget(thinking_max_tokens))
+            } else {
+                resolved_model.model.reasoning.map(ReasoningConfig::Bool)
+            }
+        });
 
     let client = LlmClient::from_config(
         api_type,
@@ -504,6 +535,7 @@ async fn run_chat(mut args: Args) {
         base_url,
         model.clone(),
         max_tokens,
+        thinking_max_tokens,
         reasoning,
         reasoning_config,
         openai_config,
@@ -847,6 +879,41 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_model_row_display_includes_max_tokens_as_k() {
+        let model = ModelEntryConfig {
+            id: "deepseek-v4-pro".to_string(),
+            name: "DeepSeek V4 Pro".to_string(),
+            context_window: 200_000,
+            max_tokens: 8192,
+            ..Default::default()
+        };
+
+        let row = model_row_display("DeepSeek", &model);
+
+        assert_eq!(row.0, "DeepSeek");
+        assert_eq!(row.1, "deepseek-v4-pro");
+        assert_eq!(row.2, "DeepSeek V4 Pro");
+        assert_eq!(row.3, "200k");
+        assert_eq!(row.4, "8k");
+    }
+
+    #[test]
+    fn test_model_row_display_zero_max_tokens_as_dash() {
+        let model = ModelEntryConfig {
+            id: "local".to_string(),
+            context_window: 0,
+            max_tokens: 0,
+            ..Default::default()
+        };
+
+        let row = model_row_display("Ollama", &model);
+
+        assert_eq!(row.2, "-");
+        assert_eq!(row.3, "-");
+        assert_eq!(row.4, "-");
     }
 
     #[test]

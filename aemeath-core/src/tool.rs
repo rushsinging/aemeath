@@ -42,6 +42,27 @@ impl ToolResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentProgressEvent {
+    /// Monotonic sequence for internal ordering/replacement. UI does not display it by default.
+    pub sequence: usize,
+    pub kind: AgentProgressKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentProgressKind {
+    ToolCalls { calls: Vec<AgentToolCallProgress> },
+    Message { text: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentToolCallProgress {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+    pub summary: String,
+}
+
 /// Callback for running a sub-agent loop. Implemented by the CLI layer.
 #[async_trait]
 pub trait AgentRunner: Send + Sync {
@@ -55,7 +76,7 @@ pub trait AgentRunner: Send + Sync {
         max_turns: Option<u32>,
         model_spec: Option<&str>,
         // Optional channel to stream per-turn progress to TUI
-        progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+        progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     ) -> String;
 
     /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
@@ -80,10 +101,10 @@ pub struct ToolContext {
     pub max_agent_concurrency: usize,
     /// Semaphore to limit concurrent sub-agent executions (shared across tool calls)
     pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
-    /// Channel to send agent progress updates to the TUI (tool_id → progress_text).
+    /// Channel to send agent progress updates to the TUI (tool_id → progress event).
     /// Populated when an Agent tool call is in flight, so CliAgentRunner can stream
-    /// per-turn textual output back to the user.
-    pub progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    /// per-turn structured output back to the user.
+    pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
     /// back to the user-visible session.
     pub parent_session_id: Option<String>,

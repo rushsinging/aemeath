@@ -32,10 +32,11 @@ impl super::App {
                 let key = format!("{}/{}", provider_name, display_name);
                 let marker = if key == current { " ←" } else { "" };
                 options.push(format!(
-                    "{}/{} ctx:{}k{}",
+                    "{}/{} ctx:{}k max:{}k{}",
                     provider_name,
                     display_name,
                     model.context_window / 1000,
+                    model.max_tokens / 1000,
                     marker,
                 ));
                 keys.push(key);
@@ -54,7 +55,7 @@ impl super::App {
                 self.pending_images.clear();
                 self.input_area.set_pending_images(0);
                 self.output_area.clear();
-                self.reset_runtime_state();
+                self.reset_runtime_state().await;
                 self.output_area.push_system("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
@@ -118,15 +119,7 @@ impl super::App {
                 ));
             }
             "/save" => {
-                use aemeath_core::session::{now_iso, Session};
-                let s = Session {
-                    id: self.session_id.clone(),
-                    cwd: self.cwd.to_string_lossy().to_string(),
-                    messages: self.messages.clone(),
-                    created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
-                    updated_at: now_iso(),
-                    metadata: Default::default(),
-                };
+                let s = self.build_session(self.messages.clone()).await;
                 match session::save_session(&s).await {
                     Ok(()) => self
                         .output_area
@@ -226,7 +219,7 @@ impl super::App {
                                     self.pending_images.clear();
                                     self.input_area.set_pending_images(0);
                                     self.output_area.clear();
-                                    self.reset_runtime_state();
+                                    self.reset_runtime_state().await;
                                     self.output_area.push_system("[cleared]");
                                 }
                                 aemeath_core::command::CommandAction::Compact => {
@@ -290,6 +283,7 @@ impl super::App {
                                         Some(base_url),
                                         model_id.clone(),
                                         max_tokens,
+                                        0,
                                         reasoning,
                                         reasoning_config,
                                         openai_config,

@@ -745,8 +745,8 @@ impl App {
             UiEvent::LiveTps(tps) => {
                 self.status_bar.set_tps(tps);
             }
-            UiEvent::AgentProgress { tool_id, text } => {
-                self.output_area.push_tool_progress(&tool_id, &text);
+            UiEvent::AgentProgress { tool_id, event } => {
+                self.output_area.push_agent_progress(&tool_id, event);
                 self.output_area.start_spinner();
                 self.output_area.set_spinner_phase("Agent working...");
             }

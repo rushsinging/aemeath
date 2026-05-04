@@ -1,11 +1,14 @@
-use aemeath_core::agent::Agent;
+use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::compact::safe_slice;
 use aemeath_core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use aemeath_core::hook::HookRunner;
 use aemeath_core::logging::{self, LogFile};
 use aemeath_core::message::Message;
 use aemeath_core::task::TaskStore;
-use aemeath_core::tool::{AgentRunner, ToolContext, ToolRegistry};
+use aemeath_core::tool::{
+    AgentProgressEvent, AgentProgressKind, AgentRunner, AgentToolCallProgress, ToolContext,
+    ToolRegistry,
+};
 use aemeath_llm::client::LlmClient;
 use aemeath_llm::pool::LlmClientPool;
 use aemeath_llm::stream::StreamHandler;
@@ -35,6 +38,152 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup.
     pub models_config: Arc<ModelsConfig>,
+}
+
+fn build_tool_calls_progress_event(sequence: usize, tool_calls: &[ToolCall]) -> AgentProgressEvent {
+    AgentProgressEvent {
+        sequence,
+        kind: AgentProgressKind::ToolCalls {
+            calls: tool_calls
+                .iter()
+                .map(|call| AgentToolCallProgress {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    input: call.input.clone(),
+                    summary: summarize_tool_input(&call.name, &call.input),
+                })
+                .collect(),
+        },
+    }
+}
+
+#[cfg(test)]
+fn format_grouped_tool_summaries(tool_calls: &[ToolCall]) -> String {
+    let mut grouped: Vec<(&str, Vec<String>)> = Vec::new();
+    for call in tool_calls {
+        if let Some((_, summaries)) = grouped.iter_mut().find(|(name, _)| *name == call.name) {
+            summaries.push(summarize_tool_input(&call.name, &call.input));
+        } else {
+            grouped.push((
+                call.name.as_str(),
+                vec![summarize_tool_input(&call.name, &call.input)],
+            ));
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(name, summaries)| {
+            let count = summaries.len();
+            let visible = summaries
+                .iter()
+                .filter(|summary| !summary.is_empty())
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>();
+            let suffix = if visible.is_empty() {
+                String::new()
+            } else {
+                let mut text = visible.join(", ");
+                if count > 3 {
+                    text.push_str(&format!(" +{} more", count - 3));
+                }
+                format!(": {text}")
+            };
+            if count > 1 {
+                format!("{name} ×{count}{suffix}")
+            } else {
+                format!("{name}{suffix}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn summarize_tool_input(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "Read" | "Write" | "Edit" | "LSP" => extract_display_path(input, &["file_path", "path"]),
+        "Grep" => {
+            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+            let path = extract_display_path(input, &["path"]);
+            match (pattern.is_empty(), path.is_empty()) {
+                (false, false) => {
+                    format!("\"{}\" in {}", truncate_progress_part(pattern, 48), path)
+                }
+                (false, true) => format!("\"{}\"", truncate_progress_part(pattern, 48)),
+                (true, false) => path,
+                (true, true) => fallback_json_summary(input),
+            }
+        }
+        "Glob" => input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|pattern| truncate_progress_part(pattern, 72))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "Bash" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|command| truncate_progress_part(command, 32))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "WebFetch" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|url| truncate_progress_part(url, 72))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "TaskUpdate" | "TaskGet" | "TaskOutput" | "TaskStop" => input
+            .get("taskId")
+            .and_then(|v| v.as_str())
+            .map(|id| truncate_progress_part(id, 48))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "TaskCreate" => input
+            .get("subject")
+            .and_then(|v| v.as_str())
+            .map(|subject| truncate_progress_part(subject, 72))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "Memory" => input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        "Skill" => input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .map(|skill| truncate_progress_part(skill, 72))
+            .unwrap_or_else(|| fallback_json_summary(input)),
+        _ => fallback_json_summary(input),
+    }
+}
+
+fn extract_display_path(input: &serde_json::Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| input.get(*key).and_then(|v| v.as_str()))
+        .map(|path| {
+            let trimmed = path.trim_start_matches("/repo/");
+            let components = trimmed.split('/').collect::<Vec<_>>();
+            let compact = if components.len() > 3 {
+                components[components.len() - 3..].join("/")
+            } else {
+                trimmed.to_string()
+            };
+            truncate_progress_part(&compact, 72)
+        })
+        .unwrap_or_default()
+}
+
+fn fallback_json_summary(input: &serde_json::Value) -> String {
+    truncate_progress_part(&input.to_string(), 72)
+}
+
+fn truncate_progress_part(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    let mut truncated = text.chars().take(max_chars).collect::<String>();
+    if let Some(idx) = truncated.rfind(" && ") {
+        truncated.truncate(idx);
+    }
+    format!("{truncated}…")
 }
 
 impl CliAgentRunner {
@@ -75,6 +224,10 @@ impl CliAgentRunner {
     fn resolve_role(&self, model_spec: Option<&str>) -> Option<&AgentRoleConfig> {
         model_spec.and_then(|spec| self.agents_config.roles.get(spec))
     }
+
+    fn role_max_tokens_override(role: Option<&AgentRoleConfig>) -> Option<u32> {
+        role.and_then(|r| r.max_tokens).filter(|tokens| *tokens > 0)
+    }
 }
 
 #[async_trait]
@@ -88,7 +241,7 @@ impl AgentRunner for CliAgentRunner {
         ctx: &ToolContext,
         max_turns_override: Option<u32>,
         model_spec: Option<&str>,
-        progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+        progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     ) -> String {
         // Resolve role and model
         let role = self.resolve_role(model_spec);
@@ -100,6 +253,13 @@ impl AgentRunner for CliAgentRunner {
             (Some(pool), None) => pool.get_client(None).await,
             _ => self.client.clone(),
         };
+
+        let max_tokens_override = Self::role_max_tokens_override(role);
+        let previous_max_tokens = client.max_tokens();
+        let previous_reasoning = client.is_reasoning();
+        if let Some(max_tokens) = max_tokens_override {
+            client.set_max_tokens(max_tokens);
+        }
 
         // Determine reasoning for this sub-agent: role config > model config > default
         let role_reasoning = role.and_then(|r| r.reasoning);
@@ -115,15 +275,24 @@ impl AgentRunner for CliAgentRunner {
                 self.models_config.find_model(&query)
             })
             .map(|(_, _, entry)| entry.reasoning)
-            .flatten();        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
+            .flatten();
+        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
         log::info!(
-            "[SubAgent] reasoning={} (role={:?}, model={:?}, default={})",
+            "[SubAgent] reasoning={} max_tokens={:?} (role={:?}, model={:?}, default={})",
             reasoning,
+            max_tokens_override,
             role_reasoning,
             model_reasoning,
             self.reasoning
         );
+
+        let restore_client_settings = || {
+            if max_tokens_override.is_some() && previous_max_tokens > 0 {
+                client.set_max_tokens(previous_max_tokens);
+            }
+            client.set_reasoning(previous_reasoning);
+        };
 
         // Extract hook_runner to avoid borrow conflicts with closure
         let hook_runner = self.hook_runner.clone();
@@ -143,7 +312,12 @@ impl AgentRunner for CliAgentRunner {
             if let Some(ref output) = json_output {
                 if let Some(ref sys_msg) = output.system_message {
                     if let Some(ref tx) = progress_tx {
-                        let _ = tx.try_send(format!("[hook] {}", sys_msg));
+                        let _ = tx.try_send(AgentProgressEvent {
+                            sequence: 0,
+                            kind: AgentProgressKind::Message {
+                                text: format!("[hook] {sys_msg}"),
+                            },
+                        });
                     }
                 }
             }
@@ -203,7 +377,12 @@ impl AgentRunner for CliAgentRunner {
                     if let Some(ref output) = json_output {
                         if let Some(ref sys_msg) = output.system_message {
                             if let Some(ref tx) = progress_tx {
-                                let _ = tx.try_send(format!("[hook] {}", sys_msg));
+                                let _ = tx.try_send(AgentProgressEvent {
+                                    sequence: turns,
+                                    kind: AgentProgressKind::Message {
+                                        text: format!("[hook] {sys_msg}"),
+                                    },
+                                });
                             }
                         }
                     }
@@ -288,6 +467,7 @@ impl AgentRunner for CliAgentRunner {
                 progress(Some(turn_number), "Agent cancelled by user");
                 let result = "Cancelled by user".to_string();
                 call_subagent_stop_hook(result.clone(), turn, true).await;
+                restore_client_settings();
                 return result;
             }
             if start_time.elapsed() > max_duration {
@@ -305,6 +485,7 @@ impl AgentRunner for CliAgentRunner {
                             start_time.elapsed().as_secs()
                         );
                         call_subagent_stop_hook(result.clone(), turn, true).await;
+                        restore_client_settings();
                         return result;
                     }
                 }
@@ -313,6 +494,7 @@ impl AgentRunner for CliAgentRunner {
                     start_time.elapsed().as_secs()
                 );
                 call_subagent_stop_hook(result.clone(), turn, true).await;
+                restore_client_settings();
                 return result;
             }
             let msg_tokens = aemeath_core::compact::estimate_messages_tokens(&messages);
@@ -360,7 +542,10 @@ impl AgentRunner for CliAgentRunner {
                             } else {
                                 trimmed.to_string()
                             };
-                            let _ = tx.try_send(format!("Turn {}: {}", turn + 1, short));
+                            let _ = tx.try_send(AgentProgressEvent {
+                                sequence: turn + 1,
+                                kind: AgentProgressKind::Message { text: short },
+                            });
                         }
                     }
 
@@ -369,6 +554,7 @@ impl AgentRunner for CliAgentRunner {
                         progress(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();
                         call_subagent_stop_hook(result.clone(), turn + 1, false).await;
+                        restore_client_settings();
                         return result;
                     }
 
@@ -389,13 +575,7 @@ impl AgentRunner for CliAgentRunner {
                     // Send tool call names before execution so the TUI shows progress
                     // while long-running sub-agent tools are still in flight.
                     if let Some(ref tx) = progress_tx {
-                        let tool_names: Vec<&str> =
-                            tool_calls.iter().map(|c| c.name.as_str()).collect();
-                        let _ = tx.try_send(format!(
-                            "[Turn {}] calling: {}",
-                            turn + 1,
-                            tool_names.join(", ")
-                        ));
+                        let _ = tx.try_send(build_tool_calls_progress_event(turn + 1, &tool_calls));
                     }
 
                     let mut results = agent.execute_tools(&tool_calls).await;
@@ -481,6 +661,7 @@ impl AgentRunner for CliAgentRunner {
                     progress(Some(turn_number), &format!("Agent error: {e}"));
                     let result = format!("Sub-agent error: {e}");
                     call_subagent_stop_hook(result.clone(), turn, true).await;
+                    restore_client_settings();
                     return result;
                 }
             }
@@ -499,11 +680,13 @@ impl AgentRunner for CliAgentRunner {
             if !text.is_empty() {
                 let result = format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns);
                 call_subagent_stop_hook(result.clone(), max_turns, false).await;
+                restore_client_settings();
                 return result;
             }
         }
         let result = format!("Sub-agent reached max turns ({})", max_turns);
         call_subagent_stop_hook(result.clone(), max_turns, false).await;
+        restore_client_settings();
         result
     }
 
@@ -519,6 +702,116 @@ impl AgentRunner for CliAgentRunner {
         {
             Ok(resp) => resp.assistant_message.text_content(),
             Err(e) => format!("LLM error: {e}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_role_max_tokens_override() {
+        let role = AgentRoleConfig {
+            max_tokens: Some(8192),
+            ..Default::default()
+        };
+        assert_eq!(
+            CliAgentRunner::role_max_tokens_override(Some(&role)),
+            Some(8192)
+        );
+
+        let role = AgentRoleConfig {
+            max_tokens: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(CliAgentRunner::role_max_tokens_override(Some(&role)), None);
+
+        let role = AgentRoleConfig {
+            max_tokens: None,
+            ..Default::default()
+        };
+        assert_eq!(CliAgentRunner::role_max_tokens_override(Some(&role)), None);
+
+        assert_eq!(CliAgentRunner::role_max_tokens_override(None), None);
+    }
+
+    #[test]
+    fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
+        let calls = vec![
+            test_tool_call(
+                "1",
+                "Read",
+                serde_json::json!({"file_path": "/repo/src/lib.rs"}),
+            ),
+            test_tool_call(
+                "2",
+                "Grep",
+                serde_json::json!({"pattern": "AgentProgress", "path": "/repo/src"}),
+            ),
+        ];
+
+        let event = build_tool_calls_progress_event(2, &calls);
+
+        assert_eq!(event.sequence, 2);
+        match event.kind {
+            AgentProgressKind::ToolCalls { calls } => {
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "1");
+                assert_eq!(calls[0].name, "Read");
+                assert_eq!(
+                    calls[0].input,
+                    serde_json::json!({"file_path": "/repo/src/lib.rs"})
+                );
+                assert_eq!(calls[0].summary, "src/lib.rs");
+                assert_eq!(calls[1].name, "Grep");
+                assert_eq!(calls[1].summary, "\"AgentProgress\" in src");
+            }
+            AgentProgressKind::Message { .. } => panic!("expected ToolCalls event"),
+        }
+    }
+
+    #[test]
+    fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_level() {
+        let calls = vec![test_tool_call(
+            "1",
+            "Bash",
+            serde_json::json!({"command": "cargo check -p aemeath-cli && cargo test"}),
+        )];
+
+        let event = build_tool_calls_progress_event(1, &calls);
+
+        match event.kind {
+            AgentProgressKind::ToolCalls { calls } => {
+                assert_eq!(calls[0].summary, "cargo check -p aemeath-cli…");
+            }
+            AgentProgressKind::Message { .. } => panic!("expected ToolCalls event"),
+        }
+    }
+
+    #[test]
+    fn test_format_grouped_tool_summaries_keeps_existing_display_format() {
+        let calls = vec![
+            test_tool_call("1", "Read", serde_json::json!({"file_path": "/repo/a.rs"})),
+            test_tool_call("2", "Read", serde_json::json!({"file_path": "/repo/b.rs"})),
+            test_tool_call("3", "Read", serde_json::json!({"file_path": "/repo/c.rs"})),
+            test_tool_call("4", "Read", serde_json::json!({"file_path": "/repo/d.rs"})),
+        ];
+
+        let summary = format_grouped_tool_summaries(&calls);
+
+        assert_eq!(summary, "Read ×4: a.rs, b.rs, c.rs +1 more");
+    }
+
+    fn test_tool_call(
+        id: &str,
+        name: &str,
+        input: serde_json::Value,
+    ) -> aemeath_core::agent::ToolCall {
+        aemeath_core::agent::ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            input,
         }
     }
 }

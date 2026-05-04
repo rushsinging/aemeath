@@ -58,6 +58,7 @@ impl LlmClient {
             None,
             None,
             200000,
+            0,
             false,
             None,
         )
@@ -69,12 +70,17 @@ impl LlmClient {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
+        thinking_max_tokens: u32,
         reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> = match api {
             ApiDriverKind::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
-                api_key, base_url, model, max_tokens,
+                api_key,
+                base_url,
+                model,
+                max_tokens,
+                thinking_max_tokens,
             )),
             ApiDriverKind::OpenAI | ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => {
                 let config = OpenAIProviderConfig::from_api_driver(api, api.as_str());
@@ -124,6 +130,7 @@ impl LlmClient {
         base_url: Option<String>,
         model: String,
         max_tokens: u32,
+        thinking_max_tokens: u32,
         reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
         openai_config: Option<OpenAIProviderConfig>,
@@ -145,6 +152,7 @@ impl LlmClient {
                 base_url,
                 Some(model),
                 max_tokens,
+                thinking_max_tokens,
                 reasoning,
                 reasoning_config,
             )
@@ -270,5 +278,11 @@ impl LlmClient {
     }
     pub fn reasoning_effort(&self) -> Option<String> {
         self.provider.reasoning_effort()
+    }
+    pub fn set_max_tokens(&self, max_tokens: u32) {
+        self.provider.set_max_tokens(max_tokens);
+    }
+    pub fn max_tokens(&self) -> u32 {
+        self.provider.max_tokens()
     }
 }
