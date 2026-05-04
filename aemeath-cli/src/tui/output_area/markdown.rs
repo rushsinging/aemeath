@@ -1,8 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
-use crate::tui::safe_text;
-
 /// 将纯文本中的内联 Markdown 标记转换为 styled Span 列表。
 ///
 /// 支持的语法：
@@ -106,14 +104,13 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
             '[' => {
                 let rest: String = chars.clone().collect();
                 if let Some(close_bracket) = rest.find(']') {
-                    if rest[close_bracket + 1..].starts_with('(') {
-                        if let Some(close_paren) = rest[close_bracket + 2..].find(')') {
-                            let inner = safe_text::safe_str_slice_by_char(&rest, 0, close_bracket);
-                            let _url = safe_text::safe_str_slice_by_char(
-                                &rest,
-                                close_bracket + 2,
-                                close_bracket + 2 + close_paren,
-                            );
+                    let after_bracket = rest.get(close_bracket + 1..).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                    if after_bracket.starts_with('(') {
+                        let url_start = close_bracket + 2;
+                        let url_rest = rest.get(url_start..).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                        if let Some(close_paren) = url_rest.find(')') {
+                            let inner = rest.get(0..close_bracket).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                            let _url = rest.get(url_start..url_start + close_paren).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
                             if !inner.is_empty() && !_url.is_empty() {
                                 flush_plain(&mut spans, &mut buf, base_style);
                                 spans.push(Span::styled(
@@ -374,6 +371,15 @@ mod tests {
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].content, "click ");
         assert_eq!(spans[1].content, "here");
+        assert_eq!(spans[2].content, " now");
+    }
+
+    #[test]
+    fn link_with_cjk_text() {
+        let spans = inline_markdown_spans("click [你好](https://example.com) now", base());
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content, "click ");
+        assert_eq!(spans[1].content, "你好");
         assert_eq!(spans[2].content, " now");
     }
 
