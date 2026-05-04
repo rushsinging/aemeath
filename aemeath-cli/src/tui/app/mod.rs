@@ -630,49 +630,29 @@ impl App {
         Ok(())
     }
 
-    /// Update task status display in output area.
+    /// Update task status display in output area. Also runs lifecycle checks.
     async fn update_task_status(
         &mut self,
         task_store: &Arc<aemeath_core::task::TaskStore>,
         _is_processing: bool,
     ) {
         let tasks = task_store.list_current_batch().await;
-        let mut active: Vec<_> = tasks
+        let active: Vec<_> = tasks
             .iter()
             .filter(|t| t.status != aemeath_core::task::TaskStatus::Deleted)
+            .cloned()
             .collect();
-        active.sort_by(|a, b| {
-            a.id.parse::<u64>()
-                .unwrap_or(u64::MAX)
-                .cmp(&b.id.parse::<u64>().unwrap_or(u64::MAX))
-        });
-        // Note: we intentionally do NOT call start_spinner() here.
-        // Spinner lifecycle is managed by update_ui() based on UiEvents.
-        // Starting spinner here caused BUG#24 — it could restart a stopped
-        // spinner at wrong moments (e.g. after ToolResult but before next turn).
+
         if active.is_empty() {
+            // Check lifecycle: if previous batch was completed and auto-cleared
             self.output_area.set_task_status(Vec::new());
         } else {
-            let completed = active
-                .iter()
-                .filter(|t| t.status == aemeath_core::task::TaskStatus::Completed)
-                .count();
-            let total = active.len();
-            let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed, total)];
-            for t in &active {
-                let icon = match t.status {
-                    aemeath_core::task::TaskStatus::Completed => "✓",
-                    aemeath_core::task::TaskStatus::InProgress => "■",
-                    aemeath_core::task::TaskStatus::Pending => "□",
-                    _ => continue,
-                };
-                let owner = t
-                    .owner
-                    .as_deref()
-                    .map(|o| format!(" (@{})", o))
-                    .unwrap_or_default();
-                lines.push(format!("{} #{} {}{}", icon, t.id, t.subject, owner));
-            }
+            let task_list_config = aemeath_core::config::TaskListConfig::default();
+            let lines = task_window::build_task_window(
+                &active,
+                task_list_config.max_lines,
+                task_list_config.show_last_completed,
+            );
             self.output_area.set_task_status(lines);
         }
     }
@@ -809,5 +789,6 @@ pub mod processing;
 pub mod render;
 pub mod slash;
 pub mod stream;
+pub mod task_window;
 pub mod update;
 pub mod util;

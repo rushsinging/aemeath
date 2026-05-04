@@ -28,7 +28,7 @@ pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
 pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};
-pub use ui::UiConfig;
+pub use ui::{TaskLifecycleConfig, TaskListConfig, UiConfig};
 
 use serde::{Deserialize, Serialize};
 

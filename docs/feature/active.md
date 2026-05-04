@@ -9,6 +9,8 @@
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
 | 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
 | 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
+| 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
+| 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -189,6 +191,187 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 - `safe_text` 放在 `aemeath-cli/src/tui/` 还是提升到 `aemeath-core/src/utils/`（如果 core 也有类似需求）
 - 是否引入 `unicode-segmentation` crate（按 grapheme cluster 而非 char 计算，更贴合"用户感知字符"）
 - grep 门禁误报怎么处理（比如测试文件、`safe_text` 自己内部使用切片、经 `.get(byte_range)` 验证的字节范围）—— 可以加 `allow unsafe_text_op` 注释跳过
+
+---
+
+### #24 Spinner 下方 task list 限量显示（最多 7 条）
+
+**目标**：当 task 数量较多（10+）时，spinner 下方的 task list 占据屏幕大量空间，把主对话/输出挤到看不见。改为按"前后文相关性"窗口化显示，固定上限 7 条左右，让用户能快速看到"刚做完什么、正在做什么、接下来做什么"，而不是被一长串 ☐ pending 淹没。
+
+**当前现状**（`aemeath-cli/src/tui/app/mod.rs:639-672`）：
+- `update_task_status()` 把当前 batch 内**所有**非 deleted 的 task 全部 push 到 `task_status_lines`
+- 摘要行 `━━ Tasks: x/y ━━` + 每个 task 一行（`✓` / `■` / `□` + 编号 + 标题 + owner）
+- 7 条 task → 占 8 行；20 条 task → 占 21 行；输出区域所剩无几
+
+**预期窗口化策略**：
+
+显示顺序（completed → in_progress → pending）：
+
+```
+━━ Tasks: 3/15 ━━              ← 摘要行始终反映全量
+✓ #3 拆分 mod.rs                ← 上一条 completed，仅显示 1 条
+■ #4 拆分 hook.rs               ← 所有 in_progress 全显示
+■ #5 拆分 task.rs
+□ #6 拆分 scheduler.rs           ← 后续 pending，按余量填充
+□ #7 拆分 state.rs
+□ #8 拆分 guidance.rs
+… +7 more pending               ← 折叠提示
+```
+
+具体规则：
+1. **摘要行保持全量**：`Tasks: x/y` 不受窗口限制
+2. **窗口按优先级填充**（默认上限 7 条）：
+   - 上一条 completed（最近完成的 1 条）
+   - 所有 in_progress（一般 1~3 条）
+   - 后续 pending 按 task id 升序填充剩余配额
+3. **超出部分**：`… +N more pending` 单行折叠提示
+4. **没有 in_progress 时**：第一条 pending 视为"接下来要做"，显示前 6 条 + `… +N more`
+5. **全部 completed 时**：显示最后 5~7 条 completed
+6. **空 task list**：不显示窗口
+
+**配置项**：
+```json
+{
+  "ui": {
+    "task_list": {
+      "max_lines": 7,
+      "show_last_completed": 1,
+      "fold_hint_format": "… +{n} more {status}"
+    }
+  }
+}
+```
+
+**实施分解**：
+1. `update_task_status()` 增加窗口化逻辑（分桶 → 按规则取窗口 + 折叠提示）
+2. 拆出纯函数 `build_task_window(tasks, max_lines, last_completed_count) -> Vec<String>`，单独测试
+3. 单元测试覆盖：0 / 1 / max / max+1 / 远超 max 各档；全 pending / 全 in_progress / 全 completed / 混合；in_progress 数量超过 max 时 pending 全部隐藏
+
+**涉及路径**：
+- `aemeath-cli/src/tui/app/mod.rs`（`update_task_status` 窗口化）
+- 新增：`aemeath-cli/src/tui/app/task_window.rs`（纯函数 + 单元测试）
+- `aemeath-core/src/config/`（`ui.task_list.max_lines` 等配置字段）
+
+**关联**：
+- Feature #18（task batch 机制）—— 在 batch 之上做窗口化，正交
+- Feature #25（task 跨轮次生命周期）—— 限量解决"显示太多"，#25 解决"显示太久"
+- Bug #29（主 agent task 不更新）—— 修复后窗口化逻辑会更频繁触发
+
+**开放问题**：
+- max 默认 7 是否合适？高分屏 vs 小屏权衡
+- 折叠提示是否可点击展开？留作后续 polish
+- 全部 completed 时显示 last 5 vs 折叠成 `Tasks: 15/15 ✓ all done`
+
+---
+
+### #25 Task list 跨轮次生命周期策略
+
+**目标**：在同一 session 内，处理"上一轮的 task list 在新对话开始时还会显示"的问题。当前 Feature #18 的 batch 机制只是"新 turn 切到新 batch"，但没规定旧 batch 怎么收尾、怎么提示用户、何时归档。本 feature 补齐三种典型场景的明确策略。
+
+**用户痛点**：「同一个 session 中，新的对话开始时还会显示上次的 task list」
+
+具体场景：
+- 上轮 task 全做完了 → 新对话开头还看到一长串 ✓，没价值还占地方
+- 上轮 task 没做完用户主动问别的 → 旧 task 状态尴尬，是继续？是放弃？没出路
+- 上轮 task 多轮没推进（用户跑题、agent 偏题）→ 沉默积压在 batch 里没人理
+
+---
+
+#### 场景 1：上一轮 task 全部完成
+
+**触发**：上一 batch 内所有 task 都是 `Completed`（或 `Cancelled`），且用户输入新对话。
+
+**策略**：
+- 新 turn 开始时检测上一 batch 是否 100% 完成
+- 是 → 自动隐藏旧 batch（保留在 TaskStore 历史中，可通过 `/task history` 回看）
+- 显示一行 toast（1~2 秒）：`✓ 上一组 task 已完成（5/5）`
+- 新 batch 在用户新 task 出现时才创建
+
+#### 场景 2：上一轮 task 中断、用户开新话题
+
+**触发**：上一 batch 内有 `InProgress` / `Pending` task，用户输入了一条**与未完成 task 主题不相关**的新消息。
+
+**判断"主题不相关"**（启发式，不调 LLM）：
+- 关键词重叠率低（task 标题与新消息分词后 cosine 相似度 < 0.2）
+- 或：用户消息以 `/` 开头（slash 命令通常是控制流）
+- 或：消息含明显切换语气（"先放一下"、"换个话题"、"另外"、"对了"等）
+
+**策略**：弹 inline 提示（不阻塞输入）：
+```
+⚠ 上一组 task 还有 3 项未完成（#4 #5 #6），是否：
+  [c] 继续上次任务   [p] 暂存稍后回来   [d] 丢弃这组任务
+  （直接回车默认 [p] 暂存）
+```
+
+- `[c]` 继续：保留旧 batch 为当前 batch，新消息作为"补充指令"附加
+- `[p]` 暂存：旧 batch 标记为 `paused`，从视图隐藏，可 `/task resume <batch_id>` 恢复
+- `[d]` 丢弃：旧未完成全部 `Cancelled`，归档
+
+#### 场景 3：旧 task 沉默积压
+
+**触发**：某 batch 内有 `InProgress` / `Pending`，连续 N 轮（默认 3）用户对话没推进它（没 TaskUpdate 涉及它，没 tool call 修改了 task 涉及的文件等）。
+
+**策略**：
+```
+ℹ 以下 task 已沉默 3 轮：
+  ■ #4 拆分 hook.rs
+  □ #5 拆分 task.rs
+  仍要继续吗？回 /task keep 保留 / /task drop 丢弃 / /task pause 暂存
+```
+
+- 不打断当前对话，提示出现一次后不重复（直到再过 N 轮或用户回复）
+- 提示文本不入 LLM context（仅 UI 可见，避免污染对话）
+
+---
+
+**配置项**：
+```json
+{
+  "ui": {
+    "task_lifecycle": {
+      "auto_clear_completed_on_new_turn": true,
+      "interrupt_prompt_enabled": true,
+      "interrupt_default_action": "pause",
+      "stale_remind_after_turns": 3,
+      "stale_remind_repeat_interval": 5
+    }
+  }
+}
+```
+
+**新增命令 / 状态**：
+- `Task.batch_status`: `Active | Paused | Archived`
+- `/task pause` —— 当前 batch → Paused
+- `/task resume [batch_id]` —— 恢复指定 batch
+- `/task keep` —— 沉默提示中确认保留
+- `/task drop` —— 当前未完成全部 Cancelled
+- `/task history` —— 列出本 session 内所有 batch
+
+**实施分解**：
+1. **TaskStore 扩展**：`batch_status` 字段、`Batch` 结构（id / created_at / last_active_turn / status）
+2. **场景 1 检测**：`update_task_status()` 调用前 check 上一 batch → 全 completed 隐藏 + toast
+3. **场景 2 启发式 + 提示 UI**：新增 `topic_relevance_check(prev_tasks, new_message)`，触发时 push `UiEvent::TaskInterruptPrompt`
+4. **场景 3 沉默检测**：turn 结束 hook 中递增每个未完成 task 的 `silence_turns`；达阈值 push `UiEvent::TaskStaleReminder`
+5. **命令实现**：`commands/task.rs` 增加 pause / resume / keep / drop / history
+
+**涉及路径**：
+- `aemeath-core/src/task.rs`（Batch 结构、batch_status、silence_turns）
+- 新增：`aemeath-core/src/task/lifecycle.rs`（场景判定纯逻辑 + 单元测试）
+- `aemeath-cli/src/tui/app/mod.rs`（update_task_status 触发场景检测）
+- `aemeath-cli/src/tui/app/update.rs`（处理 TaskInterruptPrompt / TaskStaleReminder UI 事件）
+- 新增：`aemeath-core/src/command/commands/task.rs`（pause / resume / keep / drop / history）
+- `aemeath-core/src/config/`（`ui.task_lifecycle` 配置）
+
+**关联**：
+- Feature #18（task batch 机制）—— 本 feature 在 batch 之上加生命周期状态
+- Feature #24（task list 限量显示）—— 限量解决"显示太多"，本 feature 解决"显示太久"
+- Bug #29（主 agent task 不更新）—— 修好后场景 1/3 才能准确触发
+
+**开放问题**：
+- 主题相关性判断用关键词重叠率够吗？误判率 vs 复杂度（要不要直接调 LLM？太重）
+- 场景 2 提示 inline vs ask_user？倾向 inline，但要确认默认 `[p] pause` 不会让用户莫名其妙
+- batch 归档保留多久？session 结束时持久化，session resume 时是否复活？
+- `/task history` 输出格式：表格 vs 树形？
 
 ---
 

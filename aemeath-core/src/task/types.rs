@@ -179,10 +179,56 @@ impl Task {
     }
 }
 
+/// Batch status for lifecycle management.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchStatus {
+    /// Active batch — currently being worked on
+    Active,
+    /// Paused batch — interrupted by user, can be resumed
+    Paused,
+    /// Archived batch — completed or discarded
+    Archived,
+}
+
+impl Default for BatchStatus {
+    fn default() -> Self {
+        Self::Active
+    }
+}
+
+/// Represents a batch (group of tasks from one turn).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Batch {
+    pub id: u64,
+    pub status: BatchStatus,
+    pub created_at: u64,
+    pub last_active_turn: u64,
+    /// Number of completed turns since last activity
+    #[serde(default)]
+    pub silence_turns: u64,
+}
+
+impl Batch {
+    pub fn new(id: u64) -> Self {
+        let now = default_timestamp();
+        Self {
+            id,
+            status: BatchStatus::Active,
+            created_at: now,
+            last_active_turn: 0,
+            silence_turns: 0,
+        }
+    }
+}
+
 /// Serializable snapshot of a TaskStore for session persistence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSnapshot {
     pub tasks: Vec<Task>,
     pub next_id: u64,
     pub current_batch: u64,
+    /// Batches metadata for lifecycle management
+    #[serde(default)]
+    pub batches: Vec<Batch>,
 }

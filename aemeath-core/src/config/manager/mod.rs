@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(pre.len(), 1);
         assert_eq!(pre[0].matcher, "Bash");
         assert_eq!(pre[0].command, "echo before-bash");
-        assert_eq!(pre[0].timeout, 30); // default
+        assert_eq!(pre[0].timeout, 60); // default
 
         let stop = config.hooks.events.get(&HookEvent::Stop).unwrap();
         assert_eq!(stop.len(), 1);

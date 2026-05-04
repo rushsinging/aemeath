@@ -172,6 +172,7 @@ mod tests {
             cost_tracker: CostTracker::new(),
             models_config,
             current_model: "Zhipu/glm-5.1".to_string(),
+            task_store: None,
         }
     }
 

@@ -76,7 +76,7 @@ mod tests {
     fn test_byte_idx_after_str() {
         let start = ByteIdx::new(10);
         let next = start.after_str("🔬");
-        assert_eq!(next.as_usize(), 17); // 10 + "🔬".len()
+        assert_eq!(next.as_usize(), 14); // 10 + "🔬".len()
     }
 
     #[test]

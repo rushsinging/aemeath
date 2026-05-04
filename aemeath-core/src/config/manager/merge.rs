@@ -126,6 +126,42 @@ impl ConfigManager {
                 color: overlay.ui.color,
                 verbose: overlay.ui.verbose || base.ui.verbose,
                 tui: overlay.ui.tui,
+                task_list: super::super::TaskListConfig {
+                    max_lines: if overlay.ui.task_list.max_lines != 0 {
+                        overlay.ui.task_list.max_lines
+                    } else {
+                        base.ui.task_list.max_lines
+                    },
+                    show_last_completed: if overlay.ui.task_list.show_last_completed != 0 {
+                        overlay.ui.task_list.show_last_completed
+                    } else {
+                        base.ui.task_list.show_last_completed
+                    },
+                    fold_hint_format: if !overlay.ui.task_list.fold_hint_format.is_empty() {
+                        overlay.ui.task_list.fold_hint_format
+                    } else {
+                        base.ui.task_list.fold_hint_format
+                    },
+                },
+                task_lifecycle: super::super::TaskLifecycleConfig {
+                    auto_clear_completed_on_new_turn: overlay.ui.task_lifecycle.auto_clear_completed_on_new_turn,
+                    interrupt_prompt_enabled: overlay.ui.task_lifecycle.interrupt_prompt_enabled,
+                    interrupt_default_action: if !overlay.ui.task_lifecycle.interrupt_default_action.is_empty() {
+                        overlay.ui.task_lifecycle.interrupt_default_action
+                    } else {
+                        base.ui.task_lifecycle.interrupt_default_action
+                    },
+                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns != 0 {
+                        overlay.ui.task_lifecycle.stale_remind_after_turns
+                    } else {
+                        base.ui.task_lifecycle.stale_remind_after_turns
+                    },
+                    stale_remind_repeat_interval: if overlay.ui.task_lifecycle.stale_remind_repeat_interval != 0 {
+                        overlay.ui.task_lifecycle.stale_remind_repeat_interval
+                    } else {
+                        base.ui.task_lifecycle.stale_remind_repeat_interval
+                    },
+                },
             },
             permissions: PermissionConfig {
                 mode: if overlay.permissions.mode != PermissionModeConfig::default() {

@@ -20,6 +20,7 @@ pub mod model;
 pub mod reflect;
 pub mod session;
 pub mod stats;
+pub mod task;
 pub mod tasks;
 pub mod think;
 pub mod tools;
@@ -37,6 +38,7 @@ pub fn init_all() {
 use crate::config::Config;
 use crate::cost::CostTracker;
 use crate::state::AppState;
+use crate::task::TaskStore;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -124,6 +126,8 @@ pub struct CommandContext {
     pub models_config: crate::config::ModelsConfig,
     /// Current model name (for display)
     pub current_model: String,
+    /// Task store for task lifecycle commands
+    pub task_store: Option<Arc<TaskStore>>,
 }
 
 impl CommandContext {
@@ -142,6 +146,7 @@ impl CommandContext {
             cost_tracker,
             models_config: crate::config::ModelsConfig::default(),
             current_model: String::new(),
+            task_store: None,
         }
     }
 
