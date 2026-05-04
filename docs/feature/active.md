@@ -8,7 +8,7 @@
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
 | 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
-| 23 | TUI 字符串/切片安全索引收口 | 高 | 待实施 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_byte_slice`、`clamp_char_range`、`SafeChars` 等 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
+| 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_byte_slice`、`clamp_char_range`、`SafeChars` 等 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -74,6 +74,16 @@
 ### #23 TUI 字符串/切片安全索引收口
 
 **目标**：把 TUI 路径中"按字符索引、按字节切片、按宽度截断、按显示列号定位"等容易越界的操作收口到一个统一的工具模块，业务路径全部走该模块的 API，禁止直接 `chars[from..to]`、`s[i..j]`、`chars().nth(n)`、`text.len()` 当字符长度等高风险写法。配合单元测试覆盖边界条件，根治"TUI streaming/选中/复制/渲染"路径反复出现的越界 panic。
+
+**已完成的改动**：
+
+1. 新增 `aemeath-cli/src/tui/safe_text.rs`，统一提供 panic-free 字符范围、字符串切片、显示宽度截断、列号转换、split index clamp，并补充 `str_display_width`。
+2. `selection.rs` 的复制选中文本路径迁移到 `safe_char_slice` / `safe_str_slice_by_char`。
+3. `output_area/mod.rs` 的 `screen_line_map.split_off` 迁移到 `clamp_split_index`。
+4. `output_area/display.rs` 的宽度截断和列号转换委托给 `safe_text`。
+5. `input_area.rs` 自动换行后缀提取改为 `safe_char_slice`。
+6. 新增 `scripts/check-unsafe-text-ops.sh` 门禁，阻止 TUI 业务路径重新出现高风险切片/索引写法，当前 guard findings 已清零。
+7. 补充 safe_text/display 相关边界测试，以及 markdown CJK link 渲染测试，覆盖 CJK 宽字符与安全索引场景。
 
 **为什么要做（已踩过的坑）**：
 
