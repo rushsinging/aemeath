@@ -8,7 +8,7 @@
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
 | 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
-| 23 | TUI 字符串/切片安全索引收口 | 高 | 待实施 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_byte_slice`、`clamp_char_range`、`SafeChars` 等 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
+| 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -75,6 +75,16 @@
 
 **目标**：把 TUI 路径中"按字符索引、按字节切片、按宽度截断、按显示列号定位"等容易越界的操作收口到一个统一的工具模块，业务路径全部走该模块的 API，禁止直接 `chars[from..to]`、`s[i..j]`、`chars().nth(n)`、`text.len()` 当字符长度等高风险写法。配合单元测试覆盖边界条件，根治"TUI streaming/选中/复制/渲染"路径反复出现的越界 panic。
 
+**已完成的改动**：
+
+1. 新增 `aemeath-cli/src/tui/safe_text.rs`，统一提供 panic-free 字符范围、字符串切片、显示宽度截断、列号转换、split index clamp，并补充 `str_display_width`。
+2. `selection.rs` 的复制选中文本路径迁移到 `safe_char_slice` / `safe_str_slice_by_char`。
+3. `output_area/mod.rs` 的 `screen_line_map.split_off` 迁移到 `clamp_split_index`。
+4. `output_area/display.rs` 的宽度截断和列号转换委托给 `safe_text`。
+5. `input_area.rs` 自动换行后缀提取改为 `safe_char_slice`。
+6. 新增 `scripts/check-unsafe-text-ops.sh` 门禁，阻止 TUI 业务路径重新出现高风险切片/索引写法，当前 guard findings 已清零。
+7. 补充 safe_text/display 相关边界测试，以及 markdown CJK link 渲染测试，覆盖 CJK 宽字符与安全索引场景。
+
 **为什么要做（已踩过的坑）**：
 
 | Bug | 路径 | 越界类型 |
@@ -84,60 +94,70 @@
 | #8（archived）| 字符串索引 | 字节/字符长度混淆 |
 | #16（archived）| `/resume` 列表 CJK | `chars().nth(x_usize)` 用屏幕列号当字符索引 + `text.len()` 当显示宽度 |
 | streaming.rs | thinking block | UTF-8 字节 boundary panic（4636/4636 修复） |
-| #28（active）| 复制选中文本 | `chars[from..to]` 中 `from` 未做 `chars.len()` 裁剪 |
+| #28（已代码修复，待确认归档）| 复制选中文本 | `chars[from..to]` 中 `from` 未做 `chars.len()` 裁剪；代码层已修复，仍在 `docs/bug/active.md` 等待用户确认归档 |
 
 每次出 bug 各自修各自的，没有共享防御层 → 同样的"index 越界 / 字节-字符混淆 / CJK 宽字符当 1 列"模式会换个文件再出现。
 
-**预期设计**：
+**实际设计 / API**：
 
 #### 1. 新增 `aemeath-cli/src/tui/safe_text.rs` 模块
 
-API 草案（全部 panic-free，越界返回空切片或 None）：
+实际 API（全部 panic-free，越界返回空切片、空字符串、`None` 或 clamp 后的位置）：
 
 ```rust
 /// 按字符（不是字节）安全切片，from/to 都被 clamp 到 chars 长度，
-/// 如 from > to 视为空。
+/// 如 from >= to 视为空。
 pub fn safe_char_slice(chars: &[char], from: usize, to: usize) -> &[char];
 
-/// 按字符 index 安全取一个字符
+/// 按字符 index 安全取一个字符。
 pub fn safe_char_at(s: &str, idx: usize) -> Option<char>;
 
-/// 按字符长度安全截断 &str
-pub fn safe_char_truncate(s: &str, max_chars: usize) -> &str;
+/// 按字符 range 进行 clamp；空区间或反向区间返回 None。
+pub fn clamp_char_range(from: usize, to: usize, chars_len: usize) -> Option<Range<usize>>;
 
-/// 按 unicode 显示宽度截断（CJK 占 2 列），返回 (substring, width_used)
+/// 按字符范围安全切 `&str`，返回借用切片而非新分配 String。
+pub fn safe_str_slice_by_char(s: &str, from: usize, to: usize) -> &str;
+
+/// 按 unicode 显示宽度截断（CJK 占 2 列），返回 (substring, width_used)。
 pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize);
 
-/// 按 unicode 显示宽度从屏幕列号定位字符索引（鼠标点击/选中用）
+/// 计算 unicode 显示宽度。
+pub fn str_display_width(s: &str) -> usize;
+
+/// 按 unicode 显示宽度从屏幕列号定位字符索引（鼠标点击/选中用）。
 pub fn col_to_char_idx(s: &str, col: usize) -> usize;
 
-/// 按字符 range 进行 clamp，保证 0 <= from <= to <= chars_len
-pub fn clamp_char_range(from: usize, to: usize, chars_len: usize) -> (usize, usize);
-
-/// 字节切片版本（用于 ratatui Span 等只接受 &str 的场景）
-pub fn safe_str_slice(s: &str, char_from: usize, char_to: usize) -> String;
-
-/// 包装 char vec + 提供越界安全访问，实现 Index/IndexMut 时内部 clamp
-pub struct SafeChars<'a> { ... }
+/// clamp Vec::split_off 的 split index。
+pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 ```
 
-#### 2. 业务路径全部迁移
+实际实现偏差：
+- `safe_str_slice_by_char` 返回 `&str`，不是早期草案里的 `String`。
+- 未引入 `SafeChars` 包装类型；当前以函数式 helper 收口高风险操作。
+- 未保留 `safe_byte_slice` / `safe_char_truncate` 命名；对应能力由 `safe_str_slice_by_char`、`truncate_unicode_width` 覆盖。
 
-- `selection.rs::get_selected_text` → 改用 `safe_char_slice`
-- `markdown.rs` 各 inline span 切片 → 改用 `safe_str_slice` / `safe_char_truncate`
-- `streaming.rs` thinking block 解析 → 改用 `safe_char_slice`，禁止用字节 offset 切 `&str`
-- `input_area.rs::render_suggestions_in_area` → 改用 `truncate_unicode_width`
-- `output_area/mod.rs` 中 `screen_line_map` 索引 → 改用 `clamp_char_range`
-- 所有 `chars().nth(n)` → 改用 `safe_char_at`
-- 所有 `text.len()` 后跟切片场景 → 审查是字节还是字符
+#### 2. 业务路径迁移范围
 
-#### 3. lint / 测试门禁
+- `selection.rs::get_selected_text` → 改用 `safe_char_slice` / `safe_str_slice_by_char`。
+- `output_area/mod.rs` 中 `screen_line_map.split_off` → 改用 `clamp_split_index`。
+- `output_area/display.rs` 的宽度截断、显示宽度计算、列号转换 → 改用 `truncate_unicode_width` / `str_display_width` / `col_to_char_idx`。
+- `input_area.rs` 自动换行后缀提取 → 改用 `safe_char_slice`。
+- `markdown.rs` link 解析仍保留 `.get(byte_range)`：byte range 来自 `find()`，由 `get()` 验证 UTF-8 boundary；这些位置通过 `allow unsafe_text_op` 注释白名单，不代表全部直接切片都已消除。
+- `streaming.rs` 继续使用 `aemeath-core/src/string_idx/` 的 `ByteIdx` / `StrSlice`，因为 thinking block 解析是字节级协议/标签扫描操作，不适合强行改成 TUI 字符切片 helper。
+
+#### 3. caveat / 边界说明
+
+- `safe_text` 是 TUI 字符索引 / 显示宽度安全层；`aemeath-core::string_idx` 是字节 / 字符强类型索引层。两者当前并存，未来可评估统一或抽象边界。
+- `safe_text` 收口的是 TUI 业务路径里的高风险字符切片、显示宽度截断、列号换算和 split index；并非要求所有字节级解析都改成字符级 API。
+- 验证 caveat：`cargo fmt --check` 仍有与 #23 无关的 `aemeath-core` 预存格式差异，因此本次文档 follow-up 以 `git diff --check` 作为必跑验证。
+
+#### 4. lint / 测试门禁
 
 - `safe_text` 模块每个函数至少 5 个测试：空输入、from=to、from>to、from>len、to>len、CJK 宽字符
 - 加 clippy 自定义 lint 或 grep 检查脚本：`tui/` 目录下出现 `chars\[.+\.\..+\]` / `\.chars\(\)\.nth\(` / `s\[\d+\.\.\d+\]` 时 fail，强制走 `safe_text`
 - CI 增加 panic stress test：构造各种边界输入（空字符串、纯 CJK、超长行、滚动裁剪后选中等）
 
-#### 4. 实施分两阶段
+#### 5. 实施分两阶段
 
 **Phase 1（先止血）**：
 - 修复当前 #28（最小修复 + 加 `if from > to { continue; }`）
@@ -168,7 +188,7 @@ pub struct SafeChars<'a> { ... }
 **开放问题**：
 - `safe_text` 放在 `aemeath-cli/src/tui/` 还是提升到 `aemeath-core/src/utils/`（如果 core 也有类似需求）
 - 是否引入 `unicode-segmentation` crate（按 grapheme cluster 而非 char 计算，更贴合"用户感知字符"）
-- grep 门禁误报怎么处理（比如测试文件、`SafeChars::new` 自己内部使用切片）—— 可以加 `#[allow(unsafe_text_op)]` 注释跳过
+- grep 门禁误报怎么处理（比如测试文件、`safe_text` 自己内部使用切片、经 `.get(byte_range)` 验证的字节范围）—— 可以加 `allow unsafe_text_op` 注释跳过
 
 ---
 

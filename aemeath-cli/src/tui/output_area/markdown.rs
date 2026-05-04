@@ -104,10 +104,13 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
             '[' => {
                 let rest: String = chars.clone().collect();
                 if let Some(close_bracket) = rest.find(']') {
-                    if rest[close_bracket + 1..].starts_with('(') {
-                        if let Some(close_paren) = rest[close_bracket + 2..].find(')') {
-                            let inner = &rest[..close_bracket];
-                            let _url = &rest[close_bracket + 2..close_bracket + 2 + close_paren];
+                    let after_bracket = rest.get(close_bracket + 1..).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                    if after_bracket.starts_with('(') {
+                        let url_start = close_bracket + 2;
+                        let url_rest = rest.get(url_start..).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                        if let Some(close_paren) = url_rest.find(')') {
+                            let inner = rest.get(0..close_bracket).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
+                            let _url = rest.get(url_start..url_start + close_paren).unwrap_or(""); // allow unsafe_text_op: byte range comes from find() and get() validates UTF-8 boundary
                             if !inner.is_empty() && !_url.is_empty() {
                                 flush_plain(&mut spans, &mut buf, base_style);
                                 spans.push(Span::styled(
@@ -168,7 +171,7 @@ pub fn is_table_separator(line: &str) -> bool {
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') || trimmed.len() <= 2 {
         return false;
     }
-    let inner = trimmed[1..trimmed.len() - 1].trim();
+    let inner = trimmed.get(1..trimmed.len() - 1).unwrap_or("").trim();
     // 每个段必须是 :-+(-*:)? 形式
     inner.split('|').all(|seg| {
         let seg = seg.trim();
@@ -191,7 +194,7 @@ pub fn parse_table_cells(line: &str) -> Vec<&str> {
     if trimmed.len() <= 2 {
         return vec![];
     }
-    let trimmed = &trimmed[1..trimmed.len() - 1]; // strip leading/trailing |
+    let trimmed = trimmed.get(1..trimmed.len() - 1).unwrap_or(""); // strip leading/trailing |
     trimmed.split('|').map(|s| s.trim()).collect()
 }
 
@@ -368,6 +371,15 @@ mod tests {
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].content, "click ");
         assert_eq!(spans[1].content, "here");
+        assert_eq!(spans[2].content, " now");
+    }
+
+    #[test]
+    fn link_with_cjk_text() {
+        let spans = inline_markdown_spans("click [你好](https://example.com) now", base());
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content, "click ");
+        assert_eq!(spans[1].content, "你好");
         assert_eq!(spans[2].content, " now");
     }
 

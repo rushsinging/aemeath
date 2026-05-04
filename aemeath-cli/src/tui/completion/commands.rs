@@ -13,7 +13,7 @@ pub fn generate_command_suggestions(
 
     // 移除前导 /
     let search_term = if partial_lower.starts_with('/') {
-        &partial_lower[1..]
+        partial_lower.strip_prefix('/').unwrap_or(&partial_lower)
     } else {
         &partial_lower
     };

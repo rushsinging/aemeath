@@ -8,7 +8,7 @@ use super::types::{Suggestion, SuggestionType};
 pub fn generate_file_suggestions(partial: &str, cwd: &PathBuf) -> Vec<Suggestion> {
     // 移除 @ 前缀
     let path_str = if partial.starts_with('@') {
-        &partial[1..]
+        partial.strip_prefix('@').unwrap_or(partial)
     } else {
         partial
     };
@@ -24,7 +24,7 @@ pub fn generate_file_suggestions(partial: &str, cwd: &PathBuf) -> Vec<Suggestion
     } else if path_str.starts_with('~') {
         // 展开主目录
         if let Some(home) = std::env::var("HOME").ok() {
-            PathBuf::from(home).join(&path_str[1..])
+            PathBuf::from(home).join(path_str.strip_prefix('~').unwrap_or(""))
         } else {
             cwd.join(path_str)
         }

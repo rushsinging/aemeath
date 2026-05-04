@@ -1,4 +1,5 @@
 use crate::tui::completion::{Suggestion, SuggestionType};
+use crate::tui::safe_text::safe_char_slice;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -302,7 +303,9 @@ impl InputArea {
             self.textarea.move_cursor(CursorMove::Forward);
         }
         // 删掉光标到行尾的内容（保存到 after）
-        let after: String = chars[best_break..].iter().collect();
+        let after: String = safe_char_slice(&chars, best_break, chars.len())
+            .iter()
+            .collect();
         self.textarea.delete_line_by_end();
         // 插入换行和 after
         self.textarea.insert_newline();
@@ -714,5 +717,54 @@ impl InputArea {
     pub fn get_inner_area(&self, area: &Rect) -> Rect {
         let block = ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL);
         block.inner(*area)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn test_auto_wrap_current_line_handles_cjk_without_panic() {
+        let mut input = InputArea::new();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 3,
+        };
+        let mut buf = Buffer::empty(area);
+        input.render(area, &mut buf);
+
+        for ch in "你好世界你好世界".chars() {
+            input.input(ch);
+        }
+
+        let text = input.get_text();
+        assert!(text.contains('你'));
+        assert!(text.contains('界'));
+    }
+
+    #[test]
+    fn test_auto_wrap_current_line_handles_emoji_without_panic() {
+        let mut input = InputArea::new();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 3,
+        };
+        let mut buf = Buffer::empty(area);
+        input.render(area, &mut buf);
+
+        for ch in "a🚀b🚀c🚀d🚀e".chars() {
+            input.input(ch);
+        }
+
+        let text = input.get_text();
+        assert!(text.contains('🚀'));
+        assert!(text.contains('e'));
     }
 }
