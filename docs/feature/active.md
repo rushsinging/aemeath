@@ -11,7 +11,7 @@
 | 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 | 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
 | 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
-| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：MCP 配置/连接管理/工具注册与注销、manager 状态 API、`/mcp` 命令和默认 1MB tool result 限制已落地，待用户确认后归档 |
+| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -378,16 +378,22 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ### #28 MCP 系统完善
 
-**目标**：完善 MCP 系统的配置、连接管理、工具发现注册和 CLI 操作路径，覆盖 P0+P1 能力并等待用户确认后归档。
+**目标**：完善 MCP 系统的配置、连接管理、工具发现注册和 CLI 操作路径，覆盖本轮 P0+P1 基础能力；P2 不在本轮范围，待后续单独规划。
 
 #### 本轮已完成的 P0+P1 改动
 
-- McpServerConfig 支持 stdio/SSE/Streamable HTTP 配置形态、URL 安全校验、header 脱敏
-- McpConnectionManager 接入启动加载路径，统一管理连接/tool 发现/注册
-- ToolRegistry 注销与查询接口
-- Manager tool diff、snapshot refresh、health check once、reconnect 状态转换 API
-- `/mcp` 独立命令模块，支持 list/tools/restart/add/remove 的真实路径或 runtime bridge 提示
-- MCP tool result 默认 1MB 响应大小限制
+- `McpServerConfig` 支持 stdio 可用配置；SSE/Streamable HTTP 仅完成配置解析与 URL 安全校验，传输实现仍为占位存根；header 脱敏已完成。
+- McpConnectionManager 接入启动加载路径，统一管理连接/tool 发现/注册。
+- ToolRegistry 注销与查询接口。
+- Manager tool diff、snapshot refresh、`health_check_once` API 和状态转换；未暗示后台定时 health check loop 已启动。
+- `/mcp` 独立命令模块已落地，支持 list/tools/restart/add/remove 的解析与预览输出；实际运行时操作待 runtime bridge 接入。
+- MCP tool result 默认 1MB 响应大小限制。
+
+#### 已知限制
+
+- SSE/Streamable HTTP 传输未实现，`connect_http` 为 stub。
+- `/mcp` restart/add/remove/list/tools 暂未接入 runtime manager bridge，仅返回状态/预览提示。
+- 健康检查已有单次 API，后台定时 loop 尚未接入。
 
 #### 关联
 
