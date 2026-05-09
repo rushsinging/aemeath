@@ -135,7 +135,7 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
 
     let mut pos = 0;
     while results.len() < limit {
-        let result_start = match html[pos..].find("<div class=\"result") {
+        let result_start = match html[pos..].find("<div class=\"result ") {
             Some(s) => s + pos,
             None => break,
         };

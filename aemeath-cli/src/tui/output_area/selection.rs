@@ -5,6 +5,24 @@ use aemeath_core::string_idx::{char_to_byte, CharIdx, StrSlice};
 use crate::tui::safe_text::{safe_char_slice, safe_str_slice_by_char};
 
 impl super::OutputArea {
+    /// 获取逻辑行总数（包括普通行 + task_status 虚拟行）
+    fn total_virtual_line_count(&self) -> usize {
+        self.lines.len() + self.task_status_lines.len()
+    }
+
+    /// 根据逻辑索引获取行文本内容。
+    /// idx < self.lines.len() → 普通行；否则 → task_status_lines[i]
+    fn get_line_content(&self, idx: usize) -> Option<String> {
+        if idx < self.lines.len() {
+            Some(self.lines[idx].content.clone())
+        } else {
+            let task_idx = idx - self.lines.len();
+            self.task_status_lines
+                .get(task_idx)
+                .map(|s| format!("  {s}"))
+        }
+    }
+
     /// Start a selection at the given screen position
     /// row/col 是相对于输出区域 rect 的偏移
     pub fn start_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
@@ -22,9 +40,8 @@ impl super::OutputArea {
         // 将屏幕行映射到逻辑行+char偏移
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
-            if logic_idx < self.lines.len() {
-                let line = &self.lines[logic_idx].content;
-                let byte_start = char_to_byte(line, char_start);
+            if let Some(line) = self.get_line_content(logic_idx) {
+                let byte_start = char_to_byte(&line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
                     rel_col,
@@ -46,9 +63,8 @@ impl super::OutputArea {
 
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
-            if logic_idx < self.lines.len() {
-                let line = &self.lines[logic_idx].content;
-                let byte_start = char_to_byte(line, char_start);
+            if let Some(line) = self.get_line_content(logic_idx) {
+                let byte_start = char_to_byte(&line, char_start);
                 let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
                     rel_col,
@@ -96,12 +112,11 @@ impl super::OutputArea {
         }
 
         let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
-        if logic_idx >= self.lines.len() {
+        let Some(line) = self.get_line_content(logic_idx) else {
             return;
-        }
+        };
 
-        let line = &self.lines[logic_idx].content;
-        let byte_start = char_to_byte(line, char_start);
+        let byte_start = char_to_byte(&line, char_start);
         let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
             line.bslice_from(byte_start),
             rel_col,
@@ -153,24 +168,29 @@ impl super::OutputArea {
             return None;
         }
 
+        let total = self.total_virtual_line_count();
         let mut result = String::new();
 
         for logic_idx in start_logic..=end_logic {
-            if logic_idx >= self.lines.len() {
+            if logic_idx >= total {
                 log::debug!(
-                    "get_selected_text: logic_idx {} >= lines len {}, breaking",
+                    "get_selected_text: logic_idx {} >= total {}, breaking",
                     logic_idx,
-                    self.lines.len()
+                    total
                 );
                 break;
             }
+
+            let Some(content) = self.get_line_content(logic_idx) else {
+                continue;
+            };
 
             // 不同逻辑行之间加换行
             if logic_idx > start_logic {
                 result.push('\n');
             }
 
-            let chars: Vec<char> = self.lines[logic_idx].content.chars().collect();
+            let chars: Vec<char> = content.chars().collect();
             let from = if logic_idx == start_logic {
                 start_col.as_usize().min(chars.len())
             } else {
@@ -198,7 +218,7 @@ impl super::OutputArea {
                 from,
                 to,
                 chars.len(),
-                safe_str_slice_by_char(&self.lines[logic_idx].content, 0, 60)
+                safe_str_slice_by_char(&content, 0, 60)
             );
             result.extend(selected_chars.iter());
         }
@@ -266,5 +286,82 @@ mod tests {
         let selected = output.get_selected_text();
 
         assert_eq!(selected, Some("b".to_string()));
+        }
+
+        #[test]
+        fn test_get_line_content_normal_line() {
+            let mut output = OutputArea::new();
+            output.push_line(OutputLine {
+                content: "hello".to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+            assert_eq!(output.get_line_content(0), Some("hello".to_string()));
+            assert_eq!(output.get_line_content(1), None);
+        }
+
+        #[test]
+        fn test_get_line_content_task_status_line() {
+            let mut output = OutputArea::new();
+            output.push_line(OutputLine {
+                content: "normal".to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+            output.task_status_lines = vec!["task 1".to_string(), "task 2".to_string()];
+            // idx=0 → normal line
+            assert_eq!(output.get_line_content(0), Some("normal".to_string()));
+            // idx=1 → task_status_lines[0], 带 "  " 前缀
+            assert_eq!(output.get_line_content(1), Some("  task 1".to_string()));
+            // idx=2 → task_status_lines[1]
+            assert_eq!(output.get_line_content(2), Some("  task 2".to_string()));
+            // idx=3 → 越界
+            assert_eq!(output.get_line_content(3), None);
+        }
+
+        #[test]
+        fn test_total_virtual_line_count() {
+            let mut output = OutputArea::new();
+            output.push_line(OutputLine {
+                content: "a".to_string(),
+                style: LineStyle::Normal,
+                ..Default::default()
+            });
+            output.task_status_lines = vec!["t1".to_string(), "t2".to_string()];
+            assert_eq!(output.total_virtual_line_count(), 3);
+        }
+
+        #[test]
+        fn test_get_selected_text_task_status_only() {
+            let mut output = OutputArea::new();
+            output.push_line(OutputLine {
+                content: "normal line".to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+            output.task_status_lines = vec!["pending task".to_string()];
+            // 选中 task_status 行（logic_idx=1）
+            output.selection_start = Some((1, CharIdx::new(2)));
+            output.selection_end = Some((1, CharIdx::new(8)));
+            let selected = output.get_selected_text();
+            // content is "  pending task", chars [2..8) = "pendi"
+            assert_eq!(selected, Some("pendi".to_string()));
+        }
+
+        #[test]
+        fn test_get_selected_text_spanning_normal_and_task_status() {
+            let mut output = OutputArea::new();
+            output.push_line(OutputLine {
+                content: "abc".to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+            output.task_status_lines = vec!["xyz".to_string()];
+            // 选中从普通行末尾到 task_status 行开头
+            output.selection_start = Some((0, CharIdx::new(1)));
+            output.selection_end = Some((1, CharIdx::new(3)));
+            let selected = output.get_selected_text();
+            // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
+            assert_eq!(selected, Some("bc\n  x".to_string()));
+        }
     }
-}

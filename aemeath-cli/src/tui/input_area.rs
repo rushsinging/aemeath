@@ -655,15 +655,11 @@ impl InputArea {
             }
             let line_chars: Vec<char> = lines[row].chars().collect();
             let from = if row == start_row { start_col } else { 0 };
-            let to = if row == end_row {
-                end_col.min(line_chars.len())
-            } else {
-                line_chars.len()
-            };
+            let to = if row == end_row { end_col } else { line_chars.len() };
             if row > start_row {
                 result.push('\n');
             }
-            result.extend(line_chars[from..to].iter());
+            result.extend(safe_char_slice(&line_chars, from, to).iter());
         }
 
         if result.is_empty() {

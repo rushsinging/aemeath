@@ -36,13 +36,12 @@ impl App {
     pub(crate) fn update(
         &mut self,
         msg: Msg,
-        is_processing: &mut bool,
         ui_tx: &mpsc::Sender<UiEvent>,
         active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
         match msg {
-            Msg::Key(key) => self.update_key(key, is_processing, ui_tx, active_cancel, spawn_refs),
+            Msg::Key(key) => self.update_key(key, ui_tx, active_cancel, spawn_refs),
             Msg::Mouse(mouse) => {
                 self.handle_mouse_event(mouse, self.output_area_rect);
                 UpdateResult {
@@ -50,7 +49,7 @@ impl App {
                     pending_slash: None,
                 }
             }
-            Msg::Paste(text) if !*is_processing => {
+            Msg::Paste(text) if !self.is_processing => {
                 self.handle_paste_event(text, ui_tx);
                 UpdateResult {
                     cmd: Cmd::None,
@@ -77,52 +76,19 @@ impl App {
                 if text.trim().is_empty() {
                     // Empty paste — try clipboard image (same as idle mode)
                     self.just_pasted = true;
-                    let output_tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match crate::image::read_clipboard_image().await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = output_tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[clipboard image added ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = output_tx
-                                    .send(UiEvent::Error(format!("No image in clipboard: {e}")))
-                                    .await;
-                            }
-                        }
-                    });
                     self.output_area.push_system("[reading clipboard image...]");
+                    return UpdateResult {
+                        cmd: Cmd::ReadClipboardImage,
+                        pending_slash: None,
+                    };
                 } else if crate::image::is_image_file(text.trim()) {
                     self.output_area
                         .push_system(&format!("[loading image: {}...]", text.trim()));
-                    let path = text.trim().to_string();
-                    let tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match crate::image::process_image_file(&path).await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[image loaded ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(UiEvent::Error(format!("Failed to load image: {e}")))
-                                    .await;
-                            }
-                        }
-                    });
                     self.just_pasted = true;
+                    return UpdateResult {
+                        cmd: Cmd::ProcessImageFile(text.trim().to_string()),
+                        pending_slash: None,
+                    };
                 } else {
                     self.just_pasted = true;
                     for ch in text.chars() {
@@ -146,14 +112,13 @@ impl App {
                 cmd: Cmd::None,
                 pending_slash: None,
             },
-            Msg::Ui(ev) => self.update_ui(ev, is_processing, ui_tx, active_cancel, spawn_refs),
+            Msg::Ui(ev) => self.update_ui(ev, ui_tx, active_cancel, spawn_refs),
         }
     }
 
     fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        is_processing: &mut bool,
         ui_tx: &mpsc::Sender<UiEvent>,
         active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_refs: &SpawnContextRefs<'_>,
@@ -430,7 +395,7 @@ impl App {
 
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                if *is_processing {
+                if self.is_processing {
                     spawn_refs.interrupted.store(true, Ordering::Relaxed);
                     if let Ok(guard) = active_cancel.lock() {
                         if let Some(token) = guard.as_ref() {
@@ -458,14 +423,14 @@ impl App {
                     }
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Tab) if !*is_processing => {
+            (KeyModifiers::NONE, KeyCode::Tab) if !self.is_processing => {
                 if self.input_area.is_showing_suggestions() {
                     self.apply_current_suggestion();
                 } else {
                     self.update_suggestions();
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Esc) if !*is_processing => {
+            (KeyModifiers::NONE, KeyCode::Esc) if !self.is_processing => {
                 if self.input_area.is_showing_suggestions() {
                     self.input_area.clear_suggestions();
                 }
@@ -480,7 +445,7 @@ impl App {
                 }
                 self.status_bar.set_warning("Interrupted");
             }
-            (_, KeyCode::Enter) if *is_processing => {
+            (_, KeyCode::Enter) if self.is_processing => {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();
                     self.input_area.add_history(&input);
@@ -492,11 +457,11 @@ impl App {
                         .set_warning(&format!("{n} message(s) queued"));
                 }
             }
-            (_, KeyCode::Enter) if !*is_processing => {
+            (_, KeyCode::Enter) if !self.is_processing => {
                 if self.input_area.is_showing_suggestions() {
                     self.apply_current_suggestion();
                 } else if !self.input_area.is_empty() {
-                    return self.update_enter(is_processing, ui_tx, active_cancel, spawn_refs);
+                    return self.update_enter(ui_tx, active_cancel, spawn_refs);
                 }
             }
             (KeyModifiers::NONE, KeyCode::PageUp) => self.output_area.scroll_up(10),
@@ -514,13 +479,13 @@ impl App {
                     c
                 };
                 self.input_area.input(ch);
-                if !*is_processing {
+                if !self.is_processing {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 self.input_area.backspace();
-                if !*is_processing {
+                if !self.is_processing {
                     self.update_suggestions();
                 }
             }
@@ -538,36 +503,14 @@ impl App {
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
             (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
-                if !*is_processing && !self.just_pasted =>
+                if !self.is_processing && !self.just_pasted =>
             {
                 self.just_pasted = true;
-                let tx = ui_tx.clone();
-                tokio::spawn(async move {
-                    tx.send(UiEvent::SystemMessage(
-                        "[reading clipboard image...]".to_string(),
-                    ))
-                    .await
-                    .ok();
-                    match crate::image::read_clipboard_image().await {
-                        Ok(img) => {
-                            let size = img.final_size;
-                            tx.send(UiEvent::ClipboardImage(img)).await.ok();
-                            tx.send(UiEvent::SystemMessage(format!(
-                                "[clipboard image added ({} bytes). Type message to send.]",
-                                size
-                            )))
-                            .await
-                            .ok();
-                        }
-                        Err(e) => {
-                            tx.send(UiEvent::SystemMessage(format!(
-                                "No image in clipboard: {e}"
-                            )))
-                            .await
-                            .ok();
-                        }
-                    }
-                });
+                self.output_area.push_system("[reading clipboard image...]");
+                return UpdateResult {
+                    cmd: Cmd::ReadClipboardImage,
+                    pending_slash: None,
+                };
             }
             (KeyModifiers::NONE, KeyCode::End) => self.input_area.move_end(),
             _ => {}
@@ -582,7 +525,6 @@ impl App {
     /// Handle Enter when not processing
     fn update_enter(
         &mut self,
-        is_processing: &mut bool,
         ui_tx: &mpsc::Sender<UiEvent>,
         active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         spawn_refs: &SpawnContextRefs<'_>,
@@ -620,7 +562,7 @@ impl App {
         self.tool_call_active = false;
         self.output_area.start_spinner();
         self.output_area.set_spinner_phase("Thinking...");
-        *is_processing = true;
+        self.is_processing = true;
 
         UpdateResult {
             cmd: Cmd::SpawnProcessing(spawn_ctx),
@@ -632,10 +574,9 @@ impl App {
     fn update_ui(
         &mut self,
         ev: UiEvent,
-        is_processing: &mut bool,
         _ui_tx: &mpsc::Sender<UiEvent>,
         _active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        spawn_refs: &SpawnContextRefs<'_>,
+        _spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
         match ev {
             UiEvent::Text(text) => {
@@ -755,23 +696,25 @@ impl App {
                     "[SPINNER] Error: tool_call_active {} -> false",
                     self.tool_call_active
                 );
-                let hook_runner = spawn_refs.hook_runner.clone();
-                let msg_clone = msg.clone();
-                tokio::spawn(async move {
-                    let _ = hook_runner.on_notification(&msg_clone, "error").await;
-                });
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
-                *is_processing = false;
+                self.is_processing = false;
+                return UpdateResult {
+                    cmd: Cmd::RunHookNotification {
+                        message: msg,
+                        kind: "error".to_string(),
+                    },
+                    pending_slash: None,
+                };
             }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
-                *is_processing = false;
+                self.is_processing = false;
             }
             UiEvent::MessagesSync(msgs) => {
                 self.messages = msgs;
@@ -786,14 +729,15 @@ impl App {
                     .set_pending_images(self.pending_images.len());
             }
             UiEvent::SystemMessage(msg) => {
-                let hook_runner = spawn_refs.hook_runner.clone();
-                let msg_clone = msg.clone();
-                tokio::spawn(async move {
-                    let _ = hook_runner
-                        .on_notification(&msg_clone, "system_message")
-                        .await;
-                });
+                // Hook notification deferred to Cmd; state update stays here
                 self.output_area.push_system(&msg);
+                return UpdateResult {
+                    cmd: Cmd::RunHookNotification {
+                        message: msg,
+                        kind: "system_message".to_string(),
+                    },
+                    pending_slash: None,
+                };
             }
             UiEvent::AskUser {
                 id,
@@ -837,18 +781,20 @@ impl App {
                 additional_context,
             } => {
                 if let Some(ref msg) = system_message {
-                    let hook_runner = spawn_refs.hook_runner.clone();
-                    let msg_clone = msg.clone();
-                    tokio::spawn(async move {
-                        let _ = hook_runner
-                            .on_notification(&msg_clone, "system_message")
-                            .await;
-                    });
                     self.output_area.push_system(msg);
                 }
                 if let Some(ref ctx) = additional_context {
                     self.output_area
                         .push_system(&format!("[Additional Context] {ctx}"));
+                }
+                if let Some(msg) = system_message {
+                    return UpdateResult {
+                        cmd: Cmd::RunHookNotification {
+                            message: msg,
+                            kind: "system_message".to_string(),
+                        },
+                        pending_slash: None,
+                    };
                 }
             }
             UiEvent::DrainQueuedInput { reply_tx } => {
@@ -895,7 +841,7 @@ impl App {
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
-                *is_processing = false;
+                self.is_processing = false;
                 self.status_bar.set_success("Ready");
                 if let Ok(reminders) = self.session_reminders.lock() {
                     if let Some(line) = reminders.recap_line() {
@@ -913,7 +859,7 @@ impl App {
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
                 self.active_tool_call_ids.clear();
-                *is_processing = false;
+                self.is_processing = false;
                 self.status_bar.set_success("Ready");
                 if let Ok(reminders) = self.session_reminders.lock() {
                     if let Some(line) = reminders.recap_line() {

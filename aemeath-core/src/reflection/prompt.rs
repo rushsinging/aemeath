@@ -10,10 +10,10 @@ pub fn build_reflection_prompt(project_memory: &str, recent_summary: &str) -> St
 
 JSON 格式：
 {{
-  "deviations": ["偏差描述"],
-  "suggested_memories": [{{"category":"decision","content":"记忆内容","tags":["可选标签"]}}],
-  "outdated_memories": ["memory-id"],
-  "user_alert": "可选用户提示"
+    "deviations": ["偏差描述"],
+    "suggested_memories": [{{"category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加"}}],
+    "outdated_memories": ["memory-id"],
+    "user_alert": "可选用户提示"
 }}
 
 # 当前项目记忆

@@ -1,0 +1,53 @@
+# Bug #28 Output Area 选中/渲染时 panic：slice/split_off 越界
+
+**状态**：✅ 已修复，用户已确认
+**发现日期**：2026-05
+**确认日期**：2026-05-06
+**优先级**：高
+**根因类别**：selection 坐标和 screen_line_map 在动态内容变化时未做边界收敛
+**修复提交**：1a21759
+
+## 症状
+
+TUI 中选中并尝试复制文本时崩溃，状态行/spinner 行显示：
+
+```text
+[PANIC] range start index 4 out of range for slice of length 2 at aemeath-cli/src/tui/output_area/selection.rs:203:32
+```
+
+同一 session / turn 中还出现相似 panic：
+
+```text
+[PANIC] `at` split index (is 4) should be <= len (is 0) at aemeath-cli/src/tui/output_area/mod.rs:474:57
+```
+
+## 根因
+
+OutputArea 有两类动态状态未在读取/裁剪前做统一边界收敛：
+
+1. `get_selected_text()` 使用 selection 保存的 `(logic_idx, char_col)` 对当前 `lines[logic_idx].content` 切片。动态 streaming、tool progress 替换、行重排后，原来的 `start_col` 可能大于当前 `chars.len()`，导致 `chars[from..to]` 越界。
+2. `render()` 中 `lines` 追加 queued/spinner/task 临时行后，`lines.len()` 可能大于 `area.height`，但这些临时行没有对应的 `screen_line_map` 项。用 `lines.len() - area.height` 直接裁剪 `screen_line_map.split_off(offset)` 时，`offset` 可能大于 `screen_line_map.len()`，导致 split 越界。
+
+## 修复
+
+- 新增/使用 `aemeath-cli/src/tui/safe_text.rs` 中的安全文本 API。
+- `selection.rs::get_selected_text` 改用 `safe_char_slice` / `safe_str_slice_by_char`，对字符范围做 clamp，避免 `chars[from..to]` 越界。
+- `output_area/mod.rs` 中 `screen_line_map.split_off` 改用 `clamp_split_index`，确保临时行过多或高度变化时不会 split 越界。
+- 补充显示宽度转换与边界回归测试。
+
+## 涉及文件
+
+- `aemeath-cli/src/tui/safe_text.rs`
+- `aemeath-cli/src/tui/output_area/selection.rs`
+- `aemeath-cli/src/tui/output_area/mod.rs`
+- `aemeath-cli/src/tui/output_area/display.rs`
+- `aemeath-cli/src/tui/input_area.rs`
+
+## 关联
+
+- Feature #23：TUI 字符串/切片安全索引收口
+- 历史 Bug #4 / #5 / #8 / #16：同类字符串索引、显示宽度、screen_line_map 越界问题
+
+## 验证
+
+用户已确认修复。

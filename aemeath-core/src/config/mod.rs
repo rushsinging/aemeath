@@ -9,6 +9,7 @@
 
 pub mod hooks;
 pub mod legacy;
+pub mod logging;
 pub mod manager;
 pub mod memory;
 pub mod models;
@@ -21,6 +22,7 @@ pub mod ui;
 // Re-exports for backward compatibility
 pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
+pub use logging::LoggingConfig;
 pub use manager::ConfigManager;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
@@ -90,6 +92,10 @@ pub struct Config {
     /// Memory and reflection configuration
     #[serde(default)]
     pub memory: MemoryConfig,
+
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 #[cfg(test)]

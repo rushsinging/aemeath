@@ -3,8 +3,10 @@ mod cli;
 mod image;
 mod mcp_loader;
 mod prompt;
+mod reflection;
 mod render;
 mod repl;
+mod task_reminder;
 mod tui;
 
 use aemeath_core::config::{models::ResolvedModel, Config, ModelEntryConfig};
@@ -45,7 +47,6 @@ use prompt::build_system_prompt_parts;
 
 #[tokio::main]
 async fn main() {
-    init_logging();
     init_panic_hook();
 
     let cli = Cli::parse();
@@ -73,11 +74,13 @@ async fn main() {
     }
 }
 
-fn init_logging() {
+fn init_logging(logging_config: &aemeath_core::config::LoggingConfig) {
     // 初始化结构化日志 — 路由到 ~/.aemeath/aemeath.log，避免库的 log::warn! / log::error! 破坏 TUI 渲染。
     // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复 stderr 行为。
+    // 日志级别由 config.json 的 logging 段控制；可通过 RUST_LOG 环境变量覆盖。
+    let default_filter = logging_config.to_filter_string();
     let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,aemeath_llm=debug,aemeath_cli=debug"),
+        env_logger::Env::default().default_filter_or(&default_filter),
     );
     let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -427,6 +430,14 @@ async fn run_chat(mut args: Args) {
         .await
         .ok();
 
+    // 初始化日志系统（在 config 加载之后，使用配置中的日志级别）
+    init_logging(
+        config_file
+            .as_ref()
+            .map(|c| &c.logging)
+            .unwrap_or(&aemeath_core::config::LoggingConfig::default()),
+    );
+
     // 应用 config.json 中的 permissions.mode（CLI --allow-all 和 env var 优先）
     if !args.allow_all {
         if let Some(ref cfg) = config_file {
@@ -734,30 +745,6 @@ async fn run_chat(mut args: Args) {
         .unwrap_or(4);
     let agent_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
 
-    // 将并发限制记录到 debug.log 以便诊断
-    {
-        use std::io::Write;
-        let debug_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".aemeath")
-            .join("debug.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&debug_path)
-        {
-            let _ = writeln!(
-                f,
-                "[{}] concurrency limits: max_tool={}, max_agent={}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-                max_tool_concurrency,
-                max_agent_concurrency
-            );
-        }
-    }
     log::info!(
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,

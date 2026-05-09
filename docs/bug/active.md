@@ -3,10 +3,11 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
-| 26 | 几乎每次对话都触发 superpowers skill 调用 | 中 | 活动中 | 未确认 | 2026-05 | SessionStart hook 注入提示过强或 skill 触发条件过宽 |
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
-| 28 | Output Area 选中/渲染时 panic：slice/split_off 越界 | 高 | 待确认 | 未确认 | 2026-05 | selection 坐标和 screen_line_map 在动态内容变化时未做边界收敛 |
+| 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
+| 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
+| 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 
 ## 详情
 
@@ -30,31 +31,6 @@
 2. compaction 阶段主动截断过长的 tool result 内容
 3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
 **涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
-
-### #28 Output Area 选中/渲染时 panic：slice/split_off 越界
-**症状**：TUI 中选中并尝试复制文本时崩溃，状态行/spinner 行显示：
-```
-[PANIC] range start index 4 out of range for slice of length 2 at aemeath-cli/src/tui/output_area/selection.rs:203:32
-```
-同一 session / turn 中还出现大量相似 panic：
-```
-[PANIC] `at` split index (is 4) should be <= len (is 0) at aemeath-cli/src/tui/output_area/mod.rs:474:57
-```
-**根因**：OutputArea 有两类动态状态未在读取/裁剪前做统一边界收敛：
-1. `get_selected_text()` 使用 selection 保存的 `(logic_idx, char_col)` 对当前 `lines[logic_idx].content` 切片。动态 streaming、tool progress 替换、行重排后，原来的 `start_col` 可能大于当前 `chars.len()`，导致 `chars[from..to]` 越界。
-2. `render()` 中 `lines` 追加 queued/spinner/task 临时行后，`lines.len()` 可能大于 `area.height`，但这些临时行没有对应的 `screen_line_map` 项。用 `lines.len() - area.height` 直接裁剪 `screen_line_map.split_off(offset)` 时，`offset` 可能大于 `screen_line_map.len()`，导致 split 越界。
-**复现路径**：
-1. 选中一段文本或正在渲染带 spinner/task/status 的 output area
-2. 内容因 streaming、tool call progress、spinner/task 临时行、窗口高度变化等发生变化
-3. selection 坐标或 screen_line_map 与当前可见行数量不再一致
-4. 触发复制或下一帧 render → panic
-**修复方向**：
-1. `get_selected_text()` 中 `from` 和 `to` 都裁剪到 `chars.len()`，并在 `from > to` 时跳过该行，避免反向/越界切片。
-2. `render()` 裁剪 `screen_line_map` 时使用 `offset.min(screen_line_map.len())`，并将最终 map 长度截断到实际可见高度，确保临时行过多时不会越界。
-3. 增加回归测试覆盖 selection 行变短、反向 selection clamp、reserved 临时行超过高度三类场景。
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/selection.rs`（`get_selected_text` 切片裁剪）
-- `aemeath-cli/src/tui/output_area/mod.rs`（`render` 中 `screen_line_map` 与临时渲染行裁剪）
 
 ### #27 Sub-agent 已执行 tool call 但 task list 状态不更新
 **症状**：父 agent 创建 7 个 task（"#1 拆分 task.rs (509→<400)" ... "#7 ..."），通过 Agent tool 派发 sub-agent 执行其中某个（如 "拆分 state.rs 到400行以下"）。sub-agent 已完成 Read / Bash / Write / Bash / Bash 等多个 tool call（屏幕可见），但临时区域的 task list 仍显示 `Tasks: 0/7`，所有 7 项保持 `☐`（pending）状态。
@@ -109,18 +85,111 @@
 - Bug #27（sub-agent 路径）—— 共因是 LLM 不主动 update task 状态，但修复路径不同
 - Feature #18（Task list 跨轮次 batch 机制）—— batch 工作正常，问题在状态推进
 
-### #26 几乎每次对话都触发 superpowers skill 调用
-**症状**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。
-**疑似根因**：
-1. SessionStart hook（`~/.aemeath/hooks/superpowers-inject.sh` 由 Feature #17 改成短提示）的提示文本可能仍然过强（"if there is even a 1% chance..."），让 LLM 把"调用 skill"当作默认动作
-2. `superpowers:using-superpowers` skill 的 description 包含 "Use when starting any conversation"，被 LLM 解读成"每轮都要调用"
-3. Skill 列表注入到 system prompt 后，LLM 倾向于用 skill 而非直接回答
+### #26 几乎每次对话都触发 superpowers skill 调用（已归档：不作为 Bug）
+**归档原因**：用户确认该项不算 Bug，不再作为活动 bug 跟踪。
+**原现象**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。
+**原疑似根因**：SessionStart hook 提示语偏强、`using-superpowers` description 触发面过宽、Skill 列表注入后模型倾向调用 skill。
+**后续处理**：如需调整，应作为体验优化 / feature 另行登记，而非 bug 修复。
+
+### #31 WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更）
+**症状**：WebSearch tool 调用后始终返回 "No search results found"，但直接 curl DuckDuckGo HTML 接口（`https://html.duckduckgo.com/html/`）可以正常返回搜索结果。
+
+**根因**：`parse_duckduckgo_html()` 在第 138 行用 `find("<div class=\"result\"")` 匹配结果块。DuckDuckGo 近期将结果 div 的 class 从单值 `class="result"` 改为多值 `class="result results_links results_links_deep web-result "`。搜索字符串期望 `result` 后紧跟 `"`，实际 HTML 中 `result` 后是空格，导致永远匹配不到任何结果。
+
+**修复**：`aemeath-tools/src/web_search.rs:138` 将搜索字符串从 `<div class="result"` 改为 `<div class="result "`（加空格），兼容新旧两种 class 格式。
+
+**涉及路径**：`aemeath-tools/src/web_search.rs` `parse_duckduckgo_html()`
+
+**验证**：
+1. `curl https://html.duckduckgo.com/html/?q=test` 确认 HTML 中有 `class="result results_links..."`
+2. `grep -c '<div class="result"' /tmp/ddg_test.html` 返回 0，确认旧匹配字符串失效
+3. 修复后用实际 HTML 测试，成功提取 5 条结果
+4. `cargo check -p aemeath-tools` 编译通过
+
+
+### #32 Task list 窗口化：始终只显示 1 条 task
+
+**症状**：task list 显示行为不一致，表现出两种症状：
+
+**症状 A — 窗口退缩至 1 条**：
+Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
+- Task 1~10 陆续创建，总数 > 7
+- LLM 持续完成任务（TaskUpdate completed），不断增加新 task
+- task list 窗口始终只显示 1 行（如正在执行 #9，则只显示 #9）
+- #9 完成后跳到 #10，#9 随之消失，窗口仍只显示 1 行
+
+**症状 B — completed 挂留 + 窗口截断**：
+- Task 2 已完成（completed），但仍滞留在 task list 中不消失
+- 同时在显示 task 4（执行中）和 task 5（待执行）
+- 即 task list 显示：2（completed）、4（in_progress）、5（pending）
+- 未达 7 条上限，但 task 3 等中间 task 未显示，completed 未自动清理
+
+**复现路径**：
+1. LLM 创建 ≥ 2 条 task
+2. LLM 完成部分 task，新建更多 task（总数持续波动）
+3. 观察 task list 显示 —— 始终只有 1 行
+
+**根因**：`build_task_window()` 窗口化策略在两处逻辑缺陷：
+
+1. **症状 A 根因**：窗口填充规则"上一条 completed + 所有 in_progress + 后续 pending"在串行执行场景（1 条 in_progress）下，completed 最多只取 1 条，结果窗口极易退缩至 1 条
+2. **症状 B 根因**：
+   - completed 未设置自动清理（TTL），过期 completed 不会自动从窗口排除
+   - 窗口填充时对 pending 的截断位置不正确，跳过了 task 3（pending）而直接到了 task 5
+
+另外需确认 `task_status_lines` 是批量替换还是增量追加 —— 如果是增量方式，旧行不会被移除，会导致 completed 长期滞留。
+
 **修复方向**：
-1. 调整 SessionStart hook 提示语，从"必须检查 skill"改为"如有明确匹配场景再考虑调用"
-2. 评估是否对 `using-superpowers` 这类元 skill 做特殊处理（不在每轮提示中暴露）
-3. 增加配置开关 `skill.auto_suggest = false`，让用户主动用 `/skill` 命令调用而非 LLM 自主决定
-4. 观察并记录哪些用户输入触发了不必要的 skill 调用，形成 ban list
-**涉及路径**：`~/.aemeath/hooks/superpowers-inject.sh`、`aemeath-core/src/skill.rs`（skill description 是否参与 system prompt 构建）、`aemeath-core/src/config/`（`skill.auto_suggest` 配置）
+1. `build_task_window()` 添加**下限保护**：窗口结果 < `min(3, total_tasks)` 时扩大填充（补入更多 pending / completed）
+2. `build_task_window()` 修复 **pending 截断顺序**：按 task id 升序取 pending，不跳跃
+3. Completed task **自动清理**：窗口化时排除太旧的 completed（如已完成超过 3 秒），或每次重建窗口时只保留最近 N 条 completed
+4. 确认 `update_task_status` 每次推送的是 **完整窗口行列表**（批量替换），而非增量追加
+5. 单元测试覆盖：
+   - 10 tasks、1 in_progress / 9 pending → ≥ 3 条显示
+   - 5 tasks、1 completed(#2) / 1 in_progress(#4) / 3 pending(#3,#5,#6) → 按序显示 #2,#3,#4,#5
+
+**涉及路径**：
+- `aemeath-cli/src/tui/app/task_window.rs`（`build_task_window` 窗口化逻辑）
+- `aemeath-cli/src/tui/app/mod.rs`（`update_task_status` 调用侧）
+
+**修复（2026-05-09）**：
+1. **Completed TTL 过滤**：按 `updated_at` 降序排列，排除更新超过 30s 的旧 completed
+2. **温和扩展**：填充完核心任务后，有余量时自动补充更多 completed 和 pending
+3. **下限保护**：扩展后不足 `min(3, total)` 时进一步从 completed 头部补充
+4. **pending 顺序**：`pending.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX))` 确保升序
+5. **单元测试**：新增 4 个测试覆盖下限保护、TTL 过滤、pending 顺序、温和扩展场景
+6. **门禁脚本补漏**：`scripts/check-unsafe-text-ops.sh` 新增不带 `&` 的切片检测模式
+
+**关联**：
+- Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
+- Feature #18（task batch 机制）—— 同属 task list 显示链路
+
+
+### #33 Spinner 下方 task list 无法选中和复制
+
+**症状**：spinner 下方的 task list 行（摘要行 `━━ Tasks: 3/5 ━━` 及每条 task 的 `✓ #1 标题`、`■ #2 标题`、`□ #3 标题`）在 TUI 中可见但鼠标无法选中、无法复制。拖拽选中时这些行被跳过，`Ctrl+C` 复制时也拿不到文本。
+
+**复现路径**：
+1. 对话中创建了 task，spinner 下方显示 task list
+2. 鼠标拖拽尝试选中 task list 区域的行
+3. 观察：task list 行未被高亮，复制时无内容
+
+**根因**：
+1. **screen_line_map 未覆盖 task status 行**：`update_task_status()` 把 task 行 push 到 `task_status_lines`，但 render 阶段这些行可能走的是独立渲染路径（如 status bar 区域），未注册到 `screen_line_map`，导致 selection 系统看不到这些行
+2. **LineKind 缺失**：即使 task 行在 screen_line_map 中，其 `LineKind` 可能不是 `Text`，`copy_selection` 中的 `LineKind` 分支未处理 task status 类型
+
+**修复方向**：
+1. 确保 task status 行渲染时注册到 `screen_line_map`，分配正确的 `LineKind::Text`（或新增 `LineKind::TaskStatus` 并在 copy 路径处理）
+2. `copy_selection` 中对 task 相关行做文本提取（标题文本不含图标部分）
+3. 单元测试覆盖：验证 task 行可被选中和复制
+
+**涉及路径**：
+- `aemeath-cli/src/tui/app/mod.rs`（`update_task_status` / render 阶段 screen_line_map 注册）
+- `aemeath-cli/src/tui/output_area/mod.rs`（selection / copy 路径的 LineKind 处理）
+
+**关联**：
+- Bug #14（已修复：tool call 标题可选中但无法复制）—— 同类问题，修复模式可复用
+- Feature #24（task list 窗口化）—— task list 的渲染路径与窗口化逻辑共用
+- Bug #32（task list 显示不完整）—— 同在 task list 渲染链路
 
 
 # 已归档 Bug

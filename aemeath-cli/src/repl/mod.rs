@@ -372,13 +372,15 @@ pub async fn run_repl(
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                        if let Some(text) = auto_reflection_text(
-                            &memory_config,
-                            turn_count + turns,
-                            &messages,
-                            &cwd,
-                        )
-                        .await
+                        if let Some(text) = crate::reflection::run_reflection(
+                                &memory_config,
+                                turn_count + turns,
+                                &messages,
+                                &cwd,
+                                &client,
+                                &system_prompt_text,
+                            )
+                            .await
                         {
                             eprintln!("{text}");
                         }
@@ -748,47 +750,4 @@ fn log_post_compact_results(results: Vec<aemeath_core::hook::HookResult>) {
             eprintln!("{}", result.output.trim());
         }
     }
-}
-
-async fn auto_reflection_text(
-    config: &aemeath_core::config::MemoryConfig,
-    turn_count: usize,
-    messages: &[Message],
-    cwd: &PathBuf,
-) -> Option<String> {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-    if turn_count % config.reflection.interval_turns != 0 {
-        return None;
-    }
-
-    let store = aemeath_core::memory::MemoryStore::new(
-        aemeath_core::memory::memory_base_dir(),
-        aemeath_core::memory::project_hash_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .ok()?;
-    let entries = store
-        .list(Some(aemeath_core::memory::MemoryLayer::Project))
-        .ok()?;
-    let mut output = aemeath_core::reflection::ReflectionOutput {
-        deviations: Vec::new(),
-        suggested_memories: Vec::new(),
-        outdated_memories: entries
-            .iter()
-            .filter(|entry| entry.outdated)
-            .map(|entry| entry.id.clone())
-            .collect(),
-        user_alert: None,
-    };
-    if entries.is_empty() && !messages.is_empty() {
-        output
-            .deviations
-            .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
-    }
-    Some(aemeath_core::reflection::ReflectionEngine::format_output(
-        &output,
-    ))
 }

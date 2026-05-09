@@ -1,4 +1,5 @@
 use aemeath_core::cost::format_tokens;
+use crate::tui::safe_text::safe_char_slice;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -238,9 +239,9 @@ impl StatusBar {
                 let sel_start = start.min(len);
                 let sel_end = end.min(len);
 
-                let before: String = chars[..sel_start].iter().collect();
-                let selected: String = chars[sel_start..sel_end].iter().collect();
-                let after: String = chars[sel_end..].iter().collect();
+                let before: String = safe_char_slice(&chars, 0, sel_start).iter().collect();
+                let selected: String = safe_char_slice(&chars, sel_start, sel_end).iter().collect();
+                let after: String = safe_char_slice(&chars, sel_end, len).iter().collect();
 
                 let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
                 let base = Style::default().bg(Color::Black);

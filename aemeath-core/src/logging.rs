@@ -1,3 +1,13 @@
+//! 日志文件管理与格式化输出
+//!
+//! # 日志文件职责
+//!
+//! | 文件 | 职责 | 内容 |
+//! |------|------|------|
+//! | `aemeath.log` | **应用主日志**：所有模块的结构化运行日志 | env_logger pipe 接收全部 `log::*` 输出，包含所有 crate（core/cli/llm/tools）的 info/warn/error/debug |
+//! | `agent.log` | **Agent 对话审计日志**：LLM 交互的完整记录 | 主 agent 和 sub-agent 的每次 LLM 请求/响应摘要、tool call 触发与结果摘要、token 用量、模型切换。面向"复现对话流程"而非"调试内部状态" |
+//! | `panic.log` | **Panic 崩溃日志** | panic 信息 + backtrace |
+
 use chrono::{DateTime, Local};
 use serde_json::json;
 use std::fs::{self, File, OpenOptions};
@@ -12,7 +22,6 @@ pub const LOG_RETENTION_DAYS: u64 = 30;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFile {
     Aemeath,
-    Debug,
     Agent,
     Panic,
 }
@@ -21,7 +30,6 @@ impl LogFile {
     pub fn file_name(self) -> &'static str {
         match self {
             LogFile::Aemeath => "aemeath.log",
-            LogFile::Debug => "debug.log",
             LogFile::Agent => "agent.log",
             LogFile::Panic => "panic.log",
         }
@@ -85,47 +93,6 @@ pub fn append_text_line(
     message: &str,
 ) -> io::Result<()> {
     append_text_line_with_turn(log_file, session_id, None, level, module, message)
-}
-
-pub fn format_agent_line(
-    session_id: &str,
-    turn: Option<usize>,
-    role: &str,
-    model: &str,
-    level: &str,
-    module: &str,
-    message: &str,
-) -> String {
-    let turn = turn
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| "-".to_string());
-    format!(
-        "[{}] [session:{}] [turn:{}] [role:{}] [model:{}] [{}] [{}] {}",
-        timestamp_rfc3339(),
-        session_id,
-        turn,
-        role,
-        model,
-        level,
-        module,
-        message
-    )
-}
-
-pub fn append_agent_line(
-    log_file: LogFile,
-    session_id: &str,
-    turn: Option<usize>,
-    role: &str,
-    model: &str,
-    level: &str,
-    module: &str,
-    message: &str,
-) -> std::io::Result<()> {
-    append_line(
-        log_file,
-        &format_agent_line(session_id, turn, role, model, level, module, message),
-    )
 }
 
 pub fn append_text_line_with_turn(
@@ -269,11 +236,10 @@ mod tests {
     fn test_log_file_file_name_boundary_all_variants() {
         let names = [
             LogFile::Aemeath.file_name(),
-            LogFile::Debug.file_name(),
             LogFile::Agent.file_name(),
             LogFile::Panic.file_name(),
         ];
-        assert_eq!(names.len(), 4);
+        assert_eq!(names.len(), 3);
         assert!(names.iter().all(|name| name.ends_with(".log")));
     }
 
@@ -297,39 +263,6 @@ mod tests {
     fn test_format_text_line_boundary_empty_values() {
         let line = format_text_line("", "", "", "");
         assert!(line.contains("[session:] [turn:-] [] []"));
-    }
-
-    #[test]
-    fn test_format_agent_line_happy_path() {
-        let line = format_agent_line(
-            "sess-1",
-            Some(2),
-            "coder",
-            "deepseek/deepseek-chat",
-            "INFO",
-            "agent",
-            "started",
-        );
-        assert!(line.contains("[session:sess-1]"));
-        assert!(line.contains("[turn:2]"));
-        assert!(line.contains("[role:coder]"));
-        assert!(line.contains("[model:deepseek/deepseek-chat]"));
-        assert!(line.contains("[INFO]"));
-        assert!(line.ends_with("started"));
-    }
-
-    #[test]
-    fn test_format_agent_line_boundary_no_turn() {
-        let line = format_agent_line("sess-1", None, "default", "default", "INFO", "agent", "msg");
-        assert!(line.contains("[turn:-]"));
-        assert!(line.contains("[role:default]"));
-        assert!(line.contains("[model:default]"));
-    }
-
-    #[test]
-    fn test_format_agent_line_boundary_empty_role_model() {
-        let line = format_agent_line("sess", Some(0), "", "", "DEBUG", "agent", "");
-        assert!(line.contains("[role:] [model:]"));
     }
 
     #[test]

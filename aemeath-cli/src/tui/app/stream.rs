@@ -4,7 +4,6 @@ use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{
     CompactHookData, HookData, HookJsonOutput, HookResult, StopHookData, ToolHookData,
 };
-use aemeath_core::logging::{self, LogFile};
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::provider::StreamHandler;
@@ -14,6 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+use crate::task_reminder::TaskReminderState;
 
 /// Background task: runs the agent loop and sends UI events via channel
 #[allow(clippy::too_many_arguments)]
@@ -28,14 +29,14 @@ pub async fn process_in_background(
     mut messages: Vec<Message>,
     context_size: usize,
     cwd: PathBuf,
-    #[allow(unused_variables)] session_id: String,
+    session_id: String,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     agent_runner: Option<Arc<dyn aemeath_core::tool::AgentRunner>>,
     allow_all: bool,
     interrupted: Arc<AtomicBool>,
     cancel: CancellationToken,
-    _task_store: Arc<aemeath_core::task::TaskStore>,
+    task_store: Arc<aemeath_core::task::TaskStore>,
     max_tool_concurrency: usize,
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
@@ -71,25 +72,46 @@ pub async fn process_in_background(
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
+    let mut task_reminder_state = TaskReminderState::new();
 
     for _ in 0..MAX_TURNS {
         turn_count += 1;
         crate::set_current_turn(turn_count);
         log::info!(
-            "turn started: messages={}, context_size={}, tool_schemas={}",
+            "turn started: session={}, turn={}, messages={}, context_size={}, tool_schemas={}",
+            session_id,
+            turn_count,
             messages.len(),
             context_size,
             tool_schemas.len()
         );
+        log_agent_loop_event(
+            &session_id,
+            turn_count,
+            "turn_started",
+            serde_json::json!({
+                "messages": messages.len(),
+                "context_size": context_size,
+                "tool_schema_count": tool_schemas.len(),
+            }),
+        );
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
+            log_agent_loop_event(
+                &session_id,
+                turn_count,
+                "interrupted",
+                serde_json::json!({
+                    "messages_before_truncate": messages.len(),
+                    "messages_at_start": messages_at_start,
+                }),
+            );
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages)).await;
             let _ = tx.send(UiEvent::Cancelled).await;
             let _ = tx.send(UiEvent::Done).await;
             return;
         }
-
         struct TuiStreamHandler {
             tx: mpsc::Sender<UiEvent>,
             first_text_time: Option<std::time::Instant>,
@@ -260,6 +282,9 @@ pub async fn process_in_background(
             }
         }
 
+        // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
+        task_reminder_state.update_from_messages(turn_count as u64, &messages);
+
         // Prepend CLAUDE.md user context for the API call
         let messages_for_api: Vec<Message> = {
             let mut api_msgs = Vec::new();
@@ -267,6 +292,13 @@ pub async fn process_in_background(
                 api_msgs.push(Message::user(format!(
                     "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
                 )));
+            }
+            // Inject task reminder if conditions are met
+            if let Some(reminder) = task_reminder_state
+                .build_reminder(turn_count as u64, &task_store)
+                .await
+            {
+                api_msgs.push(reminder);
             }
             api_msgs.extend(messages.iter().cloned());
             api_msgs
@@ -298,8 +330,12 @@ pub async fn process_in_background(
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        log::debug!("turn api finished: elapsed_secs={:.3}", api_elapsed);
-
+        log::debug!(
+            "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
+            session_id,
+            turn_count,
+            api_elapsed
+        );
         match response {
             Ok(resp) => {
                 last_api_input_tokens = resp.usage.input_tokens as u64;
@@ -316,15 +352,43 @@ pub async fn process_in_background(
                 let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+                log_agent_loop_event(
+                    &session_id,
+                    turn_count,
+                    "llm_response",
+                    serde_json::json!({
+                        "stop_reason": format!("{:?}", resp.stop_reason),
+                        "input_tokens": resp.usage.input_tokens,
+                        "output_tokens": resp.usage.output_tokens,
+                        "tool_call_count": tool_calls.len(),
+                        "elapsed_secs": api_elapsed,
+                    }),
+                );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                    if let Some(text) =
-                        auto_reflection_text(&memory_config, turn_count, &messages, &cwd).await
+                    log_agent_loop_event(
+                        &session_id,
+                        turn_count,
+                        "agent_loop_break",
+                        serde_json::json!({
+                            "reason": if tool_calls.is_empty() { "no_tool_calls" } else { "end_turn" },
+                            "stop_reason": format!("{:?}", resp.stop_reason),
+                            "tool_call_count": tool_calls.len(),
+                        }),
+                    );
+                    if let Some(text) = crate::reflection::run_reflection(
+                        &memory_config,
+                        turn_count,
+                        &messages,
+                        &cwd,
+                        &client,
+                        &system_prompt_text,
+                    )
+                    .await
                     {
                         let _ = tx.send(UiEvent::SystemMessage(text)).await;
                     }
                     break;
                 }
-
                 {
                     let (approved, denied): (Vec<_>, Vec<_>) = if allow_all {
                         (tool_calls.iter().collect(), vec![])
@@ -347,6 +411,19 @@ pub async fn process_in_background(
 
                     let mut denied_results: Vec<(String, String, bool, Vec<ImageData>)> =
                         Vec::new();
+                    log_agent_loop_event(
+                        &session_id,
+                        turn_count,
+                        "tool_batch_started",
+                        serde_json::json!({
+                            "approved_count": approved.len(),
+                            "denied_count": denied.len(),
+                            "tool_calls": tool_calls.iter().map(|call| serde_json::json!({
+                                "id": call.id,
+                                "name": call.name,
+                            })).collect::<Vec<_>>(),
+                        }),
+                    );
                     for call in &denied {
                         // PermissionDenied hook: notify when a tool is denied
                         let _hook_results = hook_ui
@@ -559,6 +636,14 @@ pub async fn process_in_background(
 
                         let results = agent.execute_tools(std::slice::from_ref(&call)).await;
                         for (id, output, is_error, images) in results {
+                            log_tool_result_event(
+                                &session_id,
+                                turn_count,
+                                &call.name,
+                                &id,
+                                is_error,
+                                &output,
+                            );
                             // PostToolUse hook: run with JSON output parsing
                             let hook_results = hook_ui
                                 .run_json(
@@ -897,10 +982,18 @@ pub async fn process_in_background(
                         .chain(agent_results.into_iter())
                         .chain(denied_results.into_iter())
                         .collect();
+                    log_agent_loop_event(
+                        &session_id,
+                        turn_count,
+                        "tool_batch_finished",
+                        serde_json::json!({
+                            "result_count": all_results.len(),
+                            "error_count": all_results.iter().filter(|(_, _, is_error, _)| *is_error).count(),
+                        }),
+                    );
 
                     // Build tool result message for API
                     messages.push(Message::tool_results_rich(all_results));
-
                     // Sync after tool execution
                     let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
@@ -933,6 +1026,15 @@ pub async fn process_in_background(
                 }
             }
             Err(e) => {
+                log_agent_loop_event(
+                    &session_id,
+                    turn_count,
+                    "llm_error",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                        "elapsed_secs": api_elapsed,
+                    }),
+                );
                 let _ = tx.send(UiEvent::Error(e.to_string())).await;
                 // StopFailure hook: API 错误导致 agent 循环结束
                 let stop_results = hook_ui
@@ -961,6 +1063,15 @@ pub async fn process_in_background(
     }
 
     messages.truncate(messages_at_start);
+    log_agent_loop_event(
+        &session_id,
+        turn_count,
+        "agent_loop_finished",
+        serde_json::json!({
+            "turns": turn_count,
+            "elapsed_secs": turn_start.elapsed().as_secs_f64(),
+        }),
+    );
 
     // Stop hook: agent 循环结束
     let _ = hook_ui
@@ -977,47 +1088,37 @@ pub async fn process_in_background(
         .await;
 }
 
-async fn auto_reflection_text(
-    config: &aemeath_core::config::MemoryConfig,
-    turn_count: usize,
-    messages: &[Message],
-    cwd: &PathBuf,
-) -> Option<String> {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-    if turn_count % config.reflection.interval_turns != 0 {
-        return None;
-    }
+fn log_agent_loop_event(session_id: &str, turn: usize, event: &str, extra: serde_json::Value) {
+    log::info!(
+        "[agent_loop] session={}, turn={}, event={}, extra={}",
+        session_id,
+        turn,
+        event,
+        extra
+    );
+}
 
-    let store = aemeath_core::memory::MemoryStore::new(
-        aemeath_core::memory::memory_base_dir(),
-        aemeath_core::memory::project_hash_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .ok()?;
-    let entries = store
-        .list(Some(aemeath_core::memory::MemoryLayer::Project))
-        .ok()?;
-    let mut output = aemeath_core::reflection::ReflectionOutput {
-        deviations: Vec::new(),
-        suggested_memories: Vec::new(),
-        outdated_memories: entries
-            .iter()
-            .filter(|entry| entry.outdated)
-            .map(|entry| entry.id.clone())
-            .collect(),
-        user_alert: None,
-    };
-    if entries.is_empty() && !messages.is_empty() {
-        output
-            .deviations
-            .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
-    }
-    Some(aemeath_core::reflection::ReflectionEngine::format_output(
-        &output,
-    ))
+fn log_tool_result_event(
+    session_id: &str,
+    turn: usize,
+    tool_name: &str,
+    tool_id: &str,
+    is_error: bool,
+    output: &str,
+) {
+    let preview: String = output.chars().take(500).collect();
+    log_agent_loop_event(
+        session_id,
+        turn,
+        "tool_result",
+        serde_json::json!({
+            "tool_name": tool_name,
+            "tool_id": tool_id,
+            "is_error": is_error,
+            "output_chars": output.chars().count(),
+            "output_preview": preview,
+        }),
+    );
 }
 
 #[derive(Clone)]
@@ -1140,25 +1241,30 @@ fn log_llm_request_messages(
     turn: usize,
     provider: &str,
     model: &str,
-    system_blocks: &[aemeath_llm::types::SystemBlock],
+    _system_blocks: &[aemeath_llm::types::SystemBlock],
     messages: &[Message],
     tool_schemas: &[serde_json::Value],
 ) {
-    let payload = serde_json::json!({
-        "event": "llm_request_messages",
-        "provider": provider,
-        "model": model,
-        "system_blocks": system_blocks,
-        "messages": messages,
-        "tool_schema_count": tool_schemas.len(),
-    });
-    let _ = logging::append_json_line_with_turn(
-        LogFile::Agent,
+    // 只记录摘要（消息条数 + 最近 3 条的类型），不 dump 完整消息内容
+    let latest: Vec<serde_json::Value> = messages
+        .iter()
+        .rev()
+        .take(3)
+        .map(|m| {
+            serde_json::json!({
+                "role": m.role,
+                "len": m.content.len(),
+            })
+        })
+        .collect();
+    log::info!(
+        "[llm_request] session={}, turn={}, provider={}, model={}, messages={}, tools={}, latest_roles={}",
         session_id,
-        Some(turn),
-        "INFO",
-        "llm_request",
-        "messages sent to LLM",
-        payload,
+        turn,
+        provider,
+        model,
+        messages.len(),
+        tool_schemas.len(),
+        serde_json::to_string(&latest).unwrap_or_default(),
     );
 }

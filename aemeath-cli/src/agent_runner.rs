@@ -2,7 +2,6 @@ use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::compact::safe_slice;
 use aemeath_core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use aemeath_core::hook::HookRunner;
-use aemeath_core::logging::{self, LogFile};
 use aemeath_core::message::Message;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{
@@ -323,7 +322,7 @@ impl AgentRunner for CliAgentRunner {
             }
         }
 
-        // Helper to emit progress — writes to agent.log for diagnostics.
+        // Helper to emit progress — writes to aemeath.log via log::info! for diagnostics.
         let session_id = ctx
             .parent_session_id
             .clone()
@@ -340,15 +339,14 @@ impl AgentRunner for CliAgentRunner {
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
         let progress = move |turn: Option<usize>, msg: &str| {
-            let _ = logging::append_agent_line(
-                LogFile::Agent,
-                &session_id,
-                turn,
-                &role_name,
-                &model_name,
-                "INFO",
-                "agent",
-                msg,
+            let turn_str = turn.map(|t| t.to_string()).unwrap_or_else(|| "-".to_string());
+            log::info!(
+                target: "sub_agent",
+                "[role:{} model:{} turn:{}] {}",
+                role_name,
+                model_name,
+                turn_str,
+                msg
             );
         }; // Helper to call SubagentStop hook and send system messages
         let hook_runner_clone = hook_runner.clone();
@@ -408,24 +406,29 @@ impl AgentRunner for CliAgentRunner {
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
         let log_request_messages = |turn: usize, messages: &[Message]| {
-            let payload = serde_json::json!({
-                "event": "subagent_llm_request_messages",
-                "provider": client.provider_name(),
-                "model": client.model_name(),
-                "role": role_name_for_log,
-                "model_spec": model_name_for_log,
-                "system_blocks": system_blocks,
-                "messages": messages,
-                "tool_schema_count": sub_schemas.len(),
-            });
-            let _ = logging::append_json_line_with_turn(
-                LogFile::Agent,
-                &session_id_for_log,
-                Some(turn),
-                "INFO",
-                "llm_request",
-                "sub-agent messages sent to LLM",
-                payload,
+            // 只记录摘要，不 dump 完整消息内容
+            let latest: Vec<serde_json::Value> = messages
+                .iter()
+                .rev()
+                .take(3)
+                .map(|m| {
+                    serde_json::json!({
+                        "role": m.role,
+                        "len": m.content.len(),
+                    })
+                })
+                .collect();
+            log::info!(
+                "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
+                session_id_for_log,
+                turn,
+                client.provider_name(),
+                client.model_name(),
+                role_name_for_log,
+                model_name_for_log,
+                messages.len(),
+                sub_schemas.len(),
+                serde_json::to_string(&latest).unwrap_or_default(),
             );
         };
 

@@ -455,9 +455,15 @@ impl OutputArea {
             lines.push(sl.clone());
         }
         if spinner_line.is_some() {
-            for task_line in &self.task_status_lines {
+            let base_idx = self.lines.len();
+            for (i, task_line) in self.task_status_lines.iter().enumerate() {
+                let text = format!("  {task_line}");
+                let char_count = text.chars().count();
+                // task_status 行使用 base_idx + i 作为逻辑索引，
+                // get_line_content() 会将其映射回 task_status_lines[i]
+                self.screen_line_map.push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
                 lines.push(Line::styled(
-                    format!("  {task_line}"),
+                    text,
                     Style::default().fg(Color::DarkGray),
                 ));
             }

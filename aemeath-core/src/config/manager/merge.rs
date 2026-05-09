@@ -1,6 +1,18 @@
 //! Config merge logic
 
-use super::*;
+use super::super::{
+    hooks::HooksConfig,
+    legacy::{self, ApiConfig, ModelConfig},
+    logging::{self, LoggingConfig, SubAgentLogConfig},
+    models::ModelsConfig,
+    permissions::{PermissionConfig, PermissionModeConfig},
+    skills::SkillsConfig,
+    storage::StorageConfig,
+    tools::{self, AgentsConfig, ToolsConfig},
+    ui::UiConfig,
+    Config,
+};
+use super::ConfigManager;
 
 impl ConfigManager {
     /// Merge two configs (overlay takes precedence)
@@ -205,6 +217,51 @@ impl ConfigManager {
                 HooksConfig { events }
             },
             memory: overlay.memory,
+            logging: LoggingConfig {
+                default_level: if !overlay.logging.default_level.is_empty() {
+                    overlay.logging.default_level
+                } else {
+                    base.logging.default_level
+                },
+                module_levels: {
+                    let mut levels = base.logging.module_levels;
+                    for (k, v) in overlay.logging.module_levels {
+                        levels.insert(k, v);
+                    }
+                    levels
+                },
+                max_bytes: if overlay.logging.max_bytes != logging::default_max_bytes() {
+                    overlay.logging.max_bytes
+                } else {
+                    base.logging.max_bytes
+                },
+                max_backups: if overlay.logging.max_backups != logging::default_max_backups() {
+                    overlay.logging.max_backups
+                } else {
+                    base.logging.max_backups
+                },
+                retention_days: if overlay.logging.retention_days
+                    != logging::default_retention_days()
+                {
+                    overlay.logging.retention_days
+                } else {
+                    base.logging.retention_days
+                },
+                sub_agent_log: SubAgentLogConfig {
+                    enabled: overlay.logging.sub_agent_log.enabled,
+                    include_request_payload: overlay
+                        .logging
+                        .sub_agent_log
+                        .include_request_payload,
+                    max_payload_bytes: if overlay.logging.sub_agent_log.max_payload_bytes
+                        != logging::default_max_payload_bytes()
+                    {
+                        overlay.logging.sub_agent_log.max_payload_bytes
+                    } else {
+                        base.logging.sub_agent_log.max_payload_bytes
+                    },
+                },
+            },
         }
     }
 

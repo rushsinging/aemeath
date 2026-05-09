@@ -35,7 +35,7 @@ pub(crate) struct SpawnContext {
 }
 
 /// Borrowed references to the shared state needed for spawning.
-/// Used in event_handler to avoid passing many individual parameters.
+/// Used in the processing pipeline to avoid passing many individual parameters.
 pub(crate) struct SpawnContextRefs<'a> {
     pub client: &'a Arc<aemeath_llm::client::LlmClient>,
     pub registry: &'a Arc<ToolRegistry>,

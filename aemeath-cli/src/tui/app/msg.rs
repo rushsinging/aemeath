@@ -34,4 +34,15 @@ pub(crate) enum Cmd {
     QueueInput(String),
     /// Save session with the given messages (async operation).
     SaveSession(Vec<aemeath_core::message::Message>),
+    /// Execute multiple commands in sequence.
+    Batch(Vec<Cmd>),
+    /// Run a hook notification asynchronously.
+    RunHookNotification {
+        message: String,
+        kind: String,
+    },
+    /// Read clipboard image asynchronously.
+    ReadClipboardImage,
+    /// Process an image file path asynchronously.
+    ProcessImageFile(String),
 }

@@ -28,9 +28,10 @@ while IFS= read -r -d '' file; do
     COUNT=$((COUNT + 1))
   done < <(
     perl -ne '
-      print "$.:$_" if /\.chars\(\)\.nth\(/;
-      print "$.:$_" if /&\s*[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]*\.\.[^\]]*\]/;
-    ' "$file"
+            print "$.:$_" if /\.chars\(\)\.nth\(/;
+            print "$.:$_" if /&\s*[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]*\.\.[^\]]*\]/;
+            print "$.:$_" if /[A-Za-z_][A-Za-z0-9_]*\s*\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\]/;
+          ' "$file"
   )
 done < <(find "$TARGET" -name '*.rs' -print0)
 

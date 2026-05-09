@@ -559,22 +559,7 @@ inventory::submit!(ToolDisplayEntry {
 });
 
 fn debug_log(msg: &str) {
-    use std::io::Write;
-    let path = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".aemeath")
-        .join("debug.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let _ = writeln!(f, "[{ts}] {msg}");
-    }
+    log::debug!("{}", msg);
 }
 
 /// Format a tool call for human-friendly display.

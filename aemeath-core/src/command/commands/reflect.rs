@@ -25,14 +25,54 @@ fn reflect_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
         return CommandResult::Error("Reflection 系统已禁用。".to_string());
     }
 
-    match args.trim() {
+    let trimmed = args.trim();
+    // Support --auto flag for any subcommand
+    let (cmd, auto) = if let Some(sub) = trimmed.strip_suffix(" --auto") {
+        (sub.trim(), true)
+    } else if let Some(sub) = trimmed.strip_suffix(" -a") {
+        (sub.trim(), true)
+    } else {
+        (trimmed, false)
+    };
+
+    match cmd {
         "" => run_reflection(ctx),
-        "apply" => CommandResult::Success("暂无待应用的 Reflection 建议。".to_string()),
+        "apply" => apply_reflection(ctx, auto),
         "stats" | "history" => {
             CommandResult::Success("Reflection stats/history 将在打磨阶段支持。".to_string())
         }
         other => CommandResult::Error(format!("未知 reflect 子命令: {other}")),
     }
+}
+
+fn apply_reflection(ctx: &CommandContext, _auto: bool) -> CommandResult {
+    let mut store = match open_memory_store(ctx) {
+        Ok(store) => store,
+        Err(error) => return CommandResult::Error(error),
+    };
+
+    let memories = match store.list(Some(MemoryLayer::Project)) {
+        Ok(memories) => memories,
+        Err(error) => return CommandResult::Error(error.to_string()),
+    };
+
+    let mut archived_count = 0;
+    for entry in &memories {
+        if entry.outdated {
+            match store.delete(&entry.id) {
+                Ok(()) => archived_count += 1,
+                Err(e) => log::warn!("Failed to archive outdated memory {}: {e}", entry.id),
+            }
+        }
+    }
+
+    let msg = if archived_count > 0 {
+        format!("已归档 {archived_count} 条过时记忆。")
+    } else {
+        "没有需要应用的反思建议。".to_string()
+    };
+
+    CommandResult::Success(msg)
 }
 
 fn run_reflection(ctx: &CommandContext) -> CommandResult {
