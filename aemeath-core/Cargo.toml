@@ -22,4 +22,3 @@ chrono = "0.4"
 unicode-width = "0.2"
 inventory = { workspace = true }
 url = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }

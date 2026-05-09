@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -31,7 +32,23 @@ pub enum McpTransportKind {
     StreamableHttp,
 }
 
+impl fmt::Display for McpTransportKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            McpTransportKind::Stdio => "stdio",
+            McpTransportKind::Sse => "sse",
+            McpTransportKind::StreamableHttp => "streamable_http",
+        };
+        f.write_str(name)
+    }
+}
+
 impl McpServerConfig {
+    /// Resolve the configured transport.
+    ///
+    /// An explicit `transport` takes precedence. Otherwise, stdio is selected
+    /// when `command` is present, and streamable HTTP is selected when only
+    /// `url` is present.
     pub fn transport_kind(&self) -> Result<McpTransportKind, String> {
         if let Some(kind) = self.transport {
             return Ok(kind);
@@ -297,8 +314,7 @@ impl McpClient {
             .ok_or_else(|| "remote MCP server requires url".to_string())?;
         validate_remote_url(url)?;
         Err(format!(
-            "MCP {:?} transport for '{}' is configured but HTTP session support is not connected yet",
-            kind, name
+            "MCP {kind} transport for '{name}' is not yet supported"
         ))
     }
 
@@ -420,6 +436,12 @@ impl McpClient {
     /// Shutdown the MCP server
     pub async fn shutdown(&mut self) {
         let _ = self.child.kill().await;
+    }
+}
+
+impl Drop for McpClient {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
     }
 }
 
