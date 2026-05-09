@@ -358,6 +358,71 @@ impl McpConnectionManager {
         self.connect_server(name).await
     }
 
+    /// Mark a server as reconnecting and clear any stored error.
+    pub async fn mark_reconnecting(&self, name: &str) -> Result<(), String> {
+        let mut connections = self.connections.lock().await;
+        let connection = connections
+            .get_mut(name)
+            .ok_or_else(|| format!("Server '{}' not found", name))?;
+
+        connection.state = ConnectionState::Reconnecting;
+        connection.error = None;
+
+        Ok(())
+    }
+
+    /// Refresh the cached tool snapshot for a server.
+    pub async fn refresh_tool_snapshot(&self, name: &str, tools: Vec<McpToolDef>) {
+        {
+            let mut connections = self.connections.lock().await;
+            if let Some(connection) = connections.get_mut(name) {
+                connection.tools = tools.clone();
+            }
+        }
+
+        let mut discovered = self.discovered_tools.lock().await;
+        discovered.insert(name.to_string(), tools);
+    }
+
+    /// Run one health-check pass across connected servers.
+    pub async fn health_check_once(&self) {
+        let connected_servers = self.get_connected_servers().await;
+
+        for server in connected_servers {
+            let Some(client) = server.client else {
+                continue;
+            };
+
+            let ping_result = {
+                let client = client.lock().await;
+                client.ping().await
+            };
+
+            if let Err(error) = ping_result {
+                log::warn!("MCP server '{}' health check failed: {}", server.name, error);
+
+                if let Err(mark_error) = self.mark_reconnecting(&server.name).await {
+                    log::warn!(
+                        "Failed to mark MCP server '{}' as reconnecting: {}",
+                        server.name,
+                        mark_error
+                    );
+                    continue;
+                }
+
+                if self.config.auto_reconnect {
+                    if let Err(reconnect_error) = self.reconnect_server(&server.name).await {
+                        log::warn!(
+                            "Failed to reconnect MCP server '{}': {}",
+                            server.name,
+                            reconnect_error
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Toggle server enabled/disabled
     pub async fn toggle_server(&self, name: &str) -> Result<(), String> {
         // Read state while holding the lock, then release before calling
@@ -691,5 +756,51 @@ mod tests {
         assert!(connection.client.is_none());
         assert!(connection.tools.is_empty());
         assert!(!connection.supports_resources);
+    }
+
+    #[tokio::test]
+    async fn test_mark_reconnecting_sets_state_and_clears_error() {
+        let mut servers = HashMap::new();
+        servers.insert("example".to_string(), server_config(Some("/bin/example-mcp")));
+        let manager = McpConnectionManager::with_servers(servers);
+        manager.initialize().await.unwrap();
+
+        {
+            let mut connections = manager.connections.lock().await;
+            let connection = connections.get_mut("example").unwrap();
+            connection.state = ConnectionState::Failed;
+            connection.error = Some("connection refused".to_string());
+        }
+
+        manager.mark_reconnecting("example").await.unwrap();
+
+        let connection = manager.get_server("example").await.unwrap();
+        assert_eq!(connection.state, ConnectionState::Reconnecting);
+        assert!(connection.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_tool_snapshot_updates_discovered_tools() {
+        let mut servers = HashMap::new();
+        servers.insert("example".to_string(), server_config(Some("/bin/example-mcp")));
+        let manager = McpConnectionManager::with_servers(servers);
+        manager.initialize().await.unwrap();
+
+        manager
+            .refresh_tool_snapshot("example", vec![tool("old", "old description")])
+            .await;
+        manager
+            .refresh_tool_snapshot("example", vec![tool("new", "new description")])
+            .await;
+
+        let all_tools = manager.get_all_tools().await;
+        assert_eq!(all_tools.len(), 1);
+        assert_eq!(all_tools[0].0, "example");
+        assert_eq!(all_tools[0].1.name, "new");
+        assert_eq!(all_tools[0].1.description, "new description");
+
+        let connection = manager.get_server("example").await.unwrap();
+        assert_eq!(connection.tools.len(), 1);
+        assert_eq!(connection.tools[0].name, "new");
     }
 }
