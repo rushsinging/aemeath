@@ -33,9 +33,19 @@ pub(crate) async fn parse_openai_stream(
     let mut stop_reason = crate::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
 
-    let byte_stream = response
-        .bytes_stream()
-        .map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+    let byte_stream = response.bytes_stream().map(|r| {
+        r.map_err(|e| {
+            let mut msg = format!("{}", e);
+            let mut source = std::error::Error::source(&e);
+            let mut depth = 1;
+            while let Some(cause) = source {
+                msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                source = cause.source();
+                depth += 1;
+            }
+            io::Error::new(io::ErrorKind::Other, msg)
+        })
+    });
     let reader = StreamReader::new(byte_stream);
     let mut lines = reader.lines();
 
@@ -52,11 +62,14 @@ pub(crate) async fn parse_openai_stream(
                 )));
             }
             result = lines.next_line() => {
-                match result.map_err(|e| crate::LlmError::Stream(e.to_string()))? {
-                    Some(line) => line,
-                    None => break,
-                }
-            }
+                match result {
+                    Ok(Some(line)) => line,
+                    Ok(None) => break,
+                    Err(e) => {
+                        log::warn!("[openai-compat stream] failed to read SSE line: {}", e);
+                        return Err(crate::LlmError::Stream(e.to_string()));
+                    }
+                }            }
         };
 
         // 停滞检测

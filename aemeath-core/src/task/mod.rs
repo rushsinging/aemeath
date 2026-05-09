@@ -453,15 +453,11 @@ impl TaskStore {
         let mut ids: Vec<u64> = batches.iter().map(|b| b.id).collect();
         ids.sort_unstable();
         ids.pop(); // remove largest (current)
-        ids.pop()  // second largest = previous
+        ids.pop() // second largest = previous
     }
 
     /// Get tasks in a specific batch that match statuses.
-    pub async fn tasks_in_batch(
-        &self,
-        batch_id: u64,
-        statuses: &[TaskStatus],
-    ) -> Vec<Task> {
+    pub async fn tasks_in_batch(&self, batch_id: u64, statuses: &[TaskStatus]) -> Vec<Task> {
         let tasks = self.tasks.lock().await;
         let mut result: Vec<Task> = tasks
             .values()

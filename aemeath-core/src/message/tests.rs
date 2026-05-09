@@ -336,10 +336,11 @@ fn test_deep_clean_removes_mid_orphaned_tool_result() {
     let removed = deep_clean_messages(&mut msgs);
     assert!(removed > 0, "should have removed at least one message");
     // The orphaned ToolResult message should be gone
-    assert!(msgs
-        .iter()
-        .all(|m| !m.has_tool_results()
-            || m.tool_result_ids().into_iter().any(|id| id != "orphan")));
+    assert!(
+        msgs.iter()
+            .all(|m| !m.has_tool_results()
+                || m.tool_result_ids().into_iter().any(|id| id != "orphan"))
+    );
 }
 
 #[test]

@@ -156,19 +156,34 @@ impl ConfigManager {
                     },
                 },
                 task_lifecycle: super::super::TaskLifecycleConfig {
-                    auto_clear_completed_on_new_turn: overlay.ui.task_lifecycle.auto_clear_completed_on_new_turn,
+                    auto_clear_completed_on_new_turn: overlay
+                        .ui
+                        .task_lifecycle
+                        .auto_clear_completed_on_new_turn,
                     interrupt_prompt_enabled: overlay.ui.task_lifecycle.interrupt_prompt_enabled,
-                    interrupt_default_action: if !overlay.ui.task_lifecycle.interrupt_default_action.is_empty() {
+                    interrupt_default_action: if !overlay
+                        .ui
+                        .task_lifecycle
+                        .interrupt_default_action
+                        .is_empty()
+                    {
                         overlay.ui.task_lifecycle.interrupt_default_action
                     } else {
                         base.ui.task_lifecycle.interrupt_default_action
                     },
-                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns != 0 {
+                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns
+                        != 0
+                    {
                         overlay.ui.task_lifecycle.stale_remind_after_turns
                     } else {
                         base.ui.task_lifecycle.stale_remind_after_turns
                     },
-                    stale_remind_repeat_interval: if overlay.ui.task_lifecycle.stale_remind_repeat_interval != 0 {
+                    stale_remind_repeat_interval: if overlay
+                        .ui
+                        .task_lifecycle
+                        .stale_remind_repeat_interval
+                        != 0
+                    {
                         overlay.ui.task_lifecycle.stale_remind_repeat_interval
                     } else {
                         base.ui.task_lifecycle.stale_remind_repeat_interval
@@ -249,10 +264,7 @@ impl ConfigManager {
                 },
                 sub_agent_log: SubAgentLogConfig {
                     enabled: overlay.logging.sub_agent_log.enabled,
-                    include_request_payload: overlay
-                        .logging
-                        .sub_agent_log
-                        .include_request_payload,
+                    include_request_payload: overlay.logging.sub_agent_log.include_request_payload,
                     max_payload_bytes: if overlay.logging.sub_agent_log.max_payload_bytes
                         != logging::default_max_payload_bytes()
                     {

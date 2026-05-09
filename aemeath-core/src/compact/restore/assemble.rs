@@ -1,9 +1,9 @@
 //! 压缩结果组装与角色交替修复
 
-use std::collections::HashSet;
 use crate::compact::restore::restore_files::build_file_restoration;
 use crate::compact::restore::sanitize_pairs::sanitize_tool_pairs;
 use crate::message::{ContentBlock, Message, Role};
+use std::collections::HashSet;
 
 /// 从摘要 + 近期消息组装最终压缩结果。
 pub fn assemble_compacted(

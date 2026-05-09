@@ -53,7 +53,9 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
             };
 
             task_store.get_or_create_batch(batch_id).await;
-            task_store.set_batch_status(batch_id, BatchStatus::Paused).await;
+            task_store
+                .set_batch_status(batch_id, BatchStatus::Paused)
+                .await;
 
             CommandResult::Success(format!("Batch #{} paused", batch_id))
         }
@@ -90,10 +92,15 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
             };
 
             if batch.status != BatchStatus::Paused {
-                return CommandResult::Error(format!("Batch #{} is not paused (status: {:?})", batch_id, batch.status));
+                return CommandResult::Error(format!(
+                    "Batch #{} is not paused (status: {:?})",
+                    batch_id, batch.status
+                ));
             }
 
-            task_store.set_batch_status(batch_id, BatchStatus::Active).await;
+            task_store
+                .set_batch_status(batch_id, BatchStatus::Active)
+                .await;
             task_store.reset_silence(batch_id).await;
 
             CommandResult::Success(format!("Batch #{} resumed", batch_id))
@@ -112,7 +119,9 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
             };
 
             task_store.get_or_create_batch(batch_id).await;
-            task_store.set_batch_status(batch_id, BatchStatus::Active).await;
+            task_store
+                .set_batch_status(batch_id, BatchStatus::Active)
+                .await;
             task_store.reset_silence(batch_id).await;
 
             CommandResult::Success(format!("Batch #{} kept active", batch_id))
@@ -176,9 +185,7 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
             CommandResult::Success(lines.join("\n"))
         }
 
-        "" => CommandResult::Error(
-            "Usage: /task <pause|resume|keep|drop|history>".to_string(),
-        ),
+        "" => CommandResult::Error("Usage: /task <pause|resume|keep|drop|history>".to_string()),
 
         other => CommandResult::Error(format!("Unknown task command: {}", other)),
     }

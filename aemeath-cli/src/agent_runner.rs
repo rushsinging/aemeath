@@ -339,7 +339,9 @@ impl AgentRunner for CliAgentRunner {
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
         let progress = move |turn: Option<usize>, msg: &str| {
-            let turn_str = turn.map(|t| t.to_string()).unwrap_or_else(|| "-".to_string());
+            let turn_str = turn
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "-".to_string());
             log::info!(
                 target: "sub_agent",
                 "[role:{} model:{} turn:{}] {}",
@@ -393,12 +395,7 @@ impl AgentRunner for CliAgentRunner {
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        aemeath_tools::register_all_tools_except_agent(
-            &mut sub_registry,
-            sub_task_store,
-            sub_skills,
-        );
-
+        aemeath_tools::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
         let sub_schemas = sub_registry.schemas();
         let mut messages = vec![Message::user(prompt)];
         let mut handler = SilentHandler;

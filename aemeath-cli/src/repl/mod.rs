@@ -373,14 +373,14 @@ pub async fn run_repl(
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         if let Some(text) = crate::reflection::run_reflection(
-                                &memory_config,
-                                turn_count + turns,
-                                &messages,
-                                &cwd,
-                                &client,
-                                &system_prompt_text,
-                            )
-                            .await
+                            &memory_config,
+                            turn_count + turns,
+                            &messages,
+                            &cwd,
+                            &client,
+                            &system_prompt_text,
+                        )
+                        .await
                         {
                             eprintln!("{text}");
                         }

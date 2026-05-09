@@ -1,6 +1,6 @@
 //! Task reminder passive injection.
 //!
-//! Automatically injects a concise task status reminder as a `<system-reminder>` 
+//! Automatically injects a concise task status reminder as a `<system-reminder>`
 //! user message every N turns. This lets the LLM perceive progress without
 //! actively calling `TaskList`.
 
@@ -94,9 +94,7 @@ impl TaskReminderState {
 
         Some(Message {
             role: Role::User,
-            content: vec![ContentBlock::Text {
-                text: reminder,
-            }],
+            content: vec![ContentBlock::Text { text: reminder }],
         })
     }
 }

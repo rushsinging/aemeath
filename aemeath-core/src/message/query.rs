@@ -4,7 +4,10 @@ use crate::message::types::*;
 
 impl Message {
     pub fn extract_tool_uses(&self) -> Vec<(&str, &str, &serde_json::Value)> {
-        self.content.iter().filter_map(|b| b.as_tool_use()).collect()
+        self.content
+            .iter()
+            .filter_map(|b| b.as_tool_use())
+            .collect()
     }
 
     pub fn text_content(&self) -> String {
@@ -25,7 +28,10 @@ impl Message {
 
     /// Returns the ToolUse IDs in this message.
     pub fn tool_use_ids(&self) -> Vec<&str> {
-        self.content.iter().filter_map(|b| b.tool_use_id()).collect()
+        self.content
+            .iter()
+            .filter_map(|b| b.tool_use_id())
+            .collect()
     }
 
     /// Returns true if this message contains ToolResult blocks.

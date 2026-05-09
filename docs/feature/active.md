@@ -11,7 +11,7 @@
 | 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 | 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
 | 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
-| 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 实施中 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
+| 27 | 日志分化：input.log / output.log / tool.log | 中 | 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
 | 30 | Agent loop 收尾工作 | 高 | 待实施 | 未确认 | agent loop 结束时（正常结束、用户打断、API 错误、达到 MAX_TURNS）执行统一收尾：task 状态清理、tool 资源释放、session 持久化、日志摘要等。当前所有退出点均缺少收尾逻辑 |

@@ -230,6 +230,19 @@ impl LlmProvider for OpenAICompatibleProvider {
         }
 
         let headers = self.build_headers()?;
+        let request_body_bytes = serde_json::to_string(&request_body)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let request_message_count = request_body
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+        let request_tool_count = request_body
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
 
         let mut last_error = None;
         for attempt in 0..self.max_retries {
@@ -290,8 +303,20 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 depth += 1;
                             }
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
-                            if remaining > 0 {
-                                handler.on_error(&format!(
+                            log::warn!(
+                                "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
+                                self.config.source_key,
+                                self.model,
+                                attempt + 1,
+                                self.max_retries,
+                                remaining,
+                                detail,
+                                request_body_bytes,
+                                request_message_count,
+                                request_tool_count,
+                                msg,
+                            );
+                            if remaining > 0 {                                handler.on_error(&format!(
                                     "network error ({detail}), retrying ({}/{})...",
                                     attempt + 2, self.max_retries
                                 ));
@@ -304,6 +329,17 @@ impl LlmProvider for OpenAICompatibleProvider {
             };
 
             let status = response.status();
+            log::debug!(
+                "[openai-compat stream] response received provider={} model={} status={} attempt={}/{} body_bytes={} messages={} tools={}",
+                self.config.source_key,
+                self.model,
+                status,
+                attempt + 1,
+                self.max_retries,
+                request_body_bytes,
+                request_message_count,
+                request_tool_count,
+            );
             if status == 429 {
                 let remaining = self.max_retries.saturating_sub(attempt + 1);
                 if remaining > 0 {
@@ -353,6 +389,28 @@ impl LlmProvider for OpenAICompatibleProvider {
                     return Err(crate::LlmError::Stream(msg.clone()));
                 }
                 Err(crate::LlmError::Stream(e)) => {
+                    let mut source_chain = String::new();
+                    let stream_error = crate::LlmError::Stream(e.clone());
+                    let mut source: Option<&dyn StdError> = StdError::source(&stream_error);
+                    let mut depth = 1;
+                    while let Some(cause) = source {
+                        source_chain.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                        source = cause.source();
+                        depth += 1;
+                    }
+                    log::warn!(
+                        "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
+                        self.config.source_key,
+                        self.model,
+                        attempt + 1,
+                        self.max_retries,
+                        self.max_retries.saturating_sub(attempt + 1),
+                        request_body_bytes,
+                        request_message_count,
+                        request_tool_count,
+                        e,
+                        source_chain,
+                    );
                     handler.on_error(&format!("Streaming error: {}, retrying...", e));
                     last_error = Some(crate::LlmError::Stream(e));
                     continue;

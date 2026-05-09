@@ -492,7 +492,8 @@ impl App {
 
         loop {
             // Update task status lines
-            self.update_task_status(&task_store, self.is_processing).await;
+            self.update_task_status(&task_store, self.is_processing)
+                .await;
 
             // Draw UI
             self.draw(terminal)?;
@@ -626,12 +627,7 @@ impl App {
                 }
                 Cmd::Batch(cmds) => {
                     for cmd in cmds {
-                        Self::exec_one_cmd(
-                            self,
-                            &active_cancel,
-                            &ui_tx,
-                            cmd,
-                        ).await;
+                        Self::exec_one_cmd(self, &active_cancel, &ui_tx, cmd).await;
                     }
                 }
                 Cmd::RunHookNotification { message, kind } => {
@@ -925,9 +921,7 @@ impl App {
                         }
                         Err(e) => {
                             let _ = tx
-                                .send(UiEvent::SystemMessage(format!(
-                                    "Failed to load image: {e}"
-                                )))
+                                .send(UiEvent::SystemMessage(format!("Failed to load image: {e}")))
                                 .await;
                         }
                     }

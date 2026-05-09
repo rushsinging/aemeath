@@ -154,10 +154,11 @@ CRITICAL — Context budget:
 - Use Grep to find specific code instead of reading entire files — this is much more token-efficient.
 - Use Glob to discover files, then read only the most relevant ones.
 - NEVER read more than 3 files per tool call round.
-- You have max {turns} rounds of tool calls. Plan ahead — don't waste rounds reading files you won't use.{scope_hint}
+- You have max {turns} rounds of tool calls. Plan ahead — don't waste rounds reading files you won't use.
+- You cannot use Task*, AskUserQuestion, or Agent tools. Task tracking and user clarification belong to the parent agent.
+- If the task is ambiguous or needs user input, return a concise `blocked:` explanation instead of asking the user.{scope_hint}
 
-Instructions:
-- Complete the task described in the user message
+Instructions:- Complete the task described in the user message
 - Be thorough but concise
 - Once you have enough information, STOP using tools and write your final response immediately
 - Do not ask questions — make reasonable decisions and proceed"#

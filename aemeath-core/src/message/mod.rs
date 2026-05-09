@@ -6,10 +6,10 @@
 //! - `query` — Message 内容查询方法
 //! - `integrity` — 消息完整性检查与清理（sanitize, check, deep_clean）
 
-mod types;
 mod constructors;
-mod query;
 mod integrity;
+mod query;
+mod types;
 
 // 类型定义
 pub use types::*;

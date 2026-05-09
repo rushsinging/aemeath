@@ -1,5 +1,6 @@
 //! Unified LLM client that supports multiple providers
 
+use std::error::Error as StdError;
 use std::sync::Arc;
 
 use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
@@ -19,6 +20,56 @@ fn truncate_preview(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     format!("{}…", &s[..end])
+}
+
+fn llm_error_chain(error: &crate::LlmError) -> String {
+    let mut chain = String::new();
+    let mut source = StdError::source(error);
+    let mut depth = 1;
+    while let Some(cause) = source {
+        chain.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+        source = cause.source();
+        depth += 1;
+    }
+    chain
+}
+
+fn messages_payload_bytes(messages: &[Message]) -> usize {
+    serde_json::to_string(messages)
+        .map(|s| s.len())
+        .unwrap_or(0)
+}
+
+fn content_block_counts(messages: &[Message]) -> (usize, usize, usize, usize, usize) {
+    let mut text = 0;
+    let mut thinking = 0;
+    let mut tool_use = 0;
+    let mut tool_result = 0;
+    let mut image = 0;
+    for msg in messages {
+        for block in &msg.content {
+            match block {
+                aemeath_core::message::ContentBlock::Text { .. } => text += 1,
+                aemeath_core::message::ContentBlock::Thinking { .. } => thinking += 1,
+                aemeath_core::message::ContentBlock::ToolUse { .. } => tool_use += 1,
+                aemeath_core::message::ContentBlock::ToolResult { .. } => tool_result += 1,
+                aemeath_core::message::ContentBlock::Image { .. } => image += 1,
+            }
+        }
+    }
+    (text, thinking, tool_use, tool_result, image)
+}
+
+fn largest_message_summary(messages: &[Message]) -> (usize, String, usize) {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(idx, msg)| {
+            let bytes = serde_json::to_string(msg).map(|s| s.len()).unwrap_or(0);
+            (idx, format!("{:?}", msg.role).to_lowercase(), bytes)
+        })
+        .max_by_key(|(_, _, bytes)| *bytes)
+        .unwrap_or((0, "none".to_string(), 0))
 }
 
 /// Configuration for OpenAI-compatible providers. The source key is used only
@@ -172,6 +223,9 @@ impl LlmClient {
             .provider
             .stream_message(system, messages, tool_schemas, handler, cancel)
             .await;
+        if let Err(error) = &result {
+            self.log_stream_error("stream_message", system, messages, tool_schemas, error);
+        }
         self.log_response(&result);
         result
     }
@@ -190,6 +244,9 @@ impl LlmClient {
             .provider
             .stream_message(system, messages, tool_schemas, &mut handler, cancel)
             .await;
+        if let Err(error) = &result {
+            self.log_stream_error("stream_message_raw", system, messages, tool_schemas, error);
+        }
         self.log_response(&result);
         result
     }
@@ -256,9 +313,42 @@ impl LlmClient {
                 );
             }
             Err(e) => {
-                log::debug!("[LLM RESPONSE ERROR] {}", e);
+                log::warn!("[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
             }
         }
+    }
+
+    fn log_stream_error(
+        &self,
+        phase: &str,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        error: &crate::LlmError,
+    ) {
+        let (text_blocks, thinking_blocks, tool_use_blocks, tool_result_blocks, image_blocks) =
+            content_block_counts(messages);
+        let (largest_idx, largest_role, largest_bytes) = largest_message_summary(messages);
+        log::warn!(
+            "[LLM STREAM ERROR] phase={} provider={} model={} system_blocks={} messages={} tools={} messages_payload_bytes={} content_blocks={{text:{},thinking:{},tool_use:{},tool_result:{},image:{}}} largest_message={{index:{},role:{},bytes:{}}} error={}{}",
+            phase,
+            self.provider_name(),
+            self.model_name(),
+            system.len(),
+            messages.len(),
+            tool_schemas.len(),
+            messages_payload_bytes(messages),
+            text_blocks,
+            thinking_blocks,
+            tool_use_blocks,
+            tool_result_blocks,
+            image_blocks,
+            largest_idx,
+            largest_role,
+            largest_bytes,
+            error,
+            llm_error_chain(error),
+        );
     }
 
     pub fn model_name(&self) -> &str {

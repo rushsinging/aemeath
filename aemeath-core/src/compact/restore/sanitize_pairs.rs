@@ -9,8 +9,8 @@
 //! - 缺失的 id 立即在该 assistant 之后插入一个 user 占位消息补齐
 //! - 与任何 assistant.tool_use 都不匹配的孤立 tool_result 被移除
 
-use std::collections::HashSet;
 use crate::message::{ContentBlock, Message, Role};
+use std::collections::HashSet;
 
 pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
     // 1) 收集所有 assistant 消息发出过的 tool_use_id（用于识别孤立 result）

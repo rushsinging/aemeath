@@ -114,6 +114,12 @@ pub async fn process_in_background(
         }
         struct TuiStreamHandler {
             tx: mpsc::Sender<UiEvent>,
+            session_id: String,
+            turn_count: usize,
+            provider: String,
+            model: String,
+            api_messages: usize,
+            tool_schemas: usize,
             first_text_time: Option<std::time::Instant>,
             total_chars: usize,
             last_tps_update: std::time::Instant,
@@ -153,6 +159,17 @@ pub async fn process_in_background(
                 }
             }
             fn on_error(&mut self, error: &str) {
+                log::warn!(
+                    "LLM stream warning shown in TUI: session={} turn={} provider={} model={} api_messages={} tools={} streamed_chars={} error={}",
+                    self.session_id,
+                    self.turn_count,
+                    self.provider,
+                    self.model,
+                    self.api_messages,
+                    self.tool_schemas,
+                    self.total_chars,
+                    error,
+                );
                 if let Err(e) = self
                     .tx
                     .try_send(UiEvent::SystemMessage(format!("[warn] {}", error)))
@@ -306,6 +323,12 @@ pub async fn process_in_background(
 
         let mut handler = TuiStreamHandler {
             tx: tx.clone(),
+            session_id: session_id.clone(),
+            turn_count,
+            provider: client.provider_name().to_string(),
+            model: client.model_name().to_string(),
+            api_messages: messages_for_api.len(),
+            tool_schemas: tool_schemas.len(),
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
@@ -330,6 +353,20 @@ pub async fn process_in_background(
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
+        if let Err(error) = &response {
+            log::warn!(
+                "turn api failed: session={}, turn={}, provider={}, model={}, elapsed_secs={:.3}, api_messages={}, tool_schemas={}, streamed_chars={}, error={}",
+                session_id,
+                turn_count,
+                client.provider_name(),
+                client.model_name(),
+                api_elapsed,
+                messages_for_api.len(),
+                tool_schemas.len(),
+                handler.total_chars,
+                error,
+            );
+        }
         log::debug!(
             "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
             session_id,

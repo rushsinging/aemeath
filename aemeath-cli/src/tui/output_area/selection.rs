@@ -286,82 +286,82 @@ mod tests {
         let selected = output.get_selected_text();
 
         assert_eq!(selected, Some("b".to_string()));
-        }
-
-        #[test]
-        fn test_get_line_content_normal_line() {
-            let mut output = OutputArea::new();
-            output.push_line(OutputLine {
-                content: "hello".to_string(),
-                style: LineStyle::Assistant,
-                ..Default::default()
-            });
-            assert_eq!(output.get_line_content(0), Some("hello".to_string()));
-            assert_eq!(output.get_line_content(1), None);
-        }
-
-        #[test]
-        fn test_get_line_content_task_status_line() {
-            let mut output = OutputArea::new();
-            output.push_line(OutputLine {
-                content: "normal".to_string(),
-                style: LineStyle::Assistant,
-                ..Default::default()
-            });
-            output.task_status_lines = vec!["task 1".to_string(), "task 2".to_string()];
-            // idx=0 → normal line
-            assert_eq!(output.get_line_content(0), Some("normal".to_string()));
-            // idx=1 → task_status_lines[0], 带 "  " 前缀
-            assert_eq!(output.get_line_content(1), Some("  task 1".to_string()));
-            // idx=2 → task_status_lines[1]
-            assert_eq!(output.get_line_content(2), Some("  task 2".to_string()));
-            // idx=3 → 越界
-            assert_eq!(output.get_line_content(3), None);
-        }
-
-        #[test]
-        fn test_total_virtual_line_count() {
-            let mut output = OutputArea::new();
-            output.push_line(OutputLine {
-                content: "a".to_string(),
-                style: LineStyle::Normal,
-                ..Default::default()
-            });
-            output.task_status_lines = vec!["t1".to_string(), "t2".to_string()];
-            assert_eq!(output.total_virtual_line_count(), 3);
-        }
-
-        #[test]
-        fn test_get_selected_text_task_status_only() {
-            let mut output = OutputArea::new();
-            output.push_line(OutputLine {
-                content: "normal line".to_string(),
-                style: LineStyle::Assistant,
-                ..Default::default()
-            });
-            output.task_status_lines = vec!["pending task".to_string()];
-            // 选中 task_status 行（logic_idx=1）
-            output.selection_start = Some((1, CharIdx::new(2)));
-            output.selection_end = Some((1, CharIdx::new(8)));
-            let selected = output.get_selected_text();
-            // content is "  pending task", chars [2..8) = "pendi"
-            assert_eq!(selected, Some("pendi".to_string()));
-        }
-
-        #[test]
-        fn test_get_selected_text_spanning_normal_and_task_status() {
-            let mut output = OutputArea::new();
-            output.push_line(OutputLine {
-                content: "abc".to_string(),
-                style: LineStyle::Assistant,
-                ..Default::default()
-            });
-            output.task_status_lines = vec!["xyz".to_string()];
-            // 选中从普通行末尾到 task_status 行开头
-            output.selection_start = Some((0, CharIdx::new(1)));
-            output.selection_end = Some((1, CharIdx::new(3)));
-            let selected = output.get_selected_text();
-            // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
-            assert_eq!(selected, Some("bc\n  x".to_string()));
-        }
     }
+
+    #[test]
+    fn test_get_line_content_normal_line() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "hello".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        assert_eq!(output.get_line_content(0), Some("hello".to_string()));
+        assert_eq!(output.get_line_content(1), None);
+    }
+
+    #[test]
+    fn test_get_line_content_task_status_line() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "normal".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.task_status_lines = vec!["task 1".to_string(), "task 2".to_string()];
+        // idx=0 → normal line
+        assert_eq!(output.get_line_content(0), Some("normal".to_string()));
+        // idx=1 → task_status_lines[0], 带 "  " 前缀
+        assert_eq!(output.get_line_content(1), Some("  task 1".to_string()));
+        // idx=2 → task_status_lines[1]
+        assert_eq!(output.get_line_content(2), Some("  task 2".to_string()));
+        // idx=3 → 越界
+        assert_eq!(output.get_line_content(3), None);
+    }
+
+    #[test]
+    fn test_total_virtual_line_count() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "a".to_string(),
+            style: LineStyle::Normal,
+            ..Default::default()
+        });
+        output.task_status_lines = vec!["t1".to_string(), "t2".to_string()];
+        assert_eq!(output.total_virtual_line_count(), 3);
+    }
+
+    #[test]
+    fn test_get_selected_text_task_status_only() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "normal line".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.task_status_lines = vec!["pending task".to_string()];
+        // 选中 task_status 行（logic_idx=1）
+        output.selection_start = Some((1, CharIdx::new(2)));
+        output.selection_end = Some((1, CharIdx::new(8)));
+        let selected = output.get_selected_text();
+        // content is "  pending task", chars [2..8) = "pendi"
+        assert_eq!(selected, Some("pendi".to_string()));
+    }
+
+    #[test]
+    fn test_get_selected_text_spanning_normal_and_task_status() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "abc".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.task_status_lines = vec!["xyz".to_string()];
+        // 选中从普通行末尾到 task_status 行开头
+        output.selection_start = Some((0, CharIdx::new(1)));
+        output.selection_end = Some((1, CharIdx::new(3)));
+        let selected = output.get_selected_text();
+        // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
+        assert_eq!(selected, Some("bc\n  x".to_string()));
+    }
+}

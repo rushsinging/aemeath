@@ -7,11 +7,11 @@
 //! - `reasoning` — reasoning_effort 校验与支持检测
 //! - `deserialize` — ModelEntryConfig 自定义反序列化
 
-mod types;
-mod error;
-mod resolve;
-mod reasoning;
 mod deserialize;
+mod error;
+mod reasoning;
+mod resolve;
+mod types;
 
 // 类型
 pub use types::*;

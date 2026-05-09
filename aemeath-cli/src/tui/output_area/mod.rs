@@ -461,14 +461,22 @@ impl OutputArea {
                 let char_count = text.chars().count();
                 // task_status 行使用 base_idx + i 作为逻辑索引，
                 // get_line_content() 会将其映射回 task_status_lines[i]
-                self.screen_line_map.push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
-                lines.push(Line::styled(
-                    text,
-                    Style::default().fg(Color::DarkGray),
-                ));
+                let screen_idx = self.screen_line_map.len();
+                self.screen_line_map
+                    .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
+                if self.has_real_selection() {
+                    let spans = self.render_line_with_selection(
+                        screen_idx,
+                        &text,
+                        Style::default().fg(Color::DarkGray),
+                        &self.screen_line_map,
+                    );
+                    lines.push(Line::from(spans));
+                } else {
+                    lines.push(Line::styled(text, Style::default().fg(Color::DarkGray)));
+                }
             }
         }
-
         let lines: Vec<Line> = if lines.len() > area.height as usize {
             let offset = lines.len() - area.height as usize;
             log::debug!(
@@ -811,6 +819,30 @@ fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(CharIdx, CharIdx)>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aemeath_core::string_idx::CharIdx;
+    use ratatui::style::Color;
+
+    #[test]
+    fn test_render_highlights_selected_task_status_line() {
+        let mut output = OutputArea::new();
+        output.start_spinner();
+        output.task_status_lines = vec!["□ #33 选中时没有高亮".to_string()];
+        output.selection_start = Some((0, CharIdx::new(2)));
+        output.selection_end = Some((0, CharIdx::new(7)));
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 2,
+        };
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf);
+
+        assert_eq!(buf[(2, 1)].style().bg, Some(Color::Blue));
+        assert_eq!(buf[(6, 1)].style().bg, Some(Color::Blue));
+        assert_ne!(buf[(7, 1)].style().bg, Some(Color::Blue));
+    }
 
     #[test]
     fn test_render_clamps_screen_line_map_when_reserved_lines_overflow_height() {

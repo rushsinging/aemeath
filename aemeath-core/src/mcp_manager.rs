@@ -420,7 +420,11 @@ impl McpConnectionManager {
             };
 
             if let Err(error) = ping_result {
-                log::warn!("MCP server '{}' health check failed: {}", server.name, error);
+                log::warn!(
+                    "MCP server '{}' health check failed: {}",
+                    server.name,
+                    error
+                );
 
                 if self.config.auto_reconnect {
                     if let Err(reconnect_error) = self.reconnect_server(&server.name).await {
@@ -718,7 +722,10 @@ mod tests {
         assert_eq!(diff.changed[0].name, changed_new.name);
         assert_eq!(diff.changed[0].description, changed_new.description);
         assert_eq!(diff.changed[1].name, schema_changed_new.name);
-        assert_eq!(diff.changed[1].input_schema, schema_changed_new.input_schema);
+        assert_eq!(
+            diff.changed[1].input_schema,
+            schema_changed_new.input_schema
+        );
     }
 
     #[test]
@@ -732,7 +739,10 @@ mod tests {
 
         assert_eq!(
             removed_qualified_tool_names("demo", &removed),
-            vec!["mcp__demo__read".to_string(), "mcp__demo__write".to_string()]
+            vec![
+                "mcp__demo__read".to_string(),
+                "mcp__demo__write".to_string()
+            ]
         );
     }
 
@@ -789,7 +799,10 @@ mod tests {
     #[tokio::test]
     async fn test_mark_reconnecting_sets_state_and_clears_error() {
         let mut servers = HashMap::new();
-        servers.insert("example".to_string(), server_config(Some("/bin/example-mcp")));
+        servers.insert(
+            "example".to_string(),
+            server_config(Some("/bin/example-mcp")),
+        );
         let manager = McpConnectionManager::with_servers(servers);
         manager.initialize().await.unwrap();
 
@@ -819,7 +832,10 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_tool_snapshot_updates_discovered_tools() {
         let mut servers = HashMap::new();
-        servers.insert("example".to_string(), server_config(Some("/bin/example-mcp")));
+        servers.insert(
+            "example".to_string(),
+            server_config(Some("/bin/example-mcp")),
+        );
         let manager = McpConnectionManager::with_servers(servers);
         manager.initialize().await.unwrap();
 
