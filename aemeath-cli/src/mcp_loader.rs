@@ -76,7 +76,10 @@ pub async fn load_mcp_tools(
                         Ok(tools) => {
                             log::info!("[MCP] {} registered {} tools", name, tools.len());
                             for tool_def in tools {
-                                let qualified = format!("mcp__{}_{}", name, tool_def.name);
+                                let qualified = aemeath_core::mcp_manager::qualified_tool_name(
+                                    name,
+                                    &tool_def.name,
+                                );
                                 registry.register(Box::new(McpTool {
                                     tool_name: tool_def.name,
                                     qualified_name: qualified,

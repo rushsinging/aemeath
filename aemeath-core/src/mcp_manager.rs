@@ -550,7 +550,10 @@ impl Tool for McpToolWrapper {
 
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
-            Ok(output) => ToolResult::success(output),
+            Ok(output) => ToolResult::success(crate::mcp::limit_tool_response(
+                &output,
+                crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
+            )),
             Err(e) => ToolResult::error(format!("MCP tool error: {}", e)),
         }
     }
