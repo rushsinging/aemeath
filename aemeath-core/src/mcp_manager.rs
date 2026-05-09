@@ -79,6 +79,22 @@ impl McpServerConnection {
     }
 }
 
+fn default_auto_connect() -> bool {
+    true
+}
+
+fn default_auto_reconnect() -> bool {
+    true
+}
+
+fn default_reconnect_delay_seconds() -> u64 {
+    5
+}
+
+fn default_max_reconnect_attempts() -> u32 {
+    3
+}
+
 fn default_health_check_interval_seconds() -> u64 {
     30
 }
@@ -91,14 +107,19 @@ fn default_max_tool_response_bytes() -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpManagerConfig {
     /// Server configurations
+    #[serde(default)]
     pub servers: HashMap<String, McpServerConfig>,
     /// Auto-connect on startup
+    #[serde(default = "default_auto_connect")]
     pub auto_connect: bool,
     /// Reconnect on failure
+    #[serde(default = "default_auto_reconnect")]
     pub auto_reconnect: bool,
     /// Reconnect delay in seconds
+    #[serde(default = "default_reconnect_delay_seconds")]
     pub reconnect_delay_seconds: u64,
     /// Max reconnect attempts
+    #[serde(default = "default_max_reconnect_attempts")]
     pub max_reconnect_attempts: u32,
     /// Health check interval in seconds
     #[serde(default = "default_health_check_interval_seconds")]
@@ -226,12 +247,13 @@ impl McpConnectionManager {
 
     /// Connect to a specific server
     pub async fn connect_server(&self, name: &str) -> Result<McpServerConnection, String> {
-        let connections = self.connections.lock().await;
-
-        let connection = connections
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("Server '{}' not configured", name))?;
+        let connection = {
+            let connections = self.connections.lock().await;
+            connections
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("Server '{}' not configured", name))?
+        };
 
         // Attempt connection
         let client = McpClient::connect(name, &connection.config).await;
@@ -594,6 +616,27 @@ mod tests {
     fn test_mcp_manager_config_defaults_include_health_check() {
         let config = McpManagerConfig::default();
 
+        assert!(config.servers.is_empty());
+        assert!(config.auto_connect);
+        assert!(config.auto_reconnect);
+        assert_eq!(config.reconnect_delay_seconds, 5);
+        assert_eq!(config.max_reconnect_attempts, 3);
+        assert_eq!(config.health_check_interval_seconds, 30);
+        assert_eq!(
+            config.max_tool_response_bytes,
+            crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
+        );
+    }
+
+    #[test]
+    fn test_mcp_manager_config_deserializes_empty_object_with_defaults() {
+        let config: McpManagerConfig = serde_json::from_str("{}").unwrap();
+
+        assert!(config.servers.is_empty());
+        assert!(config.auto_connect);
+        assert!(config.auto_reconnect);
+        assert_eq!(config.reconnect_delay_seconds, 5);
+        assert_eq!(config.max_reconnect_attempts, 3);
         assert_eq!(config.health_check_interval_seconds, 30);
         assert_eq!(
             config.max_tool_response_bytes,
