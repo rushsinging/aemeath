@@ -371,17 +371,38 @@ impl McpConnectionManager {
         Ok(())
     }
 
+    /// Mark a server as failed, store the error, and clear any active client.
+    pub(crate) async fn set_failed(&self, name: &str, error: String) -> Result<(), String> {
+        let mut connections = self.connections.lock().await;
+        let connection = connections
+            .get_mut(name)
+            .ok_or_else(|| format!("Server '{}' not found", name))?;
+
+        connection.state = ConnectionState::Failed;
+        connection.error = Some(error);
+        connection.client = None;
+
+        Ok(())
+    }
+
     /// Refresh the cached tool snapshot for a server.
-    pub async fn refresh_tool_snapshot(&self, name: &str, tools: Vec<McpToolDef>) {
+    pub async fn refresh_tool_snapshot(
+        &self,
+        name: &str,
+        tools: Vec<McpToolDef>,
+    ) -> Result<(), String> {
         {
             let mut connections = self.connections.lock().await;
-            if let Some(connection) = connections.get_mut(name) {
-                connection.tools = tools.clone();
-            }
+            let connection = connections
+                .get_mut(name)
+                .ok_or_else(|| format!("Server '{}' not found", name))?;
+            connection.tools = tools.clone();
         }
 
         let mut discovered = self.discovered_tools.lock().await;
         discovered.insert(name.to_string(), tools);
+
+        Ok(())
     }
 
     /// Run one health-check pass across connected servers.
@@ -401,15 +422,6 @@ impl McpConnectionManager {
             if let Err(error) = ping_result {
                 log::warn!("MCP server '{}' health check failed: {}", server.name, error);
 
-                if let Err(mark_error) = self.mark_reconnecting(&server.name).await {
-                    log::warn!(
-                        "Failed to mark MCP server '{}' as reconnecting: {}",
-                        server.name,
-                        mark_error
-                    );
-                    continue;
-                }
-
                 if self.config.auto_reconnect {
                     if let Err(reconnect_error) = self.reconnect_server(&server.name).await {
                         log::warn!(
@@ -417,7 +429,23 @@ impl McpConnectionManager {
                             server.name,
                             reconnect_error
                         );
+
+                        if let Err(set_failed_error) =
+                            self.set_failed(&server.name, reconnect_error).await
+                        {
+                            log::warn!(
+                                "Failed to mark MCP server '{}' as failed: {}",
+                                server.name,
+                                set_failed_error
+                            );
+                        }
                     }
+                } else if let Err(mark_error) = self.mark_reconnecting(&server.name).await {
+                    log::warn!(
+                        "Failed to mark MCP server '{}' as reconnecting: {}",
+                        server.name,
+                        mark_error
+                    );
                 }
             }
         }
@@ -780,6 +808,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mark_reconnecting_unknown_server_returns_error() {
+        let manager = McpConnectionManager::new(McpManagerConfig::default());
+
+        let err = manager.mark_reconnecting("missing").await.unwrap_err();
+
+        assert_eq!(err, "Server 'missing' not found");
+    }
+
+    #[tokio::test]
     async fn test_refresh_tool_snapshot_updates_discovered_tools() {
         let mut servers = HashMap::new();
         servers.insert("example".to_string(), server_config(Some("/bin/example-mcp")));
@@ -788,10 +825,12 @@ mod tests {
 
         manager
             .refresh_tool_snapshot("example", vec![tool("old", "old description")])
-            .await;
+            .await
+            .unwrap();
         manager
             .refresh_tool_snapshot("example", vec![tool("new", "new description")])
-            .await;
+            .await
+            .unwrap();
 
         let all_tools = manager.get_all_tools().await;
         assert_eq!(all_tools.len(), 1);
@@ -802,5 +841,18 @@ mod tests {
         let connection = manager.get_server("example").await.unwrap();
         assert_eq!(connection.tools.len(), 1);
         assert_eq!(connection.tools[0].name, "new");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_tool_snapshot_unknown_server_returns_error() {
+        let manager = McpConnectionManager::new(McpManagerConfig::default());
+
+        let err = manager
+            .refresh_tool_snapshot("missing", vec![tool("phantom", "phantom description")])
+            .await
+            .unwrap_err();
+
+        assert_eq!(err, "Server 'missing' not found");
+        assert!(manager.get_all_tools().await.is_empty());
     }
 }
