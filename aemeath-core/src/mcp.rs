@@ -101,6 +101,8 @@ struct JsonRpcError {
     message: String,
 }
 
+pub const DEFAULT_MAX_TOOL_RESPONSE_BYTES: usize = 1_048_576;
+
 /// MCP stdio client — communicates with an MCP server via stdin/stdout
 pub struct McpClient {
     name: String,
@@ -221,6 +223,24 @@ pub fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, Stri
             }
         })
         .collect()
+}
+
+pub fn limit_tool_response(output: &str, max_bytes: usize) -> String {
+    if output.len() <= max_bytes {
+        return output.to_string();
+    }
+
+    let mut truncate_at = max_bytes;
+    while truncate_at > 0 && !output.is_char_boundary(truncate_at) {
+        truncate_at -= 1;
+    }
+
+    format!(
+        "{}\n\n[Output truncated: original {} bytes, limit {} bytes]",
+        &output[..truncate_at],
+        output.len(),
+        max_bytes
+    )
 }
 
 impl McpClient {
@@ -362,6 +382,10 @@ impl McpClient {
         }
 
         response.result.ok_or_else(|| "empty result".to_string())
+    }
+
+    pub async fn ping(&self) -> Result<(), String> {
+        self.send_request("ping", None).await.map(|_| ())
     }
 
     async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
@@ -524,5 +548,18 @@ mod mcp_server_config_tests {
         assert_eq!(redacted.get("X-Api-Key").unwrap(), "<redacted>");
         assert_eq!(redacted.get("Proxy-Authorization").unwrap(), "<redacted>");
         assert_eq!(redacted.get("Accept").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn test_limit_tool_response_keeps_small_output() {
+        assert_eq!(limit_tool_response("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_limit_tool_response_truncates_large_output() {
+        let limited = limit_tool_response("abcdefghij", 5);
+
+        assert!(limited.starts_with("abcde"));
+        assert!(limited.contains("truncated"));
     }
 }
