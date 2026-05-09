@@ -572,7 +572,7 @@ async fn run_chat(mut args: Args) {
     let mut registry = ToolRegistry::new();
     aemeath_tools::register_all_tools(&mut registry, task_store.clone(), skills.clone());
 
-    let _mcp_clients = load_mcp_tools(&mut registry, &cwd).await;
+    let _mcp_manager = load_mcp_tools(&mut registry, &cwd).await;
 
     // Create hook runner before agent_runner so it can be shared
     let cwd_str = cwd.display().to_string();

@@ -1,38 +1,10 @@
-//! MCP and skills commands.
+//! Skills commands.
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
 use crate::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
 };
-
-inventory::submit! {
-    CommandDescriptor::new(|| {
-        Command::new(
-            "mcp".to_string(),
-            "Manage MCP servers".to_string(),
-            CommandCategory::Tools,
-            mcp_execute,
-        )
-        .with_usage(vec![
-            "/mcp - List MCP servers".to_string(),
-            "/mcp add <name> <command> - Add MCP server".to_string(),
-            "/mcp remove <name> - Remove MCP server".to_string(),
-            "/mcp tools - List MCP tools".to_string(),
-        ])
-    })
-}
-
-fn mcp_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
-    match args.trim().split_whitespace().next().unwrap_or("") {
-        "" => CommandResult::Success(
-            "MCP (Model Context Protocol):\n\nUse the following tools to manage MCP:\n  - McpTool: Call an MCP tool\n  - ListMcpResourcesTool: List MCP resources\n  - ReadMcpResourceTool: Read an MCP resource\n\nMCP servers are configured in ~/.config/aemeath/config.json".to_string()
-        ),
-        "tools" => CommandResult::Success("MCP tools: Use ToolSearch or ListMcpResourcesTool to find available tools".to_string()),
-        "add" | "remove" => CommandResult::Success("Manage MCP server in config: ~/.config/aemeath/config.json".to_string()),
-        other => CommandResult::Error(format!("Unknown MCP command: {}", other)),
-    }
-}
 
 inventory::submit! {
     CommandDescriptor::new(|| {

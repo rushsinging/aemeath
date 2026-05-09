@@ -1,100 +1,184 @@
+use aemeath_core::mcp::McpServerConfig;
+use aemeath_core::mcp_manager::McpConnectionManager;
 use aemeath_core::tool::ToolRegistry;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
-pub async fn load_mcp_tools(
-    registry: &mut ToolRegistry,
-    cwd: &PathBuf,
-) -> Vec<std::sync::Arc<tokio::sync::Mutex<aemeath_core::mcp::McpClient>>> {
-    use aemeath_core::mcp::{McpClient, McpServerConfig};
-    use aemeath_tools::mcp_tool::McpTool;
+pub fn parse_mcp_servers_config(
+    config: &serde_json::Value,
+) -> Result<HashMap<String, McpServerConfig>, String> {
+    let Some(mcp_servers) = config.get("mcpServers") else {
+        return Ok(HashMap::new());
+    };
 
-    let mut clients = Vec::new();
+    serde_json::from_value(mcp_servers.clone())
+        .map_err(|e| format!("invalid mcpServers config: {e}"))
+}
 
-    // Look for MCP config in .mcp.json or ~/.aemeath/mcp.json
-    let config_paths = [
-        cwd.join(".mcp.json"),
-        dirs::home_dir()
-            .map(|h| h.join(".aemeath").join("mcp.json"))
-            .unwrap_or_default(),
-    ];
+pub fn merge_mcp_servers(
+    base: &mut HashMap<String, McpServerConfig>,
+    overlay: HashMap<String, McpServerConfig>,
+) {
+    base.extend(overlay);
+}
 
-    for config_path in &config_paths {
-        if !config_path.exists() {
-            continue;
+async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, McpServerConfig>> {
+    if !config_path.exists() {
+        return None;
+    }
+
+    let content = match tokio::fs::read_to_string(config_path).await {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("failed to read MCP config {}: {e}", config_path.display());
+            return None;
         }
+    };
 
-        // Warn if loading from a project-level config (may contain untrusted commands)
-        let is_project_level = config_path == &cwd.join(".mcp.json");
-        if is_project_level {
-            eprintln!(
-                "⚠️  SECURITY: Loading MCP servers from project config {}.\n\
-                 These servers can execute arbitrary commands on your system.\n\
-                 Review the commands before proceeding. Use --no-tui and Ctrl+C to abort if needed.",
-                config_path.display()
-            );
-            log::warn!(
-                "Loading MCP servers from project-level config {} — commands may be untrusted.",
-                config_path.display()
-            );
+    let config: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("invalid MCP config {}: {e}", config_path.display());
+            return None;
         }
+    };
 
-        let content = match tokio::fs::read_to_string(config_path).await {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+    match parse_mcp_servers_config(&config) {
+        Ok(servers) => Some(servers),
+        Err(e) => {
+            log::warn!("invalid MCP config {}: {e}", config_path.display());
+            None
+        }
+    }
+}
 
-        let config: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!("invalid MCP config {}: {e}", config_path.display());
-                continue;
-            }
-        };
+pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
+    let mut servers = HashMap::new();
 
-        // Expect format: { "mcpServers": { "name": { "command": "...", "args": [...] } } }
-        let servers = match config.get("mcpServers").and_then(|v| v.as_object()) {
-            Some(s) => s,
-            None => continue,
-        };
-
-        for (name, server_config) in servers {
-            let mcp_config: McpServerConfig = match serde_json::from_value(server_config.clone()) {
-                Ok(c) => c,
-                Err(e) => {
-                    log::warn!("invalid MCP server config '{}': {e}", name);
-                    continue;
-                }
-            };
-
-            log::info!("[MCP] connecting to {}...", name);
-            match McpClient::connect(name, &mcp_config).await {
-                Ok(client) => {
-                    let client = std::sync::Arc::new(tokio::sync::Mutex::new(client));
-
-                    // Fetch and register tools
-                    match client.lock().await.list_tools().await {
-                        Ok(tools) => {
-                            log::info!("[MCP] {} registered {} tools", name, tools.len());
-                            for tool_def in tools {
-                                let qualified = format!("mcp__{}_{}", name, tool_def.name);
-                                registry.register(Box::new(McpTool {
-                                    tool_name: tool_def.name,
-                                    qualified_name: qualified,
-                                    tool_description: tool_def.description,
-                                    schema: tool_def.input_schema,
-                                    client: client.clone(),
-                                }));
-                            }
-                        }
-                        Err(e) => log::warn!("[MCP] {} failed to list tools: {e}", name),
-                    }
-
-                    clients.push(client);
-                }
-                Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
-            }
+    if let Some(global_config_path) = dirs::home_dir().map(|h| h.join(".aemeath").join("mcp.json"))
+    {
+        if let Some(global_servers) = read_mcp_servers_config(&global_config_path).await {
+            merge_mcp_servers(&mut servers, global_servers);
         }
     }
 
-    clients
+    let project_config_path = cwd.join(".mcp.json");
+    if let Some(project_servers) = read_mcp_servers_config(&project_config_path).await {
+        if !project_servers.is_empty() {
+            log::warn!(
+                "Loading MCP servers from project-level config {} — commands may be untrusted.",
+                project_config_path.display()
+            );
+        }
+        merge_mcp_servers(&mut servers, project_servers);
+    }
+
+    let manager = Arc::new(McpConnectionManager::with_servers(servers));
+    if let Err(e) = manager.initialize().await {
+        log::warn!("failed to initialize MCP manager: {e}");
+    }
+    manager
+}
+
+pub async fn load_mcp_tools(registry: &mut ToolRegistry, cwd: &Path) -> Arc<McpConnectionManager> {
+    let manager = load_mcp_manager(cwd).await;
+
+    for (name, result) in manager.connect_all().await {
+        match result {
+            Ok(connection) => {
+                log::info!("[MCP] {} registered {} tools", name, connection.tools.len());
+            }
+            Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
+        }
+    }
+
+    manager.register_tools(registry).await;
+    manager
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{merge_mcp_servers, parse_mcp_servers_config};
+    use aemeath_core::mcp::McpServerConfig;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_parse_mcp_servers_config_reads_mcp_servers() {
+        let config = json!({
+            "mcpServers": {
+                "demo": {
+                    "command": "node",
+                    "args": ["server.js"],
+                    "env": {"API_KEY": "secret"}
+                }
+            }
+        });
+
+        let servers = parse_mcp_servers_config(&config).expect("parse mcpServers");
+        let server = servers.get("demo").expect("demo server");
+
+        assert_eq!(server.command.as_deref(), Some("node"));
+        assert_eq!(server.args, vec!["server.js"]);
+        assert_eq!(
+            server.env.get("API_KEY").map(String::as_str),
+            Some("secret")
+        );
+    }
+
+    #[test]
+    fn test_parse_mcp_servers_config_empty_when_missing() {
+        let config = json!({"other": {}});
+
+        let servers = parse_mcp_servers_config(&config).expect("missing mcpServers is valid");
+
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn test_merge_mcp_servers_project_overrides_global() {
+        let mut base = HashMap::from([(
+            "demo".to_string(),
+            McpServerConfig {
+                command: Some("global".to_string()),
+                args: vec!["global.js".to_string()],
+                env: HashMap::new(),
+                url: None,
+                headers: HashMap::new(),
+                transport: None,
+            },
+        )]);
+        let overlay = HashMap::from([
+            (
+                "demo".to_string(),
+                McpServerConfig {
+                    command: Some("project".to_string()),
+                    args: vec!["project.js".to_string()],
+                    env: HashMap::new(),
+                    url: None,
+                    headers: HashMap::new(),
+                    transport: None,
+                },
+            ),
+            (
+                "extra".to_string(),
+                McpServerConfig {
+                    command: Some("extra".to_string()),
+                    args: Vec::new(),
+                    env: HashMap::new(),
+                    url: None,
+                    headers: HashMap::new(),
+                    transport: None,
+                },
+            ),
+        ]);
+
+        merge_mcp_servers(&mut base, overlay);
+
+        assert_eq!(base.len(), 2);
+        assert_eq!(base["demo"].command.as_deref(), Some("project"));
+        assert_eq!(base["demo"].args, vec!["project.js"]);
+        assert_eq!(base["extra"].command.as_deref(), Some("extra"));
+    }
 }

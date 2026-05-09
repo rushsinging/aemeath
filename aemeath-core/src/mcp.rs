@@ -1,19 +1,66 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-/// MCP server configuration (stdio transport)
+/// MCP server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    pub command: String,
+    #[serde(default)]
+    pub command: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub transport: Option<McpTransportKind>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTransportKind {
+    Stdio,
+    Sse,
+    StreamableHttp,
+}
+
+impl fmt::Display for McpTransportKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            McpTransportKind::Stdio => "stdio",
+            McpTransportKind::Sse => "sse",
+            McpTransportKind::StreamableHttp => "streamable_http",
+        };
+        f.write_str(name)
+    }
+}
+
+impl McpServerConfig {
+    /// Resolve the configured transport.
+    ///
+    /// An explicit `transport` takes precedence. Otherwise, stdio is selected
+    /// when `command` is present, and streamable HTTP is selected when only
+    /// `url` is present.
+    pub fn transport_kind(&self) -> Result<McpTransportKind, String> {
+        if let Some(kind) = self.transport {
+            return Ok(kind);
+        }
+        if self.command.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            return Ok(McpTransportKind::Stdio);
+        }
+        if self.url.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            return Ok(McpTransportKind::StreamableHttp);
+        }
+        Err("MCP server config must define either command or url".to_string())
+    }
 }
 
 /// An MCP tool definition received from a server
@@ -53,6 +100,8 @@ struct JsonRpcError {
     code: i64,
     message: String,
 }
+
+pub const DEFAULT_MAX_TOOL_RESPONSE_BYTES: usize = 1_048_576;
 
 /// MCP stdio client — communicates with an MCP server via stdin/stdout
 pub struct McpClient {
@@ -142,13 +191,84 @@ fn filter_env(
         .collect()
 }
 
-impl McpClient {
-    /// Connect to an MCP server via stdio
-    pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
-        // Validate command safety
-        validate_command(&config.command)?;
+pub fn validate_remote_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid MCP url: {e}"))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let host = parsed.host_str().unwrap_or_default();
+            if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+                Ok(())
+            } else {
+                Err("remote MCP url must use https unless it points to localhost".to_string())
+            }
+        }
+        other => Err(format!("unsupported MCP url scheme: {other}")),
+    }
+}
 
-        let mut cmd = Command::new(&config.command);
+pub fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    headers
+        .iter()
+        .map(|(key, value)| {
+            let lower = key.to_ascii_lowercase();
+            let sensitive = lower == "authorization"
+                || lower == "cookie"
+                || lower == "x-api-key"
+                || lower == "proxy-authorization";
+            if sensitive {
+                (key.clone(), "<redacted>".to_string())
+            } else {
+                (key.clone(), value.clone())
+            }
+        })
+        .collect()
+}
+
+pub fn limit_tool_response(output: &str, max_bytes: usize) -> String {
+    if output.len() <= max_bytes {
+        return output.to_string();
+    }
+
+    let mut truncate_at = max_bytes;
+    while truncate_at > 0 && !output.is_char_boundary(truncate_at) {
+        truncate_at -= 1;
+    }
+
+    let notice = format!(
+        "[Output truncated: original {} bytes, limit {} bytes]",
+        output.len(),
+        max_bytes
+    );
+
+    if truncate_at == 0 {
+        notice
+    } else {
+        format!("{}\n\n{}", &output[..truncate_at], notice)
+    }
+}
+
+impl McpClient {
+    /// Connect to an MCP server
+    pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+        let kind = config.transport_kind()?;
+        match kind {
+            McpTransportKind::Stdio => Self::connect_stdio(name, config).await,
+            McpTransportKind::Sse | McpTransportKind::StreamableHttp => {
+                Self::connect_http(name, config, kind).await
+            }
+        }
+    }
+
+    async fn connect_stdio(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+        // Validate command safety
+        let command = config
+            .command
+            .as_deref()
+            .ok_or_else(|| "stdio MCP server requires command".to_string())?;
+        validate_command(command)?;
+
+        let mut cmd = Command::new(command);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -162,7 +282,7 @@ impl McpClient {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("failed to start MCP server '{}': {e}", config.command))?;
+            .map_err(|e| format!("failed to start MCP server '{}': {e}", command))?;
 
         let stdin = child.stdin.take().ok_or("failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("failed to get stdout")?;
@@ -206,6 +326,21 @@ impl McpClient {
             .await?;
 
         Ok(client)
+    }
+
+    async fn connect_http(
+        name: &str,
+        config: &McpServerConfig,
+        kind: McpTransportKind,
+    ) -> Result<Self, String> {
+        let url = config
+            .url
+            .as_deref()
+            .ok_or_else(|| "remote MCP server requires url".to_string())?;
+        validate_remote_url(url)?;
+        Err(format!(
+            "MCP {kind} transport for '{name}' is not yet supported"
+        ))
     }
 
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, String> {
@@ -252,6 +387,11 @@ impl McpClient {
         }
 
         response.result.ok_or_else(|| "empty result".to_string())
+    }
+
+    /// Send a JSON-RPC ping request to verify the MCP server is responsive.
+    pub async fn ping(&self) -> Result<(), String> {
+        self.send_request("ping", None).await.map(|_| ())
     }
 
     async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
@@ -326,5 +466,127 @@ impl McpClient {
     /// Shutdown the MCP server
     pub async fn shutdown(&mut self) {
         let _ = self.child.kill().await;
+    }
+}
+
+impl Drop for McpClient {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
+#[cfg(test)]
+mod mcp_server_config_tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_server_config_stdio_defaults_to_stdio_transport() {
+        let config = McpServerConfig {
+            command: Some("/usr/bin/mcp-server".to_string()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            headers: HashMap::new(),
+            transport: None,
+        };
+
+        assert_eq!(config.transport_kind().unwrap(), McpTransportKind::Stdio);
+    }
+
+    #[test]
+    fn test_mcp_server_config_url_defaults_to_streamable_http() {
+        let config = McpServerConfig {
+            command: None,
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: Some("https://example.com/mcp".to_string()),
+            headers: HashMap::new(),
+            transport: None,
+        };
+
+        assert_eq!(
+            config.transport_kind().unwrap(),
+            McpTransportKind::StreamableHttp
+        );
+    }
+
+    #[test]
+    fn test_mcp_server_config_explicit_sse_transport() {
+        let config = McpServerConfig {
+            command: Some("/usr/bin/mcp-server".to_string()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: Some("https://example.com/sse".to_string()),
+            headers: HashMap::new(),
+            transport: Some(McpTransportKind::Sse),
+        };
+
+        assert_eq!(config.transport_kind().unwrap(), McpTransportKind::Sse);
+    }
+
+    #[test]
+    fn test_validate_remote_url_rejects_public_http() {
+        let err = validate_remote_url("http://example.com/mcp").unwrap_err();
+        assert!(err.contains("http"));
+    }
+
+    #[test]
+    fn test_validate_remote_url_allows_localhost_http() {
+        validate_remote_url("http://localhost:3000/mcp").unwrap();
+        validate_remote_url("http://127.0.0.1:3000/mcp").unwrap();
+        validate_remote_url("http://[::1]:3000/mcp").unwrap();
+    }
+
+    #[test]
+    fn test_redact_headers_hides_sensitive_values() {
+        let headers = HashMap::from([
+            ("Authorization".to_string(), "Bearer secret".to_string()),
+            ("cookie".to_string(), "session=secret".to_string()),
+            ("X-Api-Key".to_string(), "secret".to_string()),
+            ("Proxy-Authorization".to_string(), "secret".to_string()),
+            ("Accept".to_string(), "application/json".to_string()),
+        ]);
+
+        let redacted = redact_headers(&headers);
+
+        assert_eq!(redacted.get("Authorization").unwrap(), "<redacted>");
+        assert_eq!(redacted.get("cookie").unwrap(), "<redacted>");
+        assert_eq!(redacted.get("X-Api-Key").unwrap(), "<redacted>");
+        assert_eq!(redacted.get("Proxy-Authorization").unwrap(), "<redacted>");
+        assert_eq!(redacted.get("Accept").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn test_limit_tool_response_keeps_small_output() {
+        assert_eq!(limit_tool_response("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_limit_tool_response_truncates_large_output() {
+        let limited = limit_tool_response("abcdefghij", 5);
+
+        assert!(limited.starts_with("abcde"));
+        assert!(limited.contains("truncated"));
+    }
+
+    #[test]
+    fn test_limit_tool_response_truncates_at_utf8_boundary() {
+        let limited = limit_tool_response("你好世界", 5);
+
+        assert!(limited.starts_with("你"));
+        assert!(limited.contains("truncated"));
+    }
+
+    #[test]
+    fn test_limit_tool_response_zero_limit_returns_notice_without_prefix() {
+        assert_eq!(
+            limit_tool_response("abc", 0),
+            "[Output truncated: original 3 bytes, limit 0 bytes]"
+        );
+    }
+
+    #[test]
+    fn test_limit_tool_response_empty_input_with_zero_limit_returns_empty() {
+        assert_eq!(limit_tool_response("", 0), "");
     }
 }

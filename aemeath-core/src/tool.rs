@@ -147,6 +147,22 @@ impl ToolRegistry {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
+    pub fn unregister(&mut self, name: &str) -> bool {
+        self.tools.remove(name).is_some()
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
         self.tools.get(name).map(|t| t.as_ref())
     }
@@ -166,5 +182,73 @@ impl ToolRegistry {
 
     pub fn names(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tool_registry_tests {
+    use super::*;
+
+    struct DummyTool {
+        name: String,
+        description: String,
+    }
+
+    impl DummyTool {
+        fn new(name: &str, description: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                description: description.to_string(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Tool for DummyTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+            ToolResult::success("ok")
+        }
+    }
+
+    #[test]
+    fn test_tool_registry_unregister_existing_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool::new("dummy", "first")));
+
+        assert!(registry.contains("dummy"));
+        assert_eq!(registry.len(), 1);
+        assert!(registry.unregister("dummy"));
+        assert!(!registry.contains("dummy"));
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_tool_registry_unregister_missing_tool() {
+        let mut registry = ToolRegistry::new();
+
+        assert!(!registry.unregister("missing"));
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_tool_registry_register_overwrites_existing_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool::new("dummy", "first")));
+        registry.register(Box::new(DummyTool::new("dummy", "second")));
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.get("dummy").unwrap().description(), "second");
     }
 }
