@@ -13,6 +13,7 @@ pub mod debug;
 pub mod effort;
 pub mod git;
 pub mod help;
+pub mod mcp;
 pub mod memory;
 mod memory_support;
 pub mod misc;
