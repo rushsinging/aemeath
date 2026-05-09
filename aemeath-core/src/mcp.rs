@@ -235,12 +235,17 @@ pub fn limit_tool_response(output: &str, max_bytes: usize) -> String {
         truncate_at -= 1;
     }
 
-    format!(
-        "{}\n\n[Output truncated: original {} bytes, limit {} bytes]",
-        &output[..truncate_at],
+    let notice = format!(
+        "[Output truncated: original {} bytes, limit {} bytes]",
         output.len(),
         max_bytes
-    )
+    );
+
+    if truncate_at == 0 {
+        notice
+    } else {
+        format!("{}\n\n{}", &output[..truncate_at], notice)
+    }
 }
 
 impl McpClient {
@@ -384,6 +389,7 @@ impl McpClient {
         response.result.ok_or_else(|| "empty result".to_string())
     }
 
+    /// Send a JSON-RPC ping request to verify the MCP server is responsive.
     pub async fn ping(&self) -> Result<(), String> {
         self.send_request("ping", None).await.map(|_| ())
     }
@@ -561,5 +567,26 @@ mod mcp_server_config_tests {
 
         assert!(limited.starts_with("abcde"));
         assert!(limited.contains("truncated"));
+    }
+
+    #[test]
+    fn test_limit_tool_response_truncates_at_utf8_boundary() {
+        let limited = limit_tool_response("你好世界", 5);
+
+        assert!(limited.starts_with("你"));
+        assert!(limited.contains("truncated"));
+    }
+
+    #[test]
+    fn test_limit_tool_response_zero_limit_returns_notice_without_prefix() {
+        assert_eq!(
+            limit_tool_response("abc", 0),
+            "[Output truncated: original 3 bytes, limit 0 bytes]"
+        );
+    }
+
+    #[test]
+    fn test_limit_tool_response_empty_input_with_zero_limit_returns_empty() {
+        assert_eq!(limit_tool_response("", 0), "");
     }
 }
