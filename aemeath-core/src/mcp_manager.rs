@@ -193,6 +193,19 @@ pub fn diff_tools(old: &[McpToolDef], new: &[McpToolDef]) -> ToolListDiff {
     }
 }
 
+/// Build the registry-qualified name for an MCP tool.
+pub fn qualified_tool_name(server: &str, tool: &str) -> String {
+    format!("mcp__{}__{}", server, tool)
+}
+
+/// Build registry-qualified names for tools removed from an MCP server.
+pub fn removed_qualified_tool_names(server: &str, removed: &[String]) -> Vec<String> {
+    removed
+        .iter()
+        .map(|tool| qualified_tool_name(server, tool))
+        .collect()
+}
+
 /// MCP connection manager
 pub struct McpConnectionManager {
     /// Configuration
@@ -410,7 +423,7 @@ impl McpConnectionManager {
             if let Some(client_arc) = &connection.client {
                 for tool_def in &connection.tools {
                     // Create qualified name: mcp__server__tool
-                    let qualified_name = format!("mcp__{}__{}", connection.name, tool_def.name);
+                    let qualified_name = qualified_tool_name(&connection.name, &tool_def.name);
 
                     let mcp_tool = McpToolWrapper {
                         tool_name: tool_def.name.clone(),
@@ -610,6 +623,21 @@ mod tests {
         assert_eq!(diff.changed[0].description, changed_new.description);
         assert_eq!(diff.changed[1].name, schema_changed_new.name);
         assert_eq!(diff.changed[1].input_schema, schema_changed_new.input_schema);
+    }
+
+    #[test]
+    fn test_qualified_tool_name_uses_double_separator() {
+        assert_eq!(qualified_tool_name("server", "read"), "mcp__server__read");
+    }
+
+    #[test]
+    fn test_tool_names_for_unregister_returns_removed_names() {
+        let removed = vec!["read".to_string(), "write".to_string()];
+
+        assert_eq!(
+            removed_qualified_tool_names("demo", &removed),
+            vec!["mcp__demo__read".to_string(), "mcp__demo__write".to_string()]
+        );
     }
 
     #[test]

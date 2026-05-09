@@ -39,7 +39,10 @@ impl Tool for McpTool {
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
-            Ok(output) => ToolResult::success(output),
+            Ok(output) => ToolResult::success(aemeath_core::mcp::limit_tool_response(
+                &output,
+                aemeath_core::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
+            )),
             Err(e) => ToolResult::error(format!("MCP tool error: {e}")),
         }
     }
