@@ -9,7 +9,6 @@
 
 use crate::mcp::{McpClient, McpServerConfig, McpToolDef};
 use crate::tool::{Tool, ToolContext, ToolRegistry, ToolResult};
-use crate::tools::mcp_tool::McpTool;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,7 +33,7 @@ pub enum ConnectionState {
 }
 
 /// MCP server connection info
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct McpServerConnection {
     /// Server name
     pub name: String,
@@ -80,6 +79,14 @@ impl McpServerConnection {
     }
 }
 
+fn default_health_check_interval_seconds() -> u64 {
+    30
+}
+
+fn default_max_tool_response_bytes() -> usize {
+    crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
+}
+
 /// MCP connection manager configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpManagerConfig {
@@ -94,8 +101,10 @@ pub struct McpManagerConfig {
     /// Max reconnect attempts
     pub max_reconnect_attempts: u32,
     /// Health check interval in seconds
+    #[serde(default = "default_health_check_interval_seconds")]
     pub health_check_interval_seconds: u64,
     /// Maximum MCP tool response size in bytes
+    #[serde(default = "default_max_tool_response_bytes")]
     pub max_tool_response_bytes: usize,
 }
 
@@ -164,7 +173,6 @@ pub fn diff_tools(old: &[McpToolDef], new: &[McpToolDef]) -> ToolListDiff {
 }
 
 /// MCP connection manager
-#[derive(Debug)]
 pub struct McpConnectionManager {
     /// Configuration
     config: McpManagerConfig,
@@ -220,12 +228,10 @@ impl McpConnectionManager {
     pub async fn connect_server(&self, name: &str) -> Result<McpServerConnection, String> {
         let connections = self.connections.lock().await;
 
-        let connection = connections.get(name).cloned();
-        if connection.is_none() {
-            return Err(format!("Server '{}' not configured", name));
-        }
-
-        let connection = connection?;
+        let connection = connections
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("Server '{}' not configured", name))?;
 
         // Attempt connection
         let client = McpClient::connect(name, &connection.config).await;
@@ -553,20 +559,35 @@ mod tests {
         let unchanged_new = tool("unchanged", "same");
         let changed_old = tool("changed", "old description");
         let changed_new = tool("changed", "new description");
+        let schema_changed_old = tool("schema_changed", "same description");
+        let mut schema_changed_new = tool("schema_changed", "same description");
+        schema_changed_new.input_schema = json!({
+            "type": "object",
+            "properties": {
+                "count": { "type": "integer" }
+            }
+        });
         let removed = tool("removed", "removed description");
         let added = tool("added", "added description");
 
         let diff = diff_tools(
-            &[unchanged_old, changed_old, removed],
-            &[unchanged_new, changed_new.clone(), added.clone()],
+            &[unchanged_old, changed_old, schema_changed_old, removed],
+            &[
+                unchanged_new,
+                changed_new.clone(),
+                schema_changed_new.clone(),
+                added.clone(),
+            ],
         );
 
         assert_eq!(diff.added.len(), 1);
         assert_eq!(diff.added[0].name, added.name);
         assert_eq!(diff.removed, vec!["removed".to_string()]);
-        assert_eq!(diff.changed.len(), 1);
+        assert_eq!(diff.changed.len(), 2);
         assert_eq!(diff.changed[0].name, changed_new.name);
         assert_eq!(diff.changed[0].description, changed_new.description);
+        assert_eq!(diff.changed[1].name, schema_changed_new.name);
+        assert_eq!(diff.changed[1].input_schema, schema_changed_new.input_schema);
     }
 
     #[test]

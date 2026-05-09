@@ -11,6 +11,7 @@ pub mod history;
 pub mod hook;
 pub mod logging;
 pub mod mcp;
+pub mod mcp_manager;
 pub mod memory;
 pub mod message;
 pub mod permission;
