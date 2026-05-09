@@ -11,6 +11,7 @@
 | 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 | 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
 | 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
+| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：MCP 配置/连接管理/工具注册与注销、manager 状态 API、`/mcp` 命令和默认 1MB tool result 限制已落地，待用户确认后归档 |
 
 ### #17 Skill 延迟加载 + 命名空间前缀
 
@@ -372,6 +373,26 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 - 场景 2 提示 inline vs ask_user？倾向 inline，但要确认默认 `[p] pause` 不会让用户莫名其妙
 - batch 归档保留多久？session 结束时持久化，session resume 时是否复活？
 - `/task history` 输出格式：表格 vs 树形？
+
+---
+
+### #28 MCP 系统完善
+
+**目标**：完善 MCP 系统的配置、连接管理、工具发现注册和 CLI 操作路径，覆盖 P0+P1 能力并等待用户确认后归档。
+
+#### 本轮已完成的 P0+P1 改动
+
+- McpServerConfig 支持 stdio/SSE/Streamable HTTP 配置形态、URL 安全校验、header 脱敏
+- McpConnectionManager 接入启动加载路径，统一管理连接/tool 发现/注册
+- ToolRegistry 注销与查询接口
+- Manager tool diff、snapshot refresh、health check once、reconnect 状态转换 API
+- `/mcp` 独立命令模块，支持 list/tools/restart/add/remove 的真实路径或 runtime bridge 提示
+- MCP tool result 默认 1MB 响应大小限制
+
+#### 关联
+
+- Feature #28 MCP P0+P1 实施任务 1-9 已完成并 review 通过
+- 用户确认后再归档；确认前保留在 active.md
 
 ---
 
