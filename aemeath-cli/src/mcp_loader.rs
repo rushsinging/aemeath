@@ -1,10 +1,9 @@
-use aemeath_core::mcp::{McpClient, McpServerConfig};
+use aemeath_core::mcp::McpServerConfig;
 use aemeath_core::mcp_manager::McpConnectionManager;
 use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub fn parse_mcp_servers_config(
     config: &serde_json::Value,
@@ -24,9 +23,7 @@ pub fn merge_mcp_servers(
     base.extend(overlay);
 }
 
-async fn read_mcp_servers_config(
-    config_path: &PathBuf,
-) -> Option<HashMap<String, McpServerConfig>> {
+async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, McpServerConfig>> {
     if !config_path.exists() {
         return None;
     }
@@ -56,7 +53,7 @@ async fn read_mcp_servers_config(
     }
 }
 
-pub async fn load_mcp_manager(cwd: &PathBuf) -> Arc<McpConnectionManager> {
+pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
     let mut servers = HashMap::new();
 
     if let Some(global_config_path) = dirs::home_dir().map(|h| h.join(".aemeath").join("mcp.json"))
@@ -67,19 +64,13 @@ pub async fn load_mcp_manager(cwd: &PathBuf) -> Arc<McpConnectionManager> {
     }
 
     let project_config_path = cwd.join(".mcp.json");
-    if project_config_path.exists() {
-        eprintln!(
-            "⚠️  SECURITY: Loading MCP servers from project config {}.\n\
-             These servers can execute arbitrary commands on your system.\n\
-             Review the commands before proceeding. Use --no-tui and Ctrl+C to abort if needed.",
-            project_config_path.display()
-        );
-        log::warn!(
-            "Loading MCP servers from project-level config {} — commands may be untrusted.",
-            project_config_path.display()
-        );
-    }
     if let Some(project_servers) = read_mcp_servers_config(&project_config_path).await {
+        if !project_servers.is_empty() {
+            log::warn!(
+                "Loading MCP servers from project-level config {} — commands may be untrusted.",
+                project_config_path.display()
+            );
+        }
         merge_mcp_servers(&mut servers, project_servers);
     }
 
@@ -90,10 +81,7 @@ pub async fn load_mcp_manager(cwd: &PathBuf) -> Arc<McpConnectionManager> {
     manager
 }
 
-pub async fn load_mcp_tools(
-    registry: &mut ToolRegistry,
-    cwd: &PathBuf,
-) -> Vec<Arc<Mutex<McpClient>>> {
+pub async fn load_mcp_tools(registry: &mut ToolRegistry, cwd: &Path) -> Arc<McpConnectionManager> {
     let manager = load_mcp_manager(cwd).await;
 
     for (name, result) in manager.connect_all().await {
@@ -106,7 +94,7 @@ pub async fn load_mcp_tools(
     }
 
     manager.register_tools(registry).await;
-    Vec::new()
+    manager
 }
 
 #[cfg(test)]
