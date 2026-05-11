@@ -102,6 +102,12 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
+    pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
+        Self { provider }
+    }
+}
+
+impl LlmClient {
     pub fn new(api_key: String) -> Self {
         Self::with_provider(
             ApiDriverKind::Anthropic,
