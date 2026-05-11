@@ -17,13 +17,15 @@
 | 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
 | 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | 待实施 | 未确认 | 通过 CI hook 脚本保证 TUI 层不偏离 TEA 架构（update→Cmd→渲染），以及所有 .rs 文件不超过 400 行（含测试） |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
-| 33 | 优化 TaskListCreate 工具调用显示 | 中 | 待实施 | 已确认 | TaskListCreate 在 TUI 中应显示为简洁摘要（如 `✓ Task list created: <subject>` + summary），隐藏原始 JSON 参数、`Task list #N created`、重复 Summary 和 `✓ TaskListCreate completed` 等噪声 |
+| 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | 待实施 | 已确认 | TaskListCreate 和 TaskListComplete 在 TUI 中应显示为简洁摘要，隐藏原始 JSON 参数、`Task list #N created/completed`、重复 Summary 和默认 completed 行等噪声 |
 
-### #33 优化 TaskListCreate 工具调用显示
+### #33 优化 TaskListCreate / TaskListComplete 工具调用显示
 
-**目标**：减少 TaskListCreate 工具调用在 TUI 输出中的重复信息和视觉噪声，把“创建任务列表”展示为用户可读的简洁摘要。
+**目标**：减少 TaskListCreate / TaskListComplete 工具调用在 TUI 输出中的重复信息和视觉噪声，把“创建/完成任务列表”展示为用户可读的简洁摘要。
 
 **当前表现**：
+
+TaskListCreate 示例：
 
 ```text
 TaskListCreate
@@ -33,18 +35,36 @@ TaskListCreate
   ✓ TaskListCreate completed
 ```
 
+TaskListComplete 示例：
+
+```text
+TaskListComplete
+  {}
+  Task list #2 completed
+  ✓ TaskListComplete completed
+```
+
 **期望表现**：
+
+TaskListCreate：
 
 ```text
 ✓ Task list created: 拆分超过 400 行限制的大文件
   将 15 个超过 400 行限制的 .rs 文件拆分为多个职责清晰的模块
 ```
 
+TaskListComplete：
+
+```text
+✓ Task list completed
+```
+
 **范围**：
-1. TUI 工具调用展示层对 `TaskListCreate` 做专用摘要渲染。
-2. 隐藏原始 JSON 参数块、重复 summary、`Task list #N created` 和默认 completed 行。
-3. 保留错误路径的可见错误信息，避免静默失败。
-4. 不改变 ToolResult 语义和 task list 创建逻辑，仅优化展示。
+1. TUI 工具调用展示层对 `TaskListCreate` 和 `TaskListComplete` 做专用摘要渲染。
+2. `TaskListCreate` 隐藏原始 JSON 参数块、重复 summary、`Task list #N created` 和默认 completed 行。
+3. `TaskListComplete` 隐藏空 JSON 参数块、`Task list #N completed` 和默认 completed 行，仅保留简洁完成提示。
+4. 保留错误路径的可见错误信息，避免静默失败。
+5. 不改变 ToolResult 语义和 task list 创建/完成逻辑，仅优化展示。
 
 **涉及路径**：
 - `aemeath-cli/src/tui/output_area/tool_display.rs`
