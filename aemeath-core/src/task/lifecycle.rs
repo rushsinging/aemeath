@@ -171,6 +171,7 @@ mod tests {
     fn make_batch(id: u64, status: BatchStatus, silence_turns: u64) -> Batch {
         Batch {
             id,
+            summary: None,
             status,
             created_at: 0,
             last_active_turn: 0,

@@ -13,15 +13,8 @@ pub struct SystemPromptParts {
     pub claude_md: String,
 }
 
-pub async fn build_system_prompt_parts(
-    cwd: &PathBuf,
-    hook_runner: &HookRunner,
-) -> SystemPromptParts {
-    let cwd_str = cwd.to_string_lossy();
-    let is_git = is_git_repo(cwd).await;
-
-    // --- Static part: instructions that don't change between sessions ---
-    let static_part = format!(
+fn static_system_prompt_for(cwd_str: &str, is_git: bool) -> String {
+    format!(
         r#"You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 # System
@@ -58,15 +51,19 @@ When a task requires understanding a large codebase (review, refactor, audit, et
 
 # Task workflow — MANDATORY
 When you use TaskCreate to create tasks, you MUST maintain task status throughout execution:
-- BEFORE starting work on a task: call `TaskUpdate(taskId, status="in_progress")`
-- AFTER completing a task: call `TaskUpdate(taskId, status="completed")`
-- If dispatching a sub-agent for a task: pass `taskId` to the Agent tool — it will manage status automatically
-- Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate
+- For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a request summary.
+- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(taskId, status="in_progress")` in the same tool batch or an earlier one.
+- AFTER completing a task yourself: call `TaskUpdate(taskId, status="completed")` before reporting completion.
+- If dispatching a sub-agent for a task: pass `taskId` to the Agent tool and do NOT call TaskUpdate for that task; the dispatcher manages Pending → InProgress → Completed/Pending automatically.
+- After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
+- Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
 Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
+When the user says "continue", "resume", or similar without specifying a task, call TaskList first to inspect open task batches before choosing work.
+System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 
-BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no status updates)
-GOOD: TaskCreate(3 tasks) → TaskUpdate(id1, in_progress) → Agent("do task 1", taskId="id1") → TaskUpdate(id2, in_progress) → Agent("do task 2", taskId="id2") → ...
+BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (missing taskId / no lifecycle ownership)
+GOOD: TaskListCreate(summary) → TaskCreate(3 tasks) → Agent("do task 1", taskId="1") → TaskUpdate(id2, in_progress) → Bash/Edit for task 2 → TaskUpdate(id2, completed) → TaskListComplete()
 
 # Tone and style
  - Your responses should be short and concise.
@@ -75,7 +72,23 @@ GOOD: TaskCreate(3 tasks) → TaskUpdate(id1, in_progress) → Agent("do task 1"
 # Environment
  - Working directory: {cwd_str}
  - Is a git repository: {is_git}"#
-    );
+    )
+}
+
+#[cfg(test)]
+fn static_system_prompt_for_test(cwd_str: &str, is_git: bool) -> String {
+    static_system_prompt_for(cwd_str, is_git)
+}
+
+pub async fn build_system_prompt_parts(
+    cwd: &PathBuf,
+    hook_runner: &HookRunner,
+) -> SystemPromptParts {
+    let cwd_str = cwd.to_string_lossy();
+    let is_git = is_git_repo(cwd).await;
+
+    // --- Static part: instructions that don't change between sessions ---
+    let static_part = static_system_prompt_for(&cwd_str, is_git);
 
     // --- Dynamic part: session-specific context ---
     let mut dynamic = String::new();
@@ -337,34 +350,5 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use aemeath_core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
-
-    #[test]
-    fn test_format_memory_context_empty() {
-        assert!(format_memory_context(&[]).is_none());
-    }
-
-    #[test]
-    fn test_format_memory_context_with_entries() {
-        let entry = MemoryEntry::new(
-            MemoryLayer::Project,
-            MemoryCategory::Decision,
-            "使用 JSON 存储 Memory",
-            MemorySource::User,
-        );
-        let output = format_memory_context(&[entry]).unwrap();
-
-        assert!(output.contains("# Project Memory"));
-        assert!(output.contains("[Decision]"));
-        assert!(output.contains("使用 JSON 存储 Memory"));
-    }
-
-    #[tokio::test]
-    async fn test_collect_memory_context_zero_limit() {
-        let cwd = PathBuf::from("/tmp/aemeath-no-memory");
-
-        assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
-    }
-}
+#[path = "prompt_tests.rs"]
+mod prompt_tests;

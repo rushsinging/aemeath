@@ -100,6 +100,40 @@ impl Tool for TaskListTool {
             stats.completed
         );
 
+        let batches = self.store.list_batches().await;
+        for batch in batches {
+            let batch_tasks = self
+                .store
+                .tasks_in_batch(
+                    batch.id,
+                    &[
+                        TaskStatus::Pending,
+                        TaskStatus::InProgress,
+                        TaskStatus::Completed,
+                    ],
+                )
+                .await;
+            if batch_tasks.is_empty() {
+                continue;
+            }
+            let done = batch_tasks
+                .iter()
+                .filter(|task| task.status == TaskStatus::Completed)
+                .count();
+            output.push_str(&format!(
+                "Task list #{} [{:?}] — {}/{} done{}\n",
+                batch.id,
+                batch.status,
+                done,
+                batch_tasks.len(),
+                batch
+                    .summary
+                    .as_deref()
+                    .map(|summary| format!(" — {summary}"))
+                    .unwrap_or_default()
+            ));
+        }
+
         for task in &tasks {
             let icon = match task.status {
                 TaskStatus::Pending => "□",

@@ -14,9 +14,35 @@
 | 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
-| 30 | Agent loop 收尾工作 | 高 | 待实施 | 未确认 | agent loop 结束时（正常结束、用户打断、API 错误、达到 MAX_TURNS）执行统一收尾：task 状态清理、tool 资源释放、session 持久化、日志摘要等。当前所有退出点均缺少收尾逻辑 |
+| 30 | Agent loop 收尾工作 | 高 | 待实施 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查、tool 资源释放、session 持久化。#27/#29/#34 已先做局部修复，后续统一收口到该 feature |
 
-### #17 Skill 延迟加载 + 命名空间前缀
+### #30 Agent loop 收尾工作
+
+**目标**：把 agent loop 的所有退出路径收敛到统一 finalize，避免正常结束、用户打断、API 错误、超时、达到 max turns 等分支各自手写清理逻辑，导致 task 状态、hook、日志、session 持久化行为不一致。
+
+**与 #27/#29/#34 的关系**：
+- #27 已先在 `Agent` tool 层补 taskId 状态桥接，但子代理内部取消/超时/API error 等结果仍应由统一 `AgentRunOutcome` 表达，避免继续依赖字符串结果判断。
+- #29 已先通过 prompt 和工具描述强化主 agent 必须 `TaskUpdate`，后续 #30 只做收尾检查和日志提示，**不应**启发式自动替用户推进 task 状态。
+- #34 已先引入 task batch summary、`TaskListCreate` / `TaskListComplete` 和 reminder 隔离；后续 #30 可在 finalize 中检查 active list 是否仍有 pending/in_progress，并决定记录摘要或提示关闭，不自动误归档。
+
+**推荐 P0 范围**：
+1. 新增 `AgentRunStatus` / `AgentRunOutcome`，覆盖 completed、cancelled、timed_out、api_error、max_turns。
+2. 将 `CliAgentRunner::run_agent()` 多个 early return 收敛为统一 finalize 函数/guard。
+3. finalize 统一执行：恢复 client 设置、调用 `SubagentStop` hook、写结构化日志摘要（status、turns、duration、role、model）。
+4. 保持当前对外行为不变；不在本 feature 中自动完成 pending task。
+5. 补单元测试覆盖各类 outcome 的 finalize 行为，至少覆盖正常完成、错误、max turns。
+
+**后续 P1/P2 可选**：
+- session 持久化接入 finalize。
+- tool 资源释放/取消 token 清理接入 finalize。
+- task list 收尾检查结果写入日志或 reminder 状态。
+
+**明确不做**：
+- 不自动把所有 pending task 标记 completed。
+- 不按工具调用启发式猜测应该更新哪个 task。
+- 不在当前 #27/#29/#34 修复分支里扩大实现该 feature；本轮只记录设计，后续单独在 #30 中统一完成。
+
+---
 
 **目标**：对齐 Claude Code 的 plugin/skill 加载机制，降低启动开销，支持 skill 包（如 superpowers）的自动发现和命名空间隔离。
 

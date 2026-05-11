@@ -22,6 +22,8 @@ pub mod sleep;
 pub mod task_create;
 pub mod task_get;
 pub mod task_list;
+pub mod task_list_complete;
+pub mod task_list_create;
 pub mod task_output;
 pub mod task_stop;
 pub mod task_update;
@@ -70,6 +72,12 @@ pub fn register_all_tools(
         store: task_store.clone(),
     }));
     registry.register(Box::new(task_list::TaskListTool {
+        store: task_store.clone(),
+    }));
+    registry.register(Box::new(task_list_create::TaskListCreateTool {
+        store: task_store.clone(),
+    }));
+    registry.register(Box::new(task_list_complete::TaskListCompleteTool {
         store: task_store.clone(),
     }));
     registry.register(Box::new(task_get::TaskGetTool {
@@ -157,6 +165,12 @@ pub fn register_all_tools_except_agent(
     registry.register(Box::new(task_list::TaskListTool {
         store: task_store.clone(),
     }));
+    registry.register(Box::new(task_list_create::TaskListCreateTool {
+        store: task_store.clone(),
+    }));
+    registry.register(Box::new(task_list_complete::TaskListCompleteTool {
+        store: task_store.clone(),
+    }));
     registry.register(Box::new(task_get::TaskGetTool {
         store: task_store.clone(),
     }));
@@ -194,6 +208,8 @@ mod tests {
             "TaskCreate",
             "TaskUpdate",
             "TaskList",
+            "TaskListCreate",
+            "TaskListComplete",
             "TaskGet",
             "TaskOutput",
             "TaskStop",

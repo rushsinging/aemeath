@@ -5,7 +5,7 @@
 //! actively calling `TaskList`.
 
 use aemeath_core::message::{ContentBlock, Message, Role};
-use aemeath_core::task::TaskStore;
+use aemeath_core::task::{TaskStatus, TaskStore};
 
 /// How many turns since last TaskCreate/TaskUpdate before injecting a reminder.
 const TURNS_SINCE_WRITE: u64 = 5;
@@ -38,7 +38,7 @@ impl TaskReminderState {
                 for block in &msg.content {
                     if let ContentBlock::ToolUse { name, .. } = block {
                         match name.as_str() {
-                            "TaskCreate" | "TaskUpdate" => {
+                            "TaskCreate" | "TaskUpdate" | "TaskListCreate" | "TaskListComplete" => {
                                 self.last_task_management_turn = current_turn;
                                 return;
                             }
@@ -74,22 +74,36 @@ impl TaskReminderState {
             return None;
         }
 
-        let stats = task_store.stats().await;
-        // Fuse: no tasks, no reminder
-        if stats.total == 0 {
+        let mut lines = Vec::new();
+        for batch in task_store.lists_with_pending().await {
+            let tasks = task_store
+                .tasks_in_batch(batch.id, &[TaskStatus::Pending, TaskStatus::InProgress])
+                .await;
+            if tasks.is_empty() {
+                continue;
+            }
+            let task_text = tasks
+                .iter()
+                .map(|task| format!("#{} {} [{:?}]", task.id, task.subject, task.status))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let summary = batch.summary.as_deref().unwrap_or("no summary");
+            lines.push(format!(
+                "Task batch #{} [{:?}] — summary: {} — {}",
+                batch.id, batch.status, summary, task_text
+            ));
+        }
+
+        if lines.is_empty() {
             return None;
         }
 
         self.last_reminder_turn = current_turn;
 
         let text = format!(
-            "Task progress: {completed}/{total} done, {in_progress} active, {pending} pending. Use TaskList to see details.",
-            completed = stats.completed,
-            total = stats.total,
-            in_progress = stats.in_progress,
-            pending = stats.pending,
+            "Task reminders are grouped by task batch and may belong to earlier user requests. If unrelated to the latest user message, answer the latest user message first.\n{}\nUse TaskList only when the user asks to continue/resume or when a listed task is clearly relevant.",
+            lines.join("\n")
         );
-
         let reminder = format!("<system-reminder>\n{}\n</system-reminder>", text);
 
         Some(Message {
@@ -102,5 +116,75 @@ impl TaskReminderState {
 impl Default for TaskReminderState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::task::TaskStatus;
+
+    fn reminder_text(message: &Message) -> String {
+        message.text_content()
+    }
+
+    #[tokio::test]
+    async fn test_build_reminder_groups_by_batch_and_warns_unrelated() {
+        let store = TaskStore::new();
+        store
+            .create_list("旧任务".to_string(), "修复 task 状态".to_string())
+            .await;
+        let task = store
+            .create("分析旧任务".to_string(), "修复 task 状态".to_string(), None)
+            .await;
+        let mut state = TaskReminderState::new();
+        let reminder = state
+            .build_reminder(TURNS_SINCE_WRITE, &store)
+            .await
+            .expect("reminder exists");
+        let text = reminder_text(&reminder);
+
+        assert!(text.contains("Task batch #0"));
+        assert!(text.contains("修复 task 状态"));
+        assert!(text.contains("may belong to earlier user requests"));
+        assert!(text.contains("If unrelated to the latest user message"));
+        assert_eq!(
+            store.get(&task.id).await.unwrap().status,
+            TaskStatus::Pending
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_reminder_omits_all_completed_batches() {
+        let store = TaskStore::new();
+        let task = store
+            .create("完成任务".to_string(), "done".to_string(), None)
+            .await;
+        store
+            .update(&task.id, |task| task.status = TaskStatus::Completed)
+            .await;
+
+        let mut state = TaskReminderState::new();
+        let reminder = state.build_reminder(TURNS_SINCE_WRITE, &store).await;
+
+        assert!(reminder.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_build_reminder_mentions_use_tasklist_only_when_relevant() {
+        let store = TaskStore::new();
+        store
+            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .await;
+
+        let mut state = TaskReminderState::new();
+        let reminder = state
+            .build_reminder(TURNS_SINCE_WRITE, &store)
+            .await
+            .expect("reminder exists");
+        let text = reminder_text(&reminder);
+
+        assert!(text.contains("Use TaskList only when the user asks to continue/resume"));
+        assert!(!text.contains("Use TaskList to see details."));
     }
 }
