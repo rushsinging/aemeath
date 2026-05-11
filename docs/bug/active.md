@@ -11,7 +11,41 @@
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 活动中 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
-| 37 | Assistant 空消息导致 API 400 invalid_request_error | 高 | 活动中 | 未确认 | 2026-05 | 会话历史中存在 content/tool_calls 均为空的 assistant message |
+| 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 活动中 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
+| 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 活动中 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
+
+## 专案
+
+### 专案 A：Task 系统生命周期管理（#27 + #29 + #34 + #36 + #37）
+
+**统一描述**：Task 系统在状态流转、batch 隔离、跨轮次清理三个维度存在缺陷，导致 LLM 工作已执行但 task 状态不更新、旧 task reminder 干扰新请求、已完成 batch 不清空。
+
+| 原始 Bug | 角度 | 状态 |
+|----------|------|------|
+| #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
+| #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
+| #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
+| #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 待修复 |
+| #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 待修复：新用户消息开始时未清空/隐藏旧 completed batch |
+
+**遗留问题（#36 + #37 未修复）**：
+
+**#36 — 新 batch 任务编号不从 1 开始**：
+- 同一 session 中第二次 TaskListCreate 后，TaskCreate 分配的 task id 仍沿用全局递增（如 #6、#7...），而非新 batch 从 #1 重新编号
+- 根因：TaskStore 的 task_id 是全局自增计数器，TaskListCreate 创建新 batch 时未重置编号
+- 修复方向：TUI 渲染 task list 时使用 batch 内的相对编号（1, 2, 3...）而非全局 task id；或在 TaskListCreate 时重置计数器
+
+**#37 — 已完成 batch 挂留**：
+- 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时，旧 task list 仍显示
+- 根因：TaskListComplete 后 batch 标记为完成，但 TUI 渲染未检查 batch 完成状态来决定是否隐藏
+- 修复方向：`TaskListComplete` 标记 batch 完成后，TUI task list 渲染时过滤掉已完成 batch；或新用户消息入队时自动触发已完成 batch 的归档清理
+
+**涉及路径**：
+- `aemeath-tools/src/agent.rs`（#27：AgentTool taskId 桥接）
+- `aemeath-core/src/task.rs`（TaskStore batch 管理、completed batch 归档）
+- `aemeath-tools/src/task_list_create.rs`、`task_list_complete.rs`（#34：batch 生命周期）
+- `aemeath-cli/src/tui/app/task_window.rs`（#37：渲染过滤已完成 batch）
+- system prompt 中 task 维护指引
 
 ## 详情
 
