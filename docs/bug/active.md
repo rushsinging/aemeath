@@ -9,6 +9,7 @@
 | 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
+| 35 | Write tool 在 worktree 中写入错误分支 | 高 | 活动中 | 未确认 | 2026-05 | Write tool 使用相对路径解析，worktree 中 CWD 指向 worktree 目录但 tool 解析到 main worktree 路径 |
 
 ## 详情
 
@@ -187,6 +188,17 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 ### #33 Spinner 下方 task list 无法选中和复制
 
 **症状**：spinner 下方的 task list 行（摘要行 `━━ Tasks: 3/5 ━━` 及每条 task 的 `✓ #1 标题`、`■ #2 标题`、`□ #3 标题`）在 TUI 中可见但鼠标无法选中、无法复制。拖拽选中时这些行被跳过，`Ctrl+C` 复制时也拿不到文本。
+
+### #35 Write tool 在 worktree 中写入错误分支
+
+**症状**：使用 git worktree 隔离开发时（如 `.worktrees/feature-xxx/`），LLM 通过 Write/Read 等文件工具使用相对路径，文件实际写入 main worktree 而非当前 worktree。主 agent 和 sub-agent 都受影响。
+
+**根因**：文件工具的路径解析基于进程 CWD（main worktree 根目录），未感知用户当前操作的 worktree 上下文。主 agent 启动时 CWD 为 main worktree，sub-agent 也是同一进程空间，因此所有文件工具都解析到 main worktree。
+
+**修复方向**：
+1. 主 agent 启动时感知当前 worktree 目录（通过 `.git` 或环境变量），将 CWD 设为 worktree 根
+2. 或者在 tool 执行时传入 worktree 的根路径，用于路径解析的 base
+3. 检查 Read/Edit/Write/Glob/Grep/Bash 等所有文件相关工具是否都受影响
 
 **复现路径**：
 1. 对话中创建了 task，spinner 下方显示 task list
