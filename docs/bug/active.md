@@ -10,6 +10,7 @@
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
+| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 活动中 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
 
 ## 详情
 
@@ -226,6 +227,28 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - Feature #24（task list 窗口化）—— task list 的渲染路径与窗口化逻辑共用
 - Bug #32（task list 显示不完整）—— 同在 task list 渲染链路
 
+### #36 TaskListCreate 后新任务编号未从 1 开始
+
+**症状**：调用 `TaskListCreate` 创建新的 task list 后，后续通过 `TaskCreate` 新增任务时，用户可见编号没有从 1 重新开始，而是继续沿用之前 task list / 全局任务的递增编号（例如新列表第一条显示为 `#6`）。
+
+**期望行为**：每个 task list 内的任务编号应独立计数；创建新 task list 后，该列表中新添加的第一条任务应显示为 `#1`，后续为 `#2`、`#3`。
+
+**影响**：不同用户请求之间的 task 编号泄漏，降低可读性，也会让用户和 agent 在引用“第 1 个任务”时产生歧义。
+
+**疑似根因**：TaskStore 使用全局递增 task id 作为用户可见编号，TaskListCreate 只创建 batch/list 边界，没有为每个 task list 维护局部序号或显示编号映射。
+
+**修复方向**：
+1. 区分内部唯一 task id 与 task list 内用户可见序号。
+2. TaskCreate 归属当前 task list 时，为该 list 分配从 1 开始的局部显示编号。
+3. TaskList / reminder / TUI task list / TaskUpdate 引用语义需保持一致，避免破坏内部 id 查找。
+4. 添加回归测试：连续创建两个 task list，第二个列表第一条任务显示编号为 1。
+
+**涉及路径**：
+- `aemeath-core/src/task.rs`
+- `aemeath-tools/src/task_list_create.rs`
+- `aemeath-tools/src/task_create.rs`
+- `aemeath-tools/src/task_list.rs`
+- TUI task list 渲染相关路径
 
 # 已归档 Bug
 
