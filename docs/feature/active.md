@@ -2,7 +2,6 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | ✅ 已完成 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化；当前 UI 不够醒目，用户容易忽略需要回答问题（如选项列表混在普通输出中，无明显视觉区分），需加强视觉提示：高亮/颜色/边框/图标，确保用户第一时间注意到需要操作；另外等待用户回答时 spinner 动画应暂停，当前 spinner 持续动画给人"还在处理"的错觉 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt top-N 注入；Hook 兜底与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory；自动 N 轮触发在 `auto_apply_suggestions=true` 时会自动写入 Memory，false 时仅展示建议不写入；PostCompact 触发待继续。详见 [spec](specs/009-reflection-system.md) |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
@@ -520,31 +519,6 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 - Feature #28 MCP P0+P1 实施任务 1-9 已完成并 review 通过
 - 用户确认后再归档；确认前保留在 active.md
-
----
-
-### #4 AskUserQuestion TUI 美化
-
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
-
-**实施完成（2026-05-11）**：
-
-1. 新增 `LineStyle::AskUser` 样式（亮黄色 + 粗体），在 `types.rs` 的 `to_style()` 中映射。
-2. 重写 `push_ask_user()` 美化：
-   - 顶部添加醒目标题行 `━━ 需要你的回答 ━━`（AskUser 样式）
-   - 问题文本使用 `LineStyle::AskUser` 亮黄粗体
-   - 操作提示行 `[↑↓] 选择  [Enter] 确认  [Esc] 取消`（多选时为 `[↑↓] 移动  [Space] 选中/取消`）
-   - 默认选项用 `❯` 箭头 + AskUser 样式
-   - 选项底部增加空行分隔
-3. 优化 `update_ask_user_options()` 中光标/选中项的高亮样式为 `LineStyle::AskUser`
-4. Spinner 暂停：`UiEvent::ToolCall` 处理中已对 `AskUserQuestion` 跳过 `start_spinner()`
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/types.rs`（新增 `LineStyle::AskUser`）
-- `aemeath-cli/src/tui/output_area/content.rs`（重写 `push_ask_user`、优化 `update_ask_user_options`）
-- `aemeath-cli/src/tui/app/update.rs`（已有 spinner 跳过逻辑，无需改动）
-
----
 
 ### #8 Memory 系统
 
