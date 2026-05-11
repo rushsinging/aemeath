@@ -51,7 +51,7 @@ When a task requires understanding a large codebase (review, refactor, audit, et
 
 # Task workflow — MANDATORY
 When you use TaskCreate to create tasks, you MUST maintain task status throughout execution:
-- For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a request summary.
+- For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
 - BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(taskId, status="in_progress")` in the same tool batch or an earlier one.
 - AFTER completing a task yourself: call `TaskUpdate(taskId, status="completed")` before reporting completion.
 - If dispatching a sub-agent for a task: pass `taskId` to the Agent tool and do NOT call TaskUpdate for that task; the dispatcher manages Pending → InProgress → Completed/Pending automatically.
