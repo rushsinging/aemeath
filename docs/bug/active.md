@@ -9,7 +9,7 @@
 | 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
-| 35 | Write tool 在 worktree 中写入错误分支 | 高 | 活动中 | 未确认 | 2026-05 | Write tool 使用相对路径解析，worktree 中 CWD 指向 worktree 目录但 tool 解析到 main worktree 路径 |
+| 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 
 ## 详情
 
