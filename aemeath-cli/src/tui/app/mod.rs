@@ -1,5 +1,6 @@
 mod cmd_exec;
 mod event;
+mod resume;
 mod run_loop;
 mod runtime;
 mod session_lifecycle;
