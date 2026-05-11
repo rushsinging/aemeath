@@ -28,27 +28,74 @@ pub(crate) enum AgentRunStatus {
     MaxTurns,         // 子 agent 达到 max turns
 }
 
+impl AgentRunStatus {
+    fn as_log_str(&self) -> &'static str {
+        match self {
+            AgentRunStatus::Completed => "completed",
+            AgentRunStatus::Cancelled => "cancelled",
+            AgentRunStatus::TimedOut => "timed_out",
+            AgentRunStatus::ApiError(_) => "api_error",
+            AgentRunStatus::MaxTurns => "max_turns",
+        }
+    }
+}
+
+/// Agent 循环停止原因
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentStopReason {
+    EndTurn,
+    NoToolCalls,
+    RepetitiveText,
+    UserInterrupted,
+    Timeout,
+    ApiError,
+    MaxTurns,
+}
+
+impl AgentStopReason {
+    fn as_log_str(self) -> &'static str {
+        match self {
+            AgentStopReason::EndTurn => "end_turn",
+            AgentStopReason::NoToolCalls => "no_tool_calls",
+            AgentStopReason::RepetitiveText => "repetitive_text",
+            AgentStopReason::UserInterrupted => "user_interrupted",
+            AgentStopReason::Timeout => "timeout",
+            AgentStopReason::ApiError => "api_error",
+            AgentStopReason::MaxTurns => "max_turns",
+        }
+    }
+}
+
 /// Agent 循环统一结果
 #[derive(Debug, Clone)]
-pub(crate) struct AgentRunOutcome {
+pub(crate) struct AgentRunSummary {
     pub status: AgentRunStatus,
+    pub stop_reason: AgentStopReason,
     pub turns: usize,
     pub duration: Duration,
     pub role: Option<String>, // 子 agent 有 role，主 loop 为 None
     pub model: String,
 }
 
+pub(crate) fn build_agent_run_summary_log_data(
+    summary: &AgentRunSummary,
+    session_id: &str,
+) -> serde_json::Value {
+    json!({
+        "session": session_id,
+        "status": summary.status.as_log_str(),
+        "stop_reason": summary.stop_reason.as_log_str(),
+        "turns": summary.turns,
+        "duration_ms": summary.duration.as_millis(),
+        "role": summary.role.as_deref().unwrap_or("-"),
+        "model": summary.model,
+    })
+}
+
 /// 主 loop 和子 agent 共用的结构化日志摘要
-pub(crate) fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
-    log::info!(
-        "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
-        session_id,
-        outcome.status,
-        outcome.turns,
-        outcome.duration.as_millis(),
-        outcome.role.as_deref().unwrap_or("-"),
-        outcome.model,
-    );
+pub(crate) fn log_agent_run_summary(summary: &AgentRunSummary, session_id: &str) {
+    let data = build_agent_run_summary_log_data(summary, session_id);
+    log::info!("[agent_loop_finished] {}", data);
 }
 
 /// 子 agent 退出时统一收尾：
@@ -56,7 +103,7 @@ pub(crate) fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
 ///   2. SubagentStop hook（含 system_message 转发）
 ///   3. 恢复 client 设置
 async fn finalize_sub_agent(
-    outcome: &AgentRunOutcome,
+    summary: &AgentRunSummary,
     client: &LlmClient,
     hook_runner: &HookRunner,
     session_id: &str,
@@ -69,17 +116,15 @@ async fn finalize_sub_agent(
     restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
 ) {
-    log_agent_outcome(outcome, session_id);
+    log_agent_run_summary(summary, session_id);
 
     // SubagentStop hook
     let is_error = matches!(
-        outcome.status,
-        AgentRunStatus::Cancelled
-            | AgentRunStatus::TimedOut
-            | AgentRunStatus::ApiError(_)
+        summary.status,
+        AgentRunStatus::Cancelled | AgentRunStatus::TimedOut | AgentRunStatus::ApiError(_)
     );
     let hook_results = hook_runner
-        .on_subagent_stop(prompt, system, model_spec, output, outcome.turns, is_error)
+        .on_subagent_stop(prompt, system, model_spec, output, summary.turns, is_error)
         .await;
 
     // Forward system messages from hook results
@@ -88,7 +133,7 @@ async fn finalize_sub_agent(
             if let Some(ref sys_msg) = output.system_message {
                 if let Some(ref tx) = progress_tx {
                     let _ = tx.try_send(AgentProgressEvent {
-                        sequence: outcome.turns,
+                        sequence: summary.turns,
                         kind: AgentProgressKind::Message {
                             text: format!("[hook] {sys_msg}"),
                         },
@@ -588,19 +633,20 @@ impl AgentRunner for CliAgentRunner {
         let start_time = std::time::Instant::now();
         let max_duration = std::time::Duration::from_secs(600); // 10 minute hard limit
 
-        // Helper macro: construct AgentRunOutcome, call finalize_sub_agent, then return result
+        // Helper macro: construct AgentRunSummary, call finalize_sub_agent, then return result
         macro_rules! finalize_and_return {
-            ($status:expr, $turns:expr, $result:expr) => {{
+            ($status:expr, $stop_reason:expr, $turns:expr, $result:expr) => {{
                 let _elapsed = start_time.elapsed();
-                let outcome = AgentRunOutcome {
+                let summary = AgentRunSummary {
                     status: $status,
+                    stop_reason: $stop_reason,
                     turns: $turns,
                     duration: _elapsed,
                     role: Some(role_name_for_log.clone()),
                     model: model_name_for_log.clone(),
                 };
                 finalize_sub_agent(
-                    &outcome,
+                    &summary,
                     client.as_ref(),
                     &hook_runner,
                     &session_id,
@@ -623,7 +669,12 @@ impl AgentRunner for CliAgentRunner {
             if ctx.cancel.is_cancelled() {
                 progress(Some(turn_number), "Agent cancelled by user");
                 let result = "Cancelled by user".to_string();
-                finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
+                finalize_and_return!(
+                    AgentRunStatus::Cancelled,
+                    AgentStopReason::UserInterrupted,
+                    turn,
+                    result
+                );
             }
             if start_time.elapsed() > max_duration {
                 let elapsed_secs = start_time.elapsed().as_secs();
@@ -637,9 +688,16 @@ impl AgentRunner for CliAgentRunner {
                     .rev()
                     .map(|msg| msg.text_content())
                     .find(|text| !text.is_empty())
-                    .map(|text| format!("{}\n\n[Sub-agent timed out after {}s]", text, elapsed_secs))
+                    .map(|text| {
+                        format!("{}\n\n[Sub-agent timed out after {}s]", text, elapsed_secs)
+                    })
                     .unwrap_or_else(|| format!("Sub-agent timed out after {}s", elapsed_secs));
-                finalize_and_return!(AgentRunStatus::TimedOut, turn, result);
+                finalize_and_return!(
+                    AgentRunStatus::TimedOut,
+                    AgentStopReason::Timeout,
+                    turn,
+                    result
+                );
             }
             let msg_tokens = aemeath_core::compact::estimate_messages_tokens(&messages);
             progress(
@@ -726,9 +784,18 @@ impl AgentRunner for CliAgentRunner {
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         progress(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();
-                        finalize_and_return!(AgentRunStatus::Completed, turn + 1, result);
+                        let stop_reason = if resp.stop_reason == StopReason::EndTurn {
+                            AgentStopReason::EndTurn
+                        } else {
+                            AgentStopReason::NoToolCalls
+                        };
+                        finalize_and_return!(
+                            AgentRunStatus::Completed,
+                            stop_reason,
+                            turn + 1,
+                            result
+                        );
                     }
-
                     // JsonLogger: 记录工具调用
                     if let Some(ref jl) = self.json_logger {
                         for tc in &tool_calls {
@@ -860,7 +927,12 @@ impl AgentRunner for CliAgentRunner {
                     progress(Some(turn_number), &format!("Agent error: {e}"));
                     let error_string = e.to_string();
                     let result = format!("Sub-agent error: {error_string}");
-                    finalize_and_return!(AgentRunStatus::ApiError(error_string), turn, result);
+                    finalize_and_return!(
+                        AgentRunStatus::ApiError(error_string),
+                        AgentStopReason::ApiError,
+                        turn,
+                        result
+                    );
                 }
             }
         }
@@ -880,7 +952,12 @@ impl AgentRunner for CliAgentRunner {
             .find(|text| !text.is_empty())
             .map(|text| format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns))
             .unwrap_or_else(|| format!("Sub-agent reached max turns ({})", max_turns));
-        finalize_and_return!(AgentRunStatus::MaxTurns, max_turns, result);
+        finalize_and_return!(
+            AgentRunStatus::MaxTurns,
+            AgentStopReason::MaxTurns,
+            max_turns,
+            result
+        );
     }
 
     async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String {
@@ -1040,6 +1117,28 @@ mod tests {
         assert_eq!(data["tool_name"], "Read");
         assert_eq!(data["is_error"], false);
         assert_eq!(data["output"], "完整输出");
+    }
+
+    #[test]
+    fn test_build_agent_run_summary_log_data_includes_stop_reason() {
+        let summary = AgentRunSummary {
+            status: AgentRunStatus::Completed,
+            stop_reason: AgentStopReason::NoToolCalls,
+            turns: 2,
+            duration: Duration::from_millis(1500),
+            role: None,
+            model: "glm-5.1".to_string(),
+        };
+
+        let data = build_agent_run_summary_log_data(&summary, "session-1");
+
+        assert_eq!(data["session"], "session-1");
+        assert_eq!(data["status"], "completed");
+        assert_eq!(data["stop_reason"], "no_tool_calls");
+        assert_eq!(data["turns"], 2);
+        assert_eq!(data["duration_ms"], 1500);
+        assert_eq!(data["role"], "-");
+        assert_eq!(data["model"], "glm-5.1");
     }
 
     fn test_tool_call(

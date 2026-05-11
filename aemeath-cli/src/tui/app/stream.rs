@@ -1,4 +1,6 @@
-use crate::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::agent_runner::{
+    log_agent_run_summary, AgentRunStatus, AgentRunSummary, AgentStopReason,
+};
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::config::hooks::HookEvent;
@@ -99,7 +101,7 @@ pub async fn process_in_background(
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
-    let mut outcome: Option<AgentRunOutcome> = None;
+    let summary: AgentRunSummary;
     let mut task_reminder_state = TaskReminderState::new();
 
     // Stall detection: sliding window for text repetition
@@ -116,13 +118,14 @@ pub async fn process_in_background(
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
             let _ = tx.send(UiEvent::Cancelled).await;
-            outcome = Some(AgentRunOutcome {
+            summary = AgentRunSummary {
                 status: AgentRunStatus::Cancelled,
+                stop_reason: AgentStopReason::UserInterrupted,
                 turns: turn_count,
                 duration: turn_start.elapsed(),
                 role: None,
                 model: client.model_name().to_string(),
-            });
+            };
             break;
         }
         struct TuiStreamHandler {
@@ -422,12 +425,14 @@ pub async fn process_in_background(
                             recent_fingerprints.len(),
                             max_fingerprint_repeat
                         );
-                        let _ = tx
-                            .send(UiEvent::SystemMessage(
-                                "[agent loop stopped: LLM is producing repetitive output]"
-                                    .to_string(),
-                            ))
-                            .await;
+                        summary = AgentRunSummary {
+                            status: AgentRunStatus::Completed,
+                            stop_reason: AgentStopReason::RepetitiveText,
+                            turns: turn_count,
+                            duration: turn_start.elapsed(),
+                            role: None,
+                            model: client.model_name().to_string(),
+                        };
                         break;
                     }
                 }
@@ -484,13 +489,18 @@ pub async fn process_in_background(
                     {
                         let _ = tx.send(UiEvent::SystemMessage(text)).await;
                     }
-                    outcome = Some(AgentRunOutcome {
+                    summary = AgentRunSummary {
                         status: AgentRunStatus::Completed,
+                        stop_reason: if resp.stop_reason == StopReason::EndTurn {
+                            AgentStopReason::EndTurn
+                        } else {
+                            AgentStopReason::NoToolCalls
+                        },
                         turns: turn_count,
                         duration: turn_start.elapsed(),
                         role: None,
                         model: client.model_name().to_string(),
-                    });
+                    };
                     break;
                 }
                 {
@@ -1117,13 +1127,14 @@ pub async fn process_in_background(
             Err(e) => {
                 let error_msg = e.to_string();
                 let _ = tx.send(UiEvent::Error(error_msg.clone())).await;
-                outcome = Some(AgentRunOutcome {
+                summary = AgentRunSummary {
                     status: AgentRunStatus::ApiError(error_msg),
+                    stop_reason: AgentStopReason::ApiError,
                     turns: turn_count,
                     duration: turn_start.elapsed(),
                     role: None,
                     model: client.model_name().to_string(),
-                });
+                };
                 break;
             }
         }
@@ -1131,22 +1142,28 @@ pub async fn process_in_background(
 
     messages.truncate(messages_at_start);
 
-    if let Some(ref outcome) = outcome {
-        finalize_main_loop(outcome, &tx, &hook_ui, &hook_runner, &session_id, &task_store).await;
-    }
+    finalize_main_loop(
+        &summary,
+        &tx,
+        &hook_ui,
+        &hook_runner,
+        &session_id,
+        &task_store,
+    )
+    .await;
 }
 
 async fn finalize_main_loop(
-    outcome: &AgentRunOutcome,
+    summary: &AgentRunSummary,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
     hook_runner: &aemeath_core::hook::HookRunner,
     session_id: &str,
     task_store: &TaskStore,
 ) {
-    log_agent_outcome(outcome, session_id);
+    log_agent_run_summary(summary, session_id);
 
-    match &outcome.status {
+    match &summary.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
             // Stop hook: agent 循环正常结束
             let _ = hook_ui
@@ -1155,16 +1172,18 @@ async fn finalize_main_loop(
                     HookEvent::Stop,
                     None,
                     HookData::Stop(StopHookData {
-                        turns: outcome.turns,
+                        turns: summary.turns,
                     }),
                 )
                 .await;
-            let _ = tx.send(UiEvent::DoneWithDuration(outcome.duration)).await;
+            let _ = tx.send(UiEvent::DoneWithDuration(summary.duration)).await;
 
             // 如果活跃 task batch 全部完成，归档它 — 下次对话不再提醒
             if let Some(active) = task_store.active_list().await {
                 if task_store.is_batch_completed(active.id).await {
-                    task_store.set_batch_status(active.id, aemeath_core::task::BatchStatus::Archived).await;
+                    task_store
+                        .set_batch_status(active.id, aemeath_core::task::BatchStatus::Archived)
+                        .await;
                     log::info!(
                         "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
                         active.id
@@ -1183,7 +1202,7 @@ async fn finalize_main_loop(
                     HookEvent::StopFailure,
                     None,
                     HookData::Stop(StopHookData {
-                        turns: outcome.turns,
+                        turns: summary.turns,
                     }),
                 )
                 .await;
