@@ -65,12 +65,20 @@ impl TaskReminderState {
         current_turn: u64,
         task_store: &TaskStore,
     ) -> Option<Message> {
+        let is_first_reminder = self.last_reminder_turn == 0;
+
         // Throttle: must have ≥ TURNS_SINCE_WRITE since last task management
-        if current_turn < self.last_task_management_turn + TURNS_SINCE_WRITE {
+        // (skip on first reminder)
+        if !is_first_reminder
+            && current_turn < self.last_task_management_turn + TURNS_SINCE_WRITE
+        {
             return None;
         }
         // Throttle: must have ≥ TURNS_BETWEEN_REMINDERS since last reminder
-        if current_turn < self.last_reminder_turn + TURNS_BETWEEN_REMINDERS {
+        // (skip on first reminder)
+        if !is_first_reminder
+            && current_turn < self.last_reminder_turn + TURNS_BETWEEN_REMINDERS
+        {
             return None;
         }
 

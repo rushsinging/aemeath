@@ -1,3 +1,4 @@
+use crate::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::config::hooks::HookEvent;
@@ -5,6 +6,7 @@ use aemeath_core::hook::{
     CompactHookData, HookData, HookJsonOutput, HookResult, StopHookData, ToolHookData,
 };
 use aemeath_core::message::Message;
+use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
 use aemeath_llm::provider::StreamHandler;
 use aemeath_llm::types::StopReason;
@@ -97,6 +99,7 @@ pub async fn process_in_background(
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
+    let mut outcome: Option<AgentRunOutcome> = None;
     let mut task_reminder_state = TaskReminderState::new();
 
     for _ in 0..MAX_TURNS {
@@ -105,10 +108,16 @@ pub async fn process_in_background(
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
             messages.truncate(messages_at_start);
-            let _ = tx.send(UiEvent::MessagesSync(messages)).await;
+            let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
             let _ = tx.send(UiEvent::Cancelled).await;
-            let _ = tx.send(UiEvent::Done).await;
-            return;
+            outcome = Some(AgentRunOutcome {
+                status: AgentRunStatus::Cancelled,
+                turns: turn_count,
+                duration: turn_start.elapsed(),
+                role: None,
+                model: client.model_name().to_string(),
+            });
+            break;
         }
         struct TuiStreamHandler {
             tx: mpsc::Sender<UiEvent>,
@@ -423,6 +432,13 @@ pub async fn process_in_background(
                     {
                         let _ = tx.send(UiEvent::SystemMessage(text)).await;
                     }
+                    outcome = Some(AgentRunOutcome {
+                        status: AgentRunStatus::Completed,
+                        turns: turn_count,
+                        duration: turn_start.elapsed(),
+                        role: None,
+                        model: client.model_name().to_string(),
+                    });
                     break;
                 }
                 {
@@ -1047,48 +1063,92 @@ pub async fn process_in_background(
                 }
             }
             Err(e) => {
-                let _ = tx.send(UiEvent::Error(e.to_string())).await;
-                // StopFailure hook: API 错误导致 agent 循环结束
-                let stop_results = hook_ui
-                    .run_json(
-                        &hook_runner,
-                        HookEvent::StopFailure,
-                        None,
-                        HookData::Stop(StopHookData { turns: turn_count }),
-                    )
-                    .await;
-                let (system_message, additional_context) = stop_results
-                    .into_iter()
-                    .find_map(|(_, _, json_output)| json_output)
-                    .map(|output| (output.system_message, output.additional_context))
-                    .unwrap_or((None, None));
-                let _ = tx
-                    .send(UiEvent::StopFailureHook {
-                        system_message,
-                        additional_context,
-                    })
-                    .await;
-                let _ = tx.send(UiEvent::Done).await;
-                return;
+                let error_msg = e.to_string();
+                let _ = tx.send(UiEvent::Error(error_msg.clone())).await;
+                outcome = Some(AgentRunOutcome {
+                    status: AgentRunStatus::ApiError(error_msg),
+                    turns: turn_count,
+                    duration: turn_start.elapsed(),
+                    role: None,
+                    model: client.model_name().to_string(),
+                });
+                break;
             }
         }
     }
 
     messages.truncate(messages_at_start);
 
-    // Stop hook: agent 循环结束
-    let _ = hook_ui
-        .run_plain(
-            &hook_runner,
-            HookEvent::Stop,
-            None,
-            HookData::Stop(StopHookData { turns: turn_count }),
-        )
-        .await;
+    if let Some(ref outcome) = outcome {
+        finalize_main_loop(outcome, &tx, &hook_ui, &hook_runner, &session_id, &task_store).await;
+    }
+}
 
-    let _ = tx
-        .send(UiEvent::DoneWithDuration(turn_start.elapsed()))
-        .await;
+async fn finalize_main_loop(
+    outcome: &AgentRunOutcome,
+    tx: &mpsc::Sender<UiEvent>,
+    hook_ui: &HookUi,
+    hook_runner: &aemeath_core::hook::HookRunner,
+    session_id: &str,
+    task_store: &TaskStore,
+) {
+    log_agent_outcome(outcome, session_id);
+
+    match &outcome.status {
+        AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
+            // Stop hook: agent 循环正常结束
+            let _ = hook_ui
+                .run_plain(
+                    hook_runner,
+                    HookEvent::Stop,
+                    None,
+                    HookData::Stop(StopHookData {
+                        turns: outcome.turns,
+                    }),
+                )
+                .await;
+            let _ = tx.send(UiEvent::DoneWithDuration(outcome.duration)).await;
+
+            // 如果活跃 task batch 全部完成，归档它 — 下次对话不再提醒
+            if let Some(active) = task_store.active_list().await {
+                if task_store.is_batch_completed(active.id).await {
+                    task_store.set_batch_status(active.id, aemeath_core::task::BatchStatus::Archived).await;
+                    log::info!(
+                        "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
+                        active.id
+                    );
+                }
+            }
+        }
+        AgentRunStatus::Cancelled => {
+            let _ = tx.send(UiEvent::Done).await;
+        }
+        AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
+            // StopFailure hook: API 错误导致 agent 循环结束
+            let stop_results = hook_ui
+                .run_json(
+                    hook_runner,
+                    HookEvent::StopFailure,
+                    None,
+                    HookData::Stop(StopHookData {
+                        turns: outcome.turns,
+                    }),
+                )
+                .await;
+            let (system_message, additional_context) = stop_results
+                .into_iter()
+                .find_map(|(_, _, json_output)| json_output)
+                .map(|output| (output.system_message, output.additional_context))
+                .unwrap_or((None, None));
+            let _ = tx
+                .send(UiEvent::StopFailureHook {
+                    system_message,
+                    additional_context,
+                })
+                .await;
+            let _ = tx.send(UiEvent::Done).await;
+        }
+    }
 }
 
 #[cfg(test)]

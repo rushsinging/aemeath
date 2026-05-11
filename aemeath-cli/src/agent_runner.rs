@@ -2,6 +2,7 @@ use aemeath_core::agent::{Agent, ToolCall};
 use aemeath_core::compact::safe_slice;
 use aemeath_core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use aemeath_core::hook::HookRunner;
+use aemeath_core::logging::JsonLogger;
 use aemeath_core::message::Message;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::{
@@ -15,8 +16,94 @@ use aemeath_llm::types::{StopReason, SystemBlock};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
+use std::time::Duration;
 
-use aemeath_core::logging::JsonLogger;
+/// Agent 循环退出状态
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AgentRunStatus {
+    Completed,        // 正常完成
+    Cancelled,        // 用户打断
+    TimedOut,         // 子 agent 超时（10 分钟）
+    ApiError(String), // LLM API 错误
+    MaxTurns,         // 子 agent 达到 max turns
+}
+
+/// Agent 循环统一结果
+#[derive(Debug, Clone)]
+pub(crate) struct AgentRunOutcome {
+    pub status: AgentRunStatus,
+    pub turns: usize,
+    pub duration: Duration,
+    pub role: Option<String>, // 子 agent 有 role，主 loop 为 None
+    pub model: String,
+}
+
+/// 主 loop 和子 agent 共用的结构化日志摘要
+pub(crate) fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
+    log::info!(
+        "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
+        session_id,
+        outcome.status,
+        outcome.turns,
+        outcome.duration.as_millis(),
+        outcome.role.as_deref().unwrap_or("-"),
+        outcome.model,
+    );
+}
+
+/// 子 agent 退出时统一收尾：
+///   1. 结构化日志
+///   2. SubagentStop hook（含 system_message 转发）
+///   3. 恢复 client 设置
+async fn finalize_sub_agent(
+    outcome: &AgentRunOutcome,
+    client: &LlmClient,
+    hook_runner: &HookRunner,
+    session_id: &str,
+    prompt: &str,
+    system: &str,
+    model_spec: Option<&str>,
+    output: &str,
+    previous_max_tokens: u32,
+    previous_reasoning: bool,
+    restore_max_tokens: bool,
+    progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
+) {
+    log_agent_outcome(outcome, session_id);
+
+    // SubagentStop hook
+    let is_error = matches!(
+        outcome.status,
+        AgentRunStatus::Cancelled
+            | AgentRunStatus::TimedOut
+            | AgentRunStatus::ApiError(_)
+    );
+    let hook_results = hook_runner
+        .on_subagent_stop(prompt, system, model_spec, output, outcome.turns, is_error)
+        .await;
+
+    // Forward system messages from hook results
+    for (_, _, json_output) in &hook_results {
+        if let Some(ref output) = json_output {
+            if let Some(ref sys_msg) = output.system_message {
+                if let Some(ref tx) = progress_tx {
+                    let _ = tx.try_send(AgentProgressEvent {
+                        sequence: outcome.turns,
+                        kind: AgentProgressKind::Message {
+                            text: format!("[hook] {sys_msg}"),
+                        },
+                    });
+                }
+            }
+        }
+    }
+
+    // 恢复 client 设置
+    if restore_max_tokens && previous_max_tokens > 0 {
+        client.set_max_tokens(previous_max_tokens);
+    }
+    client.set_reasoning(previous_reasoning);
+}
 
 /// A no-op stream handler for sub-agents (output goes to result, not terminal)
 struct SilentHandler;
@@ -291,12 +378,7 @@ impl AgentRunner for CliAgentRunner {
             self.reasoning
         );
 
-        let restore_client_settings = || {
-            if max_tokens_override.is_some() && previous_max_tokens > 0 {
-                client.set_max_tokens(previous_max_tokens);
-            }
-            client.set_reasoning(previous_reasoning);
-        };
+        let restore_max_tokens = max_tokens_override.is_some();
 
         // Extract hook_runner to avoid borrow conflicts with closure
         let hook_runner = self.hook_runner.clone();
@@ -355,46 +437,7 @@ impl AgentRunner for CliAgentRunner {
                 turn_str,
                 msg
             );
-        }; // Helper to call SubagentStop hook and send system messages
-        let hook_runner_clone = hook_runner.clone();
-        let progress_tx_clone = progress_tx.clone();
-        let system_for_hook = system.clone();
-        let resolved_spec_for_hook = resolved_spec.clone();
-        let call_subagent_stop_hook = move |result: String, turns: usize, is_error: bool| {
-            let hook_runner = hook_runner_clone.clone();
-            let progress_tx = progress_tx_clone.clone();
-            let prompt = prompt.to_string();
-            let system = system_for_hook.clone();
-            let resolved_spec = resolved_spec_for_hook.clone();
-            async move {
-                let hook_results = hook_runner
-                    .on_subagent_stop(
-                        &prompt,
-                        &system,
-                        resolved_spec.as_deref(),
-                        &result,
-                        turns,
-                        is_error,
-                    )
-                    .await;
-                // Send any system messages from hook results to progress_tx
-                for (_, _, json_output) in &hook_results {
-                    if let Some(ref output) = json_output {
-                        if let Some(ref sys_msg) = output.system_message {
-                            if let Some(ref tx) = progress_tx {
-                                let _ = tx.try_send(AgentProgressEvent {
-                                    sequence: turns,
-                                    kind: AgentProgressKind::Message {
-                                        text: format!("[hook] {sys_msg}"),
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-            }
         };
-
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
         let sub_task_store = std::sync::Arc::new(TaskStore::new());
         let sub_skills =
@@ -432,23 +475,6 @@ impl AgentRunner for CliAgentRunner {
                 sub_schemas.len(),
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
-            // 分化日志：input
-            if let Some(logger_mutex) = crate::get_json_logger() {
-                if let Ok(mut logger) = logger_mutex.lock() {
-                    let _ = logger.log_input(
-                        turn,
-                        &role_name_for_log,
-                        &model_name_for_log,
-                        serde_json::json!({
-                            "provider": client.provider_name(),
-                            "model": model_name_for_log,
-                            "messages": messages.len(),
-                            "tools": sub_schemas.len(),
-                            "latest_roles": latest,
-                        }),
-                    );
-                }
-            }
         };
 
         let sub_ctx = ToolContext {
@@ -483,41 +509,59 @@ impl AgentRunner for CliAgentRunner {
         let max_turns = max_turns_override.unwrap_or(50) as usize;
         let start_time = std::time::Instant::now();
         let max_duration = std::time::Duration::from_secs(600); // 10 minute hard limit
+
+        // Helper macro: construct AgentRunOutcome, call finalize_sub_agent, then return result
+        macro_rules! finalize_and_return {
+            ($status:expr, $turns:expr, $result:expr) => {{
+                let _elapsed = start_time.elapsed();
+                let outcome = AgentRunOutcome {
+                    status: $status,
+                    turns: $turns,
+                    duration: _elapsed,
+                    role: Some(role_name_for_log.clone()),
+                    model: model_name_for_log.clone(),
+                };
+                finalize_sub_agent(
+                    &outcome,
+                    client.as_ref(),
+                    &hook_runner,
+                    &session_id,
+                    prompt,
+                    &system,
+                    resolved_spec.as_deref(),
+                    &$result,
+                    previous_max_tokens,
+                    previous_reasoning,
+                    restore_max_tokens,
+                    progress_tx.as_ref(),
+                )
+                .await;
+                return $result;
+            }};
+        }
+
         for turn in 0..max_turns {
             let turn_number = turn + 1;
             if ctx.cancel.is_cancelled() {
                 progress(Some(turn_number), "Agent cancelled by user");
                 let result = "Cancelled by user".to_string();
-                call_subagent_stop_hook(result.clone(), turn, true).await;
-                restore_client_settings();
-                return result;
+                finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
             }
             if start_time.elapsed() > max_duration {
+                let elapsed_secs = start_time.elapsed().as_secs();
                 progress(
                     Some(turn_number),
-                    &format!("Agent timed out after {}s", start_time.elapsed().as_secs()),
+                    &format!("Agent timed out after {}s", elapsed_secs),
                 );
                 // Return whatever text we have so far
-                for msg in messages.iter().rev() {
-                    let text = msg.text_content();
-                    if !text.is_empty() {
-                        let result = format!(
-                            "{}\n\n[Sub-agent timed out after {}s]",
-                            text,
-                            start_time.elapsed().as_secs()
-                        );
-                        call_subagent_stop_hook(result.clone(), turn, true).await;
-                        restore_client_settings();
-                        return result;
-                    }
-                }
-                let result = format!(
-                    "Sub-agent timed out after {}s",
-                    start_time.elapsed().as_secs()
-                );
-                call_subagent_stop_hook(result.clone(), turn, true).await;
-                restore_client_settings();
-                return result;
+                let result = messages
+                    .iter()
+                    .rev()
+                    .map(|msg| msg.text_content())
+                    .find(|text| !text.is_empty())
+                    .map(|text| format!("{}\n\n[Sub-agent timed out after {}s]", text, elapsed_secs))
+                    .unwrap_or_else(|| format!("Sub-agent timed out after {}s", elapsed_secs));
+                finalize_and_return!(AgentRunStatus::TimedOut, turn, result);
             }
             let msg_tokens = aemeath_core::compact::estimate_messages_tokens(&messages);
             progress(
@@ -630,29 +674,10 @@ impl AgentRunner for CliAgentRunner {
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
 
-                    // 分化日志：output
-                    if let Some(logger_mutex) = crate::get_json_logger() {
-                        if let Ok(mut logger) = logger_mutex.lock() {
-                            let _ = logger.log_output(
-                                turn_number,
-                                &role_name_for_log,
-                                &model_name_for_log,
-                                serde_json::json!({
-                                    "stop_reason": format!("{:?}", resp.stop_reason),
-                                    "input_tokens": resp.usage.input_tokens,
-                                    "output_tokens": resp.usage.output_tokens,
-                                    "tool_call_count": tool_calls.len(),
-                                }),
-                            );
-                        }
-                    }
-
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         progress(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();
-                        call_subagent_stop_hook(result.clone(), turn + 1, false).await;
-                        restore_client_settings();
-                        return result;
+                        finalize_and_return!(AgentRunStatus::Completed, turn + 1, result);
                     }
 
                     // JsonLogger: 记录工具调用
@@ -692,23 +717,6 @@ impl AgentRunner for CliAgentRunner {
                         let _ = tx.try_send(build_tool_calls_progress_event(turn + 1, &tool_calls));
                     }
 
-                    // 分化日志：tool_call（每个工具调用写一行）
-                    if let Some(logger_mutex) = crate::get_json_logger() {
-                        if let Ok(mut logger) = logger_mutex.lock() {
-                            for call in &tool_calls {
-                                let _ = logger.log_tool_call(
-                                    turn_number,
-                                    &role_name_for_log,
-                                    &model_name_for_log,
-                                    serde_json::json!({
-                                        "id": call.id,
-                                        "name": call.name,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-
                     let mut results = agent.execute_tools(&tool_calls).await;
                     progress(
                         Some(turn_number),
@@ -739,24 +747,6 @@ impl AgentRunner for CliAgentRunner {
                             &format!("  ← {}[{}]: {}", tool_name, label, out_short),
                         );
 
-                        // 分化日志：tool_result
-                        let preview: String = output.chars().take(500).collect();
-                        if let Some(logger_mutex) = crate::get_json_logger() {
-                            if let Ok(mut logger) = logger_mutex.lock() {
-                                let _ = logger.log_tool_result(
-                                    turn_number,
-                                    &role_name_for_log,
-                                    &model_name_for_log,
-                                    serde_json::json!({
-                                        "tool_name": tool_name,
-                                        "tool_id": id,
-                                        "is_error": is_error,
-                                        "output_chars": output.chars().count(),
-                                        "output_preview": preview,
-                                    }),
-                                );
-                            }
-                        }
                     }
 
                     // JsonLogger: 记录工具执行结果（完整输出）
@@ -831,10 +821,9 @@ impl AgentRunner for CliAgentRunner {
                 }
                 Err(e) => {
                     progress(Some(turn_number), &format!("Agent error: {e}"));
-                    let result = format!("Sub-agent error: {e}");
-                    call_subagent_stop_hook(result.clone(), turn, true).await;
-                    restore_client_settings();
-                    return result;
+                    let error_string = e.to_string();
+                    let result = format!("Sub-agent error: {error_string}");
+                    finalize_and_return!(AgentRunStatus::ApiError(error_string), turn, result);
                 }
             }
         }
@@ -847,19 +836,14 @@ impl AgentRunner for CliAgentRunner {
             ),
         );
         // Return the last assistant text if available
-        for msg in messages.iter().rev() {
-            let text = msg.text_content();
-            if !text.is_empty() {
-                let result = format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns);
-                call_subagent_stop_hook(result.clone(), max_turns, false).await;
-                restore_client_settings();
-                return result;
-            }
-        }
-        let result = format!("Sub-agent reached max turns ({})", max_turns);
-        call_subagent_stop_hook(result.clone(), max_turns, false).await;
-        restore_client_settings();
-        result
+        let result = messages
+            .iter()
+            .rev()
+            .map(|msg| msg.text_content())
+            .find(|text| !text.is_empty())
+            .map(|text| format!("{}\n\n[Sub-agent reached max turns ({})]", text, max_turns))
+            .unwrap_or_else(|| format!("Sub-agent reached max turns ({})", max_turns));
+        finalize_and_return!(AgentRunStatus::MaxTurns, max_turns, result);
     }
 
     async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String {
