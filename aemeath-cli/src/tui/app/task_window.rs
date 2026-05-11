@@ -32,7 +32,7 @@ pub fn build_task_window<'a>(
         return Vec::new();
     }
 
-    // --- completed: 按 updated_at 降序 ---
+    // --- completed: 按 task id 升序，保持任务列表稳定顺序 ---
     let all_completed_count = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
@@ -41,9 +41,9 @@ pub fn build_task_window<'a>(
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
         .collect();
-    completed.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
+    completed.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
     // TTL filter: only apply when there are more completed than max_lines
-    let newest_ts = completed.first().map(|t| t.updated_at).unwrap_or(0);
+    let newest_ts = completed.iter().map(|t| t.updated_at).max().unwrap_or(0);
     let completed: Vec<&Task> = if completed.len() > max_lines {
         completed
             .into_iter()
@@ -94,13 +94,10 @@ pub fn build_task_window<'a>(
 
     // 1. 最近 completed（最多 show_last_completed 条）
     let comp_show = show_last_completed.min(remaining).min(completed.len());
-    let comp_start = completed.len().saturating_sub(comp_show);
-    for t in &completed[comp_start..] {
-        // allow unsafe_text_op: Vec slice with bounds-checked start
+    for t in completed.iter().take(comp_show) {
         lines.push(format_task_line(t));
     }
     remaining = remaining.saturating_sub(comp_show);
-
     // 2. 所有 in_progress
     let ip_show = in_progress_count.min(remaining);
     for t in in_progress.iter().take(ip_show) {
@@ -119,16 +116,10 @@ pub fn build_task_window<'a>(
     let _task_lines = lines.len() - 1; // exclude summary
     let min_show = 3.min(total);
     if remaining > 0 {
-        // 补充更多 completed（跳过已显示的尾部），插入到已显示 completed 之后
-        let after_comp = completed.len().saturating_sub(comp_show);
-        let more_comp = remaining.min(after_comp);
+        // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
+        let more_comp = remaining.min(completed.len().saturating_sub(comp_show));
         let insert_pos = 1 + comp_show; // after summary + displayed completed
-        for (i, t) in completed
-            .iter()
-            .skip(after_comp.saturating_sub(more_comp))
-            .take(more_comp)
-            .enumerate()
-        {
+        for (i, t) in completed.iter().skip(comp_show).take(more_comp).enumerate() {
             lines.insert(insert_pos + i, format_task_line(t));
         }
         remaining = remaining.saturating_sub(more_comp);
@@ -141,17 +132,21 @@ pub fn build_task_window<'a>(
         }
         remaining = remaining.saturating_sub(more_pending);
     }
-    // 如果仍然不足 min_show，从更早的 completed 头部继续取
+    // 如果仍然不足 min_show，从更早的 completed 继续取
     if lines.len() - 1 < min_show && remaining > 0 {
-        let head_comp = completed.len().saturating_sub(comp_show);
-        let more = (min_show - (lines.len() - 1)).min(remaining).min(head_comp);
-        let start = head_comp.saturating_sub(more);
-        for t in &completed[start..start + more] {
-            // allow unsafe_text_op: Vec slice with bounds-checked start
-            lines.insert(1 + comp_show, format_task_line(t));
+        let shown_completed = completed.len().min(comp_show);
+        let more = (min_show - (lines.len() - 1))
+            .min(remaining)
+            .min(completed.len().saturating_sub(shown_completed));
+        for (i, t) in completed
+            .iter()
+            .skip(shown_completed)
+            .take(more)
+            .enumerate()
+        {
+            lines.insert(1 + shown_completed + i, format_task_line(t));
         }
     }
-
     // --- 折叠提示 ---
     let pending_hidden = pending_count.saturating_sub(pending_show);
     let ip_hidden = in_progress_count.saturating_sub(ip_show);
@@ -214,7 +209,7 @@ mod tests {
     }
 
     fn make_task(id: &str, subject: &str, status: TaskStatus) -> Task {
-        make_task_with_ts(id, subject, status, 100)
+        make_task_with_ts(id, subject, status, id.parse::<u64>().unwrap_or(100))
     }
 
     #[test]
@@ -266,8 +261,8 @@ mod tests {
         // 温和扩展会补充额外的 completed → summary + 2 completed + in_progress + 2 pending = 6
         assert_eq!(result.len(), 6);
         assert!(result[0].contains("2/5"));
-        assert!(result[1].contains("✓ #2 done b")); // last completed
-        assert!(result[2].contains("✓ #1 done a")); // extra completed inserted after main completed
+        assert!(result[1].contains("✓ #1 done a")); // completed 按 task id 升序
+        assert!(result[2].contains("✓ #2 done b")); // extra completed inserted after main completed
         assert!(result[3].contains("■ #3 doing c")); // in_progress
         assert!(result[4].contains("□ #4"));
         assert!(result[5].contains("□ #5"));
@@ -400,6 +395,45 @@ mod tests {
         assert!(result[2].contains("□ #2 first")); // smallest id first
         assert!(result[3].contains("□ #5 second"));
         assert!(result[4].contains("□ #10 skip early"));
+    }
+
+    #[test]
+    fn test_completed_lines_keep_task_id_order_when_expanded() {
+        let tasks = vec![
+            make_task_with_ts("1", "检查 bug 35 与 worktree 约定", TaskStatus::Completed, 100),
+            make_task_with_ts("2", "创建 bug35 worktree 并验证基线", TaskStatus::Completed, 300),
+            make_task_with_ts("3", "定位 bug 35 根因", TaskStatus::Completed, 200),
+            make_task_with_ts("4", "添加回归测试并修复 bug 35", TaskStatus::InProgress, 400),
+            make_task_with_ts("5", "验证并更新文档", TaskStatus::Pending, 500),
+        ];
+
+        let result = build_task_window(&tasks, 7, 1);
+
+        assert!(result[1].contains("✓ #1 检查 bug 35 与 worktree 约定"));
+        assert!(result[2].contains("✓ #2 创建 bug35 worktree 并验证基线"));
+        assert!(result[3].contains("✓ #3 定位 bug 35 根因"));
+        assert!(result[4].contains("■ #4 添加回归测试并修复 bug 35"));
+        assert!(result[5].contains("□ #5 验证并更新文档"));
+    }
+
+    #[test]
+    fn test_fold_hint_counts_only_unshown_tasks() {
+        let tasks = vec![
+            make_task("1", "done", TaskStatus::Completed),
+            make_task("2", "doing", TaskStatus::InProgress),
+            make_task("3", "pending a", TaskStatus::Pending),
+            make_task("4", "pending b", TaskStatus::Pending),
+            make_task("5", "pending c", TaskStatus::Pending),
+        ];
+
+        let result = build_task_window(&tasks, 4, 1);
+
+        assert_eq!(result.len(), 6);
+        assert!(result[1].contains("✓ #1 done"));
+        assert!(result[2].contains("■ #2 doing"));
+        assert!(result[3].contains("□ #3 pending a"));
+        assert!(result[4].contains("□ #4 pending b"));
+        assert!(result[5].contains("+1 more pending"));
     }
 
     #[test]
