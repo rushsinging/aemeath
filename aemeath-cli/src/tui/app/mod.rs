@@ -1,7 +1,9 @@
+mod event;
+
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use aemeath_core::message::Message;
 use aemeath_core::skill::Skill;
-use aemeath_core::tool::{AgentProgressEvent, ImageData, ToolRegistry};
+use aemeath_core::tool::ToolRegistry;
 use crossterm::{
     event::{Event, EventStream},
     execute,
@@ -21,76 +23,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-/// Events sent from background task to UI
-#[derive(Debug)]
-pub enum UiEvent {
-    Text(String),
-    Thinking(String),
-    TextBlockComplete(String),
-    ToolCallStart(String),
-    ToolCall {
-        id: String,
-        name: String,
-        summary: String,
-    },
-    ToolResult {
-        id: String,
-        tool_name: String,
-        output: String,
-        is_error: bool,
-        images: Vec<ImageData>,
-    },
-    Usage {
-        input: u32,
-        output: u32,
-        last_input: u32,
-        elapsed_secs: f64,
-    },
-    Error(String),
-    Cancelled,
-    MessagesSync(Vec<Message>),
-    Done,
-    DoneWithDuration(std::time::Duration),
-    LiveTps(f64),
-    ClipboardImage(crate::image::ProcessedImage),
-    SystemMessage(String),
-    /// AskUserQuestion tool call: pause and wait for user input
-    AskUser {
-        id: String,
-        question: String,
-        options: Vec<String>,
-        #[allow(dead_code)]
-        allow_free_input: bool,
-        multi_select: bool,
-        default: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<String>,
-    },
-    /// Sub-agent progress update (streams per-turn output to TUI)
-    AgentProgress {
-        tool_id: String,
-        event: AgentProgressEvent,
-    },
-    /// Results from StopFailure hook (API error导致 agent 循环结束)
-    StopFailureHook {
-        system_message: Option<String>,
-        additional_context: Option<String>,
-    },
-    /// Background agent loop requests queued user input before next LLM call.
-    DrainQueuedInput {
-        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
-    },
-    /// Lifecycle hook execution started.
-    HookStart {
-        event: String,
-        command: String,
-    },
-    /// Lifecycle hook execution finished.
-    HookEnd {
-        event: String,
-        blocked: bool,
-        error: Option<String>,
-    },
-}
+pub use event::UiEvent;
+
 /// Main TUI application
 pub struct App {
     pub output_area: OutputArea,
