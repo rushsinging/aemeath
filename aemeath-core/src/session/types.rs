@@ -121,10 +121,7 @@ impl Session {
         if let Some(title) = &self.metadata.title {
             return title.chars().take(40).collect();
         }
-        let first_user = self
-            .messages
-            .iter()
-            .find(|m| m.role == Role::User);
+        let first_user = self.messages.iter().find(|m| m.role == Role::User);
         if let Some(msg) = first_user {
             let text = msg.text_content();
             let first_line = text.lines().next().unwrap_or("").trim();

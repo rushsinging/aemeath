@@ -13,7 +13,10 @@ use aemeath_llm::pool::LlmClientPool;
 use aemeath_llm::stream::StreamHandler;
 use aemeath_llm::types::{StopReason, SystemBlock};
 use async_trait::async_trait;
+use serde_json::json;
 use std::sync::Arc;
+
+use aemeath_core::logging::JsonLogger;
 
 /// A no-op stream handler for sub-agents (output goes to result, not terminal)
 struct SilentHandler;
@@ -37,6 +40,8 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup.
     pub models_config: Arc<ModelsConfig>,
+    /// 分化日志写入器（input.log / output.log / tool.log）
+    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
 }
 
 fn build_tool_calls_progress_event(sequence: usize, tool_calls: &[ToolCall]) -> AgentProgressEvent {
@@ -339,7 +344,9 @@ impl AgentRunner for CliAgentRunner {
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
         let progress = move |turn: Option<usize>, msg: &str| {
-            let turn_str = turn.map(|t| t.to_string()).unwrap_or_else(|| "-".to_string());
+            let turn_str = turn
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "-".to_string());
             log::info!(
                 target: "sub_agent",
                 "[role:{} model:{} turn:{}] {}",
@@ -513,6 +520,39 @@ impl AgentRunner for CliAgentRunner {
             );
 
             log_request_messages(turn_number, &messages);
+
+            // JsonLogger: 记录 LLM 输入快照
+            if let Some(ref jl) = self.json_logger {
+                let new_messages: Vec<serde_json::Value> = messages
+                    [messages.len().saturating_sub(1)..]
+                    .iter()
+                    .map(|m| {
+                        let blocks: Vec<serde_json::Value> = m
+                            .content
+                            .iter()
+                            .filter_map(|b| serde_json::to_value(b).ok())
+                            .collect();
+                        json!({
+                            "role": m.role,
+                            "content_blocks": blocks,
+                            "block_count": m.content.len(),
+                        })
+                    })
+                    .collect();
+                let data = json!({
+                    "messages": new_messages,
+                    "system_blocks_count": system_blocks.len(),
+                    "tool_schemas_count": sub_schemas.len(),
+                    "tool_schemas_names": sub_schemas.iter().map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?")).collect::<Vec<_>>(),
+                });
+                let _ = jl.lock().unwrap().log_input(
+                    turn_number,
+                    &role_name_for_log,
+                    &model_name_for_log,
+                    data,
+                );
+            }
+
             let response = client
                 .stream_message(
                     &system_blocks,
@@ -534,6 +574,30 @@ impl AgentRunner for CliAgentRunner {
                         ),
                     );
                     messages.push(resp.assistant_message.clone());
+
+                    // JsonLogger: 记录 LLM 完整输出
+                    if let Some(ref jl) = self.json_logger {
+                        let blocks: Vec<serde_json::Value> = resp
+                            .assistant_message
+                            .content
+                            .iter()
+                            .filter_map(|block| serde_json::to_value(block).ok())
+                            .collect();
+                        let data = json!({
+                            "stop_reason": format!("{:?}", resp.stop_reason),
+                            "input_tokens": resp.usage.input_tokens,
+                            "output_tokens": resp.usage.output_tokens,
+                            "elapsed_secs": start_time.elapsed().as_secs_f64(),
+                            "provider": client.provider_name(),
+                            "content_blocks": blocks,
+                        });
+                        let _ = jl.lock().unwrap().log_output(
+                            turn_number,
+                            &role_name_for_log,
+                            &model_name_for_log,
+                            data,
+                        );
+                    }
 
                     // Send text output to TUI progress channel (if available)
                     if let Some(ref tx) = progress_tx {
@@ -559,6 +623,23 @@ impl AgentRunner for CliAgentRunner {
                         call_subagent_stop_hook(result.clone(), turn + 1, false).await;
                         restore_client_settings();
                         return result;
+                    }
+
+                    // JsonLogger: 记录工具调用
+                    if let Some(ref jl) = self.json_logger {
+                        for tc in &tool_calls {
+                            let data = json!({
+                                "tool_use_id": tc.id,
+                                "tool_name": tc.name,
+                                "input": tc.input,
+                            });
+                            let _ = jl.lock().unwrap().log_tool_call(
+                                turn_number,
+                                &role_name_for_log,
+                                &model_name_for_log,
+                                data,
+                            );
+                        }
                     }
 
                     // Build a lookup from tool_use_id to tool call info
@@ -610,6 +691,28 @@ impl AgentRunner for CliAgentRunner {
                             Some(turn_number),
                             &format!("  ← {}[{}]: {}", tool_name, label, out_short),
                         );
+                    }
+
+                    // JsonLogger: 记录工具执行结果（完整输出）
+                    if let Some(ref jl) = self.json_logger {
+                        for (id, output, is_error, _) in results.iter() {
+                            let tool_name = call_info
+                                .get(id.as_str())
+                                .map(|(n, _)| n.as_str())
+                                .unwrap_or("?");
+                            let data = json!({
+                                "tool_use_id": id,
+                                "tool_name": tool_name,
+                                "is_error": is_error,
+                                "output": output,
+                            });
+                            let _ = jl.lock().unwrap().log_tool_result(
+                                turn_number,
+                                &role_name_for_log,
+                                &model_name_for_log,
+                                data,
+                            );
+                        }
                     }
 
                     // Truncate oversized tool results to keep sub-agent context lean

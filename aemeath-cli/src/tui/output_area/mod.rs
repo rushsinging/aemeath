@@ -461,11 +461,9 @@ impl OutputArea {
                 let char_count = text.chars().count();
                 // task_status 行使用 base_idx + i 作为逻辑索引，
                 // get_line_content() 会将其映射回 task_status_lines[i]
-                self.screen_line_map.push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
-                lines.push(Line::styled(
-                    text,
-                    Style::default().fg(Color::DarkGray),
-                ));
+                self.screen_line_map
+                    .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
+                lines.push(Line::styled(text, Style::default().fg(Color::DarkGray)));
             }
         }
 

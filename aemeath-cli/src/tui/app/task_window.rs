@@ -69,7 +69,8 @@ pub fn build_task_window<'a>(
         let start = completed.len().saturating_sub(capacity);
         let shown = completed.len() - start;
         let hidden = completed.len() - shown;
-        for t in &completed[start..] { // allow unsafe_text_op: Vec slice with bounds-checked start
+        for t in &completed[start..] {
+            // allow unsafe_text_op: Vec slice with bounds-checked start
             lines.push(format_task_line(t));
         }
         if hidden > 0 {
@@ -84,7 +85,8 @@ pub fn build_task_window<'a>(
     // 1. 最近 completed（最多 show_last_completed 条）
     let comp_show = show_last_completed.min(remaining).min(completed.len());
     let comp_start = completed.len().saturating_sub(comp_show);
-    for t in &completed[comp_start..] { // allow unsafe_text_op: Vec slice with bounds-checked start
+    for t in &completed[comp_start..] {
+        // allow unsafe_text_op: Vec slice with bounds-checked start
         lines.push(format_task_line(t));
     }
     remaining = remaining.saturating_sub(comp_show);
@@ -134,7 +136,8 @@ pub fn build_task_window<'a>(
         let head_comp = completed.len().saturating_sub(comp_show);
         let more = (min_show - (lines.len() - 1)).min(remaining).min(head_comp);
         let start = head_comp.saturating_sub(more);
-        for t in &completed[start..start + more] { // allow unsafe_text_op: Vec slice with bounds-checked start
+        for t in &completed[start..start + more] {
+            // allow unsafe_text_op: Vec slice with bounds-checked start
             lines.insert(1 + comp_show, format_task_line(t));
         }
     }
@@ -263,7 +266,13 @@ mod tests {
     #[test]
     fn test_build_task_window_all_completed() {
         let tasks: Vec<_> = (1..=10)
-            .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskStatus::Completed))
+            .map(|i| {
+                make_task(
+                    &i.to_string(),
+                    &format!("task {}", i),
+                    TaskStatus::Completed,
+                )
+            })
             .collect();
         let result = build_task_window(&tasks, 7, 1);
         // summary + 7 completed + fold hint = 9 lines
@@ -287,7 +296,13 @@ mod tests {
     #[test]
     fn test_build_task_window_in_progress_overflow() {
         let mut tasks: Vec<_> = (1..=10)
-            .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskStatus::InProgress))
+            .map(|i| {
+                make_task(
+                    &i.to_string(),
+                    &format!("task {}", i),
+                    TaskStatus::InProgress,
+                )
+            })
             .collect();
         tasks.push(make_task("11", "pending", TaskStatus::Pending));
         let result = build_task_window(&tasks, 7, 1);
@@ -352,7 +367,11 @@ mod tests {
         assert!(task_lines >= 3, "task_lines={}, expected >= 3", task_lines);
         // 应该显示不止 1 条 completed
         let comp_count = result.iter().filter(|l| l.starts_with('✓')).count();
-        assert!(comp_count >= 2, "expected >= 2 completed, got {}", comp_count);
+        assert!(
+            comp_count >= 2,
+            "expected >= 2 completed, got {}",
+            comp_count
+        );
     }
 
     #[test]

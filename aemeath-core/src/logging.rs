@@ -5,15 +5,20 @@
 //! | 文件 | 职责 | 内容 |
 //! |------|------|------|
 //! | `aemeath.log` | **应用主日志**：所有模块的结构化运行日志 | env_logger pipe 接收全部 `log::*` 输出，包含所有 crate（core/cli/llm/tools）的 info/warn/error/debug |
-//! | `agent.log` | **Agent 对话审计日志**：LLM 交互的完整记录 | 主 agent 和 sub-agent 的每次 LLM 请求/响应摘要、tool call 触发与结果摘要、token 用量、模型切换。面向"复现对话流程"而非"调试内部状态" |
+//! | `input.log` | **LLM 输入快照** | 每次 API 调用的新增 messages 摘要、system blocks、tool schemas |
+//! | `output.log` | **LLM 完整输出** | 模型返回的完整 content blocks、token 用量、耗时 |
+//! | `tool.log` | **工具调用记录** | 工具调用请求参数 + 工具执行结果（完整输出） |
+//! | `agent.log` | **已废弃**：Agent 对话审计日志 | 无写入点，保留枚举兼容 |
 //! | `panic.log` | **Panic 崩溃日志** | panic 信息 + backtrace |
 
 use chrono::{DateTime, Local};
 use serde_json::json;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+
+use crate::config::logging::LoggingConfig;
 
 pub const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 pub const LOG_MAX_BACKUPS: usize = 5;
@@ -22,8 +27,12 @@ pub const LOG_RETENTION_DAYS: u64 = 30;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFile {
     Aemeath,
+    /// 已废弃：无写入点，保留枚举兼容
     Agent,
     Panic,
+    Input,
+    Output,
+    Tool,
 }
 
 impl LogFile {
@@ -32,6 +41,9 @@ impl LogFile {
             LogFile::Aemeath => "aemeath.log",
             LogFile::Agent => "agent.log",
             LogFile::Panic => "panic.log",
+            LogFile::Input => "input.log",
+            LogFile::Output => "output.log",
+            LogFile::Tool => "tool.log",
         }
     }
 }
@@ -222,6 +234,207 @@ fn is_rotated_log_path(path: &Path) -> bool {
     base.ends_with(".log") && suffix.chars().all(|c| c.is_ascii_digit())
 }
 
+// ---------------------------------------------------------------------------
+// JsonLogger — 分化日志（input.log / output.log / tool.log）
+// ---------------------------------------------------------------------------
+
+/// 分化日志写入器，将 agent 交互按职责写入三个独立 JSON 日志文件。
+///
+/// 所有方法为 `&mut self`，调用方应通过 `Arc<Mutex<JsonLogger>>` 共享。
+pub struct JsonLogger {
+    input: BufWriter<File>,
+    output: BufWriter<File>,
+    tool: BufWriter<File>,
+    input_path: PathBuf,
+    output_path: PathBuf,
+    tool_path: PathBuf,
+    session_id: String,
+    config: LoggingConfig,
+}
+
+impl JsonLogger {
+    /// 创建 JsonLogger，自动创建日志目录并打开三个文件。
+    ///
+    /// 如果目录不存在则创建。文件以 append + create 模式打开。
+    pub fn new(session_id: &str, logs_dir: &Path, config: &LoggingConfig) -> io::Result<Self> {
+        fs::create_dir_all(logs_dir)?;
+
+        let input_path = logs_dir.join("input.log");
+        let output_path = logs_dir.join("output.log");
+        let tool_path = logs_dir.join("tool.log");
+
+        rotate_if_needed(&input_path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(&output_path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(&tool_path, config.max_bytes, config.max_backups)?;
+
+        let input = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&input_path)?,
+        );
+        let output = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&output_path)?,
+        );
+        let tool = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tool_path)?,
+        );
+
+        Ok(Self {
+            input,
+            output,
+            tool,
+            input_path,
+            output_path,
+            tool_path,
+            session_id: session_id.to_string(),
+            config: config.clone(),
+        })
+    }
+
+    /// 记录 LLM 输入快照到 `input.log`。
+    pub fn log_input(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let path = self.input_path.clone();
+        write_role_entry(
+            &mut self.input,
+            &path,
+            "input",
+            turn,
+            role,
+            model,
+            data,
+            &self.session_id,
+            &self.config,
+        )
+    }
+
+    /// 记录 LLM 完整输出到 `output.log`。
+    pub fn log_output(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let path = self.output_path.clone();
+        write_role_entry(
+            &mut self.output,
+            &path,
+            "output",
+            turn,
+            role,
+            model,
+            data,
+            &self.session_id,
+            &self.config,
+        )
+    }
+
+    /// 记录工具调用请求到 `tool.log`。
+    pub fn log_tool_call(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let path = self.tool_path.clone();
+        write_role_entry(
+            &mut self.tool,
+            &path,
+            "tool_call",
+            turn,
+            role,
+            model,
+            data,
+            &self.session_id,
+            &self.config,
+        )
+    }
+
+    /// 记录工具执行结果到 `tool.log`。
+    pub fn log_tool_result(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let path = self.tool_path.clone();
+        write_role_entry(
+            &mut self.tool,
+            &path,
+            "tool_result",
+            turn,
+            role,
+            model,
+            data,
+            &self.session_id,
+            &self.config,
+        )
+    }
+}
+
+/// 内部统一写入函数
+fn write_role_entry(
+    writer: &mut BufWriter<File>,
+    path: &Path,
+    event_type: &str,
+    turn: usize,
+    role: &str,
+    model: &str,
+    data: serde_json::Value,
+    session_id: &str,
+    config: &LoggingConfig,
+) -> io::Result<()> {
+    check_rotate(writer, path, config)?;
+
+    let entry = json!({
+        "ts": timestamp_rfc3339(),
+        "session": session_id,
+        "turn": turn,
+        "role": role,
+        "model": model,
+        "type": event_type,
+        "data": data,
+    });
+    writeln!(
+        writer,
+        "{}",
+        serde_json::to_string(&entry).unwrap_or_default()
+    )?;
+    writer.flush()
+}
+
+/// 检查文件大小，超过 max_bytes 时轮转并重新打开
+fn check_rotate(
+    writer: &mut BufWriter<File>,
+    path: &Path,
+    config: &LoggingConfig,
+) -> io::Result<()> {
+    let need_rotate = fs::metadata(path)
+        .map(|m| m.len() >= config.max_bytes)
+        .unwrap_or(false);
+    if need_rotate {
+        writer.flush()?;
+        rotate_if_needed(path, config.max_bytes, config.max_backups)?;
+        *writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,8 +451,11 @@ mod tests {
             LogFile::Aemeath.file_name(),
             LogFile::Agent.file_name(),
             LogFile::Panic.file_name(),
+            LogFile::Input.file_name(),
+            LogFile::Output.file_name(),
+            LogFile::Tool.file_name(),
         ];
-        assert_eq!(names.len(), 3);
+        assert_eq!(names.len(), 6);
         assert!(names.iter().all(|name| name.ends_with(".log")));
     }
 
@@ -281,5 +497,32 @@ mod tests {
     fn test_is_rotated_log_path_error_non_numeric_suffix() {
         assert!(!is_rotated_log_path(Path::new("aemeath.log.old")));
         assert!(!is_rotated_log_path(Path::new("aemeath.log")));
+    }
+
+    #[test]
+    fn test_json_logger_log_input_happy_path_writes_user_message() {
+        let temp = std::env::temp_dir().join(format!(
+            "aemeath-json-logger-test-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp).unwrap();
+        let mut logger = JsonLogger::new("session-1", &temp, &LoggingConfig::default()).unwrap();
+
+        logger
+            .log_input(
+                1,
+                "default",
+                "model-1",
+                json!({"messages":[{"role":"user","content":"hello"}]}),
+            )
+            .unwrap();
+
+        let content = fs::read_to_string(temp.join("input.log")).unwrap();
+        assert!(content.contains("\"session\":\"session-1\""));
+        assert!(content.contains("\"type\":\"input\""));
+        assert!(content.contains("hello"));
     }
 }

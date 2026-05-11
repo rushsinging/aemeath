@@ -37,10 +37,7 @@ pub(crate) enum Cmd {
     /// Execute multiple commands in sequence.
     Batch(Vec<Cmd>),
     /// Run a hook notification asynchronously.
-    RunHookNotification {
-        message: String,
-        kind: String,
-    },
+    RunHookNotification { message: String, kind: String },
     /// Read clipboard image asynchronously.
     ReadClipboardImage,
     /// Process an image file path asynchronously.

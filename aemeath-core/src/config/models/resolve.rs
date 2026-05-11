@@ -9,11 +9,12 @@ impl ModelsConfig {
         &self,
         selection: &str,
     ) -> Result<ResolvedModel, ModelResolveError> {
-        let (source_query, model_query) = selection
-            .split_once('/')
-            .ok_or_else(|| ModelResolveError::InvalidFormat {
-                selection: selection.to_string(),
-            })?;
+        let (source_query, model_query) =
+            selection
+                .split_once('/')
+                .ok_or_else(|| ModelResolveError::InvalidFormat {
+                    selection: selection.to_string(),
+                })?;
         if source_query.is_empty() || model_query.is_empty() {
             return Err(ModelResolveError::InvalidFormat {
                 selection: selection.to_string(),
@@ -21,11 +22,12 @@ impl ModelsConfig {
         }
 
         let available_sources = self.available_source_keys();
-        let (source_key, source_config) = self
-            .provider_entry_ci(source_query)
-            .ok_or_else(|| ModelResolveError::UnknownSource {
-                source: source_query.to_string(),
-                available_sources: available_sources.clone(),
+        let (source_key, source_config) =
+            self.provider_entry_ci(source_query).ok_or_else(|| {
+                ModelResolveError::UnknownSource {
+                    source: source_query.to_string(),
+                    available_sources: available_sources.clone(),
+                }
             })?;
 
         let model = find_model_in_provider(source_config, model_query)
@@ -125,14 +127,9 @@ impl ModelsConfig {
     }
 
     /// 内部方法：大小写不敏感查找 provider 条目
-    fn provider_entry_ci(
-        &self,
-        name: &str,
-    ) -> Option<(&String, &ProviderModelsConfig)> {
+    fn provider_entry_ci(&self, name: &str) -> Option<(&String, &ProviderModelsConfig)> {
         let lc = name.to_lowercase();
-        self.providers
-            .iter()
-            .find(|(k, _)| k.to_lowercase() == lc)
+        self.providers.iter().find(|(k, _)| k.to_lowercase() == lc)
     }
 }
 

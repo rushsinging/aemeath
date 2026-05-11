@@ -53,7 +53,11 @@ impl McpServerConfig {
         if let Some(kind) = self.transport {
             return Ok(kind);
         }
-        if self.command.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        if self
+            .command
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        {
             return Ok(McpTransportKind::Stdio);
         }
         if self.url.as_deref().is_some_and(|s| !s.trim().is_empty()) {

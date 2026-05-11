@@ -1,7 +1,7 @@
 //! 压缩后文件恢复附件构建
 
-use std::collections::HashSet;
 use crate::token_estimation::estimate_tokens;
+use std::collections::HashSet;
 
 /// 压缩后恢复的最大最近读取文件数。
 pub const POST_COMPACT_MAX_FILES: usize = 5;

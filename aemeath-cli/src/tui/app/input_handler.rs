@@ -335,6 +335,7 @@ impl super::App {
             agent_semaphore: spawn_ctx.agent_semaphore.clone(),
             hook_runner: spawn_ctx.hook_runner.clone(),
             memory_config: spawn_ctx.memory_config.clone(),
+            json_logger: spawn_ctx.json_logger.clone(),
         });
 
         KeyResult::None

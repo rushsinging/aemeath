@@ -55,6 +55,7 @@ pub async fn run_repl(
     skills: std::collections::HashMap<String, Skill>,
     hook_runner: aemeath_core::hook::HookRunner,
     memory_config: aemeath_core::config::MemoryConfig,
+    json_logger: Option<Arc<std::sync::Mutex<aemeath_core::logging::JsonLogger>>>,
 ) {
     // Run SessionStart hooks: inject additional_context into user_context
     {
@@ -335,6 +336,22 @@ pub async fn run_repl(
                 api_msgs
             };
 
+            let logged_messages =
+                crate::tui::app::stream::logged_input_messages(&messages_for_api, messages.len());
+            if let Some(ref jl) = json_logger {
+                let data = serde_json::json!({
+                    "messages": logged_messages,
+                    "system_blocks_count": system_blocks.len(),
+                    "tool_schemas_count": tool_schemas.len(),
+                });
+                let _ = jl.lock().unwrap().log_input(
+                    turn_count + turns,
+                    "default",
+                    client.model_name(),
+                    data,
+                );
+            }
+
             let indicator = ThinkingIndicator::start("thinking...");
             let mut handler = TerminalStreamHandler::new(verbose, markdown);
             let response = client
@@ -371,16 +388,51 @@ pub async fn run_repl(
                     messages.push(resp.assistant_message.clone());
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+                    if let Some(ref jl) = json_logger {
+                        let blocks: Vec<serde_json::Value> = resp
+                            .assistant_message
+                            .content
+                            .iter()
+                            .filter_map(|block| serde_json::to_value(block).ok())
+                            .collect();
+                        let data = serde_json::json!({
+                            "stop_reason": format!("{:?}", resp.stop_reason),
+                            "input_tokens": resp.usage.input_tokens,
+                            "output_tokens": resp.usage.output_tokens,
+                            "elapsed_secs": elapsed.as_secs_f64(),
+                            "provider": client.provider_name(),
+                            "content_blocks": blocks,
+                        });
+                        let _ = jl.lock().unwrap().log_output(
+                            turn_count + turns,
+                            "default",
+                            client.model_name(),
+                            data,
+                        );
+                        for call in &tool_calls {
+                            let data = serde_json::json!({
+                                "tool_use_id": call.id,
+                                "tool_name": call.name,
+                                "input": call.input,
+                            });
+                            let _ = jl.lock().unwrap().log_tool_call(
+                                turn_count + turns,
+                                "default",
+                                client.model_name(),
+                                data,
+                            );
+                        }
+                    }
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         if let Some(text) = crate::reflection::run_reflection(
-                                &memory_config,
-                                turn_count + turns,
-                                &messages,
-                                &cwd,
-                                &client,
-                                &system_prompt_text,
-                            )
-                            .await
+                            &memory_config,
+                            turn_count + turns,
+                            &messages,
+                            &cwd,
+                            &client,
+                            &system_prompt_text,
+                        )
+                        .await
                         {
                             eprintln!("{text}");
                         }
@@ -514,6 +566,27 @@ pub async fn run_repl(
                     );
                     if persisted > 0 {
                         println!("[{persisted} tool result(s) persisted to disk]");
+                    }
+
+                    if let Some(ref jl) = json_logger {
+                        for (id, output, is_error, _images) in results.iter() {
+                            let tool_name = call_summaries
+                                .get(id)
+                                .map(|(n, _): &(String, String)| n.as_str())
+                                .unwrap_or("");
+                            let data = serde_json::json!({
+                                "tool_use_id": id,
+                                "tool_name": tool_name,
+                                "is_error": is_error,
+                                "output": output,
+                            });
+                            let _ = jl.lock().unwrap().log_tool_result(
+                                turn_count + turns,
+                                "default",
+                                client.model_name(),
+                                data,
+                            );
+                        }
                     }
 
                     for (_id, output, is_error, _images) in results.iter() {

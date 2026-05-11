@@ -205,7 +205,10 @@ mod tests {
 
     #[test]
     fn test_build_prompt_contains_memory_and_summary() {
-        let prompt = ReflectionEngine::build_prompt("- [Decision] 使用 JSON 存储", "User: 你好\nAssistant: 你好！\n");
+        let prompt = ReflectionEngine::build_prompt(
+            "- [Decision] 使用 JSON 存储",
+            "User: 你好\nAssistant: 你好！\n",
+        );
         assert!(prompt.contains("使用 JSON 存储"));
         assert!(prompt.contains("最近对话摘要"));
     }

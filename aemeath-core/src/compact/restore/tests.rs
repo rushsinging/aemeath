@@ -1,6 +1,6 @@
+use crate::compact::restore::assemble::assemble_compacted;
 use crate::compact::restore::assemble::fix_role_alternation;
 use crate::compact::restore::sanitize_pairs::sanitize_tool_pairs;
-use crate::compact::restore::assemble::assemble_compacted;
 use crate::message::{ContentBlock, Message, Role};
 
 // helper

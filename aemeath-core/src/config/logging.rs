@@ -61,6 +61,14 @@ pub struct LoggingConfig {
     /// Sub-agent log settings
     #[serde(default)]
     pub sub_agent_log: SubAgentLogConfig,
+
+    /// 分化日志存放目录。默认 ~/.aemeath/logs/，不配时回退到 ~/.aemeath/
+    #[serde(default)]
+    pub logs_dir: Option<String>,
+
+    /// 是否启用 input/output/tool 分化日志
+    #[serde(default = "default_true")]
+    pub role_logs_enabled: bool,
 }
 
 fn default_level() -> String {
@@ -92,6 +100,8 @@ impl Default for LoggingConfig {
             max_backups: 5,
             retention_days: 30,
             sub_agent_log: SubAgentLogConfig::default(),
+            logs_dir: None,
+            role_logs_enabled: true,
         }
     }
 }

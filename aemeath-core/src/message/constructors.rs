@@ -42,11 +42,13 @@ impl Message {
             role: Role::User,
             content: results
                 .into_iter()
-                .map(|(tool_use_id, content, is_error)| ContentBlock::ToolResult {
-                    tool_use_id,
-                    content: serde_json::Value::String(content),
-                    is_error,
-                })
+                .map(
+                    |(tool_use_id, content, is_error)| ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: serde_json::Value::String(content),
+                        is_error,
+                    },
+                )
                 .collect(),
         }
     }

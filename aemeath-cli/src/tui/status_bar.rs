@@ -1,5 +1,5 @@
-use aemeath_core::cost::format_tokens;
 use crate::tui::safe_text::safe_char_slice;
+use aemeath_core::cost::format_tokens;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

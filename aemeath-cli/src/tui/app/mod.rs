@@ -140,6 +140,8 @@ pub struct App {
     pub task_store: Option<Arc<aemeath_core::task::TaskStore>>,
     /// Whether background processing is active (LLM streaming / tool calls)
     pub is_processing: bool,
+    /// 分化日志写入器（input.log / output.log / tool.log）
+    pub json_logger: Option<Arc<std::sync::Mutex<aemeath_core::logging::JsonLogger>>>,
 }
 
 /// State for interactive AskUserQuestion option selection
@@ -213,6 +215,7 @@ impl App {
             memory_config: aemeath_core::config::MemoryConfig::default(),
             task_store: None,
             is_processing: false,
+            json_logger: None,
         }
     }
 
@@ -492,7 +495,8 @@ impl App {
 
         loop {
             // Update task status lines
-            self.update_task_status(&task_store, self.is_processing).await;
+            self.update_task_status(&task_store, self.is_processing)
+                .await;
 
             // Draw UI
             self.draw(terminal)?;
@@ -500,6 +504,7 @@ impl App {
             // Build spawn context refs for update()
             let hook_runner_clone = self.hook_runner.clone();
             let memory_config_clone = self.memory_config.clone();
+            let json_logger_clone = self.json_logger.clone();
             let spawn_refs = processing::SpawnContextRefs {
                 client: &client,
                 registry: &registry,
@@ -518,6 +523,7 @@ impl App {
                 agent_semaphore: &agent_semaphore,
                 hook_runner: &hook_runner_clone,
                 memory_config: &memory_config_clone,
+                json_logger: &json_logger_clone,
             };
 
             // --- TEA event collection: produce a Msg ---
@@ -592,6 +598,7 @@ impl App {
                         agent_semaphore: agent_semaphore.clone(),
                         hook_runner: self.hook_runner.clone(),
                         memory_config: self.memory_config.clone(),
+                        json_logger: self.json_logger.clone(),
                     });
                 }
             }
@@ -626,12 +633,7 @@ impl App {
                 }
                 Cmd::Batch(cmds) => {
                     for cmd in cmds {
-                        Self::exec_one_cmd(
-                            self,
-                            &active_cancel,
-                            &ui_tx,
-                            cmd,
-                        ).await;
+                        Self::exec_one_cmd(self, &active_cancel, &ui_tx, cmd).await;
                     }
                 }
                 Cmd::RunHookNotification { message, kind } => {
@@ -925,9 +927,7 @@ impl App {
                         }
                         Err(e) => {
                             let _ = tx
-                                .send(UiEvent::SystemMessage(format!(
-                                    "Failed to load image: {e}"
-                                )))
+                                .send(UiEvent::SystemMessage(format!("Failed to load image: {e}")))
                                 .await;
                         }
                     }
