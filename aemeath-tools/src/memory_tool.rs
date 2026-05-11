@@ -332,6 +332,7 @@ mod tests {
 
     fn test_ctx(cwd: PathBuf) -> ToolContext {
         ToolContext {
+            path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
             cwd,
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),

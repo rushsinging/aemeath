@@ -599,10 +599,7 @@ fn format_todowrite_value(input: &serde_json::Value) -> Option<(String, Vec<Stri
     let mut details = Vec::new();
 
     for todo in todos.iter().take(3) {
-        let subject = todo
-            .get("subject")
-            .and_then(|s| s.as_str())
-            .unwrap_or("?");
+        let subject = todo.get("subject").and_then(|s| s.as_str()).unwrap_or("?");
         let status = todo
             .get("status")
             .and_then(|s| s.as_str())

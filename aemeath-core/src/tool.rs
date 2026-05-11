@@ -86,6 +86,8 @@ pub trait AgentRunner: Send + Sync {
 #[derive(Clone)]
 pub struct ToolContext {
     pub cwd: PathBuf,
+    /// Base directory used to resolve relative file/tool paths.
+    pub path_base: Arc<Mutex<PathBuf>>,
     pub cancel: CancellationToken,
     pub read_files: std::sync::Arc<Mutex<HashSet<String>>>,
     pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
