@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Task priority levels
 #[derive(
@@ -201,6 +202,9 @@ impl Default for BatchStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Batch {
     pub id: u64,
+    /// Human-readable summary of the user request this batch belongs to.
+    #[serde(default)]
+    pub summary: Option<String>,
     pub status: BatchStatus,
     pub created_at: u64,
     pub last_active_turn: u64,
@@ -214,6 +218,7 @@ impl Batch {
         let now = default_timestamp();
         Self {
             id,
+            summary: None,
             status: BatchStatus::Active,
             created_at: now,
             last_active_turn: 0,
@@ -231,4 +236,15 @@ pub struct TaskSnapshot {
     /// Batches metadata for lifecycle management
     #[serde(default)]
     pub batches: Vec<Batch>,
+}
+
+/// Task store statistics.
+#[derive(Debug, Clone)]
+pub struct TaskStoreStats {
+    pub total: usize,
+    pub pending: usize,
+    pub in_progress: usize,
+    pub completed: usize,
+    pub deleted: usize,
+    pub by_priority: HashMap<TaskPriority, usize>,
 }

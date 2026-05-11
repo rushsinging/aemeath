@@ -17,8 +17,9 @@ impl Tool for TaskCreateTool {
         "Create a task to track progress on multi-step work.\n\n\
          IMPORTANT workflow:\n\
          1. First, describe your complete plan as text — list ALL planned tasks so the user can see the full picture\n\
-         2. Then create tasks one by one with TaskCreate\n\
-         3. Use TaskUpdate to set dependencies and assign agents\n\n\
+         2. For a new multi-step user request, call TaskListCreate before TaskCreate so tasks attach to a request summary\n\
+         3. Then create tasks one by one with TaskCreate\n\
+         4. Use TaskUpdate to set dependencies and assign agents\n\n\
          After creating tasks, use TaskUpdate to:\n\
          - Set dependencies (addBlockedBy/addBlocks) between tasks\n\
          - Mark as in_progress before starting work\n\

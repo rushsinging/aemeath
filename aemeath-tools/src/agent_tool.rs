@@ -126,13 +126,15 @@ impl Tool for AgentTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         if let Some(ref tid) = task_id {
+            if self.store.get(tid).await.is_none() {
+                return ToolResult::error(format!("task not found: {tid}"));
+            }
             self.store
                 .update(tid, |t| {
                     t.status = TaskStatus::InProgress;
                 })
                 .await;
         }
-
         // Prepend scope warnings as guidance so the sub-agent can adjust its strategy
         let scope_hint = if scope.warnings.is_empty() {
             String::new()
@@ -359,63 +361,5 @@ fn is_agent_failure(result: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_analyze_task_scope_numbered_list_has_no_warning() {
-        let prompt =
-            "请按以下步骤执行：\n1. 读取文件\n2. 分析问题\n3. 修改代码\n4. 运行测试\n5. 汇报结果";
-
-        let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-        assert_eq!(result.level, ScopeLevel::Ok);
-        assert!(result.warnings.is_empty());
-    }
-
-    #[test]
-    fn test_analyze_task_scope_large_task_pattern_still_blocks() {
-        let prompt = "review all files in the entire codebase";
-
-        let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-        assert_eq!(result.level, ScopeLevel::Block);
-        assert!(result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("entire codebase")));
-    }
-
-    #[test]
-    fn test_analyze_task_scope_simple_task_still_warns() {
-        let prompt = "read the file and summarize it";
-
-        let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-        assert_eq!(result.level, ScopeLevel::Warn);
-        assert!(result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("simple task")));
-    }
-
-    #[test]
-    fn test_is_agent_failure_detects_known_markers() {
-        assert!(is_agent_failure("Cancelled by user"));
-        assert!(is_agent_failure(
-            "Some text\n\n[Sub-agent timed out after 600s]"
-        ));
-        assert!(is_agent_failure("Sub-agent error: connection refused"));
-        assert!(is_agent_failure(
-            "Done\n\n[Sub-agent reached max turns (50)]"
-        ));
-    }
-
-    #[test]
-    fn test_is_agent_failure_normal_result_is_not_failure() {
-        assert!(!is_agent_failure("Successfully refactored the module."));
-        assert!(!is_agent_failure(""));
-        assert!(!is_agent_failure("No issues found in the reviewed files."));
-    }
-}
+#[path = "agent_tool_tests.rs"]
+mod agent_tool_tests;

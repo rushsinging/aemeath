@@ -3,8 +3,9 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
-| 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
-| 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 修复中 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
+| 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
+| 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
+| 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
 | 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
@@ -53,9 +54,11 @@
 - `aemeath-tools/src/agent.rs`（AgentTool 接受 `task_id` 并在 run_agent 前后自动联动）
 - `aemeath-core/src/task.rs`（TaskStore 父子共享 / 引用语义）
 - `aemeath-cli/src/agent_runner.rs`（sub-agent 与父 TaskStore 的关系）
-**关联**：
-- Bug #29（主 agent 路径同样不更新）—— 共因之一是 LLM 不主动 update，但 sub-agent 路径还多 AgentTool 桥接 + TaskStore 隔离两条独立修复线
-- Feature #18（Task list 跨轮次 batch 机制）—— batch 机制本身工作正常
+**修复（2026-05-11）**：
+1. `Agent` tool 新增 `taskId/task_id` 参数，执行前自动将父 task 标记为 `in_progress`，成功后标记为 `completed`，失败后恢复为 `pending`。
+2. 子代理上下文继续复用父 `TaskStore`，父侧 task list 可实时观察到 AgentTool 的状态桥接结果。
+3. 子代理注册工具时排除 TaskCreate/TaskUpdate/TaskList 等协调类工具，避免子代理绕过父级状态管理。
+4. 新增 `agent_tool_tests` 覆盖 taskId 缺失、成功完成、失败回滚三条路径。
 
 ### #29 主 agent tool call 执行后 task list 状态不更新
 **症状**：task 列表只有 1 条 `#1 拆分 hook.rs → hook/ 目录`，状态 `☐`（pending）。LLM（主 agent，不是 sub-agent）已通过 Bash tool 执行 `mkdir -p .../aemeath-core/src/hook`（属于该 task 的第一步），并进入 Thinking 阶段（spinner 显示 `Cogitating... 389s (Thinking...)`）。task list 仍显示 `Tasks: 0/1`，#1 仍为 `☐`，没有任何 in_progress / completed 联动。
@@ -81,15 +84,28 @@
 - `aemeath-core/src/task.rs`（如做启发式联动需要 query 接口）
 - `aemeath-cli/src/tui/output_area/`（UI 兜底显示）
 
-**关联**：
-- Bug #27（sub-agent 路径）—— 共因是 LLM 不主动 update task 状态，但修复路径不同
-- Feature #18（Task list 跨轮次 batch 机制）—— batch 工作正常，问题在状态推进
+**修复（2026-05-11）**：
+1. 静态 system prompt 新增强制流程：新多步请求先 `TaskListCreate`，直接执行 Read/Grep/Glob/Bash/Edit/Write 等工具前先 `TaskUpdate(in_progress)`，完成后 `TaskUpdate(completed)`，全部完成后 `TaskListComplete`。
+2. `TaskCreate` 工具描述同步加入 TaskListCreate 前置要求，降低模型跳过状态维护的概率。
+3. 新增 prompt 单元测试覆盖直接工具前后必须 TaskUpdate、Agent taskId 委派、Task reminder 可能无关等约束。
 
 ### #26 几乎每次对话都触发 superpowers skill 调用（已归档：不作为 Bug）
 **归档原因**：用户确认该项不算 Bug，不再作为活动 bug 跟踪。
 **原现象**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。
 **原疑似根因**：SessionStart hook 提示语偏强、`using-superpowers` description 触发面过宽、Skill 列表注入后模型倾向调用 skill。
 **后续处理**：如需调整，应作为体验优化 / feature 另行登记，而非 bug 修复。
+
+### #34 Task reminder 干扰新用户请求
+**症状**：存在上一轮未完成 task 时，后续用户提出无关新请求，系统注入的 task reminder 容易让模型优先继续旧 task，忽略或延迟响应当前用户请求。
+
+**根因**：task reminder 只列出未完成任务，缺少 request summary / batch 归属提示，也没有明确说明旧 batch 可能与最新用户消息无关。
+
+**修复（2026-05-11）**：
+1. `Batch` 增加 `summary` 字段，新增 `TaskListCreate` / `TaskListComplete` 工具显式管理一次用户请求对应的 task batch。
+2. `TaskStore` 新增 active/list/complete 相关接口，并保证 `TaskCreate` 自动归属当前 batch。
+3. task reminder 改为按 batch 输出，包含 summary，并明确提示：若与最新用户消息无关，优先回答最新消息；只有用户要求 continue/resume 或任务明显相关时才使用 TaskList。
+4. TaskList 输出增加 task list 摘要和完成比例，便于人工确认 batch 隔离状态。
+5. 新增 `task_reminder`、`task_list_create`、`task_list_complete` 单元测试覆盖提醒隔离、空列表、完成关闭等路径。
 
 ### #31 WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更）
 **症状**：WebSearch tool 调用后始终返回 "No search results found"，但直接 curl DuckDuckGo HTML 接口（`https://html.duckduckgo.com/html/`）可以正常返回搜索结果。
