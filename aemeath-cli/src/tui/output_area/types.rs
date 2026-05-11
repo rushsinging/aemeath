@@ -30,6 +30,8 @@ pub enum LineStyle {
     Thinking,
     DiffAdd,
     DiffRemove,
+    /// AskUserQuestion 醒目样式：亮黄 + 粗体
+    AskUser,
 }
 
 impl LineStyle {
@@ -61,6 +63,9 @@ impl LineStyle {
                     .bg(Color::Rgb(r, g, b))
                     .fg(Color::Rgb(fr, fg, fb))
             }
+            LineStyle::AskUser => Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         }
     }
 }

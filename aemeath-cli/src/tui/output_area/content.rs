@@ -102,11 +102,25 @@ impl super::OutputArea {
     ) -> Option<usize> {
         self.finish_streaming();
 
-        // 问题文本
+        // 分隔标题行
+        self.push_line(OutputLine {
+            content: "━━ 需要你的回答 ━━".to_string(),
+            style: LineStyle::AskUser,
+            ..Default::default()
+        });
+
+        // 空行
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::Normal,
+            ..Default::default()
+        });
+
+        // 问题文本（醒目样式）
         for line in question.lines() {
             self.push_line(OutputLine {
                 content: line.to_string(),
-                style: LineStyle::Assistant,
+                style: LineStyle::AskUser,
                 ..Default::default()
             });
         }
@@ -114,13 +128,36 @@ impl super::OutputArea {
         if options.is_empty() {
             if let Some(d) = default {
                 self.push_line(OutputLine {
-                    content: format!("  (default: {})", d),
+                    content: format!("  (default: {d})"),
                     style: LineStyle::System,
                     ..Default::default()
                 });
             }
+            // 操作提示
+            self.push_line(OutputLine {
+                content: String::new(),
+                style: LineStyle::Normal,
+                ..Default::default()
+            });
+            self.push_line(OutputLine {
+                content: "  [Enter] 确认  [Esc] 取消".to_string(),
+                style: LineStyle::System,
+                ..Default::default()
+            });
             return None;
         }
+
+        // 操作提示行
+        let hint = if multi_select {
+            "  [↑↓] 移动  [Space] 选中/取消  [Enter] 确认  [Esc] 取消"
+        } else {
+            "  [↑↓] 选择  [Enter] 确认  [Esc] 取消"
+        };
+        self.push_line(OutputLine {
+            content: hint.to_string(),
+            style: LineStyle::System,
+            ..Default::default()
+        });
 
         // 空行分隔
         self.push_line(OutputLine {
@@ -137,19 +174,26 @@ impl super::OutputArea {
                 let check = if is_default { "✓" } else { " " };
                 format!("  [{}] {}. {}", check, i + 1, opt)
             } else {
-                let arrow = if is_default { "❯" } else { " " };
-                format!("{} {}. {}", arrow, i + 1, opt)
+                let marker = if is_default { "❯" } else { " " };
+                format!("  {} {}. {}", marker, i + 1, opt)
             };
             self.push_line(OutputLine {
                 content,
                 style: if is_default {
-                    LineStyle::Assistant
+                    LineStyle::AskUser
                 } else {
                     LineStyle::Normal
                 },
                 ..Default::default()
             });
         }
+
+        // 底部空行
+        self.push_line(OutputLine {
+            content: String::new(),
+            style: LineStyle::Normal,
+            ..Default::default()
+        });
 
         Some(option_start)
     }
@@ -176,7 +220,7 @@ impl super::OutputArea {
             if let Some(line) = self.lines.get_mut(start + i) {
                 line.content = content;
                 line.style = if is_highlight {
-                    LineStyle::Assistant
+                    LineStyle::AskUser
                 } else {
                     LineStyle::Normal
                 };
