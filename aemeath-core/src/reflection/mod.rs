@@ -1,6 +1,8 @@
 pub mod prompt;
 
-use crate::memory::{MemoryCategory, MemoryEntry, MemoryStore};
+use crate::memory::{
+    AddResult, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource, MemoryStore,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,6 +28,12 @@ pub struct ReflectionOutput {
     pub user_alert: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReflectionApplyResult {
+    pub suggestions_added: usize,
+    pub outdated_marked: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ReflectionError {
     #[error("Reflection 输出不是有效 JSON: {0}")]
@@ -40,7 +48,83 @@ pub struct ReflectionEngine;
 
 impl ReflectionEngine {
     pub fn parse_output(json: &str) -> ReflectionResult<ReflectionOutput> {
-        serde_json::from_str(json).map_err(ReflectionError::InvalidJson)
+        let extracted = Self::extract_json_object(json).unwrap_or(json);
+        serde_json::from_str(extracted).map_err(ReflectionError::InvalidJson)
+    }
+
+    pub fn extract_json_object(text: &str) -> Option<&str> {
+        let trimmed = text.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            return Some(trimmed);
+        }
+
+        if let Some(fence_start) = trimmed.find("```") {
+            let after_start = &trimmed[fence_start + 3..];
+            let after_lang = after_start
+                .strip_prefix("json")
+                .or_else(|| after_start.strip_prefix("JSON"))
+                .unwrap_or(after_start)
+                .trim_start_matches(['\r', '\n']);
+            if let Some(fence_end) = after_lang.find("```") {
+                let fenced = after_lang[..fence_end].trim();
+                if fenced.starts_with('{') && fenced.ends_with('}') {
+                    return Some(fenced);
+                }
+            }
+        }
+
+        let start = trimmed.find('{')?;
+        let end = trimmed.rfind('}')?;
+        if start < end {
+            Some(trimmed[start..=end].trim())
+        } else {
+            None
+        }
+    }
+
+    pub fn apply_suggestions(
+        output: &ReflectionOutput,
+        store: &mut MemoryStore,
+    ) -> ReflectionResult<usize> {
+        let mut added = 0;
+        for suggestion in &output.suggested_memories {
+            let mut entry = MemoryEntry::new(
+                MemoryLayer::Project,
+                suggestion.category,
+                suggestion.content.clone(),
+                MemorySource::Llm,
+            )
+            .with_tags(suggestion.tags.clone());
+            if !suggestion.reason.trim().is_empty() {
+                entry = entry.with_source_ref(format!("reflection: {}", suggestion.reason));
+            } else {
+                entry = entry.with_source_ref("reflection");
+            }
+            match store
+                .add(entry)
+                .map_err(|error| ReflectionError::Memory(error.to_string()))?
+            {
+                AddResult::Added | AddResult::Merged { .. } => added += 1,
+                AddResult::NeedsEviction { .. } => {
+                    return Err(ReflectionError::Memory(
+                        "Memory 已满，请先执行 /memory compact 后再应用反思建议".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(added)
+    }
+
+    pub fn apply_output(
+        output: &ReflectionOutput,
+        store: &mut MemoryStore,
+    ) -> ReflectionResult<ReflectionApplyResult> {
+        let outdated_marked = Self::apply_outdated(output, store)?;
+        let suggestions_added = Self::apply_suggestions(output, store)?;
+        Ok(ReflectionApplyResult {
+            suggestions_added,
+            outdated_marked,
+        })
     }
 
     pub fn apply_outdated(
@@ -155,6 +239,13 @@ impl ReflectionEngine {
 mod tests {
     use super::*;
 
+    fn temp_store(max_entries: usize) -> (MemoryStore, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("aemeath-reflection-test-{}", uuid::Uuid::new_v4()));
+        let store = MemoryStore::new(&dir, "project", max_entries, 0.9).unwrap();
+        (store, dir)
+    }
+
     #[test]
     fn test_parse_output_valid_json() {
         let json = r#"{
@@ -186,6 +277,98 @@ mod tests {
         let result = ReflectionEngine::parse_output("not json");
 
         assert!(matches!(result, Err(ReflectionError::InvalidJson(_))));
+    }
+
+    #[test]
+    fn test_parse_output_extracts_fenced_json() {
+        let text = r#"这里是反思结果：
+```json
+{"deviations":["偏差"],"suggested_memories":[],"outdated_memories":[],"user_alert":null}
+```
+"#;
+
+        let output = ReflectionEngine::parse_output(text).unwrap();
+
+        assert_eq!(output.deviations, vec!["偏差"]);
+    }
+
+    #[test]
+    fn test_parse_output_extracts_object_from_prose() {
+        let text = r#"反思如下：{"deviations":["遗漏测试"],"suggested_memories":[]}请确认。"#;
+
+        let output = ReflectionEngine::parse_output(text).unwrap();
+
+        assert_eq!(output.deviations, vec!["遗漏测试"]);
+    }
+
+    #[test]
+    fn test_apply_suggestions_adds_llm_project_memory() {
+        let (mut store, dir) = temp_store(10);
+        let output = ReflectionOutput {
+            deviations: Vec::new(),
+            suggested_memories: vec![MemorySuggestion {
+                category: crate::memory::MemoryCategory::Decision,
+                content: "Reflection 使用真实 LLM 调用".to_string(),
+                tags: vec!["reflection".to_string()],
+                reason: "用户选择方案 B".to_string(),
+            }],
+            outdated_memories: Vec::new(),
+            user_alert: None,
+        };
+
+        let added = ReflectionEngine::apply_suggestions(&output, &mut store).unwrap();
+        let memories = store
+            .list(Some(crate::memory::MemoryLayer::Project))
+            .unwrap();
+
+        assert_eq!(added, 1);
+        assert_eq!(memories.len(), 1);
+        assert_eq!(memories[0].source, crate::memory::MemorySource::Llm);
+        assert_eq!(memories[0].tags, vec!["reflection"]);
+        assert!(memories[0]
+            .source_ref
+            .as_deref()
+            .unwrap()
+            .contains("用户选择方案 B"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_apply_output_marks_outdated_and_adds_suggestions() {
+        let (mut store, dir) = temp_store(10);
+        let existing = MemoryEntry::new(
+            crate::memory::MemoryLayer::Project,
+            crate::memory::MemoryCategory::Fact,
+            "旧事实",
+            crate::memory::MemorySource::User,
+        );
+        let existing_id = existing.id.clone();
+        store.add(existing).unwrap();
+        let output = ReflectionOutput {
+            deviations: Vec::new(),
+            suggested_memories: vec![MemorySuggestion {
+                category: crate::memory::MemoryCategory::Pattern,
+                content: "先写测试再实现".to_string(),
+                tags: Vec::new(),
+                reason: String::new(),
+            }],
+            outdated_memories: vec![existing_id.clone()],
+            user_alert: None,
+        };
+
+        let applied = ReflectionEngine::apply_output(&output, &mut store).unwrap();
+        let memories = store
+            .list(Some(crate::memory::MemoryLayer::Project))
+            .unwrap();
+        let outdated = memories
+            .iter()
+            .find(|entry| entry.id == existing_id)
+            .unwrap();
+
+        assert_eq!(applied.suggestions_added, 1);
+        assert_eq!(applied.outdated_marked, 1);
+        assert!(outdated.outdated);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

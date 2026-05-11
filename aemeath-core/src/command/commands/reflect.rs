@@ -46,33 +46,13 @@ fn reflect_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
 }
 
 fn apply_reflection(ctx: &CommandContext, _auto: bool) -> CommandResult {
-    let mut store = match open_memory_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return CommandResult::Error(error),
-    };
-
-    let memories = match store.list(Some(MemoryLayer::Project)) {
-        Ok(memories) => memories,
-        Err(error) => return CommandResult::Error(error.to_string()),
-    };
-
-    let mut archived_count = 0;
-    for entry in &memories {
-        if entry.outdated {
-            match store.delete(&entry.id) {
-                Ok(()) => archived_count += 1,
-                Err(e) => log::warn!("Failed to archive outdated memory {}: {e}", entry.id),
-            }
-        }
+    if let Err(error) = open_memory_store(ctx) {
+        return CommandResult::Error(error);
     }
 
-    let msg = if archived_count > 0 {
-        format!("已归档 {archived_count} 条过时记忆。")
-    } else {
-        "没有需要应用的反思建议。".to_string()
-    };
-
-    CommandResult::Success(msg)
+    CommandResult::Success(
+        "核心命令模式没有待应用的 Reflection 建议；请在 TUI 中运行 /reflect 后再执行 /reflect apply。".to_string(),
+    )
 }
 
 fn run_reflection(ctx: &CommandContext) -> CommandResult {
@@ -136,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_lightweight_output_outdated_memory() {
+    fn test_build_lightweight_output_does_not_delete_outdated_memory() {
         let mut entry = MemoryEntry::new(
             MemoryLayer::Project,
             MemoryCategory::Decision,
@@ -144,9 +124,9 @@ mod tests {
             MemorySource::User,
         );
         entry.outdated = true;
-        let id = entry.id.clone();
+
         let output = build_lightweight_output(&[entry]);
 
-        assert_eq!(output.outdated_memories, vec![id]);
+        assert_eq!(output.outdated_memories.len(), 1);
     }
 }

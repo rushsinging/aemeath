@@ -344,8 +344,8 @@ mod tests {
         output.selection_start = Some((1, CharIdx::new(2)));
         output.selection_end = Some((1, CharIdx::new(8)));
         let selected = output.get_selected_text();
-        // content is "  pending task", chars [2..8) = "pendi"
-        assert_eq!(selected, Some("pendi".to_string()));
+        // content is "  pending task", chars [2..8) = "pendin"
+        assert_eq!(selected, Some("pendin".to_string()));
     }
 
     #[test]

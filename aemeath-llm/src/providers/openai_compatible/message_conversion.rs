@@ -300,8 +300,9 @@ impl OpenAICompatibleProvider {
 #[cfg(test)]
 mod tests {
     use crate::providers::openai_compatible::{
-        ApiDriverKind, OpenAICompatibleProvider, OpenAIProviderConfig, ReasoningConfig,
+        OpenAICompatibleProvider, OpenAIProviderConfig, ReasoningConfig,
     };
+    use aemeath_core::provider::ApiDriverKind;
     use aemeath_core::message::{ContentBlock, Message, Role};
 
     fn provider_with_reasoning() -> OpenAICompatibleProvider {

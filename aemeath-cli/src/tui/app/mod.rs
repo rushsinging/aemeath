@@ -136,6 +136,8 @@ pub struct App {
     /// Session-local reminders for MemoryTool recap.
     pub session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
     pub memory_config: aemeath_core::config::MemoryConfig,
+    /// Pending LLM reflection output waiting for `/reflect apply`.
+    pub pending_reflection: Option<aemeath_core::reflection::ReflectionOutput>,
     /// Task store (shared with tools), cleared on /clear
     pub task_store: Option<Arc<aemeath_core::task::TaskStore>>,
     /// Whether background processing is active (LLM streaming / tool calls)
@@ -211,6 +213,7 @@ impl App {
                 aemeath_core::memory::SessionReminders::new(),
             )),
             memory_config: aemeath_core::config::MemoryConfig::default(),
+            pending_reflection: None,
             task_store: None,
             is_processing: false,
         }
@@ -230,6 +233,7 @@ impl App {
         self.status_bar.reset_runtime_state();
         self.ask_user_reply_tx = None;
         self.ask_user_state = None;
+        self.pending_reflection = None;
         if let Ok(mut reminders) = self.session_reminders.lock() {
             reminders.clear();
         }

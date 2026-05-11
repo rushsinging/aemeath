@@ -567,6 +567,20 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
+    if name == "TodoWrite" {
+        return format_todowrite_value(&parsed).unwrap_or_else(|| {
+            let truncated = truncate_json(raw_json);
+            (format!("● {name}"), vec![truncated])
+        });
+    }
+
+    if name == "TodoRun" {
+        return (
+            "● TodoRun".to_string(),
+            vec!["execute all pending todos".to_string()],
+        );
+    }
+
     if let Some(display) = lookup_display(name) {
         return (
             display.format_header(&parsed),
@@ -577,6 +591,35 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     // Fallback for unknown tools
     let truncated = truncate_json(raw_json);
     (format!("● {name}"), vec![truncated])
+}
+
+fn format_todowrite_value(input: &serde_json::Value) -> Option<(String, Vec<String>)> {
+    let todos = input.get("todos").and_then(|t| t.as_array())?;
+    let count = todos.len();
+    let mut details = Vec::new();
+
+    for todo in todos.iter().take(3) {
+        let subject = todo
+            .get("subject")
+            .and_then(|s| s.as_str())
+            .unwrap_or("?");
+        let status = todo
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("pending");
+        let icon = match status {
+            "completed" => "✓",
+            "in_progress" => "◐",
+            _ => "○",
+        };
+        details.push(format!("{icon} {subject}"));
+    }
+
+    if count > 3 {
+        details.push(format!("... +{} more", count - 3));
+    }
+
+    Some((format!("● TodoWrite ({count} items)"), details))
 }
 
 fn truncate_json(raw: &str) -> String {
@@ -682,9 +725,6 @@ impl super::OutputArea {
 
         if let Ok(v) = parsed {
             if let Some(todos) = v.get("todos").and_then(|t| t.as_array()) {
-                let count = todos.len();
-                let mut details: Vec<String> = Vec::new();
-
                 for todo in todos.iter() {
                     if let (Some(id), Some(subject)) = (
                         todo.get("id").and_then(|s| s.as_str()),
@@ -695,33 +735,9 @@ impl super::OutputArea {
                     }
                 }
 
-                for todo in todos.iter().take(3) {
-                    let subject = todo
-                        .get("subject")
-                        .and_then(|s| s.as_str())
-                        .map(|s| s.to_string())
-                        .or_else(|| {
-                            todo.get("id")
-                                .and_then(|s| s.as_str())
-                                .and_then(|id| self.todo_subject_cache.get(id).cloned())
-                        })
-                        .unwrap_or_else(|| "?".to_string());
-
-                    let status = todo
-                        .get("status")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("pending");
-                    let icon = match status {
-                        "completed" => "✓",
-                        "in_progress" => "◐",
-                        _ => "○",
-                    };
-                    details.push(format!("{icon} {subject}"));
+                if let Some((header, details)) = format_todowrite_value(&v) {
+                    return (header, details);
                 }
-                if count > 3 {
-                    details.push(format!("... +{} more", count - 3));
-                }
-                return (format!("● TodoWrite ({count} items)"), details);
             }
         }
 
