@@ -92,14 +92,19 @@ pub async fn process_in_background(
         ctx,
     };
 
-    const MAX_TURNS: usize = 100;
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
 
-    for _ in 0..MAX_TURNS {
+    // Stall detection: sliding window for text repetition
+    let mut recent_fingerprints: Vec<String> = Vec::new();
+    const FINGERPRINT_WINDOW: usize = 4;
+    const FINGERPRINT_MAX_REPEAT: usize = 3;
+    let mut max_fingerprint_repeat: usize = 0;
+
+    loop {
         turn_count += 1;
         crate::set_current_turn(turn_count);
         if interrupted.load(Ordering::Relaxed) {
@@ -370,6 +375,51 @@ pub async fn process_in_background(
 
                 messages.push(resp.assistant_message.clone());
                 let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+
+                // Collect text fingerprint for repetition detection
+                {
+                    let text = resp.assistant_message.text_content();
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        let fp: String = trimmed.chars().take(200).collect();
+                        recent_fingerprints.push(fp);
+                        if recent_fingerprints.len() > FINGERPRINT_WINDOW {
+                            recent_fingerprints.remove(0);
+                        }
+                    }
+                }
+                // Check for repetitive text (LLM stuck on the same output)
+                if recent_fingerprints.len() >= FINGERPRINT_MAX_REPEAT {
+                    let last = &recent_fingerprints[recent_fingerprints.len() - 1];
+                    let repeat_count = recent_fingerprints
+                        .iter()
+                        .rev()
+                        .take(FINGERPRINT_MAX_REPEAT)
+                        .filter(|fp| *fp == last)
+                        .count();
+                    if repeat_count > max_fingerprint_repeat {
+                        max_fingerprint_repeat = repeat_count;
+                        log::debug!(
+                            "[stall] fingerprint repeat count: {} (max so far: {})",
+                            repeat_count,
+                            max_fingerprint_repeat
+                        );
+                    }
+                    if repeat_count >= FINGERPRINT_MAX_REPEAT {
+                        log::warn!(
+                            "[stall] assistant text repeated {} times in recent {} turns (max: {})",
+                            repeat_count,
+                            recent_fingerprints.len(),
+                            max_fingerprint_repeat
+                        );
+                        let _ = tx
+                            .send(UiEvent::SystemMessage(
+                                "[agent loop stopped: LLM is producing repetitive output]".to_string(),
+                            ))
+                            .await;
+                        break;
+                    }
+                }
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
 
@@ -1073,8 +1123,6 @@ pub async fn process_in_background(
             }
         }
     }
-
-    messages.truncate(messages_at_start);
 
     // Stop hook: agent 循环结束
     let _ = hook_ui
