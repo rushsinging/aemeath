@@ -838,56 +838,26 @@ mod tests {
         assert!(output.screen_line_map.len() <= area.height as usize);
     }
     #[test]
-    fn todowrite_real_input_from_session() {
-        let raw = r#"{"todos":[{"activeForm":"Reviewing aemeath-core","description":"Read","id":"1","status":"in_progress","subject":"Review aemeath-core (核心逻辑)"},{"activeForm":"Reviewing aemeath-llm","description":"Read","id":"2","status":"pending","subject":"Review aemeath-llm (LLM 抽象层)"},{"activeForm":"Reviewing aemeath-tools","description":"Read","id":"3","status":"pending","subject":"Review aemeath-tools (工具实现)"}]}"#;
-        let (header, details) = tool_display::format_tool_call("TodoWrite", raw);
-        println!("HEADER: {header}");
-        for d in &details {
-            println!("DETAIL: {d}");
-        }
-        assert!(header.contains("3 items"), "header was: {header}");
-        assert!(details[0].contains("核心"), "detail[0]: {}", details[0]);
-        assert!(
-            details[0].starts_with("◐"),
-            "detail[0] icon: {}",
-            details[0]
-        );
-        assert!(
-            details[1].starts_with("○"),
-            "detail[1] icon: {}",
-            details[1]
-        );
+    fn taskcreate_formats_subject() {
+        let raw = r#"{"subject":"Review aemeath-core (核心逻辑)","description":"Read"}"#;
+        let (header, details) = tool_display::format_tool_call("TaskCreate", raw);
+        assert_eq!(header, "● TaskCreate(Review aemeath-core (核心逻辑))");
+        assert_eq!(details, vec!["Read"]);
     }
 
     #[test]
-    fn todowrite_via_value_to_string_roundtrip() {
-        let v: serde_json::Value = serde_json::from_str(r#"{"todos":[{"subject":"Review aemeath-core (核心逻辑)","status":"in_progress"},{"subject":"T2","status":"pending"}]}"#).unwrap();
-        let s = v.to_string();
-        println!("ROUNDTRIP STRING: {s}");
-        let (header, details) = tool_display::format_tool_call("TodoWrite", &s);
-        println!("HEADER: {header}");
-        for d in &details {
-            println!("DETAIL: {d}");
-        }
-        assert!(details[0].contains("核心"), "detail[0]: {}", details[0]);
-        assert!(details[0].starts_with("◐"));
+    fn taskupdate_formats_status() {
+        let raw = r#"{"taskId":"1","status":"in_progress"}"#;
+        let (header, details) = tool_display::format_tool_call("TaskUpdate", raw);
+        assert_eq!(header, "● TaskUpdate(1)");
+        assert_eq!(details, vec!["-> in_progress"]);
     }
 
     #[test]
-    fn todorun_with_max_turns() {
-        let raw = r#"{"max_turns_per_todo": 100}"#;
-        let (header, details) = tool_display::format_tool_call("TodoRun", raw);
-        assert_eq!(header, "● TodoRun");
-        assert_eq!(details.len(), 1);
-        assert_eq!(details[0], "execute all pending todos");
-    }
-
-    #[test]
-    fn todorun_without_max_turns() {
-        let raw = "{}";
-        let (header, details) = tool_display::format_tool_call("TodoRun", raw);
-        assert_eq!(header, "● TodoRun");
-        assert_eq!(details.len(), 1);
-        assert_eq!(details[0], "execute all pending todos");
+    fn agent_formats_prompt_preview() {
+        let raw = r#"{"description":"review","prompt":"check file","role":"reviewer"}"#;
+        let (header, details) = tool_display::format_tool_call("Agent", raw);
+        assert_eq!(header, "● Agent(review)  [role: reviewer]");
+        assert_eq!(details, vec!["check file"]);
     }
 }

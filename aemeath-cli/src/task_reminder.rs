@@ -75,7 +75,21 @@ impl TaskReminderState {
         }
 
         let mut lines = Vec::new();
-        for batch in task_store.lists_with_pending().await {
+        let mut pending_batches = task_store.lists_with_pending().await;
+        if pending_batches.is_empty() {
+            let current_batch = task_store.current_batch().await;
+            let tasks = task_store
+                .tasks_in_batch(
+                    current_batch,
+                    &[TaskStatus::Pending, TaskStatus::InProgress],
+                )
+                .await;
+            if !tasks.is_empty() {
+                pending_batches.push(task_store.get_or_create_batch(current_batch).await);
+            }
+        }
+
+        for batch in pending_batches {
             let tasks = task_store
                 .tasks_in_batch(batch.id, &[TaskStatus::Pending, TaskStatus::InProgress])
                 .await;
@@ -93,7 +107,6 @@ impl TaskReminderState {
                 batch.id, batch.status, summary, task_text
             ));
         }
-
         if lines.is_empty() {
             return None;
         }

@@ -34,6 +34,26 @@ impl TaskStore {
         }
     }
 
+    async fn resolve_task_batch(&self) -> u64 {
+        if let Some(active) = self.active_list().await {
+            return active.id;
+        }
+
+        let (has_active, has_any) = {
+            let tasks = self.tasks.lock().await;
+            let has_any = !tasks.is_empty();
+            let has_active = tasks
+                .values()
+                .any(|t| t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted);
+            (has_active, has_any)
+        };
+        let mut batch = self.current_batch.lock().await;
+        if has_any && !has_active {
+            *batch += 1;
+        }
+        *batch
+    }
+
     /// Create a new task with all fields
     pub async fn create(
         &self,
@@ -49,23 +69,7 @@ impl TaskStore {
             // next_id lock released here
         };
 
-        // Bump batch if all existing tasks are completed (new turn)
-        let batch = {
-            let (has_active, has_any) = {
-                let tasks = self.tasks.lock().await;
-                let has_any = !tasks.is_empty();
-                let has_active = tasks
-                    .values()
-                    .any(|t| t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted);
-                (has_active, has_any)
-            };
-            let mut batch = self.current_batch.lock().await;
-            if has_any && !has_active {
-                *batch += 1;
-            }
-            *batch
-        };
-
+        let batch = self.resolve_task_batch().await;
         let now = types::default_timestamp();
         let task = Task {
             id: id.clone(),
@@ -105,23 +109,7 @@ impl TaskStore {
             id
         };
 
-        // Bump batch if all existing tasks are completed (new turn)
-        let batch = {
-            let (has_active, has_any) = {
-                let tasks = self.tasks.lock().await;
-                let has_any = !tasks.is_empty();
-                let has_active = tasks
-                    .values()
-                    .any(|t| t.status != TaskStatus::Completed && t.status != TaskStatus::Deleted);
-                (has_active, has_any)
-            };
-            let mut batch = self.current_batch.lock().await;
-            if has_any && !has_active {
-                *batch += 1;
-            }
-            *batch
-        };
-
+        let batch = self.resolve_task_batch().await;
         let now = types::default_timestamp();
         let task = Task {
             id: id.clone(),
@@ -325,6 +313,85 @@ impl TaskStore {
     }
 
     // ── Batch lifecycle management ──
+
+    /// Create an active task list for the current coherent user request.
+    pub async fn create_list(&self, subject: String, summary: String) -> Batch {
+        let batch_id = {
+            let mut current_batch = self.current_batch.lock().await;
+            let has_existing_current_list = {
+                let batches = self.batches.lock().await;
+                batches.iter().any(|batch| batch.id == *current_batch)
+            };
+            if has_existing_current_list {
+                *current_batch += 1;
+            }
+            *current_batch
+        };
+
+        let mut batch = Batch::new(batch_id);
+        batch.summary = Some(if summary.trim().is_empty() {
+            subject
+        } else {
+            summary
+        });
+
+        let mut batches = self.batches.lock().await;
+        for existing in batches.iter_mut() {
+            if existing.status == BatchStatus::Active {
+                existing.status = BatchStatus::Paused;
+            }
+        }
+        if let Some(existing) = batches.iter_mut().find(|existing| existing.id == batch_id) {
+            *existing = batch.clone();
+        } else {
+            batches.push(batch.clone());
+        }
+        batch
+    }
+
+    /// Return the current active task list, if one exists.
+    pub async fn active_list(&self) -> Option<Batch> {
+        let current_batch = *self.current_batch.lock().await;
+        let batches = self.batches.lock().await;
+        batches
+            .iter()
+            .find(|batch| batch.id == current_batch && batch.status == BatchStatus::Active)
+            .cloned()
+    }
+
+    /// Complete the current active task list.
+    pub async fn complete_list(&self) -> Option<Batch> {
+        let current_batch = *self.current_batch.lock().await;
+        let mut batches = self.batches.lock().await;
+        let batch = batches
+            .iter_mut()
+            .find(|batch| batch.id == current_batch && batch.status == BatchStatus::Active)?;
+        batch.status = BatchStatus::Archived;
+        Some(batch.clone())
+    }
+
+    /// Return the current batch id.
+    pub async fn current_batch(&self) -> u64 {
+        *self.current_batch.lock().await
+    }
+
+    /// List active/paused task lists that still have pending or in-progress tasks.
+    pub async fn lists_with_pending(&self) -> Vec<Batch> {
+        let batches = self.batches.lock().await.clone();
+        let tasks = self.tasks.lock().await;
+        let mut result: Vec<Batch> = batches
+            .into_iter()
+            .filter(|batch| {
+                matches!(batch.status, BatchStatus::Active | BatchStatus::Paused)
+                    && tasks.values().any(|task| {
+                        task.batch == batch.id
+                            && matches!(task.status, TaskStatus::Pending | TaskStatus::InProgress)
+                    })
+            })
+            .collect();
+        result.sort_by_key(|batch| batch.id);
+        result
+    }
 
     /// Get or create a batch by id.
     pub async fn get_or_create_batch(&self, batch_id: u64) -> Batch {
