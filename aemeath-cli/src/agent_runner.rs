@@ -44,6 +44,83 @@ pub struct CliAgentRunner {
     pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
 }
 
+fn build_json_logger_input_data(
+    messages: &[Message],
+    system_blocks_count: usize,
+    tool_schemas: &[serde_json::Value],
+) -> serde_json::Value {
+    let new_messages: Vec<serde_json::Value> = messages
+        .get(messages.len().saturating_sub(1)..)
+        .unwrap_or(&[])
+        .iter()
+        .map(|m| {
+            let blocks: Vec<serde_json::Value> = m
+                .content
+                .iter()
+                .filter_map(|b| serde_json::to_value(b).ok())
+                .collect();
+            json!({
+                "role": m.role,
+                "content_blocks": blocks,
+                "block_count": m.content.len(),
+            })
+        })
+        .collect();
+    json!({
+        "messages": new_messages,
+        "system_blocks_count": system_blocks_count,
+        "tool_schemas_count": tool_schemas.len(),
+        "tool_schemas_names": tool_schemas.iter().map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?")).collect::<Vec<_>>(),
+    })
+}
+
+fn build_json_logger_output_data(
+    resp: &aemeath_llm::types::StreamResponse,
+    elapsed_secs: f64,
+    provider: &str,
+) -> serde_json::Value {
+    let blocks: Vec<serde_json::Value> = resp
+        .assistant_message
+        .content
+        .iter()
+        .filter_map(|block| serde_json::to_value(block).ok())
+        .collect();
+    json!({
+        "stop_reason": format!("{:?}", resp.stop_reason),
+        "input_tokens": resp.usage.input_tokens,
+        "output_tokens": resp.usage.output_tokens,
+        "elapsed_secs": elapsed_secs,
+        "provider": provider,
+        "content_blocks": blocks,
+    })
+}
+
+fn build_json_logger_tool_call_data(tool_call: &ToolCall) -> serde_json::Value {
+    json!({
+        "tool_use_id": tool_call.id,
+        "tool_name": tool_call.name,
+        "input": tool_call.input,
+    })
+}
+
+fn build_json_logger_tool_result_data(
+    id: &str,
+    output: &str,
+    is_error: bool,
+    call_info: &std::collections::HashMap<String, (String, String)>,
+) -> serde_json::Value {
+    let tool_name = call_info
+        .get(id)
+        .map(|(name, _)| name.as_str())
+        .unwrap_or("?");
+    json!({
+        "tool_use_id": id,
+        "tool_name": tool_name,
+        "is_error": is_error,
+        "output": output,
+    })
+}
+
 fn build_tool_calls_progress_event(sequence: usize, tool_calls: &[ToolCall]) -> AgentProgressEvent {
     AgentProgressEvent {
         sequence,
@@ -432,23 +509,6 @@ impl AgentRunner for CliAgentRunner {
                 sub_schemas.len(),
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
-            // 分化日志：input
-            if let Some(logger_mutex) = crate::get_json_logger() {
-                if let Ok(mut logger) = logger_mutex.lock() {
-                    let _ = logger.log_input(
-                        turn,
-                        &role_name_for_log,
-                        &model_name_for_log,
-                        serde_json::json!({
-                            "provider": client.provider_name(),
-                            "model": model_name_for_log,
-                            "messages": messages.len(),
-                            "tools": sub_schemas.len(),
-                            "latest_roles": latest,
-                        }),
-                    );
-                }
-            }
         };
 
         let sub_ctx = ToolContext {
@@ -535,28 +595,8 @@ impl AgentRunner for CliAgentRunner {
 
             // JsonLogger: 记录 LLM 输入快照
             if let Some(ref jl) = self.json_logger {
-                let new_messages: Vec<serde_json::Value> = messages
-                    [messages.len().saturating_sub(1)..]
-                    .iter()
-                    .map(|m| {
-                        let blocks: Vec<serde_json::Value> = m
-                            .content
-                            .iter()
-                            .filter_map(|b| serde_json::to_value(b).ok())
-                            .collect();
-                        json!({
-                            "role": m.role,
-                            "content_blocks": blocks,
-                            "block_count": m.content.len(),
-                        })
-                    })
-                    .collect();
-                let data = json!({
-                    "messages": new_messages,
-                    "system_blocks_count": system_blocks.len(),
-                    "tool_schemas_count": sub_schemas.len(),
-                    "tool_schemas_names": sub_schemas.iter().map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?")).collect::<Vec<_>>(),
-                });
+                let data =
+                    build_json_logger_input_data(&messages, system_blocks.len(), &sub_schemas);
                 let _ = jl.lock().unwrap().log_input(
                     turn_number,
                     &role_name_for_log,
@@ -589,20 +629,11 @@ impl AgentRunner for CliAgentRunner {
 
                     // JsonLogger: 记录 LLM 完整输出
                     if let Some(ref jl) = self.json_logger {
-                        let blocks: Vec<serde_json::Value> = resp
-                            .assistant_message
-                            .content
-                            .iter()
-                            .filter_map(|block| serde_json::to_value(block).ok())
-                            .collect();
-                        let data = json!({
-                            "stop_reason": format!("{:?}", resp.stop_reason),
-                            "input_tokens": resp.usage.input_tokens,
-                            "output_tokens": resp.usage.output_tokens,
-                            "elapsed_secs": start_time.elapsed().as_secs_f64(),
-                            "provider": client.provider_name(),
-                            "content_blocks": blocks,
-                        });
+                        let data = build_json_logger_output_data(
+                            &resp,
+                            start_time.elapsed().as_secs_f64(),
+                            client.provider_name(),
+                        );
                         let _ = jl.lock().unwrap().log_output(
                             turn_number,
                             &role_name_for_log,
@@ -630,23 +661,6 @@ impl AgentRunner for CliAgentRunner {
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
 
-                    // 分化日志：output
-                    if let Some(logger_mutex) = crate::get_json_logger() {
-                        if let Ok(mut logger) = logger_mutex.lock() {
-                            let _ = logger.log_output(
-                                turn_number,
-                                &role_name_for_log,
-                                &model_name_for_log,
-                                serde_json::json!({
-                                    "stop_reason": format!("{:?}", resp.stop_reason),
-                                    "input_tokens": resp.usage.input_tokens,
-                                    "output_tokens": resp.usage.output_tokens,
-                                    "tool_call_count": tool_calls.len(),
-                                }),
-                            );
-                        }
-                    }
-
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         progress(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();
@@ -658,11 +672,7 @@ impl AgentRunner for CliAgentRunner {
                     // JsonLogger: 记录工具调用
                     if let Some(ref jl) = self.json_logger {
                         for tc in &tool_calls {
-                            let data = json!({
-                                "tool_use_id": tc.id,
-                                "tool_name": tc.name,
-                                "input": tc.input,
-                            });
+                            let data = build_json_logger_tool_call_data(tc);
                             let _ = jl.lock().unwrap().log_tool_call(
                                 turn_number,
                                 &role_name_for_log,
@@ -690,23 +700,6 @@ impl AgentRunner for CliAgentRunner {
                     // while long-running sub-agent tools are still in flight.
                     if let Some(ref tx) = progress_tx {
                         let _ = tx.try_send(build_tool_calls_progress_event(turn + 1, &tool_calls));
-                    }
-
-                    // 分化日志：tool_call（每个工具调用写一行）
-                    if let Some(logger_mutex) = crate::get_json_logger() {
-                        if let Ok(mut logger) = logger_mutex.lock() {
-                            for call in &tool_calls {
-                                let _ = logger.log_tool_call(
-                                    turn_number,
-                                    &role_name_for_log,
-                                    &model_name_for_log,
-                                    serde_json::json!({
-                                        "id": call.id,
-                                        "name": call.name,
-                                    }),
-                                );
-                            }
-                        }
                     }
 
                     let mut results = agent.execute_tools(&tool_calls).await;
@@ -738,40 +731,14 @@ impl AgentRunner for CliAgentRunner {
                             Some(turn_number),
                             &format!("  ← {}[{}]: {}", tool_name, label, out_short),
                         );
-
-                        // 分化日志：tool_result
-                        let preview: String = output.chars().take(500).collect();
-                        if let Some(logger_mutex) = crate::get_json_logger() {
-                            if let Ok(mut logger) = logger_mutex.lock() {
-                                let _ = logger.log_tool_result(
-                                    turn_number,
-                                    &role_name_for_log,
-                                    &model_name_for_log,
-                                    serde_json::json!({
-                                        "tool_name": tool_name,
-                                        "tool_id": id,
-                                        "is_error": is_error,
-                                        "output_chars": output.chars().count(),
-                                        "output_preview": preview,
-                                    }),
-                                );
-                            }
-                        }
                     }
 
                     // JsonLogger: 记录工具执行结果（完整输出）
                     if let Some(ref jl) = self.json_logger {
                         for (id, output, is_error, _) in results.iter() {
-                            let tool_name = call_info
-                                .get(id.as_str())
-                                .map(|(n, _)| n.as_str())
-                                .unwrap_or("?");
-                            let data = json!({
-                                "tool_use_id": id,
-                                "tool_name": tool_name,
-                                "is_error": is_error,
-                                "output": output,
-                            });
+                            let data = build_json_logger_tool_result_data(
+                                id, output, *is_error, &call_info,
+                            );
                             let _ = jl.lock().unwrap().log_tool_result(
                                 turn_number,
                                 &role_name_for_log,
@@ -973,6 +940,52 @@ mod tests {
         let summary = format_grouped_tool_summaries(&calls);
 
         assert_eq!(summary, "Read ×4: a.rs, b.rs, c.rs +1 more");
+    }
+
+    #[test]
+    fn test_build_json_logger_input_data_includes_latest_message_and_schema_names() {
+        let messages = vec![Message::user("first"), Message::user("latest")];
+        let schemas = vec![serde_json::json!({"name": "Read"})];
+
+        let data = build_json_logger_input_data(&messages, 2, &schemas);
+
+        assert_eq!(data["system_blocks_count"], 2);
+        assert_eq!(data["tool_schemas_count"], 1);
+        assert_eq!(data["tool_schemas_names"], serde_json::json!(["Read"]));
+        assert_eq!(data["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(data["messages"][0]["role"], "user");
+        assert_eq!(data["messages"][0]["block_count"], 1);
+    }
+
+    #[test]
+    fn test_build_json_logger_tool_call_data_contains_full_input() {
+        let call = test_tool_call(
+            "tool-1",
+            "Bash",
+            serde_json::json!({"command": "cargo check"}),
+        );
+
+        let data = build_json_logger_tool_call_data(&call);
+
+        assert_eq!(data["tool_use_id"], "tool-1");
+        assert_eq!(data["tool_name"], "Bash");
+        assert_eq!(data["input"]["command"], "cargo check");
+    }
+
+    #[test]
+    fn test_build_json_logger_tool_result_data_contains_full_output() {
+        let mut call_info = std::collections::HashMap::new();
+        call_info.insert(
+            "tool-1".to_string(),
+            ("Read".to_string(), "file.rs".to_string()),
+        );
+
+        let data = build_json_logger_tool_result_data("tool-1", "完整输出", false, &call_info);
+
+        assert_eq!(data["tool_use_id"], "tool-1");
+        assert_eq!(data["tool_name"], "Read");
+        assert_eq!(data["is_error"], false);
+        assert_eq!(data["output"], "完整输出");
     }
 
     fn test_tool_call(

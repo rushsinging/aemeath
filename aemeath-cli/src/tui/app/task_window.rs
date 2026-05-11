@@ -6,8 +6,9 @@
 use aemeath_core::task::{Task, TaskStatus};
 
 /// TTL for completed tasks shown in the window (seconds relative to newest).
-/// Older completed are excluded to keep the window fresh.
-const COMPLETED_TTL_SECS: u64 = 30;
+/// Older completed are excluded **only when** the window would overflow `max_lines`.
+/// When the window has spare capacity, all completed tasks in the current batch are shown.
+const COMPLETED_TTL_SECS: u64 = 300; // 5 minutes
 
 /// 构建 task 状态显示行（窗口化，含摘要行）。
 ///
@@ -31,17 +32,26 @@ pub fn build_task_window<'a>(
         return Vec::new();
     }
 
-    // --- completed: 按 updated_at 降序，TTL 过滤旧记录 ---
+    // --- completed: 按 updated_at 降序 ---
+    let all_completed_count = tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Completed)
+        .count();
     let mut completed: Vec<&Task> = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
         .collect();
     completed.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
+    // TTL filter: only apply when there are more completed than max_lines
     let newest_ts = completed.first().map(|t| t.updated_at).unwrap_or(0);
-    let completed: Vec<&Task> = completed
-        .into_iter()
-        .filter(|t| newest_ts.saturating_sub(t.updated_at) <= COMPLETED_TTL_SECS)
-        .collect();
+    let completed: Vec<&Task> = if completed.len() > max_lines {
+        completed
+            .into_iter()
+            .filter(|t| newest_ts.saturating_sub(t.updated_at) <= COMPLETED_TTL_SECS)
+            .collect()
+    } else {
+        completed
+    };
 
     let in_progress: Vec<&Task> = tasks
         .iter()
@@ -54,7 +64,7 @@ pub fn build_task_window<'a>(
     pending.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
 
     let total = tasks.len();
-    let completed_count = completed.len();
+    let completed_count = all_completed_count;
     let in_progress_count = in_progress.len();
     let pending_count = pending.len();
 
@@ -394,19 +404,38 @@ mod tests {
 
     #[test]
     fn test_completed_ttl_excludes_old() {
-        // 新旧 completed 混合，旧的应被 TTL 过滤
-        let now = 1000;
+        // TTL only applies when completed count exceeds max_lines.
+        // With max_lines=7 and only 2 completed, TTL does NOT filter → both shown.
+        let now: u64 = 10000;
         let tasks = vec![
-            make_task_with_ts("1", "old done", TaskStatus::Completed, now - 60), // > 30s TTL
-            make_task_with_ts("2", "recent done", TaskStatus::Completed, now - 5), // within TTL
+            make_task_with_ts("1", "old done", TaskStatus::Completed, now - 3600),
+            make_task_with_ts("2", "recent done", TaskStatus::Completed, now - 5),
             make_task_with_ts("3", "in progress", TaskStatus::InProgress, now),
             make_task_with_ts("4", "pending", TaskStatus::Pending, now),
         ];
         let result = build_task_window(&tasks, 7, 1);
-        // old completed filtered → summary says 1/4 (1 completed counted)
-        assert!(result[0].contains("1/4"));
-        // should show recent completed (#2), not old (#1)
+        // Summary uses all_completed_count (2), not TTL-filtered
+        assert!(result[0].contains("2/4"));
+        // Both completed shown (within max_lines, no TTL filtering)
         assert!(result.iter().any(|l| l.contains("✓ #2")));
-        assert!(!result.iter().any(|l| l.contains("✓ #1")));
+        assert!(result.iter().any(|l| l.contains("✓ #1")));
+
+        // Now test with many completed (> max_lines) where TTL kicks in
+        let mut many_tasks: Vec<Task> = Vec::new();
+        for i in 0..10 {
+            let ts = if i < 5 { now - 600 } else { now - 5 }; // first 5 are old
+            many_tasks.push(make_task_with_ts(
+                &format!("{}", i),
+                &format!("task {}", i),
+                TaskStatus::Completed,
+                ts,
+            ));
+        }
+        many_tasks.push(make_task_with_ts("10", "pending", TaskStatus::Pending, now));
+        let result2 = build_task_window(&many_tasks, 7, 1);
+        // Summary still shows all completed
+        assert!(result2[0].contains("10/11"));
+        // Old completed (0..4) should be filtered by TTL
+        assert!(!result2.iter().any(|l| l.contains("✓ #0 ")));
     }
 }

@@ -175,6 +175,10 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 5. **单元测试**：新增 4 个测试覆盖下限保护、TTL 过滤、pending 顺序、温和扩展场景
 6. **门禁脚本补漏**：`scripts/check-unsafe-text-ops.sh` 新增不带 `&` 的切片检测模式
 
+**修复（2026-05-11）**：
+7. **TTL 阈值调整**：30s → 300s（5 分钟），且仅当 completed 数量超过 `max_lines` 时才触发 TTL 过滤；窗口有空位时所有 completed 都显示
+8. **摘要行全量 completed 计数**：`Tasks: x/y` 中的 x 改为使用全量 completed 数（`all_completed_count`），而非 TTL 过滤后的数量，修复"Tasks: 1/5 但实际已完成 3 条"的问题
+
 **关联**：
 - Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
 - Feature #18（task batch 机制）—— 同属 task list 显示链路
