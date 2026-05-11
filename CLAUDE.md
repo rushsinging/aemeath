@@ -14,17 +14,6 @@
 4. **MUST** 遵循 DRY 原则。类型、辅助函数、常量、数据访问逻辑 **MUST** 定义一次、到处引用。**NEVER** 在多个文件重复相同逻辑。
 5. **MUST NOT** 手动调整代码格式。格式化由 `cargo fmt` / `rustfmt` 处理，只关注逻辑变更。
 
-## Progressive Disclosure
-
-根级 CLAUDE.md 定义仓库级规则。作用域级说明存放在 `specs/` 下，操作对应区域前 **MUST** 先读取。
-
-- 涉及 `aemeath-core/`：读取 `specs/core.md`。
-- 涉及 `aemeath-cli/`：读取 `specs/cli.md`。
-- 涉及 `aemeath-llm/`：读取 `specs/llm.md`。
-- 涉及 `aemeath-tools/`：读取 `specs/tools.md`。
-
-当多条作用域规则同时适用时，全部遵循。如果作用域规则与根规则出现冲突，停止操作并询问用户。
-
 ## 项目结构
 
 ```
@@ -33,7 +22,6 @@ aemeath/                    # workspace root
 ├── aemeath-cli/            # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
 ├── aemeath-llm/            # LLM 客户端：provider API 调用、流式响应、模型池
 ├── aemeath-tools/          # 工具注册：文件读写、搜索、Bash、Agent、Web 等
-├── specs/                  # 作用域级说明（core / cli / llm / tools）
 ├── docs/                   # bug / feature 追踪（active.md + archived/）
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
 └── CLAUDE.md               # 本文件
@@ -59,6 +47,7 @@ aemeath/                    # workspace root
 - **MUST** 单个 `.rs` 文件不超过 400 行（含测试代码）。超出时立即拆分职责。
 - **MUST** 开始工作前查看 `docs/bug/active.md` 和 `docs/feature/active.md`，确认当前修改是否与已知条目相关。
 - **MUST** 修复 bug 时先添加重现该 bug 的测试用例，再提交修复代码。
+- **MUST** 解决 bug 或完成 feature 后，同步更新 `docs/bug/active.md` 或 `docs/feature/active.md`，记录问题、解决思路和当前解决状态。
 
 ### SHOULD
 - **SHOULD** 新增 provider 时同步添加 model guidance 文件。
