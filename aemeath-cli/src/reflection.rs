@@ -16,6 +16,27 @@ pub async fn run_reflection(
     client: &aemeath_llm::client::LlmClient,
     system_prompt_text: &str,
 ) -> Option<String> {
+    run_reflection_with_base_dir(
+        config,
+        turn_count,
+        messages,
+        cwd,
+        client,
+        system_prompt_text,
+        aemeath_core::memory::memory_base_dir(),
+    )
+    .await
+}
+
+async fn run_reflection_with_base_dir(
+    config: &aemeath_core::config::MemoryConfig,
+    turn_count: usize,
+    messages: &[aemeath_core::message::Message],
+    cwd: &PathBuf,
+    client: &aemeath_llm::client::LlmClient,
+    system_prompt_text: &str,
+    base_dir: PathBuf,
+) -> Option<String> {
     if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
         return None;
     }
@@ -23,8 +44,8 @@ pub async fn run_reflection(
         return None;
     }
 
-    let store = MemoryStore::new(
-        aemeath_core::memory::memory_base_dir(),
+    let mut store = MemoryStore::new(
+        base_dir.clone(),
         aemeath_core::memory::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
@@ -48,9 +69,29 @@ pub async fn run_reflection(
         Ok(output) => output,
         Err(_) => {
             // Fall back to lightweight if LLM parsing fails
-            return lightweight_reflection_text(config, turn_count, messages, cwd).await;
+            return lightweight_reflection_text_with_base_dir(
+                config, turn_count, messages, cwd, base_dir,
+            )
+            .await;
         }
     };
+
+    if config.reflection.auto_apply_suggestions {
+        return match ReflectionEngine::apply_output(&output, &mut store) {
+            Ok(result) => {
+                let mut text = ReflectionEngine::format_output(&output);
+                text.push_str(&format!(
+                    "\n已自动应用 Reflection：新增/合并 {} 条记忆，标记 {} 条过时记忆。",
+                    result.suggestions_added, result.outdated_marked
+                ));
+                Some(text)
+            }
+            Err(error) => {
+                log::warn!("Reflection auto apply failed: {error}");
+                Some(ReflectionEngine::format_output(&output))
+            }
+        };
+    }
 
     Some(ReflectionEngine::format_output(&output))
 }
@@ -128,11 +169,12 @@ fn extract_json(text: &str) -> Option<String> {
 }
 
 /// Lightweight reflection fallback: basic checks without LLM call.
-async fn lightweight_reflection_text(
+async fn lightweight_reflection_text_with_base_dir(
     config: &aemeath_core::config::MemoryConfig,
     turn_count: usize,
     messages: &[aemeath_core::message::Message],
     cwd: &PathBuf,
+    base_dir: PathBuf,
 ) -> Option<String> {
     if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
         return None;
@@ -142,7 +184,7 @@ async fn lightweight_reflection_text(
     }
 
     let store = MemoryStore::new(
-        aemeath_core::memory::memory_base_dir(),
+        base_dir,
         aemeath_core::memory::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
@@ -167,4 +209,169 @@ async fn lightweight_reflection_text(
             .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
     }
     Some(ReflectionEngine::format_output(&output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::memory::{MemoryCategory, MemoryLayer, MemorySource, MemoryStore};
+    use aemeath_llm::provider::{LlmProvider, StreamHandler};
+    use aemeath_llm::types::{StopReason, StreamResponse, SystemBlock, Usage};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    struct StaticReflectionProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for StaticReflectionProvider {
+        async fn stream_message(
+            &self,
+            _system: &[SystemBlock],
+            _messages: &[aemeath_core::message::Message],
+            _tool_schemas: &[serde_json::Value],
+            handler: &mut dyn StreamHandler,
+            _cancel: &CancellationToken,
+        ) -> Result<StreamResponse, aemeath_llm::LlmError> {
+            handler.on_text(&self.response);
+            Ok(StreamResponse {
+                assistant_message: aemeath_core::message::Message::placeholder(
+                    aemeath_core::message::Role::Assistant,
+                ),
+                usage: Usage {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+                stop_reason: StopReason::EndTurn,
+            })
+        }
+
+        fn model_name(&self) -> &str {
+            "test-reflection-model"
+        }
+
+        fn provider_name(&self) -> &str {
+            "test-reflection-provider"
+        }
+
+        fn set_reasoning(&self, _enabled: bool) {}
+
+        fn is_reasoning(&self) -> bool {
+            false
+        }
+    }
+
+    fn build_client(response: &str) -> aemeath_llm::client::LlmClient {
+        aemeath_llm::client::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
+            response: response.to_string(),
+        }))
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("aemeath-{name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[tokio::test]
+    async fn test_run_reflection_auto_apply_suggestions_writes_memory() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let response = r#"{
+            "suggested_memories": [
+                {
+                    "category": "decision",
+                    "content": "后台 reflection 自动写入 memory",
+                    "tags": ["reflection"],
+                    "reason": "auto_apply_suggestions=true"
+                }
+            ]
+        }"#;
+        let client = build_client(response);
+        let mut config = aemeath_core::config::MemoryConfig::default();
+        config.reflection.interval_turns = 2;
+        config.reflection.auto_apply_suggestions = true;
+
+        let text = run_reflection_with_base_dir(
+            &config,
+            2,
+            &[aemeath_core::message::Message::user("请记住这个决策")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await
+        .unwrap();
+        let store = MemoryStore::new(
+            &base_dir,
+            aemeath_core::memory::project_hash_from_path(&cwd),
+            config.max_entries,
+            config.similarity_threshold,
+        )
+        .unwrap();
+        let entries = store.list(Some(MemoryLayer::Project)).unwrap();
+
+        assert!(text.contains("后台 reflection 自动写入 memory"));
+        assert!(text.contains("已自动应用 Reflection：新增/合并 1 条记忆，标记 0 条过时记忆。"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, MemoryCategory::Decision);
+        assert_eq!(entries[0].content, "后台 reflection 自动写入 memory");
+        assert_eq!(entries[0].source, MemorySource::Llm);
+        assert!(entries[0]
+            .source_ref
+            .as_deref()
+            .unwrap()
+            .contains("auto_apply"));
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_reflection_auto_apply_false_does_not_write_memory() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let response = r#"{
+            "suggested_memories": [
+                {
+                    "category": "decision",
+                    "content": "auto apply false 不写入",
+                    "tags": ["reflection"],
+                    "reason": "auto_apply_suggestions=false"
+                }
+            ]
+        }"#;
+        let client = build_client(response);
+        let mut config = aemeath_core::config::MemoryConfig::default();
+        config.reflection.interval_turns = 2;
+        config.reflection.auto_apply_suggestions = false;
+
+        let text = run_reflection_with_base_dir(
+            &config,
+            2,
+            &[aemeath_core::message::Message::user("请只展示建议")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await
+        .unwrap();
+        let store = MemoryStore::new(
+            &base_dir,
+            aemeath_core::memory::project_hash_from_path(&cwd),
+            config.max_entries,
+            config.similarity_threshold,
+        )
+        .unwrap();
+        let entries = store.list(Some(MemoryLayer::Project)).unwrap();
+
+        assert!(text.contains("auto apply false 不写入"));
+        assert!(!text.contains("已自动应用 Reflection"));
+        assert!(entries.is_empty());
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
 }
