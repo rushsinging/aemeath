@@ -428,6 +428,8 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 **配置**：`logging.logs_dir`（默认 `~/.aemeath/logs/`）、`logging.role_logs_enabled`（默认 `true`）
 
+**当前状态**：修复中；已修复 TUI `input.log` 只写 injected messages 导致用户输入缺失的问题，并补齐 REPL 的 input/output/tool 分化日志写入。验证：`cargo test -p aemeath-cli test_logged_input_messages`、`cargo test -p aemeath-core test_json_logger_log_input_happy_path_writes_user_message`、`cargo check -p aemeath-cli` 通过（仅既有 `Cmd::Batch` dead_code warning）。
+
 详见 [design spec](../superpowers/specs/2026-05-09-log-split-design.md)
 
 **实施完成（2026-05-11）**：

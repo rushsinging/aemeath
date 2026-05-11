@@ -19,13 +19,11 @@ use clap::Parser;
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// 全局 session ID，供日志格式化器使用
 static SESSION_ID: OnceLock<String> = OnceLock::new();
 static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
-/// 全局分化日志写入器（input/output/tool.log），由 init_logging 初始化
-static JSON_LOGGER: OnceLock<Mutex<JsonLogger>> = OnceLock::new();
 
 /// 设置全局 session ID（只能调用一次）
 fn set_session_id(id: String) {
@@ -34,11 +32,6 @@ fn set_session_id(id: String) {
 
 pub(crate) fn set_current_turn(turn: usize) {
     CURRENT_TURN.store(turn, Ordering::Relaxed);
-}
-
-/// 获取全局 JsonLogger 的引用（供 stream.rs / agent_runner.rs 使用）
-pub(crate) fn get_json_logger() -> Option<&'static Mutex<JsonLogger>> {
-    JSON_LOGGER.get()
 }
 
 fn current_turn_for_log() -> Option<usize> {
@@ -113,24 +106,6 @@ fn init_logging(logging_config: &aemeath_core::config::LoggingConfig) {
         )
     });
     builder.init();
-
-    // 初始化分化日志（input/output/tool.log）
-    if logging_config.role_logs_enabled {
-        let base_dir = logging::logs_base_dir(logging_config.logs_dir.as_deref());
-        let sid = SESSION_ID
-            .get()
-            .map(|s| s.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        match JsonLogger::new(&base_dir, sid, logging_config.role_logs_enabled) {
-            Ok(logger) => {
-                let _ = JSON_LOGGER.set(Mutex::new(logger));
-            }
-            Err(e) => {
-                log::warn!("无法初始化分化日志: {}", e);
-            }
-        }
-    }
 }
 
 fn init_panic_hook() {
@@ -607,6 +582,48 @@ async fn run_chat(mut args: Args) {
         aemeath_core::hook::HookRunner::empty(cwd_str.clone())
     };
 
+    // 确定 session ID（尽早生成，以便分化日志、agent_runner 等使用）
+    let session_id = args
+        .resume
+        .clone()
+        .unwrap_or_else(|| aemeath_core::session::new_session_id());
+    set_session_id(session_id.clone());
+    log::info!("session started");
+
+    // 初始化分化日志（input.log / output.log / tool.log）
+    let json_logger: Option<Arc<Mutex<JsonLogger>>> = if config_file
+        .as_ref()
+        .map(|c| c.logging.role_logs_enabled)
+        .unwrap_or(true)
+    {
+        let logs_dir = config_file
+            .as_ref()
+            .and_then(|c| c.logging.logs_dir.as_ref())
+            .map(|d| {
+                if d.starts_with('~') {
+                    let home = dirs::home_dir().unwrap_or_default();
+                    PathBuf::from(d.replacen('~', &home.to_string_lossy(), 1))
+                } else {
+                    PathBuf::from(d)
+                }
+            })
+            .unwrap_or_else(|| logging::log_dir().join("logs"));
+        let logging_cfg = config_file
+            .as_ref()
+            .map(|c| &c.logging)
+            .cloned()
+            .unwrap_or_default();
+        match JsonLogger::new(&session_id, &logs_dir, &logging_cfg) {
+            Ok(jl) => Some(Arc::new(Mutex::new(jl))),
+            Err(e) => {
+                log::warn!("无法创建分化日志: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let agent_runner = {
         // Build LlmClientPool if there are multiple providers configured
         let models_config_arc = std::sync::Arc::new(
@@ -643,6 +660,7 @@ async fn run_chat(mut args: Args) {
             hook_runner: hook_runner.clone(),
             reasoning,
             models_config: models_config_arc.clone(),
+            json_logger: json_logger.clone(),
         })
     };
 
@@ -739,43 +757,6 @@ async fn run_chat(mut args: Args) {
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    // 确定 session ID
-    let session_id = args
-        .resume
-        .clone()
-        .unwrap_or_else(|| aemeath_core::session::new_session_id());
-    set_session_id(session_id.clone());
-    log::info!("session started");
-
-    // 初始化分化日志写入器
-    {
-        let logs_dir = config_file
-            .as_ref()
-            .and_then(|c| c.logging.logs_dir.as_deref())
-            .map(|d| {
-                if d.starts_with('~') {
-                    dirs::home_dir()
-                        .unwrap_or_default()
-                        .join(d.trim_start_matches("~/"))
-                } else {
-                    PathBuf::from(d)
-                }
-            })
-            .unwrap_or_else(|| logging::logs_base_dir(None));
-        let role_logs_enabled = config_file
-            .as_ref()
-            .map(|c| c.logging.role_logs_enabled)
-            .unwrap_or(true);
-        match JsonLogger::new(&logs_dir, session_id.clone(), role_logs_enabled) {
-            Ok(logger) => {
-                let _ = JSON_LOGGER.set(Mutex::new(logger));
-            }
-            Err(e) => {
-                log::warn!("无法初始化分化日志: {e}");
-            }
-        }
-    }
-
     // 解析并发限制: CLI args > config file > defaults
     let max_tool_concurrency = args
         .max_tool_concurrency
@@ -830,6 +811,7 @@ async fn run_chat(mut args: Args) {
             skills_map.clone(),
             hook_runner.clone(),
             memory_config,
+            json_logger.clone(),
         )
         .await;
     } else {
@@ -851,6 +833,7 @@ async fn run_chat(mut args: Args) {
             .unwrap_or_default();
         app.set_skills(skills_map);
         app.hook_runner = hook_runner.clone();
+        app.json_logger = json_logger.clone();
         if let Err(e) = app
             .run(
                 client,

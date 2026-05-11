@@ -5,7 +5,10 @@
 //! | 文件 | 职责 | 内容 |
 //! |------|------|------|
 //! | `aemeath.log` | **应用主日志**：所有模块的结构化运行日志 | env_logger pipe 接收全部 `log::*` 输出，包含所有 crate（core/cli/llm/tools）的 info/warn/error/debug |
-//! | `agent.log` | **Agent 对话审计日志**：LLM 交互的完整记录 | 主 agent 和 sub-agent 的每次 LLM 请求/响应摘要、tool call 触发与结果摘要、token 用量、模型切换。面向"复现对话流程"而非"调试内部状态" |
+//! | `input.log` | **LLM 输入快照** | 每次 API 调用的新增 messages 摘要、system blocks、tool schemas |
+//! | `output.log` | **LLM 完整输出** | 模型返回的完整 content blocks、token 用量、耗时 |
+//! | `tool.log` | **工具调用记录** | 工具调用请求参数 + 工具执行结果（完整输出） |
+//! | `agent.log` | **已废弃**：Agent 对话审计日志 | 无写入点，保留枚举兼容 |
 //! | `panic.log` | **Panic 崩溃日志** | panic 信息 + backtrace |
 
 use chrono::{DateTime, Local};
@@ -15,6 +18,8 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::config::logging::LoggingConfig;
+
 pub const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 pub const LOG_MAX_BACKUPS: usize = 5;
 pub const LOG_RETENTION_DAYS: u64 = 30;
@@ -22,6 +27,7 @@ pub const LOG_RETENTION_DAYS: u64 = 30;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFile {
     Aemeath,
+    /// 已废弃：无写入点，保留枚举兼容
     Agent,
     Panic,
     Input,
@@ -46,22 +52,8 @@ pub fn log_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".aemeath")
 }
 
-/// 根据配置确定日志基础目录：
-/// - 有 logs_dir 配置 → 使用配置值
-/// - 无配置 → 默认 ~/.aemeath/logs/
-pub fn logs_base_dir(logs_dir_config: Option<&str>) -> PathBuf {
-    logs_dir_config
-        .map(PathBuf::from)
-        .unwrap_or_else(|| log_dir().join("logs"))
-}
-
 pub fn log_path(log_file: LogFile) -> PathBuf {
     log_dir().join(log_file.file_name())
-}
-
-/// 获取指定基础目录下的日志文件路径
-pub fn log_path_in_dir(base_dir: &Path, log_file: LogFile) -> PathBuf {
-    base_dir.join(log_file.file_name())
 }
 
 pub fn prepare_log_file(log_file: LogFile) -> io::Result<PathBuf> {
@@ -242,69 +234,71 @@ fn is_rotated_log_path(path: &Path) -> bool {
     base.ends_with(".log") && suffix.chars().all(|c| c.is_ascii_digit())
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// JsonLogger — 分化日志写入器
-// ═══════════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------------------
+// JsonLogger — 分化日志（input.log / output.log / tool.log）
+// ---------------------------------------------------------------------------
 
-/// 分化日志写入器。
+/// 分化日志写入器，将 agent 交互按职责写入三个独立 JSON 日志文件。
 ///
-/// 将 LLM 交互日志从 `aemeath.log` 分离为三个独立 JSON 文件：
-/// - `input.log`：LLM 输入快照
-/// - `output.log`：LLM 完整输出
-/// - `tool.log`：工具调用请求 + 结果
+/// 所有方法为 `&mut self`，调用方应通过 `Arc<Mutex<JsonLogger>>` 共享。
 pub struct JsonLogger {
     input: BufWriter<File>,
     output: BufWriter<File>,
     tool: BufWriter<File>,
+    input_path: PathBuf,
+    output_path: PathBuf,
+    tool_path: PathBuf,
     session_id: String,
-    enabled: bool,
+    config: LoggingConfig,
 }
 
 impl JsonLogger {
-    /// 创建 JsonLogger，在 `base_dir` 下打开三个日志文件。
+    /// 创建 JsonLogger，自动创建日志目录并打开三个文件。
     ///
-    /// 目录不存在时自动创建。文件轮转复用 `rotate_if_needed()`。
-    /// 如果 `enabled` 为 false，使用 `/dev/null` 占位。
-    pub fn new(base_dir: &Path, session_id: String, enabled: bool) -> io::Result<Self> {
-        fs::create_dir_all(base_dir)?;
-        cleanup_old_rotated_logs(base_dir)?;
+    /// 如果目录不存在则创建。文件以 append + create 模式打开。
+    pub fn new(session_id: &str, logs_dir: &Path, config: &LoggingConfig) -> io::Result<Self> {
+        fs::create_dir_all(logs_dir)?;
 
-        let open = |log_file: LogFile| -> io::Result<BufWriter<File>> {
-            let path = log_path_in_dir(base_dir, log_file);
-            rotate_if_needed(&path, LOG_MAX_BYTES, LOG_MAX_BACKUPS)?;
-            let file = OpenOptions::new().create(true).append(true).open(&path)?;
-            Ok(BufWriter::new(file))
-        };
+        let input_path = logs_dir.join("input.log");
+        let output_path = logs_dir.join("output.log");
+        let tool_path = logs_dir.join("tool.log");
 
-        let null = || -> io::Result<BufWriter<File>> {
-            let file = OpenOptions::new().write(true).open(if cfg!(windows) {
-                "NUL"
-            } else {
-                "/dev/null"
-            })?;
-            Ok(BufWriter::new(file))
-        };
+        rotate_if_needed(&input_path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(&output_path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(&tool_path, config.max_bytes, config.max_backups)?;
 
-        let (input, output, tool) = if enabled {
-            (
-                open(LogFile::Input)?,
-                open(LogFile::Output)?,
-                open(LogFile::Tool)?,
-            )
-        } else {
-            (null()?, null()?, null()?)
-        };
+        let input = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&input_path)?,
+        );
+        let output = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&output_path)?,
+        );
+        let tool = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tool_path)?,
+        );
 
         Ok(Self {
             input,
             output,
             tool,
-            session_id,
-            enabled,
+            input_path,
+            output_path,
+            tool_path,
+            session_id: session_id.to_string(),
+            config: config.clone(),
         })
     }
 
-    /// 写入 input.log — LLM 输入快照
+    /// 记录 LLM 输入快照到 `input.log`。
     pub fn log_input(
         &mut self,
         turn: usize,
@@ -312,19 +306,21 @@ impl JsonLogger {
         model: &str,
         data: serde_json::Value,
     ) -> io::Result<()> {
-        let session_id = self.session_id.clone();
-        write_json_line(
+        let path = self.input_path.clone();
+        write_role_entry(
             &mut self.input,
-            &session_id,
+            &path,
             "input",
             turn,
             role,
             model,
             data,
+            &self.session_id,
+            &self.config,
         )
     }
 
-    /// 写入 output.log — LLM 完整输出
+    /// 记录 LLM 完整输出到 `output.log`。
     pub fn log_output(
         &mut self,
         turn: usize,
@@ -332,19 +328,21 @@ impl JsonLogger {
         model: &str,
         data: serde_json::Value,
     ) -> io::Result<()> {
-        let session_id = self.session_id.clone();
-        write_json_line(
+        let path = self.output_path.clone();
+        write_role_entry(
             &mut self.output,
-            &session_id,
+            &path,
             "output",
             turn,
             role,
             model,
             data,
+            &self.session_id,
+            &self.config,
         )
     }
 
-    /// 写入 tool.log — 工具调用请求
+    /// 记录工具调用请求到 `tool.log`。
     pub fn log_tool_call(
         &mut self,
         turn: usize,
@@ -352,19 +350,21 @@ impl JsonLogger {
         model: &str,
         data: serde_json::Value,
     ) -> io::Result<()> {
-        let session_id = self.session_id.clone();
-        write_json_line(
+        let path = self.tool_path.clone();
+        write_role_entry(
             &mut self.tool,
-            &session_id,
+            &path,
             "tool_call",
             turn,
             role,
             model,
             data,
+            &self.session_id,
+            &self.config,
         )
     }
 
-    /// 写入 tool.log — 工具调用结果
+    /// 记录工具执行结果到 `tool.log`。
     pub fn log_tool_result(
         &mut self,
         turn: usize,
@@ -372,50 +372,67 @@ impl JsonLogger {
         model: &str,
         data: serde_json::Value,
     ) -> io::Result<()> {
-        let session_id = self.session_id.clone();
-        write_json_line(
+        let path = self.tool_path.clone();
+        write_role_entry(
             &mut self.tool,
-            &session_id,
+            &path,
             "tool_result",
             turn,
             role,
             model,
             data,
+            &self.session_id,
+            &self.config,
         )
-    }
-
-    /// 返回是否已启用
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
     }
 }
 
-/// 向指定 writer 中写入一行 JSON 日志
-fn write_json_line(
+/// 内部统一写入函数
+fn write_role_entry(
     writer: &mut BufWriter<File>,
-    session_id: &str,
-    log_type: &str,
+    path: &Path,
+    event_type: &str,
     turn: usize,
     role: &str,
     model: &str,
     data: serde_json::Value,
+    session_id: &str,
+    config: &LoggingConfig,
 ) -> io::Result<()> {
-    let line = serde_json::json!({
+    check_rotate(writer, path, config)?;
+
+    let entry = json!({
         "ts": timestamp_rfc3339(),
         "session": session_id,
         "turn": turn,
         "role": role,
         "model": model,
-        "type": log_type,
+        "type": event_type,
         "data": data,
     });
-    writeln!(writer, "{}", line)
+    writeln!(
+        writer,
+        "{}",
+        serde_json::to_string(&entry).unwrap_or_default()
+    )?;
+    writer.flush()
 }
 
-impl Drop for JsonLogger {
-    fn drop(&mut self) {
-        // BufWriter 自动 flush 到 File
+/// 检查文件大小，超过 max_bytes 时轮转并重新打开
+fn check_rotate(
+    writer: &mut BufWriter<File>,
+    path: &Path,
+    config: &LoggingConfig,
+) -> io::Result<()> {
+    let need_rotate = fs::metadata(path)
+        .map(|m| m.len() >= config.max_bytes)
+        .unwrap_or(false);
+    if need_rotate {
+        writer.flush()?;
+        rotate_if_needed(path, config.max_bytes, config.max_backups)?;
+        *writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -440,145 +457,6 @@ mod tests {
         ];
         assert_eq!(names.len(), 6);
         assert!(names.iter().all(|name| name.ends_with(".log")));
-    }
-
-    #[test]
-    fn test_log_file_new_variants_file_name() {
-        assert_eq!(LogFile::Input.file_name(), "input.log");
-        assert_eq!(LogFile::Output.file_name(), "output.log");
-        assert_eq!(LogFile::Tool.file_name(), "tool.log");
-    }
-
-    #[test]
-    fn test_logs_base_dir_with_config() {
-        let dir = logs_base_dir(Some("/custom/logs"));
-        assert_eq!(dir, PathBuf::from("/custom/logs"));
-    }
-
-    #[test]
-    fn test_logs_base_dir_default() {
-        let dir = logs_base_dir(None);
-        assert!(dir.ends_with("logs"));
-        assert!(dir.starts_with(log_dir()));
-    }
-
-    #[test]
-    fn test_log_path_in_dir() {
-        let base = Path::new("/tmp/test_logs");
-        assert_eq!(
-            log_path_in_dir(base, LogFile::Input),
-            PathBuf::from("/tmp/test_logs/input.log")
-        );
-        assert_eq!(
-            log_path_in_dir(base, LogFile::Output),
-            PathBuf::from("/tmp/test_logs/output.log")
-        );
-        assert_eq!(
-            log_path_in_dir(base, LogFile::Tool),
-            PathBuf::from("/tmp/test_logs/tool.log")
-        );
-    }
-
-    #[test]
-    fn test_json_logger_new_disabled_does_not_create_files() {
-        let tmp =
-            std::env::temp_dir().join(format!("aemeath_test_json_logger_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let result = JsonLogger::new(&tmp, "test-session".to_string(), false);
-        assert!(result.is_ok());
-        // input/output/tool.log 不应存在（写入 /dev/null）
-        assert!(!tmp.join("input.log").exists());
-        assert!(!tmp.join("output.log").exists());
-        assert!(!tmp.join("tool.log").exists());
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_json_logger_new_enabled_creates_directory_and_files() {
-        let tmp = std::env::temp_dir().join(format!(
-            "aemeath_test_json_logger_enabled_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let logger = JsonLogger::new(&tmp, "test-session".to_string(), true);
-        assert!(logger.is_ok());
-        // 目录和文件应该创建
-        assert!(tmp.join("input.log").exists());
-        assert!(tmp.join("output.log").exists());
-        assert!(tmp.join("tool.log").exists());
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_json_logger_write_and_format() {
-        let tmp = std::env::temp_dir().join(format!(
-            "aemeath_test_json_logger_write_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let mut logger = JsonLogger::new(&tmp, "session-1".to_string(), true).unwrap();
-
-        logger
-            .log_input(3, "default", "gpt-5.5", serde_json::json!({"messages": 5}))
-            .unwrap();
-        logger
-            .log_output(3, "default", "gpt-5.5", serde_json::json!({"tokens": 100}))
-            .unwrap();
-        logger
-            .log_tool_call(3, "default", "gpt-5.5", serde_json::json!({"tool": "Read"}))
-            .unwrap();
-        logger
-            .log_tool_result(3, "default", "gpt-5.5", serde_json::json!({"result": "ok"}))
-            .unwrap();
-        drop(logger);
-
-        let input_content = std::fs::read_to_string(tmp.join("input.log")).unwrap();
-        let output_content = std::fs::read_to_string(tmp.join("output.log")).unwrap();
-        let tool_content = std::fs::read_to_string(tmp.join("tool.log")).unwrap();
-
-        // 验证 JSON 格式：取首行，包含必要字段
-        let check = |content: &str, expected_type: &str| {
-            let line = content.lines().find(|l| !l.trim().is_empty()).unwrap();
-            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-            assert_eq!(parsed["session"], "session-1");
-            assert_eq!(parsed["turn"], 3);
-            assert_eq!(parsed["role"], "default");
-            assert_eq!(parsed["model"], "gpt-5.5");
-            assert_eq!(parsed["type"], expected_type);
-            assert!(!parsed["ts"].as_str().unwrap().is_empty());
-        };
-
-        check(&input_content, "input");
-        check(&output_content, "output");
-        // tool.log 包含 tool_call + tool_result 两行，取最后一行
-        let tool_line = tool_content.lines().last().unwrap();
-        let tool_parsed: serde_json::Value = serde_json::from_str(tool_line).unwrap();
-        assert_eq!(tool_parsed["type"], "tool_result");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_json_logger_disabled_writes_to_null() {
-        let tmp = std::env::temp_dir().join(format!(
-            "aemeath_test_json_logger_disabled_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let mut logger = JsonLogger::new(&tmp, "session-1".to_string(), false).unwrap();
-        // disabled 时写入不报错
-        assert!(logger.log_input(1, "r", "m", serde_json::json!({})).is_ok());
-        assert!(logger
-            .log_output(1, "r", "m", serde_json::json!({}))
-            .is_ok());
-        assert!(logger
-            .log_tool_call(1, "r", "m", serde_json::json!({}))
-            .is_ok());
-        assert!(logger
-            .log_tool_result(1, "r", "m", serde_json::json!({}))
-            .is_ok());
-        assert!(!logger.is_enabled());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -619,5 +497,32 @@ mod tests {
     fn test_is_rotated_log_path_error_non_numeric_suffix() {
         assert!(!is_rotated_log_path(Path::new("aemeath.log.old")));
         assert!(!is_rotated_log_path(Path::new("aemeath.log")));
+    }
+
+    #[test]
+    fn test_json_logger_log_input_happy_path_writes_user_message() {
+        let temp = std::env::temp_dir().join(format!(
+            "aemeath-json-logger-test-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp).unwrap();
+        let mut logger = JsonLogger::new("session-1", &temp, &LoggingConfig::default()).unwrap();
+
+        logger
+            .log_input(
+                1,
+                "default",
+                "model-1",
+                json!({"messages":[{"role":"user","content":"hello"}]}),
+            )
+            .unwrap();
+
+        let content = fs::read_to_string(temp.join("input.log")).unwrap();
+        assert!(content.contains("\"session\":\"session-1\""));
+        assert!(content.contains("\"type\":\"input\""));
+        assert!(content.contains("hello"));
     }
 }

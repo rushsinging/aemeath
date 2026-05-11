@@ -908,6 +908,7 @@ impl App {
             agent_semaphore: spawn_refs.agent_semaphore.clone(),
             hook_runner: spawn_refs.hook_runner.clone(),
             memory_config: spawn_refs.memory_config.clone(),
+            json_logger: spawn_refs.json_logger.clone(),
         }
     }
 }

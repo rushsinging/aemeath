@@ -273,7 +273,7 @@ impl ConfigManager {
                         base.logging.sub_agent_log.max_payload_bytes
                     },
                 },
-                logs_dir: overlay.logging.logs_dir.or(base.logging.logs_dir),
+                logs_dir: overlay.logging.logs_dir.or(base.logging.logs_dir.clone()),
                 role_logs_enabled: overlay.logging.role_logs_enabled,
             },
         }

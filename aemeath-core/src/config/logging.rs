@@ -62,7 +62,7 @@ pub struct LoggingConfig {
     #[serde(default)]
     pub sub_agent_log: SubAgentLogConfig,
 
-    /// 分化日志文件存放目录。默认 ~/.aemeath/logs/，不配时回退 ~/.aemeath/
+    /// 分化日志存放目录。默认 ~/.aemeath/logs/，不配时回退到 ~/.aemeath/
     #[serde(default)]
     pub logs_dir: Option<String>,
 

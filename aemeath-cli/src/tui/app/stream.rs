@@ -16,6 +16,30 @@ use tokio_util::sync::CancellationToken;
 
 use crate::task_reminder::TaskReminderState;
 
+pub(crate) fn logged_input_messages(
+    messages_for_api: &[Message],
+    persisted_message_count: usize,
+) -> Vec<serde_json::Value> {
+    let injected_count = messages_for_api
+        .len()
+        .saturating_sub(persisted_message_count);
+    let mut indices: Vec<usize> = (0..injected_count).collect();
+    if persisted_message_count > 0 && !messages_for_api.is_empty() {
+        indices.push(messages_for_api.len() - 1);
+    }
+    indices
+        .into_iter()
+        .filter_map(|index| messages_for_api.get(index))
+        .map(|m| {
+            serde_json::json!({
+                "role": m.role,
+                "content": m.content,
+                "len": m.content.len(),
+            })
+        })
+        .collect()
+}
+
 /// Background task: runs the agent loop and sends UI events via channel
 #[allow(clippy::too_many_arguments)]
 pub async fn process_in_background(
@@ -42,6 +66,7 @@ pub async fn process_in_background(
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     hook_runner: aemeath_core::hook::HookRunner,
     memory_config: aemeath_core::config::MemoryConfig,
+    json_logger: Option<Arc<std::sync::Mutex<aemeath_core::logging::JsonLogger>>>,
 ) {
     let hook_ui = HookUi::new(tx.clone());
 
@@ -67,58 +92,18 @@ pub async fn process_in_background(
         ctx,
     };
 
+    const MAX_TURNS: usize = 100;
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
 
-    // Stall detection: sliding windows for repetition detection
-    let mut recent_fingerprints: Vec<String> = Vec::new();
-    const FINGERPRINT_WINDOW: usize = 4;
-    const FINGERPRINT_MAX_REPEAT: usize = 3;
-    let mut max_fingerprint_repeat: usize = 0;
-    let mut recent_tool_patterns: Vec<Vec<String>> = Vec::new();
-    const TOOL_PATTERN_WINDOW: usize = 12;
-    const TOOL_PATTERN_MAX_REPEAT: usize = 10;
-    let mut max_tool_pattern_repeat: usize = 0;
-
-    loop {
+    for _ in 0..MAX_TURNS {
         turn_count += 1;
         crate::set_current_turn(turn_count);
-        log::info!(
-            "turn started: session={}, turn={}, messages={}, context_size={}, tool_schemas={}",
-            session_id,
-            turn_count,
-            messages.len(),
-            context_size,
-            tool_schemas.len()
-        );
-        log_agent_loop_event(
-            &session_id,
-            turn_count,
-            "turn_started",
-            serde_json::json!({
-                "messages": messages.len(),
-                "context_size": context_size,
-                "tool_schema_count": tool_schemas.len(),
-            }),
-            None,
-            None,
-        );
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
-            log_agent_loop_event(
-                &session_id,
-                turn_count,
-                "interrupted",
-                serde_json::json!({
-                    "messages_before_truncate": messages.len(),
-                    "messages_at_start": messages_at_start,
-                }),
-                None,
-                None,
-            );
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages)).await;
             let _ = tx.send(UiEvent::Cancelled).await;
@@ -127,12 +112,6 @@ pub async fn process_in_background(
         }
         struct TuiStreamHandler {
             tx: mpsc::Sender<UiEvent>,
-            session_id: String,
-            turn_count: usize,
-            provider: String,
-            model: String,
-            api_messages: usize,
-            tool_schemas: usize,
             first_text_time: Option<std::time::Instant>,
             total_chars: usize,
             last_tps_update: std::time::Instant,
@@ -172,17 +151,6 @@ pub async fn process_in_background(
                 }
             }
             fn on_error(&mut self, error: &str) {
-                log::warn!(
-                    "LLM stream warning shown in TUI: session={} turn={} provider={} model={} api_messages={} tools={} streamed_chars={} error={}",
-                    self.session_id,
-                    self.turn_count,
-                    self.provider,
-                    self.model,
-                    self.api_messages,
-                    self.tool_schemas,
-                    self.total_chars,
-                    error,
-                );
                 if let Err(e) = self
                     .tx
                     .try_send(UiEvent::SystemMessage(format!("[warn] {}", error)))
@@ -336,25 +304,41 @@ pub async fn process_in_background(
 
         let mut handler = TuiStreamHandler {
             tx: tx.clone(),
-            session_id: session_id.clone(),
-            turn_count,
-            provider: client.provider_name().to_string(),
-            model: client.model_name().to_string(),
-            api_messages: messages_for_api.len(),
-            tool_schemas: tool_schemas.len(),
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
         };
-        log_llm_request_messages(
-            &session_id,
-            turn_count,
-            client.provider_name(),
-            client.model_name(),
-            &system_blocks,
-            &messages_for_api,
-            &tool_schemas,
-        );
+
+        // JsonLogger: 记录 LLM 输入快照
+        if let Some(ref jl) = json_logger {
+            let new_msgs = logged_input_messages(&messages_for_api, messages.len());
+            let sb_count = system_blocks.len();
+            let sb_summary: Vec<serde_json::Value> = system_blocks
+                .iter()
+                .map(|sb| {
+                    serde_json::json!({
+                        "type": sb.block_type,
+                        "len": sb.text.len(),
+                    })
+                })
+                .collect();
+            let schema_names: Vec<&str> = tool_schemas
+                .iter()
+                .map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?"))
+                .collect();
+            let data = serde_json::json!({
+                "messages": new_msgs,
+                "system_blocks_count": sb_count,
+                "system_blocks": sb_summary,
+                "tool_schemas_count": tool_schemas.len(),
+                "tool_schemas_names": schema_names,
+            });
+            let _ = jl
+                .lock()
+                .unwrap()
+                .log_input(turn_count, "default", client.model_name(), data);
+        }
+
         let api_start = std::time::Instant::now();
         let response = client
             .stream_message(
@@ -366,20 +350,6 @@ pub async fn process_in_background(
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        if let Err(error) = &response {
-            log::warn!(
-                "turn api failed: session={}, turn={}, provider={}, model={}, elapsed_secs={:.3}, api_messages={}, tool_schemas={}, streamed_chars={}, error={}",
-                session_id,
-                turn_count,
-                client.provider_name(),
-                client.model_name(),
-                api_elapsed,
-                messages_for_api.len(),
-                tool_schemas.len(),
-                handler.total_chars,
-                error,
-            );
-        }
         log::debug!(
             "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
             session_id,
@@ -401,123 +371,46 @@ pub async fn process_in_background(
                 messages.push(resp.assistant_message.clone());
                 let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
-                // Collect text fingerprint for repetition detection
-                {
-                    let text = resp.assistant_message.text_content();
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        let fp: String = trimmed.chars().take(200).collect();
-                        recent_fingerprints.push(fp);
-                        if recent_fingerprints.len() > FINGERPRINT_WINDOW {
-                            recent_fingerprints.remove(0);
-                        }
-                    }
-                }
-                // Check for repetitive text (LLM stuck on the same output)
-                if recent_fingerprints.len() >= FINGERPRINT_MAX_REPEAT {
-                    let last = &recent_fingerprints[recent_fingerprints.len() - 1];
-                    let repeat_count = recent_fingerprints
-                        .iter()
-                        .rev()
-                        .take(FINGERPRINT_MAX_REPEAT)
-                        .filter(|fp| *fp == last)
-                        .count();
-                    if repeat_count > max_fingerprint_repeat {
-                        max_fingerprint_repeat = repeat_count;
-                        log::debug!(
-                            "[stall] fingerprint repeat count: {} (max so far: {})",
-                            repeat_count,
-                            max_fingerprint_repeat
-                        );
-                    }
-                    if repeat_count >= FINGERPRINT_MAX_REPEAT {
-                        log::warn!(
-                            "[stall] assistant text repeated {} times in recent {} turns (max: {})",
-                            repeat_count,
-                            recent_fingerprints.len(),
-                            max_fingerprint_repeat
-                        );
-                        let _ = tx
-                            .send(UiEvent::SystemMessage(
-                                "[agent loop stopped: LLM is producing repetitive output]"
-                                    .to_string(),
-                            ))
-                            .await;
-                        break;
-                    }
-                }
-
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-                log_agent_loop_event(
-                    &session_id,
-                    turn_count,
-                    "llm_response",
-                    serde_json::json!({
+
+                // JsonLogger: 记录 LLM 完整输出 + 工具调用
+                if let Some(ref jl) = json_logger {
+                    let blocks: Vec<serde_json::Value> = resp
+                        .assistant_message
+                        .content
+                        .iter()
+                        .filter_map(|block| serde_json::to_value(block).ok())
+                        .collect();
+                    let data = serde_json::json!({
                         "stop_reason": format!("{:?}", resp.stop_reason),
                         "input_tokens": resp.usage.input_tokens,
                         "output_tokens": resp.usage.output_tokens,
-                        "tool_call_count": tool_calls.len(),
                         "elapsed_secs": api_elapsed,
-                    }),
-                    None,
-                    None,
-                );
-                // Collect tool-call pattern for loop detection
-                if !tool_calls.is_empty() {
-                    let pattern: Vec<String> = tool_calls.iter().map(|c| c.name.clone()).collect();
-                    recent_tool_patterns.push(pattern);
-                    if recent_tool_patterns.len() > TOOL_PATTERN_WINDOW {
-                        recent_tool_patterns.remove(0);
-                    }
-                    if recent_tool_patterns.len() >= 2 {
-                        let last = &recent_tool_patterns[recent_tool_patterns.len() - 1];
-                        // Count consecutive identical patterns from the end
-                        let repeat_count = recent_tool_patterns
-                            .iter()
-                            .rev()
-                            .take_while(|p| *p == last)
-                            .count();
-                        if repeat_count > max_tool_pattern_repeat {
-                            max_tool_pattern_repeat = repeat_count;
-                            log::debug!(
-                                "[stall] tool pattern repeat count: {} (max so far: {}), pattern: {:?}",
-                                repeat_count,
-                                max_tool_pattern_repeat,
-                                last
-                            );
-                        }
-                        if repeat_count >= TOOL_PATTERN_MAX_REPEAT {
-                            log::warn!(
-                                "[stall] tool pattern {:?} repeated {} times in recent {} turns (max: {})",
-                                last,
-                                repeat_count,
-                                recent_tool_patterns.len(),
-                                max_tool_pattern_repeat
-                            );
-                            let _ = tx
-                                .send(UiEvent::SystemMessage(format!(
-                                    "[agent loop stopped: LLM is repeating the same tool pattern ({} x{})]",
-                                    last.join(" → "),
-                                    repeat_count
-                                )))
-                                .await;
-                            break;
-                        }
+                        "provider": client.provider_name(),
+                        "content_blocks": blocks,
+                    });
+                    let _ = jl.lock().unwrap().log_output(
+                        turn_count,
+                        "default",
+                        client.model_name(),
+                        data,
+                    );
+
+                    for tc in &tool_calls {
+                        let tc_data = serde_json::json!({
+                            "tool_use_id": tc.id,
+                            "tool_name": tc.name,
+                            "input": tc.input,
+                        });
+                        let _ = jl.lock().unwrap().log_tool_call(
+                            turn_count,
+                            "default",
+                            client.model_name(),
+                            tc_data,
+                        );
                     }
                 }
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                    log_agent_loop_event(
-                        &session_id,
-                        turn_count,
-                        "agent_loop_break",
-                        serde_json::json!({
-                            "reason": if tool_calls.is_empty() { "no_tool_calls" } else { "end_turn" },
-                            "stop_reason": format!("{:?}", resp.stop_reason),
-                            "tool_call_count": tool_calls.len(),
-                        }),
-                        None,
-                        None,
-                    );
                     if let Some(text) = crate::reflection::run_reflection(
                         &memory_config,
                         turn_count,
@@ -554,21 +447,6 @@ pub async fn process_in_background(
 
                     let mut denied_results: Vec<(String, String, bool, Vec<ImageData>)> =
                         Vec::new();
-                    log_agent_loop_event(
-                        &session_id,
-                        turn_count,
-                        "tool_batch_started",
-                        serde_json::json!({
-                            "approved_count": approved.len(),
-                            "denied_count": denied.len(),
-                            "tool_calls": tool_calls.iter().map(|call| serde_json::json!({
-                                "id": call.id,
-                                "name": call.name,
-                            })).collect::<Vec<_>>(),
-                        }),
-                        None,
-                        None,
-                    );
                     for call in &denied {
                         // PermissionDenied hook: notify when a tool is denied
                         let _hook_results = hook_ui
@@ -781,15 +659,21 @@ pub async fn process_in_background(
 
                         let results = agent.execute_tools(std::slice::from_ref(&call)).await;
                         for (id, output, is_error, images) in results {
-                            log_tool_result_event(
-                                &session_id,
-                                turn_count,
-                                &call.name,
-                                &id,
-                                is_error,
-                                &output,
-                                None,
-                            );
+                            // JsonLogger: 记录工具执行结果（完整输出）
+                            if let Some(ref jl) = json_logger {
+                                let tr_data = serde_json::json!({
+                                    "tool_use_id": id,
+                                    "tool_name": call.name,
+                                    "is_error": is_error,
+                                    "output": output,
+                                });
+                                let _ = jl.lock().unwrap().log_tool_result(
+                                    turn_count,
+                                    "default",
+                                    client.model_name(),
+                                    tr_data,
+                                );
+                            }
                             // PostToolUse hook: run with JSON output parsing
                             let hook_results = hook_ui
                                 .run_json(
@@ -1128,17 +1012,6 @@ pub async fn process_in_background(
                         .chain(agent_results.into_iter())
                         .chain(denied_results.into_iter())
                         .collect();
-                    log_agent_loop_event(
-                        &session_id,
-                        turn_count,
-                        "tool_batch_finished",
-                        serde_json::json!({
-                            "result_count": all_results.len(),
-                            "error_count": all_results.iter().filter(|(_, _, is_error, _)| *is_error).count(),
-                        }),
-                        None,
-                        None,
-                    );
 
                     // Build tool result message for API
                     messages.push(Message::tool_results_rich(all_results));
@@ -1174,17 +1047,6 @@ pub async fn process_in_background(
                 }
             }
             Err(e) => {
-                log_agent_loop_event(
-                    &session_id,
-                    turn_count,
-                    "llm_error",
-                    serde_json::json!({
-                        "error": e.to_string(),
-                        "elapsed_secs": api_elapsed,
-                    }),
-                    None,
-                    None,
-                );
                 let _ = tx.send(UiEvent::Error(e.to_string())).await;
                 // StopFailure hook: API 错误导致 agent 循环结束
                 let stop_results = hook_ui
@@ -1212,17 +1074,7 @@ pub async fn process_in_background(
         }
     }
 
-    log_agent_loop_event(
-        &session_id,
-        turn_count,
-        "agent_loop_finished",
-        serde_json::json!({
-            "turns": turn_count,
-            "elapsed_secs": turn_start.elapsed().as_secs_f64(),
-        }),
-        None,
-        None,
-    );
+    messages.truncate(messages_at_start);
 
     // Stop hook: agent 循环结束
     let _ = hook_ui
@@ -1239,66 +1091,37 @@ pub async fn process_in_background(
         .await;
 }
 
-fn log_agent_loop_event(
-    session_id: &str,
-    turn: usize,
-    event: &str,
-    extra: serde_json::Value,
-    _provider: Option<&str>,
-    model: Option<&str>,
-) {
-    log::info!(
-        "[agent_loop] session={}, turn={}, event={}, extra={}",
-        session_id,
-        turn,
-        event,
-        extra
-    );
-    // 分化日志：output / tool
-    if let Some(logger_mutex) = crate::get_json_logger() {
-        if let Ok(mut logger) = logger_mutex.lock() {
-            let _ = match event {
-                "llm_response" => logger.log_output(turn, "default", model.unwrap_or("?"), extra),
-                "tool_result" => {
-                    logger.log_tool_result(turn, "default", model.unwrap_or("?"), extra)
-                }
-                "tool_batch_started" => {
-                    if let Some(calls) = extra.get("tool_calls").and_then(|v| v.as_array()) {
-                        for call in calls {
-                            let _ = logger.log_tool_call(
-                                turn,
-                                "default",
-                                model.unwrap_or("?"),
-                                call.clone(),
-                            );
-                        }
-                    }
-                    Ok(())
-                }
-                _ => Ok(()),
-            };
-        }
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn log_tool_result_event(
-    session_id: &str,
-    turn: usize,
-    tool_name: &str,
-    tool_id: &str,
-    is_error: bool,
-    output: &str,
-    model: Option<&str>,
-) {
-    let preview: String = output.chars().take(500).collect();
-    let extra = serde_json::json!({
-        "tool_name": tool_name,
-        "tool_id": tool_id,
-        "is_error": is_error,
-        "output_chars": output.chars().count(),
-        "output_preview": preview,
-    });
-    log_agent_loop_event(session_id, turn, "tool_result", extra, None, model);
+    #[test]
+    fn test_logged_input_messages_happy_path_includes_latest_user_message() {
+        let messages = vec![Message::user("context"), Message::user("hello")];
+
+        let logged = logged_input_messages(&messages, 1);
+
+        assert_eq!(logged.len(), 2);
+        assert!(logged[0]["content"].to_string().contains("context"));
+        assert!(logged[1]["content"].to_string().contains("hello"));
+    }
+
+    #[test]
+    fn test_logged_input_messages_boundary_no_injected_message() {
+        let messages = vec![Message::user("hello")];
+
+        let logged = logged_input_messages(&messages, 1);
+
+        assert_eq!(logged.len(), 1);
+        assert!(logged[0]["content"].to_string().contains("hello"));
+    }
+
+    #[test]
+    fn test_logged_input_messages_error_empty_input_is_empty() {
+        let logged = logged_input_messages(&[], 0);
+
+        assert!(logged.is_empty());
+    }
 }
 
 #[derive(Clone)]
@@ -1413,60 +1236,5 @@ async fn drain_queued_input(tx: &mpsc::Sender<UiEvent>) -> Option<Vec<String>> {
     match reply_rx.await {
         Ok(queued) if !queued.is_empty() => Some(queued),
         _ => None,
-    }
-}
-
-fn log_llm_request_messages(
-    session_id: &str,
-    turn: usize,
-    provider: &str,
-    model: &str,
-    _system_blocks: &[aemeath_llm::types::SystemBlock],
-    messages: &[Message],
-    tool_schemas: &[serde_json::Value],
-) {
-    // 只记录摘要（消息条数 + 最近 3 条的类型），不 dump 完整消息内容
-    let latest: Vec<serde_json::Value> = messages
-        .iter()
-        .rev()
-        .take(3)
-        .map(|m| {
-            serde_json::json!({
-                "role": m.role,
-                "len": m.content.len(),
-            })
-        })
-        .collect();
-    log::info!(
-        "[llm_request] session={}, turn={}, provider={}, model={}, messages={}, tools={}, latest_roles={}",
-        session_id,
-        turn,
-        provider,
-        model,
-        messages.len(),
-        tool_schemas.len(),
-        serde_json::to_string(&latest).unwrap_or_default(),
-    );
-    // 分化日志：input
-    if let Some(logger_mutex) = crate::get_json_logger() {
-        if let Ok(mut logger) = logger_mutex.lock() {
-            let messages_preview: Vec<serde_json::Value> = messages
-                .iter()
-                .map(|m| {
-                    serde_json::json!({
-                        "role": m.role,
-                        "content": &m.content,
-                    })
-                })
-                .collect();
-            let _ = logger.log_input(
-                turn,
-                provider,
-                model,
-                serde_json::json!({
-                    "messages": messages_preview,
-                }),
-            );
-        }
     }
 }
