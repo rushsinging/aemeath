@@ -294,6 +294,7 @@ pub async fn run_repl(
 
         let ctx = ToolContext {
             cwd: cwd.clone(),
+            path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
             cancel: cancel.clone(),
             read_files: read_files.clone(),
             agent_runner: agent_runner.clone(),

@@ -25,6 +25,19 @@ pub fn validate_and_normalize_path(
     workspace_root: &Path,
     allow_outside: bool,
 ) -> Result<PathBuf, String> {
+    validate_and_normalize_path_from_base(file_path, workspace_root, workspace_root, allow_outside)
+}
+
+/// Normalize a path against `path_base`, then validate it stays within `workspace_root`.
+///
+/// This allows tools to resolve relative paths against the active worktree while
+/// keeping security checks anchored to the configured workspace boundary.
+pub fn validate_and_normalize_path_from_base(
+    file_path: &str,
+    path_base: &Path,
+    workspace_root: &Path,
+    allow_outside: bool,
+) -> Result<PathBuf, String> {
     // --- Reject obvious traversal attempts early ---
     if !allow_outside && file_path.contains("..") {
         return Err(format!(
@@ -42,7 +55,7 @@ pub fn validate_and_normalize_path(
     let abs_path = if Path::new(file_path).is_absolute() {
         PathBuf::from(file_path)
     } else {
-        workspace_root.join(file_path)
+        path_base.join(file_path)
     };
 
     // Resolve workspace root once
@@ -84,10 +97,18 @@ pub fn validate_and_normalize_path(
 /// Used by `glob` and `grep` tools where the path is a directory to search.
 /// Returns the canonical directory path or an error.
 pub fn validate_search_path(path_str: &str, workspace_root: &Path) -> Result<PathBuf, String> {
+    validate_search_path_from_base(path_str, workspace_root, workspace_root)
+}
+
+pub fn validate_search_path_from_base(
+    path_str: &str,
+    path_base: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf, String> {
     let abs_path = if Path::new(path_str).is_absolute() {
         PathBuf::from(path_str)
     } else {
-        workspace_root.join(path_str)
+        path_base.join(path_str)
     };
 
     let workspace_abs = workspace_root
@@ -123,4 +144,24 @@ pub fn validate_tool_use_id(id: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_validate_and_normalize_path_relative_uses_current_worktree_base() {
+        let workspace = tempdir().unwrap();
+        let worktree = workspace.path().join(".worktrees/bug35");
+        std::fs::create_dir_all(worktree.join("src")).unwrap();
+
+        let path =
+            validate_and_normalize_path_from_base("src/new.rs", &worktree, workspace.path(), false)
+                .unwrap();
+
+        assert_eq!(path, worktree.canonicalize().unwrap().join("src/new.rs"));
+        assert!(!path.starts_with(workspace.path().join("src")));
+    }
 }

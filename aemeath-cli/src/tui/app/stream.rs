@@ -77,6 +77,7 @@ pub async fn process_in_background(
 
     let ctx = ToolContext {
         cwd: cwd.clone(),
+        path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
         cancel: cancel.clone(),
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),
@@ -423,7 +424,8 @@ pub async fn process_in_background(
                         );
                         let _ = tx
                             .send(UiEvent::SystemMessage(
-                                "[agent loop stopped: LLM is producing repetitive output]".to_string(),
+                                "[agent loop stopped: LLM is producing repetitive output]"
+                                    .to_string(),
                             ))
                             .await;
                         break;

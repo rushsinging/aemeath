@@ -1,3 +1,4 @@
+use crate::path_security::validate_search_path_from_base;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -36,11 +37,16 @@ impl Tool for GrepTool {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: pattern"),
         };
-        let search_path = input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_else(|| ctx.cwd.to_string_lossy().to_string());
+        let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let path_base = ctx
+            .path_base
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone());
+        let search_path = match validate_search_path_from_base(path_str, &path_base, &ctx.cwd) {
+            Ok(p) => p,
+            Err(e) => return ToolResult::error(e),
+        };
         let glob_filter = input.get("glob").and_then(|v| v.as_str());
 
         let output = if is_rg_available().await {

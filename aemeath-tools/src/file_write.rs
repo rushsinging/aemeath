@@ -1,4 +1,4 @@
-use crate::path_security::validate_and_normalize_path;
+use crate::path_security::validate_and_normalize_path_from_base;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -51,7 +51,17 @@ impl Tool for FileWriteTool {
             )),
         };
         // Validate path is within workspace boundary
-        let path = match validate_and_normalize_path(file_path, &ctx.cwd, ctx.allow_all) {
+        let path_base = ctx
+            .path_base
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone());
+        let path = match validate_and_normalize_path_from_base(
+            file_path,
+            &path_base,
+            &ctx.cwd,
+            ctx.allow_all,
+        ) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };

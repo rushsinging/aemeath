@@ -6,12 +6,14 @@ use safety::{check_command_safety, check_shell_injection};
 
 pub use safety::is_readonly_command;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
 
 /// Maximum bytes to capture from a single pipe (stdout or stderr).
 /// Prevents OOM from commands that produce massive output.
 const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+const CWD_MARKER: &str = "__AEMEATH_CWD__=";
 
 pub struct BashTool;
 
@@ -65,10 +67,17 @@ impl Tool for BashTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(120_000);
 
+        let path_base = ctx
+            .path_base
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone());
+        let script =
+            format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut child = match Command::new("bash")
             .arg("-c")
-            .arg(command)
-            .current_dir(&ctx.cwd)
+            .arg(&script)
+            .current_dir(&path_base)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
@@ -140,6 +149,12 @@ impl Tool for BashTool {
         match wait_result {
             Ok(Ok(status)) => {
                 let stdout = String::from_utf8_lossy(&stdout);
+                let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
+                if let Some(new_path_base) = new_path_base {
+                    if let Ok(mut path_base) = ctx.path_base.lock() {
+                        *path_base = new_path_base;
+                    }
+                }
                 let stderr = String::from_utf8_lossy(&stderr);
                 let mut out = String::new();
                 if !stdout.is_empty() {
@@ -171,5 +186,68 @@ impl Tool for BashTool {
                 ToolResult::error(format!("command timed out after {timeout_ms}ms"))
             }
         }
+    }
+}
+
+fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
+    let Some(pos) = stdout.rfind(CWD_MARKER) else {
+        return (stdout.to_string(), None);
+    };
+    let before_marker = &stdout[..pos];
+    let after_marker = &stdout[pos + CWD_MARKER.len()..];
+    let Some(first_line_end) = after_marker.find('\n') else {
+        return (stdout.to_string(), None);
+    };
+    let cwd = after_marker[..first_line_end].trim();
+    if cwd.is_empty() {
+        return (stdout.to_string(), None);
+    }
+
+    let visible_stdout = before_marker.trim_end_matches('\n').to_string();
+    (visible_stdout, Some(PathBuf::from(cwd)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::tool::Tool;
+    use serde_json::json;
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+    use tokio::sync::Semaphore;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn test_bash_persists_cd_for_subsequent_write_path_base() {
+        let workspace = tempdir().unwrap();
+        let worktree = workspace.path().join(".worktrees/bug35");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let path_base = Arc::new(Mutex::new(workspace.path().to_path_buf()));
+        let ctx = ToolContext {
+            cwd: workspace.path().to_path_buf(),
+            path_base: Arc::clone(&path_base),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(
+                json!({ "command": format!("cd {}", worktree.display()) }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!result.is_error);
+        assert_eq!(*path_base.lock().unwrap(), worktree);
     }
 }

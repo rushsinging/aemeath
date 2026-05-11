@@ -193,14 +193,15 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 
 ### #35 Write tool 在 worktree 中写入错误分支
 
+**状态**：待确认
+
 **症状**：使用 git worktree 隔离开发时（如 `.worktrees/feature-xxx/`），LLM 通过 Write/Read 等文件工具使用相对路径，文件实际写入 main worktree 而非当前 worktree。主 agent 和 sub-agent 都受影响。
 
 **根因**：文件工具的路径解析基于进程 CWD（main worktree 根目录），未感知用户当前操作的 worktree 上下文。主 agent 启动时 CWD 为 main worktree，sub-agent 也是同一进程空间，因此所有文件工具都解析到 main worktree。
 
-**修复方向**：
-1. 主 agent 启动时感知当前 worktree 目录（通过 `.git` 或环境变量），将 CWD 设为 worktree 根
-2. 或者在 tool 执行时传入 worktree 的根路径，用于路径解析的 base
-3. 检查 Read/Edit/Write/Glob/Grep/Bash 等所有文件相关工具是否都受影响
+**修复**：新增 `ToolContext.path_base` 作为相对路径解析基准，并由 Bash 工具在命令结束后记录实际 `$PWD`，让后续 Read/Edit/Write/Glob/Grep/Bash 相对路径基于当前 worktree/目录解析，同时仍用 `cwd` 作为安全边界。新增回归测试覆盖 Bash `cd` 后路径基准持久化，以及路径工具按当前 worktree base 解析相对路径。
+
+**验证**：`cargo test -p aemeath-tools` 通过（24 passed）；`cargo check` 通过（仅既有 `Cmd::Batch` dead_code warning）。
 
 **复现路径**：
 1. 对话中创建了 task，spinner 下方显示 task list

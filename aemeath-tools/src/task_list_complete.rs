@@ -46,6 +46,7 @@ mod tests {
     fn test_ctx() -> ToolContext {
         ToolContext {
             cwd: std::path::PathBuf::from("."),
+            path_base: std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("."))),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
