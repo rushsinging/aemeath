@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化；当前 UI 不够醒目，用户容易忽略需要回答问题（如选项列表混在普通输出中，无明显视觉区分），需加强视觉提示：高亮/颜色/边框/图标，确保用户第一时间注意到需要操作 |
+| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化；当前 UI 不够醒目，用户容易忽略需要回答问题（如选项列表混在普通输出中，无明显视觉区分），需加强视觉提示：高亮/颜色/边框/图标，确保用户第一时间注意到需要操作；另外等待用户回答时 spinner 动画应暂停，当前 spinner 持续动画给人"还在处理"的错觉 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt top-N 注入；Hook 兜底与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory；自动 N 轮触发在 `auto_apply_suggestions=true` 时会自动写入 Memory，false 时仅展示建议不写入；PostCompact 触发待继续。详见 [spec](specs/009-reflection-system.md) |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
