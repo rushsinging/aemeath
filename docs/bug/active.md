@@ -10,9 +10,9 @@
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
-| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 活动中 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
-| 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 活动中 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
-| 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 活动中 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
+| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
+| 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
+| 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 
 ## 专案
 
@@ -25,26 +25,26 @@
 | #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
 | #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
 | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
-| #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 待修复 |
-| #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 待修复：新用户消息开始时未清空/隐藏旧 completed batch |
+| #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
+| #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
 
-**遗留问题（#36 + #37 未修复）**：
+**本次修复（#36 + #37）**：
 
 **#36 — 新 batch 任务编号不从 1 开始**：
 - 同一 session 中第二次 TaskListCreate 后，TaskCreate 分配的 task id 仍沿用全局递增（如 #6、#7...），而非新 batch 从 #1 重新编号
 - 根因：TaskStore 的 task_id 是全局自增计数器，TaskListCreate 创建新 batch 时未重置编号
-- 修复方向：TUI 渲染 task list 时使用 batch 内的相对编号（1, 2, 3...）而非全局 task id；或在 TaskListCreate 时重置计数器
+- 修复：TUI 渲染 task list 时使用 batch 内的相对编号（1, 2, 3...）而非全局 task id
 
 **#37 — 已完成 batch 挂留**：
 - 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时，旧 task list 仍显示
-- 根因：TaskListComplete 后 batch 标记为完成，但 TUI 渲染未检查 batch 完成状态来决定是否隐藏
-- 修复方向：`TaskListComplete` 标记 batch 完成后，TUI task list 渲染时过滤掉已完成 batch；或新用户消息入队时自动触发已完成 batch 的归档清理
+- 根因：TaskListComplete 后 batch 标记为归档，但当前列表查询仍从所有 task 的最大 batch 推断当前 batch
+- 修复：`TaskStore::list_current_batch()` 只选择 Active/Paused batch；没有活动 batch 时返回空列表，已归档 batch 不再回流显示
 
 **涉及路径**：
 - `aemeath-tools/src/agent.rs`（#27：AgentTool taskId 桥接）
 - `aemeath-core/src/task.rs`（TaskStore batch 管理、completed batch 归档）
 - `aemeath-tools/src/task_list_create.rs`、`task_list_complete.rs`（#34：batch 生命周期）
-- `aemeath-cli/src/tui/app/task_window.rs`（#37：渲染过滤已完成 batch）
+- `aemeath-cli/src/tui/app/task_window.rs`（#36：batch 内局部编号）
 - system prompt 中 task 维护指引
 
 ## 详情
@@ -285,7 +285,12 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-tools/src/task_list.rs`
 - TUI task list 渲染相关路径
 
-### #37 Assistant 空消息导致 API 400 invalid_request_error
+**修复（2026-05-11）**：
+1. TUI task list 渲染改用 batch 内局部显示编号，不再直接展示全局 task id；同一 batch 内按全局 id 稳定映射为 `#1/#2/...`。
+2. `TaskStore::list_current_batch()` 改为只选择 Active/Paused batch，已归档 batch 不再因 task id 最大而被误显示。
+3. 新增回归测试覆盖第二个 task list 从 `#1` 开始显示、已归档 batch 不再出现在当前 batch 列表。
+
+### #38 Assistant 空消息导致 API 400 invalid_request_error
 
 **症状**：会话 `019e16be-7344-7145-9153-ac7c2757df27` 调用模型时返回：
 
@@ -312,6 +317,11 @@ Error: API error [400 Bad Request]: {"error":{"message":"Invalid assistant messa
 - session 持久化 / resume 读取路径
 - provider message 转换路径（OpenAI/OpenAICompatible/Zhipu 等）
 - agent loop finalize / streaming assistant message 生成路径
+
+**修复（2026-05-11）**：
+1. OpenAI-compatible 请求转换阶段增加发送前防御：assistant 消息若仅包含空白文本、且没有 tool_calls / reasoning_content，则在请求前丢弃，避免触发 `content or tool_calls must be set`。
+2. 保留 user 空白消息语义；保留 tool-only assistant，并继续以 `content: null + tool_calls` 发送。
+3. 新增回归测试覆盖空白 assistant 被过滤、空白 user 保留、tool-only assistant 保留。
 
 # 已归档 Bug
 

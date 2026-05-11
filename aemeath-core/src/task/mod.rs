@@ -252,8 +252,19 @@ impl TaskStore {
     /// This shows the current turn's task list, including completed ones,
     /// but hides tasks from previous turns.
     pub async fn list_current_batch(&self) -> Vec<Task> {
+        let max_batch = {
+            let batches = self.batches.lock().await;
+            batches
+                .iter()
+                .filter(|batch| matches!(batch.status, BatchStatus::Active | BatchStatus::Paused))
+                .map(|batch| batch.id)
+                .max()
+        };
+        let Some(max_batch) = max_batch else {
+            return Vec::new();
+        };
+
         let tasks = self.tasks.lock().await;
-        let max_batch = tasks.values().map(|t| t.batch).max().unwrap_or(0);
         let mut result: Vec<Task> = tasks
             .values()
             .filter(|t| t.batch == max_batch && t.status != TaskStatus::Deleted)
@@ -265,6 +276,11 @@ impl TaskStore {
                 .then_with(|| a.created_at.cmp(&b.created_at))
         });
         result
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn set_current_batch_for_test(&self, batch_id: u64) {
+        *self.current_batch.lock().await = batch_id;
     }
 
     /// Clear all deleted tasks from memory
@@ -551,4 +567,29 @@ pub struct TaskStoreStats {
     pub completed: usize,
     pub deleted: usize,
     pub by_priority: HashMap<TaskPriority, usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_list_current_batch_hides_archived_batch() {
+        let store = TaskStore::new();
+        let batch = store
+            .create_list("finished".to_string(), "finished summary".to_string())
+            .await;
+        let task = store
+            .create("done".to_string(), "done description".to_string(), None)
+            .await;
+        store
+            .update(&task.id, |task| task.status = TaskStatus::Completed)
+            .await;
+        store.complete_list().await;
+        store.set_current_batch_for_test(batch.id).await;
+
+        let tasks = store.list_current_batch().await;
+
+        assert!(tasks.is_empty());
+    }
 }

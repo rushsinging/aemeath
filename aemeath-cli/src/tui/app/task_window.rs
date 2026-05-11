@@ -113,7 +113,6 @@ pub fn build_task_window<'a>(
     remaining = remaining.saturating_sub(pending_show);
 
     // --- 下限保护 + 温和扩展：有余量时继续填充 ---
-    let _task_lines = lines.len() - 1; // exclude summary
     let min_show = 3.min(total);
     if remaining > 0 {
         // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
@@ -247,15 +246,30 @@ mod tests {
 
     #[test]
     fn test_build_task_window_uses_batch_local_numbering() {
+        let mut first_in_first_batch = make_task("1", "first batch first", TaskStatus::Completed);
+        first_in_first_batch.batch = 1;
+        let mut second_in_first_batch = make_task("2", "first batch second", TaskStatus::Completed);
+        second_in_first_batch.batch = 1;
         let mut first_in_second_batch = make_task("6", "second batch first", TaskStatus::Pending);
         first_in_second_batch.batch = 2;
         let mut second_in_second_batch = make_task("7", "second batch second", TaskStatus::Pending);
         second_in_second_batch.batch = 2;
 
-        let result = build_task_window(&[first_in_second_batch, second_in_second_batch], 7, 1);
+        let result = build_task_window(
+            &[
+                first_in_first_batch,
+                second_in_first_batch,
+                first_in_second_batch,
+                second_in_second_batch,
+            ],
+            7,
+            2,
+        );
 
-        assert!(result[1].contains("□ #1 second batch first"));
-        assert!(result[2].contains("□ #2 second batch second"));
+        assert!(result[1].contains("✓ #1 first batch first"));
+        assert!(result[2].contains("✓ #2 first batch second"));
+        assert!(result[3].contains("□ #1 second batch first"));
+        assert!(result[4].contains("□ #2 second batch second"));
     }
 
     #[test]
