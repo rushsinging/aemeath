@@ -13,7 +13,7 @@
 | 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
-| 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
+| 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查、记录对话停止原因日志（正常 EndTurn / 无 tool_calls / 文本重复检测 / 用户中断等）。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
 | 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | 待实施 | 未确认 | 通过 CI hook 脚本保证 TUI 层不偏离 TEA 架构（update→Cmd→渲染），以及所有 .rs 文件不超过 400 行（含测试） |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
 | 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | 待实施 | 已确认 | TaskListCreate 和 TaskListComplete 在 TUI 中应显示为简洁摘要，隐藏原始 JSON 参数、`Task list #N created/completed`、重复 Summary 和默认 completed 行等噪声 |
