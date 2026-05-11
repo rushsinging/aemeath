@@ -11,6 +11,7 @@
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 活动中 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
+| 37 | Assistant 空消息导致 API 400 invalid_request_error | 高 | 活动中 | 未确认 | 2026-05 | 会话历史中存在 content/tool_calls 均为空的 assistant message |
 
 ## 详情
 
@@ -249,6 +250,34 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-tools/src/task_create.rs`
 - `aemeath-tools/src/task_list.rs`
 - TUI task list 渲染相关路径
+
+### #37 Assistant 空消息导致 API 400 invalid_request_error
+
+**症状**：会话 `019e16be-7344-7145-9153-ac7c2757df27` 调用模型时返回：
+
+```text
+Error: API error [400 Bad Request]: {"error":{"message":"Invalid assistant message: content or tool_calls must be set","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}
+```
+
+**影响**：包含该异常 assistant 消息的 session 后续无法继续正常请求 OpenAI-compatible API；resume 或继续对话会反复触发 400。
+
+**根因假设**：某条 assistant message 在持久化或发送前同时缺少 `content` 和 `tool_calls`（或二者为空），违反目标 API 对 assistant 消息的校验要求。可能发生在：
+1. assistant turn 因中断、空响应、tool-only 事件折叠、stream finalize 等路径产生空消息。
+2. session resume 读取历史时没有过滤/修复空 assistant message。
+3. provider 请求构造层没有在发送前校验 message 非空。
+
+**复现线索**：session id `019e16be-7344-7145-9153-ac7c2757df27`。
+
+**修复方向**：
+1. 定位该 session 文件中空 assistant message 的来源，确认是保存阶段还是发送阶段产生。
+2. 请求发送前增加防御：过滤或拒绝 content/tool_calls 均为空的 assistant message，并输出中文错误说明。
+3. session resume/加载历史时对既有空 assistant message 做兼容处理，避免坏历史阻断后续对话。
+4. 添加回归测试覆盖空 assistant message 不会进入 provider request。
+
+**涉及路径**：
+- session 持久化 / resume 读取路径
+- provider message 转换路径（OpenAI/OpenAICompatible/Zhipu 等）
+- agent loop finalize / streaming assistant message 生成路径
 
 # 已归档 Bug
 
