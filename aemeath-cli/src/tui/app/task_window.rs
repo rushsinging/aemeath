@@ -32,7 +32,8 @@ pub fn build_task_window<'a>(
         return Vec::new();
     }
 
-    // --- completed: 按 task id 升序，保持任务列表稳定顺序 ---
+    // --- completed: 按 batch 内显示序号升序，保持任务列表稳定顺序 ---
+    let display_numbers = batch_display_numbers(tasks);
     let all_completed_count = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
@@ -41,8 +42,7 @@ pub fn build_task_window<'a>(
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
         .collect();
-    completed.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
-    // TTL filter: only apply when there are more completed than max_lines
+    completed.sort_by_key(|t| task_display_number(t, &display_numbers)); // TTL filter: only apply when there are more completed than max_lines
     let newest_ts = completed.iter().map(|t| t.updated_at).max().unwrap_or(0);
     let completed: Vec<&Task> = if completed.len() > max_lines {
         completed
@@ -61,8 +61,7 @@ pub fn build_task_window<'a>(
         .iter()
         .filter(|t| t.status == TaskStatus::Pending)
         .collect();
-    pending.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
-
+    pending.sort_by_key(|t| task_display_number(t, &display_numbers));
     let total = tasks.len();
     let completed_count = all_completed_count;
     let in_progress_count = in_progress.len();
@@ -81,7 +80,7 @@ pub fn build_task_window<'a>(
         let hidden = completed.len() - shown;
         for t in &completed[start..] {
             // allow unsafe_text_op: Vec slice with bounds-checked start
-            lines.push(format_task_line(t));
+            lines.push(format_task_line(t, &display_numbers));
         }
         if hidden > 0 {
             lines.push(format_fold_hint(hidden, "completed"));
@@ -95,32 +94,31 @@ pub fn build_task_window<'a>(
     // 1. 最近 completed（最多 show_last_completed 条）
     let comp_show = show_last_completed.min(remaining).min(completed.len());
     for t in completed.iter().take(comp_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(comp_show);
     // 2. 所有 in_progress
     let ip_show = in_progress_count.min(remaining);
     for t in in_progress.iter().take(ip_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(ip_show);
 
     // 3. pending 填充余量
     let pending_show = pending_count.min(remaining);
     for t in pending.iter().take(pending_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(pending_show);
 
     // --- 下限保护 + 温和扩展：有余量时继续填充 ---
-    let _task_lines = lines.len() - 1; // exclude summary
     let min_show = 3.min(total);
     if remaining > 0 {
         // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
         let more_comp = remaining.min(completed.len().saturating_sub(comp_show));
         let insert_pos = 1 + comp_show; // after summary + displayed completed
         for (i, t) in completed.iter().skip(comp_show).take(more_comp).enumerate() {
-            lines.insert(insert_pos + i, format_task_line(t));
+            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_comp);
     }
@@ -128,7 +126,7 @@ pub fn build_task_window<'a>(
         // 补充更多 pending（跳过已显示的 pending_show 条）
         let more_pending = remaining.min(pending_count.saturating_sub(pending_show));
         for t in pending.iter().skip(pending_show).take(more_pending) {
-            lines.push(format_task_line(t));
+            lines.push(format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_pending);
     }
@@ -144,7 +142,10 @@ pub fn build_task_window<'a>(
             .take(more)
             .enumerate()
         {
-            lines.insert(1 + shown_completed + i, format_task_line(t));
+            lines.insert(
+                1 + shown_completed + i,
+                format_task_line(t, &display_numbers),
+            );
         }
     }
     // --- 折叠提示 ---
@@ -164,7 +165,7 @@ pub fn build_task_window<'a>(
     lines
 }
 
-fn format_task_line(t: &Task) -> String {
+fn format_task_line(t: &Task, display_numbers: &std::collections::HashMap<String, u64>) -> String {
     let icon = match t.status {
         TaskStatus::Completed => "✓",
         TaskStatus::InProgress => "■",
@@ -176,7 +177,37 @@ fn format_task_line(t: &Task) -> String {
         .as_deref()
         .map(|o| format!(" (@{})", o))
         .unwrap_or_default();
-    format!("{} #{} {}{}", icon, t.id, t.subject, owner)
+    format!(
+        "{} #{} {}{}",
+        icon,
+        task_display_number(t, display_numbers),
+        t.subject,
+        owner
+    )
+}
+
+fn batch_display_numbers(tasks: &[Task]) -> std::collections::HashMap<String, u64> {
+    let mut by_batch: std::collections::BTreeMap<u64, Vec<&Task>> =
+        std::collections::BTreeMap::new();
+    for task in tasks {
+        by_batch.entry(task.batch).or_default().push(task);
+    }
+
+    let mut result = std::collections::HashMap::new();
+    for batch_tasks in by_batch.values_mut() {
+        batch_tasks.sort_by_key(|task| task.id.parse::<u64>().unwrap_or(u64::MAX));
+        for (idx, task) in batch_tasks.iter().enumerate() {
+            result.insert(task.id.clone(), (idx + 1) as u64);
+        }
+    }
+    result
+}
+
+fn task_display_number(t: &Task, display_numbers: &std::collections::HashMap<String, u64>) -> u64 {
+    display_numbers
+        .get(&t.id)
+        .copied()
+        .unwrap_or_else(|| t.id.parse::<u64>().unwrap_or(u64::MAX))
 }
 
 fn format_fold_hint(n: usize, status: &str) -> String {
@@ -210,6 +241,34 @@ mod tests {
 
     fn make_task(id: &str, subject: &str, status: TaskStatus) -> Task {
         make_task_with_ts(id, subject, status, id.parse::<u64>().unwrap_or(100))
+    }
+
+    #[test]
+    fn test_build_task_window_uses_batch_local_numbering() {
+        let mut first_in_first_batch = make_task("1", "first batch first", TaskStatus::Completed);
+        first_in_first_batch.batch = 1;
+        let mut second_in_first_batch = make_task("2", "first batch second", TaskStatus::Completed);
+        second_in_first_batch.batch = 1;
+        let mut first_in_second_batch = make_task("6", "second batch first", TaskStatus::Pending);
+        first_in_second_batch.batch = 2;
+        let mut second_in_second_batch = make_task("7", "second batch second", TaskStatus::Pending);
+        second_in_second_batch.batch = 2;
+
+        let result = build_task_window(
+            &[
+                first_in_first_batch,
+                second_in_first_batch,
+                first_in_second_batch,
+                second_in_second_batch,
+            ],
+            7,
+            2,
+        );
+
+        assert!(result[1].contains("✓ #1 first batch first"));
+        assert!(result[2].contains("✓ #2 first batch second"));
+        assert!(result[3].contains("□ #1 second batch first"));
+        assert!(result[4].contains("□ #2 second batch second"));
     }
 
     #[test]
@@ -400,10 +459,25 @@ mod tests {
     #[test]
     fn test_completed_lines_keep_task_id_order_when_expanded() {
         let tasks = vec![
-            make_task_with_ts("1", "检查 bug 35 与 worktree 约定", TaskStatus::Completed, 100),
-            make_task_with_ts("2", "创建 bug35 worktree 并验证基线", TaskStatus::Completed, 300),
+            make_task_with_ts(
+                "1",
+                "检查 bug 35 与 worktree 约定",
+                TaskStatus::Completed,
+                100,
+            ),
+            make_task_with_ts(
+                "2",
+                "创建 bug35 worktree 并验证基线",
+                TaskStatus::Completed,
+                300,
+            ),
             make_task_with_ts("3", "定位 bug 35 根因", TaskStatus::Completed, 200),
-            make_task_with_ts("4", "添加回归测试并修复 bug 35", TaskStatus::InProgress, 400),
+            make_task_with_ts(
+                "4",
+                "添加回归测试并修复 bug 35",
+                TaskStatus::InProgress,
+                400,
+            ),
             make_task_with_ts("5", "验证并更新文档", TaskStatus::Pending, 500),
         ];
 

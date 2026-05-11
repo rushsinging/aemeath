@@ -221,6 +221,18 @@ impl OpenAICompatibleProvider {
             if content_parts.is_empty() && tool_calls.is_empty() && reasoning_content.is_none() {
                 continue;
             }
+            if msg.role == Role::Assistant
+                && tool_calls.is_empty()
+                && reasoning_content.is_none()
+                && content_parts.iter().all(|part| {
+                    part.get("text")
+                        .and_then(|text| text.as_str())
+                        .is_some_and(|text| text.trim().is_empty())
+                })
+            {
+                log::warn!("[openai-compat] dropping blank assistant message before request");
+                continue;
+            }
 
             // 构建消息
             let role = match msg.role {
@@ -327,6 +339,63 @@ mod tests {
             false,
             Some(ReasoningConfig::Bool(false)),
         )
+    }
+
+    #[test]
+    fn test_convert_messages_drops_blank_assistant_text_message() {
+        let provider = provider_without_reasoning();
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "   \n\t".to_string(),
+            }],
+        }];
+
+        let converted = provider.convert_messages(&[], &messages).unwrap();
+
+        assert!(converted.is_empty());
+    }
+
+    #[test]
+    fn test_convert_messages_keeps_blank_user_text_message() {
+        let provider = provider_without_reasoning();
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "   \n\t".to_string(),
+            }],
+        }];
+
+        let converted = provider.convert_messages(&[], &messages).unwrap();
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].get("role"), Some(&serde_json::json!("user")));
+        assert_eq!(
+            converted[0].get("content"),
+            Some(&serde_json::json!("   \n\t"))
+        );
+    }
+
+    #[test]
+    fn test_convert_messages_keeps_assistant_with_tool_calls_and_null_content() {
+        let provider = provider_without_reasoning();
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path":"/tmp/a"}),
+            }],
+        }];
+
+        let converted = provider.convert_messages(&[], &messages).unwrap();
+        let assistant = converted
+            .iter()
+            .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
+            .unwrap();
+
+        assert_eq!(assistant.get("content"), Some(&serde_json::Value::Null));
+        assert!(assistant.get("tool_calls").is_some());
     }
 
     #[test]

@@ -10,8 +10,8 @@
 | 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
-| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 活动中 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
-| 37 | Assistant 空消息导致 API 400 invalid_request_error | 高 | 活动中 | 未确认 | 2026-05 | 会话历史中存在 content/tool_calls 均为空的 assistant message |
+| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
+| 37 | Assistant 空消息导致 API 400 invalid_request_error | 高 | 待确认 | 未确认 | 2026-05 | 会话历史中存在 content/tool_calls 均为空的 assistant message |
 
 ## 详情
 
@@ -251,6 +251,11 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-tools/src/task_list.rs`
 - TUI task list 渲染相关路径
 
+**修复（2026-05-11）**：
+1. TUI task list 渲染改用 batch 内局部显示编号，不再直接展示全局 task id；同一 batch 内按全局 id 稳定映射为 `#1/#2/...`。
+2. `TaskStore::list_current_batch()` 改为只选择 Active/Paused batch，已归档 batch 不再因 task id 最大而被误显示。
+3. 新增回归测试覆盖第二个 task list 从 `#1` 开始显示、已归档 batch 不再出现在当前 batch 列表。
+
 ### #37 Assistant 空消息导致 API 400 invalid_request_error
 
 **症状**：会话 `019e16be-7344-7145-9153-ac7c2757df27` 调用模型时返回：
@@ -278,6 +283,11 @@ Error: API error [400 Bad Request]: {"error":{"message":"Invalid assistant messa
 - session 持久化 / resume 读取路径
 - provider message 转换路径（OpenAI/OpenAICompatible/Zhipu 等）
 - agent loop finalize / streaming assistant message 生成路径
+
+**修复（2026-05-11）**：
+1. OpenAI-compatible 请求转换阶段增加发送前防御：assistant 消息若仅包含空白文本、且没有 tool_calls / reasoning_content，则在请求前丢弃，避免触发 `content or tool_calls must be set`。
+2. 保留 user 空白消息语义；保留 tool-only assistant，并继续以 `content: null + tool_calls` 发送。
+3. 新增回归测试覆盖空白 assistant 被过滤、空白 user 保留、tool-only assistant 保留。
 
 # 已归档 Bug
 
