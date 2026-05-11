@@ -117,7 +117,11 @@ fn init_logging(logging_config: &aemeath_core::config::LoggingConfig) {
     // 初始化分化日志（input/output/tool.log）
     if logging_config.role_logs_enabled {
         let base_dir = logging::logs_base_dir(logging_config.logs_dir.as_deref());
-        let sid = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("unknown").to_string();
+        let sid = SESSION_ID
+            .get()
+            .map(|s| s.as_str())
+            .unwrap_or("unknown")
+            .to_string();
         match JsonLogger::new(&base_dir, sid, logging_config.role_logs_enabled) {
             Ok(logger) => {
                 let _ = JSON_LOGGER.set(Mutex::new(logger));

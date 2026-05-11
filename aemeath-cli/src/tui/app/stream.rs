@@ -439,7 +439,8 @@ pub async fn process_in_background(
                         );
                         let _ = tx
                             .send(UiEvent::SystemMessage(
-                                "[agent loop stopped: LLM is producing repetitive output]".to_string(),
+                                "[agent loop stopped: LLM is producing repetitive output]"
+                                    .to_string(),
                             ))
                             .await;
                         break;
@@ -1257,18 +1258,10 @@ fn log_agent_loop_event(
     if let Some(logger_mutex) = crate::get_json_logger() {
         if let Ok(mut logger) = logger_mutex.lock() {
             let _ = match event {
-                "llm_response" => logger.log_output(
-                    turn,
-                    "default",
-                    model.unwrap_or("?"),
-                    extra,
-                ),
-                "tool_result" => logger.log_tool_result(
-                    turn,
-                    "default",
-                    model.unwrap_or("?"),
-                    extra,
-                ),
+                "llm_response" => logger.log_output(turn, "default", model.unwrap_or("?"), extra),
+                "tool_result" => {
+                    logger.log_tool_result(turn, "default", model.unwrap_or("?"), extra)
+                }
                 "tool_batch_started" => {
                     if let Some(calls) = extra.get("tool_calls").and_then(|v| v.as_array()) {
                         for call in calls {
