@@ -10,7 +10,7 @@ mod task_reminder;
 mod tui;
 
 use aemeath_core::config::{models::ResolvedModel, Config, ModelEntryConfig};
-use aemeath_core::logging::{self, LogFile};
+use aemeath_core::logging::{self, JsonLogger, LogFile};
 use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
@@ -19,11 +19,13 @@ use clap::Parser;
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// 全局 session ID，供日志格式化器使用
 static SESSION_ID: OnceLock<String> = OnceLock::new();
 static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
+/// 全局分化日志写入器（input/output/tool.log），由 init_logging 初始化
+static JSON_LOGGER: OnceLock<Mutex<JsonLogger>> = OnceLock::new();
 
 /// 设置全局 session ID（只能调用一次）
 fn set_session_id(id: String) {
@@ -32,6 +34,11 @@ fn set_session_id(id: String) {
 
 pub(crate) fn set_current_turn(turn: usize) {
     CURRENT_TURN.store(turn, Ordering::Relaxed);
+}
+
+/// 获取全局 JsonLogger 的引用（供 stream.rs / agent_runner.rs 使用）
+pub(crate) fn get_json_logger() -> Option<&'static Mutex<JsonLogger>> {
+    JSON_LOGGER.get()
 }
 
 fn current_turn_for_log() -> Option<usize> {
@@ -106,6 +113,20 @@ fn init_logging(logging_config: &aemeath_core::config::LoggingConfig) {
         )
     });
     builder.init();
+
+    // 初始化分化日志（input/output/tool.log）
+    if logging_config.role_logs_enabled {
+        let base_dir = logging::logs_base_dir(logging_config.logs_dir.as_deref());
+        let sid = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("unknown").to_string();
+        match JsonLogger::new(&base_dir, sid, logging_config.role_logs_enabled) {
+            Ok(logger) => {
+                let _ = JSON_LOGGER.set(Mutex::new(logger));
+            }
+            Err(e) => {
+                log::warn!("无法初始化分化日志: {}", e);
+            }
+        }
+    }
 }
 
 fn init_panic_hook() {
@@ -721,6 +742,35 @@ async fn run_chat(mut args: Args) {
         .unwrap_or_else(|| aemeath_core::session::new_session_id());
     set_session_id(session_id.clone());
     log::info!("session started");
+
+    // 初始化分化日志写入器
+    {
+        let logs_dir = config_file
+            .as_ref()
+            .and_then(|c| c.logging.logs_dir.as_deref())
+            .map(|d| {
+                if d.starts_with('~') {
+                    dirs::home_dir()
+                        .unwrap_or_default()
+                        .join(d.trim_start_matches("~/"))
+                } else {
+                    PathBuf::from(d)
+                }
+            })
+            .unwrap_or_else(|| logging::logs_base_dir(None));
+        let role_logs_enabled = config_file
+            .as_ref()
+            .map(|c| c.logging.role_logs_enabled)
+            .unwrap_or(true);
+        match JsonLogger::new(&logs_dir, session_id.clone(), role_logs_enabled) {
+            Ok(logger) => {
+                let _ = JSON_LOGGER.set(Mutex::new(logger));
+            }
+            Err(e) => {
+                log::warn!("无法初始化分化日志: {e}");
+            }
+        }
+    }
 
     // 解析并发限制: CLI args > config file > defaults
     let max_tool_concurrency = args

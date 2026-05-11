@@ -427,6 +427,23 @@ impl AgentRunner for CliAgentRunner {
                 sub_schemas.len(),
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
+            // 分化日志：input
+            if let Some(logger_mutex) = crate::get_json_logger() {
+                if let Ok(mut logger) = logger_mutex.lock() {
+                    let _ = logger.log_input(
+                        turn,
+                        &role_name_for_log,
+                        &model_name_for_log,
+                        serde_json::json!({
+                            "provider": client.provider_name(),
+                            "model": model_name_for_log,
+                            "messages": messages.len(),
+                            "tools": sub_schemas.len(),
+                            "latest_roles": latest,
+                        }),
+                    );
+                }
+            }
         };
 
         let sub_ctx = ToolContext {
@@ -550,6 +567,24 @@ impl AgentRunner for CliAgentRunner {
                     }
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+
+                    // 分化日志：output
+                    if let Some(logger_mutex) = crate::get_json_logger() {
+                        if let Ok(mut logger) = logger_mutex.lock() {
+                            let _ = logger.log_output(
+                                turn_number,
+                                &role_name_for_log,
+                                &model_name_for_log,
+                                serde_json::json!({
+                                    "stop_reason": format!("{:?}", resp.stop_reason),
+                                    "input_tokens": resp.usage.input_tokens,
+                                    "output_tokens": resp.usage.output_tokens,
+                                    "tool_call_count": tool_calls.len(),
+                                }),
+                            );
+                        }
+                    }
+
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         progress(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();
@@ -576,6 +611,23 @@ impl AgentRunner for CliAgentRunner {
                     // while long-running sub-agent tools are still in flight.
                     if let Some(ref tx) = progress_tx {
                         let _ = tx.try_send(build_tool_calls_progress_event(turn + 1, &tool_calls));
+                    }
+
+                    // 分化日志：tool_call（每个工具调用写一行）
+                    if let Some(logger_mutex) = crate::get_json_logger() {
+                        if let Ok(mut logger) = logger_mutex.lock() {
+                            for call in &tool_calls {
+                                let _ = logger.log_tool_call(
+                                    turn_number,
+                                    &role_name_for_log,
+                                    &model_name_for_log,
+                                    serde_json::json!({
+                                        "id": call.id,
+                                        "name": call.name,
+                                    }),
+                                );
+                            }
+                        }
                     }
 
                     let mut results = agent.execute_tools(&tool_calls).await;
@@ -607,6 +659,25 @@ impl AgentRunner for CliAgentRunner {
                             Some(turn_number),
                             &format!("  ← {}[{}]: {}", tool_name, label, out_short),
                         );
+
+                        // 分化日志：tool_result
+                        let preview: String = output.chars().take(500).collect();
+                        if let Some(logger_mutex) = crate::get_json_logger() {
+                            if let Ok(mut logger) = logger_mutex.lock() {
+                                let _ = logger.log_tool_result(
+                                    turn_number,
+                                    &role_name_for_log,
+                                    &model_name_for_log,
+                                    serde_json::json!({
+                                        "tool_name": tool_name,
+                                        "tool_id": id,
+                                        "is_error": is_error,
+                                        "output_chars": output.chars().count(),
+                                        "output_preview": preview,
+                                    }),
+                                );
+                            }
+                        }
                     }
 
                     // Truncate oversized tool results to keep sub-agent context lean

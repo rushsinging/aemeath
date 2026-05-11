@@ -11,7 +11,7 @@
 use chrono::{DateTime, Local};
 use serde_json::json;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -24,6 +24,9 @@ pub enum LogFile {
     Aemeath,
     Agent,
     Panic,
+    Input,
+    Output,
+    Tool,
 }
 
 impl LogFile {
@@ -32,6 +35,9 @@ impl LogFile {
             LogFile::Aemeath => "aemeath.log",
             LogFile::Agent => "agent.log",
             LogFile::Panic => "panic.log",
+            LogFile::Input => "input.log",
+            LogFile::Output => "output.log",
+            LogFile::Tool => "tool.log",
         }
     }
 }
@@ -40,8 +46,22 @@ pub fn log_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".aemeath")
 }
 
+/// 根据配置确定日志基础目录：
+/// - 有 logs_dir 配置 → 使用配置值
+/// - 无配置 → 默认 ~/.aemeath/logs/
+pub fn logs_base_dir(logs_dir_config: Option<&str>) -> PathBuf {
+    logs_dir_config
+        .map(PathBuf::from)
+        .unwrap_or_else(|| log_dir().join("logs"))
+}
+
 pub fn log_path(log_file: LogFile) -> PathBuf {
     log_dir().join(log_file.file_name())
+}
+
+/// 获取指定基础目录下的日志文件路径
+pub fn log_path_in_dir(base_dir: &Path, log_file: LogFile) -> PathBuf {
+    base_dir.join(log_file.file_name())
 }
 
 pub fn prepare_log_file(log_file: LogFile) -> io::Result<PathBuf> {
@@ -222,6 +242,151 @@ fn is_rotated_log_path(path: &Path) -> bool {
     base.ends_with(".log") && suffix.chars().all(|c| c.is_ascii_digit())
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// JsonLogger — 分化日志写入器
+// ═══════════════════════════════════════════════════════════════════
+
+/// 分化日志写入器。
+///
+/// 将 LLM 交互日志从 `aemeath.log` 分离为三个独立 JSON 文件：
+/// - `input.log`：LLM 输入快照
+/// - `output.log`：LLM 完整输出
+/// - `tool.log`：工具调用请求 + 结果
+pub struct JsonLogger {
+    input: BufWriter<File>,
+    output: BufWriter<File>,
+    tool: BufWriter<File>,
+    session_id: String,
+    enabled: bool,
+}
+
+impl JsonLogger {
+    /// 创建 JsonLogger，在 `base_dir` 下打开三个日志文件。
+    ///
+    /// 目录不存在时自动创建。文件轮转复用 `rotate_if_needed()`。
+    /// 如果 `enabled` 为 false，使用 `/dev/null` 占位。
+    pub fn new(
+        base_dir: &Path,
+        session_id: String,
+        enabled: bool,
+    ) -> io::Result<Self> {
+        fs::create_dir_all(base_dir)?;
+        cleanup_old_rotated_logs(base_dir)?;
+
+        let open = |log_file: LogFile| -> io::Result<BufWriter<File>> {
+            let path = log_path_in_dir(base_dir, log_file);
+            rotate_if_needed(&path, LOG_MAX_BYTES, LOG_MAX_BACKUPS)?;
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
+            Ok(BufWriter::new(file))
+        };
+
+        let null = || -> io::Result<BufWriter<File>> {
+            let file = OpenOptions::new()
+                .write(true)
+                .open(if cfg!(windows) { "NUL" } else { "/dev/null" })?;
+            Ok(BufWriter::new(file))
+        };
+
+        let (input, output, tool) = if enabled {
+            (open(LogFile::Input)?, open(LogFile::Output)?, open(LogFile::Tool)?)
+        } else {
+            (null()?, null()?, null()?)
+        };
+
+        Ok(Self {
+            input,
+            output,
+            tool,
+            session_id,
+            enabled,
+        })
+    }
+
+    /// 写入 input.log — LLM 输入快照
+    pub fn log_input(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let session_id = self.session_id.clone();
+        write_json_line(&mut self.input, &session_id, "input", turn, role, model, data)
+    }
+
+    /// 写入 output.log — LLM 完整输出
+    pub fn log_output(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let session_id = self.session_id.clone();
+        write_json_line(&mut self.output, &session_id, "output", turn, role, model, data)
+    }
+
+    /// 写入 tool.log — 工具调用请求
+    pub fn log_tool_call(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let session_id = self.session_id.clone();
+        write_json_line(&mut self.tool, &session_id, "tool_call", turn, role, model, data)
+    }
+
+    /// 写入 tool.log — 工具调用结果
+    pub fn log_tool_result(
+        &mut self,
+        turn: usize,
+        role: &str,
+        model: &str,
+        data: serde_json::Value,
+    ) -> io::Result<()> {
+        let session_id = self.session_id.clone();
+        write_json_line(&mut self.tool, &session_id, "tool_result", turn, role, model, data)
+    }
+
+    /// 返回是否已启用
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// 向指定 writer 中写入一行 JSON 日志
+fn write_json_line(
+    writer: &mut BufWriter<File>,
+    session_id: &str,
+    log_type: &str,
+    turn: usize,
+    role: &str,
+    model: &str,
+    data: serde_json::Value,
+) -> io::Result<()> {
+    let line = serde_json::json!({
+        "ts": timestamp_rfc3339(),
+        "session": session_id,
+        "turn": turn,
+        "role": role,
+        "model": model,
+        "type": log_type,
+        "data": data,
+    });
+    writeln!(writer, "{}", line)
+}
+
+impl Drop for JsonLogger {
+    fn drop(&mut self) {
+        // BufWriter 自动 flush 到 File
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,9 +403,138 @@ mod tests {
             LogFile::Aemeath.file_name(),
             LogFile::Agent.file_name(),
             LogFile::Panic.file_name(),
+            LogFile::Input.file_name(),
+            LogFile::Output.file_name(),
+            LogFile::Tool.file_name(),
         ];
-        assert_eq!(names.len(), 3);
+        assert_eq!(names.len(), 6);
         assert!(names.iter().all(|name| name.ends_with(".log")));
+    }
+
+    #[test]
+    fn test_log_file_new_variants_file_name() {
+        assert_eq!(LogFile::Input.file_name(), "input.log");
+        assert_eq!(LogFile::Output.file_name(), "output.log");
+        assert_eq!(LogFile::Tool.file_name(), "tool.log");
+    }
+
+    #[test]
+    fn test_logs_base_dir_with_config() {
+        let dir = logs_base_dir(Some("/custom/logs"));
+        assert_eq!(dir, PathBuf::from("/custom/logs"));
+    }
+
+    #[test]
+    fn test_logs_base_dir_default() {
+        let dir = logs_base_dir(None);
+        assert!(dir.ends_with("logs"));
+        assert!(dir.starts_with(log_dir()));
+    }
+
+    #[test]
+    fn test_log_path_in_dir() {
+        let base = Path::new("/tmp/test_logs");
+        assert_eq!(
+            log_path_in_dir(base, LogFile::Input),
+            PathBuf::from("/tmp/test_logs/input.log")
+        );
+        assert_eq!(
+            log_path_in_dir(base, LogFile::Output),
+            PathBuf::from("/tmp/test_logs/output.log")
+        );
+        assert_eq!(
+            log_path_in_dir(base, LogFile::Tool),
+            PathBuf::from("/tmp/test_logs/tool.log")
+        );
+    }
+
+    #[test]
+    fn test_json_logger_new_disabled_does_not_create_files() {
+        let tmp = std::env::temp_dir().join(format!("aemeath_test_json_logger_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let result = JsonLogger::new(&tmp, "test-session".to_string(), false);
+        assert!(result.is_ok());
+        // input/output/tool.log 不应存在（写入 /dev/null）
+        assert!(!tmp.join("input.log").exists());
+        assert!(!tmp.join("output.log").exists());
+        assert!(!tmp.join("tool.log").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_json_logger_new_enabled_creates_directory_and_files() {
+        let tmp = std::env::temp_dir().join(format!("aemeath_test_json_logger_enabled_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let logger = JsonLogger::new(&tmp, "test-session".to_string(), true);
+        assert!(logger.is_ok());
+        // 目录和文件应该创建
+        assert!(tmp.join("input.log").exists());
+        assert!(tmp.join("output.log").exists());
+        assert!(tmp.join("tool.log").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_json_logger_write_and_format() {
+        let tmp = std::env::temp_dir().join(format!(
+            "aemeath_test_json_logger_write_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut logger = JsonLogger::new(&tmp, "session-1".to_string(), true).unwrap();
+
+        logger
+            .log_input(3, "default", "gpt-5.5", serde_json::json!({"messages": 5}))
+            .unwrap();
+        logger
+            .log_output(3, "default", "gpt-5.5", serde_json::json!({"tokens": 100}))
+            .unwrap();
+        logger
+            .log_tool_call(3, "default", "gpt-5.5", serde_json::json!({"tool": "Read"}))
+            .unwrap();
+        logger
+            .log_tool_result(3, "default", "gpt-5.5", serde_json::json!({"result": "ok"}))
+            .unwrap();
+        drop(logger);
+
+        let input_content = std::fs::read_to_string(tmp.join("input.log")).unwrap();
+        let output_content = std::fs::read_to_string(tmp.join("output.log")).unwrap();
+        let tool_content = std::fs::read_to_string(tmp.join("tool.log")).unwrap();
+
+        // 验证 JSON 格式：取首行，包含必要字段
+        let check = |content: &str, expected_type: &str| {
+            let line = content.lines().find(|l| !l.trim().is_empty()).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(parsed["session"], "session-1");
+            assert_eq!(parsed["turn"], 3);
+            assert_eq!(parsed["role"], "default");
+            assert_eq!(parsed["model"], "gpt-5.5");
+            assert_eq!(parsed["type"], expected_type);
+            assert!(!parsed["ts"].as_str().unwrap().is_empty());
+        };
+
+        check(&input_content, "input");
+        check(&output_content, "output");
+        // tool.log 包含 tool_call + tool_result 两行，取最后一行
+        let tool_line = tool_content.lines().last().unwrap();
+        let tool_parsed: serde_json::Value = serde_json::from_str(tool_line).unwrap();
+        assert_eq!(tool_parsed["type"], "tool_result");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_json_logger_disabled_writes_to_null() {
+        let tmp = std::env::temp_dir().join(format!("aemeath_test_json_logger_disabled_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut logger = JsonLogger::new(&tmp, "session-1".to_string(), false).unwrap();
+        // disabled 时写入不报错
+        assert!(logger.log_input(1, "r", "m", serde_json::json!({})).is_ok());
+        assert!(logger.log_output(1, "r", "m", serde_json::json!({})).is_ok());
+        assert!(logger.log_tool_call(1, "r", "m", serde_json::json!({})).is_ok());
+        assert!(logger.log_tool_result(1, "r", "m", serde_json::json!({})).is_ok());
+        assert!(!logger.is_enabled());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

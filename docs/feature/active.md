@@ -11,7 +11,7 @@
 | 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
 | 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
 | 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
-| 27 | 日志分化：input.log / output.log / tool.log | 中 | 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
+| 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
 | 30 | Agent loop 收尾工作 | 高 | 待实施 | 未确认 | agent loop 结束时（正常结束、用户打断、API 错误、达到 MAX_TURNS）执行统一收尾：task 状态清理、tool 资源释放、session 持久化、日志摘要等。当前所有退出点均缺少收尾逻辑 |
@@ -404,6 +404,14 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 详见 [design spec](../superpowers/specs/2026-05-09-log-split-design.md)
 
+**实施完成（2026-05-11）**：
+- `aemeath-core/src/logging.rs`：新增 `LogFile::Input/Output/Tool`、`JsonLogger` struct（含 `log_input/log_output/log_tool_call/log_tool_result`）、`logs_base_dir()`、日志轮转逻辑
+- `aemeath-core/src/config/logging.rs`：新增 `logs_dir`、`role_logs_enabled` 配置字段
+- `aemeath-cli/src/main.rs`：全局 `JSON_LOGGER` OnceLock + `get_json_logger()` 访问器，在 `init_logging()` 中初始化
+- `aemeath-cli/src/tui/app/stream.rs`：`log_agent_loop_event` / `log_llm_request_messages` 内部增加 JsonLogger 写入（input/output/tool call/tool result）；`log_tool_result_event` 委托到 `log_agent_loop_event`
+- `aemeath-cli/src/agent_runner.rs`：子 agent 的 `log_request_messages` 闭包 + LLM 响应处 + tool call 批量处 + tool result 处均已接入 JsonLogger
+- 测试：`aemeath-core` 368 测试全部通过
+
 ---
 
 ### #28 MCP 系统完善
@@ -551,9 +559,38 @@ enum MemoryCategory {
 
 **依赖**：无外部依赖，纯文件系统存储 + JSON 序列化。
 
+#### 完成度评估（2026-05-09）：~75%
+
+**已实现**：
+
+| 组件 | 位置 |
+|------|------|
+| 存储层 `MemoryStore`（CRUD + 搜索 + 去重 + 归档） | `memory/store.rs` |
+| `MemoryEntry` 结构（id/layer/category/tags/pin/ttl/outdated/access_count） | `memory/entry.rs` |
+| 分类：Fact/Decision/Preference/Pattern/Pitfall | `memory/entry.rs` |
+| 两层存储：Global + Project | `memory/store.rs` |
+| 去重（Jaccard 相似度） | `memory/dedup.rs` |
+| 评分（injection_score + eviction_score） | `memory/scoring.rs` |
+| System Prompt 注入（`top_for_inject` → `# Project Memory`） | `prompt.rs:223-251` |
+| `/memory` 命令（add/delete/pin/search/compact/stats） | `command/commands/memory.rs` |
+| `MemoryTool`（LLM 可通过 tool call 操作 memory） | `memory_tool.rs` |
+| `SessionReminders`（会话级提醒） | `memory/session_reminder.rs` |
+| 配置（`MemoryConfig` + `ReflectionConfig`） | `config/memory.rs` |
+
+**未实现**：
+
+| 需求 | 说明 |
+|------|------|
+| `auto_summary_on_session_end` | 配置项存在但无调用代码，SessionEnd 时没有 LLM 总结写入 memory |
+| `ReflectionGenerated` Hook 事件 | spec 中提到的 hook 事件不在 `HookEvent` 枚举中 |
+| PostCompact 提取记忆 | PostCompact hook 只记录日志，没有提取被压缩内容到 memory |
+| 淘汰策略定时触发 | 有 `compact()` + `eviction_candidates()`，但无定时触发逻辑，`archive_after_days` 配置项不在 `MemoryConfig` 中 |
+| LLM 合并相近记忆 | spec 中"超过 100 条时用 LLM 合并"未落地 |
+| SessionReminders 持久化 | `SessionReminders` 仅内存态，不写入文件，会话结束即丢失 |
+
 ---
 
-### #9 反思系统
+### #9 反思系统（初版设计）
 
 **目标**：在关键节点自动触发反思，让 agent 从过去的行为中提炼经验，写入 Memory 系统，避免重复犯错。
 
@@ -638,9 +675,51 @@ struct ReflectionEntry {
 - P1：连续工具失败反思
 - P2：子代理反思、用户中断反思
 
+**开放问题**：
+- 反思是否消耗当前 session 的 model 调用，还是用独立的轻量 model（成本权衡）
+- 反思失败（如 LLM 返回空）时是否静默丢弃 vs 提示用户
+- Memory 容量上限策略：何时压缩 / 淘汰旧反思
+
 ---
 
-### #9 反思系统
+### #9 反思系统（实施版）
+
+#### 完成度评估（2026-05-09）：~45%
+
+**已实现**：
+
+| 组件 | 位置 |
+|------|------|
+| `ReflectionEngine`（解析 JSON、格式化输出） | `reflection/mod.rs` |
+| Prompt 模板（偏差检测 + 建议记忆 + 过时记忆） | `reflection/prompt.rs` |
+| `ReflectionOutput` 结构 | `reflection/mod.rs` |
+| `run_reflection()` 共享函数（TUI + REPL 复用） | `cli/src/reflection.rs` |
+| 定时触发（每 N turns，LLM 调用） | `stream.rs:415` |
+| Lightweight fallback（LLM 失败时的轻量反思） | `reflection.rs:131` |
+| `/reflect` 命令（手动触发 + apply 子命令） | `command/commands/reflect.rs` |
+| `apply_outdated()` 标记过时记忆 | `reflection/mod.rs:49` |
+| `recent_messages_summary()` 提取对话摘要 | `reflection/mod.rs:122` |
+| 配置（`ReflectionConfig`） | `config/memory.rs` |
+
+**未实现（核心缺口——反思结果没有闭环）**：
+
+| 需求 | 说明 |
+|------|------|
+| **建议记忆自动写入 MemoryStore** | `suggested_memories` 只展示、从未写入 store。`auto_apply_suggestions` 配置项存在但无使用代码 |
+| **过时记忆自动标记** | `apply_outdated()` 已实现但从未被调用 |
+| 连续工具失败触发反思 | spec P1 |
+| SessionEnd 反思 | agent loop 结束时未触发反思 |
+| SubagentStop 反思 | spec P2 |
+| 用户中断反思 | spec P2 |
+| 错误恢复后反思 | spec P2 |
+
+**行为与 spec 不一致**：
+
+| spec 要求 | 实际行为 |
+|-----------|----------|
+| 反思结果静默写入 MemoryStore，不显示在对话中 | 当前通过 `UiEvent::SystemMessage` **展示给用户** |
+| 使用独立轻量模型（成本优化） | `ReflectionConfig.model` 字段存在，但 `run_reflection()` 使用传入的主模型 client |
+| 后台异步执行（不阻塞主循环） | `run_reflection()` 是 `.await` 的，**阻塞** agent loop |
 
 **目标**：在关键节点（任务完成、Stop、错误恢复后、用户显式触发）执行反思流程，对最近的行为、决策、失败、用户反馈做结构化总结，将有价值的经验写入 Memory 系统（#8），让 agent 在未来会话中能够基于历史经验做更好的决策。
 
@@ -676,11 +755,6 @@ struct ReflectionEntry {
 - `aemeath-core/src/command/commands/reflect.rs` — `/reflect` 命令
 - `aemeath-cli/src/tui/app/update.rs` — Stop 事件触发钩子
 - `aemeath-cli/src/tui/app/stream.rs` — TaskUpdate / 错误恢复触发钩子
-
-**开放问题**：
-- 反思是否消耗当前 session 的 model 调用，还是用独立的轻量 model（成本权衡）
-- 反思失败（如 LLM 返回空）时是否静默丢弃 vs 提示用户
-- Memory 容量上限策略：何时压缩 / 淘汰旧反思
 
 ---
 

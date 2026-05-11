@@ -67,14 +67,23 @@ pub async fn process_in_background(
         ctx,
     };
 
-    const MAX_TURNS: usize = 100;
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
 
-    for _ in 0..MAX_TURNS {
+    // Stall detection: sliding windows for repetition detection
+    let mut recent_fingerprints: Vec<String> = Vec::new();
+    const FINGERPRINT_WINDOW: usize = 4;
+    const FINGERPRINT_MAX_REPEAT: usize = 3;
+    let mut max_fingerprint_repeat: usize = 0;
+    let mut recent_tool_patterns: Vec<Vec<String>> = Vec::new();
+    const TOOL_PATTERN_WINDOW: usize = 12;
+    const TOOL_PATTERN_MAX_REPEAT: usize = 10;
+    let mut max_tool_pattern_repeat: usize = 0;
+
+    loop {
         turn_count += 1;
         crate::set_current_turn(turn_count);
         log::info!(
@@ -94,6 +103,8 @@ pub async fn process_in_background(
                 "context_size": context_size,
                 "tool_schema_count": tool_schemas.len(),
             }),
+            None,
+            None,
         );
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
@@ -105,6 +116,8 @@ pub async fn process_in_background(
                     "messages_before_truncate": messages.len(),
                     "messages_at_start": messages_at_start,
                 }),
+                None,
+                None,
             );
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages)).await;
@@ -388,6 +401,51 @@ pub async fn process_in_background(
                 messages.push(resp.assistant_message.clone());
                 let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
+                // Collect text fingerprint for repetition detection
+                {
+                    let text = resp.assistant_message.text_content();
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        let fp: String = trimmed.chars().take(200).collect();
+                        recent_fingerprints.push(fp);
+                        if recent_fingerprints.len() > FINGERPRINT_WINDOW {
+                            recent_fingerprints.remove(0);
+                        }
+                    }
+                }
+                // Check for repetitive text (LLM stuck on the same output)
+                if recent_fingerprints.len() >= FINGERPRINT_MAX_REPEAT {
+                    let last = &recent_fingerprints[recent_fingerprints.len() - 1];
+                    let repeat_count = recent_fingerprints
+                        .iter()
+                        .rev()
+                        .take(FINGERPRINT_MAX_REPEAT)
+                        .filter(|fp| *fp == last)
+                        .count();
+                    if repeat_count > max_fingerprint_repeat {
+                        max_fingerprint_repeat = repeat_count;
+                        log::debug!(
+                            "[stall] fingerprint repeat count: {} (max so far: {})",
+                            repeat_count,
+                            max_fingerprint_repeat
+                        );
+                    }
+                    if repeat_count >= FINGERPRINT_MAX_REPEAT {
+                        log::warn!(
+                            "[stall] assistant text repeated {} times in recent {} turns (max: {})",
+                            repeat_count,
+                            recent_fingerprints.len(),
+                            max_fingerprint_repeat
+                        );
+                        let _ = tx
+                            .send(UiEvent::SystemMessage(
+                                "[agent loop stopped: LLM is producing repetitive output]".to_string(),
+                            ))
+                            .await;
+                        break;
+                    }
+                }
+
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
                 log_agent_loop_event(
                     &session_id,
@@ -400,7 +458,52 @@ pub async fn process_in_background(
                         "tool_call_count": tool_calls.len(),
                         "elapsed_secs": api_elapsed,
                     }),
+                    None,
+                    None,
                 );
+                // Collect tool-call pattern for loop detection
+                if !tool_calls.is_empty() {
+                    let pattern: Vec<String> = tool_calls.iter().map(|c| c.name.clone()).collect();
+                    recent_tool_patterns.push(pattern);
+                    if recent_tool_patterns.len() > TOOL_PATTERN_WINDOW {
+                        recent_tool_patterns.remove(0);
+                    }
+                    if recent_tool_patterns.len() >= 2 {
+                        let last = &recent_tool_patterns[recent_tool_patterns.len() - 1];
+                        // Count consecutive identical patterns from the end
+                        let repeat_count = recent_tool_patterns
+                            .iter()
+                            .rev()
+                            .take_while(|p| *p == last)
+                            .count();
+                        if repeat_count > max_tool_pattern_repeat {
+                            max_tool_pattern_repeat = repeat_count;
+                            log::debug!(
+                                "[stall] tool pattern repeat count: {} (max so far: {}), pattern: {:?}",
+                                repeat_count,
+                                max_tool_pattern_repeat,
+                                last
+                            );
+                        }
+                        if repeat_count >= TOOL_PATTERN_MAX_REPEAT {
+                            log::warn!(
+                                "[stall] tool pattern {:?} repeated {} times in recent {} turns (max: {})",
+                                last,
+                                repeat_count,
+                                recent_tool_patterns.len(),
+                                max_tool_pattern_repeat
+                            );
+                            let _ = tx
+                                .send(UiEvent::SystemMessage(format!(
+                                    "[agent loop stopped: LLM is repeating the same tool pattern ({} x{})]",
+                                    last.join(" → "),
+                                    repeat_count
+                                )))
+                                .await;
+                            break;
+                        }
+                    }
+                }
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                     log_agent_loop_event(
                         &session_id,
@@ -411,6 +514,8 @@ pub async fn process_in_background(
                             "stop_reason": format!("{:?}", resp.stop_reason),
                             "tool_call_count": tool_calls.len(),
                         }),
+                        None,
+                        None,
                     );
                     if let Some(text) = crate::reflection::run_reflection(
                         &memory_config,
@@ -460,6 +565,8 @@ pub async fn process_in_background(
                                 "name": call.name,
                             })).collect::<Vec<_>>(),
                         }),
+                        None,
+                        None,
                     );
                     for call in &denied {
                         // PermissionDenied hook: notify when a tool is denied
@@ -680,6 +787,7 @@ pub async fn process_in_background(
                                 &id,
                                 is_error,
                                 &output,
+                                None,
                             );
                             // PostToolUse hook: run with JSON output parsing
                             let hook_results = hook_ui
@@ -1027,6 +1135,8 @@ pub async fn process_in_background(
                             "result_count": all_results.len(),
                             "error_count": all_results.iter().filter(|(_, _, is_error, _)| *is_error).count(),
                         }),
+                        None,
+                        None,
                     );
 
                     // Build tool result message for API
@@ -1071,6 +1181,8 @@ pub async fn process_in_background(
                         "error": e.to_string(),
                         "elapsed_secs": api_elapsed,
                     }),
+                    None,
+                    None,
                 );
                 let _ = tx.send(UiEvent::Error(e.to_string())).await;
                 // StopFailure hook: API 错误导致 agent 循环结束
@@ -1099,7 +1211,6 @@ pub async fn process_in_background(
         }
     }
 
-    messages.truncate(messages_at_start);
     log_agent_loop_event(
         &session_id,
         turn_count,
@@ -1108,6 +1219,8 @@ pub async fn process_in_background(
             "turns": turn_count,
             "elapsed_secs": turn_start.elapsed().as_secs_f64(),
         }),
+        None,
+        None,
     );
 
     // Stop hook: agent 循环结束
@@ -1125,7 +1238,14 @@ pub async fn process_in_background(
         .await;
 }
 
-fn log_agent_loop_event(session_id: &str, turn: usize, event: &str, extra: serde_json::Value) {
+fn log_agent_loop_event(
+    session_id: &str,
+    turn: usize,
+    event: &str,
+    extra: serde_json::Value,
+    _provider: Option<&str>,
+    model: Option<&str>,
+) {
     log::info!(
         "[agent_loop] session={}, turn={}, event={}, extra={}",
         session_id,
@@ -1133,6 +1253,39 @@ fn log_agent_loop_event(session_id: &str, turn: usize, event: &str, extra: serde
         event,
         extra
     );
+    // 分化日志：output / tool
+    if let Some(logger_mutex) = crate::get_json_logger() {
+        if let Ok(mut logger) = logger_mutex.lock() {
+            let _ = match event {
+                "llm_response" => logger.log_output(
+                    turn,
+                    "default",
+                    model.unwrap_or("?"),
+                    extra,
+                ),
+                "tool_result" => logger.log_tool_result(
+                    turn,
+                    "default",
+                    model.unwrap_or("?"),
+                    extra,
+                ),
+                "tool_batch_started" => {
+                    if let Some(calls) = extra.get("tool_calls").and_then(|v| v.as_array()) {
+                        for call in calls {
+                            let _ = logger.log_tool_call(
+                                turn,
+                                "default",
+                                model.unwrap_or("?"),
+                                call.clone(),
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            };
+        }
+    }
 }
 
 fn log_tool_result_event(
@@ -1142,20 +1295,17 @@ fn log_tool_result_event(
     tool_id: &str,
     is_error: bool,
     output: &str,
+    model: Option<&str>,
 ) {
     let preview: String = output.chars().take(500).collect();
-    log_agent_loop_event(
-        session_id,
-        turn,
-        "tool_result",
-        serde_json::json!({
-            "tool_name": tool_name,
-            "tool_id": tool_id,
-            "is_error": is_error,
-            "output_chars": output.chars().count(),
-            "output_preview": preview,
-        }),
-    );
+    let extra = serde_json::json!({
+        "tool_name": tool_name,
+        "tool_id": tool_id,
+        "is_error": is_error,
+        "output_chars": output.chars().count(),
+        "output_preview": preview,
+    });
+    log_agent_loop_event(session_id, turn, "tool_result", extra, None, model);
 }
 
 #[derive(Clone)]
@@ -1304,4 +1454,26 @@ fn log_llm_request_messages(
         tool_schemas.len(),
         serde_json::to_string(&latest).unwrap_or_default(),
     );
+    // 分化日志：input
+    if let Some(logger_mutex) = crate::get_json_logger() {
+        if let Ok(mut logger) = logger_mutex.lock() {
+            let messages_preview: Vec<serde_json::Value> = messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "role": m.role,
+                        "content": &m.content,
+                    })
+                })
+                .collect();
+            let _ = logger.log_input(
+                turn,
+                provider,
+                model,
+                serde_json::json!({
+                    "messages": messages_preview,
+                }),
+            );
+        }
+    }
 }
