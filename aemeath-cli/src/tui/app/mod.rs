@@ -1,4 +1,3 @@
-mod cmd_exec;
 mod event;
 mod resume;
 mod run_loop;

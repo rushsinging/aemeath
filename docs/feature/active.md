@@ -15,7 +15,7 @@
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
 | 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
-| 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | 待实施 | 未确认 | 通过 CI hook 脚本保证 TUI 层不偏离 TEA 架构（update→Cmd→渲染），以及所有 .rs 文件不超过 400 行（含测试） |
+| 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | ✅ 已完成 | 未确认 | 已完成全仓 Rust 文件拆分并新增架构守卫入口：`scripts/check-rust-file-lines.sh` 强制所有 `.rs` 文件不超过 400 行，`scripts/check-tui-tea-purity.sh` 禁止 TUI `update/` 中直接执行 spawn/hook/clipboard/image 等副作用，`scripts/check-architecture-guards.sh` 聚合 400 行、TEA 纯度与 unsafe text ops 检查 |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
 
 ### #30 Agent loop 收尾工作

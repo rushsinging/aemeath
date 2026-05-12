@@ -36,11 +36,6 @@ impl App {
                     }
                 }
             }
-            Cmd::Batch(cmds) => {
-                for cmd in cmds {
-                    Box::pin(Self::exec_one_cmd(app, active_cancel, ui_tx, cmd)).await;
-                }
-            }
             Cmd::RunHookNotification { message, kind } => {
                 let hook_runner = app.hook_runner.clone();
                 tokio::spawn(async move {

@@ -79,8 +79,7 @@ pub fn build_task_window<'a>(
         let start = completed.len().saturating_sub(capacity);
         let shown = completed.len() - start;
         let hidden = completed.len() - shown;
-        for t in &completed[start..] {
-            // allow unsafe_text_op: Vec slice with bounds-checked start
+        for t in completed.iter().skip(start) {
             lines.push(format_task_line(t));
         }
         if hidden > 0 {

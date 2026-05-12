@@ -4,6 +4,7 @@ use aemeath_core::hook::HookRunner;
 use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
+#[derive(Clone)]
 pub struct SystemPromptParts {
     /// Static instructions that rarely change — eligible for prompt caching.
     pub static_part: String,

@@ -10,17 +10,6 @@ pub(crate) struct TuiStreamHandler {
     pub(crate) last_tps_update: std::time::Instant,
 }
 
-impl TuiStreamHandler {
-    pub(crate) fn new(tx: mpsc::Sender<UiEvent>) -> Self {
-        Self {
-            tx,
-            first_text_time: None,
-            total_chars: 0,
-            last_tps_update: std::time::Instant::now(),
-        }
-    }
-}
-
 impl StreamHandler for TuiStreamHandler {
     fn on_text(&mut self, text: &str) {
         if let Err(e) = self.tx.try_send(UiEvent::Text(text.to_string())) {
