@@ -6,8 +6,7 @@
 
 use std::path::PathBuf;
 
-/// Maximum size (in chars) for a tool result to stay inline in the conversation.
-const MAX_TOOL_RESULT_CHARS: usize = 50_000;
+use crate::compact::MAX_TOOL_RESULT_CHARS;
 
 /// Preview: how many bytes to keep from the beginning.
 const PREVIEW_SIZE_BYTES: usize = 2_000;

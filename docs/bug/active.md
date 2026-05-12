@@ -13,6 +13,7 @@
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
+| 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 修复中 | 未确认 | 2026-05 | 工具输出未截断/持久化，27MB Grep 结果塞入上下文超过 10MB API 限制 |
 
 ## 专案
 
@@ -322,6 +323,28 @@ Error: API error [400 Bad Request]: {"error":{"message":"Invalid assistant messa
 1. OpenAI-compatible 请求转换阶段增加发送前防御：assistant 消息若仅包含空白文本、且没有 tool_calls / reasoning_content，则在请求前丢弃，避免触发 `content or tool_calls must be set`。
 2. 保留 user 空白消息语义；保留 tool-only assistant，并继续以 `content: null + tool_calls` 发送。
 3. 新增回归测试覆盖空白 assistant 被过滤、空白 user 保留、tool-only assistant 保留。
+
+### #39 超大工具结果触发 API 400 string_above_max_length
+
+**症状**：会话 `019e17da-d39f-700f-ae2d-b68a41e12f70` turn 74 返回：
+```
+API error [400 Bad Request]: string too long. Expected a string with maximum length 
+10485760, but got a string with length 27850677
+```
+`input[143].output[0].text` 超过 10MB 限制，导致会话中断。
+
+**根因**：turn 73 中 Grep 工具搜索冲突标记，匹配到 `~/.aemeath/logs/input.log` 大型会话日志文件，返回了 27MB 结果。`persist_oversized_results`（已实现于 `tool_result_storage.rs`）仅在 REPL 路径集成，TUI 主 loop 和子 Agent loop 均未调用，导致超大工具结果直接塞入 LLM 上下文。
+
+**修复**：
+1. 统一 `MAX_TOOL_RESULT_CHARS` 常量定义，`tool_result_storage.rs` 引用 `crate::compact::MAX_TOOL_RESULT_CHARS`
+2. TUI 主 loop（`stream.rs`）在 `all_results` 合并后、`Message::tool_results_rich` 前调用 `persist_oversized_results`
+3. 子 Agent loop（`agent_runner.rs`）在 `truncate_tool_results` 前调用 `persist_oversized_results`
+4. 超过 50KB 的工具结果写入 `~/.aemeath/tool-results/{session_id}/{tool_use_id}.txt`，上下文仅保留 `<persisted-output>` 引用标签
+
+**涉及路径**：
+- `aemeath-core/src/tool_result_storage.rs`
+- `aemeath-cli/src/tui/app/stream.rs`
+- `aemeath-cli/src/agent_runner.rs`
 
 # 已归档 Bug
 

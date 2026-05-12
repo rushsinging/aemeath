@@ -1084,12 +1084,18 @@ pub async fn process_in_background(
                         }
                     }
 
-                    let all_results: Vec<(String, String, bool, Vec<ImageData>)> = ask_user_results
+                    let mut all_results: Vec<(String, String, bool, Vec<ImageData>)> = ask_user_results
                         .into_iter()
                         .chain(non_agent_results.into_iter())
                         .chain(agent_results.into_iter())
                         .chain(denied_results.into_iter())
                         .collect();
+
+                    // Persist oversized tool results to disk to keep context lean
+                    let _persisted = aemeath_core::tool_result_storage::persist_oversized_results(
+                        &session_id,
+                        &mut all_results,
+                    );
 
                     // Build tool result message for API
                     messages.push(Message::tool_results_rich(all_results));

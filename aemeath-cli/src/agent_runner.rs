@@ -875,8 +875,20 @@ impl AgentRunner for CliAgentRunner {
                         }
                     }
 
-                    // Truncate oversized tool results to keep sub-agent context lean
-                    aemeath_core::compact::truncate_tool_results(&mut results);
+                    // Persist oversized tool results to disk before truncation
+                      let persisted_count = aemeath_core::tool_result_storage::persist_oversized_results(
+                          &session_id_for_log,
+                          &mut results,
+                      );
+                      if persisted_count > 0 {
+                          progress(
+                              Some(turn_number),
+                              &format!("Persisted {persisted_count} large tool result(s) to disk"),
+                          );
+                      }
+
+                      // Truncate remaining oversized tool results to keep sub-agent context lean
+                      aemeath_core::compact::truncate_tool_results(&mut results);
 
                     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
                     if has_images {
