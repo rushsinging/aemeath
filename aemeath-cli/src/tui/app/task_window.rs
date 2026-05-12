@@ -43,7 +43,10 @@ pub fn build_task_window<'a>(
         .filter(|t| t.status == TaskStatus::Completed)
         .collect();
     completed.sort_by_key(|t| task_display_number(t, &display_numbers));
-    // TTL filter: only apply when there are more completed than max_lines
+    let completed_unfiltered = completed.clone();
+    // TTL filter: prefer recent completed when the window would overflow,
+    // but keep older completed available as fallback so serial execution
+    // never collapses the window to only the current in_progress task.
     let newest_ts = completed.iter().map(|t| t.updated_at).max().unwrap_or(0);
     let completed: Vec<&Task> = if completed.len() > max_lines {
         completed
@@ -53,7 +56,6 @@ pub fn build_task_window<'a>(
     } else {
         completed
     };
-
     let in_progress: Vec<&Task> = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::InProgress)
@@ -115,10 +117,21 @@ pub fn build_task_window<'a>(
     // --- 下限保护 + 温和扩展：有余量时继续填充 ---
     let min_show = 3.min(total);
     if remaining > 0 {
-        // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
-        let more_comp = remaining.min(completed.len().saturating_sub(comp_show));
+        // 补充更多 completed（优先 recent，必要时回退到 TTL 外的旧 completed），插入到已显示 completed 之后
+        let shown_completed_ids: std::collections::HashSet<&str> = completed
+            .iter()
+            .take(comp_show)
+            .map(|task| task.id.as_str())
+            .collect();
+        let fallback_completed: Vec<&Task> = completed_unfiltered
+            .iter()
+            .copied()
+            .filter(|task| !shown_completed_ids.contains(task.id.as_str()))
+            .collect();
+        let more_comp = remaining.min(fallback_completed.len());
         let insert_pos = 1 + comp_show; // after summary + displayed completed
-        for (i, t) in completed.iter().skip(comp_show).take(more_comp).enumerate() {
+        let show_from = fallback_completed.len().saturating_sub(more_comp);
+        for (i, t) in fallback_completed.iter().skip(show_from).enumerate() {
             lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_comp);
@@ -133,20 +146,29 @@ pub fn build_task_window<'a>(
     }
     // 如果仍然不足 min_show，从更早的 completed 继续取
     if lines.len() - 1 < min_show && remaining > 0 {
-        let shown_completed = completed.len().min(comp_show);
-        let more = (min_show - (lines.len() - 1))
-            .min(remaining)
-            .min(completed.len().saturating_sub(shown_completed));
-        for (i, t) in completed
+        let shown_completed_ids: std::collections::HashSet<String> = lines
             .iter()
-            .skip(shown_completed)
-            .take(more)
-            .enumerate()
-        {
-            lines.insert(
-                1 + shown_completed + i,
-                format_task_line(t, &display_numbers),
-            );
+            .filter_map(|line| {
+                line.strip_prefix('✓')
+                    .and_then(|rest| rest.trim_start().strip_prefix('#'))
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .map(str::to_string)
+            })
+            .collect();
+        let more_needed = min_show - (lines.len() - 1);
+        let candidates: Vec<&Task> = completed_unfiltered
+            .iter()
+            .copied()
+            .filter(|task| {
+                let display = task_display_number(task, &display_numbers).to_string();
+                !shown_completed_ids.contains(display.as_str())
+            })
+            .collect();
+        let take_count = more_needed.min(remaining).min(candidates.len());
+        let show_from = candidates.len().saturating_sub(take_count);
+        let insert_pos = 1 + shown_completed_ids.len();
+        for (i, t) in candidates.iter().skip(show_from).enumerate() {
+            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
         }
     }
     // --- 折叠提示 ---
@@ -544,7 +566,38 @@ mod tests {
         let result2 = build_task_window(&many_tasks, 7, 1);
         // Summary still shows all completed
         assert!(result2[0].contains("10/11"));
-        // Old completed (0..4) should be filtered by TTL
-        assert!(!result2.iter().any(|l| l.contains("✓ #0 ")));
+        // Old completed (0..4) should be filtered by TTL while enough recent tasks exist.
+        assert!(!result2.iter().any(|l| l.contains("✓ #1 task 0")));
+    }
+
+    #[test]
+    fn test_build_task_window_serial_execution_keeps_context_when_recent_completed_expire() {
+        let now: u64 = 10000;
+        let mut tasks: Vec<_> = (1..=8)
+            .map(|i| {
+                make_task_with_ts(
+                    &i.to_string(),
+                    &format!("completed {i}"),
+                    TaskStatus::Completed,
+                    now - 3600,
+                )
+            })
+            .collect();
+        tasks.push(make_task_with_ts(
+            "9",
+            "current",
+            TaskStatus::InProgress,
+            now,
+        ));
+
+        let result = build_task_window(&tasks, 7, 1);
+        let task_lines = result
+            .iter()
+            .filter(|line| line.starts_with('✓') || line.starts_with('■') || line.starts_with('□'))
+            .count();
+
+        assert_eq!(task_lines, 7);
+        assert!(result.iter().any(|line| line.contains("■ #9 current")));
+        assert!(result.iter().any(|line| line.contains("✓ #8 completed 8")));
     }
 }
