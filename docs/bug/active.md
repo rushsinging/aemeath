@@ -7,7 +7,7 @@
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
 | 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
 | 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
-| 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
+| 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 待确认 | 未确认 | 2026-05 | TTL 过滤在下限补齐前丢弃旧 completed，串行执行且 completed 过期时窗口退缩 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
@@ -17,19 +17,35 @@
 
 ## 专案
 
-### 专案 A：Task 系统生命周期管理（#27 + #29 + #34 + #36 + #37）
+### 专案 A：Task 系统生命周期管理（Bug #27 + #29 + #32 + #33 + #34 + #36 + #37；Feature #18 + #24 + #25 + #29 + #30 + #33）
 
-**统一描述**：Task 系统在状态流转、batch 隔离、跨轮次清理三个维度存在缺陷，导致 LLM 工作已执行但 task 状态不更新、旧 task reminder 干扰新请求、已完成 batch 不清空。
+**统一描述**：Task 系统在状态流转、batch 隔离、跨轮次清理、窗口化显示、选中复制、reminder 注入、agent loop 收尾、工具调用展示等维度存在关联缺陷或改进项，统一作为专案 A 管理。
 
-| 原始 Bug | 角度 | 状态 |
-|----------|------|------|
-| #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
-| #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
-| #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
-| #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
-| #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
+| 类型 | 原始条目 | 角度 | 状态 |
+|------|----------|------|------|
+| Bug | #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
+| Bug | #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
+| Bug | #32 Task list 窗口化：始终只显示 1 条 task | 窗口化显示：限量显示策略缺陷 | 已修复（2026-05-11）：TTL 只优先 recent completed，补齐窗口时回退使用旧 completed |
+| Bug | #33 Spinner 下方 task list 无法选中和复制 | 交互：task status 行 selection/copy 映射缺失 | 待确认 |
+| Bug | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
+| Bug | #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
+| Bug | #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
+| Feature | #18 Task list 跨轮次 batch 机制 | 基础机制：Task 跟随 session 持久化并按 batch 分组显示 | ✅ 已完成，未确认 |
+| Feature | #24 Spinner 下方 task list 限量显示（最多 7 条） | 窗口化显示：限制 task list 占用空间 | ✅ 已完成，未确认；关联 Bug #32 |
+| Feature | #25 Task list 跨轮次生命周期策略 | 生命周期：完成归档、中断提示、旧任务提醒 | ✅ 已完成，未确认 |
+| Feature | #29 Task reminder 被动注入 | reminder：按轮次扫描并注入极简摘要 | ✅ 已完成，未确认 |
+| Feature | #30 Agent loop 收尾工作 | 收尾一致性：统一 finalize、记录停止原因、task/list 收尾检查 | ✅ 已完成，未确认 |
+| Feature | #33 优化 TaskListCreate / TaskListComplete 工具调用显示 | 展示优化：隐藏噪声，改为简洁摘要 | 待实施，已确认 |
 
-**本次修复（#36 + #37）**：
+**专案 A 相关 Feature 来源**：见 `docs/feature/active.md` 的 #18、#24、#25、#29、#30、#33。
+
+**本次修复（#32 + #36 + #37）**：
+
+**#32 — 窗口化始终只显示 1 条 task**：
+- 串行执行且大量 completed task 的 `updated_at` 超过 TTL 后，窗口只保留当前 in_progress，旧 completed 在下限补齐前已被过滤掉
+- 根因：`build_task_window()` 把 TTL 过滤后的 completed 列表作为唯一补齐来源，导致没有 pending 时无法回退填满窗口
+- 修复：保留 unfiltered completed 作为 fallback；TTL 仍优先显示 recent completed，但窗口有剩余容量时从旧 completed 回退补齐，避免退缩成 1 条
+- 回归测试：`test_build_task_window_serial_execution_keeps_context_when_recent_completed_expire`
 
 **#36 — 新 batch 任务编号不从 1 开始**：
 - 同一 session 中第二次 TaskListCreate 后，TaskCreate 分配的 task id 仍沿用全局递增（如 #6、#7...），而非新 batch 从 #1 重新编号
@@ -45,7 +61,7 @@
 - `aemeath-tools/src/agent.rs`（#27：AgentTool taskId 桥接）
 - `aemeath-core/src/task.rs`（TaskStore batch 管理、completed batch 归档）
 - `aemeath-tools/src/task_list_create.rs`、`task_list_complete.rs`（#34：batch 生命周期）
-- `aemeath-cli/src/tui/app/task_window.rs`（#36：batch 内局部编号）
+- `aemeath-cli/src/tui/app/task_window.rs`（#32：TTL fallback 补齐窗口；#36：batch 内局部编号）
 - system prompt 中 task 维护指引
 
 ## 详情
