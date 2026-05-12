@@ -7,7 +7,7 @@
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
 | 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
 | 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
-| 32 | Task list 窗口化：始终只显示 1 条 task | 高 | 修复中 | 未确认 | 2026-05 | 窗口化策略在串行执行场景下窗口退缩至 1 条；session 019e0665 实测 |
+| 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 多个症状：(A) 窗口退缩至 1 条；(B) completed 挂留 + pending 跳号；(C) 2026-05-12 复现：completed 非"最近完成"，pending 段跳号 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
@@ -178,6 +178,12 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - 即 task list 显示：2（completed）、4（in_progress）、5（pending）
 - 未达 7 条上限，但 task 3 等中间 task 未显示，completed 未自动清理
 
+**症状 C — completed 不是"最近"、pending 跳号（2026-05-12 截图）**：
+- `Tasks: 5/11`，共 5 条 completed，窗口只显示 #1（通常是最早完成的，而非"最近完成"）
+- 显示顺序：✓ #1、■ #3、■ #9、□ #4、□ #5、□ #10、□ #11
+- pending 列表从 #5 跳到 #10，#6/#7/#8 既未出现在 completed 也未出现在 pending 段，疑似被静默截断
+- 期望：「最近完成（按 updated_at desc 取 1~N 条）+ 所有 in_progress + 后续 pending 升序连续填充」
+
 **复现路径**：
 1. LLM 创建 ≥ 2 条 task
 2. LLM 完成部分 task，新建更多 task（总数持续波动）
@@ -189,6 +195,9 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 2. **症状 B 根因**：
    - completed 未设置自动清理（TTL），过期 completed 不会自动从窗口排除
    - 窗口填充时对 pending 的截断位置不正确，跳过了 task 3（pending）而直接到了 task 5
+3. **症状 C 根因（疑似）**：
+   - "最近完成"未按 `updated_at` 降序取最新，而是按 id 升序取第一条 completed → 永远显示 #1
+   - pending 段在 in_progress 之后接着取"id > 最大 in_progress id"的 pending，导致 #6/#7/#8 若状态是 completed 但被 TTL 排除，pending 仍从 #4 起，但配额耗尽前出现跳号说明排序/截断逻辑存在 off-by-one
 
 另外需确认 `task_status_lines` 是批量替换还是增量追加 —— 如果是增量方式，旧行不会被移除，会导致 completed 长期滞留。
 
