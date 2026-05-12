@@ -81,6 +81,32 @@ pub fn wrap_line(text: &str, max_width: usize) -> Vec<String> {
     result
 }
 
+/// 计算 wrap 后每个 chunk 在原始文本中的 char 偏移 (start, end)
+pub fn compute_char_offsets(text: &str, max_width: usize) -> Vec<(CharIdx, CharIdx)> {
+    if max_width == 0 {
+        let len = text.chars().count();
+        return vec![(CharIdx::ZERO, CharIdx::new(len))];
+    }
+
+    let mut result = Vec::new();
+    let mut current_width = 0usize;
+    let mut chunk_start = 0usize;
+
+    for (char_idx, ch) in text.chars().enumerate() {
+        let ch_width = ch.width().unwrap_or(1);
+        if current_width + ch_width > max_width {
+            result.push((CharIdx::new(chunk_start), CharIdx::new(char_idx)));
+            chunk_start = char_idx;
+            current_width = 0;
+        }
+        current_width += ch_width;
+    }
+
+    let end = text.chars().count();
+    result.push((CharIdx::new(chunk_start), CharIdx::new(end)));
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

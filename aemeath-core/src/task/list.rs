@@ -1,75 +1,63 @@
-use super::{Batch, BatchStatus, Task, TaskStatus, TaskStore};
+use super::{Task, TaskPriority, TaskStatus, TaskStore};
+
+fn sort_tasks_by_priority_then_created(tasks: &mut [Task]) {
+    tasks.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| a.created_at.cmp(&b.created_at))
+    });
+}
 
 impl TaskStore {
-    /// Ensure the current batch metadata exists.
-    pub(crate) async fn ensure_current_batch(&self) -> u64 {
-        let batch_id = *self.current_batch.lock().await;
-        self.get_or_create_batch(batch_id).await;
-        batch_id
-    }
-
-    /// Create a task list by assigning a summary to the current batch.
-    pub async fn create_list(&self, subject: String, summary: String) -> Batch {
-        let batch_id = self.ensure_current_batch().await;
-        let mut batches = self.batches.lock().await;
-        for batch in batches.iter_mut() {
-            if batch.id != batch_id && batch.status == BatchStatus::Active {
-                batch.status = BatchStatus::Paused;
-            }
-        }
-        let batch = batches
-            .iter_mut()
-            .find(|batch| batch.id == batch_id)
-            .expect("current batch exists");
-        batch.status = BatchStatus::Active;
-        batch.summary = Some(if summary.trim().is_empty() {
-            subject
-        } else {
-            summary
-        });
-        batch.clone()
-    }
-
-    /// Complete the current task list/batch.
-    pub async fn complete_list(&self) -> Option<Batch> {
-        let batch_id = *self.current_batch.lock().await;
-        let mut batches = self.batches.lock().await;
-        let batch = batches.iter_mut().find(|batch| batch.id == batch_id)?;
-        batch.status = BatchStatus::Archived;
-        Some(batch.clone())
-    }
-
-    /// Return the active task list/batch, if any.
-    pub async fn active_list(&self) -> Option<Batch> {
-        let batches = self.batches.lock().await;
-        batches
-            .iter()
-            .find(|batch| batch.status == BatchStatus::Active)
-            .cloned()
-    }
-
-    /// List batches that still have incomplete tasks.
-    pub async fn lists_with_pending(&self) -> Vec<Batch> {
-        let batches = self.batches.lock().await.clone();
-        let mut result = Vec::new();
-        for batch in batches {
-            if self.incomplete_count(batch.id).await > 0 {
-                result.push(batch);
-            }
-        }
-        result.sort_by_key(|batch| batch.id);
-        result
-    }
-
-    /// Get tasks in a specific batch that match statuses.
-    pub async fn tasks_in_batch(&self, batch_id: u64, statuses: &[TaskStatus]) -> Vec<Task> {
+    /// List all tasks (async)
+    pub async fn list(&self) -> Vec<Task> {
         let tasks = self.tasks.lock().await;
         let mut result: Vec<Task> = tasks
             .values()
-            .filter(|t| t.batch == batch_id && statuses.contains(&t.status))
+            .filter(|t| t.status != TaskStatus::Deleted)
             .cloned()
             .collect();
-        result.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
+        sort_tasks_by_priority_then_created(&mut result);
+        result
+    }
+
+    /// List tasks by status (async)
+    pub async fn list_by_status(&self, status: TaskStatus) -> Vec<Task> {
+        self.list()
+            .await
+            .into_iter()
+            .filter(|t| t.status == status)
+            .collect()
+    }
+
+    /// List tasks by priority (async)
+    pub async fn list_by_priority(&self, priority: TaskPriority) -> Vec<Task> {
+        self.list()
+            .await
+            .into_iter()
+            .filter(|t| t.priority == priority)
+            .collect()
+    }
+
+    /// List tasks for a session (async)
+    pub async fn list_by_session(&self, session_id: &str) -> Vec<Task> {
+        self.list()
+            .await
+            .into_iter()
+            .filter(|t| t.session_id.as_deref() == Some(session_id))
+            .collect()
+    }
+
+    /// List tasks belonging to the latest batch only.
+    pub async fn list_current_batch(&self) -> Vec<Task> {
+        let tasks = self.tasks.lock().await;
+        let max_batch = tasks.values().map(|t| t.batch).max().unwrap_or(0);
+        let mut result: Vec<Task> = tasks
+            .values()
+            .filter(|t| t.batch == max_batch && t.status != TaskStatus::Deleted)
+            .cloned()
+            .collect();
+        sort_tasks_by_priority_then_created(&mut result);
         result
     }
 }

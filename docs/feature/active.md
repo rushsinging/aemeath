@@ -2,8 +2,9 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
+| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt top-N 注入；Hook 兜底与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
-| 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory；自动 N 轮触发在 `auto_apply_suggestions=true` 时会自动写入 Memory，false 时仅展示建议不写入；PostCompact 触发待继续。详见 [spec](specs/009-reflection-system.md) |
+| 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory；自动 N 轮触发与 PostCompact 触发待继续。详见 [spec](specs/009-reflection-system.md) |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
 | 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
@@ -13,62 +14,9 @@
 | 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
-| 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查、记录对话停止原因日志（正常 EndTurn / 无 tool_calls / 文本重复检测 / 用户中断等）。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
-| 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | 待实施 | 未确认 | 通过 CI hook 脚本保证 TUI 层不偏离 TEA 架构（update→Cmd→渲染），以及所有 .rs 文件不超过 400 行（含测试） |
+| 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
+| 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | ✅ 已完成 | 未确认 | 已完成全仓 Rust 文件拆分并新增架构守卫入口：`scripts/check-rust-file-lines.sh` 强制所有 `.rs` 文件不超过 400 行，`scripts/check-tui-tea-purity.sh` 禁止 TUI `update/` 中直接执行 spawn/hook/clipboard/image 等副作用，`scripts/check-architecture-guards.sh` 聚合 400 行、TEA 纯度与 unsafe text ops 检查 |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
-| 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | 待实施 | 已确认 | TaskListCreate 和 TaskListComplete 在 TUI 中应显示为简洁摘要，隐藏原始 JSON 参数、`Task list #N created/completed`、重复 Summary 和默认 completed 行等噪声 |
-
-### #33 优化 TaskListCreate / TaskListComplete 工具调用显示
-
-**目标**：减少 TaskListCreate / TaskListComplete 工具调用在 TUI 输出中的重复信息和视觉噪声，把“创建/完成任务列表”展示为用户可读的简洁摘要。
-
-**当前表现**：
-
-TaskListCreate 示例：
-
-```text
-TaskListCreate
-  {"subject":"拆分超过 400 行限制的大文件","summary":"将 15 个超过 400 行限制的 .rs 文件拆分为多个职责..."}
-  Task list #2 created
-  Summary: 将 15 个超过 400 行限制的 .rs 文件拆分为多个职责清晰的模块
-  ✓ TaskListCreate completed
-```
-
-TaskListComplete 示例：
-
-```text
-TaskListComplete
-  {}
-  Task list #2 completed
-  ✓ TaskListComplete completed
-```
-
-**期望表现**：
-
-TaskListCreate：
-
-```text
-✓ Task list created: 拆分超过 400 行限制的大文件
-  将 15 个超过 400 行限制的 .rs 文件拆分为多个职责清晰的模块
-```
-
-TaskListComplete：
-
-```text
-✓ Task list completed
-```
-
-**范围**：
-1. TUI 工具调用展示层对 `TaskListCreate` 和 `TaskListComplete` 做专用摘要渲染。
-2. `TaskListCreate` 隐藏原始 JSON 参数块、重复 summary、`Task list #N created` 和默认 completed 行。
-3. `TaskListComplete` 隐藏空 JSON 参数块、`Task list #N completed` 和默认 completed 行，仅保留简洁完成提示。
-4. 保留错误路径的可见错误信息，避免静默失败。
-5. 不改变 ToolResult 语义和 task list 创建/完成逻辑，仅优化展示。
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/tool_display.rs`
-- Task/tool progress 转换与渲染相关路径
-
 
 ### #30 Agent loop 收尾工作
 
@@ -519,6 +467,23 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 - Feature #28 MCP P0+P1 实施任务 1-9 已完成并 review 通过
 - 用户确认后再归档；确认前保留在 active.md
+
+---
+
+### #4 AskUserQuestion TUI 美化
+
+**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
+
+**当前状态**：基础功能已实现（`UiEvent::AskUser` + `update.rs` 中 `ask_user_reply_tx` 机制），但显示为普通 system message + 纯文本选项，缺乏视觉层次。
+
+**待改进**：
+- 问题文本高亮/醒目样式
+- 选项列表带序号和视觉区分
+- 输入提示区域样式优化
+
+**涉及路径**：`aemeath-cli/src/tui/app/update.rs`（`UiEvent::AskUser` 处理）、`aemeath-cli/src/tui/output_area/`（渲染样式）
+
+---
 
 ### #8 Memory 系统
 

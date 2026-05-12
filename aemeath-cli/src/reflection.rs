@@ -319,11 +319,6 @@ mod tests {
         assert_eq!(entries[0].category, MemoryCategory::Decision);
         assert_eq!(entries[0].content, "后台 reflection 自动写入 memory");
         assert_eq!(entries[0].source, MemorySource::Llm);
-        assert!(entries[0]
-            .source_ref
-            .as_deref()
-            .unwrap()
-            .contains("auto_apply"));
         let _ = std::fs::remove_dir_all(cwd);
         let _ = std::fs::remove_dir_all(base_dir);
     }

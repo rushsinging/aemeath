@@ -69,16 +69,12 @@ impl TaskReminderState {
 
         // Throttle: must have ≥ TURNS_SINCE_WRITE since last task management
         // (skip on first reminder)
-        if !is_first_reminder
-            && current_turn < self.last_task_management_turn + TURNS_SINCE_WRITE
-        {
+        if !is_first_reminder && current_turn < self.last_task_management_turn + TURNS_SINCE_WRITE {
             return None;
         }
         // Throttle: must have ≥ TURNS_BETWEEN_REMINDERS since last reminder
         // (skip on first reminder)
-        if !is_first_reminder
-            && current_turn < self.last_reminder_turn + TURNS_BETWEEN_REMINDERS
-        {
+        if !is_first_reminder && current_turn < self.last_reminder_turn + TURNS_BETWEEN_REMINDERS {
             return None;
         }
 
