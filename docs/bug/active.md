@@ -26,7 +26,7 @@
 | Bug | #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
 | Bug | #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
 | Bug | #32 Task list 窗口化：始终只显示 1 条 task | 窗口化显示：限量显示策略缺陷 | 已修复（2026-05-11）：TTL 只优先 recent completed，补齐窗口时回退使用旧 completed |
-| Bug | #33 Spinner 下方 task list 无法选中和复制 | 交互：task status 行 selection/copy 映射缺失 | 待确认 |
+| Bug | #33 Spinner 下方 task list 无法选中和复制 | 交互：task status 行 selection/copy 映射缺失 | 待确认；已修复（2026-05-14）：render 阶段为 task status 行补充 screen_line_map 映射，复制路径可读取虚拟 task 行 |
 | Bug | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
 | Bug | #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
 | Bug | #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
@@ -35,7 +35,7 @@
 | Feature | #25 Task list 跨轮次生命周期策略 | 生命周期：完成归档、中断提示、旧任务提醒 | ✅ 已完成，未确认 |
 | Feature | #29 Task reminder 被动注入 | reminder：按轮次扫描并注入极简摘要 | ✅ 已完成，未确认 |
 | Feature | #30 Agent loop 收尾工作 | 收尾一致性：统一 finalize、记录停止原因、task/list 收尾检查 | ✅ 已完成，未确认 |
-| Feature | #33 优化 TaskListCreate / TaskListComplete 工具调用显示 | 展示优化：隐藏噪声，改为简洁摘要 | 待实施，已确认 |
+| Feature | #33 优化 TaskListCreate / TaskListComplete 工具调用显示 | 展示优化：隐藏噪声，改为简洁摘要 | ✅ 已完成，未确认；已实现简洁 header、summary 详情和成功结果静默 |
 
 **专案 A 相关 Feature 来源**：见 `docs/feature/active.md` 的 #18、#24、#25、#29、#30、#33。
 
@@ -279,9 +279,15 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 2. `copy_selection` 中对 task 相关行做文本提取（标题文本不含图标部分）
 3. 单元测试覆盖：验证 task 行可被选中和复制
 
+**修复（2026-05-14）**：
+1. `append_status_lines()` 在 spinner 存在时为 `task_status_lines` 注册 `screen_line_map` 映射，逻辑索引使用 `lines.len() + task_status_index`，与 `selection.rs::get_line_content()` 的虚拟 task 行读取规则一致。
+2. render 阶段暂存 `task_status_lines`，避免 `get_line_content()` 因真实 `self.lines` 为空而无法读取虚拟 task 行。
+3. 新增回归测试 `test_render_maps_task_status_lines_for_selection` 覆盖 task status 行可拖拽选中并复制。
+
 **涉及路径**：
-- `aemeath-cli/src/tui/app/mod.rs`（`update_task_status` / render 阶段 screen_line_map 注册）
-- `aemeath-cli/src/tui/output_area/mod.rs`（selection / copy 路径的 LineKind 处理）
+- `aemeath-cli/src/tui/output_area/render.rs`
+- `aemeath-cli/src/tui/output_area/render_status.rs`
+- `aemeath-cli/src/tui/output_area/selection.rs`
 
 **关联**：
 - Bug #14（已修复：tool call 标题可选中但无法复制）—— 同类问题，修复模式可复用

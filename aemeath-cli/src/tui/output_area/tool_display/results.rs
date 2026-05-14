@@ -120,6 +120,9 @@ fn render_result_body(tool_name: &str, result: &str, id_tag: &Option<String>) ->
     let (max_lines, result_style) = lookup_display(tool_name)
         .map(|display| (display.result_max_lines(), display.result_style()))
         .unwrap_or((3, LineStyle::System));
+    if max_lines == 0 {
+        return lines;
+    }
 
     let total = result.lines().count();
     for line in result.lines().take(max_lines) {

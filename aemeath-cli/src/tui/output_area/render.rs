@@ -66,7 +66,8 @@ impl OutputArea {
             self.render_visible_lines(&vis_lines, &code_info, &table_render_cache, &mut screen_map);
 
         self.screen_line_map = screen_map;
-        self.append_status_lines(&mut lines, queued_lines, &spinner_line);
+        let task_status_lines = self.task_status_lines.clone();
+        self.append_status_lines(&mut lines, queued_lines, &spinner_line, &task_status_lines);
         let lines = self.trim_to_area_height(lines, area.height as usize);
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

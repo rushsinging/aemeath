@@ -73,6 +73,58 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListDisplay)
 });
 
+struct TaskListCreateDisplay;
+impl ToolDisplay for TaskListCreateDisplay {
+    fn name(&self) -> &str {
+        "TaskListCreate"
+    }
+    fn format_header(&self, input: &serde_json::Value) -> String {
+        let subject = str_arg(input, "subject", "?");
+        format!("● TaskListCreate: {subject}")
+    }
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let summary = str_arg(input, "summary", "");
+        if summary.is_empty() {
+            vec![]
+        } else {
+            vec![truncate_ellipsis(summary, 80)]
+        }
+    }
+    fn result_max_lines(&self) -> usize {
+        0
+    }
+    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
+        vec![]
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskListCreate",
+    display: || Box::new(TaskListCreateDisplay)
+});
+
+struct TaskListCompleteDisplay;
+impl ToolDisplay for TaskListCompleteDisplay {
+    fn name(&self) -> &str {
+        "TaskListComplete"
+    }
+    fn format_header(&self, _input: &serde_json::Value) -> String {
+        "● TaskListComplete".to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn result_max_lines(&self) -> usize {
+        0
+    }
+    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
+        vec![]
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskListComplete",
+    display: || Box::new(TaskListCompleteDisplay)
+});
+
 struct SkillDisplay;
 impl ToolDisplay for SkillDisplay {
     fn name(&self) -> &str {
