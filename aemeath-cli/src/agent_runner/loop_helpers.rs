@@ -114,8 +114,10 @@ impl<'a> SubAgentRun<'a> {
 
 pub(super) fn append_tool_results(
     messages: &mut Vec<Message>,
-    results: Vec<aemeath_core::agent::ToolResultTuple>,
+    mut results: Vec<aemeath_core::agent::ToolResultTuple>,
+    session_id: &str,
 ) {
+    aemeath_core::tool_result_storage::persist_oversized_results(session_id, &mut results);
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
         messages.push(Message::tool_results_rich(results));
@@ -125,5 +127,30 @@ pub(super) fn append_tool_results(
             .map(|(id, output, is_error, _)| (id, output, is_error))
             .collect();
         messages.push(Message::tool_results(simple));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::compact::MAX_TOOL_RESULT_CHARS;
+    use aemeath_core::message::ContentBlock;
+
+    #[test]
+    fn test_append_tool_results_persists_oversized_sub_agent_result() {
+        let session_id = format!("test-sub-agent-{}", std::process::id());
+        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
+        let mut messages = Vec::new();
+        let results = vec![("tool-oversized".to_string(), oversized, false, Vec::new())];
+
+        append_tool_results(&mut messages, results, &session_id);
+
+        let [ContentBlock::ToolResult { content, .. }] = messages[0].content.as_slice() else {
+            panic!("expected one tool result");
+        };
+        let text = content.as_str().expect("tool result should be string");
+        assert!(text.contains("<persisted-output>"));
+        assert!(text.len() < MAX_TOOL_RESULT_CHARS);
+        assert!(text.contains(&session_id));
     }
 }

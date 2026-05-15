@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
+| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | 同 #39：超大 tool result 未持久化导致请求体过大，部分 API 静默空响应 |
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
 | 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
@@ -13,7 +13,7 @@
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
-| 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 修复中 | 未确认 | 2026-05 | 工具输出未截断/持久化，27MB Grep 结果塞入上下文超过 10MB API 限制 |
+| 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
 
 ## 专案
 
@@ -81,11 +81,11 @@
 ### #13 Zhipu API 超大请求体返回空响应
 **症状**：会话 0000019dc93bab86dfd7032f 中，多轮 tool call 后模型停止输出，TUI 无内容显示。API 返回 `stop_reason=EndTurn` 但 `input_tokens=0 output_tokens=0`，text 为空字符串，无 tool calls。
 **根因**：请求体过大（`body_bytes=11659080` 约 11MB），Zhipu GLM-5.1 API 在收到超大请求时静默返回空响应，不报错。compact 后 messages 从 62 降到 23，但 body 仍约 11MB，说明某条 tool result 包含极大内容（可能是文件搜索/读取返回了大量数据），compaction 未能有效压缩。
-**修复方向**：
-1. 发送前检测 body size，超过阈值时对超大 tool result 做截断或摘要
-2. compaction 阶段主动截断过长的 tool result 内容
-3. 检测到 `input_tokens=0 output_tokens=0` 的空响应时，视为 API 错误并重试或提示用户
-**涉及路径**：`aemeath-core/src/compact/`、stream 发送逻辑
+**修复方向 / 解决进度**：
+1. #39 已确认是 #13 的同类根因：超大 tool result 进入请求上下文导致 body 过大；不同 provider 分别表现为 400 `string_above_max_length` 或 `input_tokens=0 output_tokens=0` 空响应。
+2. 已在 TUI 主 loop 与子 Agent loop 统一接入 `persist_oversized_results`，超大工具结果进入 LLM 前会落盘并替换为 `<persisted-output>` 引用。
+3. 检测空响应并重试/提示仍可作为后续防御增强，但本次已消除已知超大 tool result 直接入上下文的主因。
+**涉及路径**：`aemeath-core/src/tool_result_storage.rs`、`aemeath-cli/src/tui/app/stream.rs`、`aemeath-cli/src/agent_runner/loop_helpers.rs`、`aemeath-cli/src/agent_runner/loop_run.rs`
 
 ### #27 Sub-agent 已执行 tool call 但 task list 状态不更新
 **症状**：父 agent 创建 7 个 task（"#1 拆分 task.rs (509→<400)" ... "#7 ..."），通过 Agent tool 派发 sub-agent 执行其中某个（如 "拆分 state.rs 到400行以下"）。sub-agent 已完成 Read / Bash / Write / Bash / Bash 等多个 tool call（屏幕可见），但临时区域的 task list 仍显示 `Tasks: 0/7`，所有 7 项保持 `☐`（pending）状态。
@@ -372,10 +372,18 @@ API error [400 Bad Request]: string too long. Expected a string with maximum len
 3. 子 Agent loop（`agent_runner.rs`）在 `truncate_tool_results` 前调用 `persist_oversized_results`
 4. 超过 50KB 的工具结果写入 `~/.aemeath/tool-results/{session_id}/{tool_use_id}.txt`，上下文仅保留 `<persisted-output>` 引用标签
 
+**修复（2026-05-15）**：
+1. TUI 主 loop 新增 `tool_results_for_api()`，在 `all_results` 合并后、构造 `Message::tool_results_rich` 前调用 `persist_oversized_results`。
+2. 子 Agent loop 的 `append_tool_results()` 接受 `session_id`，在构造 tool result message 前调用 `persist_oversized_results`；保持 UI/progress/json logger 仍记录原始 tool 输出摘要，只有进入 LLM 上下文的内容替换为引用。
+3. 新增回归测试覆盖 TUI 主 loop 与子 Agent loop 两条路径，验证超过 `MAX_TOOL_RESULT_CHARS` 的结果被替换为 `<persisted-output>`，且引用中包含 session id。
+4. #13 与 #39 确认为同类问题；#13 的超大 body 空响应由本修复消除主因，空响应检测可另作防御增强。
+
 **涉及路径**：
 - `aemeath-core/src/tool_result_storage.rs`
 - `aemeath-cli/src/tui/app/stream.rs`
-- `aemeath-cli/src/agent_runner.rs`
+- `aemeath-cli/src/tui/app/stream/tools.rs`
+- `aemeath-cli/src/agent_runner/loop_helpers.rs`
+- `aemeath-cli/src/agent_runner/loop_run.rs`
 
 # 已归档 Bug
 

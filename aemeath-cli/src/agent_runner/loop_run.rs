@@ -127,7 +127,7 @@ impl<'a> SubAgentRun<'a> {
                     self.log_tool_results(turn_number, &results, &call_info);
 
                     aemeath_core::compact::truncate_tool_results(&mut results);
-                    append_tool_results(&mut self.messages, results);
+                    append_tool_results(&mut self.messages, results, &self.session_id);
                     self.compact_if_needed(api_input, turn_number);
                 }
                 Err(e) => {
