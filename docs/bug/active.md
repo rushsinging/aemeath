@@ -6,7 +6,7 @@
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
 | 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
-| 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo HTML result div class 从单值变为多值，解析器 `find("<div class=\"result\"")` 匹配失败 |
+| 31 | WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更） | 高 | 待确认 | 未确认 | 2026-05 | DuckDuckGo result/title/snippet HTML 属性顺序变化；结果 div class 多值已修复，但 title/snippet 匹配仍假设 class 是第一个属性 |
 | 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 已修复(A) TTL 过滤导致窗口退缩至 1 条；仍跟踪(B) completed 挂留 + pending 跳号；(C) completed 非"最近完成"、pending 段跳号 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
@@ -164,17 +164,22 @@
 ### #31 WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更）
 **症状**：WebSearch tool 调用后始终返回 "No search results found"，但直接 curl DuckDuckGo HTML 接口（`https://html.duckduckgo.com/html/`）可以正常返回搜索结果。
 
-**根因**：`parse_duckduckgo_html()` 在第 138 行用 `find("<div class=\"result\"")` 匹配结果块。DuckDuckGo 近期将结果 div 的 class 从单值 `class="result"` 改为多值 `class="result results_links results_links_deep web-result "`。搜索字符串期望 `result` 后紧跟 `"`，实际 HTML 中 `result` 后是空格，导致永远匹配不到任何结果。
+**根因**：DuckDuckGo HTML 结构发生两处变化：
+1. 结果 div 的 class 从单值 `class="result"` 变为多值 `class="result results_links results_links_deep web-result "`，旧的 `find("<div class=\"result\"")` 匹配失败。
+2. 当前标题链接会输出为 `<a rel="nofollow" class="result__a" ...>`，snippet 也可能带额外属性；解析器继续用 `<a class="result__a"` / `<a class="result__snippet"` 假设 `class` 是第一个属性，导致即使找到 result block 也提取不到标题。
 
-**修复**：`aemeath-tools/src/web_search.rs:138` 将搜索字符串从 `<div class="result"` 改为 `<div class="result "`（加空格），兼容新旧两种 class 格式。
+**修复**：
+1. `aemeath-tools/src/web_search.rs` 中结果块匹配改为 `<div class="result `，兼容当前多值 class。
+2. title/snippet 匹配改为查找 `class="result__a"` / `class="result__snippet"`，不再依赖属性顺序。
+3. 新增回归测试覆盖 `<a rel="nofollow" class="result__a" ...>` 场景。
 
 **涉及路径**：`aemeath-tools/src/web_search.rs` `parse_duckduckgo_html()`
 
 **验证**：
-1. `curl https://html.duckduckgo.com/html/?q=test` 确认 HTML 中有 `class="result results_links..."`
-2. `grep -c '<div class="result"' /tmp/ddg_test.html` 返回 0，确认旧匹配字符串失效
-3. 修复后用实际 HTML 测试，成功提取 5 条结果
-4. `cargo check -p aemeath-tools` 编译通过
+1. `curl https://html.duckduckgo.com/html/?q=rust%20programming%20language` 确认 HTML 中有 `class="result results_links..."` 且标题链接为 `rel` 在 `class` 前。
+2. `cargo test -p aemeath-tools test_parse_duckduckgo_html_handles_anchor_rel_before_class -- --nocapture` 通过。
+3. `cargo test -p aemeath-tools` 通过。
+4. `cargo check -p aemeath-tools` 通过。
 
 
 ### #32 Task list 窗口化：始终只显示 1 条 task

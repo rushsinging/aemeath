@@ -129,9 +129,9 @@ fn decode_html_entities(s: &str) -> String {
 fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
     let mut results = Vec::new();
 
-    let title_pattern = "<a class=\"result__a\"";
+    let title_pattern = "class=\"result__a\"";
     let url_pattern = "href=\"";
-    let snippet_pattern = "<a class=\"result__snippet\"";
+    let snippet_pattern = "class=\"result__snippet\"";
 
     let mut pos = 0;
     while results.len() < limit {
@@ -226,4 +226,30 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
     }
 
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duckduckgo_html_handles_anchor_rel_before_class() {
+        let html = r#"
+            <div class="result results_links results_links_deep web-result ">
+              <div class="links_main links_deep result__body">
+                <h2 class="result__title">
+                  <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2F&amp;rut=abc">Rust Programming Language</a>
+                </h2>
+                <a class="result__snippet" href="/">A language empowering everyone.</a>
+              </div>
+            </div>
+        "#;
+
+        let results = parse_duckduckgo_html(html, 5);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Rust Programming Language");
+        assert_eq!(results[0].url, "https://www.rust-lang.org/&amp;rut=abc");
+        assert_eq!(results[0].snippet, "A language empowering everyone.");
+    }
 }
