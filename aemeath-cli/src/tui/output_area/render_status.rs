@@ -16,18 +16,22 @@ impl OutputArea {
         lines: &mut Vec<Line<'static>>,
         queued_lines: Vec<Line<'static>>,
         spinner_line: &Option<Line<'static>>,
+        task_status_lines: &[String],
     ) {
         lines.extend(queued_lines);
         if let Some(sl) = spinner_line {
             lines.push(sl.clone());
         }
         if spinner_line.is_some() {
-            let base_idx = self.lines.len();
-            for (i, task_line) in self.task_status_lines.iter().enumerate() {
+            let task_base_idx = self.lines.len();
+            for (i, task_line) in task_status_lines.iter().enumerate() {
                 let text = format!("  {task_line}");
                 let char_count = text.chars().count();
-                self.screen_line_map
-                    .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
+                self.screen_line_map.push((
+                    task_base_idx + i,
+                    CharIdx::ZERO,
+                    CharIdx::new(char_count),
+                ));
                 lines.push(Line::styled(text, Style::default().fg(Color::DarkGray)));
             }
         }
@@ -98,5 +102,40 @@ impl OutputArea {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{buffer::Buffer, layout::Rect};
+
+    use super::*;
+    use crate::tui::output_area::types::SpinnerState;
+
+    #[test]
+    fn test_render_maps_task_status_lines_for_selection() {
+        let mut output = OutputArea::new();
+        output.task_status_lines =
+            vec!["━━ Tasks: 0/1 ━━".to_string(), "□ #1 修复 bug".to_string()];
+        output.spinner = Some(SpinnerState {
+            frame: 0,
+            verb: "Thinking".to_string(),
+            start: std::time::Instant::now(),
+            phase: None,
+        });
+        let area = Rect::new(0, 0, 40, 5);
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf);
+        assert_eq!(output.screen_line_map.len(), 2);
+        assert_eq!(output.screen_line_map[1].0, output.lines.len() + 1);
+        assert_eq!(output.task_status_lines.len(), 2);
+        output.start_selection(1, 0, &area);
+        output.update_selection(1, 15, &area);
+
+        assert_eq!(
+            output.get_selected_text(),
+            Some("  □ #1 修复 bug".to_string())
+        );
     }
 }

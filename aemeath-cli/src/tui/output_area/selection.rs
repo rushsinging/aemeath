@@ -14,13 +14,12 @@ impl super::OutputArea {
     /// idx < self.lines.len() → 普通行；否则 → task_status_lines[i]
     fn get_line_content(&self, idx: usize) -> Option<String> {
         if idx < self.lines.len() {
-            Some(self.lines[idx].content.clone())
-        } else {
-            let task_idx = idx - self.lines.len();
-            self.task_status_lines
-                .get(task_idx)
-                .map(|s| format!("  {s}"))
+            return Some(self.lines[idx].content.clone());
         }
+        let task_idx = idx - self.lines.len();
+        self.task_status_lines
+            .get(task_idx)
+            .map(|s| format!("  {s}"))
     }
 
     /// Start a selection at the given screen position

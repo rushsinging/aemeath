@@ -17,6 +17,22 @@
 | 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
 | 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | ✅ 已完成 | 未确认 | 已完成全仓 Rust 文件拆分并新增架构守卫入口：`scripts/check-rust-file-lines.sh` 强制所有 `.rs` 文件不超过 400 行，`scripts/check-tui-tea-purity.sh` 禁止 TUI `update/` 中直接执行 spawn/hook/clipboard/image 等副作用，`scripts/check-architecture-guards.sh` 聚合 400 行、TEA 纯度与 unsafe text ops 检查 |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
+| 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | ✅ 已完成 | 未确认 | TUI 中 TaskListCreate 显示为 `TaskListCreate: <subject>` + summary，TaskListComplete 显示为单行；成功结果不再输出 created/completed 噪声，错误结果仍显示失败摘要。 |
+
+### #33 优化 TaskListCreate / TaskListComplete 工具调用显示
+
+**目标**：降低 task batch 管理工具在 TUI 输出中的噪声，让用户只看到本次 task list 的主题、摘要和完成动作，不再显示原始 JSON 与 `Task list #N created/completed` 成功结果。
+
+**已完成的改动（2026-05-14）**：
+1. 新增 `TaskListCreateDisplay`：header 显示为 `TaskListCreate: <subject>`，详情只显示 `summary`，不显示完整 JSON。
+2. 新增 `TaskListCompleteDisplay`：header 显示为 `TaskListComplete`，无参数详情。
+3. `result_max_lines() == 0` 时成功结果正文静默，避免重复显示 `created/completed`；错误结果仍显示失败摘要。
+4. 新增回归测试覆盖 TaskListCreate / TaskListComplete 成功输出不再包含噪声。
+
+**涉及路径**：
+- `aemeath-cli/src/tui/output_area/tool_display/task_impls.rs`
+- `aemeath-cli/src/tui/output_area/tool_display/results.rs`
+- `aemeath-cli/src/tui/output_area/tool_display.rs`
 
 ### #30 Agent loop 收尾工作
 

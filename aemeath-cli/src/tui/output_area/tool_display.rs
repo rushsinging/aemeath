@@ -281,6 +281,59 @@ mod tests {
         assert_eq!(matching, vec!["  ↳ plain progress", "  ↳ another progress"]);
     }
 
+    #[test]
+    fn test_task_list_create_display_hides_success_result_noise() {
+        let mut output = OutputArea::new();
+
+        output.push_tool_call(
+            "task-list-create-1",
+            "TaskListCreate",
+            r#"{"subject":"修复任务","summary":"处理当前请求"}"#,
+        );
+        output.push_tool_result_with_diff(
+            "task-list-create-1",
+            "TaskListCreate",
+            "Task list #1 created\nSummary: 处理当前请求",
+            false,
+            "",
+        );
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref() == Some("task-list-create-1"))
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            matching,
+            vec!["✓ TaskListCreate: 修复任务", "  处理当前请求", ""]
+        );
+    }
+
+    #[test]
+    fn test_task_list_complete_display_hides_success_result_noise() {
+        let mut output = OutputArea::new();
+
+        output.push_tool_call("task-list-complete-1", "TaskListComplete", "{}");
+        output.push_tool_result_with_diff(
+            "task-list-complete-1",
+            "TaskListComplete",
+            "Task list #1 completed",
+            false,
+            "",
+        );
+
+        let matching = output
+            .lines
+            .iter()
+            .filter(|line| line.tool_id.as_deref() == Some("task-list-complete-1"))
+            .map(|line| line.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(matching, vec!["✓ TaskListComplete", ""]);
+    }
+
     fn tool_calls_event(sequence: usize, calls: Vec<AgentToolCallProgress>) -> AgentProgressEvent {
         AgentProgressEvent {
             sequence,
