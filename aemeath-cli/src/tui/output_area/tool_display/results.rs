@@ -17,12 +17,14 @@ impl super::super::OutputArea {
         let id_tag = Some(tool_id.to_string());
         let mut result_lines = render_tool_result(tool_name, result, is_error, &id_tag);
         append_image_note(image_note, &id_tag, &mut result_lines);
+        if tool_name == "TaskListComplete" && result_lines.is_empty() {
+            return;
+        }
         result_lines.push(OutputLine {
             content: String::new(),
             style: LineStyle::System,
             tool_id: id_tag,
         });
-
         let insert_at = header_idx
             .map(|start| self.tool_block_end(start, tool_id) + 1)
             .unwrap_or(self.lines.len());
