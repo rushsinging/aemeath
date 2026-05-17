@@ -13,6 +13,7 @@
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
 | 40 | DeepSeek 流式输出约 120 秒后 decode timeout | 高 | 修复中 | 未确认 | 2026-05 | OpenAI-compatible provider 的 reqwest Client 对 SSE 流设置 total timeout=120s，长流在总时长达到后被客户端截断 |
+| 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 活动中 | 未确认 | 2026-05 | 疑似 /reflect 命令在 TUI update/命令处理路径中同步等待 LLM 调用或未及时 yield/stream 进度，导致 UI 事件循环被阻塞 |
 
 ## 专案
 
@@ -235,6 +236,38 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 ### #33 Spinner 下方 task list 无法选中和复制
 
 **症状**：spinner 下方的 task list 行（摘要行 `━━ Tasks: 3/5 ━━` 及每条 task 的 `✓ #1 标题`、`■ #2 标题`、`□ #3 标题`）在 TUI 中可见但鼠标无法选中、无法复制。拖拽选中时这些行被跳过，`Ctrl+C` 复制时也拿不到文本。
+
+### #41 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出
+
+**状态**：活动中
+
+**症状**：
+- 在 TUI 中执行 `/reflect` 后界面像卡死一样无即时反馈
+- 等待一段时间后才开始出现 LLM 输出
+- 用户感知为命令执行期间 UI 事件循环被阻塞，而不是正常的流式/异步反馈
+
+**复现路径**：
+1. 在 TUI 会话中输入 `/reflect`
+2. 观察命令提交后的界面响应
+3. 界面短时间无更新，过一会儿才显示 LLM 相关输出
+
+**疑似根因**：
+1. `/reflect` 命令路径可能在 TUI update/命令处理阶段同步等待 LLM 调用，阻塞事件循环
+2. reflection 调用未通过 `Cmd`/runtime 异步副作用模型执行，或虽然异步执行但没有先更新状态/进度
+3. reflection LLM 请求未接入和主对话一致的 streaming/progress 反馈，导致首个输出前没有任何 UI 心跳
+
+**修复方向**：
+1. 排查 `/reflect` 命令入口、TUI update 路径和 reflection runner 的调用关系
+2. 确保 LLM 请求类副作用不在 `update()` 同步等待，必须通过 `Cmd` 或 runtime 异步执行
+3. 提交 `/reflect` 后立即显示状态（如"正在反思..."），并保持 spinner/UI 可刷新
+4. 如 reflection 输出不支持 token 级流式，至少在请求开始、收到响应、解析建议、写入 pending/auto-apply 阶段推送进度
+5. 添加回归测试或结构性测试，覆盖 `/reflect` 不阻塞 update 主路径
+
+**涉及路径**：
+- `aemeath-core/src/command/commands/reflect.rs`
+- `aemeath-core/src/reflection.rs`
+- `aemeath-cli/src/tui/app/update/`
+- `aemeath-cli/src/tui/app/stream/`
 
 ### #35 Write tool 在 worktree 中写入错误分支
 
