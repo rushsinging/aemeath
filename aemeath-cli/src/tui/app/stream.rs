@@ -18,7 +18,7 @@ use crate::tui::app::stream::hook_ui::HookUi;
 pub(crate) use crate::tui::app::stream::input_log::logged_input_messages;
 use crate::tui::app::stream::post_batch::run_post_tool_batch;
 use crate::tui::app::stream::queue::drain_queued_input;
-use crate::tui::app::stream::tools::execute_tool_round;
+use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::Agent;
 use aemeath_core::message::Message;
@@ -345,7 +345,7 @@ pub async fn process_in_background(
                     .await;
 
                     // Build tool result message for API
-                    messages.push(Message::tool_results_rich(all_results)); // Sync after tool execution
+                    messages.push(tool_results_for_api(all_results, &session_id)); // Sync after tool execution
                     let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
                     if let Some(queued) = drain_queued_input(&queue_request_tx).await {
