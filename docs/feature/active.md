@@ -20,6 +20,13 @@
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 32 | TUI 选中和复制逻辑统一 | 中 | 待确认 | 未确认 | output area / input area / status line 三处的选中（selection）和复制（copy）逻辑各自实现，API 和行为不一致，应抽取为统一 trait 或组件 |
 | 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | ✅ 已完成 | 未确认 | TUI 中 TaskListCreate 显示为 `TaskListCreate: <subject>` + summary，TaskListComplete 显示为单行；成功结果不再输出 created/completed 噪声，错误结果仍显示失败摘要。 |
+| 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
+
+### #36 Multi-Agent 框架
+
+详见 [设计文档](specs/036-multi-agent-framework.md)
+
+---
 
 ### #33 优化 TaskListCreate / TaskListComplete 工具调用显示
 
