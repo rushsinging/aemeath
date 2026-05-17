@@ -12,7 +12,6 @@
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
-| 40 | DeepSeek 流式输出约 120 秒后 decode timeout | 高 | 修复中 | 未确认 | 2026-05 | OpenAI-compatible provider 的 reqwest Client 对 SSE 流设置 total timeout=120s，长流在总时长达到后被客户端截断 |
 | 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 活动中 | 未确认 | 2026-05 | 疑似 /reflect 命令在 TUI update/命令处理路径中同步等待 LLM 调用或未及时 yield/stream 进度，导致 UI 事件循环被阻塞 |
 
 ## 专案
@@ -400,22 +399,6 @@ API error [400 Bad Request]: string too long. Expected a string with maximum len
 - `aemeath-cli/src/tui/app/stream/tools.rs`
 - `aemeath-cli/src/agent_runner/loop_helpers.rs`
 - `aemeath-cli/src/agent_runner/loop_run.rs`
-
-### #40 DeepSeek 流式输出约 120 秒后 decode timeout
-
-**症状**：会话 `019e359e-4a50-77a7-a752-56f6ac115240` 在 DeepSeek `deepseek-v4-pro` 流式输出中多次失败，日志显示 `failed to read SSE line: error decoding response body`，外层记录为 `Streaming error` 后重试。
-
-**证据**：同一 turn 多次在约 120 秒后失败；请求体约 180KB、100+ messages，并非超大请求体。reqwest 错误链底层为 operation timed out。
-
-**根因**：OpenAI-compatible provider 构造 `reqwest::Client` 时设置了 total timeout=120s。该 timeout 覆盖整个 HTTP 请求生命周期，不适合长时间 SSE streaming；当模型正常长流输出超过 120 秒时，客户端主动截断响应，解析层表现为 decode/body 读取失败。
-
-**修复**：默认 streaming HTTP client 不再设置 reqwest total timeout，继续依赖 `parse_openai_stream()` 内部的 `STREAM_IDLE_TIMEOUT` 处理无数据空闲超时，避免正常长流被固定总时长截断。
-
-**回归测试**：`openai_streaming_http_client_has_no_total_timeout` 覆盖默认 streaming client builder 不包含 total timeout。
-
-**涉及路径**：
-- `aemeath-llm/src/providers/openai_compatible/provider.rs`
-- `aemeath-llm/src/providers/openai_compatible/tests.rs`
 
 ### #25 /clear 命令未清空 status line 数据（已确认修复）
 **根因**：`/clear` 仅清空消息历史，未联动复位 status bar 的 task list / active tool calls / spinner 状态等运行态字段。
