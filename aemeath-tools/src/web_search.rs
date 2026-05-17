@@ -71,26 +71,11 @@ impl Tool for WebSearchTool {
                     Ok(html_content) => {
                         let results = parse_duckduckgo_html(&html_content, limit);
 
-                        if results.is_empty() {
-                            return ToolResult::success("No search results found");
+                        if results.is_empty() && is_duckduckgo_challenge(&html_content) {
+                            return search_bing(&client, query, limit).await;
                         }
 
-                        let output = results
-                            .iter()
-                            .enumerate()
-                            .map(|(i, r)| {
-                                format!(
-                                    "{}. {}\n   URL: {}\n   {}\n",
-                                    i + 1,
-                                    r.title,
-                                    r.url,
-                                    r.snippet
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        ToolResult::success(output)
+                        format_search_results(results)
                     }
                     Err(e) => ToolResult::error(format!("Failed to read response: {}", e)),
                 }
@@ -98,6 +83,51 @@ impl Tool for WebSearchTool {
             Err(e) => ToolResult::error(format!("Search request failed: {}", e)),
         }
     }
+}
+
+async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> ToolResult {
+    let encoded_query = utf8_percent_encode(query, NON_ALPHANUMERIC).to_string();
+    let url = format!("https://www.bing.com/search?q={}", encoded_query);
+
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                return ToolResult::error(format!(
+                    "Bing fallback failed with status: {}",
+                    resp.status()
+                ));
+            }
+
+            match resp.text().await {
+                Ok(html_content) => format_search_results(parse_bing_html(&html_content, limit)),
+                Err(e) => ToolResult::error(format!("Failed to read Bing response: {}", e)),
+            }
+        }
+        Err(e) => ToolResult::error(format!("Bing fallback request failed: {}", e)),
+    }
+}
+
+fn format_search_results(results: Vec<SearchResult>) -> ToolResult {
+    if results.is_empty() {
+        return ToolResult::success("No search results found");
+    }
+
+    let output = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            format!(
+                "{}. {}\n   URL: {}\n   {}\n",
+                i + 1,
+                r.title,
+                r.url,
+                r.snippet
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    ToolResult::success(output)
 }
 
 struct SearchResult {
@@ -124,6 +154,115 @@ fn decode_html_entities(s: &str) -> String {
         .replace("&trade;", "™")
         .trim()
         .to_string()
+}
+
+fn is_duckduckgo_challenge(html: &str) -> bool {
+    html.contains("anomaly.js") || html.contains("challenge-form")
+}
+
+fn strip_html_tags(s: &str) -> String {
+    let mut text = String::new();
+    let mut in_tag = false;
+
+    for ch in s.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(ch),
+            _ => {}
+        }
+    }
+
+    decode_html_entities(&text)
+}
+
+fn extract_attr(tag: &str, name: &str) -> Option<String> {
+    let pattern = format!("{}=\"", name);
+    let start = tag.find(&pattern)? + pattern.len();
+    let end = tag[start..].find('"')?;
+    Some(tag[start..start + end].to_string())
+}
+
+fn parse_bing_html(html: &str, limit: usize) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    let mut pos = 0;
+
+    while results.len() < limit {
+        let result_start = match html[pos..].find("<li class=\"b_algo\"") {
+            Some(s) => pos + s,
+            None => break,
+        };
+        let result_end = match html[result_start..].find("</li>") {
+            Some(e) => result_start + e,
+            None => break,
+        };
+        let block = &html[result_start..result_end];
+
+        let h2_start = match block.find("<h2") {
+            Some(s) => s,
+            None => {
+                pos = result_end;
+                continue;
+            }
+        };
+        let link_start = match block[h2_start..].find("<a ") {
+            Some(s) => h2_start + s,
+            None => {
+                pos = result_end;
+                continue;
+            }
+        };
+        let link_tag_end = match block[link_start..].find('>') {
+            Some(e) => link_start + e,
+            None => {
+                pos = result_end;
+                continue;
+            }
+        };
+        let link_tag = &block[link_start..=link_tag_end];
+        let raw_url = match extract_attr(link_tag, "href") {
+            Some(url) => url,
+            None => {
+                pos = result_end;
+                continue;
+            }
+        };
+        let title_end = match block[link_tag_end + 1..].find("</a>") {
+            Some(e) => link_tag_end + 1 + e,
+            None => {
+                pos = result_end;
+                continue;
+            }
+        };
+        let title = strip_html_tags(&block[link_tag_end + 1..title_end]);
+
+        let snippet = if let Some(caption_start) = block.find("<p") {
+            if let Some(text_start) = block[caption_start..].find('>') {
+                let start = caption_start + text_start + 1;
+                if let Some(end) = block[start..].find("</p>") {
+                    strip_html_tags(&block[start..start + end])
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        if !raw_url.is_empty() && !title.is_empty() {
+            results.push(SearchResult {
+                title,
+                url: decode_html_entities(&raw_url),
+                snippet,
+            });
+        }
+
+        pos = result_end;
+    }
+
+    results
 }
 
 fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
@@ -251,5 +390,35 @@ mod tests {
         assert_eq!(results[0].title, "Rust Programming Language");
         assert_eq!(results[0].url, "https://www.rust-lang.org/&amp;rut=abc");
         assert_eq!(results[0].snippet, "A language empowering everyone.");
+    }
+
+    #[test]
+    fn test_is_duckduckgo_challenge_detects_anomaly_challenge() {
+        let html = r#"
+            <html>
+              <body>
+                <form id="challenge-form" action="//duckduckgo.com/anomaly.js?sv=html&cc=botnet" method="POST"></form>
+              </body>
+            </html>
+        "#;
+
+        assert!(is_duckduckgo_challenge(html));
+    }
+
+    #[test]
+    fn test_parse_bing_html_extracts_results() {
+        let html = r#"
+            <li class="b_algo">
+              <h2 class=""><a target="_blank" href="https://www.langchain.com/langgraph">LangGraph vs LangChain</a></h2>
+              <div class="b_caption"><p class="b_lineclamp2">LangGraph is for stateful agents.</p></div>
+            </li>
+        "#;
+
+        let results = parse_bing_html(html, 5);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "LangGraph vs LangChain");
+        assert_eq!(results[0].url, "https://www.langchain.com/langgraph");
+        assert_eq!(results[0].snippet, "LangGraph is for stateful agents.");
     }
 }
