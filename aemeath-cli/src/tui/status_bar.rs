@@ -1,4 +1,4 @@
-use crate::tui::safe_text::safe_char_slice;
+use crate::tui::safe_text::{col_to_char_idx, safe_char_slice};
 use aemeath_core::cost::format_tokens;
 use ratatui::{
     buffer::Buffer,
@@ -268,6 +268,21 @@ impl StatusBar {
         paragraph.render(area, buf);
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_test_status_text(&mut self, status: &str) {
+        self.status = status.to_string();
+        self.status_type = StatusType::Normal;
+        self.input_tokens = 0;
+        self.output_tokens = 0;
+        self.last_input_tokens = 0;
+        self.session_id = None;
+        self.api_calls = 0;
+        self.model = None;
+        self.context_size = 0;
+        self.tps = 0.0;
+        self.thinking = false;
+    }
+
     /// 构建状态栏的完整文本（用于选中复制）
     fn build_full_text(&self) -> String {
         let mut parts = Vec::new();
@@ -309,25 +324,22 @@ impl StatusBar {
 
     /// 开始选中
     pub fn start_selection(&mut self, col: u16) {
-        self.selection_start = Some(col as usize);
-        self.selection_end = Some(col as usize);
+        self.selection_start = Some(self.screen_col_to_char_idx(col));
+        self.selection_end = Some(self.screen_col_to_char_idx(col));
         self.is_selecting = true;
     }
 
     /// 更新选中位置
     pub fn update_selection(&mut self, col: u16) {
         if self.is_selecting {
-            self.selection_end = Some(col as usize);
+            self.selection_end = Some(self.screen_col_to_char_idx(col));
         }
     }
 
-    /// 结束选中并复制到剪贴板
+    /// 结束选中并返回选中文本，不在 status bar 层执行剪贴板副作用
     pub fn end_selection(&mut self) -> Option<String> {
         self.is_selecting = false;
         let text = self.get_selected_text();
-        if let Some(ref t) = text {
-            self.copy_to_clipboard(t);
-        }
         self.selection_start = None;
         self.selection_end = None;
         text
@@ -356,18 +368,8 @@ impl StatusBar {
         }
     }
 
-    /// 复制到剪贴板
-    fn copy_to_clipboard(&self, text: &str) {
-        use std::io::Write;
-        if let Ok(mut child) = std::process::Command::new("pbcopy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
-        }
+    fn screen_col_to_char_idx(&self, col: u16) -> usize {
+        col_to_char_idx(&self.build_full_text(), col as usize)
     }
 
     /// 清除选中
@@ -380,5 +382,48 @@ impl StatusBar {
     /// 是否正在选中
     pub fn is_selecting(&self) -> bool {
         self.is_selecting
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
+        let mut bar = StatusBar::new();
+        bar.set_test_status_text("你好a");
+        let prefix_width = " Think:OFF │ ".chars().count() as u16;
+
+        bar.start_selection(prefix_width + 2);
+        bar.update_selection(prefix_width + 6);
+
+        assert_eq!(bar.get_selected_text(), Some("好a ".to_string()));
+    }
+
+    #[test]
+    fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
+        let mut bar = StatusBar::new();
+        bar.set_test_status_text("a🚀b");
+        let prefix_width = " Think:OFF │ ".chars().count() as u16;
+
+        bar.start_selection(prefix_width + 1);
+        bar.update_selection(prefix_width + 4);
+
+        assert_eq!(bar.get_selected_text(), Some("🚀b".to_string()));
+    }
+
+    #[test]
+    fn test_status_bar_selection_boundary_end_col_clamps_to_text_len() {
+        let mut bar = StatusBar::new();
+        bar.set_test_status_text("你好");
+
+        bar.start_selection(0);
+        bar.update_selection(99);
+
+        assert_eq!(
+            bar.get_selected_text(),
+            Some(" Think:OFF │ 你好  In: 0 / Out: 0 │".to_string())
+        );
     }
 }

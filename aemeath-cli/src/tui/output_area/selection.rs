@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use aemeath_core::string_idx::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::safe_text::{safe_char_slice, safe_str_slice_by_char};
@@ -83,24 +81,6 @@ impl super::OutputArea {
         }
     }
 
-    /// End selection and copy selected text to clipboard
-    pub fn end_selection(&mut self) -> Option<String> {
-        self.is_selecting = false;
-        let selected = self.get_selected_text();
-        log::debug!(
-            "end_selection: start={:?}, end={:?}, selected={:?}",
-            self.selection_start,
-            self.selection_end,
-            selected
-                .as_deref()
-                .map(|s| safe_str_slice_by_char(s, 0, 100))
-        );
-        if let Some(ref text) = selected {
-            self.copy_to_clipboard(text);
-        }
-        selected
-    }
-
     /// Select the word at the given screen position
     pub fn select_word(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
         let rel_row = row.saturating_sub(rect.y) as usize;
@@ -145,10 +125,15 @@ impl super::OutputArea {
         self.selection_start = Some((logic_idx, CharIdx::new(start)));
         self.selection_end = Some((logic_idx, CharIdx::new(end + 1)));
         self.is_selecting = true;
+    }
 
-        if let Some(text) = self.get_selected_text() {
-            self.copy_to_clipboard(&text);
-        }
+    /// End selection and return selected text without performing clipboard side effects.
+    pub fn end_selection(&mut self) -> Option<String> {
+        self.is_selecting = false;
+        let text = self.get_selected_text();
+        self.selection_start = None;
+        self.selection_end = None;
+        text
     }
 
     /// Get the selected text based on logic line coordinates
@@ -226,19 +211,6 @@ impl super::OutputArea {
             None
         } else {
             Some(result)
-        }
-    }
-
-    /// Copy text to system clipboard
-    fn copy_to_clipboard(&self, text: &str) {
-        if let Ok(mut child) = std::process::Command::new("pbcopy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
         }
     }
 

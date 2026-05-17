@@ -7,6 +7,20 @@ fn point_in_rect(row: u16, col: u16, rect: &ratatui::layout::Rect) -> bool {
 }
 
 impl super::App {
+    fn copy_selection_to_clipboard(&mut self, text: Option<String>) {
+        let Some(text) = text else {
+            return;
+        };
+
+        match crate::tui::clipboard::copy_text(&text) {
+            Ok(()) => self.status_bar.set_success("已复制选中内容"),
+            Err(err) => {
+                log::warn!("复制选中内容失败: {err}");
+                self.status_bar.set_warning(&err);
+            }
+        }
+    }
+
     pub(super) fn handle_mouse_event(
         &mut self,
         mouse: MouseEvent,
@@ -83,11 +97,14 @@ impl super::App {
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
                 if self.output_area.is_selecting {
-                    self.output_area.end_selection();
+                    let text = self.output_area.end_selection();
+                    self.copy_selection_to_clipboard(text);
                 } else if self.input_area.is_selecting() {
-                    self.input_area.end_selection();
+                    let text = self.input_area.end_selection();
+                    self.copy_selection_to_clipboard(text);
                 } else if self.status_bar.is_selecting() {
-                    self.status_bar.end_selection();
+                    let text = self.status_bar.end_selection();
+                    self.copy_selection_to_clipboard(text);
                 }
             }
             _ => {}

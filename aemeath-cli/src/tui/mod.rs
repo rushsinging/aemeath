@@ -1,4 +1,5 @@
 pub mod app;
+pub mod clipboard;
 pub mod completion;
 pub mod dialog;
 pub mod input_area;
