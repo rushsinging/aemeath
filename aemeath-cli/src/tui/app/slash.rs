@@ -8,6 +8,34 @@ use aemeath_core::state::AppState;
 use std::sync::Arc;
 
 impl super::App {
+    fn show_memory_reminders(&mut self) {
+        let lines = self
+            .session_reminders
+            .lock()
+            .ok()
+            .map(|reminders| {
+                reminders
+                    .list()
+                    .iter()
+                    .map(|reminder| {
+                        let marker = if reminder.done { "✓" } else { "□" };
+                        format!("{marker} {} {}", reminder.id, reminder.content)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if lines.is_empty() {
+            self.output_area.push_system("当前没有 session reminder。");
+            return;
+        }
+
+        self.output_area.push_system("Session Reminders:");
+        for line in lines {
+            self.output_area.push_system(&line);
+        }
+    }
+
     /// Handle slash commands. Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
     pub(crate) async fn handle_slash_command(&mut self, input: &str) -> Option<String> {
         let parts: Vec<&str> = input.split_whitespace().collect();
@@ -150,6 +178,14 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
                 self.handle_reflect_command(&args).await;
+            }
+            "/memory" | "/mem"
+                if matches!(
+                    parts.get(1).copied(),
+                    Some("remind" | "reminder" | "reminders")
+                ) =>
+            {
+                self.show_memory_reminders();
             }
             "/paste" => {
                 // block_in_place allows async call from non-async context in tokio runtime

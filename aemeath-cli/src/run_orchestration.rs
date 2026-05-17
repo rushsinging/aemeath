@@ -213,7 +213,11 @@ pub(crate) async fn run_chat(mut args: Args) {
         reasoning,
         json_logger.clone(),
     );
-    let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner).await;
+    let prompt_memory_config = config_file
+        .as_ref()
+        .map(|c| c.memory.clone())
+        .unwrap_or_default();
+    let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner, &prompt_memory_config).await;
 
     let static_prompt = prompt::build_static_prompt(
         &cwd,

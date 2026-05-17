@@ -281,11 +281,7 @@ impl App {
                 self.active_tool_call_ids.clear();
                 self.is_processing = false;
                 self.status_bar.set_success("Ready");
-                if let Ok(reminders) = self.session_reminders.lock() {
-                    if let Some(line) = reminders.recap_line() {
-                        self.output_area.push_system(&line);
-                    }
-                }
+                self.push_session_reminder_recap();
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -299,11 +295,7 @@ impl App {
                 self.active_tool_call_ids.clear();
                 self.is_processing = false;
                 self.status_bar.set_success("Ready");
-                if let Ok(reminders) = self.session_reminders.lock() {
-                    if let Some(line) = reminders.recap_line() {
-                        self.output_area.push_system(&line);
-                    }
-                }
+                self.push_session_reminder_recap();
             }
         }
 
