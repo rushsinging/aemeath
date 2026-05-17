@@ -1,11 +1,11 @@
 use super::InputArea;
-use crate::tui::safe_text::safe_char_slice;
+use crate::tui::safe_text::{col_to_char_idx, safe_char_slice};
 use ratatui::layout::Rect;
 
 impl InputArea {
     /// 开始选中。row/col 是相对于 input_area inner rect 的偏移
     pub fn start_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
-        let pos = textarea_pos(row, col, inner_area);
+        let pos = self.textarea_pos(row, col, inner_area);
         self.selection_start = Some(pos);
         self.selection_end = Some(pos);
         self.is_selecting = true;
@@ -16,16 +16,13 @@ impl InputArea {
         if !self.is_selecting {
             return;
         }
-        self.selection_end = Some(textarea_pos(row, col, inner_area));
+        self.selection_end = Some(self.textarea_pos(row, col, inner_area));
     }
 
-    /// 结束选中并复制到剪贴板
+    /// 结束选中并返回选中文本，不在 selection 层执行剪贴板副作用
     pub fn end_selection(&mut self) -> Option<String> {
         self.is_selecting = false;
         let text = self.get_selected_text();
-        if let Some(ref t) = text {
-            copy_to_clipboard(t);
-        }
         self.selection_start = None;
         self.selection_end = None;
         text
@@ -86,24 +83,71 @@ impl InputArea {
             Some((end, start))
         }
     }
+    fn textarea_pos(&self, row: u16, col: u16, inner_area: &Rect) -> (usize, usize) {
+        let text_row = row.saturating_sub(inner_area.y) as usize;
+        let screen_col = col.saturating_sub(inner_area.x) as usize;
+        let char_col = self
+            .textarea
+            .lines()
+            .get(text_row)
+            .map(|line| col_to_char_idx(line, screen_col))
+            .unwrap_or(0);
+        (text_row, char_col)
+    }
 }
 
-fn textarea_pos(row: u16, col: u16, inner_area: &Rect) -> (usize, usize) {
-    (
-        row.saturating_sub(inner_area.y) as usize,
-        col.saturating_sub(inner_area.x) as usize,
-    )
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn copy_to_clipboard(text: &str) {
-    use std::io::Write;
-    if let Ok(mut child) = std::process::Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
+    #[test]
+    fn test_start_selection_maps_cjk_screen_col_to_char_index() {
+        let mut input = InputArea::new();
+        input.set_text("你好a");
+        let inner = Rect {
+            x: 10,
+            y: 5,
+            width: 20,
+            height: 3,
+        };
+
+        input.start_selection(5, 12, &inner);
+        input.update_selection(5, 15, &inner);
+
+        assert_eq!(input.get_selected_text(), Some("好a".to_string()));
+    }
+
+    #[test]
+    fn test_start_selection_maps_emoji_screen_col_to_char_index() {
+        let mut input = InputArea::new();
+        input.set_text("a🚀b");
+        let inner = Rect {
+            x: 10,
+            y: 5,
+            width: 20,
+            height: 3,
+        };
+
+        input.start_selection(5, 11, &inner);
+        input.update_selection(5, 14, &inner);
+
+        assert_eq!(input.get_selected_text(), Some("🚀b".to_string()));
+    }
+
+    #[test]
+    fn test_start_selection_boundary_end_col_clamps_to_line_len() {
+        let mut input = InputArea::new();
+        input.set_text("你好");
+        let inner = Rect {
+            x: 10,
+            y: 5,
+            width: 20,
+            height: 3,
+        };
+
+        input.start_selection(5, 10, &inner);
+        input.update_selection(5, 99, &inner);
+
+        assert_eq!(input.get_selected_text(), Some("你好".to_string()));
     }
 }
