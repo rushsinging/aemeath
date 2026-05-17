@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use aemeath_core::config::MemoryConfig;
 use aemeath_core::hook::HookRunner;
 use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
@@ -84,6 +85,7 @@ fn static_system_prompt_for_test(cwd_str: &str, is_git: bool) -> String {
 pub async fn build_system_prompt_parts(
     cwd: &PathBuf,
     hook_runner: &HookRunner,
+    memory_config: &MemoryConfig,
 ) -> SystemPromptParts {
     let cwd_str = cwd.to_string_lossy();
     let is_git = is_git_repo(cwd).await;
@@ -105,7 +107,7 @@ pub async fn build_system_prompt_parts(
         }
     }
 
-    if let Some(memory_context) = collect_memory_context(cwd).await {
+    if let Some(memory_context) = collect_memory_context(cwd, memory_config).await {
         dynamic.push_str("\n\n");
         dynamic.push_str(&memory_context);
     }
@@ -230,18 +232,56 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     claude_md
 }
 
-pub async fn collect_memory_context(cwd: &PathBuf) -> Option<String> {
-    collect_memory_context_with_limit(cwd, 10).await
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MemoryContextOptions {
+    max_entries: usize,
+    max_inject_count: usize,
+    similarity_threshold: f64,
 }
 
+fn memory_context_options_from_config(config: &MemoryConfig) -> MemoryContextOptions {
+    MemoryContextOptions {
+        max_entries: config.max_entries,
+        max_inject_count: if config.enabled {
+            config.max_inject_count
+        } else {
+            0
+        },
+        similarity_threshold: config.similarity_threshold,
+    }
+}
+
+pub async fn collect_memory_context(cwd: &PathBuf, config: &MemoryConfig) -> Option<String> {
+    let options = memory_context_options_from_config(config);
+    collect_memory_context_with_options(cwd, options).await
+}
+
+#[cfg(test)]
 async fn collect_memory_context_with_limit(cwd: &PathBuf, limit: usize) -> Option<String> {
-    if limit == 0 {
+    let options = MemoryContextOptions {
+        max_entries: 100,
+        max_inject_count: limit,
+        similarity_threshold: 0.8,
+    };
+    collect_memory_context_with_options(cwd, options).await
+}
+
+async fn collect_memory_context_with_options(
+    cwd: &PathBuf,
+    options: MemoryContextOptions,
+) -> Option<String> {
+    if options.max_inject_count == 0 {
         return None;
     }
 
-    let mut store =
-        MemoryStore::new(memory_base_dir(), project_hash_from_path(cwd), 100, 0.8).ok()?;
-    let entries = store.top_for_inject(limit).ok()?;
+    let mut store = MemoryStore::new(
+        memory_base_dir(),
+        project_hash_from_path(cwd),
+        options.max_entries,
+        options.similarity_threshold,
+    )
+    .ok()?;
+    let entries = store.top_for_inject(options.max_inject_count).ok()?;
     format_memory_context(&entries)
 }
 

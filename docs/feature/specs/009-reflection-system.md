@@ -13,7 +13,7 @@
 1. **依赖 #8**：反思结果写入 MemoryStore，使用 MemoryTool 的 API
 2. **反思结果追加在 output area 末尾**（而非 status bar）
 3. **建议的记忆默认需用户确认**，可配置自动应用
-4. **N 轮自动触发 + 手动触发 + PostCompact 触发**三种时机
+4. **N 轮自动触发 + 手动触发**两种时机；不做 PostCompact 后反思，避免压缩后上下文损失
 
 ---
 
@@ -23,7 +23,8 @@
 |------|---------|------|
 | N 轮对话后 | Agent 主循环计数 | 每 N 轮自动触发（默认 10 轮，可配置） |
 | 用户主动 | `/reflect` 命令 | 手动触发 |
-| PostCompact | Hook 回调 | 压缩后回顾是否丢失关键上下文 |
+
+**不做 PostCompact 后反思**：压缩完成后只剩压缩摘要，关键上下文可能已经丢失；如果后续需要与 compact 联动，应优先设计为 compact 前反思或基于完整上下文生成候选。
 
 ---
 
@@ -189,8 +190,12 @@ aemeath-core/src/command/commands/
 ### Phase 2（依赖 #8 Phase 2 完成）
 
 - N 轮自动触发（Agent 主循环计数）
-- PostCompact Hook 触发
 - `auto_apply_suggestions` 配置支持
+- 继续使用当前会话默认模型；`model = null` 表示不单独切换模型
+
+### Phase 2 暂缓项
+
+- PostCompact 后反思；如后续恢复，应改为 compact 前或完整上下文候选提取
 
 ### Phase 3
 

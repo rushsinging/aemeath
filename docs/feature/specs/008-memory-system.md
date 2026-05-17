@@ -11,12 +11,13 @@
 ## 核心设计决策
 
 1. **在 aemeath-core 原生实现**（非 superpowers 插件）
-2. **分阶段实施**：Phase 1 核心存储 + 手动管理 → Phase 2 自动注入 + Hook 兜底 → Phase 3 反思系统
+2. **分阶段实施**：Phase 1 核心存储 + 手动管理 → Phase 2 自动注入 + Reminder Recap → Phase 3 反思系统
 3. **存储两层**：Global（跨项目）+ Project（项目级），无 Session 层
 4. **时效策略**：访问频率排序沉底 + 可选 TTL + pinned 保护
-5. **LLM 自主管理 + Hook 兜底**：MemoryTool 让 LLM 主动读写，SessionEnd/PostCompact Hook 自动提取确保不遗漏
-6. **自动淘汰 + 用户确认**：超限时间步弹出 AskUserQuestion 让用户选择归档哪些
-7. **上限可配置**：`memory.max_entries`（默认 100）
+5. **LLM 自主管理**：MemoryTool 让 LLM 主动读写长期记忆和会话提醒
+6. **Hook 兜底暂缓**：不在本轮实现 SessionEnd/PostCompact 自动提取，避免和反思系统职责重叠
+7. **自动淘汰 + 用户确认暂缓**：超限时先保留归档能力，用户确认流程后续单独实现
+8. **上限可配置**：`memory.max_entries`（默认 100）
 
 ---
 
@@ -258,40 +259,15 @@ impl Tool for MemoryTool {
 
 ---
 
-## Hook 兜底
+## Hook 兜底（暂缓）
 
-### 1. SessionEnd Hook — 会话总结
+本轮不实现 Hook 兜底自动提取。原因：
 
-触发时机：会话正常结束或 `/session save` 时。
+1. SessionEnd/PostCompact 自动提取会和 Feature #9 反思系统的 suggested_memories 职责重叠。
+2. PostCompact 后再提取只看到压缩摘要，可能已经损失关键上下文，不适合作为首选记忆来源。
+3. Hook 输出协议、用户确认策略、冲突处理都需要单独设计，避免在 Memory MVP 中扩大范围。
 
-Hook 脚本调用 LLM 分析会话内容，提取值得长期记住的信息，写入 Project 层。
-
-**输入**：
-```json
-{
-    "session_id": "01923abc...",
-    "message_count": 42,
-    "summary": "本次会话讨论了 Memory 系统设计..."
-}
-```
-
-### 2. PostCompact Hook — 压缩后提取
-
-触发时机：消息历史压缩完成后。
-
-压缩过程中可能丢弃了重要决策上下文，Hook 从压缩摘要中提取关键信息写入记忆。
-
-**输入**：
-```json
-{
-    "session_id": "01923abc...",
-    "original_tokens": 50000,
-    "compressed_tokens": 8000,
-    "compacted_summary": "..."
-}
-```
-
----
+后续如恢复该方向，优先考虑**压缩前**或**会话自然结束前**基于完整上下文生成候选，再交由用户确认或 reflection 的 `auto_apply_suggestions` 策略处理。
 
 ## 去重策略
 
@@ -424,13 +400,18 @@ aemeath-core/src/command/commands/
 - 配置：`memory.rs`
 - TUI：output area 末尾 recap 展示
 
-### Phase 2 — 自动注入 + Hook 兜底
+### Phase 2 — 自动注入 + Reminder Recap
 
-- system prompt 注入 Memory（prompt.rs 改造）
+- system prompt 注入 Memory（prompt.rs 改造），并使用 `MemoryConfig` 的 `max_entries`、`similarity_threshold`、`max_inject_count`
+- 每轮对话结束后展示 Session Reminders recap
+- `/memory remind` 查看当前会话 reminders
+- `/memory compact` 命令保留手动归档能力
+
+### Phase 2 暂缓项
+
 - SessionEnd Hook 自动提取记忆
 - PostCompact Hook 提取
-- 淘汰归档 + AskUserQuestion 确认流程
-- `/memory compact` 命令
+- 淘汰归档的 AskUserQuestion 确认流程
 
 ### Phase 3 — 反思系统（见 Feature #9）
 

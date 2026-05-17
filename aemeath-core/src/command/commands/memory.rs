@@ -24,6 +24,7 @@ inventory::submit! {
             "/memory unpin <id> - Unpin memory".to_string(),
             "/memory search <query> - Search memory".to_string(),
             "/memory compact - Archive eviction candidates".to_string(),
+            "/memory remind - Show current session reminders in TUI".to_string(),
             "/memory stats - Show memory statistics".to_string(),
         ])
         .with_aliases(vec!["mem".to_string()])
@@ -48,9 +49,9 @@ fn memory_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
         "search" => search_memory(rest, ctx),
         "compact" => compact_memory(ctx),
         "stats" => stats_memory(ctx),
-        "remind" | "reminder" | "reminders" => {
-            CommandResult::Success("当前会话 reminders 将在 TUI 集成阶段接入。".to_string())
-        }
+        "remind" | "reminder" | "reminders" => CommandResult::Success(
+            "当前会话 reminders 请在 TUI 中使用 /memory remind 查看。".to_string(),
+        ),
         _ => CommandResult::Error(format!("未知 memory 子命令: {action}")),
     }
 }

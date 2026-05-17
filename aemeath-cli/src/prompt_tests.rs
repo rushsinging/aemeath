@@ -58,3 +58,54 @@ async fn test_collect_memory_context_zero_limit() {
 
     assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
 }
+
+#[test]
+fn test_memory_context_options_from_config_happy_path() {
+    let config = aemeath_core::config::MemoryConfig {
+        enabled: true,
+        max_entries: 42,
+        max_inject_count: 3,
+        auto_summary_on_session_end: true,
+        similarity_threshold: 0.7,
+        reflection: Default::default(),
+    };
+    let options = memory_context_options_from_config(&config);
+
+    assert_eq!(options.max_entries, 42);
+    assert_eq!(options.max_inject_count, 3);
+    assert_eq!(options.similarity_threshold, 0.7);
+}
+
+#[test]
+fn test_memory_context_options_from_config_boundary_zero_inject_count() {
+    let config = aemeath_core::config::MemoryConfig {
+        enabled: true,
+        max_entries: 42,
+        max_inject_count: 0,
+        auto_summary_on_session_end: true,
+        similarity_threshold: 0.7,
+        reflection: Default::default(),
+    };
+    let options = memory_context_options_from_config(&config);
+
+    assert_eq!(options.max_entries, 42);
+    assert_eq!(options.max_inject_count, 0);
+    assert_eq!(options.similarity_threshold, 0.7);
+}
+
+#[test]
+fn test_memory_context_options_from_config_disabled_uses_zero_inject_count() {
+    let config = aemeath_core::config::MemoryConfig {
+        enabled: false,
+        max_entries: 42,
+        max_inject_count: 3,
+        auto_summary_on_session_end: true,
+        similarity_threshold: 0.7,
+        reflection: Default::default(),
+    };
+    let options = memory_context_options_from_config(&config);
+
+    assert_eq!(options.max_entries, 42);
+    assert_eq!(options.max_inject_count, 0);
+    assert_eq!(options.similarity_threshold, 0.7);
+}

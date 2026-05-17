@@ -170,6 +170,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_list_drops_archived_batch_tasks_before_reusing_ids() {
+        let store = TaskStore::new();
+        store
+            .create_list("first".to_string(), "first batch".to_string())
+            .await;
+        let first = store
+            .create("first task".to_string(), "desc".to_string(), None)
+            .await;
+        store
+            .update(&first.id, |task| task.status = TaskStatus::Completed)
+            .await;
+        store.complete_list().await;
+
+        store
+            .create_list("second".to_string(), "second batch".to_string())
+            .await;
+        let second = store
+            .create("second task".to_string(), "desc".to_string(), None)
+            .await;
+        let stored = store.get("1").await.expect("new task should use reused id");
+
+        assert_eq!(second.id, "1");
+        assert_eq!(stored.subject, "second task");
+        assert_eq!(store.list().await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_clear_resets_task_ids() {
         let store = TaskStore::new();
         let first = store

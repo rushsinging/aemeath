@@ -15,6 +15,8 @@ impl TaskStore {
             };
             if has_existing_current_list {
                 *current_batch += 1;
+                self.drop_archived_batch_tasks().await;
+                *self.next_id.lock().await = 1;
             }
             *current_batch
         };
@@ -38,6 +40,24 @@ impl TaskStore {
             batches.push(batch.clone());
         }
         batch
+    }
+
+    async fn drop_archived_batch_tasks(&self) {
+        let archived_batch_ids: std::collections::HashSet<u64> = {
+            let batches = self.batches.lock().await;
+            batches
+                .iter()
+                .filter(|batch| batch.status == BatchStatus::Archived)
+                .map(|batch| batch.id)
+                .collect()
+        };
+
+        if archived_batch_ids.is_empty() {
+            return;
+        }
+
+        let mut tasks = self.tasks.lock().await;
+        tasks.retain(|_, task| !archived_batch_ids.contains(&task.batch));
     }
 
     /// Return the current active task list, if one exists.

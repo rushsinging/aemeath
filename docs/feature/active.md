@@ -3,8 +3,8 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
-| 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt top-N 注入；Hook 兜底与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
-| 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory；自动 N 轮触发与 PostCompact 触发待继续。详见 [spec](specs/009-reflection-system.md) |
+| 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
+| 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
 | 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
