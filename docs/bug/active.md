@@ -49,8 +49,9 @@
 
 **#36 — 新 batch 任务编号不从 1 开始**：
 - 同一 session 中第二次 TaskListCreate 后，TaskCreate 分配的 task id 仍沿用全局递增（如 #6、#7...），而非新 batch 从 #1 重新编号
-- 根因：TaskStore 的 task_id 是全局自增计数器，TaskListCreate 创建新 batch 时未重置编号
-- 修复：TUI 渲染 task list 时使用 batch 内的相对编号（1, 2, 3...）而非全局 task id
+- 根因：TaskStore 的 task_id 是全局自增计数器；此前只在部分展示路径宣称使用 batch 内相对编号，但 `build_task_window()` 实际仍直接格式化 `Task.id`
+- 修复：`build_task_window()` 先按当前 batch 内 task id 升序生成显示编号映射，再渲染为 batch 内相对编号（1, 2, 3...），不改变底层全局 task id
+- 回归测试：`test_build_task_window_displays_batch_local_numbers`
 
 **#37 — 已完成 batch 挂留**：
 - 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时，旧 task list 仍显示

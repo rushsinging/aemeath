@@ -33,6 +33,7 @@ pub fn build_task_window<'a>(
     }
 
     // --- completed: 按 task id 升序，保持任务列表稳定顺序 ---
+    let display_numbers = build_display_numbers(tasks);
     let all_completed_count = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
@@ -80,7 +81,7 @@ pub fn build_task_window<'a>(
         let shown = completed.len() - start;
         let hidden = completed.len() - shown;
         for t in completed.iter().skip(start) {
-            lines.push(format_task_line(t));
+            lines.push(format_task_line(t, &display_numbers));
         }
         if hidden > 0 {
             lines.push(format_fold_hint(hidden, "completed"));
@@ -94,20 +95,20 @@ pub fn build_task_window<'a>(
     // 1. 最近 completed（最多 show_last_completed 条）
     let comp_show = show_last_completed.min(remaining).min(completed.len());
     for t in completed.iter().take(comp_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(comp_show);
     // 2. 所有 in_progress
     let ip_show = in_progress_count.min(remaining);
     for t in in_progress.iter().take(ip_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(ip_show);
 
     // 3. pending 填充余量
     let pending_show = pending_count.min(remaining);
     for t in pending.iter().take(pending_show) {
-        lines.push(format_task_line(t));
+        lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(pending_show);
 
@@ -119,7 +120,7 @@ pub fn build_task_window<'a>(
         let more_comp = remaining.min(completed.len().saturating_sub(comp_show));
         let insert_pos = 1 + comp_show; // after summary + displayed completed
         for (i, t) in completed.iter().skip(comp_show).take(more_comp).enumerate() {
-            lines.insert(insert_pos + i, format_task_line(t));
+            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_comp);
     }
@@ -127,7 +128,7 @@ pub fn build_task_window<'a>(
         // 补充更多 pending（跳过已显示的 pending_show 条）
         let more_pending = remaining.min(pending_count.saturating_sub(pending_show));
         for t in pending.iter().skip(pending_show).take(more_pending) {
-            lines.push(format_task_line(t));
+            lines.push(format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_pending);
     }
@@ -143,7 +144,10 @@ pub fn build_task_window<'a>(
             .take(more)
             .enumerate()
         {
-            lines.insert(1 + shown_completed + i, format_task_line(t));
+            lines.insert(
+                1 + shown_completed + i,
+                format_task_line(t, &display_numbers),
+            );
         }
     }
     // --- 折叠提示 ---
@@ -163,7 +167,19 @@ pub fn build_task_window<'a>(
     lines
 }
 
-fn format_task_line(t: &Task) -> String {
+fn build_display_numbers(tasks: &[Task]) -> std::collections::HashMap<&str, usize> {
+    let mut ids: Vec<(&str, u64)> = tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task.id.parse::<u64>().unwrap_or(u64::MAX)))
+        .collect();
+    ids.sort_by_key(|(_, id)| *id);
+    ids.into_iter()
+        .enumerate()
+        .map(|(index, (id, _))| (id, index + 1))
+        .collect()
+}
+
+fn format_task_line(t: &Task, display_numbers: &std::collections::HashMap<&str, usize>) -> String {
     let icon = match t.status {
         TaskStatus::Completed => "✓",
         TaskStatus::InProgress => "■",
@@ -175,7 +191,8 @@ fn format_task_line(t: &Task) -> String {
         .as_deref()
         .map(|o| format!(" (@{})", o))
         .unwrap_or_default();
-    format!("{} #{} {}{}", icon, t.id, t.subject, owner)
+    let display_id = display_numbers.get(t.id.as_str()).copied().unwrap_or(0);
+    format!("{} #{} {}{}", icon, display_id, t.subject, owner)
 }
 
 fn format_fold_hint(n: usize, status: &str) -> String {
