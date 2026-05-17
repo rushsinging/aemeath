@@ -233,6 +233,8 @@ pub mod paste_handler;
 pub mod processing;
 pub mod render;
 pub mod slash;
+#[cfg(test)]
+mod slash_tests;
 pub mod stream;
 pub mod task_window;
 pub mod update;

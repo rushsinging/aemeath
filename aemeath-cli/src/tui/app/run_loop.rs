@@ -107,7 +107,9 @@ impl App {
 
             // --- Handle pending slash commands (async) ---
             if let Some(input) = result.pending_slash {
-                let review_prompt = self.handle_slash_command(&input).await;
+                let review_prompt = self
+                    .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
+                    .await;
                 if let Some(prompt) = review_prompt {
                     self.output_area.push_user_message(&input);
                     self.messages

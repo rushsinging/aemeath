@@ -1,17 +1,24 @@
 use aemeath_core::memory::MemoryLayer;
 use aemeath_core::reflection::{ReflectionEngine, ReflectionOutput};
 use aemeath_llm::types::SystemBlock;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::tui::app::UiEvent;
+
 impl super::super::App {
-    pub(crate) async fn handle_reflect_command(&mut self, args: &str) {
+    pub(crate) async fn handle_reflect_command_with_events(
+        &mut self,
+        args: &str,
+        ui_tx: Option<mpsc::Sender<UiEvent>>,
+    ) {
         if !self.memory_config.reflection.enabled {
             self.output_area.push_error("Reflection 系统已禁用。");
             return;
         }
 
         match args.trim() {
-            "" => self.run_llm_reflection().await,
+            "" => self.spawn_llm_reflection(ui_tx),
             "apply" => self.apply_pending_reflection(),
             "stats" | "history" => self
                 .output_area
@@ -22,7 +29,7 @@ impl super::super::App {
         }
     }
 
-    async fn run_llm_reflection(&mut self) {
+    fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>) {
         let Some(client) = self.client.clone() else {
             self.output_area
                 .push_error("当前没有可用的 LLM client，无法执行 Reflection。");
@@ -55,52 +62,67 @@ impl super::super::App {
         let cancel = CancellationToken::new();
 
         self.output_area.push_system("[reflection: calling LLM...]");
-        let response = match client
-            .stream_message_raw(&system, &messages, &[], Box::new(|_| {}), &cancel)
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                self.output_area
-                    .push_error(&format!("Reflection LLM 调用失败: {error}"));
-                return;
-            }
-        };
+        self.output_area.start_spinner();
+        self.output_area.set_spinner_phase("Reflecting...");
+        self.is_processing = true;
 
-        self.total_api_calls += 1;
-        self.last_input_tokens = response.usage.input_tokens as u64;
-        self.total_input_tokens += response.usage.input_tokens as u64;
-        self.total_output_tokens += response.usage.output_tokens as u64;
-        self.status_bar.set_tokens(
-            self.total_input_tokens,
-            self.total_output_tokens,
-            self.last_input_tokens,
-        );
+        if let Some(tx) = ui_tx {
+            tokio::spawn(async move {
+                let _ = tx.send(UiEvent::ReflectionStarted).await;
+                let raw_output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+                let raw_output_for_callback = raw_output.clone();
+                let response = match client
+                    .stream_message_raw(
+                        &system,
+                        &messages,
+                        &[],
+                        Box::new(move |chunk| {
+                            if let Ok(mut output) = raw_output_for_callback.lock() {
+                                output.push_str(chunk);
+                            }
+                        }),
+                        &cancel,
+                    )
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(error) => {
+                        let _ = tx
+                            .send(UiEvent::Error(format!("Reflection LLM 调用失败: {error}")))
+                            .await;
+                        return;
+                    }
+                };
 
-        let text = response.assistant_message.text_content();
-        let output = match ReflectionEngine::parse_output(&text) {
-            Ok(output) => output,
-            Err(error) => {
-                self.output_area
-                    .push_error(&format!("Reflection 输出解析失败: {error}"));
-                return;
-            }
-        };
+                let _ = tx
+                    .send(UiEvent::ReflectionUsage {
+                        input: response.usage.input_tokens,
+                        output: response.usage.output_tokens,
+                    })
+                    .await;
 
-        let formatted = ReflectionEngine::format_output(&output);
-        self.output_area.push_system(&formatted);
+                let text = response.assistant_message.text_content();
+                let text = if text.trim().is_empty() {
+                    raw_output
+                        .lock()
+                        .map(|output| output.clone())
+                        .unwrap_or_default()
+                } else {
+                    text
+                };
+                let output = match ReflectionEngine::parse_output(&text) {
+                    Ok(output) => output,
+                    Err(error) => {
+                        log::warn!("Reflection 输出解析失败: {error}");
+                        let _ = tx
+                            .send(UiEvent::Error(format!("Reflection 输出解析失败: {error}")))
+                            .await;
+                        return;
+                    }
+                };
 
-        if self.memory_config.reflection.auto_apply_suggestions {
-            self.apply_reflection_output(output);
-        } else {
-            let suggestion_count = output.suggested_memories.len();
-            let outdated_count = output.outdated_memories.len();
-            self.pending_reflection = Some(output);
-            if suggestion_count > 0 || outdated_count > 0 {
-                self.output_area.push_system(&format!(
-                    "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
-                ));
-            }
+                let _ = tx.send(UiEvent::ReflectionDone { output }).await;
+            });
         }
     }
 
@@ -116,7 +138,7 @@ impl super::super::App {
         }
     }
 
-    fn apply_reflection_output(&mut self, output: ReflectionOutput) -> bool {
+    pub(crate) fn apply_reflection_output(&mut self, output: ReflectionOutput) -> bool {
         let mut store = match self.open_reflection_memory_store() {
             Ok(store) => store,
             Err(error) => {

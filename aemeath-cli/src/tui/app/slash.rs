@@ -1,6 +1,7 @@
 mod reflection;
 mod suggestions;
 
+use crate::tui::app::UiEvent;
 use aemeath_core::command::cmd;
 use aemeath_core::command::{CommandContext, CommandRegistry, CommandResult};
 use aemeath_core::session;
@@ -36,8 +37,13 @@ impl super::App {
         }
     }
 
-    /// Handle slash commands. Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
-    pub(crate) async fn handle_slash_command(&mut self, input: &str) -> Option<String> {
+    /// Handle slash commands with an optional UI event sender for background commands.
+    /// Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
+    pub(crate) async fn handle_slash_command_with_events(
+        &mut self,
+        input: &str,
+        ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
+    ) -> Option<String> {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let cmd = *parts.first().unwrap_or(&"");
         let has_args = parts.len() > 1;
@@ -177,7 +183,7 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                self.handle_reflect_command(&args).await;
+                self.handle_reflect_command_with_events(&args, ui_tx).await;
             }
             "/memory" | "/mem"
                 if matches!(

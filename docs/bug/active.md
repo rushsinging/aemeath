@@ -13,7 +13,7 @@
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
 | 40 | DeepSeek 流式输出约 120 秒后 decode timeout | 高 | 修复中 | 未确认 | 2026-05 | OpenAI-compatible provider 的 reqwest Client 对 SSE 流设置 total timeout=120s，长流在总时长达到后被客户端截断 |
-| 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 活动中 | 未确认 | 2026-05 | 疑似 /reflect 命令在 TUI update/命令处理路径中同步等待 LLM 调用或未及时 yield/stream 进度，导致 UI 事件循环被阻塞 |
+| 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：/reflect 不再在 run_loop 中同步 await LLM；改为后台 task 执行，通过 UiEvent 回传 started/usage/done，TUI 立即显示 spinner 并继续响应 |
 
 ## 专案
 
@@ -268,6 +268,35 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-core/src/reflection.rs`
 - `aemeath-cli/src/tui/app/update/`
 - `aemeath-cli/src/tui/app/stream/`
+
+### #41 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出
+
+**状态**：待确认
+
+**症状**：
+- 在 TUI 中执行 `/reflect` 后界面像卡死一样无即时反馈
+- 等待一段时间后才开始出现 LLM 输出
+- 用户感知为命令执行期间 UI 事件循环被阻塞，而不是正常的异步反馈
+
+**根因**：
+- TUI `run_loop` 处理 `pending_slash` 时直接 `await handle_slash_command`
+- `/reflect` 分支继续 `await run_llm_reflection()`，LLM 请求在主事件循环内同步等待
+- 等待期间 tick/key/mouse/UI event 都无法被处理，所以界面看起来卡住
+
+**修复**：
+1. `/reflect` 默认 LLM 调用改为后台 `tokio::spawn` 执行
+2. 提交命令后立即显示 `[reflection: calling LLM...]`、启动 spinner，并设置 `is_processing=true`
+3. 后台任务通过 `UiEvent::ReflectionStarted`、`ReflectionUsage`、`ReflectionDone` 回传进度、token 用量和解析后的 ReflectionOutput
+4. `UiEvent::ReflectionDone` 在主线程统一格式化输出、auto apply 或保存 pending suggestions，并停止 spinner
+5. 新增回归测试 `test_spawn_llm_reflection_returns_before_llm_finishes`，使用阻塞型测试 provider 验证 `/reflect` 不等待 LLM 完成即可返回
+
+**涉及路径**：
+- `aemeath-cli/src/tui/app/run_loop.rs`
+- `aemeath-cli/src/tui/app/slash.rs`
+- `aemeath-cli/src/tui/app/slash/reflection.rs`
+- `aemeath-cli/src/tui/app/update/ui_event.rs`
+- `aemeath-cli/src/tui/app/event.rs`
+- `aemeath-cli/src/tui/app/slash_tests.rs`
 
 ### #35 Write tool 在 worktree 中写入错误分支
 
