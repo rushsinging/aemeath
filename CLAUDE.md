@@ -27,6 +27,12 @@ aemeath/                    # workspace root
 └── CLAUDE.md               # 本文件
 ```
 
+## 工作流约束
+
+- **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
+- **MUST** worktree 分支完成验证并提交后合并回 `main`。
+- **MUST** 合并回 `main` 后在 `main` 上运行对应验证，并清理已完成的 worktree。
+
 ## 编码规范
 
 ### NEVER
