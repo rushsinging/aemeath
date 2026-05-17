@@ -112,7 +112,7 @@ impl OpenAICompatibleProvider {
 
             // 如果外层消息只包含 ToolResult 块则跳过
             // （它们已经作为独立的 "role":"tool" 消息发出）
-            if content_parts.is_empty() && tool_calls.is_empty() && reasoning_content.is_none() {
+            if content_parts.is_empty() && tool_calls.is_empty() {
                 continue;
             }
 

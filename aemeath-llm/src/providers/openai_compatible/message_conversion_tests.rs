@@ -106,3 +106,23 @@ fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
     assert!(assistant.get("reasoning_content").is_none());
     assert!(assistant.get("tool_calls").is_some());
 }
+
+#[test]
+fn test_convert_messages_drops_reasoning_only_assistant() {
+    let provider = provider_with_reasoning();
+    let messages = vec![Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::Thinking {
+            thinking: "只有推理，没有可见内容".to_string(),
+        }],
+    }];
+
+    let converted = provider.convert_messages(&[], &messages).unwrap();
+
+    assert!(converted.iter().all(|m| {
+        m.get("role").and_then(|v| v.as_str()) != Some("assistant")
+            || m.get("content").is_some_and(|v| !v.is_null())
+            || m.get("tool_calls").is_some()
+    }));
+    assert!(converted.is_empty());
+}
