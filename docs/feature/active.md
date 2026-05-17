@@ -19,7 +19,7 @@
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 32 | TUI 选中和复制逻辑统一 | 高 | 修复中 | 未确认 | 用户反馈选中复制仍容易出问题；本轮按稳定性修复专项处理：统一 clipboard helper、修复 input/status CJK/emoji 屏幕列到字符索引转换、让 selection 层只返回文本并由 App 统一复制与错误反馈。 |
-| 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | ✅ 已完成 | 未确认 | TUI 中 TaskListCreate 显示为 `TaskListCreate: <subject>` + summary，TaskListComplete 显示为单行；成功结果不再输出 created/completed 噪声，错误结果仍显示失败摘要。 |
+| 33 | 优化 TaskListCreate / TaskListComplete 工具调用显示 | 中 | ✅ 已完成 | 未确认 | TUI 中 TaskListCreate 显示保持 `TaskListCreate: <subject>` + summary；TaskListComplete 成功后只保留单行 `✓ TaskListComplete`，不再输出 created/completed 噪声或额外空行。 |
 | 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
 
 ### #36 Multi-Agent 框架
@@ -32,11 +32,11 @@
 
 **目标**：降低 task batch 管理工具在 TUI 输出中的噪声，让用户只看到本次 task list 的主题、摘要和完成动作，不再显示原始 JSON 与 `Task list #N created/completed` 成功结果。
 
-**已完成的改动（2026-05-14）**：
+**已完成的改动（2026-05-17）**：
 1. 新增 `TaskListCreateDisplay`：header 显示为 `TaskListCreate: <subject>`，详情只显示 `summary`，不显示完整 JSON。
-2. 新增 `TaskListCompleteDisplay`：header 显示为 `TaskListComplete`，无参数详情。
-3. `result_max_lines() == 0` 时成功结果正文静默，避免重复显示 `created/completed`；错误结果仍显示失败摘要。
-4. 新增回归测试覆盖 TaskListCreate / TaskListComplete 成功输出不再包含噪声。
+2. 新增 `TaskListCompleteDisplay`：成功后只显示 `✓ TaskListComplete`，无参数详情、无成功结果正文、无额外空行。
+3. `TaskListCreate` 成功结果正文继续静默，避免重复显示 `created` 噪声，但保留 header + summary 的现有展示。
+4. 新增/更新回归测试覆盖 TaskListCreate 既有显示和 TaskListComplete 单行成功输出。
 
 **涉及路径**：
 - `aemeath-cli/src/tui/output_area/tool_display/task_impls.rs`

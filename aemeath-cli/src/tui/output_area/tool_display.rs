@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_task_list_complete_display_hides_success_result_noise() {
+    fn test_task_list_complete_display_shows_only_success_header() {
         let mut output = OutputArea::new();
 
         output.push_tool_call("task-list-complete-1", "TaskListComplete", "{}");
@@ -331,7 +331,7 @@ mod tests {
             .map(|line| line.content.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(matching, vec!["✓ TaskListComplete", ""]);
+        assert_eq!(matching, vec!["✓ TaskListComplete"]);
     }
 
     fn tool_calls_event(sequence: usize, calls: Vec<AgentToolCallProgress>) -> AgentProgressEvent {
