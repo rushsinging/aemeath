@@ -139,3 +139,70 @@ impl TaskStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task::BatchStatus;
+
+    #[tokio::test]
+    async fn test_create_list_resets_task_ids_for_new_batch() {
+        let store = TaskStore::new();
+        store
+            .create_list("first".to_string(), "first batch".to_string())
+            .await;
+        let first = store
+            .create("first task".to_string(), "desc".to_string(), None)
+            .await;
+        store
+            .update(&first.id, |task| task.status = TaskStatus::Completed)
+            .await;
+        store.complete_list().await;
+
+        store
+            .create_list("second".to_string(), "second batch".to_string())
+            .await;
+        let second = store
+            .create("second task".to_string(), "desc".to_string(), None)
+            .await;
+
+        assert_eq!(second.id, "1");
+    }
+
+    #[tokio::test]
+    async fn test_clear_resets_task_ids() {
+        let store = TaskStore::new();
+        let first = store
+            .create("first task".to_string(), "desc".to_string(), None)
+            .await;
+        assert_eq!(first.id, "1");
+
+        store.clear().await;
+        let second = store
+            .create("second task".to_string(), "desc".to_string(), None)
+            .await;
+
+        assert_eq!(second.id, "1");
+    }
+
+    #[tokio::test]
+    async fn test_complete_list_keeps_existing_task_ids() {
+        let store = TaskStore::new();
+        store
+            .create_list("first".to_string(), "first batch".to_string())
+            .await;
+        let first = store
+            .create("first task".to_string(), "desc".to_string(), None)
+            .await;
+
+        store.complete_list().await;
+        let stored = store
+            .get(&first.id)
+            .await
+            .expect("task should remain stored");
+
+        assert_eq!(stored.id, "1");
+        assert!(store.get("2").await.is_none());
+        assert_eq!(store.list_batches().await[0].status, BatchStatus::Archived);
+    }
+}
