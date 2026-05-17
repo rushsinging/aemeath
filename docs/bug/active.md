@@ -5,7 +5,6 @@
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | body 过大时 API 返回 input_tokens=0 output_tokens=0 |
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
-| 34 | Task reminder 干扰新用户请求 | 高 | 待确认 | 未确认 | 2026-05 | 未按 task batch/request summary 隔离提醒，旧任务提醒容易覆盖当前新请求 |
 | 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 已修复(A) TTL 过滤导致窗口退缩至 1 条；仍跟踪(B) completed 挂留 + pending 跳号；(C) completed 非"最近完成"、pending 段跳号 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
@@ -26,7 +25,7 @@
 | Bug | #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
 | Bug | #32 Task list 窗口化：始终只显示 1 条 task | 窗口化显示：限量显示策略缺陷 | 已修复（2026-05-11）：TTL 只优先 recent completed，补齐窗口时回退使用旧 completed |
 | Bug | #33 Spinner 下方 task list 无法选中和复制 | 交互：task status 行 selection/copy 映射缺失 | 待确认；已修复（2026-05-14）：render 阶段为 task status 行补充 screen_line_map 映射，复制路径可读取虚拟 task 行 |
-| Bug | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | 已有修复（2026-05-11）：Batch summary 字段 + TaskListCreate/Complete 工具 + 提醒按 batch 输出 |
+| Bug | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | ✅ 已归档（2026-05-17）：用户确认修复；详见 `docs/bug/archived/034-task-reminder-interference.md` |
 | Bug | #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
 | Bug | #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
 | Feature | #18 Task list 跨轮次 batch 机制 | 基础机制：Task 跟随 session 持久化并按 batch 分组显示 | ✅ 已完成，未确认 |
@@ -148,17 +147,8 @@
 **原疑似根因**：SessionStart hook 提示语偏强、`using-superpowers` description 触发面过宽、Skill 列表注入后模型倾向调用 skill。
 **后续处理**：如需调整，应作为体验优化 / feature 另行登记，而非 bug 修复。
 
-### #34 Task reminder 干扰新用户请求
-**症状**：存在上一轮未完成 task 时，后续用户提出无关新请求，系统注入的 task reminder 容易让模型优先继续旧 task，忽略或延迟响应当前用户请求。
-
-**根因**：task reminder 只列出未完成任务，缺少 request summary / batch 归属提示，也没有明确说明旧 batch 可能与最新用户消息无关。
-
-**修复（2026-05-11）**：
-1. `Batch` 增加 `summary` 字段，新增 `TaskListCreate` / `TaskListComplete` 工具显式管理一次用户请求对应的 task batch。
-2. `TaskStore` 新增 active/list/complete 相关接口，并保证 `TaskCreate` 自动归属当前 batch。
-3. task reminder 改为按 batch 输出，包含 summary，并明确提示：若与最新用户消息无关，优先回答最新消息；只有用户要求 continue/resume 或任务明显相关时才使用 TaskList。
-4. TaskList 输出增加 task list 摘要和完成比例，便于人工确认 batch 隔离状态。
-5. 新增 `task_reminder`、`task_list_create`、`task_list_complete` 单元测试覆盖提醒隔离、空列表、完成关闭等路径。
+### #34 Task reminder 干扰新用户请求（已归档 2026-05-17）
+用户确认修复。修复内容：新增 batch summary 与 TaskListCreate/TaskListComplete，task reminder 按 batch 输出并明确提示旧 batch 可能与最新用户消息无关。详见 `docs/bug/archived/034-task-reminder-interference.md`。
 
 ### #31 WebSearch 工具返回空结果（已归档 2026-05-14）
 用户确认修复。修复内容：结果块匹配改为 `<div class="result "`，title/snippet 不再依赖属性顺序，检测 `anomaly.js` 后 fallback 到 Bing 搜索。详见 `docs/bug/archived/031-web-search-empty-results.md`。
