@@ -5,7 +5,7 @@
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | 同 #39：超大 tool result 未持久化导致请求体过大，部分 API 静默空响应 |
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
-| 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 已修复(A) TTL 过滤导致窗口退缩至 1 条；仍跟踪(B) completed 挂留 + pending 跳号；(C) completed 非"最近完成"、pending 段跳号 |
+| 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 本轮继续修复(D)：9/10 完成后窗口只显示 ✓#9 + ■#10 未填满 7 条；根因是 completed TTL 过滤在无 pending、仅 completed+in_progress 场景中过早丢弃旧 completed，且最近 completed 曾按 id 升序取最早项。 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
@@ -177,6 +177,11 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - 显示顺序：✓ #1、■ #3、■ #9、□ #4、□ #5、□ #10、□ #11
 - pending 列表从 #5 跳到 #10，#6/#7/#8 既未出现在 completed 也未出现在 pending 段，疑似被静默截断
 - 期望：「最近完成（按 updated_at desc 取 1~N 条）+ 所有 in_progress + 后续 pending 升序连续填充」
+
+**症状 D — 仅剩最后 in_progress 时窗口未填满（2026-05-17 截图）**：
+- `Tasks: 9/10`，只显示 `✓ #9 Important 7: can_create_agents 硬校验` 和 `■ #10 Minor 1-6...`
+- 实际还有 #1~#8 completed，可用于填满 7 条窗口，但被 TTL 过滤提前丢弃
+- 期望：无 pending 且存在 in_progress 时，窗口显示最近 completed 补足剩余容量 + 当前 in_progress，例如 #4~#9 completed + #10 in_progress
 
 **复现路径**：
 1. LLM 创建 ≥ 2 条 task
