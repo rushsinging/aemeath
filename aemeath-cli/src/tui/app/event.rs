@@ -34,6 +34,14 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(crate::image::ProcessedImage),
     SystemMessage(String),
+    ReflectionStarted,
+    ReflectionUsage {
+        input: u32,
+        output: u32,
+    },
+    ReflectionDone {
+        output: aemeath_core::reflection::ReflectionOutput,
+    },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {
         id: String,

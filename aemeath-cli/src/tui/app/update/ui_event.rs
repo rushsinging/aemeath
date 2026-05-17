@@ -177,6 +177,41 @@ impl App {
                     pending_slash: None,
                 };
             }
+            UiEvent::ReflectionStarted => {
+                self.output_area.start_spinner();
+                self.output_area.set_spinner_phase("Reflecting...");
+                self.is_processing = true;
+            }
+            UiEvent::ReflectionUsage { input, output } => {
+                self.total_api_calls += 1;
+                self.last_input_tokens = input as u64;
+                self.total_input_tokens += input as u64;
+                self.total_output_tokens += output as u64;
+                self.status_bar.set_tokens(
+                    self.total_input_tokens,
+                    self.total_output_tokens,
+                    self.last_input_tokens,
+                );
+            }
+            UiEvent::ReflectionDone { output } => {
+                let formatted = aemeath_core::reflection::ReflectionEngine::format_output(&output);
+                self.output_area.push_system(&formatted);
+                if self.memory_config.reflection.auto_apply_suggestions {
+                    self.apply_reflection_output(output);
+                } else {
+                    let suggestion_count = output.suggested_memories.len();
+                    let outdated_count = output.outdated_memories.len();
+                    self.pending_reflection = Some(output);
+                    if suggestion_count > 0 || outdated_count > 0 {
+                        self.output_area.push_system(&format!(
+                            "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
+                        ));
+                    }
+                }
+                self.output_area.stop_spinner();
+                self.is_processing = false;
+                self.status_bar.set_success("Ready");
+            }
             UiEvent::AskUser {
                 id,
                 question,
