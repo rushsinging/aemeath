@@ -8,12 +8,12 @@
 | 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 本轮继续修复(D)：9/10 完成后窗口只显示 ✓#9 + ■#10 未填满 7 条；根因是 completed TTL 过滤在无 pending、仅 completed+in_progress 场景中过早丢弃旧 completed，且最近 completed 曾按 id 升序取最早项。 |
 | 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
-| 36 | TaskListCreate 后新任务编号未从 1 开始 | 中 | 待确认 | 未确认 | 2026-05 | 新 task list 未重置显示编号，仍沿用全局递增 task id |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
-| 40 | DeepSeek 流式输出约 120 秒后 decode timeout | 高 | 修复中 | 未确认 | 2026-05 | OpenAI-compatible provider 的 reqwest Client 对 SSE 流设置 total timeout=120s，长流在总时长达到后被客户端截断 |
 | 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：/reflect 不再在 run_loop 中同步 await LLM；改为后台 task 执行，通过 UiEvent 回传 started/usage/done，TUI 立即显示 spinner 并继续响应 |
+| 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
+| 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 活动中 | 未确认 | 2026-05 | TUI task list 显示 batch 内局部编号（#1/#2/...），但 TaskUpdate 接受全局 task id，agent 看到的 tool 输出是全局 id（如 `#9`），导致 agent 更新错误 task 或用户无法对应 |
 
 ## 专案
 
@@ -339,33 +339,9 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - Feature #24（task list 窗口化）—— task list 的渲染路径与窗口化逻辑共用
 - Bug #32（task list 显示不完整）—— 同在 task list 渲染链路
 
-### #36 TaskListCreate 后新任务编号未从 1 开始
+### #36 TaskListCreate 后新任务编号未从 1 开始（已归档 2026-05-14）
 
-**症状**：调用 `TaskListCreate` 创建新的 task list 后，后续通过 `TaskCreate` 新增任务时，用户可见编号没有从 1 重新开始，而是继续沿用之前 task list / 全局任务的递增编号（例如新列表第一条显示为 `#6`）。
-
-**期望行为**：每个 task list 内的任务编号应独立计数；创建新 task list 后，该列表中新添加的第一条任务应显示为 `#1`，后续为 `#2`、`#3`。
-
-**影响**：不同用户请求之间的 task 编号泄漏，降低可读性，也会让用户和 agent 在引用“第 1 个任务”时产生歧义。
-
-**疑似根因**：TaskStore 使用全局递增 task id 作为用户可见编号，TaskListCreate 只创建 batch/list 边界，没有为每个 task list 维护局部序号或显示编号映射。
-
-**修复方向**：
-1. 区分内部唯一 task id 与 task list 内用户可见序号。
-2. TaskCreate 归属当前 task list 时，为该 list 分配从 1 开始的局部显示编号。
-3. TaskList / reminder / TUI task list / TaskUpdate 引用语义需保持一致，避免破坏内部 id 查找。
-4. 添加回归测试：连续创建两个 task list，第二个列表第一条任务显示编号为 1。
-
-**涉及路径**：
-- `aemeath-core/src/task.rs`
-- `aemeath-tools/src/task_list_create.rs`
-- `aemeath-tools/src/task_create.rs`
-- `aemeath-tools/src/task_list.rs`
-- TUI task list 渲染相关路径
-
-**修复（2026-05-11）**：
-1. TUI task list 渲染改用 batch 内局部显示编号，不再直接展示全局 task id；同一 batch 内按全局 id 稳定映射为 `#1/#2/...`。
-2. `TaskStore::list_current_batch()` 改为只选择 Active/Paused batch，已归档 batch 不再因 task id 最大而被误显示。
-3. 新增回归测试覆盖第二个 task list 从 `#1` 开始显示、已归档 batch 不再出现在当前 batch 列表。
+用户确认修复。修复内容：TUI 渲染改用 batch 内局部显示编号，list_current_batch() 过滤已归档 batch。详见 docs/bug/archived/036-task-list-numbering.md。
 
 ### #38 Assistant 空消息导致 API 400 invalid_request_error
 
@@ -515,3 +491,61 @@ API error [400 Bad Request]: string too long. Expected a string with maximum len
 **根因**：`selection_start/selection_end` 存储的是 `screen_line_map` 的行索引（screen_row），但 `screen_line_map` 在每次 `render()` 时重建。当 streaming 新内容追加后，screen_map 偏移，旧索引指向错误位置，导致高亮偏移。
 **修复**：selection 改为存储逻辑行索引（logic_idx）而非屏幕行索引。渲染时通过 screen_map 查找当前 screen_idx 对应的 logic_idx 来匹配选中范围，不再受 screen_map 重建影响。
 **涉及路径**：`aemeath-cli/src/tui/output_area/selection.rs`、`mod.rs`
+
+---
+
+### #42 TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列）
+
+**症状**：在 TUI 中，多条 Bash 命令的输出中文字符显示为 `M-eM-^P`、`M-gM-^W` 等 `cat -v` 风格的转义序列。不仅限于 `cat -A` 管道命令，普通 Bash 命令输出也会出现。
+
+**复现路径**：在 TUI 中执行任何包含中文输出的 Bash 命令，观察输出区域。
+
+**排查**：
+1. Bash 工具（`aemeath-tools/src/bash.rs`）使用 `String::from_utf8_lossy` 将 `Vec<u8>` 转为 `String`，`from_utf8_lossy` 对合法 UTF-8 不做转义，只替换非法字节为 `\u{fffd}`，不会产生 `M-` 转义序列。
+2. 应用日志（`~/.aemeath/aemeath.log`）中未找到包含 `M-` 转义内容的 Bash 输出记录。
+3. 疑似问题在 TUI 渲染层或 ratatui 文本处理环节。
+
+**疑似根因**：
+- TUI 渲染路径中某处将 UTF-8 多字节字符拆分或按字节处理，导致高字节被 `cat -v` 式转义显示
+- 或终端环境 locale 配置问题（但 Bash 工具未显式设置 `LANG`/`LC_ALL`）
+
+**修复方向**：
+1. 确认 Bash 工具 spawn 子进程时是否设置了 `LANG=en_US.UTF-8` 或 `LC_ALL=C` 导致中文输出被转义
+2. 检查 TUI markdown/代码块渲染路径是否有按字节处理字符串的地方
+3. 添加日志：Bash 工具执行前后打印 stdout 原始字节和转为 String 后的内容，确认乱码发生在哪个环节
+
+**涉及路径**：
+- `aemeath-tools/src/bash.rs`（Bash 工具输出收集）
+- `aemeath-cli/src/tui/`（TUI 渲染层）
+- 可能涉及 markdown 渲染中代码块/工具输出区域的文本处理
+
+---
+
+### #43 TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致
+
+**症状**：
+- TUI task list 显示 batch 内局部编号（如 `#2 定位现有显示逻辑`、`#3 按 TDD 修改显示行为`、`#4 验证提交合并`）。
+- Agent 调用 `TaskUpdate(9) -> completed`，tool 输出 `Updated task #9: 定位现有显示逻辑`，使用的是全局 task id `9`。
+- 用户无法将 agent 输出中的 `#9` 与 TUI 显示的 `#2` 对应起来；agent 也可能因为编号不一致而引用错误的 task。
+
+**复现**：
+1. 创建多个 task list batch（如第一个 batch 创建 #1~#7，第二个 batch 创建 #8~#10）
+2. TUI 中第二个 batch 显示为 `#1/#2/#3`（局部编号）
+3. Agent 执行 `TaskUpdate` 时使用全局 id（如 `#9`），输出 `Updated task #9`
+4. TUI 显示的局部编号是 `#2`，但 agent 报告的是 `#9`
+
+**根因**：Bug #36 修复引入了 TUI 局部显示编号，但 TaskUpdate / TaskCreate 等 tool 的输入输出仍使用全局 task id。两套编号体系未对齐。
+
+**修复方向**：
+1. **方案 A**：TaskUpdate / TaskCreate / TaskList 等工具的输出统一使用与 TUI 一致的 batch 局部编号，内部映射回全局 id 执行操作。
+2. **方案 B**：TaskUpdate 接口同时接受全局 id 和局部编号，tool schema 中注明优先使用局部编号。
+3. **方案 C**：TUI 也显示全局 id，去掉局部编号（回退 #36 修复）。
+
+推荐方案 A：agent 看到的编号应与 TUI 一致，降低用户困惑。TaskStore 需提供 batch 内局部编号到全局 id 的双向映射。
+
+**涉及路径**：
+- `aemeath-core/src/task.rs`（TaskStore 编号映射）
+- `aemeath-tools/src/task_update.rs`（输入解析 + 输出格式）
+- `aemeath-tools/src/task_create.rs`（输出格式）
+- `aemeath-tools/src/task_list.rs`（输出格式）
+- `aemeath-cli/src/tui/`（TUI task list 渲染，已用局部编号）
