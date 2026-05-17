@@ -20,6 +20,10 @@ pub struct OpenAICompatibleProvider {
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
 
+pub(crate) fn build_streaming_http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+}
+
 impl OpenAICompatibleProvider {
     pub fn new(
         config: OpenAIProviderConfig,
@@ -43,8 +47,7 @@ impl OpenAICompatibleProvider {
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+            http: build_streaming_http_client_builder()
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,

@@ -164,3 +164,10 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
     let body = provider.base_request_body(Vec::new(), false);
     assert_eq!(body.get("max_tokens"), Some(&json!(32000)));
 }
+
+#[test]
+fn openai_streaming_http_client_has_no_total_timeout() {
+    let debug = format!("{:?}", provider::build_streaming_http_client_builder());
+
+    assert!(!debug.contains("timeout:"), "{debug}");
+}
