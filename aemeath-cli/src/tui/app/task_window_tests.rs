@@ -74,8 +74,8 @@ fn test_build_task_window_mix() {
     // 温和扩展会补充额外的 completed → summary + 2 completed + in_progress + 2 pending = 6
     assert_eq!(result.len(), 6);
     assert!(result[0].contains("2/5"));
-    assert!(result[1].contains("✓ #1 done a")); // completed 按 task id 升序
-    assert!(result[2].contains("✓ #2 done b")); // extra completed inserted after main completed
+    assert!(result[1].contains("✓ #2 done b")); // 最近完成
+    assert!(result[2].contains("✓ #1 done a")); // 有余量时补充旧 completed
     assert!(result[3].contains("■ #3 doing c")); // in_progress
     assert!(result[4].contains("□ #4"));
     assert!(result[5].contains("□ #5"));
@@ -251,8 +251,8 @@ fn test_completed_lines_keep_task_id_order_when_expanded() {
 
     let result = build_task_window(&tasks, 7, 1);
 
-    assert!(result[1].contains("✓ #1 检查 bug 35 与 worktree 约定"));
-    assert!(result[2].contains("✓ #2 创建 bug35 worktree 并验证基线"));
+    assert!(result[1].contains("✓ #2 创建 bug35 worktree 并验证基线"));
+    assert!(result[2].contains("✓ #1 检查 bug 35 与 worktree 约定"));
     assert!(result[3].contains("✓ #3 定位 bug 35 根因"));
     assert!(result[4].contains("■ #4 添加回归测试并修复 bug 35"));
     assert!(result[5].contains("□ #5 验证并更新文档"));
@@ -313,4 +313,89 @@ fn test_completed_ttl_excludes_old() {
     assert!(result2[0].contains("10/11"));
     // Old completed (0..4) should be filtered by TTL
     assert!(!result2.iter().any(|l| l.contains("✓ #0 ")));
+}
+
+#[test]
+fn test_recent_completed_uses_updated_at_desc_before_id_order() {
+    let tasks = vec![
+        make_task_with_ts("1", "old completed", TaskStatus::Completed, 100),
+        make_task_with_ts("2", "middle completed", TaskStatus::Completed, 200),
+        make_task_with_ts("3", "newest completed", TaskStatus::Completed, 300),
+        make_task_with_ts("4", "current", TaskStatus::InProgress, 400),
+        make_task_with_ts("5", "next", TaskStatus::Pending, 500),
+    ];
+
+    let result = build_task_window(&tasks, 3, 1);
+
+    assert!(result[1].contains("✓ #3 newest completed"));
+    assert!(result[2].contains("■ #4 current"));
+    assert!(result[3].contains("□ #5 next"));
+    assert!(!result.iter().any(|line| line.contains("#1 old completed")));
+}
+
+#[test]
+fn test_bug32_user_snapshot_keeps_full_window_when_only_recent_completed_and_in_progress() {
+    let tasks = vec![
+        make_task_with_ts(
+            "1",
+            "Critical 1: 删除 ProjectTaskStatus.Assigned，统一状态机",
+            TaskStatus::Completed,
+            100,
+        ),
+        make_task_with_ts("2", "Critical 2: already done", TaskStatus::Completed, 200),
+        make_task_with_ts("3", "Critical 3: already done", TaskStatus::Completed, 300),
+        make_task_with_ts(
+            "4",
+            "Critical 4: 定稿 Sub-Agent 部署模型",
+            TaskStatus::Completed,
+            400,
+        ),
+        make_task_with_ts(
+            "5",
+            "Critical 5: 定稿 Agent 进程模型",
+            TaskStatus::Completed,
+            500,
+        ),
+        make_task_with_ts(
+            "6",
+            "Important 1-3: 补 timeout/cancel/token/gRPC 错误码",
+            TaskStatus::Completed,
+            600,
+        ),
+        make_task_with_ts(
+            "7",
+            "Important 4+6: 补缺失 collection schema + 简化 model_health",
+            TaskStatus::Completed,
+            700,
+        ),
+        make_task_with_ts(
+            "8",
+            "Important 5: 明确 Scheduler Watch 语义",
+            TaskStatus::Completed,
+            800,
+        ),
+        make_task_with_ts(
+            "9",
+            "Important 7: can_create_agents 硬校验",
+            TaskStatus::Completed,
+            900,
+        ),
+        make_task_with_ts(
+            "10",
+            "Minor 1-6: 排版修复 + 开放问题清理 + 小修补",
+            TaskStatus::InProgress,
+            1000,
+        ),
+    ];
+
+    let result = build_task_window(&tasks, 7, 1);
+
+    assert_eq!(result.len(), 8);
+    assert!(result[1].contains("✓ #4 Critical 4: 定稿 Sub-Agent 部署模型"));
+    assert!(result[2].contains("✓ #5 Critical 5: 定稿 Agent 进程模型"));
+    assert!(result[3].contains("✓ #6 Important 1-3: 补 timeout/cancel/token/gRPC 错误码"));
+    assert!(result[4].contains("✓ #7 Important 4+6: 补缺失 collection schema + 简化 model_health"));
+    assert!(result[5].contains("✓ #8 Important 5: 明确 Scheduler Watch 语义"));
+    assert!(result[6].contains("✓ #9 Important 7: can_create_agents 硬校验"));
+    assert!(result[7].contains("■ #10 Minor 1-6: 排版修复 + 开放问题清理 + 小修补"));
 }

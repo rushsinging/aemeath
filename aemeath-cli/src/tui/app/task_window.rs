@@ -32,28 +32,21 @@ pub fn build_task_window<'a>(
         return Vec::new();
     }
 
-    // --- completed: 按 task id 升序，保持任务列表稳定顺序 ---
+    // --- completed: 主窗口按 updated_at 降序取最近完成，额外扩展时再按 task id 稳定展示 ---
     let display_numbers = build_display_numbers(tasks);
     let all_completed_count = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
         .count();
-    let mut completed: Vec<&Task> = tasks
+    let mut completed_by_recency: Vec<&Task> = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
         .collect();
-    completed.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
-    // TTL filter: only apply when there are more completed than max_lines
-    let newest_ts = completed.iter().map(|t| t.updated_at).max().unwrap_or(0);
-    let completed: Vec<&Task> = if completed.len() > max_lines {
-        completed
-            .into_iter()
-            .filter(|t| newest_ts.saturating_sub(t.updated_at) <= COMPLETED_TTL_SECS)
-            .collect()
-    } else {
-        completed
-    };
-
+    completed_by_recency.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| task_sort_key(a).cmp(&task_sort_key(b)))
+    });
     let in_progress: Vec<&Task> = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::InProgress)
@@ -62,12 +55,32 @@ pub fn build_task_window<'a>(
         .iter()
         .filter(|t| t.status == TaskStatus::Pending)
         .collect();
-    pending.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX));
+    pending.sort_by_key(|t| task_sort_key(t));
 
     let total = tasks.len();
     let completed_count = all_completed_count;
     let in_progress_count = in_progress.len();
     let pending_count = pending.len();
+
+    // TTL filter: only apply when there are more completed than max_lines.
+    // If only completed + in_progress remain, keep enough completed context to fill the window.
+    let newest_ts = completed_by_recency
+        .iter()
+        .map(|t| t.updated_at)
+        .max()
+        .unwrap_or(0);
+    let completed_by_recency: Vec<&Task> = if completed_by_recency.len() > max_lines
+        && !(pending_count == 0 && in_progress_count > 0)
+    {
+        completed_by_recency
+            .into_iter()
+            .filter(|t| newest_ts.saturating_sub(t.updated_at) <= COMPLETED_TTL_SECS)
+            .collect()
+    } else {
+        completed_by_recency
+    };
+    let mut completed_for_display = completed_by_recency.clone();
+    completed_for_display.sort_by_key(|t| task_sort_key(t));
 
     // 摘要行
     let summary = format!("━━ Tasks: {}/{} ━━", completed_count, total);
@@ -77,10 +90,10 @@ pub fn build_task_window<'a>(
 
     // 全部 completed 场景
     if in_progress_count == 0 && pending_count == 0 {
-        let start = completed.len().saturating_sub(capacity);
-        let shown = completed.len() - start;
-        let hidden = completed.len() - shown;
-        for t in completed.iter().skip(start) {
+        let start = completed_for_display.len().saturating_sub(capacity);
+        let shown = completed_for_display.len() - start;
+        let hidden = completed_for_display.len() - shown;
+        for t in completed_for_display.iter().skip(start) {
             lines.push(format_task_line(t, &display_numbers));
         }
         if hidden > 0 {
@@ -88,13 +101,33 @@ pub fn build_task_window<'a>(
         }
         return lines;
     }
-
     // --- 分配额度 ---
     let mut remaining = capacity;
 
     // 1. 最近 completed（最多 show_last_completed 条）
-    let comp_show = show_last_completed.min(remaining).min(completed.len());
-    for t in completed.iter().take(comp_show) {
+    let base_comp_show = show_last_completed
+        .min(remaining)
+        .min(completed_by_recency.len());
+    let required_completed_fill = if pending_count == 0 {
+        remaining
+            .saturating_sub(in_progress_count)
+            .min(completed_by_recency.len())
+    } else {
+        base_comp_show
+    };
+    let comp_show = base_comp_show.max(required_completed_fill);
+    let selected_completed_ids: std::collections::HashSet<&str> = completed_by_recency
+        .iter()
+        .take(comp_show)
+        .map(|task| task.id.as_str())
+        .collect();
+    let mut selected_completed: Vec<&Task> = completed_for_display
+        .iter()
+        .copied()
+        .filter(|task| selected_completed_ids.contains(task.id.as_str()))
+        .collect();
+    selected_completed.sort_by_key(|task| task_sort_key(task));
+    for t in selected_completed.iter() {
         lines.push(format_task_line(t, &display_numbers));
     }
     remaining = remaining.saturating_sub(comp_show);
@@ -117,9 +150,14 @@ pub fn build_task_window<'a>(
     let min_show = 3.min(total);
     if remaining > 0 {
         // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
-        let more_comp = remaining.min(completed.len().saturating_sub(comp_show));
+        let more_comp = remaining.min(completed_for_display.len().saturating_sub(comp_show));
         let insert_pos = 1 + comp_show; // after summary + displayed completed
-        for (i, t) in completed.iter().skip(comp_show).take(more_comp).enumerate() {
+        for (i, t) in completed_for_display
+            .iter()
+            .filter(|task| !selected_completed_ids.contains(task.id.as_str()))
+            .take(more_comp)
+            .enumerate()
+        {
             lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_comp);
@@ -134,20 +172,16 @@ pub fn build_task_window<'a>(
     }
     // 如果仍然不足 min_show，从更早的 completed 继续取
     if lines.len() - 1 < min_show && remaining > 0 {
-        let shown_completed = completed.len().min(comp_show);
         let more = (min_show - (lines.len() - 1))
             .min(remaining)
-            .min(completed.len().saturating_sub(shown_completed));
-        for (i, t) in completed
+            .min(completed_for_display.len().saturating_sub(comp_show));
+        for (i, t) in completed_for_display
             .iter()
-            .skip(shown_completed)
+            .filter(|task| !selected_completed_ids.contains(task.id.as_str()))
             .take(more)
             .enumerate()
         {
-            lines.insert(
-                1 + shown_completed + i,
-                format_task_line(t, &display_numbers),
-            );
+            lines.insert(1 + comp_show + i, format_task_line(t, &display_numbers));
         }
     }
     // --- 折叠提示 ---
@@ -167,10 +201,14 @@ pub fn build_task_window<'a>(
     lines
 }
 
+fn task_sort_key(task: &Task) -> u64 {
+    task.id.parse::<u64>().unwrap_or(u64::MAX)
+}
+
 fn build_display_numbers(tasks: &[Task]) -> std::collections::HashMap<&str, usize> {
     let mut ids: Vec<(&str, u64)> = tasks
         .iter()
-        .map(|task| (task.id.as_str(), task.id.parse::<u64>().unwrap_or(u64::MAX)))
+        .map(|task| (task.id.as_str(), task_sort_key(task)))
         .collect();
     ids.sort_by_key(|(_, id)| *id);
     ids.into_iter()
