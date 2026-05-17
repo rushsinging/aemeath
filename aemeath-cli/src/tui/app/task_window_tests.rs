@@ -145,6 +145,20 @@ fn test_build_task_window_no_in_progress() {
     assert!(result[2].contains("□ #2"));
 }
 
+#[test]
+fn test_build_task_window_displays_batch_local_numbers() {
+    let tasks = vec![
+        make_task("6", "second batch first", TaskStatus::Pending),
+        make_task("7", "second batch second", TaskStatus::InProgress),
+    ];
+    let result = build_task_window(&tasks, 7, 1);
+
+    assert!(result[1].contains("■ #2 second batch second"));
+    assert!(result[2].contains("□ #1 second batch first"));
+    assert!(!result.iter().any(|line| line.contains("#6")));
+    assert!(!result.iter().any(|line| line.contains("#7")));
+}
+
 // --- Bug #32 新增测试 ---
 
 #[test]
@@ -204,10 +218,10 @@ fn test_pending_sequential_order() {
     let result = build_task_window(&tasks, 7, 1);
     // summary + in_progress + 3 pending = 5
     assert_eq!(result.len(), 5);
-    assert!(result[1].contains("■ #3 in progress")); // in_progress
-    assert!(result[2].contains("□ #2 first")); // smallest id first
-    assert!(result[3].contains("□ #5 second"));
-    assert!(result[4].contains("□ #10 skip early"));
+    assert!(result[1].contains("■ #2 in progress")); // in_progress
+    assert!(result[2].contains("□ #1 first")); // smallest id first
+    assert!(result[3].contains("□ #3 second"));
+    assert!(result[4].contains("□ #4 skip early"));
 }
 
 #[test]
