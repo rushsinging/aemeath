@@ -1,4 +1,5 @@
 use super::InputArea;
+use crate::tui::safe_text::str_display_width;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -55,7 +56,15 @@ impl InputArea {
             } else {
                 line_len
             };
-            highlight_selection_row(inner_area, buf, row, col_from, col_to, selection_style);
+            highlight_selection_row(
+                inner_area,
+                buf,
+                row,
+                &line_text,
+                col_from,
+                col_to,
+                selection_style,
+            );
         }
     }
 }
@@ -64,6 +73,7 @@ fn highlight_selection_row(
     inner_area: Rect,
     buf: &mut Buffer,
     row: usize,
+    line_text: &str,
     col_from: usize,
     col_to: usize,
     selection_style: Style,
@@ -73,7 +83,9 @@ fn highlight_selection_row(
         return;
     }
 
-    for c in col_from..col_to {
+    let screen_col_from = char_col_to_screen_col(line_text, col_from);
+    let screen_col_to = char_col_to_screen_col(line_text, col_to);
+    for c in screen_col_from..screen_col_to {
         let screen_x = inner_area.x + c as u16;
         if screen_x >= inner_area.right() {
             break;
@@ -85,5 +97,46 @@ fn highlight_selection_row(
                 cell.set_symbol(&ch);
             }
         }
+    }
+}
+
+fn char_col_to_screen_col(line_text: &str, char_col: usize) -> usize {
+    let prefix: String = line_text.chars().take(char_col).collect();
+    str_display_width(&prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::safe_text::col_to_char_idx;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_render_selection_highlights_cjk_to_screen_width_end() {
+        let mut input = InputArea::new();
+        input.set_text("@docs/ bug 33，拖动选中后还是没有高亮");
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 3,
+        };
+        let mut buf = Buffer::empty(area);
+        input.render(area, &mut buf);
+        let inner = input.get_inner_area(&area);
+
+        input.start_selection(inner.y, inner.x, &inner);
+        input.update_selection(inner.y, inner.x + 36, &inner);
+        input.render(area, &mut buf);
+        let selected_end = col_to_char_idx(&input.get_text(), 36);
+        let screen_col = char_col_to_screen_col(&input.get_text(), selected_end) - 1;
+
+        assert_eq!(
+            buf.cell((inner.x + screen_col as u16, inner.y))
+                .unwrap()
+                .style()
+                .bg,
+            Some(Color::Blue)
+        );
     }
 }

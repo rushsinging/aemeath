@@ -18,7 +18,7 @@
 | 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | ✅ 已完成 | 未确认 | 已完成全仓 Rust 文件拆分并新增架构守卫入口：`scripts/check-rust-file-lines.sh` 强制所有 `.rs` 文件不超过 400 行，`scripts/check-tui-tea-purity.sh` 禁止 TUI `update/` 中直接执行 spawn/hook/clipboard/image 等副作用，`scripts/check-architecture-guards.sh` 聚合 400 行、TEA 纯度与 unsafe text ops 检查 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 32 | TUI 选中和复制逻辑统一 | 高 | 修复中 | 未确认 | 用户反馈选中复制仍容易出问题；本轮按稳定性修复专项处理：统一 clipboard helper、修复 input/status CJK/emoji 屏幕列到字符索引转换、让 selection 层只返回文本并由 App 统一复制与错误反馈。 |
+| 32 | TUI 选中和复制逻辑统一 | 高 | 修复中 | 未确认 | 用户反馈 input area 中 `@docs/ bug 33，拖动选中后还是没有高亮` 拖选时高亮只到“后”字；本轮补充修复 input area selection 高亮绘制，统一使用 safe_text 显示宽度换算，避免 CJK 宽字符导致高亮截断。 |
 | 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
 
 ### #36 Multi-Agent 框架
