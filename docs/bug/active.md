@@ -9,7 +9,7 @@
 | 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
 | 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 活动中 | 未确认 | 2026-05 | 输入 `/` 后弹出命令候选列表，但按上下键无法在候选中移动高亮，上下键仍被当作历史命令翻页处理 |
-| 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 活动中 | 未确认 | 2026-05 | 表格渲染文本（┼─┼ 样式）与原始 content（| col | col |）不同，screen_line_map offset 与 get_selected_text 数据源不匹配 |
+| 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
 
 ## 专案
 

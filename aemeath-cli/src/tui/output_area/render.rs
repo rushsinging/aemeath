@@ -62,10 +62,17 @@ impl OutputArea {
         let table_render_cache = render_blocks::render_table_cache(&vis_lines, &table_block_lines);
 
         let mut screen_map = Vec::new();
-        let mut lines =
-            self.render_visible_lines(&vis_lines, &code_info, &table_render_cache, &mut screen_map);
+        let mut rendered_content = std::collections::HashMap::new();
+        let mut lines = self.render_visible_lines(
+            &vis_lines,
+            &code_info,
+            &table_render_cache,
+            &mut screen_map,
+            &mut rendered_content,
+        );
 
         self.screen_line_map = screen_map;
+        self.rendered_line_content = rendered_content;
         let task_status_lines = self.task_status_lines.clone();
         self.append_status_lines(&mut lines, queued_lines, &spinner_line, &task_status_lines);
         let lines = self.trim_to_area_height(lines, area.height as usize);
@@ -103,6 +110,7 @@ impl OutputArea {
         code_info: &render_blocks::CodeBlockInfo,
         table_render_cache: &std::collections::HashMap<usize, Vec<Vec<Span<'static>>>>,
         screen_map: &mut Vec<(usize, CharIdx, CharIdx)>,
+        rendered_content: &mut std::collections::HashMap<usize, String>,
     ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let mut vi = 0;
@@ -113,7 +121,14 @@ impl OutputArea {
         while vi < vis_lines.len() {
             let (idx, output_line) = vis_lines[vi];
             if let Some(table_rows) = table_render_cache.get(&idx) {
-                self.render_table_rows(idx, output_line.style, table_rows, screen_map, &mut lines);
+                self.render_table_rows(
+                    idx,
+                    output_line.style,
+                    table_rows,
+                    screen_map,
+                    rendered_content,
+                    &mut lines,
+                );
                 vi += table_rows.len();
                 continue;
             }
@@ -144,14 +159,17 @@ impl OutputArea {
         style: LineStyle,
         table_rows: &[Vec<Span<'static>>],
         screen_map: &mut Vec<(usize, CharIdx, CharIdx)>,
+        rendered_content: &mut std::collections::HashMap<usize, String>,
         lines: &mut Vec<Line<'static>>,
     ) {
-        for row_spans in table_rows {
+        for (row_offset, row_spans) in table_rows.iter().enumerate() {
+            let logic_idx = idx + row_offset;
             let line_text: String = row_spans
                 .iter()
                 .map(|s| s.content.clone().into_owned())
                 .collect();
-            let wrapped = self.push_wrapped_offsets(idx, &line_text, screen_map);
+            rendered_content.insert(logic_idx, line_text.clone());
+            let wrapped = self.push_wrapped_offsets(logic_idx, &line_text, screen_map);
             if self.has_real_selection() {
                 let screen_start = screen_map.len() - wrapped.len();
                 for (chunk_idx, chunk) in wrapped.into_iter().enumerate() {
