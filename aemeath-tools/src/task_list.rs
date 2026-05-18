@@ -135,6 +135,7 @@ impl Tool for TaskListTool {
         }
 
         for task in &tasks {
+            let display_id = self.store.format_display_id(&task.id).await;
             let icon = match task.status {
                 TaskStatus::Pending => "□",
                 TaskStatus::InProgress => "■",
@@ -174,7 +175,7 @@ impl Tool for TaskListTool {
             output.push_str(&format!(
                 "{} #{} {}{}{} [{}]{}{}{}\n   {}\n",
                 icon,
-                task.id,
+                display_id,
                 task.subject,
                 priority_label,
                 progress,

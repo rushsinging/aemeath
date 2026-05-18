@@ -49,9 +49,35 @@ impl Tool for TaskUpdateTool {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        let task_id = match input.get("taskId").and_then(|v| v.as_str()) {
+        let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return ToolResult::error("missing required parameter: taskId"),
+        };
+
+        // Resolve display number (batch-local id) to global task id
+        let task_id = match self.store.resolve_display_id(&input_id).await {
+            Some(global_id) => global_id,
+            None => return ToolResult::error(format!("task not found: {input_id}")),
+        };
+
+        // Pre-resolve dependency display numbers to global ids (must be async)
+        let resolved_blocked_by = if let Some(arr) = input.get("addBlockedBy").and_then(|v| v.as_array()) {
+            let display_ids: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            self.store.resolve_display_ids(&display_ids).await
+        } else {
+            Vec::new()
+        };
+        let resolved_blocks = if let Some(arr) = input.get("addBlocks").and_then(|v| v.as_array()) {
+            let display_ids: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            self.store.resolve_display_ids(&display_ids).await
+        } else {
+            Vec::new()
         };
 
         let result = self
@@ -97,23 +123,15 @@ impl Tool for TaskUpdateTool {
                     task.progress_message = Some(msg.to_string());
                 }
 
-                // Dependency updates
-                if let Some(blocked_by) = input.get("addBlockedBy").and_then(|v| v.as_array()) {
-                    for id in blocked_by {
-                        if let Some(s) = id.as_str() {
-                            if !task.blocked_by.contains(&s.to_string()) {
-                                task.blocked_by.push(s.to_string());
-                            }
-                        }
+                // Dependency updates — use pre-resolved global ids
+                for gid in &resolved_blocked_by {
+                    if !task.blocked_by.contains(gid) {
+                        task.blocked_by.push(gid.clone());
                     }
                 }
-                if let Some(blocks) = input.get("addBlocks").and_then(|v| v.as_array()) {
-                    for id in blocks {
-                        if let Some(s) = id.as_str() {
-                            if !task.blocks.contains(&s.to_string()) {
-                                task.blocks.push(s.to_string());
-                            }
-                        }
+                for gid in &resolved_blocks {
+                    if !task.blocks.contains(gid) {
+                        task.blocks.push(gid.clone());
                     }
                 }
 
@@ -137,6 +155,8 @@ impl Tool for TaskUpdateTool {
 
         match result {
             Some(task) => {
+                let display_id = self.store.format_display_id(&task.id).await;
+
                 let progress_str = if task.progress > 0 {
                     format!(
                         " ({}%{})",
@@ -151,7 +171,7 @@ impl Tool for TaskUpdateTool {
                 };
                 let mut output = format!(
                     "Updated task #{}: {} [{}]{}\nStatus: {:?}",
-                    task.id,
+                    display_id,
                     task.subject,
                     task.priority.as_str(),
                     progress_str,
@@ -183,15 +203,16 @@ impl Tool for TaskUpdateTool {
                     if !newly_unblocked.is_empty() {
                         output.push_str("\n\nUnblocked tasks now ready:");
                         for t in &newly_unblocked {
-                            let deps = t
-                                .blocked_by
+                            let t_display = self.store.format_display_id(&t.id).await;
+                            let dep_displays = self.store.to_display_ids(&t.blocked_by).await;
+                            let deps = dep_displays
                                 .iter()
                                 .map(|d| format!("#{d}"))
                                 .collect::<Vec<_>>()
                                 .join(", ");
                             output.push_str(&format!(
                                 "\n  → #{} \"{}\" (was blocked by {})",
-                                t.id, t.subject, deps
+                                t_display, t.subject, deps
                             ));
                         }
                     }
@@ -211,7 +232,7 @@ impl Tool for TaskUpdateTool {
 
                 ToolResult::success(output)
             }
-            None => ToolResult::error(format!("task not found: {task_id}")),
+            None => ToolResult::error(format!("task not found: {input_id}")),
         }
     }
 }
