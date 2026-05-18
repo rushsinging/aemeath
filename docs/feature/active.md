@@ -2,23 +2,17 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
+| 4 | AskUserQuestion TUI 美化 | - | 待确认 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 17 | Skill 延迟加载 + 命名空间前缀 | - | ✅ 已完成 | 未确认 | 启动只读 frontmatter 不读全文，Skill 工具调用时按需加载；skill 包自动加 `plugin_name:` 前缀；HookJsonOutput camelCase 反序列化修复 |
 | 18 | Task list 跨轮次 batch 机制 | - | ✅ 已完成 | 未确认 | Task 跟随 session 持久化，不再每次用户消息清空；按 batch 分组显示，新 turn 自动切换到新 batch，旧 batch 隐藏；已完成 task 在当前 batch 内继续显示 |
-| 21 | TUI 优化 Agent 调用输出展示 | - | ✅ 已完成 | 未确认 | Agent 子任务每个 turn 仅显示工具名列表（如 `Read, Read, Grep`），噪声大、看不出进展。改为按工具+目标/参数摘要分组、合并连续同工具调用、按阶段（探索/编辑/验证）分段，并提供折叠展开 |
-| 23 | TUI 字符串/切片安全索引收口 | 高 | 待确认 | 未确认 | 把"按字符索引/切片"等易越界操作收口到 `safe_text` 工具模块，提供 `safe_char_slice`、`safe_str_slice_by_char`、`clamp_char_range`、`truncate_unicode_width`、`col_to_char_idx`、`safe_char_at`、`clamp_split_index`、`str_display_width` 等实际 API，禁止业务路径直接 `chars[from..to]` / `s[i..j]`。配合 lint 规则与单元测试覆盖边界，根治 Bug #4 / #8 / #28 类 panic |
-| 24 | Spinner 下方 task list 限量显示（最多 7 条） | 中 | ✅ 已完成 | 未确认 | task 多时显示过长挤占主输出。改为窗口化显示：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 7 条；其余以 `… +N more` 折行提示。摘要行 `Tasks: x/y` 仍反映全量进度 |
 | 25 | Task list 跨轮次生命周期策略 | 中 | ✅ 已完成 | 未确认 | 同 session 新对话开始时仍显示上次的 task list。补齐三种场景策略：① 全部完成时自动清屏归档；② 中断未完成时提示用户「继续 / 暂存 / 丢弃」；③ 多轮未推进的旧 task 自动提醒确认是否继续 |
-| 27 | 日志分化：input.log / output.log / tool.log | 中 | 🔧 待确认 | 未确认 | agent 交互日志从 `aemeath.log` 分离为三个 JSON 文件：input.log（LLM 输入快照）、output.log（LLM 完整输出）、tool.log（工具调用请求+结果）。日志目录移至 `logs/`，`aemeath.log` 收窄为应用诊断日志。详见 [spec](../superpowers/specs/2026-05-09-log-split-design.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
-| 29 | Task reminder 被动注入 | 高 | ✅ 已完成 | 未确认 | TUI 路径已实现：每轮扫描上一条 assistant 消息中的 TaskCreate/TaskUpdate，节流（≥5轮间隔）后注入极简 `<system-reminder>` 摘要。REPL 路径暂未注入 |
 | 30 | Agent loop 收尾工作 | 高 | ✅ 已完成 | 未确认 | agent loop 结束时统一 finalize：恢复 client 设置、SubagentStop hook、结构化日志摘要、task/list 收尾检查。详见 [设计文档](docs/superpowers/specs/2026-05-11-agent-loop-finalize-design.md) |
-| 31 | TUI 架构守卫脚本（TEA 纯度 + 400 行限制） | 高 | ✅ 已完成 | 未确认 | 已完成全仓 Rust 文件拆分并新增架构守卫入口：`scripts/check-rust-file-lines.sh` 强制所有 `.rs` 文件不超过 400 行，`scripts/check-tui-tea-purity.sh` 禁止 TUI `update/` 中直接执行 spawn/hook/clipboard/image 等副作用，`scripts/check-architecture-guards.sh` 聚合 400 行、TEA 纯度与 unsafe text ops 检查 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 32 | TUI 选中和复制逻辑统一 | 高 | 修复中 | 未确认 | 用户反馈 input area 中 `@docs/ bug 33，拖动选中后还是没有高亮` 拖选时高亮只到“后”字；本轮补充修复 input area selection 高亮绘制，统一使用 safe_text 显示宽度换算，避免 CJK 宽字符导致高亮截断。 |
+| 32 | TUI 选中和复制逻辑统一 | 高 | 修复中 | 未确认 | 已完成稳定性修复：① clipboard helper 统一入口（copy_to_clipboard + copy_selection_to_clipboard），删除 mouse_handler 重复私有方法；② OutputArea 新增 is_selecting() getter 统一访问方式；③ 双击 output 时同步清理其他区域 selection；④ 滚轮添加区域判断；⑤ input area selection 高亮统一使用 safe_text 显示宽度换算，避免 CJK 宽字符导致高亮截断。commit e89ff42、ce98c5e |
 | 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
 
 ### #36 Multi-Agent 框架

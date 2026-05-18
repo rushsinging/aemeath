@@ -5,8 +5,8 @@
 将当前单 Agent 架构升级为多 Agent 协作框架，参考 K8s 控制面设计：
 - **API Server**（数据面）— gRPC（Agent 间通信）+ REST/WebSocket（前端），白板数据 CRUD + Watch
 - **Scheduler**（调度面）— 管理 Agent Pool 生命周期，按需求量动态扩缩
-- **Agent 角色**— 4 类 Main Agent（Assistant / Scheduler / Executor / Evolver）+ Sub-Agent（Executor 唤起，无状态）
-- **分析/拆解**— Assistant 负责分析用户消息类型、拆解需求为 Project/Task，草案存入 `Requirement.draft` 并交用户确认
+- **Agent 角色**— 5 类 Main Agent（Chat / Scheduler / Executor / Assistant / Evolver）+ Sub-Agent（Executor 唤起，无状态）
+- **对话/分析拆解**— Assistant（由 Scheduler 调度）负责分析用户消息类型、拆解需求为 Project/Task，草案存入 `Requirement.draft`；Chat 面向用户多轮对话并汇报状态
 - **白板**（呈现层）— 纯 UI，通过 REST/WS 调 Server 获取数据渲染
 - **MVP 分级交付**— v0.1 单 Agent+白板 → v0.2 多 Agent 编排 → v0.3 自我进化
 - **P0 设计约束**— Executor 崩溃恢复、Task 重试、幂等性、Watch 断线恢复
@@ -21,10 +21,10 @@
 | 数据库 | MongoDB（文档型，无外键，数组存引用） |
 | 调度层次 | 两层：Scheduler → Executor → Sub-Agent |
 | 租户隔离 | Workspace 归属租户（个人/团队） |
-| Session 策略 | 4 类 Main Agent（Assistant / Scheduler / Executor / Evolver）各自管理上下文；Sub-Agent 无状态，上下文由 Executor gRPC 传递 |
-| 白板访问 | Assistant / Scheduler / Executor / Evolver 可访问；Sub-Agent 不可访问 |
+| Session 策略 | 5 类 Main Agent（Chat / Scheduler / Executor / Assistant / Evolver）各自管理上下文；Sub-Agent 无状态，上下文由 Executor gRPC 传递 |
+| 白板访问 | Chat / Scheduler / Executor / Assistant / Evolver 可访问；Sub-Agent 不可访问 |
 | Agent 实现 | 一个通用模板 + 装配器（role → skill/MCP/prompt/权限），角色配置由 TOML 定义，支持用户自定义 Role |
-| 需求分析 | Assistant 分析消息类型、拆解需求 → Project/Task，草案存入 `Requirement.draft`，用户确认后写入 Project/Task |
+| 需求分析 | Chat 接收用户消息，Scheduler 调度 Assistant 分析消息类型、拆解需求 → Project/Task，草案存入 `Requirement.draft`，用户确认后写入 Project/Task |
 | Executor 分配策略 | Executor 按 Project 独占绑定，一个 Project 同时只分配一个 Executor |
 | Evolver | 独立后台进程，定期扫描白板：总结已完成项目 → 提炼可复用模式 → 生成/优化 Skills、MCP 配置，驱动系统自我进化 |
 | P0 约束 | MongoDB replica set（Change Streams 必需）；Change Streams 由 API Server 独占订阅，Agent / 前端通过 gRPC stream / WebSocket 间接消费 |
@@ -37,7 +37,7 @@
 用户
  │
  ▼
-Assistant ──(写用户需求消息)──▶  API Server ──▶  Mongo
+Chat ──(写用户需求消息)──▶  API Server ──▶  Mongo
  │                                       │
  │                                       ▼
  │                                 Render ◀── Mongo
@@ -45,20 +45,20 @@ Assistant ──(写用户需求消息)──▶  API Server ──▶  Mongo
  │                                       ▼
  │                              白板（ChatMessage 展示）
  │
- │ 分析消息类型、拆解需求（草案写入 Requirement.draft，待用户确认）
+ │ 委托 Scheduler 调度 Assistant 分析消息类型、拆解需求（草案写入 Requirement.draft，待用户确认）
  │ 确认后写入 ▼
 API Server ──▶ Mongo ──▶ Render ──▶ 白板（Project + Project Task）
 
 Scheduler ──Watch Project──▶ API Server
     │
-    │ 管理 Pool，按 Project 分配 Executor
+    │ 管理 Pool，按 Project 分配 Executor；调度 Assistant 分析 Requirement
        ▼
      Executor ──▶  Sub-Agent（Planner / Coder / Tester / Reviewer / Designer）
        │               ↑
        │               │ 子 Agent 不访问白板，上下文由 Executor gRPC 传递
        │
        │ 写回 Project/Task 状态 → 白板变更
-       │ Assistant Watch 白板 → 感知状态变化 → 汇报用户
+       │ Chat Watch 白板 → 感知状态变化 → 汇报用户
        ▼
      API Server ──▶ Mongo ──▶ Render ──▶ 白板（状态更新）
 
@@ -73,7 +73,7 @@ Evolver（独立后台）──定期扫描白板──▶ API Server
 ## 架构概览
 
 ```
-                    白板 UI（纯前端，ui/）
+                    白板 UI（Vue + Element Plus，ui/）
                          │  REST / WebSocket
                          ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -94,13 +94,20 @@ Evolver（独立后台）──定期扫描白板──▶ API Server
         │ gRPC Watch           │ gRPC Watch / CRUD
         │                      │
 ┌───────┴──────┐          ┌────┴──────────────────┐
-│  Scheduler   │          │  Assistant（随连绑定）  │
-│  （单例）     │          │  接收/分析用户消息      │
-│              │          │  写 Requirement.draft  │
-│ Watch        │          │  Watch BoardSnapshot/DB│
-│ Project      │          │  汇报用户              │
+│  Scheduler   │          │  Chat（随连绑定）       │
+│  （单例）     │          │  接收用户消息            │
+│              │          │  写 ChatMessage         │
+│ Watch        │          │  Watch BoardSnapshot   │
+│ Project      │          │  Watch Requirement     │
+│              │          │  汇报用户              │
 │              │          └───────────────────────┘
 └──────┬───────┘
+       │ 创建/调度 Assistant Pool 执行 Requirement 分析
+       ▼
+┌─────────────────────┐
+│  Assistant Pool     │
+│  后台分析/拆解/汇总   │
+└─────────────────────┘
        │ 分派 Project (gRPC)
        ▼
 ┌─────────────────────┐
@@ -129,9 +136,10 @@ Evolver（独立后台）──定期扫描白板──▶ API Server
 
 | 类型 | Agent | Session | 白板访问 | 说明 |
 |---|---|---|---|---|
-| Main Agent | Assistant | 有 | 有 | 面向用户多轮对话，分析消息类型、拆解需求、产出草案、确认 + 汇报 |
-| Main Agent | Scheduler | 无（控制循环） | 有 | Watch + 分配决策，不参与对话 |
-| Main Agent | Executor | 有 | 有 | 持有 Project 执行上下文，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Assistant |
+| Main Agent | Chat | 有 | 有 | 面向用户多轮对话，接收用户消息，Watch BoardSnapshot 汇报用户 |
+| Main Agent | Scheduler | 无（控制循环） | 有 | Watch + 分配决策，管理 Executor/Assistant Pool，不参与对话 |
+| Main Agent | Executor | 有 | 有 | 持有 Project 执行上下文，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Chat（由 Chat 汇报用户） |
+| Main Agent | Assistant | 有 | 有 | 后台 worker，分析需求、拆解 Project/Task、产出草案、结果汇总，Pool 由 Scheduler 调度 |
 | Main Agent | Evolver | 无（定时循环） | 有 | 独立后台，定期扫描已完成 Project 和 Executor 记录，提炼可复用模式，生成/优化 Skills、MCP 配置 |
 | Sub-Agent | Planner | 无 | 无 | 一次性：接收需求 → 返回计划 |
 | Sub-Agent | Coder | 无 | 无 | 一次性：接收 spec → 返回代码 |
@@ -157,7 +165,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 
 | 校验层 | 位置 | 规则 |
 |---|---|---|
-| Board 范围 | API Server gRPC 中间件 | Assistant/Executor/Evolver 的 token `scope` 包含 `board_read`/`board_write`；Sub-Agent 请求被中间件拦截（token 中携带 role/scope） |
+| Board 范围 | API Server gRPC 中间件 | Chat/Executor/Assistant/Evolver 的 token `scope` 包含 `board_read`/`board_write`；Main Agent 请求被 gRPC 中间件拦截（token 中携带 role/scope）；Sub-Agent 不直接连 API Server |
 | Tool allowlist | Agent 装配时注入 | 按 RoleConfig.permissions 的 `allowed_tools` 过滤运行时工具（Bash/Read/Write/WebSearch/Grep/Glob 等） |
 | Sub-Agent 调用 | Executor 端校验 | 按 RoleConfig.permissions 的 `can_call_roles` 限制可选角色 |
 | 凭据隔离 | 装配时注入 | Sub-Agent 无 board 访问 token；Executor 不传递自身 credential |
@@ -171,8 +179,8 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 
 | 区域 | 数据源 | 说明 |
 |---|---|---|
-| 用户需求消息 | Requirement | 用户通过 Assistant 提交的需求记录（1:1 关联 ChatMessage） |
-| 草案 | Requirement.draft | Assistant 拆解产出的 Project/Task 草案 |
+| 用户需求消息 | Requirement | 用户通过 Chat 提交的需求记录（1:1 关联 ChatMessage） |
+| 草案 | Requirement.draft | Assistant（由 Scheduler 调度）拆解产出的 Project/Task 草案 |
 | Project & Task | Project + ProjectTask | 需求拆解后的项目与任务 |
 | Agent 状态 | Agent Registry | 当前活跃的 Agent 实例、状态 |
 | 自定义数据区块 | 扩展注册 | 支持新增其他数据类型渲染 |
@@ -199,7 +207,8 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "title": "讨论登录页重构",
   "status": "active",           // active | archived
   "created_at": ISODate,
-  "updated_at": ISODate
+  "updated_at": ISODate,
+  "version": 0,                  // u64，乐观锁，每次更新 +1
 }
 ```
 
@@ -209,10 +218,10 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "_id": ObjectId,
   "chat_id": ObjectId,
   "workspace_id": ObjectId,
-  "role": "user",               // user | assistant
+  "role": "user",               // user | chat
   "content": "帮我做一个登录页面...",
   /*
-   * message_type 由 Assistant 分析后写入：
+   * message_type 由 Chat 分析后写入：
    *   question     - 简单提问（不需要拆解）
    *   requirement  - 用户需求标记，1:1 关联 Requirement 文档
    *   clarification - 澄清/追问
@@ -226,7 +235,8 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
     "point_id": "<message_object_id>"
   },                              // Qdrant 引用（message_type=requirement 时有）
   "embedding_status": "pending", // pending | indexed | failed
-  "created_at": ISODate
+  "created_at": ISODate,
+  "version": 0,                  // u64，乐观锁，每次更新 +1
 }
 ```
 
@@ -246,7 +256,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "draft": {
     "projects": [ { "name": "...", "tasks": [...] } ],
     "summary": "...",
-    "created_by": "assistant_agent_id"
+    "created_by": "chat_agent_id"
   },
   "draft_history": [ { "revision": 0, "draft": {...}, "timestamp": ISODate } ],
   "created_at": ISODate,
@@ -261,9 +271,11 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "workspace_id": ObjectId,
   "requirement_ids": [ObjectId], // 关联的 Requirement（N:N）
   /*
-   * assigned_executor — 当前分配的 Executor Agent ID   * 独占保证：Scheduler 事务 + AgentInstance.current_project_id 部分唯一索引，详见 Scheduler 独占分配机制
+   * assigned_executor_id — 当前分配的 Executor Agent ID
+   * 可选；仅 assigned 后有值
+   * 独占保证：Scheduler 事务 + AgentInstance.current_project_id 部分唯一索引，详见 Scheduler 独占分配机制
    */
-  "assigned_executor": ObjectId,
+  "assigned_executor_id": ObjectId,
   "name": "登录页 UI 重构",
   "status": "pending",           // pending | assigned | in_progress | blocked | failed | completed | cancelled
   "version": 0,                  // 乐观锁
@@ -308,14 +320,14 @@ db.projects.createIndex(
   "description": "需要支持邮箱格式校验...",
   "status": "pending",           // pending | in_progress | in_review | completed | failed | retrying | cancelled
   "version": 0,                  // 乐观锁
-  "assigned_executor_instance_id": ObjectId, // 执行该 Task 的 Executor instance ID（不是 Sub-Agent）
-  "executor_type": "coder",                 // 实际执行角色（main / planner / coder / tester ...）
+  "assigned_executor_id": ObjectId, // 执行该 Task 的 Executor instance ID（不是 Sub-Agent）
+  "executor_type": "coder",                 // 执行此 Task 需要的角色类型（planner / coder / tester / reviewer / designer）
   "depends_on": [ObjectId],            // 前置 Task ID 列表
   "depends_type": "all",               // all（全部完成）/ any（任一完成）
   "priority": 1,
   /*
    * related_message_ids — 关联的 ChatMessage
-   * 执行过程中产生的上下文消息（如：Executor 提问、Assistant 回复）
+   * 执行过程中产生的上下文消息（如：Executor 提问、Chat 回复）
    */
   "related_message_ids": [ObjectId],
   "output_summary": "",            // Executor 完成后写入的产出摘要 + 遇到的坑/解法
@@ -339,10 +351,15 @@ db.projects.createIndex(
   "output": "Sub-Agent 产出的代码...",  // 执行输出；retry_needed 时为本次尝试的中间输出/诊断
   "summary": "LLM 摘要的任务执行小结",
   "artifacts": ["file_path", "snippet_id"],
-  "error": null,                      // 失败原因（如有）；retry_needed 时记录需要重试的原因
+  "error_message": null,              // 失败原因（如有）；retry_needed 时记录需要重试的原因
   "retry_count": 0,                   // 重试次数（当前 attempt 对应的 retry_count）
+  "is_final": true,                   // true=最终结果（completed/failed）；false=中间 attempt（retry_needed）
   "created_at": ISODate
 }
+```
+
+```javascript
+db.project_task_results.createIndex({ project_task_id: 1 })
 ```
 
 ### ProjectResult（Executor 执行完后对 Project 的整体产出）
@@ -353,7 +370,7 @@ db.projects.createIndex(
   "executor_id": ObjectId,
   "summary": "所有 Task 完成后 Executor 总结的项目产出",
   "key_decisions": ["采用 React 18...", "API 用 REST..."],
-  "task_results_ref": [ObjectId],      // 关联最终 ProjectTaskResult._id（不包含 status=retry_needed 的 intermediate attempt result）
+  "task_results_ref": [ObjectId],      // 关联最终 ProjectTaskResult._id（仅 is_final=true；不包含 status=retry_needed 的 intermediate attempt result）
   "created_at": ISODate,
   "updated_at": ISODate
 }
@@ -421,6 +438,7 @@ db.projects.createIndex(
   "_id": "uuid-string",                 // 幂等键
   "endpoint": "AssignProject",          // gRPC 方法名
   "response": { "project_id": "...", "status": "assigned" },  // 缓存的响应
+  // 最大 4KB，超出截断
   "created_at": ISODate
 }
 // TTL: created_at 过期 24h 后自动删除
@@ -463,7 +481,7 @@ v0.2 由 API Server 聚合所有 Agent 的 model_state 形成全局 model_health
 {
   "_id": ObjectId,
   "model": "anthropic/claude-sonnet-4-20250514",
-  "status": "healthy",                  // healthy | degraded | unavailable
+  "status": "healthy",                  // healthy | degraded | unhealthy
   "failed_requests": 0,
   "total_requests": 0,
   "error_rate": 0,
@@ -483,7 +501,7 @@ Chat  1:N  ChatMessage
         ProjectTask  1:N  ProjectTaskResult
       Project  1:1  ProjectResult
 Workspace  1:N  AgentInstance
-  AgentInstance  N:1  Project（assigned_executor，独占）
+  AgentInstance  N:1  Project（assigned_executor_id，独占）
 ```
 
 ## 关键数据结构
@@ -504,11 +522,11 @@ pub enum MessageType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RequirementStatus {
     Pending,        // 待分析
-    Analyzing,      // Assistant 正在分析中（原子抢占）
+    Analyzing,      // Assistant 正在分析中（原子抢占，Assistant 是后台 worker）
     Draft,          // 草案已产出，等待用户确认（允许多轮 Draft→Draft）
     InProgress,     // 关联 ProjectTask 正在执行中
     Completed,      // 所有关联 ProjectTask 为 Completed 或 Cancelled
-    Rejected,       // 用户驳回草案 → Analyzing
+    Rejected,       // 用户驳回草案；重新提交后 → Analyzing
     Cancelled,      // 用户取消
 }
 ```
@@ -560,6 +578,7 @@ pub enum AgentStatus {
 
 | Main Agent（长期运行） | Sub-Agent（按需唤起） |
 |---|---|
+| chat | - |
 | assistant | planner |
 | scheduler | coder |
 | executor | tester |
@@ -571,6 +590,7 @@ Rust 侧保留字符串常量引用：
 ```rust
 /// 内置角色常量（代码引用用）
 pub mod builtin_roles {
+    pub const CHAT: &str = "chat";
     pub const ASSISTANT: &str = "assistant";
     pub const SCHEDULER: &str = "scheduler";
     pub const EXECUTOR: &str = "executor";
@@ -591,7 +611,7 @@ pub struct RoleConfig {
     pub models: Vec<RoleModelConfig>,    // 模型列表，按优先级排列
     pub permissions: RolePermissions,     // Agent runtime 工具权限；API Server 资源权限由 token scope 控制
     pub skills: Vec<String>,
-    pub mcp: McpConfig,
+    pub mcp: McpConfig,                 // 继承现有 McpConfig 定义
     // 用户自定义角色可额外扩展字段
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -754,7 +774,9 @@ pub enum ModelHealth {
 | 任务类型 | Cost Tier | 典型场景 |
 |---|---|---|
 | 代码生成 / 重构 / 复杂 review | High | Coder 核心任务 |
+| 接收/分发用户消息 | Low | Chat 对话 |
 | 架构设计 / 拆解需求 / 产出草案 | Medium | Planner、Assistant 分析 |
+| 用户对话 / 状态汇报 / 消息提交 | Low | Chat 交互 |
 | 消息分类 / 简单格式化 / 状态总结 | Low | 辅助任务 |
 
 Executor 在唤起 Sub-Agent 时指定期望的 cost_tier：
@@ -800,21 +822,33 @@ Scheduler Watch 到 Pending Project
      │
      ▼
   Pending ──(分配 Executor)──▶ Assigned
-     ▲                     │
-     │                     ├── Scheduler 对账：status=assigned && assigned_at < now - assign_timeout_sec
-     │                     │   → pending（清理分配信息并回退）
+     ▲  │                  │
+     │  │                  ├── 用户取消（通知 Executor）──▶ Cancelled
+     │  │                  │
+     │  │                  ├── Scheduler 对账：status=assigned && assigned_at < now - assign_timeout_sec
+     │  │                  │   → pending（清理分配信息并回退）
+     │  │                  │
+     │  │                  │ Executor 开始执行
+     │  │                  ▼
+     │  └── 用户取消 / 级联取消 ─────────────────────────▶ Cancelled
+     │                  InProgress
      │                     │
-     │                     │ Executor 开始执行
-     │                     ▼
-     └──────────────── InProgress
-                            │
-                            ├── 所有子任务完成 ──▶ Completed
-                            │
-                            ├── 等待用户反馈 ──▶ Blocked ──(反馈写入 ChatMessage 并 Resume)──▶ InProgress
-                            │
-                            └── 执行失败 ──▶ Failed
+     │                     ├── 所有子任务完成 ──▶ Completed
+     │                     │
+     │                     ├── 等待用户反馈 ──▶ Blocked ──(反馈写入 ChatMessage 并 Resume)──▶ InProgress
+     │                     │                     │
+     │                     │                     └── 用户取消（长时间无法解决）──▶ Cancelled
+     │                     │
+     │                     ├── 用户取消（cooperative cancel，释放 worktree/merge_lock）──▶ Cancelled
+     │                     │
+     │                     └── 执行失败 ──▶ Failed
 
-    Executor 崩溃恢复：InProgress（清空 assigned_executor）──▶ Pending（由 Scheduler 重新分配）
+    Executor 崩溃恢复：InProgress（清空 assigned_executor_id）──▶ Pending（由 Scheduler 重新分配）
+
+    - Pending → Cancelled：用户取消或 Requirement 级联取消
+    - Assigned → Cancelled：用户取消，需通知 Executor
+    - InProgress → Cancelled：用户取消；Executor 采用 cooperative cancel，停止当前执行并释放 worktree / merge_lock
+    - Blocked → Cancelled：用户取消，适用于长时间无法解决的阻塞
 ```
 
 ### AgentInstance 生命周期
@@ -822,22 +856,24 @@ Scheduler Watch 到 Pending Project
 Scheduler 创建 Agent
      │
      ▼
-   Idle ──(领取任务)──▶ Busy
-     ▲                    │
-     │                    │ 任务完成
-     │                    ▼
-     │                  Idle
-     │
-     │ (心跳超时)
-     ▼
-   Error ──(Scheduler 回收)──▶ 销毁
+Initializing ──(初始化成功)──▶ Idle ──(领取任务)──▶ Busy
+     │                         ▲                    │
+     │                         │                    │ 任务完成
+     │                         │                    ▼
+     │                         │                  Idle
+     │                         │
+     │                         │ (心跳超时)
+     │                         ▼
+     └──(初始化失败)────────▶ Error ──(Scheduler 回收)──▶ 销毁
 ```
+
+Initializing 退出条件：Agent 注册成功 → Idle；超时 30s（如连接 DB 失败或依赖初始化未完成）→ Error。
 
 ### Scheduler 调度决策流程
 ```
 Scheduler Watch 循环:
 
-  Project 变更事件（status=pending 且无 assigned_executor）:
+  Project 变更事件（status=pending 且无 assigned_executor_id）:
     │
     ├── Executor Pool 未达 max → 创建新 Executor 实例，分配 Project
     │
@@ -849,19 +885,24 @@ Scheduler Watch 循环:
 
 ## Agent 生命周期管控
 
-Scheduler 只管理 Executor Pool。Assistant 和 Evolver 独立管控，不与 Scheduler 耦合。
+Scheduler 管理 Executor Pool 和 Assistant Pool。Chat 和 Evolver 独立管控，不与 Scheduler 耦合；Assistant 受 Scheduler 管辖。
 
 | Agent | 模式 | 生命周期 | 管控者 |
 |---|---|---|---|
 | **Executor** | Pool（动态伸缩） | Scheduler 按 pending Project 数创建/销毁 | Scheduler |
-| **Assistant** | 随连绑定（无 Pool） | 用户连接 → 创建/复用；断连 + 超时 → 释放 | 连接层 |
+| **Assistant** | 受 Scheduler 管辖（Pool） | Scheduler 按需创建/回收 | Scheduler |
+| **Chat** | 随连绑定（无 Pool） | 用户连接 → 创建/复用；断连 + 超时 → 释放 | 连接层 |
 | **Scheduler** | 单例 | 启动即注册，常驻 | — |
 | **Evolver** | 单例 | 启动即注册，常驻后台，定时循环 | 自身 |
 
 ```
-Assistant —── 随连绑定（无 Pool）───
-  Workspace 有用户连接 → 创建 / 复用 Assistant
+Chat —── 随连绑定（无 Pool）───
+  Workspace 有用户连接 → 创建 / 复用 Chat
   用户断连 + 超时       → 释放资源
+
+Assistant —── Pool（Scheduler Watch 驱动）───
+  Requirement pending/analyzing → Scheduler 创建/调度 Assistant → 分析/草案
+  Requirement 分析完成 / 空闲超时 → Scheduler 销毁
 
 Evolver —── 单例 + 定时器 ───
   启动时注册为单例
@@ -873,17 +914,18 @@ Executor —── Pool（Scheduler Watch 驱动）───
 ```
 
 ### 管控边界
-- **Scheduler** 是唯一能做 Agent 创建/销毁动态决策的组件，但只管辖 Executor Pool
-- **Assistant** 生命周期由连接层（gRPC session）管理，Scheduler 不参与
+- **Scheduler** 是唯一能做 Agent 创建/销毁动态决策的组件，管辖 Executor Pool 和 Assistant Pool
+- Chat 生命周期由连接层（gRPC session）管理，Scheduler 不参与
+- **Assistant** 作为后台 worker 由 Scheduler 调度，处理 Requirement 分析、Project/Task 拆解和结果汇总
 - **Evolver** 自身维护定时循环，不受 Scheduler 调度
 
 ### 模型健康状态流转
 ```
 Healthy ──(请求失败)──▶ Degraded ──(再次失败)──▶ Degraded ──(第3次失败)──▶ Unhealthy
    ▲                       │                                                  │
-   │                       │ (成功)                                           │
-   │                       ▼                                                  │
-   └────────────────── Healthy ◀────────(冷却 60s 后重试成功)─────────────────┘
+   │                       │ (成功)                                           │ (冷却 60s 后重试成功)
+   │                       ▼                                                  ▼
+   └────────────────── Healthy ◀──────────────────────────────(成功)──── Degraded
 
 降级路径（按 RoleModelConfig 列表优先级）:
   同 tier 逐项降级 → 下一 tier（high → medium → low）→ 全部 Unhealthy → Scheduler 告警
@@ -892,10 +934,11 @@ Healthy ──(请求失败)──▶ Degraded ──(再次失败)──▶ Deg
 ## Scheduler 设计
 
 ### 职责
-- 管理 Executor Pool（Assistant 和 Evolver 不受 Scheduler 管辖）
+- v0.1 已定稿：Scheduler 单例；多 Scheduler/主备不作为开放问题，放到 v0.2 再评估
+- 管理 Executor Pool + Assistant Pool（Chat 和 Evolver 不受 Scheduler 管辖）
 - 根据 pending Project 数量动态创建/销毁 Executor 实例
 - **将 Project 分派给 idle 状态的 Executor**（Project 粒度分配，非 Task 粒度）
-- 分配前检查目标 Project 是否已有 assigned_executor，防止两个 Executor 分配到同一 Project
+- 分配前检查目标 Project 是否已有 assigned_executor_id，防止两个 Executor 分配到同一 Project
 - Scheduler 对账负责 assigned 超时检测和回退：`status=assigned && assigned_at < now - assign_timeout_sec → pending`
 
 ### Project 独占分配机制
@@ -908,8 +951,8 @@ Healthy ──(请求失败)──▶ Degraded ──(再次失败)──▶ Deg
 分配流程（必须在 MongoDB transaction 中执行）:
   1. 条件更新 Project:
      db.projects.updateOne(
-       { _id: project_id, assigned_executor: { $exists: false }, status: "pending" },
-       { $set: { assigned_executor: executor_id, status: "assigned" } }
+       { _id: project_id, assigned_executor_id: { $exists: false }, status: "pending" },
+       { $set: { assigned_executor_id: executor_id, status: "assigned" } }
      )
      若 matched_count=0 → Project 已被其他 Executor 抢占或状态不再 pending，事务回滚
 
@@ -928,12 +971,12 @@ MongoDB 约束:
       { current_project_id: 1 },
       { unique: true, partialFilterExpression: { current_project_id: { $exists: true } } }
     )
-  - 不需要在 Project.assigned_executor 上建唯一索引（_id + 条件更新 + transaction 已保证 Project 分配互斥）
+  - 不需要在 Project.assigned_executor_id 上建唯一索引（_id + 条件更新 + transaction 已保证 Project 分配互斥）
 ```
 
 ### 扩缩策略
 
-Scheduler 只管理 Executor Pool。Assistant 随用户连接绑定，Evolver 为单例：
+Scheduler 管理 Executor Pool 和 Assistant Pool。Chat 随用户连接绑定；Assistant 由 Scheduler 调度（Pool），Evolver 为单例：
 
 ```
 Executor Pool 大小 = f(pending_project_count, max_concurrent_executor)
@@ -944,7 +987,7 @@ Executor Pool 大小 = f(pending_project_count, max_concurrent_executor)
 ### 调度流程
 ```
 Scheduler Watch 循环:
-  1. 收到 Project 变更事件（status=pending 且无 assigned_executor）
+  1. 收到 Project 变更事件（status=pending 且无 assigned_executor_id）
   2. 查询空闲 Executor
   3. 无空闲 Executor 且未达 max → 创建新 Executor
   4. 在 MongoDB transaction 中条件绑定 Project → Executor
@@ -1009,9 +1052,8 @@ RAG 不属于 P0 的硬依赖。向量数据统一存入 Qdrant，MongoDB 仅保
   ]
 }
 ```
-// same shape for requirements, projects, reflections
 
-```
+// same shape for requirements, projects, reflections
 
 ## Agent 实现：模板 + 装配器
 
@@ -1038,26 +1080,31 @@ assembler.assemble(role: RoleConfig) -> ConfiguredAgent {
 ### 角色配置（`agents/roles/`）
 
 ```toml
-# assistant.toml
-[role]
+# chat.toml（面向用户的对话 Agent）
+[agent]
+name = "chat"
+role = "chat"
+pool_size = 0               # 随连绑定，无 Pool
+
+[model]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+
+[tools]
+allowed_tools = ["read", "write", "web_search", "web_fetch"]
+
+# assistant.toml（后台需求分析/草案 Worker）
+[agent]
 name = "assistant"
-description = "用户交互层，将用户意图写入白板"
-[[models]]
-model = "anthropic/claude-sonnet-4-20250514"
-cost_tier = "high"
+role = "assistant"
+pool_size = 3               # Scheduler 管理 Pool
 
-[permissions]
-allowed_tools = []
-scope = ["board_write", "board_read"]
-max_subagents = 0
-can_call_roles = []
-can_create_agents = false
+[model]
+provider = "deepseek"
+model = "deepseek/deepseek-chat"
 
-[skills]
-enabled = []
-
-[mcp]
-servers = []
+[tools]
+allowed_tools = ["read", "write", "grep", "glob"]
 ```
 
 ```toml
@@ -1127,6 +1174,7 @@ cost_tier = "medium"
 
 [permissions]
 allowed_tools = ["agent_call"]
+# agent_call 是 allowed_tools（runtime 工具），不属于 scope
 scope = ["board_read", "board_write"]
 max_subagents = 5
 can_call_roles = ["planner", "coder", "tester", "reviewer", "designer"]
@@ -1251,13 +1299,17 @@ aemeath/
 │   │       ├── evolver/          #     Evolver（反思引擎 + 知识优化）
 │   │       │   ├── mod.rs
 │   │       │   └── evolver.rs
-│   │       ├── assistant/        #     Assistant（需求分析 + Project 装配）
+│   │       ├── chat/             #     Chat（用户对话 + 汇报）
+│   │       │   ├── mod.rs
+│   │       │   └── chat.rs
+│   │       ├── assistant/        #     Assistant（后台需求分析/草案 Worker，由 Scheduler 调度）
 │   │       │   ├── mod.rs
 │   │       │   └── assistant.rs
 │   │       └── sub_agent/        #     Sub-Agent（进程内 tokio task 执行）
 │   │           ├── mod.rs
 │   │           └── sub_agent.rs
 │   └── roles/                    #   角色配置（TOML）
+│       ├── chat.toml
 │       ├── assistant.toml
 │       ├── scheduler.toml
 │       ├── executor.toml
@@ -1268,8 +1320,16 @@ aemeath/
 │       ├── reviewer.toml
 │       ├── designer.toml
 │       └── custom/
-├── ui/                           # ★ 纯 UI 前端
+├── ui/                           # ★ 纯 Web 前端（Vue 3 + Element Plus，Vite 构建）
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
 │   └── src/
+│       ├── views/                # 页面：会话 / 白板 / 需求详情 / 项目管理
+│       ├── components/           # 组件：ChatMessage / BoardCard / StatusBadge / DAGView
+│       ├── composables/          # useBoardSnapshot / useWS / useChat
+│       ├── stores/               # Pinia 状态管理
+│       └── lib/                  # 工具函数、类型定义
 ├── CLAUDE.md
 ├── TODO.md
 └── docs/
@@ -1294,7 +1354,7 @@ POST   /api/workspaces/:ws_id/projects/:id/resume # 用户反馈已写入 ChatMe
 GET    /api/workspaces/:ws_id/projects/:id/tasks/:task_id  # Task 详情
 PATCH  /api/workspaces/:ws_id/projects/:id/tasks/:task_id  # 更新 Task 状态；status=cancelled 表示取消 Task
 GET    /api/workspaces/:ws_id/agents             # Agent 实例列表
-POST   /api/workspaces/:ws_id/chats/:chat_id/messages  # 创建 ChatMessage（Assistant/用户调用）
+POST   /api/workspaces/:ws_id/chats/:chat_id/messages  # 创建 ChatMessage（Chat/用户调用）
 POST   /api/workspaces/:ws_id/requirements/:id/confirm  # 确认草案并创建 Project/Task
 POST   /api/workspaces/:ws_id/requirements/:id/reject   # 驳回草案
 ```
@@ -1313,10 +1373,11 @@ WS /ws/workspaces/:ws_id/board
 ### Board 聚合响应结构
 ```rust
 #[derive(Serialize)]
+// Workspace 文档的核心子集（workspace_id / name / created_at / updated_at）
 pub struct BoardSnapshot {
     pub workspace: WorkspaceInfo,
     pub chats: Vec<Chat>,                         // Chat 会话
-    pub recent_messages: Vec<ChatMessage>,        // 近期 Chat 消息
+    pub recent_messages: Vec<ChatMessage>,        // 近期 Chat 消息（默认最近 50 条）
     pub requirements: Vec<Requirement>,           // Requirement 记录与草案
     pub projects: Vec<ProjectWithTasks>,           // Project & Tasks
     pub agent_instances: Vec<AgentInstance>,       // Agent 状态
@@ -1331,15 +1392,91 @@ pub struct ProjectWithTasks {
 
 ## gRPC API 设计（Agent 间通信）
 
+### Common Types（common.proto）
+
+多个 Service 共享的 Watch 请求定义放在 `common.proto`：
+
+```protobuf
+message WatchRequest {
+  string workspace_id = 1;
+  string resume_token = 2;  // 断线恢复用，首次为空
+}
+```
+
 ### Chat Service
 ```protobuf
 service ChatService {
-  rpc Create(CreateChatRequest) returns (Chat);
-  rpc AddMessage(AddMessageRequest) returns (ChatMessage);
-  rpc AnalyzeMessage(AnalyzeMessageRequest) returns (ChatMessage);  // Assistant 分析消息类型 + 关联
-  rpc Get(GetChatRequest) returns (Chat);
-  rpc List(ListChatsRequest) returns (ListChatsResponse);
-  rpc Watch(WatchRequest) returns (stream ChatEvent);
+    rpc Create(CreateChatRequest) returns (Chat);
+    rpc AddMessage(AddMessageRequest) returns (ChatMessage);
+    rpc AnalyzeMessage(AnalyzeMessageRequest) returns (AnalyzeMessageResponse);  // Chat 分析消息类型（requirement / feedback / chitchat）
+    rpc Get(GetChatRequest) returns (Chat);
+    rpc List(ListChatsRequest) returns (ListChatsResponse);
+    rpc Watch(WatchRequest) returns (stream ChatEvent);
+  }
+
+message Chat {
+  string chat_id = 1;
+  string workspace_id = 2;
+  string title = 3;
+  string status = 4;
+  uint64 version = 5;
+}
+
+message ChatMessage {
+  string message_id = 1;
+  string chat_id = 2;
+  string workspace_id = 3;
+  string role = 4;
+  string content = 5;
+  string message_type = 6;
+  string requirement_id = 7;
+  uint64 version = 8;
+}
+
+message CreateChatRequest {
+  string workspace_id = 1;
+  string title = 2;
+}
+
+message AddMessageRequest {
+  string workspace_id = 1;
+  string chat_id = 2;
+  string role = 3;
+  string content = 4;
+}
+
+message AnalyzeMessageRequest {
+    string workspace_id = 1;
+    string chat_id = 2;
+    string message_id = 3;
+  }
+
+  message AnalyzeMessageResponse {
+    string message_type = 1;  // requirement / feedback / chitchat
+    string summary = 2;       // 消息摘要
+  }
+
+  message GetChatRequest {
+  string workspace_id = 1;
+  string chat_id = 2;
+}
+
+message ListChatsRequest {
+  string workspace_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListChatsResponse {
+  repeated Chat chats = 1;
+  string next_page_token = 2;
+}
+
+message ChatEvent {
+  string event_type = 1;
+  Chat chat = 2;
+  ChatMessage message = 3;
+  string resume_token = 4;
 }
 ```
 
@@ -1351,6 +1488,38 @@ service WorkspaceService {
   rpc List(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc Watch(WatchRequest) returns (stream WorkspaceEvent);
 }
+
+message Workspace {
+  string workspace_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+}
+
+message CreateWorkspaceRequest {
+  string tenant_id = 1;
+  string name = 2;
+}
+
+message GetWorkspaceRequest {
+  string workspace_id = 1;
+}
+
+message ListWorkspacesRequest {
+  string tenant_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+  string next_page_token = 2;
+}
+
+message WorkspaceEvent {
+  string event_type = 1;
+  Workspace workspace = 2;
+  string resume_token = 3;
+}
 ```
 
 ### Requirement Service
@@ -1360,10 +1529,85 @@ service RequirementService {
   rpc Update(UpdateRequirementRequest) returns (Requirement);
   rpc Get(GetRequirementRequest) returns (Requirement);
   rpc List(ListRequirementsRequest) returns (ListRequirementsResponse);
-  rpc Analyze(AnalyzeRequirementRequest) returns (Requirement);   // Assistant 原子抢占 pending → analyzing
+  rpc Analyze(AnalyzeRequirementRequest) returns (Requirement);   // Assistant 原子抢占（后台 worker） pending → analyzing
   rpc Confirm(ConfirmRequirementRequest) returns (Requirement);   // 用户确认草案，生成 Project/Task
   rpc Reject(RejectRequirementRequest) returns (Requirement);     // 用户驳回草案
   rpc Watch(WatchRequest) returns (stream RequirementEvent);
+}
+
+message Requirement {
+  string requirement_id = 1;
+  string workspace_id = 2;
+  string source_message_id = 3;
+  string title = 4;
+  string description = 5;
+  string category = 6;
+  string status = 7;
+  repeated string project_ids = 8;
+  repeated string task_ids = 9;
+  string draft_json = 10;
+  uint64 version = 11;
+}
+
+message CreateRequirementRequest {
+  string workspace_id = 1;
+  string source_message_id = 2;
+  string title = 3;
+  string description = 4;
+}
+
+message UpdateRequirementRequest {
+  string workspace_id = 1;
+  string requirement_id = 2;
+  string title = 3;
+  string description = 4;
+  string draft_json = 5;
+  uint64 expected_version = 6;
+}
+
+message GetRequirementRequest {
+  string workspace_id = 1;
+  string requirement_id = 2;
+}
+
+message ListRequirementsRequest {
+  string workspace_id = 1;
+  string status = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListRequirementsResponse {
+  repeated Requirement requirements = 1;
+  string next_page_token = 2;
+}
+
+message AnalyzeRequirementRequest {
+  string workspace_id = 1;
+  string requirement_id = 2;
+  string assistant_agent_id = 3;
+  uint64 expected_version = 4;
+}
+
+message ConfirmRequirementRequest {
+  string workspace_id = 1;
+  string requirement_id = 2;
+  string feedback_message_id = 3;
+  uint64 expected_version = 4;
+}
+
+message RejectRequirementRequest {
+  string workspace_id = 1;
+  string requirement_id = 2;
+  string feedback_message_id = 3;
+  string reason = 4;
+  uint64 expected_version = 5;
+}
+
+message RequirementEvent {
+  string event_type = 1;
+  Requirement requirement = 2;
+  string resume_token = 3;
 }
 ```
 
@@ -1381,6 +1625,64 @@ service ProjectService {
   rpc Watch(WatchRequest) returns (stream ProjectEvent);
 }
 
+message Project {
+  string project_id = 1;
+  string workspace_id = 2;
+  repeated string requirement_ids = 3;
+  string assigned_executor_id = 4;
+  string name = 5;
+  string status = 6;
+  string summary = 7;
+  repeated string key_decisions = 8;
+  uint64 version = 9;
+}
+
+message CreateProjectRequest {
+  string workspace_id = 1;
+  repeated string requirement_ids = 2;
+  string name = 3;
+}
+
+message UpdateProjectRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string name = 3;
+  string status = 4;
+  string summary = 5;
+  uint64 expected_version = 6;
+}
+
+message GetProjectRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+}
+
+message ListProjectsRequest {
+  string workspace_id = 1;
+  string status = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+  string next_page_token = 2;
+}
+
+message AssignProjectRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string executor_id = 3;
+  uint64 expected_version = 4;
+}
+
+message AcceptProjectRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string executor_id = 3;
+  uint64 expected_version = 4;
+}
+
 message ResumeProjectRequest {
   string workspace_id = 1;
   string project_id = 2;
@@ -1391,6 +1693,21 @@ message ResumeProjectRequest {
 
 message ResumeProjectResponse {
   Project project = 1;
+}
+
+message CompleteProjectRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string executor_id = 3;
+  string summary = 4;
+  repeated string key_decisions = 5;
+  uint64 expected_version = 6;
+}
+
+message ProjectEvent {
+  string event_type = 1;
+  Project project = 2;
+  string resume_token = 3;
 }
 ```
 
@@ -1403,7 +1720,87 @@ service ProjectTaskService {
   rpc Complete(CompleteTaskRequest) returns (ProjectTask);      // Executor 标记完成
   rpc List(ListTasksRequest) returns (ListTasksResponse);
   rpc Watch(WatchRequest) returns (stream ProjectTaskEvent);
-  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse); // 完整 Request/Response 定义见 [§9.1](#91-长任务超时与取消)
+}
+
+message ProjectTask {
+  string task_id = 1;
+  string project_id = 2;
+  string workspace_id = 3;
+  string title = 4;
+  string description = 5;
+  string status = 6;
+  string assigned_executor_id = 7;
+  string executor_type = 8;
+  repeated string depends_on = 9;
+  string depends_type = 10;
+  int32 priority = 11;
+  uint64 version = 12;
+}
+
+message CreateTaskRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string title = 3;
+  string description = 4;
+  string executor_type = 5;
+  repeated string depends_on = 6;
+  string depends_type = 7;
+  int32 priority = 8;
+}
+
+message UpdateTaskRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+  string title = 3;
+  string description = 4;
+  string status = 5;
+  uint64 expected_version = 6;
+}
+
+message AssignTaskRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+  string executor_instance_id = 3;
+  uint64 expected_version = 4;
+}
+
+message CompleteTaskRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+  string executor_instance_id = 3;
+  string output_summary = 4;
+  uint64 expected_version = 5;
+}
+
+message ListTasksRequest {
+  string workspace_id = 1;
+  string project_id = 2;
+  string status = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListTasksResponse {
+  repeated ProjectTask tasks = 1;
+  string next_page_token = 2;
+}
+
+message CancelTaskRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+  string reason = 3;
+  uint64 expected_version = 4;
+}
+
+message CancelTaskResponse {
+  ProjectTask task = 1;
+}
+
+message ProjectTaskEvent {
+  string event_type = 1;
+  ProjectTask task = 2;
+  string resume_token = 3;
 }
 ```
 
@@ -1417,11 +1814,90 @@ service AgentRegistryService {
   rpc Watch(WatchRequest) returns (stream AgentEvent);
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
 }
+
+message RegisterAgentRequest {
+  string agent_id = 1;
+  AgentType agent_type = 2;
+  string executor_id = 3;
+  string workspace_id = 4;
+}
+
+message AgentInstance {
+  string agent_id = 1;
+  string workspace_id = 2;
+  AgentType agent_type = 3;
+  string role = 4;
+  string status = 5;
+  string active_model = 6;
+  string current_project_id = 7;
+  uint64 version = 8;
+}
+
+message HeartbeatRequest {
+  string agent_id = 1;
+  string workspace_id = 2;
+  string status = 3;
+  string current_project_id = 4;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+  string access_token = 2;
+}
+
+message DeregisterAgentRequest {
+  string agent_id = 1;
+  string workspace_id = 2;
+  string reason = 3;
+}
+
+message Empty {
+}
+
+message ListAgentsRequest {
+  string workspace_id = 1;
+  AgentType agent_type = 2;
+  string status = 3;
+}
+
+message ListAgentsResponse {
+  repeated AgentInstance agents = 1;
+}
+
+message AgentEvent {
+  string event_type = 1;
+  AgentInstance agent = 2;
+  string resume_token = 3;
+}
+
+message RefreshTokenRequest {
+  string agent_id = 1;
+  string refresh_token = 2;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+```
+
+### Board Service
+```protobuf
+service BoardService {
+  rpc Watch(WatchRequest) returns (stream BoardSnapshot);
+  rpc GetBoard(GetBoardRequest) returns (BoardSnapshot);
+  rpc GetBoardSnapshot(GetBoardRequest) returns (BoardSnapshot);
+}
+
+message GetBoardRequest {
+  string workspace_id = 1;
+}
 ```
 
 ## 实现前必须定稿的架构决策
 
-以下 6 项如果在 spec 阶段不定稿，实现时必定返工。每项给出当前决策、影响范围、未决问题和默认方案。
+以下关键设计项如果在 spec 阶段不定稿，实现时必定返工。每项给出当前决策、影响范围、未决问题和默认方案。
 
 ---
 
@@ -1436,7 +1912,7 @@ service AgentRegistryService {
                    │              ▼         ▼
                    └────────── Rejected ◀── (用户驳回)
 
-                   Analyzing ──(超时无结果)──▶ Pending
+                   Analyzing ──(超时 120s 无产出)──▶ Pending
     - 多方并发控制：Analyzing 标记由 Assistant 原子抢占
     - Draft 允许多轮修改（Draft → Draft），draft_history 追加入口（revision++）
     - Draft 内有 projects/tasks 草案
@@ -1454,21 +1930,33 @@ service AgentRegistryService {
 
 Project:
     Pending ──▶ Assigned ──▶ InProgress ──▶ Completed
-      ▲            │             │
-      │            ▼             ▼
-      └── (超时)   │           Failed
-                   │             │
-                   ▼             ▼
-                (超时)       Blocked ──▶ InProgress (用户反馈) / Cancelled
+      │          │             │  │
+      │          │             │  ├──▶ Failed
+      │          │             │  │
+      │          │             │  ├──▶ Blocked ──▶ InProgress (用户反馈)
+      │          │             │  │       │
+      │          │             │  │       └──▶ Cancelled
+      │          │             │  │
+      │          │             │  └──▶ Cancelled
+      │          │             │
+      │          │             └── Executor 崩溃恢复 ──▶ Pending
+      │          │
+      │          ├── (超时) ──▶ Pending
+      │          └──▶ Cancelled
+      │
+      └──▶ Cancelled
 
-    Executor 崩溃恢复：InProgress（清空 assigned_executor）──▶ Pending（重新分配）
+    Executor 崩溃恢复：InProgress（清空 assigned_executor_id）──▶ Pending（重新分配）
 
     - Assigned 超时门限：assign_timeout_sec（60s），超时回退 Pending
+    - Pending → Cancelled：用户取消或 Requirement 级联取消
+    - Assigned → Cancelled：用户取消，需通知 Executor
+    - InProgress → Cancelled：用户取消；Executor 采用 cooperative cancel，停止当前执行并释放 worktree / merge_lock
     - Project 进入 Blocked 后由 Agent 主动提醒用户；无系统自动超时，用户通过反馈解锁或手动取消
     - Blocked → InProgress：用户反馈通过 `ChatMessage(message_type=feedback)` 写入并关联 Project/Task，然后调用 ProjectService.Resume / REST resume 入口恢复执行
-    - Blocked → Cancelled：用户主动取消
+    - Blocked → Cancelled：用户主动取消，适用于长时间无法解决的阻塞
     - Failed 为普通执行失败终态之一，不自动回退 Pending；只有显式人工重试/重开才可创建新的分配流程
-    - Executor 崩溃恢复时，Scheduler 可将 InProgress Project 清空 assigned_executor 并回退 Pending 以重新分配
+    - Executor 崩溃恢复时，Scheduler 可将 InProgress Project 清空 assigned_executor_id 并回退 Pending 以重新分配
     - Completed 后冻结
 
 ProjectTask:
@@ -1483,13 +1971,13 @@ ProjectTask:
 
   Pending ──▶ Cancelled
   InProgress / InReview / Retrying ──(Executor 崩溃恢复)──▶ Pending
-  InProgress / Retrying ──(超过 max_retries 或不可重试失败)──▶ Failed
+  InProgress / Retrying ──(超过 max_task_retries 或不可重试失败)──▶ Failed
 
   - InProgress→Retrying：Sub-Agent 返回 retry_needed 或 Executor 判定本次 attempt 可重试时；写 intermediate attempt result，不写 final result
   - Retrying→InProgress：下一次 attempt 开始执行时
-  - InProgress/Retrying→Failed：超过 max_retries（默认 3）或不可重试失败时，写 final failed result；普通失败不自动回退 Pending
+  - InProgress/Retrying→Failed：超过 max_task_retries（默认 3）或不可重试失败时，写 final failed result；普通失败不自动回退 Pending
   - InReview→InProgress：Reviewer 返回修改意见时
-  - InProgress/InReview/Retrying→Pending：仅 Executor 崩溃恢复时由 Scheduler 回退并清空 assigned_executor_instance_id
+  - InProgress/InReview/Retrying→Pending：仅 Executor 崩溃恢复时由 Scheduler 回退并清空 assigned_executor_id
   - Pending→Cancelled：用户取消 / Project 被取消时级联
   - InProgress/InReview/Retrying 均可直接通过 `CancelTask` → Cancelled；Executor 采用 cooperative cancel，收到取消信号后尽快停止当前 attempt、释放资源并写回最终取消状态
 
@@ -1548,27 +2036,27 @@ Confirm 阶段对 depends_on 做拓扑校验，有环直接拒绝确认草案。
 Sub-Agent 调用流程：
 ```
 Executor 对每个就绪 Task:
-  1. 查询 Task.role_requirement（如 "coder" / "planner"）
-  2. 通过 AgentRegistry 查可用的 Sub-Agent 角色列表
+  1. 查询 Task.executor_type（如 "coder" / "planner"）
+  2. 通过本地角色配置目录（roles/）查可用的 Sub-Agent 角色列表
   3. 装配子 Agent 上下文（request context: task description + related_messages + project context）
-  4. gRPC ExecuteTask → Sub-Agent 执行
+  4. 进程内启动 tokio task，调用 SubAgent::run → Sub-Agent 执行
   5. 收集当前批次所有 Task 的结果
-  6. 批次完成后统一写回白板（方便 Assistant 一次性感知进度，避免碎片推送）
+  6. 批次完成后统一写回白板（方便 Chat 一次性感知进度，避免碎片推送）
   7. 根据结果判定 Task 状态（completed / failed / retry_needed）
      - completed / failed：写 ProjectTaskResult 作为 final result，并更新 ProjectTask.status
-     - retry_needed：不写 final result；Executor 写一条 ProjectTaskResult(status=retry_needed) 作为 intermediate attempt result（记录本次 attempt 的 output/error/artifacts/retry_count），将 ProjectTask.status 置为 retrying，然后按 retry 策略重新执行该 Task
-  8. retry: 失败或 retry_needed 后最多 retry_max 次（可配，默认 3）；最终超过 retry_max / max_retries 后写 ProjectTaskResult(status=failed) 作为最终结果，并将 ProjectTask.status 置为 failed
+     - retry_needed：不写 final result；Executor 写一条 ProjectTaskResult(status=retry_needed) 作为 intermediate attempt result（记录本次 attempt 的 output/error_message/artifacts/retry_count），将 ProjectTask.status 置为 retrying，然后按 retry 策略重新执行该 Task
+  8. retry: 失败或 retry_needed 后最多 max_task_retries 次（可配，默认 3）；最终超过 max_task_retries 后写 ProjectTaskResult(status=failed) 作为最终结果，并将 ProjectTask.status 置为 failed
 ```
 
 #### 影响范围
-- `ProjectTask` schema（depends_on、depends_type、role_requirement 字段）
+- `ProjectTask` schema（depends_on、depends_type、executor_type 字段）
 - `agent.proto`（ExecuteTask RPC 定义）
 - Executor 运行时（DAG 拓扑排序 + 批次收集）
 - 前端渲染（Task DAG 可视化）
 
-#### 未决问题
-- Executor 内部 DAG 执行器用 tokio JoinSet 还是自建调度器？
-- 是否需要 `Task.result_type`（code / file / decision / null）来指导 Executor 后处理？
+#### 当前决策
+- Executor 内部 DAG 执行器使用 tokio JoinSet。
+- `Task.result_type` 省略该字段。
 
 #### 默认方案
 - v0.1 直接实现 DAG 模式
@@ -1614,15 +2102,21 @@ pub struct ExecuteTaskParams {
     pub last_error: Option<String>,
 }
 
+pub enum SubAgentTaskStatus {
+    Completed,
+    Failed,
+    RetryNeeded,
+}
+
 pub struct ExecuteTaskResult {
     pub task_id: String,
-    pub status: TaskStatus,             // completed | failed | retry_needed
-    pub output: String,                 // Sub-Agent 产出；retry_needed 时为本次尝试的中间输出/诊断
-    pub artifacts: Vec<String>,         // 产出物引用（file_path / snippet_id）
+    pub status: SubAgentTaskStatus,    // completed | failed | retry_needed；Sub-Agent 执行结果枚举，独立于 DB 层 ProjectTaskStatus
+    pub output: String,                // Sub-Agent 产出；retry_needed 时为本次尝试的中间输出/诊断
+    pub artifacts: Vec<String>,        // 产出物引用（file_path / snippet_id）
 }
 ```
 
-`retry_needed` 落库规则：Sub-Agent 返回 `ExecuteTaskResult.status = retry_needed` 表示“本次 attempt 未形成最终结果，但建议 Executor 重试”。Executor 必须写入一条 `ProjectTaskResult(status=retry_needed)` 作为 intermediate attempt result，保留本次 attempt 的 `output` / `artifacts` / `error` / `retry_count`，同时将 `ProjectTask.status` 更新为 `retrying`；该记录不作为 final result，不触发下游依赖完成判定。随后 Executor 使用递增后的 `retry_count` 与 `last_error` 重新调用 Sub-Agent。若最终超过 `max_retries`（或 `retry_max`）仍未成功，Executor 写入最终 `ProjectTaskResult(status=failed)`，并将 `ProjectTask.status` 置为 `failed`。
+`ExecuteTaskResult.status` 使用独立枚举 `SubAgentTaskStatus = completed | failed | retry_needed`，与 DB 层 `ProjectTaskStatus` 分离。`retry_needed` 由 Executor 映射为 `ProjectTaskStatus::Retrying`。Sub-Agent 返回 `ExecuteTaskResult.status = retry_needed` 表示“本次 attempt 未形成最终结果，但建议 Executor 重试”。Executor 必须写入一条 `ProjectTaskResult(status=retry_needed)` 作为 intermediate attempt result，保留本次 attempt 的 `output` / `artifacts` / `error_message` / `retry_count`，同时将 `ProjectTask.status` 更新为 `retrying`；该记录不作为 final result，不触发下游依赖完成判定。随后 Executor 使用递增后的 `retry_count` 与 `last_error` 重新调用 Sub-Agent。若最终超过 `max_task_retries` 仍未成功，Executor 写入最终 `ProjectTaskResult(status=failed)`，并将 `ProjectTask.status` 置为 `failed`。
 
 Sub-Agent 不持有 Session，每次 ExecuteTask 是独立调用：
 - 系统提示由 Executor 装配（assembler.rs：注入 role config + tools 白名单）
@@ -1631,7 +2125,7 @@ Sub-Agent 不持有 Session，每次 ExecuteTask 是独立调用：
 - Sub-Agent 通过角色配置中的 `allowed_tools` 白名单使用 tools，各角色白名单不同
   - e.g. `coder` 可用：Bash / Read / Write / Edit / Glob / LSP
   - e.g. `planner` 可用：Read / Glob / WebSearch
-  - Main Agent（Assistant / Executor / Evolver）同样各自拥有不同 tools 列表，按职责区分
+  - Main Agent（Chat / Executor / Assistant / Evolver）同样各自拥有不同 tools 列表，按职责区分
 - 沙箱隔离为 TODO（v0.1 不实现）
 
 #### Worktree 与 Merge 锁
@@ -1676,7 +2170,7 @@ Project 文档增加 merge_lock 字段；创建 Project 时必须写入 `merge_l
 
 释放锁：db.projects.updateOne(
 { _id: project_id, "merge_lock.locked_by": task_id },
-{ $set: { merge_lock: null } }
+{ $set: { "merge_lock.locked_by": null, "merge_lock.locked_by_executor": null, "merge_lock.locked_at": null } }
 )
 ```
 
@@ -1729,9 +2223,9 @@ Scheduler 对账循环（每 60s）:
 
 Executor 崩溃后的完整恢复:
   1. Scheduler 检测 Executor 心跳超时（30s）
-  2. 释放 Project：$unset assigned_executor + status→pending（仅崩溃恢复路径；普通执行失败不自动回退 Pending）
-  3. 级联释放 ProjectTask：project_id 匹配 + status∈{in_progress,in_review,retrying} → pending + $unset assigned_executor_instance_id
-  4. 释放该 Executor 持有的所有 merge_lock：$set { merge_lock: null }
+  2. 释放 Project：$unset assigned_executor_id + status→pending（仅崩溃恢复路径；普通执行失败不自动回退 Pending）
+  3. 级联释放 ProjectTask：project_id 匹配 + status∈{in_progress,in_review,retrying} → pending + $unset assigned_executor_id
+  4. 释放该 Executor 持有的所有 merge_lock：$set { "merge_lock.locked_by": null, "merge_lock.locked_by_executor": null, "merge_lock.locked_at": null }
   5. 新 Executor 分配后查询项目关联的 pending Task → 按编排策略重新执行
 ```
 
@@ -1774,29 +2268,31 @@ Executor 崩溃后的完整恢复:
      "agent_id": "uuid",
      "role": "executor",         // 角色标识
      "workspace_id": "ws_uuid",  // 所属 Workspace
-     "scope": ["board_read", "board_write", "agent_call"],
+     "scope": ["board_read", "board_write"],
+     "aud": "aemeath-api-server",
+     "iss": "aemeath-api-server",
      "iat": ...,
      "exp": ...
    }
    用于 Agent ↔ API Server 的 gRPC 调用。
-   API Server 在 Agent 注册成功后签发。
+   API Server 在 Agent 注册成功后签发；服务端校验 Agent Token 时必须同时校验 `aud == "aemeath-api-server"` 与 `iss == "aemeath-api-server"`。
 
 权限校验位置:
  1. API Server → 校验用户 Token（REST/WS）和 Agent Token（gRPC）；`scope` 控制 API Server 资源权限，如 `board_read` / `board_write` / `agent_registry`
  2. Agent 装配器 → 注入 token + 按 RoleConfig.allowed_tools 白名单过滤 Agent runtime 工具（如 Bash/Read/Write/WebSearch/Grep/Glob）
  3. Sub-Agent → 进程内 tokio task，**无 token**。权限由 Executor 的 `RoleConfig.allowed_tools` / `can_call_roles` 控制。DB 写入统一由 Executor 经 gRPC 调 Server。
 
-`board_read` / `board_write` 属于 token `scope`，不属于 `allowed_tools`；`allowed_tools` 只描述 Agent runtime 可调用工具。
+`board_read` / `board_write` 属于 token `scope`，不属于 `allowed_tools`；`allowed_tools` 只描述 Agent runtime 可调用工具。Token scope 完全由 RoleConfig.scope 派生，签发时不做额外添加。
 
 Workspace 隔离:
   - 所有 MongoDB 查询强制带 workspace_id filter（repository 层注入）
   - Sub-Agent 由 Executor 在进程内调用，workspace 上下文由 Executor 传递，无需独立校验
   - Workspace 之间数据完全隔离
 
-Executor 产出写 DB，Server 聚合生成白板，Assistant 感知汇报:
+Executor 产出写 DB，Server 聚合生成白板，Chat 感知汇报:
   - Executor 执行完成后写 project_result / project_task_result 到 DB
   - Server 自动聚合 DB 事实层 → 生成 / 更新 BoardSnapshot
-  - Assistant Watch BoardSnapshot → 感知状态变化 → 汇报用户
+  - Chat Watch BoardSnapshot + Requirement → 感知全局状态变化与需求状态变更 → 汇报用户
 ```
 
 #### 影响范围
@@ -1805,9 +2301,9 @@ Executor 产出写 DB，Server 聚合生成白板，Assistant 感知汇报:
 - `agents/src/assembler.rs` 的 token 注入逻辑
 - `repository/` 层所有查询（强制 workspace_id 添加）
 
-#### 未决问题
-- token 签发和刷新由谁负责（API Server 自身 / 独立 Auth Service）？
-- 租户（个人 vs 团队）的 Workspace 是否需要 RBAC（Owner/Editor/Viewer）？
+#### 当前决策
+- Token 签发：v0.1 由 API Server 直接签发。
+- 租户 RBAC：v0.1 单租户。
 
 #### 默认方案
 - v0.1 API Server 自身签发 token（无独立 Auth Service），v0.2 可配置 OIDC
@@ -1822,10 +2318,11 @@ Executor 产出写 DB，Server 聚合生成白板，Assistant 感知汇报:
 ```
 幂等 ID 存储:
   - MongoDB collection: idempotency_records
-  - 文档结构: { _id: idempotency_key, endpoint, result_hash, created_at }
+  - 文档结构: { _id: idempotency_key, endpoint, response, created_at }
+  - response 仅缓存非敏感字段（project_id / status / task_id），不缓存 token / agent_id / workspace_id
   - TTL index: created_at_1, expireAfterSeconds=86400（24h）
-  - 写入流程: insertOne({ _id: key }) 成功 → 执行业务逻辑 → updateOne({ _id: key }, { $set: { result_hash, status: "done" } })
-  - 重试: insertOne 因 unique index 冲突失败 → 查 result_hash → 检查业务是否已完成 → 已完成直接返回/幂等响应
+  - 写入流程: 先尝试 insertOne({ _id: idempotency_key, endpoint, response, created_at })；若 unique index 冲突则返回已有记录的 response 字段
+  - 重试: 相同 idempotency_key 的请求直接复用 idempotency_records.response 作为幂等响应
 
 MongoDB ↔ Qdrant 一致性:
   - MongoDB 是主存储，Qdrant 是派生索引
@@ -1838,10 +2335,10 @@ MongoDB ↔ Qdrant 一致性:
   - 所有实体文档加 `version: u64` 字段
   - 更新操作: filter 包含 { _id, version: expected }, update 包含 { $inc: { version: 1 } }
   - 版本冲突 → 返回 ABORTED 错误 → 调用方重新读取最新文档 → 重试
-  - 使用者: Scheduler（分配 Project）、Executor（完成 Task）、Assistant（更新 Requirement.draft）
+  - 使用者: Scheduler（分配 Project）、Executor（完成 Task）、Assistant（更新 Requirement.draft，由 Chat 触发）
 API 重试的重复创建防护:
   - Create 操作: idempotency_key + unique constraint（如 Chat.name + workspace_id 复合唯一索引）
-  - Assign 操作: 条件更新（status + assigned_executor + version）天然幂等
+  - Assign 操作: 条件更新（status + assigned_executor_id + version）天然幂等
   - 前端重试: 相同 idempotency_key 的 POST /api/.../chats/:chat_id/messages 返回已有 ChatMessage
 ```
 
@@ -1900,13 +2397,18 @@ API 重试的重复创建防护:
 └──────────┼───────────────────┼───────────────────┼────────┘
            │                   │                   │
  ┌─────────┴────────────────┐  ┌┴─────────────────┐  ┌┴────────────────┐
- │   Assistant              │  │   Scheduler      │  │   Executor      │
+ │   Chat                   │  │   Scheduler      │  │   Executor      │
  │   (agents/)              │  │   (agents/)      │  │   (agents/)     │
- │ 接收/分析用户消息        │  │ Watch DB 变更     │  │ 执行 ProjectTask│
- │ 写 Requirement.draft     │  │ 分配 Project      │  │ 调用 SubAgent  │
- │ Watch BoardSnapshot/DB   │  └──────────────────┘  │ 写 TaskResult  │
- │ 汇报用户                 │            │             └─────────────────┘
+ │ 接收用户消息             │  │ Watch DB 变更     │  │ 执行 ProjectTask│
+ │ 写 ChatMessage           │  │ 分配 Project      │  │ 调用 SubAgent  │
+ │ Chat Watch BoardSnapshot / 汇报用户 │  │ 调度 Assistant    │  │ 写 TaskResult  │
  └──────────────────────────┘            │
+                         ┌───────┴────────────────────────────────────────────┐
+                         │   Assistant                                        │
+                         │   (agents/)                                        │
+                         │ Assistant 分析 Requirements/Project（Scheduler 调度） │
+                         │ Project/Task 草案                                  │
+                         └────────────────────────────────────────────────────┘
                          ┌───────┴──────────┐
                          │   Evolver        │
                          │   (agents/)      │
@@ -1932,11 +2434,11 @@ API 重试的重复创建防护:
 | 需求列表 | REST GET `/requirements` | WebSocket 增量推送 |
 | Project 状态 | REST GET `/projects/{id}` | WebSocket 推送 ProjectTask 完成 |
 | 聊天消息 | REST GET `/chats/{id}/messages` | WebSocket 推送新消息 |
-| Agent 状态 | REST GET `/agents/status` | WebSocket 推送心跳/状态变更 |
+| Agent 状态 | REST GET `/api/workspaces/:ws_id/agents` | WebSocket 推送心跳/状态变更 |
 
 #### 白板数据聚合（board.rs）
 
-响应：`BoardSnapshot`，结构见 [Board 聚合响应结构](#board-聚合响应结构)。
+响应：`BoardSnapshot`，结构见 [Board 聚合响应结构](#board-聚合响应结构)。REST 初始全量拉取 `GET /api/workspaces/:ws_id/board` 默认限制 `recent_messages` 为最近 50 条，避免首次加载拉取过多历史消息；后续更新仍通过 WebSocket 推送增量 diff。
 
 Server 收到 DB 变更（Agent 通过 gRPC 写入）后：
 1. 聚合受影响的白板数据
@@ -1962,7 +2464,7 @@ Executor 完成任务
 | 层次 | 数据 | 写入者 | 说明 |
 |------|------|--------|------|
 | **原始事实层** | Project / ProjectTask / ProjectResult / ProjectTaskResult | Executor（通过 gRPC） | Agent 执行的原始产出，写入 MongoDB |
-| **展示视图层** | BoardSnapshot | Server（自动聚合） | 由 `board.rs` 从事实层实时计算，不依赖 Assistant 整理 |
+| **展示视图层** | BoardSnapshot | Server（自动聚合） | 由 `board.rs` 从事实层实时计算，不依赖 Chat/Assistant 整理 |
 
 ```
 Executor 写 TaskResult（事实层）
@@ -2033,10 +2535,12 @@ UI 发起请求（生成 trace_id）
 | 文件 | 内容 |
 |------|------|
 | `~/.aemeath/audit/llm.log` | 每次 LLM 调用的请求/响应摘要、token 用量、耗时 |
-| `~/.aemeath/audit/tool.log` | 每次工具调用的名称、参数摘要、结果大小、耗时 |
+| `~/.aemeath/audit/tool.log` | 每次工具调用的名称、参数摘要、结果大小、耗时、调用时的 `role` 与 `allowed_tools` 状态 |
 | `~/.aemeath/audit/task.log` | ProjectTask 生命周期：pending → in_progress → completed/failed |
 
 审计日志按天轮转：`llm.2026-05-17.log`。
+
+Sub-Agent 工具调用审计：v0.1 信任 Executor 在进程内按 RoleConfig 过滤并执行工具调用，审计日志记录事后证据（每次调用时的 role、allowed_tools 快照、工具名和参数摘要）；v0.2 可考虑由服务端对工具调用事件做独立校验。
 
 #### 日志级别配置
 
@@ -2079,7 +2583,7 @@ pub struct ExecuteTaskParams {
 }
 ```
 
-Sub-Agent 执行循环中每条 LLM 调用前检查 deadline。超时后返回 `TaskStatus::Failed { reason: timeout }`。
+Sub-Agent 执行循环中每条 LLM 调用前检查 deadline。超时后 Executor 将任务状态置为 `ProjectTaskStatus::Failed`；失败原因记录在 `ProjectTaskResult` 的 `error_message` / `output` 字段中。
 
 **gRPC 取消服务**：
 
@@ -2107,7 +2611,7 @@ Agent Token 有 `exp` 字段，长任务执行期间可能过期。
 ```protobuf
 message RefreshTokenRequest {
   string agent_id = 1;
-  string current_token = 2;
+  // 服务端通过 gRPC metadata 中的 Agent Token 鉴权后刷新；request body 只传 agent_id。
 }
 
 message RefreshTokenResponse {
@@ -2135,20 +2639,21 @@ Executor 在执行长任务前检查 token 剩余有效期：
 | `RESOURCE_EXHAUSTED` | Executor Pool 满 / 并发超限 | 等待后重试 |
 | `DEADLINE_EXCEEDED` | 操作超时 | 检查超时设置，必要时重试 |
 
-#### 9.4 `can_create_agents` 硬校验
+#### 9.4 `Register / Deregister` 硬校验
 
 `RolePermissions.can_create_agents` 仅作为配置提示，**不作为最终授权来源**。
 
-API Server 在 Agent 创建/销毁 gRPC handler 中硬编码校验：
-- 调用 `AgentRegistryService.CreateAgent / DeleteAgent` 的请求方 `role` 必须为内置 `scheduler`
+API Server 在 Agent 注册/注销 gRPC handler 中硬编码校验：
+- 调用 `AgentRegistryService.Register / Deregister` 的请求方 `role` 必须为内置 `scheduler`
 - 非 scheduler role 直接返回 `PERMISSION_DENIED`
+- Scheduler Token 通过启动时配置预置密钥签发，不可被其他 Agent 获取
 
 #### 影响范围
 - `proto/project_task.proto` — CancelTask RPC
-- `proto/agent.proto` — RefreshToken RPC + CanCreateAgents 校验
+- `proto/agent.proto` — RefreshToken RPC + Register/Deregister 硬校验
 - `agents/src/sub_agent.rs` — deadline 检查逻辑
 - `server/src/grpc/` — 所有 handler 统一错误码
-- `server/src/grpc/agent_registry.rs` — can_create_agents 硬校验
+- `server/src/grpc/agent_registry.rs` — Register/Deregister 硬校验
 
 #### 未决问题
 - 无
@@ -2220,18 +2725,22 @@ Stop Hook 4 — agents features 隔离检查:
 1. `agents/src/template.rs` — 通用 Agent 模板
 2. `agents/src/assembler.rs` — 装配器
 3. Executor Pool 管理
-4. 角色配置文件（executor / evolver / assistant / scheduler / planner / coder / tester / reviewer / designer）
+4. 角色配置文件（chat / assistant / executor / evolver / scheduler / planner / coder / tester / reviewer / designer）
 
 ### Phase 3：调度与控制面（P1）
-1. Scheduler 实现（Watch Project + Executor Pool 管理 + 扩缩）
-2. Assistant 实现（分析消息类型 → 拆解需求 → Project/Task 草案 → 确认收口 → Watch 状态 → 汇报用户）
-3. Executor 实现（接收 Project → 编排 Task → 唤起 Sub-Agent → 结果写回白板 → 产出 summary）
-4. Embedding 服务（异步生成 Requirement / Project / ProjectTask 向量，API Server 内异步 worker）
+1. Scheduler 实现（Watch Project/Requirement + Executor/Assistant Pool 管理 + 扩缩）
+2. Chat 实现（接收用户消息 → Watch 状态 → 汇报用户）
+3. Assistant 实现（后台分析消息类型 → 拆解需求 → Project/Task 草案 → 确认收口）
+4. Executor 实现（接收 Project → 编排 Task → 唤起 Sub-Agent → 结果写回白板 → 产出 summary）
+5. Embedding 服务（异步生成 Requirement / Project / ProjectTask 向量，API Server 内异步 worker）
 
 ### Phase 4：前端（P1）
-1. `ui/` — 白板 UI
+1. `ui/` — Vue 3 + Element Plus，Vite 构建，纯 Web
 2. 原始需求、整理后的需求、Project & Task、Agent 状态四区块渲染
 3. 用户确认草案的交互流程
+4. 技术栈：Pinia 状态管理、Vue Router 路由、@tanstack/vue-query 数据获取
+5. 开发服务器通过 CORS / proxy 指向 API Server
+6. 数据获取走 `share/openapi/sdk/ts`（封装的 REST + WebSocket 客户端）
 
 ### Phase 5：CLI 集成（P2）
 1. CLI 作为 API Server 的客户端
@@ -2253,7 +2762,7 @@ Phase 1~3 完整实现风险过大。推荐分步交付：
 - 单 Scheduler + 单 Executor（无 Pool）
 - Assistant 只做需求写入和确认（不拆 Task）
 - Evolver 延后
-- 前端：只渲染白板四区块，不交互草案
+- 前端：Vue + Element Plus，只渲染白板四区块，不交互草案
 
 ### MVP v0.2 — 多 Agent 编排
 - Executor Pool + 扩缩
@@ -2264,7 +2773,7 @@ Phase 1~3 完整实现风险过大。推荐分步交付：
 ### MVP v0.3 — 自我进化
 - Evolver + RAG + 反思循环
 - Skills / MCP 自动生成与注册
-- 前端：白板自定义区块
+- 前端：白板自定义区块，DAG 可视化，Agent 状态面板
 
 ## P0 设计约束：故障恢复与幂等
 
@@ -2272,16 +2781,16 @@ Phase 1~3 完整实现风险过大。推荐分步交付：
 ```
 1. Scheduler 心跳超时检测（heartbeat_timeout_sec, 默认 30s）
 2. 超时 Executor 的 current_project_id → 查 Project status:
-   - in_progress → 仅在崩溃恢复路径清空 assigned_executor，并将 Project 回退 pending 以便重新分配
-   - blocked     → Scheduler 通知 Assistant，等待用户决策
+   - in_progress → 仅在崩溃恢复路径清空 assigned_executor_id，并将 Project 回退 pending 以便重新分配
+   - blocked     → Scheduler 通知 Chat，等待用户决策
    - completed/failed/cancelled → 终态不回退
 3. Project 崩溃恢复条件更新（防并发）:
    db.projects.updateOne(
-     { _id: project_id, status: { $in: ["pending", "in_progress"] }, assigned_executor: old_id },
-     { $unset: { assigned_executor: "" }, $set: { status: "pending" } }
+     { _id: project_id, status: { $in: ["pending", "in_progress"] }, assigned_executor_id: old_id },
+     { $unset: { assigned_executor_id: "" }, $set: { status: "pending" } }
    )
 4. 级联回退该 Project 下由该 Executor 持有的非终态 Task：
-   InProgress / InReview / Retrying → Pending（清空 assigned_executor_instance_id）
+   InProgress / InReview / Retrying → Pending（清空 assigned_executor_id）
 5. 重新分配给新 Executor 时写入原因字段（如 "reassigned_after_crash"）
 
 约束：普通执行失败不会自动 Failed → Pending；只有 Executor 崩溃恢复回退非终态 Task，或显式人工重试/重开才会重新进入 Pending/分配流程。
@@ -2299,7 +2808,7 @@ Executor 重启后:
   2. 从 Mongo 加载 Task 上下文（description + related_message_ids）
   3. 重新执行
   4. Sub-Agent 返回 retry_needed → 不写 final result；写一条 ProjectTaskResult(status=retry_needed) intermediate attempt result，ProjectTask.status=retrying，然后重新执行
-  5. 连续失败或 retry_needed 超过 max_retries（默认 3）→ 写 ProjectTaskResult(status=failed) final result → ProjectTask.status=failed → 通知 Assistant
+  5. 连续失败或 retry_needed 超过 max_task_retries（默认 3）→ 写 ProjectTaskResult(status=failed) final result → ProjectTask.status=failed → 通知 Chat
 
 重试携带 retry_count + last_error，Sub-Agent 可根据失败历史调整策略。
 ```
@@ -2332,7 +2841,7 @@ v0.1 Watch 定位：实时提示（best-effort），不是可靠消息队列。
 
 ## 开放问题
 
-- 前端技术选型：Tauri + Dioxus / egui / Web（Tauri + React）？
+- 前端技术选型：**已定稿** — Vue 3 + Element Plus + Pinia + Vite（纯 Web，通过 `share/openapi/sdk/ts` 调 Server API）
 - MongoDB Rust 驱动：官方 `mongodb` crate 还是 `bson` + 轻量封装？
 - Scheduler 自身是否也在 Pool 中可多实例？还是严格单例？
 - Embedding 模型选型：OpenAI text-embedding-3-small / 本地模型？

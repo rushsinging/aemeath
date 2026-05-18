@@ -2,10 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | 同 #39：超大 tool result 未持久化导致请求体过大，部分 API 静默空响应 |
-| 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
-| 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
-| 32 | Task list 窗口化显示异常（多症状） | 高 | 待确认 | 未确认 | 2026-05 | 已验证修复(D)：无 pending、仅 completed+in_progress 时，旧 completed 可回退补齐 7 条窗口；回归测试覆盖 9/10 完成后显示 #4~#9 completed + #10 in_progress。 |
+| 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
 | 33 | Spinner 下方 task list 无法选中、复制和高亮 | 中 | 待确认 | 未确认 | 2026-05 | task status 行已映射到 screen_line_map 且可复制；input area 高亮渲染按字符列覆盖导致 CJK 宽字符后半段漏高亮，本次改为字符列转显示列后绘制 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
@@ -231,6 +228,11 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 **修复验证（2026-05-18）**：
 11. **症状 D 验证**：当前 `build_task_window()` 已在 `pending_count == 0 && in_progress_count > 0` 时跳过 completed TTL 过滤，并按 `remaining - in_progress_count` 选取最近 completed 补满窗口。
 12. **回归测试确认**：`test_bug32_user_snapshot_keeps_full_window_when_only_recent_completed_and_in_progress` 覆盖 9/10 完成场景，期望显示 #4~#9 completed + #10 in_progress；`cargo test -p aemeath-cli task_window -- --nocapture` 通过 19 个 task_window 测试。
+
+**修复（2026-05-18 E 轮）**：用户复现：13 条 task，一开始显示 7 条，pending 减少后窗口逐渐收缩到 6/5/4/1 条。
+13. **根因**：温和扩展和下限保护阶段只在 TTL 过滤后的 `completed_for_display` 中选取，当大量 completed 超过 TTL（5 分钟）后，TTL 过滤移除了大部分 completed，剩余 completed 不够补齐窗口。
+14. **修复**：新增 `shown_ids: HashSet<&str>` 跟踪已显示的 task id 避免重复；温和扩展先从 TTL 过滤后 completed 补充，仍有余量时从 `all_completed_sorted`（未过滤）回退补齐；下限保护也从 `all_completed_sorted` 选取。所有选取阶段先 `collect()` 再遍历避免借用冲突。
+15. **回归测试**：新增 `test_bug32_window_stays_full_with_ttl_pressure`（8 completed + 1 in_progress，窗口保持 7 条）和 `test_bug32_window_never_shrinks_during_progression`（4 阶段渐进完成，窗口始终 7 条）。`cargo test -p aemeath-cli` 135 通过。
 
 **关联**：
 - Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
