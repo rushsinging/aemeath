@@ -4,7 +4,6 @@
 |---|------|--------|------|----------|----------|----------|
 | 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
 | 33 | Spinner 下方 task list 无法选中、复制和高亮 | 中 | 待确认 | 未确认 | 2026-05 | task status 行已映射到 screen_line_map 且可复制；input area 高亮渲染按字符列覆盖导致 CJK 宽字符后半段漏高亮，本次改为字符列转显示列后绘制 |
-| 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
@@ -304,47 +303,6 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-cli/src/tui/app/update/ui_event.rs`
 - `aemeath-cli/src/tui/app/event.rs`
 - `aemeath-cli/src/tui/app/slash_tests.rs`
-
-### #35 Write tool 在 worktree 中写入错误分支
-
-**状态**：待确认
-
-**症状**：使用 git worktree 隔离开发时（如 `.worktrees/feature-xxx/`），LLM 通过 Write/Read 等文件工具使用相对路径，文件实际写入 main worktree 而非当前 worktree。主 agent 和 sub-agent 都受影响。
-
-**根因**：文件工具的路径解析基于进程 CWD（main worktree 根目录），未感知用户当前操作的 worktree 上下文。主 agent 启动时 CWD 为 main worktree，sub-agent 也是同一进程空间，因此所有文件工具都解析到 main worktree。
-
-**修复**：新增 `ToolContext.path_base` 作为相对路径解析基准，并由 Bash 工具在命令结束后记录实际 `$PWD`，让后续 Read/Edit/Write/Glob/Grep/Bash 相对路径基于当前 worktree/目录解析，同时仍用 `cwd` 作为安全边界。新增回归测试覆盖 Bash `cd` 后路径基准持久化，以及路径工具按当前 worktree base 解析相对路径。
-
-**验证**：`cargo test -p aemeath-tools` 通过（24 passed）；`cargo check` 通过（仅既有 `Cmd::Batch` dead_code warning）。
-
-**复现路径**：
-1. 对话中创建了 task，spinner 下方显示 task list
-2. 鼠标拖拽尝试选中 task list 区域的行
-3. 观察：task list 行未被高亮，复制时无内容
-
-**根因**：
-1. **screen_line_map 未覆盖 task status 行**：`update_task_status()` 把 task 行 push 到 `task_status_lines`，但 render 阶段这些行可能走的是独立渲染路径（如 status bar 区域），未注册到 `screen_line_map`，导致 selection 系统看不到这些行
-2. **LineKind 缺失**：即使 task 行在 screen_line_map 中，其 `LineKind` 可能不是 `Text`，`copy_selection` 中的 `LineKind` 分支未处理 task status 类型
-
-**修复方向**：
-1. 确保 task status 行渲染时注册到 `screen_line_map`，分配正确的 `LineKind::Text`（或新增 `LineKind::TaskStatus` 并在 copy 路径处理）
-2. `copy_selection` 中对 task 相关行做文本提取（标题文本不含图标部分）
-3. 单元测试覆盖：验证 task 行可被选中和复制
-
-**修复（2026-05-14）**：
-1. `append_status_lines()` 在 spinner 存在时为 `task_status_lines` 注册 `screen_line_map` 映射，逻辑索引使用 `lines.len() + task_status_index`，与 `selection.rs::get_line_content()` 的虚拟 task 行读取规则一致。
-2. render 阶段暂存 `task_status_lines`，避免 `get_line_content()` 因真实 `self.lines` 为空而无法读取虚拟 task 行。
-3. 新增回归测试 `test_render_maps_task_status_lines_for_selection` 覆盖 task status 行可拖拽选中并复制。
-
-**涉及路径**：
-- `aemeath-cli/src/tui/output_area/render.rs`
-- `aemeath-cli/src/tui/output_area/render_status.rs`
-- `aemeath-cli/src/tui/output_area/selection.rs`
-
-**关联**：
-- Bug #14（已修复：tool call 标题可选中但无法复制）—— 同类问题，修复模式可复用
-- Feature #24（task list 窗口化）—— task list 的渲染路径与窗口化逻辑共用
-- Bug #32（task list 显示不完整）—— 同在 task list 渲染链路
 
 ### #36 TaskListCreate 后新任务编号未从 1 开始（已归档 2026-05-14）
 
