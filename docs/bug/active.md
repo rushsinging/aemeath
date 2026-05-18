@@ -9,6 +9,7 @@
 | 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
 | 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 活动中 | 未确认 | 2026-05 | 输入 `/` 后弹出命令候选列表，但按上下键无法在候选中移动高亮，上下键仍被当作历史命令翻页处理 |
+| 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 活动中 | 未确认 | 2026-05 | 表格渲染文本（┼─┼ 样式）与原始 content（| col | col |）不同，screen_line_map offset 与 get_selected_text 数据源不匹配 |
 
 ## 专案
 
@@ -508,3 +509,35 @@ Tool Bash timed out after 120s
 - `aemeath-tools/src/task_create.rs`（输出格式）
 - `aemeath-tools/src/task_list.rs`（输出格式）
 - `aemeath-cli/src/tui/`（TUI task list 渲染，已用局部编号）
+
+### #46 Output area Markdown 表格行选中复制内容错位
+
+**状态**：活动中
+
+**症状**：在 output area 中选中 markdown 表格行并复制时，复制出的文本与屏幕上看到的渲染内容不匹配。选中范围偏移、复制内容错位或缺失。
+
+**根因**：
+
+1. **渲染文本与原始 content 不一致**：表格行原始 `OutputLine.content` 为 markdown 格式（如 `| hello | world |`），但屏幕上渲染的是 `render_table_block()` 转换后的样式文本（如 ` ┼───┼───┼` 或 ` │ hello │ world │`），两者字符内容和显示宽度完全不同。
+2. **screen_line_map offset 基于渲染文本，get_selected_text 读取原始 content**：
+   - 有 selection 时，`render_table_rows()` 从 styled spans 拼回纯文本 `line_text`，再做 `push_wrapped_offsets` 记录 screen_line_map。offset 对应的是渲染后文本。
+   - `get_selected_text()` 通过 `get_line_content(logic_idx)` 读取的是 `OutputLine.content`（原始 markdown 文本）。
+   - 两套文本的字符数和宽度不同，导致 char offset 映射错位。
+3. **无 selection 时**直接用原始 `row_spans` 渲染，不经过 `push_wrapped_offsets`，screen_line_map 中该行可能缺失或 offset 不正确。
+
+**修复方向**：
+1. **方案 A（推荐）**：表格行渲染后的文本作为 `get_line_content()` 的数据源，让 screen_line_map 和选中复制使用同一份渲染文本。可在 render 阶段将表格行的渲染文本暂存，或为表格行建立独立的 content 缓存。
+2. **方案 B**：表格行不参与 selection，选中时跳过表格区域（简单但功能缺失）。
+3. **方案 C**：`push_wrapped_offsets` 对表格行使用原始 markdown content 而非渲染文本，让 offset 与 `get_line_content()` 一致。但这样选中高亮位置会与屏幕显示错位。
+
+推荐方案 A，保持选中高亮与复制内容一致。
+
+**涉及路径**：
+- `aemeath-cli/src/tui/output_area/render.rs`（`render_table_rows()`）
+- `aemeath-cli/src/tui/output_area/selection.rs`（`get_line_content()`、`get_selected_text()`）
+- `aemeath-cli/src/tui/output_area/markdown/table.rs`（`render_table_block()`）
+- `aemeath-cli/src/tui/output_area/render_blocks.rs`（`render_table_cache()`）
+
+**关联**：
+- Feature #32（TUI 选中和复制逻辑统一）
+- Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
