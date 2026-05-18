@@ -11,7 +11,7 @@
 | 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：/reflect 不再在 run_loop 中同步 await LLM；改为后台 task 执行，通过 UiEvent 回传 started/usage/done，TUI 立即显示 spinner 并继续响应 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
-| 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 活动中 | 未确认 | 2026-05 | Bash tool schema 允许传入 600s timeout，但外层 tool call/API 网关仍在 120s 触发硬超时，导致长时间命令显示 timeout 600s 却实际 120s 失败 |
+| 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
 
 ## 专案
 
