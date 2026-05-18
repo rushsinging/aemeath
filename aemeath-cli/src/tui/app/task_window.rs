@@ -69,6 +69,8 @@ pub fn build_task_window<'a>(
         .map(|t| t.updated_at)
         .max()
         .unwrap_or(0);
+    // 保存未过滤的 completed，用于温和扩展和下限保护回退
+    let all_completed_for_fallback = completed_by_recency.clone();
     let completed_by_recency: Vec<&Task> = if completed_by_recency.len() > max_lines
         && !(pending_count == 0 && in_progress_count > 0)
     {
@@ -148,40 +150,64 @@ pub fn build_task_window<'a>(
     // --- 下限保护 + 温和扩展：有余量时继续填充 ---
     let _task_lines = lines.len() - 1; // exclude summary
     let min_show = 3.min(total);
+    // 构建按 id 升序的未过滤 completed 列表，用于回退补齐
+    let mut all_completed_sorted = all_completed_for_fallback;
+    all_completed_sorted.sort_by_key(|t| task_sort_key(t));
+    // 跟踪已显示的 task id（避免重复插入）
+    let mut shown_ids: std::collections::HashSet<&str> = selected_completed_ids;
+
     if remaining > 0 {
-        // 补充更多 completed（跳过已显示的最新项），插入到已显示 completed 之后
-        let more_comp = remaining.min(completed_for_display.len().saturating_sub(comp_show));
-        let insert_pos = 1 + comp_show; // after summary + displayed completed
-        for (i, t) in completed_for_display
+        // 先从 TTL 过滤后的 completed 中补充
+        let from_filtered = remaining.min(completed_for_display.len().saturating_sub(comp_show));
+        let insert_pos = 1 + comp_show;
+        let extras: Vec<&Task> = completed_for_display
             .iter()
-            .filter(|task| !selected_completed_ids.contains(task.id.as_str()))
-            .take(more_comp)
-            .enumerate()
-        {
+            .filter(|task| !shown_ids.contains(task.id.as_str()))
+            .take(from_filtered)
+            .copied()
+            .collect();
+        for (i, t) in extras.iter().enumerate() {
             lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+            shown_ids.insert(t.id.as_str());
         }
-        remaining = remaining.saturating_sub(more_comp);
+        remaining = remaining.saturating_sub(extras.len());
     }
     if remaining > 0 {
-        // 补充更多 pending（跳过已显示的 pending_show 条）
+        // 补充更多 pending
         let more_pending = remaining.min(pending_count.saturating_sub(pending_show));
         for t in pending.iter().skip(pending_show).take(more_pending) {
             lines.push(format_task_line(t, &display_numbers));
         }
         remaining = remaining.saturating_sub(more_pending);
     }
-    // 如果仍然不足 min_show，从更早的 completed 继续取
-    if lines.len() - 1 < min_show && remaining > 0 {
-        let more = (min_show - (lines.len() - 1))
-            .min(remaining)
-            .min(completed_for_display.len().saturating_sub(comp_show));
-        for (i, t) in completed_for_display
+    // 如果仍有余量，从未过滤的 completed 中回退补齐
+    if remaining > 0 {
+        let insert_pos = 1 + comp_show;
+        let fallback: Vec<&Task> = all_completed_sorted
             .iter()
-            .filter(|task| !selected_completed_ids.contains(task.id.as_str()))
-            .take(more)
-            .enumerate()
-        {
-            lines.insert(1 + comp_show + i, format_task_line(t, &display_numbers));
+            .filter(|t| !shown_ids.contains(t.id.as_str()))
+            .take(remaining)
+            .copied()
+            .collect();
+        for (i, t) in fallback.iter().enumerate() {
+            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+            shown_ids.insert(t.id.as_str());
+        }
+        remaining = remaining.saturating_sub(fallback.len());
+    }
+    // 如果仍然不足 min_show，继续从 completed 取
+    if lines.len() - 1 < min_show && remaining > 0 {
+        let need = (min_show - (lines.len() - 1)).min(remaining);
+        let insert_pos = 1 + comp_show;
+        let more: Vec<&Task> = all_completed_sorted
+            .iter()
+            .filter(|t| !shown_ids.contains(t.id.as_str()))
+            .take(need)
+            .copied()
+            .collect();
+        for (i, t) in more.iter().enumerate() {
+            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+            shown_ids.insert(t.id.as_str());
         }
     }
     // --- 折叠提示 ---
