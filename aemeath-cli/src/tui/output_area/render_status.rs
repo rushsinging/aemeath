@@ -23,6 +23,7 @@ impl OutputArea {
             lines.push(sl.clone());
         }
         if spinner_line.is_some() {
+            let screen_start = self.screen_line_map.len();
             let task_base_idx = self.lines.len();
             for (i, task_line) in task_status_lines.iter().enumerate() {
                 let text = format!("  {task_line}");
@@ -32,7 +33,19 @@ impl OutputArea {
                     CharIdx::ZERO,
                     CharIdx::new(char_count),
                 ));
-                lines.push(Line::styled(text, Style::default().fg(Color::DarkGray)));
+                let screen_idx = screen_start + i;
+                let task_style = Style::default().fg(Color::DarkGray);
+                let line = if self.has_real_selection() {
+                    Line::from(self.render_line_with_selection(
+                        screen_idx,
+                        &text,
+                        task_style,
+                        &self.screen_line_map,
+                    ))
+                } else {
+                    Line::styled(text, task_style)
+                };
+                lines.push(line);
             }
         }
     }
@@ -137,5 +150,34 @@ mod tests {
             output.get_selected_text(),
             Some("  □ #1 修复 bug".to_string())
         );
+    }
+
+    #[test]
+    fn test_render_highlights_selected_task_status_line() {
+        let mut output = OutputArea::new();
+        output.task_status_lines = vec!["□ #1 修复 bug".to_string()];
+        output.spinner = Some(SpinnerState {
+            frame: 0,
+            verb: "Thinking".to_string(),
+            start: std::time::Instant::now(),
+            phase: None,
+        });
+        let area = Rect::new(0, 0, 40, 4);
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf);
+        output.start_selection(0, 0, &area);
+        output.update_selection(0, 8, &area);
+        output.render(area, &mut buf);
+
+        let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
+        assert_eq!(first_selected.style().bg, Some(ratatui::style::Color::Blue));
+        assert_eq!(
+            first_selected.style().fg,
+            Some(ratatui::style::Color::White)
+        );
+
+        let unselected = buf.cell((area.x + 9, area.y + 1)).unwrap();
+        assert_ne!(unselected.style().bg, Some(ratatui::style::Color::Blue));
     }
 }
