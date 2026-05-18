@@ -6,7 +6,7 @@
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
 | 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 本轮继续修复(D)：9/10 完成后窗口只显示 ✓#9 + ■#10 未填满 7 条；根因是 completed TTL 过滤在无 pending、仅 completed+in_progress 场景中过早丢弃旧 completed，且最近 completed 曾按 id 升序取最早项。 |
-| 33 | Spinner 下方 task list 无法选中和复制 | 中 | 待确认 | 未确认 | 2026-05 | task status 行渲染时未在 screen_line_map 中添加条目，导致 selection/copy 路径无法映射到这些屏幕行 |
+| 33 | Spinner 下方 task list 无法选中、复制和高亮 | 中 | 待确认 | 未确认 | 2026-05 | task status 行已映射到 screen_line_map 且可复制，但渲染路径未对虚拟 task 行叠加 selection 高亮；本次补齐高亮渲染 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
 | 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
@@ -26,7 +26,7 @@
 | Bug | #27 Sub-agent 已执行 tool call 但 task list 状态不更新 | 状态流转：sub-agent 路径 | 已有修复（2026-05-11）：AgentTool 新增 taskId 参数 + 自动桥接 |
 | Bug | #29 主 agent tool call 执行后 task list 状态不更新 | 状态流转：主 agent 路径 | 已有修复（2026-05-11）：system prompt 强约束 + TaskCreate 描述增强 |
 | Bug | #32 Task list 窗口化：始终只显示 1 条 task | 窗口化显示：限量显示策略缺陷 | 已修复（2026-05-11）：TTL 只优先 recent completed，补齐窗口时回退使用旧 completed |
-| Bug | #33 Spinner 下方 task list 无法选中和复制 | 交互：task status 行 selection/copy 映射缺失 | 待确认；已修复（2026-05-14）：render 阶段为 task status 行补充 screen_line_map 映射，复制路径可读取虚拟 task 行 |
+| Bug | #33 Spinner 下方 task list 无法选中、复制和高亮 | 交互：task status 行 selection/copy 映射与高亮渲染 | 待确认；已修复（2026-05-17）：task status 行使用虚拟逻辑行叠加 selection 高亮，复制路径继续读取虚拟 task 行 |
 | Bug | #34 Task reminder 干扰新用户请求 | batch 隔离：提醒不隔离 | ✅ 已归档（2026-05-17）：用户确认修复；详见 `docs/bug/archived/034-task-reminder-interference.md` |
 | Bug | #36 TaskListCreate 后新任务编号未从 1 开始 | batch 内编号：session 第二次 TaskListCreate 时 TaskCreate 编号沿用全局递增而非从 1 开始 | 已修复（2026-05-11）：TUI 使用 batch 内局部显示编号 |
 | Bug | #37 Task list 全部完成后切换对话仍显示旧 task | 跨轮次清理：已完成 batch 挂留 | 已修复（2026-05-11）：当前列表只读取 Active/Paused batch，归档 batch 自动隐藏 |
