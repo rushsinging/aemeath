@@ -13,11 +13,18 @@ impl InputArea {
     pub fn set_suggestions(&mut self, suggestions: Vec<Suggestion>) {
         self.selected_suggestion = if suggestions.is_empty() { -1 } else { 0 };
         self.show_suggestions = !suggestions.is_empty();
+        log::debug!(
+            "set_suggestions: count={}, show={}, selected={}",
+            suggestions.len(),
+            self.show_suggestions,
+            self.selected_suggestion,
+        );
         self.suggestions = suggestions;
     }
 
     /// Clear suggestions
     pub fn clear_suggestions(&mut self) {
+        log::debug!("clear_suggestions (was show={})", self.show_suggestions);
         self.suggestions.clear();
         self.selected_suggestion = -1;
         self.show_suggestions = false;
@@ -30,6 +37,12 @@ impl InputArea {
 
     /// Move selection up in suggestions
     pub fn select_previous(&mut self) -> bool {
+        log::debug!(
+            "select_previous: show={}, suggestions={}, selected={}",
+            self.show_suggestions,
+            self.suggestions.len(),
+            self.selected_suggestion,
+        );
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion > 0 {
                 self.selected_suggestion -= 1;
@@ -44,6 +57,12 @@ impl InputArea {
 
     /// Move selection down in suggestions
     pub fn select_next(&mut self) -> bool {
+        log::debug!(
+            "select_next: show={}, suggestions={}, selected={}",
+            self.show_suggestions,
+            self.suggestions.len(),
+            self.selected_suggestion,
+        );
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion < self.suggestions.len() as i32 - 1 {
                 self.selected_suggestion += 1;

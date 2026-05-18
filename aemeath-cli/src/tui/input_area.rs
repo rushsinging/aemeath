@@ -63,6 +63,7 @@ impl InputArea {
     }
 
     pub(super) fn hide_suggestions(&mut self) {
+        log::debug!("hide_suggestions (was show={})", self.show_suggestions);
         self.show_suggestions = false;
     }
 
