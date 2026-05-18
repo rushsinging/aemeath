@@ -5,7 +5,7 @@
 | 13 | Zhipu API 超大请求体返回空响应 | 高 | 待确认 | 未确认 | 2026-04 | 同 #39：超大 tool result 未持久化导致请求体过大，部分 API 静默空响应 |
 | 27 | Sub-agent 已执行 tool call 但 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | AgentTool::call() 未读取 taskId 参数，未在 run_agent 前后管理 task 状态转换；sub-agent TaskStore 与父隔离 |
 | 29 | 主 agent tool call 执行后 task list 状态不更新 | 高 | 待确认 | 未确认 | 2026-05 | system prompt 引用不存在的 TodoWrite/TodoRun，缺少 TaskUpdate 强约束 |
-| 32 | Task list 窗口化显示异常（多症状） | 高 | 修复中 | 未确认 | 2026-05 | 本轮继续修复(D)：9/10 完成后窗口只显示 ✓#9 + ■#10 未填满 7 条；根因是 completed TTL 过滤在无 pending、仅 completed+in_progress 场景中过早丢弃旧 completed，且最近 completed 曾按 id 升序取最早项。 |
+| 32 | Task list 窗口化显示异常（多症状） | 高 | 待确认 | 未确认 | 2026-05 | 已验证修复(D)：无 pending、仅 completed+in_progress 时，旧 completed 可回退补齐 7 条窗口；回归测试覆盖 9/10 完成后显示 #4~#9 completed + #10 in_progress。 |
 | 33 | Spinner 下方 task list 无法选中、复制和高亮 | 中 | 待确认 | 未确认 | 2026-05 | task status 行已映射到 screen_line_map 且可复制，但渲染路径未对虚拟 task 行叠加 selection 高亮；本次补齐高亮渲染 |
 | 35 | Write tool 在 worktree 中写入错误分支 | 高 | 待确认 | 未确认 | 2026-05 | 文件工具缺少独立相对路径基准，Bash `cd` 后未同步后续工具路径解析 |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
@@ -227,6 +227,10 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 8. **摘要行全量 completed 计数**：`Tasks: x/y` 中的 x 改为使用全量 completed 数（`all_completed_count`），而非 TTL 过滤后的数量，修复"Tasks: 1/5 但实际已完成 3 条"的问题
 9. **Completed 显示顺序修正**：completed 行改为按 task id 升序显示，保持 task list 视觉顺序稳定；TTL 判断仍使用最大 `updated_at` 作为最新完成时间。
 10. **回归测试补充**：新增用户示例对应的 completed 乱序测试；`task_window` 16 个单元测试、`cargo test -p aemeath-cli`、`cargo check -p aemeath-cli` 通过。
+
+**修复验证（2026-05-18）**：
+11. **症状 D 验证**：当前 `build_task_window()` 已在 `pending_count == 0 && in_progress_count > 0` 时跳过 completed TTL 过滤，并按 `remaining - in_progress_count` 选取最近 completed 补满窗口。
+12. **回归测试确认**：`test_bug32_user_snapshot_keeps_full_window_when_only_recent_completed_and_in_progress` 覆盖 9/10 完成场景，期望显示 #4~#9 completed + #10 in_progress；`cargo test -p aemeath-cli task_window -- --nocapture` 通过 19 个 task_window 测试。
 
 **关联**：
 - Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
