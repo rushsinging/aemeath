@@ -7,21 +7,26 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
-struct StubRunner;
+struct StubRunner {
+    captured_max_turns: Mutex<Option<u32>>,
+    captured_system: Mutex<String>,
+}
 
 #[async_trait::async_trait]
 impl AgentRunner for StubRunner {
     async fn run_agent(
         &self,
         prompt: &str,
-        _system: &str,
+        system: &str,
         _tool_schemas: &[serde_json::Value],
         _registry: &ToolRegistry,
         _ctx: &ToolContext,
-        _max_turns: Option<u32>,
+        max_turns: Option<u32>,
         _model_spec: Option<&str>,
         _progress_tx: Option<tokio::sync::mpsc::Sender<aemeath_core::tool::AgentProgressEvent>>,
     ) -> String {
+        *self.captured_max_turns.lock().unwrap() = max_turns;
+        *self.captured_system.lock().unwrap() = system.to_string();
         prompt.to_string()
     }
 
@@ -30,13 +35,13 @@ impl AgentRunner for StubRunner {
     }
 }
 
-fn test_ctx() -> ToolContext {
+fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
     ToolContext {
         cwd: PathBuf::from("."),
         path_base: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
-        agent_runner: Some(Arc::new(StubRunner)),
+        agent_runner: Some(runner),
         session_reminders: None,
         plan_mode: None,
         allow_all: false,
@@ -46,6 +51,76 @@ fn test_ctx() -> ToolContext {
         progress_tx: None,
         parent_session_id: None,
     }
+}
+
+fn test_ctx() -> ToolContext {
+    test_ctx_with_runner(Arc::new(StubRunner::default()))
+}
+
+#[tokio::test]
+async fn test_agent_tool_uses_200_default_turns() {
+    let store = Arc::new(TaskStore::new());
+    let tool = AgentTool { store };
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(*runner.captured_max_turns.lock().unwrap(), None);
+    assert!(runner
+        .captured_system
+        .lock()
+        .unwrap()
+        .contains("You have max 200 rounds of tool calls"));
+}
+
+#[tokio::test]
+async fn test_agent_tool_caps_max_turns_at_200() {
+    let store = Arc::new(TaskStore::new());
+    let tool = AgentTool { store };
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+                "max_turns": 250,
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(*runner.captured_max_turns.lock().unwrap(), Some(200));
+    assert!(runner
+        .captured_system
+        .lock()
+        .unwrap()
+        .contains("You have max 200 rounds of tool calls"));
+}
+
+#[test]
+fn test_agent_tool_schema_describes_200_turn_limit() {
+    let tool = AgentTool {
+        store: Arc::new(TaskStore::new()),
+    };
+
+    let schema = tool.input_schema().to_string();
+    let description = tool.description();
+
+    assert!(schema.contains("default 200, max 200"));
+    assert!(description.contains("default 200 tool-call rounds"));
 }
 
 #[tokio::test]
