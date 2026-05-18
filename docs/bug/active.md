@@ -11,6 +11,7 @@
 | 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：/reflect 不再在 run_loop 中同步 await LLM；改为后台 task 执行，通过 UiEvent 回传 started/usage/done，TUI 立即显示 spinner 并继续响应 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
+| 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 活动中 | 未确认 | 2026-05 | Bash tool schema 允许传入 600s timeout，但外层 tool call/API 网关仍在 120s 触发硬超时，导致长时间命令显示 timeout 600s 却实际 120s 失败 |
 
 ## 专案
 
@@ -526,6 +527,35 @@ API error [400 Bad Request]: string too long. Expected a string with maximum len
 - 可能涉及 markdown 渲染中代码块/工具输出区域的文本处理
 
 ---
+
+### #44 Bash 工具设置 600s timeout 仍被 120s 截断
+
+**症状**：Bash 工具调用传入 `timeout: 600000` 时，UI/日志显示命令 timeout 为 600s，例如：
+
+```text
+$ docker build -f "apps/studio/docker/Dockerfile.dev" "apps/studio" --target builder --progress=plain  (timeout: 600s)
+```
+
+但实际执行约 120s 后失败：
+
+```text
+Tool Bash timed out after 120s
+```
+
+**影响**：长时间命令（如 Docker build、大型依赖安装、长测试）无法通过单次 Bash 调用完成；用户会被 `timeout: 600s` 展示误导，以为命令本应允许运行 10 分钟。
+
+**根因假设**：Bash 工具自身参数/schema 允许传入最高 600s timeout，但工具执行外层还存在 tool call/API 网关/宿主 runtime 的 120s 硬超时。当前展示的是内层 Bash timeout，实际生效的是更短的外层 timeout。
+
+**修复方向**：
+1. 明确区分并记录两层 timeout：Bash 命令 timeout 与外层 tool call timeout。
+2. 若外层硬限制可从配置读取，应在 Bash 工具展示和错误消息中显示有效 timeout（取两者较小值），避免 UI 显示 600s 但 120s 失败。
+3. 若外层硬限制不可控，应在文档/工具描述中说明长任务需后台执行并轮询日志，例如 `cmd > /tmp/build.log 2>&1 &` 后分次查看。
+
+**临时规避**：将长命令拆分为多个短步骤，或用后台进程执行并通过后续 Bash 调用轮询日志和退出状态。
+
+**涉及路径**：
+- `aemeath-tools/src/bash.rs`（Bash 工具 timeout 参数、命令展示、错误消息）
+- tool call 调度/runtime 层（外层执行超时来源）
 
 ### #43 TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致
 
