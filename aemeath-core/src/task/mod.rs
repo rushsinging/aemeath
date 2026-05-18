@@ -1,4 +1,5 @@
 pub mod batch;
+pub mod display;
 pub mod lifecycle;
 pub mod list;
 pub mod store;

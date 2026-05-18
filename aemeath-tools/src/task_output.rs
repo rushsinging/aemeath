@@ -61,6 +61,7 @@ impl Tool for TaskOutputTool {
             let count = tasks.len().min(limit);
 
             for task in tasks.iter().take(count) {
+                let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
                     aemeath_core::task::TaskStatus::Pending => "pending",
                     aemeath_core::task::TaskStatus::InProgress => "in_progress",
@@ -68,7 +69,7 @@ impl Tool for TaskOutputTool {
                     aemeath_core::task::TaskStatus::Deleted => "deleted",
                 };
 
-                output.push_str(&format!("#{} [{}] {}\n", task.id, status, task.subject));
+                output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
                 output.push_str(&format!("  Description: {}\n", task.description));
 
                 if let Some(owner) = &task.owner {
@@ -76,11 +77,13 @@ impl Tool for TaskOutputTool {
                 }
 
                 if !task.blocked_by.is_empty() {
-                    output.push_str(&format!("  Blocked by: {}\n", task.blocked_by.join(", ")));
+                    let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
+                    output.push_str(&format!("  Blocked by: {}\n", dep_displays.join(", ")));
                 }
 
                 if !task.blocks.is_empty() {
-                    output.push_str(&format!("  Blocks: {}\n", task.blocks.join(", ")));
+                    let dep_displays = self.store.to_display_ids(&task.blocks).await;
+                    output.push_str(&format!("  Blocks: {}\n", dep_displays.join(", ")));
                 }
 
                 output.push('\n');
@@ -94,10 +97,16 @@ impl Tool for TaskOutputTool {
             }
 
             ToolResult::success(output.trim_end())
-        } else if let Some(task_id) = input["task_id"].as_str() {
+        } else if let Some(input_id) = input["task_id"].as_str() {
+            // Resolve display number to global id
+            let task_id = match self.store.resolve_display_id(input_id).await {
+                Some(global_id) => global_id,
+                None => return ToolResult::error(format!("Task not found: {}", input_id)),
+            };
             // Get specific task output
-            match self.store.get(task_id).await {
+            match self.store.get(&task_id).await {
                 Some(task) => {
+                    let display_id = self.store.format_display_id(&task.id).await;
                     let status = match task.status {
                         aemeath_core::task::TaskStatus::Pending => "pending",
                         aemeath_core::task::TaskStatus::InProgress => "in_progress",
@@ -106,7 +115,7 @@ impl Tool for TaskOutputTool {
                     };
 
                     let mut output = String::new();
-                    output.push_str(&format!("Task #{} [{}]\n", task.id, status));
+                    output.push_str(&format!("Task #{} [{}]\n", display_id, status));
                     output.push_str(&format!("Subject: {}\n", task.subject));
                     output.push_str(&format!("Description: {}\n", task.description));
 
@@ -119,16 +128,18 @@ impl Tool for TaskOutputTool {
                     }
 
                     if !task.blocked_by.is_empty() {
-                        output.push_str(&format!("Blocked by: {}\n", task.blocked_by.join(", ")));
+                        let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
+                        output.push_str(&format!("Blocked by: {}\n", dep_displays.join(", ")));
                     }
 
                     if !task.blocks.is_empty() {
-                        output.push_str(&format!("Blocks: {}\n", task.blocks.join(", ")));
+                        let dep_displays = self.store.to_display_ids(&task.blocks).await;
+                        output.push_str(&format!("Blocks: {}\n", dep_displays.join(", ")));
                     }
 
                     ToolResult::success(output.trim_end())
                 }
-                None => ToolResult::error(format!("Task not found: {}", task_id)),
+                None => ToolResult::error(format!("Task not found: {}", input_id)),
             }
         } else {
             // No task_id specified, show recent tasks
@@ -142,6 +153,7 @@ impl Tool for TaskOutputTool {
             let count = tasks.len().min(limit);
 
             for task in tasks.iter().take(count) {
+                let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
                     aemeath_core::task::TaskStatus::Pending => "pending",
                     aemeath_core::task::TaskStatus::InProgress => "in_progress",
@@ -149,7 +161,7 @@ impl Tool for TaskOutputTool {
                     aemeath_core::task::TaskStatus::Deleted => "deleted",
                 };
 
-                output.push_str(&format!("#{} [{}] {}\n", task.id, status, task.subject));
+                output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
             }
 
             if tasks.len() > limit {

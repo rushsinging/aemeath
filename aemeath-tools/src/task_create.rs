@@ -111,6 +111,7 @@ impl Tool for TaskCreateTool {
         };
 
         let priority_str = task.priority.as_str();
+        let display_id = self.store.format_display_id(&task.id).await;
         let progress_str = if task.progress > 0 {
             format!(
                 " ({}% - {})",
@@ -123,7 +124,7 @@ impl Tool for TaskCreateTool {
 
         ToolResult::success(format!(
             "Task #{} created successfully: {} [{}]{progress_str}\nDescription: {}",
-            task.id, task.subject, priority_str, task.description
+            display_id, task.subject, priority_str, task.description
         ))
     }
 }

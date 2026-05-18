@@ -36,19 +36,24 @@ impl Tool for TaskGetTool {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        let task_id = input["taskId"].as_str().unwrap_or("");
+        let input_id = input["taskId"].as_str().unwrap_or("");
 
-        if task_id.is_empty() {
+        if input_id.is_empty() {
             return ToolResult::error("Task ID is required");
         }
 
-        let task = self.store.get(task_id).await;
+        // Resolve display number to global id
+        let task_id = match self.store.resolve_display_id(input_id).await {
+            Some(global_id) => global_id,
+            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+        };
 
-        if task.is_none() {
-            return ToolResult::error(format!("Task not found: {}", task_id));
-        }
+        let task = match self.store.get(&task_id).await {
+            Some(t) => t,
+            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+        };
 
-        let task = task.unwrap();
+        let display_id = self.store.format_display_id(&task.id).await;
         let status = match task.status {
             TaskStatus::Pending => "pending",
             TaskStatus::InProgress => "in_progress",
@@ -59,7 +64,7 @@ impl Tool for TaskGetTool {
         let priority = task.priority.as_str();
 
         let mut lines = vec![
-            format!("Task #{}: {}", task.id, task.subject),
+            format!("Task #{}: {}", display_id, task.subject),
             format!("Status: {}", status),
             format!("Priority: {}", priority),
             format!("Description: {}", task.description),
@@ -98,8 +103,8 @@ impl Tool for TaskGetTool {
 
         // Dependencies
         if !task.blocked_by.is_empty() {
-            let blocked_by = task
-                .blocked_by
+            let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
+            let blocked_by = dep_displays
                 .iter()
                 .map(|id| format!("#{}", id))
                 .collect::<Vec<_>>()
@@ -113,8 +118,8 @@ impl Tool for TaskGetTool {
         }
 
         if !task.blocks.is_empty() {
-            let blocks = task
-                .blocks
+            let dep_displays = self.store.to_display_ids(&task.blocks).await;
+            let blocks = dep_displays
                 .iter()
                 .map(|id| format!("#{}", id))
                 .collect::<Vec<_>>()
