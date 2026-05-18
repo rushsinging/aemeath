@@ -3,14 +3,12 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
-| 33 | Spinner 下方 task list 无法选中、复制和高亮 | 中 | 待确认 | 未确认 | 2026-05 | task status 行已映射到 screen_line_map 且可复制；input area 高亮渲染按字符列覆盖导致 CJK 宽字符后半段漏高亮，本次改为字符列转显示列后绘制 |
 | 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
-| 38 | Assistant 空消息导致 API 400 invalid_request_error | 中 | 待确认 | 未确认 | 2026-05 | assistant message content 和 tool_calls 同时为空，违反 API 校验 |
 | 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
-| 41 | 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：/reflect 不再在 run_loop 中同步 await LLM；改为后台 task 执行，通过 UiEvent 回传 started/usage/done，TUI 立即显示 spinner 并继续响应 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
+| 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 活动中 | 未确认 | 2026-05 | 输入 `/` 后弹出命令候选列表，但按上下键无法在候选中移动高亮，上下键仍被当作历史命令翻页处理 |
 
 ## 专案
 
@@ -307,39 +305,6 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 ### #36 TaskListCreate 后新任务编号未从 1 开始（已归档 2026-05-14）
 
 用户确认修复。修复内容：TUI 渲染改用 batch 内局部显示编号，list_current_batch() 过滤已归档 batch。详见 docs/bug/archived/036-task-list-numbering.md。
-
-### #38 Assistant 空消息导致 API 400 invalid_request_error
-
-**症状**：会话 `019e16be-7344-7145-9153-ac7c2757df27` 调用模型时返回：
-
-```text
-Error: API error [400 Bad Request]: {"error":{"message":"Invalid assistant message: content or tool_calls must be set","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}
-```
-
-**影响**：包含该异常 assistant 消息的 session 后续无法继续正常请求 OpenAI-compatible API；resume 或继续对话会反复触发 400。
-
-**根因假设**：某条 assistant message 在持久化或发送前同时缺少 `content` 和 `tool_calls`（或二者为空），违反目标 API 对 assistant 消息的校验要求。可能发生在：
-1. assistant turn 因中断、空响应、tool-only 事件折叠、stream finalize 等路径产生空消息。
-2. session resume 读取历史时没有过滤/修复空 assistant message。
-3. provider 请求构造层没有在发送前校验 message 非空。
-
-**复现线索**：session id `019e16be-7344-7145-9153-ac7c2757df27`。
-
-**修复方向**：
-1. 定位该 session 文件中空 assistant message 的来源，确认是保存阶段还是发送阶段产生。
-2. 请求发送前增加防御：过滤或拒绝 content/tool_calls 均为空的 assistant message，并输出中文错误说明。
-3. session resume/加载历史时对既有空 assistant message 做兼容处理，避免坏历史阻断后续对话。
-4. 添加回归测试覆盖空 assistant message 不会进入 provider request。
-
-**涉及路径**：
-- session 持久化 / resume 读取路径
-- provider message 转换路径（OpenAI/OpenAICompatible/Zhipu 等）
-- agent loop finalize / streaming assistant message 生成路径
-
-**修复（2026-05-11）**：
-1. OpenAI-compatible 请求转换阶段增加发送前防御：assistant 消息若仅包含空白文本、且没有 tool_calls / reasoning_content，则在请求前丢弃，避免触发 `content or tool_calls must be set`。
-2. 保留 user 空白消息语义；保留 tool-only assistant，并继续以 `content: null + tool_calls` 发送。
-3. 新增回归测试覆盖空白 assistant 被过滤、空白 user 保留、tool-only assistant 保留。
 
 ### #39 超大工具结果触发 API 400 string_above_max_length
 
