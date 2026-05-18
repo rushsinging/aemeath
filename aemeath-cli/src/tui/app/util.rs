@@ -1,10 +1,22 @@
 // Suggestion 在 apply_current_suggestion 中通过 self.input_area.accept_suggestion() 使用
 
 impl super::App {
-    /// Copy text to clipboard
-    #[allow(dead_code)]
-    pub fn copy_to_clipboard(&mut self, text: &str) -> Result<(), String> {
-        crate::tui::clipboard::copy_text(text)
+    /// Copy text to clipboard with status bar feedback.
+    pub fn copy_to_clipboard(&mut self, text: &str) {
+        match crate::tui::clipboard::copy_text(text) {
+            Ok(()) => self.status_bar.set_success("已复制选中内容"),
+            Err(err) => {
+                log::warn!("复制选中内容失败: {err}");
+                self.status_bar.set_warning(&err);
+            }
+        }
+    }
+
+    /// Copy optional selection text to clipboard; no-op if None.
+    pub fn copy_selection_to_clipboard(&mut self, text: Option<String>) {
+        if let Some(t) = text {
+            self.copy_to_clipboard(&t);
+        }
     }
 
     /// Accept the currently highlighted suggestion

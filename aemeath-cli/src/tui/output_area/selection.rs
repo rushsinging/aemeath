@@ -220,6 +220,11 @@ impl super::OutputArea {
         self.selection_end = None;
         self.is_selecting = false;
     }
+
+    /// Whether a selection drag is in progress
+    pub fn is_selecting(&self) -> bool {
+        self.is_selecting
+    }
 }
 
 #[cfg(test)]
