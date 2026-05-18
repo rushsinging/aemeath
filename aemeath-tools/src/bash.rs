@@ -42,6 +42,13 @@ impl Tool for BashTool {
         false
     }
 
+    /// Override: Bash commands may run up to 600s (schema max).
+    /// The default 120s outer timeout in agent.rs would kill long-running
+    /// commands before the internal per-command timeout fires.
+    fn timeout_secs(&self) -> u64 {
+        600
+    }
+
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
