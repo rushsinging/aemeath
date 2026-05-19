@@ -11,6 +11,9 @@ impl super::OutputArea {
     /// 根据逻辑索引获取行文本内容。
     /// idx < self.lines.len() → 普通行；否则 → task_status_lines[i]
     fn get_line_content(&self, idx: usize) -> Option<String> {
+        if let Some(rendered) = self.rendered_line_content.get(&idx) {
+            return Some(rendered.clone());
+        }
         if idx < self.lines.len() {
             return Some(self.lines[idx].content.clone());
         }
@@ -231,6 +234,7 @@ impl super::OutputArea {
 mod tests {
     use super::super::{LineStyle, OutputArea, OutputLine};
     use aemeath_core::string_idx::CharIdx;
+    use ratatui::{buffer::Buffer, layout::Rect};
 
     #[test]
     fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
@@ -339,5 +343,32 @@ mod tests {
         let selected = output.get_selected_text();
         // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
         assert_eq!(selected, Some("bc\n  x".to_string()));
+    }
+
+    #[test]
+    fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
+        let mut output = OutputArea::new();
+        for content in ["| Name | Status |", "| --- | --- |", "| Alice | Done |"] {
+            output.push_line(OutputLine {
+                content: content.to_string(),
+                style: LineStyle::Assistant,
+                ..Default::default()
+            });
+        }
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 5,
+        };
+        let mut buf = Buffer::empty(area);
+        output.render(area, &mut buf);
+
+        output.start_selection(0, 0, &area);
+        output.update_selection(0, 15, &area);
+
+        let selected = output.get_selected_text();
+
+        assert_eq!(selected, Some(" Name  │ Status".to_string()));
     }
 }

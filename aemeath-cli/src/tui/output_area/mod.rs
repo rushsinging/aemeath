@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use aemeath_core::string_idx::CharIdx;
 
@@ -48,6 +48,8 @@ pub struct OutputArea {
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
     /// 由 render() 构建，供 selection 使用
     pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
+    /// 渲染后的逻辑行文本覆盖：Markdown 表格等渲染文本与原始 content 不同时，selection 使用这里的数据源
+    pub rendered_line_content: HashMap<usize, String>,
     /// 活跃的 spinner 动画（显示为最后一行）
     pub spinner: Option<SpinnerState>,
     /// 上次渲染时的可见高度缓存
@@ -87,6 +89,7 @@ impl OutputArea {
             selection_start: None,
             selection_end: None,
             screen_line_map: Vec::new(),
+            rendered_line_content: HashMap::new(),
             spinner: None,
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
