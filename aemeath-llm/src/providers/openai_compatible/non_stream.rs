@@ -109,7 +109,7 @@ impl OpenAICompatibleProvider {
 
                     // 提取 tool calls
                     if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
-                        for tool_call in tool_calls {
+                        for (idx, tool_call) in tool_calls.iter().enumerate() {
                             if let Some(function) = tool_call.get("function") {
                                 let id = tool_call
                                     .get("id")
@@ -128,7 +128,7 @@ impl OpenAICompatibleProvider {
                                 let input: serde_json::Value = serde_json::from_str(arguments)
                                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-                                handler.on_tool_use_start(&name);
+                                handler.on_tool_use_start(&name, idx);
                                 if !name.is_empty() {
                                     content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                 }

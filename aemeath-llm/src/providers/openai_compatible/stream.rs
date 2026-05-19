@@ -194,7 +194,7 @@ pub(crate) async fn parse_openai_stream(
                                         entry.0 = format!("call_{}", index);
                                     }
                                     if is_new {
-                                        handler.on_tool_use_start(name);
+                                        handler.on_tool_use_start(name, index);
                                     }
                                 }
                                 if let Some(args) =
@@ -202,6 +202,15 @@ pub(crate) async fn parse_openai_stream(
                                 {
                                     entry.2.push_str(args);
                                     entry.3 += 1;
+                                    // Notify handler with accumulated arguments for
+                                    // real-time UI updates (e.g. showing file path).
+                                    if !entry.1.is_empty() {
+                                        handler.on_tool_arguments_delta(
+                                            index,
+                                            &entry.1,
+                                            &entry.2,
+                                        );
+                                    }
                                 }
                             }
                         }

@@ -139,7 +139,7 @@ impl OllamaProviderNonStream for OllamaProvider {
                             .cloned()
                             .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
 
-                        handler.on_tool_use_start(&name);
+                        handler.on_tool_use_start(&name, idx);
                         content_blocks.push(ContentBlock::ToolUse { id, name, input });
                     }
                 }

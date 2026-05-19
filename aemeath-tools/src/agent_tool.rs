@@ -88,13 +88,10 @@ impl Tool for AgentTool {
         // reads. Advisory UI messages belong in the UI channel.
         let scope = analyze_task_scope(prompt, &ctx.cwd);
 
-        // Hard block: prompt is far too large for a sub-agent
-        if scope.level == ScopeLevel::Block {
-            return ToolResult::error(format!(
-                "Task is too large for a sub-agent. Please break it down:\n{}",
-                scope.warnings.join("\n")
-            ));
-        }
+        // Scope analysis may produce warnings but never blocks — the calling
+        // agent is responsible for deciding whether the task is appropriate.
+        // (Previously, ScopeLevel::Block returned an error here, which was too
+        // aggressive for expert users who know what they're doing.)
 
         let _model = input.get("model").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -222,11 +219,10 @@ enum ScopeLevel {
     Ok,
     /// Task has warning signs — let it proceed but inject hints
     Warn,
-    /// Task is too large — block and ask the caller to break it down
-    Block,
 }
 
 struct ScopeResult {
+    #[allow(dead_code)]
     level: ScopeLevel,
     warnings: Vec<String>,
 }
@@ -257,20 +253,12 @@ fn extract_file_paths(prompt: &str) -> Vec<&str> {
     paths
 }
 
-/// Broad patterns that indicate the task is too vague or too large.
-const LARGE_TASK_PATTERNS: &[&str] = &[
-    "entire codebase",
-    "whole project",
-    "all files",
-    "the entire",
-    "every file",
-    "review everything",
-    "review all",
-    "audit everything",
-    "audit all",
-    "refactor everything",
-    "refactor all",
-];
+/// Patterns that indicate the task might be vague or large.
+/// These now only produce warnings — they no longer block execution.
+/// Kept as an empty array for documentation purposes; broad keyword
+/// matching has been removed — the calling agent decides scope.
+#[allow(dead_code)]
+const LARGE_TASK_PATTERNS: &[&str] = &[];
 
 /// Patterns that indicate the task might be single-step and doesn't need a sub-agent.
 const SIMPLE_TASK_PATTERNS: &[&str] = &[
@@ -307,13 +295,13 @@ fn analyze_task_scope(prompt: &str, cwd: &Path) -> ScopeResult {
         .collect();
 
     if existing_paths.len() > 10 {
-        level = ScopeLevel::Block;
+        level = ScopeLevel::Warn;
         warnings.push(format!(
-          "Prompt references {} file paths. A sub-agent cannot effectively process this many files in ~128K tokens. Break into 2-4 smaller agents, each handling a subset of files.",
+          "Prompt references {} file paths. A sub-agent may not effectively process this many files in ~128K tokens. Consider breaking into 2-4 smaller agents, each handling a subset of files.",
           existing_paths.len()
       ));
     } else if existing_paths.len() > 5 {
-        if level != ScopeLevel::Block {
+        if level != ScopeLevel::Warn {
             level = ScopeLevel::Warn;
         }
         warnings.push(format!(
@@ -323,16 +311,8 @@ fn analyze_task_scope(prompt: &str, cwd: &Path) -> ScopeResult {
     }
 
     // --- 3. Vague / oversized task patterns ---
-    for pattern in LARGE_TASK_PATTERNS {
-        if prompt_lower.contains(pattern) {
-            level = ScopeLevel::Block;
-            warnings.push(format!(
-              "Task description contains \"{}\" — this is too broad for a sub-agent. Use a two-phase approach: (1) YOU do the overview with Glob/Grep, (2) launch focused agents for specific files.",
-              pattern
-          ));
-            break;
-        }
-    }
+    // LARGE_TASK_PATTERNS is now empty — broad keyword checks removed.
+    // The calling agent is responsible for deciding task appropriateness.
 
     // --- 4. Simple task that doesn't need a sub-agent ---
     for pattern in SIMPLE_TASK_PATTERNS {

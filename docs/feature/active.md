@@ -2,13 +2,15 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待确认 | 未确认 | AskUserQuestion 已接入专用 TUI 问答界面：标题、问题、选项/自由输入提示和等待态均已完成；待用户确认实际体验 |
+| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」；操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾，不单独占行；纯选择模式（仅 options、无 free_input）改为上下键高亮选项 + Enter 确认 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
+| 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider |
+| 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 
 ### #36 Multi-Agent 框架
 
@@ -473,21 +475,20 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ### #4 AskUserQuestion TUI 美化
 
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 进入专用问答状态，让用户清楚知道当前需要确认什么、有哪些可选答案，以及如何提交或取消。
+**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 的等待输入界面要清楚说明下一步操作，并避免提示文字挤占过多 output area。
 
-**当前状态**：已完成，等待用户体验确认。AskUserQuestion 已从普通 system message + 纯文本选项升级为专用交互界面：
+**当前状态**：待实施。基础问答链路已存在（`UiEvent::AskUser` + `ask_user_reply_tx`），本轮聚焦交互文案和选择模式：
 
-- 顶部显示 `━━ 需要你的回答 ━━`，用亮黄色粗体提示当前轮次暂停等待用户输入。
-- 问题文本使用 `LineStyle::AskUser` 高亮，避免混在普通 assistant/system 输出里。
-- 有选项时展示带编号的答案列表，默认/当前选项用 `❯` 标记，多选模式用 `✓` 表示已选。
-- 操作提示区根据模式分别展示选择、确认、取消或多选快捷键；无选项时进入自由输入确认模式。
-- AskUserQuestion 等待期间停止 spinner，并把状态切到 `Waiting for user`，避免误导用户以为模型仍在生成。
+- AskUserQuestion 等待输入时，在 output area 提示「请在下方输入区域输入」。
+- 操作指引放在提示文字末尾：`[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项`，不再单独占一行。
+- 纯选择模式（仅 options、无 free_input）不要求用户手动输入选项文本，改为上下键高亮选项 + Enter 确认。
+- 多选/自由输入保持现有能力，但提示文案需要与实际可用快捷键一致。
 
 **涉及路径**：
-- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换、停止 spinner、等待用户输入）
-- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、多选、确认/取消、自由输入）
-- `aemeath-cli/src/tui/output_area/content.rs`（`push_ask_user` / `update_ask_user_options` 渲染）
-- `aemeath-cli/src/tui/output_area/types.rs`（`LineStyle::AskUser` 样式）
+- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换与等待提示）
+- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、确认/取消、自由输入）
+- `aemeath-cli/src/tui/output_area/content.rs`（AskUserQuestion 提示与选项渲染）
+- `aemeath-cli/src/tui/output_area/types.rs`（AskUserQuestion 行样式）
 
 ---
 

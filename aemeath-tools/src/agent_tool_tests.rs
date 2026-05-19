@@ -207,16 +207,15 @@ fn test_analyze_task_scope_numbered_list_has_no_warning() {
 }
 
 #[test]
-fn test_analyze_task_scope_large_task_pattern_still_blocks() {
+fn test_analyze_task_scope_large_task_pattern_no_longer_blocks() {
+    // LARGE_TASK_PATTERNS is now empty — broad task keywords no longer trigger
+    // Block or any warning. The calling agent decides scope appropriateness.
     let prompt = "review all files in the entire codebase";
 
     let result = analyze_task_scope(prompt, &PathBuf::from("."));
 
-    assert_eq!(result.level, ScopeLevel::Block);
-    assert!(result
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("entire codebase")));
+    assert_eq!(result.level, ScopeLevel::Ok);
+    assert!(result.warnings.is_empty());
 }
 
 #[test]

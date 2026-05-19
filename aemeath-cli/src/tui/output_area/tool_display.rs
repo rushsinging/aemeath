@@ -107,26 +107,33 @@ fn debug_log(msg: &str) {
 
 impl super::OutputArea {
     /// 流式过程中 tool_use_start 时推送预占 header，立刻让用户看到 tool 被调用。
-    /// 同一个 tool name 的多次调用会生成唯一递增的 pending id
-    /// （如 pending:Agent:0, pending:Agent:1），以便后续 push_tool_call
-    /// 逐个原地更新对应的占位行。
-    pub fn push_tool_call_start(&mut self, name: &str) {
+    /// `index` 是 LLM 返回的 tool call index，用于生成唯一 pending id
+    /// （如 pending:Agent:2），以便后续精确匹配和原地更新。
+    pub fn push_tool_call_start(&mut self, name: &str, index: usize) {
         self.finish_streaming();
-        // 查找同名 tool 已有多少个 pending 行，用于生成唯一序号
-        let count = self
-            .lines
-            .iter()
-            .filter(|line| {
-                line.tool_id
-                    .as_deref()
-                    .is_some_and(|id| id.starts_with(&format!("pending:{name}:")))
-            })
-            .count();
         self.push_line(OutputLine {
             content: format!("● {name}..."),
             style: LineStyle::ToolCallRunning,
-            tool_id: Some(format!("pending:{name}:{count}")),
+            tool_id: Some(format!("pending:{name}:{index}")),
         });
+    }
+
+    /// 流式 arguments delta 到达时更新 pending 占位行内容。
+    /// 尝试从 partial JSON 中提取关键参数并更新显示。
+    /// 使用 `name` + `index` 精确匹配 pending 行。
+    pub fn update_tool_call_pending(&mut self, name: &str, index: usize, partial_args: &str) {
+        let preview = common::extract_tool_preview(name, partial_args);
+        if preview.is_empty() {
+            return;
+        }
+        let pending_id = format!("pending:{name}:{index}");
+        let new_content = format!("● {name}({preview})");
+        for line in &mut self.lines {
+            if line.tool_id.as_deref() == Some(&pending_id) {
+                line.content = new_content;
+                break;
+            }
+        }
     }
 
     /// 更新 Agent 工具调用的进度显示（原地替换 pending 占位行）

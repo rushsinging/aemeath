@@ -41,19 +41,27 @@ impl App {
                 self.output_area.finish_streaming();
                 self.output_area.push_system("");
             }
-            UiEvent::ToolCallStart(name) => {
+            UiEvent::ToolCallStart { name, index } => {
                 log::debug!(
-                    "[SPINNER] ToolCallStart({name}): tool_call_active {} -> true",
+                    "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
                     self.tool_call_active
                 );
                 self.tool_call_active = true;
-                self.output_area.push_tool_call_start(&name);
+                self.output_area.push_tool_call_start(&name, index);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.output_area.start_spinner();
                     self.output_area
                         .set_spinner_phase(format!("Calling {name}..."));
                 }
+            }
+            UiEvent::ToolArgumentsDelta {
+                index,
+                name,
+                partial_args,
+            } => {
+                self.output_area
+                    .update_tool_call_pending(&name, index, &partial_args);
             }
             UiEvent::ToolCall { id, name, summary } => {
                 log::debug!(
