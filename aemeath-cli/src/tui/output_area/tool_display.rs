@@ -106,29 +106,32 @@ fn debug_log(msg: &str) {
 }
 
 impl super::OutputArea {
-    /// 流式过程中 tool_use_start 时推送预占 header，立刻让用户看到 tool 被调用
+    /// 流式过程中 tool_use_start 时推送预占 header，立刻让用户看到 tool 被调用。
+    /// 同一个 tool name 的多次调用会生成唯一递增的 pending id
+    /// （如 pending:Agent:0, pending:Agent:1），以便后续 push_tool_call
+    /// 逐个原地更新对应的占位行。
     pub fn push_tool_call_start(&mut self, name: &str) {
         self.finish_streaming();
+        // 查找同名 tool 已有多少个 pending 行，用于生成唯一序号
+        let count = self
+            .lines
+            .iter()
+            .filter(|line| {
+                line.tool_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with(&format!("pending:{name}:")))
+            })
+            .count();
         self.push_line(OutputLine {
             content: format!("● {name}..."),
             style: LineStyle::ToolCallRunning,
-            tool_id: Some(format!("pending:{name}")),
+            tool_id: Some(format!("pending:{name}:{count}")),
         });
     }
 
-    /// 更新 Agent 工具调用的进度显示（实时替换 header 行文本）
+    /// 更新 Agent 工具调用的进度显示（原地替换 pending 占位行）
     pub fn push_tool_call(&mut self, tool_id: &str, name: &str, summary: &str) {
         self.finish_streaming();
-
-        // 清除该 tool 的预占 header（如果有）
-        let pending_id = format!("pending:{name}");
-        if let Some(pos) = self
-            .lines
-            .iter()
-            .position(|line| line.tool_id.as_deref() == Some(&pending_id))
-        {
-            self.lines.remove(pos);
-        }
 
         let (header, details) = if name == "TodoWrite" {
             self.format_todowrite(summary)
@@ -136,15 +139,45 @@ impl super::OutputArea {
             format_tool_call(name, summary)
         };
 
+        let detail_style = lookup_display(name)
+            .map(|display| display.detail_style())
+            .unwrap_or(LineStyle::System);
+
+        // 查找第一个匹配的 pending 占位行，原地替换
+        let prefix = format!("pending:{name}:");
+        if let Some(pos) = self
+            .lines
+            .iter()
+            .position(|line| line.tool_id.as_deref().is_some_and(|id| id.starts_with(&prefix)))
+        {
+            // 原地更新 header 行
+            self.lines[pos].content = header;
+            self.lines[pos].style = LineStyle::ToolCallRunning;
+            self.lines[pos].tool_id = Some(tool_id.to_string());
+
+            // 在 header 后插入 detail 行
+            let detail_lines: Vec<OutputLine> = details
+                .iter()
+                .map(|detail| OutputLine {
+                    content: format!("{INDENT}{detail}"),
+                    style: detail_style,
+                    tool_id: Some(tool_id.to_string()),
+                })
+                .collect();
+
+            for (i, dl) in detail_lines.into_iter().enumerate() {
+                self.lines.insert(pos + 1 + i, dl);
+            }
+            return;
+        }
+
+        // 没有 pending 占位行（非流式路径），直接追加
         self.push_line(OutputLine {
             content: header,
             style: LineStyle::ToolCallRunning,
             tool_id: Some(tool_id.to_string()),
         });
 
-        let detail_style = lookup_display(name)
-            .map(|display| display.detail_style())
-            .unwrap_or(LineStyle::System);
         for detail in details.iter() {
             self.push_line(OutputLine {
                 content: format!("{INDENT}{detail}"),
