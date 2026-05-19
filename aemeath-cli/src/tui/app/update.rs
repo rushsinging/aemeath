@@ -6,6 +6,8 @@ mod spawn_context;
 mod spinner;
 mod ui_event;
 
+pub(crate) use key::CTRL_C_TIMEOUT_SECS;
+
 use super::msg::{Cmd, Msg};
 use super::processing::SpawnContextRefs;
 use super::UiEvent;
