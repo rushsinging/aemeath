@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待确认 | 未确认 | AskUserQuestion 向用户确认时，TUI 界面需要美化 |
+| 4 | AskUserQuestion TUI 美化 | - | 待确认 | 未确认 | AskUserQuestion 已接入专用 TUI 问答界面：标题、问题、选项/自由输入提示和等待态均已完成；待用户确认实际体验 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
@@ -473,16 +473,21 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ### #4 AskUserQuestion TUI 美化
 
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
+**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 进入专用问答状态，让用户清楚知道当前需要确认什么、有哪些可选答案，以及如何提交或取消。
 
-**当前状态**：基础功能已实现（`UiEvent::AskUser` + `update.rs` 中 `ask_user_reply_tx` 机制），但显示为普通 system message + 纯文本选项，缺乏视觉层次。
+**当前状态**：已完成，等待用户体验确认。AskUserQuestion 已从普通 system message + 纯文本选项升级为专用交互界面：
 
-**待改进**：
-- 问题文本高亮/醒目样式
-- 选项列表带序号和视觉区分
-- 输入提示区域样式优化
+- 顶部显示 `━━ 需要你的回答 ━━`，用亮黄色粗体提示当前轮次暂停等待用户输入。
+- 问题文本使用 `LineStyle::AskUser` 高亮，避免混在普通 assistant/system 输出里。
+- 有选项时展示带编号的答案列表，默认/当前选项用 `❯` 标记，多选模式用 `✓` 表示已选。
+- 操作提示区根据模式分别展示选择、确认、取消或多选快捷键；无选项时进入自由输入确认模式。
+- AskUserQuestion 等待期间停止 spinner，并把状态切到 `Waiting for user`，避免误导用户以为模型仍在生成。
 
-**涉及路径**：`aemeath-cli/src/tui/app/update.rs`（`UiEvent::AskUser` 处理）、`aemeath-cli/src/tui/output_area/`（渲染样式）
+**涉及路径**：
+- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换、停止 spinner、等待用户输入）
+- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、多选、确认/取消、自由输入）
+- `aemeath-cli/src/tui/output_area/content.rs`（`push_ask_user` / `update_ask_user_options` 渲染）
+- `aemeath-cli/src/tui/output_area/types.rs`（`LineStyle::AskUser` 样式）
 
 ---
 
