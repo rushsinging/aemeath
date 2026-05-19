@@ -82,8 +82,25 @@ impl InputArea {
 
         let max_visible = 5;
         let max_cols = area.width as usize;
-        for (i, suggestion) in self.suggestions.iter().take(max_visible).enumerate() {
-            let is_selected = i as i32 == self.selected_suggestion;
+        let selected = if self.selected_suggestion >= 0 {
+            self.selected_suggestion as usize
+        } else {
+            0
+        };
+        // Compute scroll offset so the selected item is always visible
+        let scroll_offset = if selected >= max_visible {
+            selected - max_visible + 1
+        } else {
+            0
+        };
+        for (i, suggestion) in self
+            .suggestions
+            .iter()
+            .skip(scroll_offset)
+            .take(max_visible)
+            .enumerate()
+        {
+            let is_selected = (i + scroll_offset) as i32 == self.selected_suggestion;
             let y = area.y + i as u16;
             let bg_color = if is_selected {
                 Color::Cyan
