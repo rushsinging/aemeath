@@ -181,10 +181,16 @@ pub(crate) async fn parse_openai_stream(
                             // 更新 function 信息
                             if let Some(function) = tc.get("function") {
                                 if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
+                                    // First time we see this tool call's name — notify the
+                                    // handler immediately so the UI can show it in real time.
+                                    let is_new = entry.1.is_empty();
                                     entry.1 = name.to_string();
                                     if entry.0.is_empty() {
                                         // 某些 provider 不发送 tool call ID
                                         entry.0 = format!("call_{}", index);
+                                    }
+                                    if is_new {
+                                        handler.on_tool_use_start(name);
                                     }
                                 }
                                 if let Some(args) =
@@ -221,7 +227,9 @@ pub(crate) async fn parse_openai_stream(
     let mut truncated_tool: Option<(String, String, usize, u32)> = None;
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if !name.is_empty() {
-            handler.on_tool_use_start(&name);
+            // Note: on_tool_use_start was already called during streaming
+            // when the name first appeared in a delta chunk. No need to
+            // call it again here.
             let input: serde_json::Value = if arguments.is_empty() {
                 log::warn!(
                     "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
