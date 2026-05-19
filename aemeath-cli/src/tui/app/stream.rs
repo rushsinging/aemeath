@@ -6,16 +6,19 @@ mod handler;
 mod hook_ui;
 mod input_log;
 mod permissions;
+mod pipeline;
 mod post_batch;
 mod queue;
 mod tools;
 
 use crate::agent_runner::{AgentRunOutcome, AgentRunStatus};
+use crate::tui::app::stream::agent_calls::PendingAgent;
 use crate::tui::app::stream::compact::auto_compact;
 use crate::tui::app::stream::finalize::finalize_main_loop;
 use crate::tui::app::stream::handler::TuiStreamHandler;
 use crate::tui::app::stream::hook_ui::HookUi;
 pub(crate) use crate::tui::app::stream::input_log::logged_input_messages;
+use crate::tui::app::stream::pipeline::{flush_pending_agents, handle_pipeline_round};
 use crate::tui::app::stream::post_batch::run_post_tool_batch;
 use crate::tui::app::stream::queue::drain_queued_input;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
@@ -91,6 +94,13 @@ pub async fn process_in_background(
     let mut turn_count: usize = 0;
     let mut outcome: Option<AgentRunOutcome> = None;
     let mut task_reminder_state = TaskReminderState::new();
+
+    // Agent pipeline: when the LLM returns only Agent tool calls (common with
+    // DeepSeek / Zhipu which don't support parallel_tool_calls), we spawn them
+    // in the background immediately and return a placeholder tool result so the
+    // LLM can continue generating more Agent calls. All pending agents are
+    // collected and awaited when the loop exits or a non-Agent round appears.
+    let mut pending_agents: Vec<PendingAgent> = Vec::new();
 
     // Stall detection: sliding window for text repetition
     let mut recent_fingerprints: Vec<String> = Vec::new();
@@ -328,25 +338,46 @@ pub async fn process_in_background(
                     break;
                 }
                 {
-                    let all_results = execute_tool_round(
-                        &tool_calls,
-                        &registry,
-                        allow_all,
-                        &agent,
-                        &tx,
-                        &hook_ui,
-                        &hook_runner,
-                        &json_logger,
-                        turn_count,
-                        client.model_name(),
-                        max_agent_concurrency,
-                        &interrupted,
-                    )
-                    .await;
+                    let all_agents = pipeline::is_all_agent_calls(&tool_calls);
+                    if all_agents {
+                        handle_pipeline_round(
+                            &tool_calls,
+                            &registry,
+                            allow_all,
+                            &tx,
+                            &hook_ui,
+                            &hook_runner,
+                            &agent,
+                            &mut messages,
+                            &session_id,
+                            &mut pending_agents,
+                            turn_count,
+                        )
+                        .await;
+                    } else {
+                        // Non-agent round: first drain any pending agents
+                        flush_pending_agents(&mut pending_agents, &tx).await;
 
-                    // Build tool result message for API
-                    messages.push(tool_results_for_api(all_results, &session_id)); // Sync after tool execution
-                    let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                        let all_results = execute_tool_round(
+                            &tool_calls,
+                            &registry,
+                            allow_all,
+                            &agent,
+                            &tx,
+                            &hook_ui,
+                            &hook_runner,
+                            &json_logger,
+                            turn_count,
+                            client.model_name(),
+                            max_agent_concurrency,
+                            &interrupted,
+                        )
+                        .await;
+
+                        // Build tool result message for API
+                        messages.push(tool_results_for_api(all_results, &session_id));
+                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                    }
 
                     if let Some(queued) = drain_queued_input(&queue_request_tx).await {
                         for input in queued {
@@ -372,6 +403,9 @@ pub async fn process_in_background(
             }
         }
     }
+
+    // Drain any remaining pending agents before cleanup
+    flush_pending_agents(&mut pending_agents, &tx).await;
 
     messages.truncate(messages_at_start);
 

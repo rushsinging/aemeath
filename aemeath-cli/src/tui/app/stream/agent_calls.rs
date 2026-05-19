@@ -9,6 +9,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// A handle to a spawned agent task that can be awaited later.
+pub(crate) struct PendingAgent {
+    pub tool_call_ids: Vec<String>,
+    pub handle: tokio::task::JoinHandle<Vec<UiToolResult>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls(
     agent_approved: &[&ToolCall],
@@ -58,6 +64,116 @@ pub(crate) async fn execute_agent_calls(
         agent_results.extend(batch_results.into_iter().flatten());
     }
     agent_results
+}
+
+/// Spawn agent calls as background tasks without blocking.
+/// Returns a `PendingAgent` handle that can be awaited later.
+/// Also sends ToolCall UI events so the user sees what's queued.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_agent_calls(
+    agent_calls: &[&ToolCall],
+    registry: &Arc<ToolRegistry>,
+    agent_ctx: &aemeath_core::tool::ToolContext,
+    tx: &mpsc::Sender<UiEvent>,
+    hook_ui: &HookUi,
+    hook_runner: &aemeath_core::hook::HookRunner,
+) -> PendingAgent {
+    let tool_call_ids: Vec<String> = agent_calls.iter().map(|c| c.id.clone()).collect();
+
+    // Collect owned copies of tool calls for the spawned task
+    let owned_calls: Vec<ToolCall> = agent_calls
+        .iter()
+        .map(|c| ToolCall {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            input: c.input.clone(),
+        })
+        .collect();
+
+    let tx = tx.clone();
+    let hook_ui = hook_ui.clone();
+    let hook_runner = hook_runner.clone();
+    let registry = registry.clone();
+    let mut ag_ctx = agent_ctx.clone();
+
+    let handle = tokio::spawn(async move {
+        let mut results = Vec::new();
+        for call in owned_calls {
+            // Send ToolCall UI event
+            let _ = tx
+                .send(UiEvent::ToolCall {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    summary: call.input.to_string(),
+                })
+                .await;
+            let r = execute_one_agent(
+                call,
+                tx.clone(),
+                hook_ui.clone(),
+                hook_runner.clone(),
+                registry.clone(),
+                &mut ag_ctx,
+            )
+            .await;
+            results.extend(r);
+        }
+        results
+    });
+
+    PendingAgent {
+        tool_call_ids,
+        handle,
+    }
+}
+
+/// Wait for all pending agents to complete and collect their results.
+/// Also replaces placeholder tool results in the messages with real ones.
+pub(crate) async fn drain_pending_agents(
+    pending: &mut Vec<PendingAgent>,
+    tx: &mpsc::Sender<UiEvent>,
+) -> Vec<UiToolResult> {
+    let mut all_results = Vec::new();
+    for pending_agent in pending.drain(..) {
+        match pending_agent.handle.await {
+            Ok(results) => {
+                for result in &results {
+                    let _ = tx
+                        .send(UiEvent::ToolResult {
+                            id: result.0.clone(),
+                            tool_name: "Agent".to_string(),
+                            output: result.1.clone(),
+                            is_error: result.2,
+                            images: result.3.clone(),
+                        })
+                        .await;
+                }
+                all_results.extend(results);
+            }
+            Err(e) => {
+                log::warn!("Pending agent task failed: {e}");
+                for id in &pending_agent.tool_call_ids {
+                    let result = (
+                        id.clone(),
+                        format!("Agent task failed: {e}"),
+                        true,
+                        vec![],
+                    );
+                    let _ = tx
+                        .send(UiEvent::ToolResult {
+                            id: id.clone(),
+                            tool_name: "Agent".to_string(),
+                            output: result.1.clone(),
+                            is_error: true,
+                            images: vec![],
+                        })
+                        .await;
+                    all_results.push(result);
+                }
+            }
+        }
+    }
+    all_results
 }
 
 async fn execute_one_agent(
