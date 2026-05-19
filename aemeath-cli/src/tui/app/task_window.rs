@@ -159,17 +159,16 @@ pub fn build_task_window<'a>(
     if remaining > 0 {
         // 先从 TTL 过滤后的 completed 中补充
         let from_filtered = remaining.min(completed_for_display.len().saturating_sub(comp_show));
-        let insert_pos = 1 + comp_show;
         let extras: Vec<&Task> = completed_for_display
             .iter()
             .filter(|task| !shown_ids.contains(task.id.as_str()))
             .take(from_filtered)
             .copied()
             .collect();
-        for (i, t) in extras.iter().enumerate() {
-            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+        for t in extras.iter() {
             shown_ids.insert(t.id.as_str());
         }
+        merge_completed_lines(&mut lines, 1, comp_show, &extras, &display_numbers);
         remaining = remaining.saturating_sub(extras.len());
     }
     if remaining > 0 {
@@ -182,33 +181,31 @@ pub fn build_task_window<'a>(
     }
     // 如果仍有余量，从未过滤的 completed 中回退补齐
     if remaining > 0 {
-        let insert_pos = 1 + comp_show;
         let fallback: Vec<&Task> = all_completed_sorted
             .iter()
             .filter(|t| !shown_ids.contains(t.id.as_str()))
             .take(remaining)
             .copied()
             .collect();
-        for (i, t) in fallback.iter().enumerate() {
-            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+        for t in fallback.iter() {
             shown_ids.insert(t.id.as_str());
         }
+        merge_completed_lines(&mut lines, 1, comp_show, &fallback, &display_numbers);
         remaining = remaining.saturating_sub(fallback.len());
     }
     // 如果仍然不足 min_show，继续从 completed 取
     if lines.len() - 1 < min_show && remaining > 0 {
         let need = (min_show - (lines.len() - 1)).min(remaining);
-        let insert_pos = 1 + comp_show;
         let more: Vec<&Task> = all_completed_sorted
             .iter()
             .filter(|t| !shown_ids.contains(t.id.as_str()))
             .take(need)
             .copied()
             .collect();
-        for (i, t) in more.iter().enumerate() {
-            lines.insert(insert_pos + i, format_task_line(t, &display_numbers));
+        for t in more.iter() {
             shown_ids.insert(t.id.as_str());
         }
+        merge_completed_lines(&mut lines, 1, comp_show, &more, &display_numbers);
     }
     // --- 折叠提示 ---
     let pending_hidden = pending_count.saturating_sub(pending_show);
@@ -229,6 +226,37 @@ pub fn build_task_window<'a>(
 
 fn task_sort_key(task: &Task) -> u64 {
     task.id.parse::<u64>().unwrap_or(u64::MAX)
+}
+
+fn merge_completed_lines(
+    lines: &mut Vec<String>,
+    start: usize,
+    selected_count: usize,
+    extra_tasks: &[&Task],
+    display_numbers: &std::collections::HashMap<&str, usize>,
+) {
+    if extra_tasks.is_empty() {
+        return;
+    }
+
+    let end = (start + selected_count).min(lines.len());
+    let mut completed_lines: Vec<String> = lines.drain(start..end).collect();
+    completed_lines.extend(
+        extra_tasks
+            .iter()
+            .map(|task| format_task_line(task, display_numbers)),
+    );
+    completed_lines.sort_by_key(|line| display_line_number(line));
+    for (offset, line) in completed_lines.into_iter().enumerate() {
+        lines.insert(start + offset, line);
+    }
+}
+
+fn display_line_number(line: &str) -> usize {
+    line.split_once('#')
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .and_then(|number| number.parse::<usize>().ok())
+        .unwrap_or(usize::MAX)
 }
 
 fn build_display_numbers(tasks: &[Task]) -> std::collections::HashMap<&str, usize> {

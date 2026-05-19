@@ -74,8 +74,8 @@ fn test_build_task_window_mix() {
     // 温和扩展会补充额外的 completed → summary + 2 completed + in_progress + 2 pending = 6
     assert_eq!(result.len(), 6);
     assert!(result[0].contains("2/5"));
-    assert!(result[1].contains("✓ #2 done b")); // 最近完成
-    assert!(result[2].contains("✓ #1 done a")); // 有余量时补充旧 completed
+    assert!(result[1].contains("✓ #1 done a")); // completed 区块按显示编号排序
+    assert!(result[2].contains("✓ #2 done b"));
     assert!(result[3].contains("■ #3 doing c")); // in_progress
     assert!(result[4].contains("□ #4"));
     assert!(result[5].contains("□ #5"));
@@ -251,11 +251,39 @@ fn test_completed_lines_keep_task_id_order_when_expanded() {
 
     let result = build_task_window(&tasks, 7, 1);
 
-    assert!(result[1].contains("✓ #2 创建 bug35 worktree 并验证基线"));
-    assert!(result[2].contains("✓ #1 检查 bug 35 与 worktree 约定"));
+    assert!(result[1].contains("✓ #1 检查 bug 35 与 worktree 约定"));
+    assert!(result[2].contains("✓ #2 创建 bug35 worktree 并验证基线"));
     assert!(result[3].contains("✓ #3 定位 bug 35 根因"));
     assert!(result[4].contains("■ #4 添加回归测试并修复 bug 35"));
     assert!(result[5].contains("□ #5 验证并更新文档"));
+}
+
+#[test]
+fn test_bug32_completed_expansion_keeps_display_order_for_user_snapshot() {
+    let tasks = vec![
+        make_task_with_ts(
+            "8",
+            "修复 architecture.md（7项）",
+            TaskStatus::Completed,
+            800,
+        ),
+        make_task_with_ts("1", "审阅 state.md", TaskStatus::Completed, 100),
+        make_task_with_ts("2", "审阅 data.md", TaskStatus::Completed, 200),
+        make_task_with_ts("3", "审阅 architecture.md", TaskStatus::Completed, 300),
+        make_task_with_ts("4", "审阅 api.md", TaskStatus::Completed, 400),
+        make_task_with_ts("9", "修复 api.md（5项）", TaskStatus::InProgress, 900),
+        make_task_with_ts("10", "修复 plan.md（8项）", TaskStatus::Pending, 1000),
+    ];
+
+    let result = build_task_window(&tasks, 7, 1);
+
+    assert!(result[1].contains("✓ #1 审阅 state.md"));
+    assert!(result[2].contains("✓ #2 审阅 data.md"));
+    assert!(result[3].contains("✓ #3 审阅 architecture.md"));
+    assert!(result[4].contains("✓ #4 审阅 api.md"));
+    assert!(result[5].contains("✓ #5 修复 architecture.md（7项）"));
+    assert!(result[6].contains("■ #6 修复 api.md（5项）"));
+    assert!(result[7].contains("□ #7 修复 plan.md（8项）"));
 }
 
 #[test]
@@ -432,8 +460,18 @@ fn test_bug32_window_stays_full_with_ttl_pressure() {
         TaskStatus::InProgress,
         now,
     ));
-    tasks.push(make_task_with_ts("12", "pending a", TaskStatus::Pending, now));
-    tasks.push(make_task_with_ts("13", "pending b", TaskStatus::Pending, now));
+    tasks.push(make_task_with_ts(
+        "12",
+        "pending a",
+        TaskStatus::Pending,
+        now,
+    ));
+    tasks.push(make_task_with_ts(
+        "13",
+        "pending b",
+        TaskStatus::Pending,
+        now,
+    ));
 
     let result = build_task_window(&tasks, 7, 1);
     let task_lines = result.len() - 1;
@@ -476,7 +514,11 @@ fn test_bug32_window_never_shrinks_during_progression() {
         }
         let result = build_task_window(&tasks, max_lines, 1);
         // task 行数 = 总行数 - summary(1) - fold hints
-        let task_lines = result.iter().skip(1).filter(|l| !l.starts_with('…')).count();
+        let task_lines = result
+            .iter()
+            .skip(1)
+            .filter(|l| !l.starts_with('…'))
+            .count();
         assert_eq!(
             task_lines, max_lines,
             "stage 1: expected {} task lines, got {}",
@@ -505,7 +547,11 @@ fn test_bug32_window_never_shrinks_during_progression() {
             ));
         }
         let result = build_task_window(&tasks, max_lines, 1);
-        let task_lines = result.iter().skip(1).filter(|l| !l.starts_with('…')).count();
+        let task_lines = result
+            .iter()
+            .skip(1)
+            .filter(|l| !l.starts_with('…'))
+            .count();
         assert_eq!(
             task_lines, max_lines,
             "stage 2: expected {} task lines, got {}",
@@ -524,7 +570,12 @@ fn test_bug32_window_never_shrinks_during_progression() {
                 now - 100 + i as u64,
             ));
         }
-        tasks.push(make_task_with_ts("11", "doing", TaskStatus::InProgress, now));
+        tasks.push(make_task_with_ts(
+            "11",
+            "doing",
+            TaskStatus::InProgress,
+            now,
+        ));
         for i in 12..=13 {
             tasks.push(make_task_with_ts(
                 &i.to_string(),
@@ -534,7 +585,11 @@ fn test_bug32_window_never_shrinks_during_progression() {
             ));
         }
         let result = build_task_window(&tasks, max_lines, 1);
-        let task_lines = result.iter().skip(1).filter(|l| !l.starts_with('…')).count();
+        let task_lines = result
+            .iter()
+            .skip(1)
+            .filter(|l| !l.starts_with('…'))
+            .count();
         assert_eq!(
             task_lines, max_lines,
             "stage 3: expected {} task lines, got {}",
@@ -553,9 +608,18 @@ fn test_bug32_window_never_shrinks_during_progression() {
                 now - 100 + i as u64,
             ));
         }
-        tasks.push(make_task_with_ts("13", "doing", TaskStatus::InProgress, now));
+        tasks.push(make_task_with_ts(
+            "13",
+            "doing",
+            TaskStatus::InProgress,
+            now,
+        ));
         let result = build_task_window(&tasks, max_lines, 1);
-        let task_lines = result.iter().skip(1).filter(|l| !l.starts_with('…')).count();
+        let task_lines = result
+            .iter()
+            .skip(1)
+            .filter(|l| !l.starts_with('…'))
+            .count();
         assert_eq!(
             task_lines, max_lines,
             "stage 4 (no pending): expected {} task lines, got {}: {:?}",
