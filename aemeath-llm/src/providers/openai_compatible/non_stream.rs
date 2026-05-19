@@ -21,6 +21,7 @@ impl OpenAICompatibleProvider {
         self.apply_reasoning_fields(&mut request_body);
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
+            request_body["parallel_tool_calls"] = serde_json::Value::Bool(true);
         }
 
         let headers = self.build_headers()?;

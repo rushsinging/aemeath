@@ -76,6 +76,10 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
+            // Enable parallel tool calls so the model can return multiple
+            // tool_use blocks in a single response, enabling true concurrent
+            // execution of independent tasks (e.g. launching 6 reviewers at once).
+            request_body["parallel_tool_calls"] = serde_json::Value::Bool(true);
         }
 
         if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {
