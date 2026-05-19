@@ -26,15 +26,6 @@ pub(crate) async fn execute_agent_calls(
         if interrupted.load(Ordering::Relaxed) {
             break;
         }
-        for call in batch {
-            let _ = tx
-                .send(UiEvent::ToolCall {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    summary: call.input.to_string(),
-                })
-                .await;
-        }
         let agent_futures: Vec<_> = batch
             .iter()
             .map(|call| {
