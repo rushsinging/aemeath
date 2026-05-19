@@ -103,8 +103,8 @@ impl InputArea {
 
         let (row, _) = self.textarea.cursor();
         if row == 0 {
-            // 仅当 input 非空或已在历史浏览模式时才触发历史翻看
-            if !self.is_empty() || self.history_index.is_some() {
+            // 仅当 input 为空时触发历史翻看；非空时上键只移动光标
+            if self.is_empty() || self.history_index.is_some() {
                 self.history_up();
             }
         } else {
@@ -215,45 +215,47 @@ mod tests {
     }
 
     #[test]
-    fn test_move_up_empty_input_does_not_enter_history() {
+    fn test_move_up_empty_input_enters_history() {
         let mut input = rendered_input();
         input.add_history("previous message");
 
-        // input 为空，按上键不应进入历史浏览
-        input.move_up();
-        assert!(
-            input.history_index.is_none(),
-            "空 input 按上键不应进入历史浏览模式"
-        );
-        assert!(input.is_empty(), "空 input 按上键后应仍为空");
-    }
-
-    #[test]
-    fn test_move_up_nonempty_input_enters_history() {
-        let mut input = rendered_input();
-        input.add_history("previous message");
-
-        // input 非空，按上键应进入历史浏览
-        input.input('x');
+        // input 为空，按上键应进入历史浏览
         input.move_up();
         assert!(
             input.history_index.is_some(),
-            "非空 input 按上键应进入历史浏览模式"
+            "空 input 按上键应进入历史浏览模式"
         );
         assert_eq!(input.get_text(), "previous message");
     }
 
     #[test]
-    fn test_move_up_empty_then_type_then_up_works() {
+    fn test_move_up_nonempty_input_does_not_enter_history() {
+        let mut input = rendered_input();
+        input.add_history("previous message");
+
+        // input 非空，按上键不应进入历史浏览
+        input.input('x');
+        input.move_up();
+        assert!(
+            input.history_index.is_none(),
+            "非空 input 按上键不应进入历史浏览模式"
+        );
+        assert_eq!(input.get_text(), "x");
+    }
+
+    #[test]
+    fn test_move_up_type_then_clear_then_up_works() {
         let mut input = rendered_input();
         input.add_history("old");
 
-        // 先空 input 按上键 — 无反应
+        // 输入内容后按上键 — 不进入历史
+        input.input('a');
         input.move_up();
         assert!(input.history_index.is_none());
+        assert_eq!(input.get_text(), "a");
 
-        // 输入内容后按上键 — 正常进入历史
-        input.input('a');
+        // 清空后再按上键 — 正常进入历史
+        input.clear();
         input.move_up();
         assert!(input.history_index.is_some());
         assert_eq!(input.get_text(), "old");
