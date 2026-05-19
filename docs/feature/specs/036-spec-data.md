@@ -112,6 +112,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   },                              // Qdrant 引用（message_type=requirement 时有）
   "embedding_status": "pending", // pending | indexed | failed
   "created_at": ISODate,
+  "updated_at": ISODate,        // message_type 异步写入/内容更新的时间戳
   "version": 0,                  // u64，乐观锁，每次更新 +1
 }
 ```
@@ -132,7 +133,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "draft": {
     "projects": [ { "name": "...", "tasks": [...] } ],
     "summary": "...",
-    "created_by": "assistant_agent_id"
+    "created_by": ObjectId              // Assistant AgentInstance._id
   },
   "draft_history": [ { "revision": 0, "draft": {...}, "timestamp": ISODate } ],
   "created_at": ISODate,
@@ -158,9 +159,9 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "assigned_at": ISODate,        // 分配给 Executor 的时间；assigned 状态下用于超时检测
   "assignment_attempts": 0,      // 分配尝试次数；每次分配递增
   "merge_lock": {                // git merge 锁（同一 main 分支串行 merge）；创建 Project 时必须初始化为 { locked_by: null, locked_by_executor: null, locked_at: null }
-    "locked_by": ObjectId,       //   当前持有锁的 AgentInstance._id；null = 未锁定（兼容锁获取条件）
-    "locked_at": ISODate,        //   锁获取时间
-    "locked_by_executor": ObjectId // 持有锁的 Executor AgentInstance._id
+    "locked_by": ObjectId,       // 当前持有锁的 Task ID；null = 未锁定（锁所有权与释放校验依据）
+    "locked_at": ISODate,        // 锁获取时间；null = 未锁定（用于超时/过期检测）
+    "locked_by_executor": ObjectId // 当前持有锁的 Executor AgentInstance._id；兼容 Executor 专用索引
   },
   "summary": "",                 // Executor 完成后写入的项目总结
   "key_decisions": [],           // 关键决策列表
@@ -226,18 +227,20 @@ db.projects.createIndex(
   "workspace_id": ObjectId,
   "role": "executor",            // 角色标识（内置 + 用户自定义）
   "role_config_ref": "roles/executor.toml",
-  "status": "idle",              // initializing | idle | busy | error
+  "status": "idle",              // initializing | idle | busy | heartbeat_lost | error
   "version": 0,                  // 乐观锁
   "active_model": "anthropic/claude-sonnet-4-20250514",
   "model_state": {
+    // status: healthy | degraded | unhealthy
     "models": [
       { "model": "anthropic/claude-sonnet-4-20250514", "status": "healthy" },
       { "model": "openai/gpt-5-codex", "status": "healthy" }
     ]
   },
-  "current_project_id": ObjectId, // 当前处理的 Project（Executor 专用）
+  "current_project_id": Option<ObjectId>, // 当前处理的 Project（Executor 专用）；空闲时为 None/null
   "last_heartbeat": ISODate,
-  "created_at": ISODate
+  "created_at": ISODate,
+  "updated_at": ISODate
 }
 ```
 
@@ -245,10 +248,11 @@ db.projects.createIndex(
 
 ### Board 聚合响应结构
 ```rust
-#[derive(Serialize)]
-// Workspace 文档的核心子集（workspace_id / name / created_at / updated_at）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// WorkspaceInfo 对齐 API spec，BoardSnapshot 同时显式携带 workspace_id 便于订阅/路由校验
 pub struct BoardSnapshot {
     pub snapshot_id: String,                     // 当前快照 ID，用于增量订阅一致性校验
+    pub workspace_id: ObjectId,                  // 当前 Workspace ID
     pub workspace: WorkspaceInfo,
     pub chats: Vec<Chat>,                         // Chat 会话
     pub recent_messages: Vec<ChatMessage>,        // 近期 Chat 消息（默认最近 50 条）
@@ -257,21 +261,27 @@ pub struct BoardSnapshot {
     pub agent_instances: Vec<AgentInstance>,       // Agent 状态
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoardSnapshotUpdate {
     pub snapshot_id: String,        // 基于哪个快照做 diff
+    pub is_full_snapshot: bool,     // 首次 Watch 消息为 true
     pub timestamp: i64,
     pub changed_requirements: Vec<Requirement>,   // 新增/变更的 Requirement
     pub removed_requirement_ids: Vec<ObjectId>,   // 删除/移除的 Requirement ID
     pub changed_projects: Vec<ProjectWithTasks>,  // 新增/变更的 Project & Tasks
+    pub changed_tasks: Vec<ProjectTask>,          // 新增/变更的 ProjectTask
     pub removed_project_ids: Vec<ObjectId>,       // 删除/移除的 Project ID
     pub removed_task_ids: Vec<ObjectId>,          // 删除/移除的 ProjectTask ID
     pub changed_chats: Vec<Chat>,                 // 新增/变更的 Chat 会话
-    pub new_messages: Vec<ChatMessage>,
-    pub agent_status: Vec<AgentInstance>,
+    pub removed_chat_ids: Vec<ObjectId>,          // 删除/移除的 Chat ID
+    pub new_messages: Vec<ChatMessage>,           // 新增 Chat 消息
+    pub changed_messages: Vec<ChatMessage>,       // message_type 等异步更新的消息增量
+    pub updated_messages: Vec<ChatMessage>,       // 已存在消息内容/元数据更新
+    pub changed_agents: Vec<AgentInstance>,       // 新增/变更的 Agent 状态
 }
 
-/// Workspace 文档的核心子集，嵌入 BoardSnapshot
+/// Workspace 文档的核心子集，嵌入 BoardSnapshot；字段与 struct 定义一致
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceInfo {
     pub name: String,
     pub provider: String,
@@ -279,7 +289,7 @@ pub struct WorkspaceInfo {
     pub created_at: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWithTasks {
     pub project: Project,
     pub tasks: Vec<ProjectTask>,
@@ -304,15 +314,22 @@ Layer 3: 成本分层（任务粒度）
 
 ### Layer 1：角色 → 模型绑定
 
-RoleConfig 中配置模型列表，优先级递减：
+RoleConfig 中通过 `models` 配置模型池，按优先级递减；每个候选模型声明其 `cost_tier`：
+
+```rust
+pub enum CostTier {
+    Low,
+    Medium,
+    High,
+}
+```
 
 ```toml
 # roles/coder.toml
-[role]
 name = "coder"
 description = "代码实现 Agent"
 
-[[models]]                        # 按优先级排列
+[[models]]                         # 按优先级排列
 model = "anthropic/claude-sonnet-4-20250514"
 cost_tier = "high"
 
@@ -352,3 +369,11 @@ message ExecuteTaskRequest {
 ```
 
 Sub-Agent 从自身角色配置中选择满足 `min_cost_tier` 的第一个 Healthy 模型执行。
+
+Sub-Agent 模型选择流程：
+1. Executor 根据 Task 的 `executor_type` 读取对应 RoleConfig。
+2. RoleConfig 的 `models` 定义该 Sub-Agent 角色可用模型池及每个模型的 `CostTier`。
+3. Executor 创建 Sub-Agent / 发起 ExecuteTask 时传入期望的 `min_cost_tier`。
+4. Sub-Agent runtime 在模型池中按优先级筛选 `cost_tier >= min_cost_tier` 且健康状态为 Healthy 的模型。
+5. 选择第一个命中的模型作为本次执行模型；若执行失败，按同一筛选结果继续故障转移到下一个候选。
+6. 无 Healthy 模型时返回 Error 给 Executor，Executor 将 Task 置为 Failed。

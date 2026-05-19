@@ -11,11 +11,14 @@ GET    /api/workspaces                           # Workspace 列表
 DELETE /api/workspaces                           # 批量删除 Workspace
 GET    /api/workspaces/:ws_id                    # Workspace 详情
 PATCH  /api/workspaces/:ws_id                    # 更新 Workspace
+DELETE /api/workspaces/:ws_id                    # 删除单个 Workspace
 GET    /api/workspaces/:ws_id/board              # 白板聚合数据（一次性返回全部区块）
 POST   /api/workspaces/:ws_id/chats              # 创建 Chat
 GET    /api/workspaces/:ws_id/chats              # Chat 列表
 DELETE /api/workspaces/:ws_id/chats              # 批量删除 Chat
-GET    /api/workspaces/:ws_id/chats/:id          # Chat 详情
+GET    /api/workspaces/:ws_id/chats/:chat_id     # Chat 详情
+PATCH  /api/workspaces/:ws_id/chats/:chat_id     # 更新 Chat title/status（归档等）
+DELETE /api/workspaces/:ws_id/chats/:chat_id     # 删除单个 Chat
 GET    /api/workspaces/:ws_id/chats/:chat_id/messages  # Chat 消息列表（含需求消息）
 GET    /api/workspaces/:ws_id/requirements       # Requirement 列表（支持 ?status=... 过滤）
 GET    /api/workspaces/:ws_id/requirements/:id   # Requirement 详情
@@ -23,15 +26,19 @@ POST   /api/workspaces/:ws_id/requirements       # 创建 Requirement
 PATCH  /api/workspaces/:ws_id/requirements/:id   # 更新 Requirement（草案/状态/关联）
 POST   /api/workspaces/:ws_id/requirements/:id/cancel  # 软取消 Requirement，状态→Cancelled；不硬删除
 GET    /api/workspaces/:ws_id/projects           # Project 列表（支持 ?status=in_progress&requirement_id=... 过滤）
-GET    /api/workspaces/:ws_id/projects/:id/tasks # 某个 Project 的 Task 列表
-POST   /api/workspaces/:ws_id/projects/:id/resume # 用户反馈已写入 ChatMessage(message_type=feedback) 并关联 Project/Task 后，恢复 Blocked Project
-GET    /api/workspaces/:ws_id/projects/:id/tasks/:task_id  # Task 详情
-PATCH  /api/workspaces/:ws_id/projects/:id/tasks/:task_id  # 更新 Task 状态；status=cancelled 表示取消 Task，对应 gRPC CancelTask
+GET    /api/workspaces/:ws_id/projects/:project_id  # Project 详情
+GET    /api/workspaces/:ws_id/projects/:project_id/tasks # 某个 Project 的 Task 列表
+POST   /api/workspaces/:ws_id/projects/:project_id/resume # 用户反馈已写入 ChatMessage(message_type=feedback) 并关联 Project/Task 后，恢复 Blocked Project
+POST   /api/workspaces/:ws_id/projects/:project_id/cancel  # 取消 Project
+GET    /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id  # Task 详情
+PATCH  /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id  # 更新 Task 状态；status=cancelled 表示取消 Task，对应 gRPC CancelTask
 GET    /api/workspaces/:ws_id/agents             # Agent 实例列表
 POST   /api/workspaces/:ws_id/chats/:chat_id/messages  # 创建 ChatMessage（Chat/用户调用）
 POST   /api/workspaces/:ws_id/requirements/:id/confirm  # 确认草案并创建 Project/Task
 POST   /api/workspaces/:ws_id/requirements/:id/reject   # 驳回草案
 ```
+
+说明：DELETE 批量删除端点的 IDs 通过 query params 传递。
 
 说明：Requirement 取消使用 `POST /api/workspaces/:ws_id/requirements/:id/cancel` 进行软取消，仅将状态推进到 `Cancelled`，不提供硬删除语义。
 
@@ -42,6 +49,7 @@ WS /ws/workspaces/:ws_id/board
     - chat_message_updated
     - requirement_updated
     - project_created
+    - project_status_changed
     - task_status_changed
     - agent_status_changed
 ```
@@ -49,8 +57,10 @@ WS /ws/workspaces/:ws_id/board
 ### Board 聚合响应结构
 ```rust
 #[derive(Serialize)]
-// Workspace 文档的核心子集（workspace_id / name / created_at / updated_at）
+// WorkspaceInfo 对齐 data spec，BoardSnapshot 同时显式携带 workspace_id 便于订阅/路由校验
 pub struct BoardSnapshot {
+    pub snapshot_id: String,                     // 当前快照 ID，用于增量订阅一致性校验
+    pub workspace_id: ObjectId,                  // 当前 Workspace ID
     pub workspace: WorkspaceInfo,
     pub chats: Vec<Chat>,                         // Chat 会话
     pub recent_messages: Vec<ChatMessage>,        // 近期 Chat 消息（默认最近 50 条）
@@ -62,14 +72,24 @@ pub struct BoardSnapshot {
 #[derive(Serialize)]
 pub struct BoardSnapshotUpdate {
     pub snapshot_id: String,        // 基于哪个快照做 diff
+    pub is_full_snapshot: bool,     // 首次 Watch 消息为 true，表示本消息携带完整快照语义；后续为 false，仅推送增量
     pub timestamp: i64,
-    pub changed_requirements: Vec<Requirement>,   // 新增/变更的
-    pub changed_projects: Vec<(Project, Vec<ProjectTask>)>,
-    pub new_messages: Vec<ChatMessage>,
-    pub agent_status: Vec<AgentInstance>,
+    pub changed_requirements: Vec<Requirement>,   // 新增/变更的 Requirement
+    pub removed_requirement_ids: Vec<ObjectId>,   // 删除/移除的 Requirement ID
+    pub changed_projects: Vec<ProjectWithTasks>,  // 新增/变更的 Project & Tasks
+    pub changed_tasks: Vec<ProjectTask>,          // 新增/变更的 ProjectTask
+    pub removed_project_ids: Vec<ObjectId>,       // 删除/移除的 Project ID
+    pub removed_task_ids: Vec<ObjectId>,          // 删除/移除的 ProjectTask ID
+    pub changed_chats: Vec<Chat>,                 // 新增/变更的 Chat 会话
+    pub removed_chat_ids: Vec<ObjectId>,          // 删除/移除的 Chat ID
+    pub new_messages: Vec<ChatMessage>,           // 新增 Chat 消息
+    pub changed_messages: Vec<ChatMessage>,       // message_type 异步判定结果变更
+    pub updated_messages: Vec<ChatMessage>,       // 消息内容/元数据变更（如 LLM streaming 追加、title 修改等）
+    pub changed_agents: Vec<AgentInstance>,       // 新增/变更的 Agent 状态
 }
 
-/// Workspace 文档的核心子集，嵌入 BoardSnapshot
+/// Workspace 文档的核心子集，嵌入 BoardSnapshot；字段与 data spec 一致
+#[derive(Serialize, Deserialize)]
 pub struct WorkspaceInfo {
     pub name: String,
     pub provider: String,
@@ -117,10 +137,12 @@ message Empty {}
 ```protobuf
 service ChatService {
   rpc Create(CreateChatRequest) returns (Chat);
+  rpc UpdateChat(UpdateChatRequest) returns (Chat); // 更新 title / status（归档等）。REST: PATCH /api/workspaces/:ws_id/chats/:chat_id
   rpc AddMessage(AddMessageRequest) returns (ChatMessage);
   rpc AnalyzeMessage(AnalyzeMessageRequest) returns (AnalyzeMessageResponse);  // Chat 分析消息类型
   rpc Get(GetChatRequest) returns (Chat);
   rpc List(ListChatsRequest) returns (ListChatsResponse);
+  rpc DeleteChat(DeleteChatRequest) returns (Empty);
   rpc Watch(WatchRequest) returns (stream ChatEvent);
 }
 ```
@@ -130,8 +152,10 @@ service ChatService {
 ```protobuf
 service WorkspaceService {
   rpc Create(CreateWorkspaceRequest) returns (Workspace);
+  rpc Update(UpdateWorkspaceRequest) returns (Workspace);        // 仅更新 provider/model 等可修改字段；用户侧通过 REST PATCH 触发
   rpc Get(GetWorkspaceRequest) returns (Workspace);
   rpc List(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc Delete(DeleteWorkspaceRequest) returns (Empty); // REST 触发，Agent 一般不直接调用
   rpc Watch(WatchRequest) returns (stream WorkspaceEvent);
 }
 ```
@@ -144,11 +168,16 @@ service RequirementService {
   rpc Update(UpdateRequirementRequest) returns (Requirement);
   rpc Get(GetRequirementRequest) returns (Requirement);
   rpc List(ListRequirementsRequest) returns (ListRequirementsResponse);
-  rpc Analyze(AnalyzeRequirementRequest) returns (Requirement);   // Assistant 原子抢占 pending→analyzing
+  rpc Analyze(AnalyzeRequirementRequest) returns (Requirement);   // Assistant 原子抢占 Pending→Analyzing；Rejected 可重新提交→Analyzing（驳回后可重新分析）
   rpc Confirm(ConfirmRequirementRequest) returns (Requirement);   // 用户确认草案
   rpc Reject(RejectRequirementRequest) returns (Requirement);     // 用户驳回草案
-  rpc Cancel(CancelRequirementRequest) returns (Requirement);     // 软取消，状态→Cancelled
+  rpc Cancel(CancelRequirementRequest) returns (CancelRequirementResponse); // 软取消，状态→Cancelled
   rpc Watch(WatchRequest) returns (stream RequirementEvent);
+}
+
+message CancelRequirementResponse {
+  Requirement requirement = 1;
+  RequirementStatus previous_status = 2;
 }
 ```
 
@@ -166,23 +195,31 @@ service ProjectService {
   rpc Complete(CompleteProjectRequest) returns (Project);
   rpc Block(BlockProjectRequest) returns (Project);
   rpc Fail(FailProjectRequest) returns (Project);
-  rpc Cancel(CancelProjectRequest) returns (Project);
+  rpc Cancel(CancelProjectRequest) returns (CancelProjectResponse);
   rpc Watch(WatchRequest) returns (stream ProjectEvent);
+}
+
+message CancelProjectResponse {
+  Project project = 1;
+  ProjectStatus previous_status = 2;
 }
 ```
 
-### ProjectTaskService（task.proto）
+### ProjectTaskService（project_task.proto）
 
 ```protobuf
 service ProjectTaskService {
   rpc Create(CreateTaskRequest) returns (ProjectTask);
+  rpc Get(GetTaskRequest) returns (ProjectTask);
   rpc Update(UpdateTaskRequest) returns (ProjectTask);
   rpc Assign(AssignTaskRequest) returns (ProjectTask);
   rpc Complete(CompleteTaskRequest) returns (ProjectTask);
   rpc List(ListTasksRequest) returns (ListTasksResponse);
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc FailTask(FailTaskRequest) returns (FailTaskResponse);
   rpc Watch(WatchRequest) returns (stream ProjectTaskEvent);
 }
+// Task 状态流转 InProgress→InReview、InReview→InProgress（返工）、InProgress→Retrying 通过 Update RPC 实现。
 ```
 
 ### AgentRegistryService（agent.proto）
@@ -202,7 +239,7 @@ service AgentRegistryService {
 
 ```protobuf
 service BoardService {
-  rpc Watch(WatchRequest) returns (stream BoardSnapshotUpdate);   // 增量推送，首次全量
+  rpc Watch(WatchRequest) returns (stream BoardSnapshotUpdate);   // 首次消息为全量快照（is_full_snapshot=true），之后按 snapshot_id 连续增量推送
   rpc GetBoardSnapshot(GetBoardRequest) returns (BoardSnapshot);
 }
 ```
@@ -245,6 +282,7 @@ aemeath/
 │   │   ├── project_task.proto
 │   │   ├── agent.proto
 │   │   ├── common.proto           #   共享枚举/类型（如 CostTier）
+│   │   ├── board.proto            #   BoardService
 │   │   └── sdk/                  #   proto 生成的 SDK
 │   │       ├── rust/             #     tonic 生成
 │   │       └── ts/               #     protobuf-ts 生成
@@ -297,7 +335,8 @@ aemeath/
 │   │       │   └── repository.rs
 │   │       ├── board/            #     board feature（白板聚合）
 │   │       │   ├── mod.rs
-│   │       │   ├── rest.rs       #       GET /board/{workspace_id}
+│   │       │   ├── grpc.rs       #       BoardService gRPC handler (Watch + GetBoardSnapshot)
+│   │       │   ├── rest.rs       #       GET /api/workspaces/:ws_id/board
 │   │       │   └── aggregator.rs #       跨 feature 聚合逻辑
 │   │       └── ws/               #     WebSocket feature
 │   │           ├── mod.rs
@@ -900,10 +939,10 @@ API 重试的重复创建防护:
 
 | 数据类型 | 获取方式 | 更新方式 |
 |----------|----------|----------|
-| 白板（board） | REST GET `/board/{workspace_id}` | Server 聚合后 WebSocket 推送 |
+| 白板（board） | REST GET `/api/workspaces/:ws_id/board` | Server 聚合后 WebSocket 推送 |
 | 需求列表 | REST GET `/requirements` | WebSocket 增量推送 |
-| Project 状态 | REST GET `/projects/{id}` | WebSocket 推送 ProjectTask 完成 |
-| 聊天消息 | REST GET `/chats/{id}/messages` | WebSocket 推送新消息 |
+| Project 状态 | REST GET `/projects/{project_id}` | WebSocket 推送 ProjectTask 完成 |
+| 聊天消息 | REST GET `/chats/{chat_id}/messages` | WebSocket 推送新消息 |
 | Agent 状态 | REST GET `/api/workspaces/:ws_id/agents` | WebSocket 推送心跳/状态变更 |
 
 #### 白板数据聚合（board.rs）
@@ -1065,8 +1104,8 @@ message CancelTaskRequest {
 }
 
 message CancelTaskResponse {
-  bool success = 1;
-  TaskStatus previous_status = 2;
+  ProjectTask task = 1;
+  ProjectTaskStatus previous_status = 2;
 }
 ```
 

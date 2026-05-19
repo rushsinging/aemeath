@@ -49,7 +49,8 @@ pub enum AgentStatus {
     Initializing,   // Scheduler 创建后，正在加载配置 / 建立连接
     Idle,           // 空闲，可接收新任务
     Busy,           // 正在执行任务
-    Error,          // 异常状态（暂时性 → 冷却恢复 Idle；持久性 → Scheduler 销毁）
+    HeartbeatLost,  // 心跳丢失（恢复后 → Idle）
+    Error,          // 异常状态（暂时性 → 冷却恢复 Idle；持久性 → Scheduler 回收文档）
 }
 ```
 
@@ -63,26 +64,29 @@ Scheduler Watch 到 Pending Project
      │
      ▼
   Pending ──(分配 Executor)──▶ Assigned
-     ▲  │                  │
-     │  │                  ├── 用户取消（通知 Executor）──▶ Cancelled
-     │  │                  │
-     │  │                  ├── Scheduler 对账：status=assigned && assigned_at < now - assign_timeout_sec
-     │  │                  │   → pending（清理分配信息并回退）
-     │  │                  │
-     │  │                  │ Executor 开始执行
-     │  │                  ▼
-     │  └── 用户取消 / 级联取消 ─────────────────────────▶ Cancelled
-     │                  InProgress ──▶ Pending（崩溃恢复）
-     │                     │
-     │                     ├── 所有 ProjectTask 为 Completed 或 Cancelled ──▶ Completed
-     │                     │
-     │                     ├── 等待用户反馈 ──▶ Blocked ──(反馈写入 ChatMessage 并 Resume)──▶ InProgress
-     │                     │                     │
-     │                     │                     └── 用户取消（长时间无法解决）──▶ Cancelled
-     │                     │
-     │                     ├── 用户取消（cooperative cancel，释放 worktree/merge_lock）──▶ Cancelled
-     │                     │
-     │                     └── 执行失败 ──▶ Failed（终态，需人工干预重开）
+     │                         │
+     │                         ├── 用户取消（通知 Executor）──▶ Cancelled
+     │                         │
+     │                         ├── Scheduler 对账：status=assigned && assigned_at < now - assign_timeout_sec
+     │                         │   → Pending（清理分配信息并回退）
+     │                         │
+     │                         └── Executor 开始执行
+     │                             ▼
+     │                          InProgress ──▶ Pending（崩溃恢复；下属非终态 ProjectTask 一并回退到 Pending）
+     │                             │
+     │                             ├── 所有 ProjectTask 为 Completed 或 Cancelled ──▶ Completed
+     │                             │
+     │                             ├── 等待用户反馈 ──▶ Blocked ──(反馈写入 ChatMessage 并 Resume)──▶ InProgress
+     │                             │                     │
+     │                             │                     └── 用户取消（长时间无法解决）──▶ Cancelled
+     │                             │
+     │                             ├── 用户取消（cooperative cancel，释放 worktree/merge_lock）──▶ Cancelled
+     │                             │
+     │                             └── 执行失败 ──▶ Failed（需人工干预重开）
+     │                                 │
+     │                                 └── 人工重开 ──▶ Pending
+     │
+     └── 用户取消 / 级联取消 ─────────────────────────────▶ Cancelled
 
     - Pending → Cancelled：用户取消或 Requirement 级联取消
     - Assigned → Cancelled：用户取消，需通知 Executor
@@ -93,13 +97,20 @@ Scheduler Watch 到 Pending Project
 ### Requirement 状态流转
 
 ```
-pending ──▶ analyzing（Assistant 原子抢占）
-analyzing ──▶ draft（草案产出，可被确认）
-analyzing ──▶ pending（超时回退 / 冲突放弃）
+Pending ──▶ Analyzing（Assistant 原子抢占）
+Pending ──▶ Cancelled（用户取消）
+Analyzing ──▶ Draft（草案产出，可被确认）
+Analyzing ──▶ Pending（超时回退 / 冲突放弃）
+Analyzing ──▶ Cancelled（分析中取消）
 
-draft ──▶ InProgress（用户确认并创建关联 Project）
+Draft ──▶ Draft（用户驳回后选择重新生成，Assistant 重新生成草案；允许多轮 Draft）
+Draft ──▶ InProgress（用户确认并创建关联 Project）
+Draft ──▶ Rejected（用户驳回并选择放弃）
+Draft ──▶ Cancelled（用户取消）
+Rejected ──▶ Analyzing（用户重新提交）
 
-InProgress ──▶ completed（所有 ProjectTask 为 Completed/Cancelled）
+InProgress ──▶ Completed（所有 ProjectTask 为 Completed/Cancelled）
+InProgress ──▶ Cancelled（用户取消）
 ```
 
 ### ProjectTask 状态流转
@@ -110,8 +121,10 @@ in_progress ──▶ in_review
 in_progress ──▶ failed（执行失败）
 in_review ──▶ completed / failed（产出 / 阻断）
 in_review ──▶ in_progress（返工）
-* ──▶ retrying（自动重试）──▶ pending
-* ──▶ cancelled（用户取消）
+in_progress ──▶ retrying（自动重试）──▶ pending
+retrying ──▶ failed（重试耗尽：max_retries 次后仍失败或不可重试失败）
+failed ──▶ pending（人工重开）
+pending / in_progress / in_review / retrying ──▶ cancelled（用户取消；排除 Completed/Cancelled/Failed 终态）
 ```
 
 ### AgentInstance 生命周期
@@ -122,11 +135,13 @@ Scheduler 创建 Agent
 Initializing ──(初始化成功)──────────────▶ Idle
 Initializing ──(初始化失败)──────────────▶ Error
 Idle         ──(领取任务)────────────────▶ Busy
-Idle         ──(心跳超时)────────────────▶ Error
+Idle         ──(心跳超时)────────────────▶ HeartbeatLost
 Busy         ──(任务完成)────────────────▶ Idle
-Busy         ──(心跳超时)────────────────▶ Error
+Busy         ──(任务异常终止/panic)────────▶ Error
+Busy         ──(心跳超时)────────────────▶ HeartbeatLost
+HeartbeatLost──(心跳恢复)────────────────▶ Idle
+HeartbeatLost──(恢复失败/异常升级)────────▶ Error
 Error        ──(冷却恢复/自动重启)────────▶ Idle
-Error        ──(Scheduler 回收)──────────▶ 销毁
 ```
 
 Initializing 退出条件：Agent 注册成功 → Idle；超时 30s（如连接 DB 失败或依赖初始化未完成）→ Error。

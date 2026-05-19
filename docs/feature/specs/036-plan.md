@@ -12,12 +12,14 @@
 **产出**：
 1. `share/` 目录：proto 编译脚本、common.proto（含 WatchRequest、Empty、AgentType、IdempotencyOptions）
 2. `server/` 骨架：axum 启动、gRPC server 启动、CORS 配置
-3. `infra/mongodb/`：collection 创建脚本（workspaces / chats / chat_messages / requirements / projects / project_tasks / agent_instances）、索引定义
+3. `infra/mongodb/`：collection 创建脚本（workspaces / chats / chat_messages / requirements / projects / project_tasks / agent_instances / reflections（Sprint 0 仅建 collection + 基础索引；完整 schema 在 Sprint 3/4 实施时按需补充） / idempotency_records / scheduler_state（Sprint 0 仅建 collection + 基础索引；完整 schema 在 Sprint 3/4 实施时按需补充） / agent_heartbeats（Sprint 0 仅建 collection + 基础索引；完整 schema 在 Sprint 3/4 实施时按需补充））、索引定义
 4. `infra/deploy/`：docker-compose.dev.yaml（本地开发全栈：Server + MongoDB + Gateway），Dockerfile（开发镜像）
 5. `agent_registry/` + `scheduler/` + `executor/` + `chat/` + `assistant/` 各 crate 骨架
-6. `share/openapi/sdk/ts` SDK 目录（空壳 + package.json）
-7. TOML 配置装配器（assembler.rs）：能从 5 个 toml 文件的 [role]/[permissions] 段解析 RoleConfig
-8. 日志基建：`aemeath.log` + `panic.log` + `agent.log`
+6. AgentRegistryService gRPC 骨架
+7. `share/openapi/sdk/ts` SDK 目录（空壳 + package.json）
+8. TOML 配置装配器（assembler.rs）：能从 5 个 Main Agent toml 文件的顶层扁平字段与 [permissions] 段解析 RoleConfig
+9. Sub-Agent 角色 TOML 骨架（planner/coder/tester/reviewer/designer，共 5 个）
+10. 日志基建：`aemeath.log` + `panic.log` + `agent.log`
 
 **涉及模块**：share/proto, server, infra, agent_registry, 所有 agent crate 骨架, config
 
@@ -31,13 +33,14 @@
 **依赖**：S0
 
 **产出**：
-1. Workspace CRUD（REST：POST/GET/DELETE /api/workspaces）
-2. Chat CRUD（REST：POST/GET/DELETE /api/workspaces/:ws_id/chats，一个 Workspace 下可多个 Chat）
+1. Workspace CRUD（REST：POST/GET/PATCH/DELETE /api/workspaces；PATCH /api/workspaces/:ws_id 更新 provider/model 配置）
+2. Chat CRUD（REST：POST/GET/PATCH/DELETE /api/workspaces/:ws_id/chats，一个 Workspace 下可多个 Chat）
 3. ChatMessage（REST：POST /api/workspaces/:ws_id/chats/:chat_id/messages + WebSocket 推送）
 4. WebSocket `/ws/workspaces/:ws_id/board`：连接后推送该 workspace 的全量 BoardSnapshot，后续增量推送 BoardSnapshotUpdate
-5. Chats Service gRPC（ChatService.Create/AddMessage/Get/List/Watch）
-6. 幂等：AddMessage 按 idempotency_key 去重
-7. `infra/gateway/nginx.conf`：反向代理（/api → Server REST，/ws → WebSocket，/grpc → gRPC）
+5. Chats Service gRPC（ChatService.Create/AddMessage/Get/List/UpdateChat/DeleteChat/Watch/AnalyzeMessage）
+6. BoardService gRPC 骨架（board.proto：Watch + GetBoardSnapshot）
+7. 幂等：AddMessage 按 idempotency_key 去重
+8. `infra/gateway/nginx.conf`：反向代理（/api → Server REST，/ws → WebSocket，/grpc → gRPC）
 
 **涉及模块**：server（REST + WS handler）、share/proto（chat.proto）、Chat Agent（gRPC client 端）、infra/gateway
 
@@ -68,23 +71,30 @@
 ### Sprint 3 — 需求分析
 
 **目标**：用户发需求后，Assistant 分析生成草案，用户确认后创建 Requirement  
-**依赖**：S1 + S2（Server API 就绪后 UI 可联调）
+**依赖**：S1（后端开发不需要等 S2 UI 完成）
+
+S3 前端依赖 S2
 
 **产出（后端）**：
-1. Requirement CRUD（gRPC：RequirementService.Create/Update/Analyze/Confirm）
-2. Requirement 状态机实现（pending → analyzing → draft → confirmed）
-3. Scheduler 实现：Watch Project + Requirement，根据状态分派
-4. Assistant 实现：分析 Requirement 方向（新建 Project / 已有 Project 下新增 Task / 重复无需修改），产出草案，不拆具体 Project/Task
-5. Scheduler → Assistant 调度链路（Pool 管理 + 心跳检测）
-6. 幂等：AnalyzeRequirement 原子抢占，Confirm 按 idempotency_key 去重
+1. Requirement CRUD（gRPC：RequirementService.Create/Update/Get/List/Analyze/Confirm/Reject/Cancel/Watch）
+2. WorkspaceService gRPC（Create/Get/List/Update/Delete/Watch）
+3. REST：Requirement 创建/列表/详情/更新/Cancel/Confirm/Reject
+4. Requirement 状态机实现（pending → analyzing → draft → InProgress）
+5. Scheduler 实现：Watch Requirement（根据状态分派给 Assistant Pool）
+6. AgentRegistryService 完整实现（Register/Heartbeat/Deregister/List/Watch/RefreshToken）
+7. 模型健康状态机实现（Healthy / Degraded / Unhealthy）
+8. Assistant 实现：分析 Requirement 方向（新建 Project / 已有 Project 下新增 Task / 重复无需修改），产出包含 Project/Task 计划的草案（不创建实际 Project/Task 文档）
+9. Scheduler → Assistant 调度链路（Pool 管理 + 心跳检测）
+10. 幂等：Analyze 原子抢占，Confirm 按 idempotency_key 去重
+11. 审计日志：`llm.log` / `tool.log` / `task.log` + 日轮转
 
 **产出（前端）**：
-7. Requirement 卡片组件：显示状态（分析中/草案已产出/已确认）
-8. 草案确认交互：用户查看草案、确认/修改/拒绝
+F1. Requirement 卡片组件：显示状态（分析中/草案已产出/已确认）
+F2. 草案确认交互：用户查看草案、确认/修改/拒绝
 
-**涉及模块**：scheduler/、assistant/、server（RequirementService gRPC）、ui/
+**涉及模块**：scheduler/、assistant/、agent_registry/、server（RequirementService gRPC）、ui/
 
-**验证标准**：提交 requirement 后能观察到 pending → analyzing → draft 的状态变化，用户确认后只创建一次 confirmed Requirement；Assistant/Scheduler 任一方重启后不会重复分析已被抢占的 Requirement。
+**验证标准**：提交 requirement 后能观察到 pending → analyzing → draft 的状态变化，用户确认后只创建一次 InProgress Requirement；Assistant/Scheduler 任一方重启后不会重复分析已被抢占的 Requirement。
 
 ---
 
@@ -94,18 +104,24 @@
 **依赖**：S3
 
 **产出（后端）**：
-1. Project + ProjectTask CRUD（gRPC：ProjectService.Create/Assign + TaskService.Create/Complete）
-2. Project/ProjectTask 状态机实现（含取消、重试、崩溃恢复）
-3. Executor 实现：接收 Project → 按 Task 顺序/并行编排 → 唤起 Sub-Agent（Planner/Coder/Reviewer/Tester/Designer）→ 收集产出 → 产出 ProjectResult.summary
-4. Sub-Agent 编排：每个 Task 对应一个 Sub-Agent 角色，Executor 按 allowed_tools + context_window 管理上下文
-5. Agent 间通信：Executor → Sub-Agent gRPC 调用
-6. Context 上下文管理：每个 Sub-Agent 独立 context_window，超限时触发压缩
-7. BoardSnapshot 增量推送：Executor 每完成一个 Task 写回 result，Server 推送增量
+1. ProjectService gRPC（Create/Update/Get/List/Assign/Accept/Resume/Complete/Block/Fail/Cancel/Watch）
+2. ProjectTaskService gRPC（Create/Update/Get/List/Assign/Complete/FailTask/CancelTask/Watch）
+3. REST：Project 创建/列表/详情/更新/Resume/Cancel、Task 创建/列表/详情/更新、Agent 列表
+4. Project/ProjectTask 状态机实现（含取消、重试、崩溃恢复）
+5. Scheduler 实现：Watch Project（根据状态分派给 Executor Pool）
+6. Executor 实现：接收 Project → 按 Task 顺序/并行编排 → 唤起 Sub-Agent（Planner/Coder/Reviewer/Tester/Designer）→ 收集产出 → 产出 ProjectResult.summary
+7. Sub-Agent 编排：每个 Task 对应一个 Sub-Agent 角色，Executor 按 allowed_tools + context_window 管理上下文
+8. Agent 间通信：Executor → Sub-Agent gRPC 调用
+9. Context 上下文管理：每个 Sub-Agent 独立 context_window，超限时触发压缩
+10. BoardSnapshot 增量推送：Executor 每完成一个 Task 写回 result，Server 推送增量
+11. Worktree 隔离：Executor 为每个 Task 创建独立 git worktree
+12. Merge Lock：Project 级别乐观锁（MongoDB），并发串行化，崩溃恢复级联释放
+13. Sub-Agent 角色 TOML 完整配置（planner/coder/tester/reviewer/designer，共 5 个）
 
 **产出（前端）**：
-8. Project/Task 进度面板：树形结构展示 Project → Tasks → Sub-Agent 状态
-9. Task 详情：Sub-Agent 日志片段、产出摘要
-10. 取消/重试操作
+F1. Project/Task 进度面板：树形结构展示 Project → Tasks → Sub-Agent 状态
+F2. Task 详情：Sub-Agent 日志片段、产出摘要
+F3. 取消/重试操作
 
 **涉及模块**：executor/、scheduler/（Executor Pool 管理）、planner/coder/reviewer/tester/designer（Sub-Agent）、server、ui/
 
@@ -123,7 +139,7 @@
 2. RBAC：Token scope 精确到 board_read/board_write/message_read/message_write，中间件校验
 3. Sub-Agent 安全审计：task.log 记录 action_history
 4. BoardSnapshot 性能：增量推送 + 分级订阅（Chat 全量，UI 按区域）
-5. Token 刷新：execution_token 过期前的自动续期
+5. Token 刷新：Agent Token 自动续期（AgentRegistryService.RefreshToken）
 
 **涉及模块**：evolver/、server（RBAC 中间件）、ui/
 
@@ -137,11 +153,12 @@
 
 ```toml
 # chat.toml（面向用户的对话 Agent）
-[role]
 name = "chat"
 description = "面向用户的对话 Agent"
-system_prompt = "与用户对话，理解需求并协调调度。"
 pool_size = 0               # 随连绑定，无 Pool
+system_prompt = "你是面向用户的 Chat Agent，负责理解用户消息、写入白板并汇报状态。"
+skills = ["conversation", "requirement-triage"]
+mcp = { servers = [] }
 
 [[models]]
 model = "anthropic/claude-sonnet-4-20250514"
@@ -150,19 +167,21 @@ cost_tier = "high"
 [permissions]
 allowed_tools = ["read", "write", "web_search", "web_fetch"]
 scope = ["board_read", "board_write"]
-can_call_roles = ["scheduler"]  # Chat 只能调 Scheduler
+can_call_roles = []  # Chat 不直接调用其他 Agent，由后端/Scheduler 编排
 max_subagents = 0              # Chat 不唤起 Sub-Agent
+can_create_agents = false
 ```
 
 ### `assistant.toml`
 
 ```toml
 # assistant.toml（后台需求分析/草案 Worker）
-[role]
 name = "assistant"
 description = "后台需求分析/草案 Worker"
-system_prompt = "分析用户需求并生成可确认草案。"
 pool_size = 3               # Scheduler 管理 Pool
+system_prompt = "你是 Assistant Agent，负责深度分析 Requirement，拆解 Project/Task 草案并写回白板。"
+skills = ["requirement-analysis", "task-breakdown"]
+mcp = { servers = [] }
 
 [[models]]
 model = "deepseek/deepseek-chat"
@@ -173,17 +192,20 @@ allowed_tools = ["read", "write", "grep", "glob"]
 scope = ["board_read", "board_write"]
 can_call_roles = []
 max_subagents = 0
+can_create_agents = false
 ```
 
 ### `scheduler.toml`
 
 ```toml
 # scheduler.toml
-[role]
 name = "scheduler"
 description = "管理 Agent Pool 生命周期，分派任务"
-system_prompt = "管理 Agent Pool 生命周期并分派任务。"
-pool_size = 1
+pool_size = 0               # 单例，无 Pool
+system_prompt = "你是 Scheduler Agent，负责 Watch Project/Requirement，管理 Assistant/Executor Pool 并执行调度。"
+skills = []
+mcp = { servers = [] }
+
 [[models]]
 model = "deepseek/deepseek-chat"
 cost_tier = "low"
@@ -192,24 +214,20 @@ cost_tier = "low"
 allowed_tools = []
 scope = ["agent_registry", "board_read", "board_write"]
 can_create_agents = true
-can_call_roles = []
+can_call_roles = ["assistant", "executor"]
 max_subagents = 0
-
-[skills]
-enabled = []
-
-[mcp]
-servers = []
 ```
 
 ### `executor.toml`
 
 ```toml
 # executor.toml
-[role]
 name = "executor"
 description = "领取 Project，编排 Sub-Agent 执行 Tasks，写回白板"
-system_prompt = "领取项目并编排 Sub-Agent 执行任务。"
+pool_size = 3               # Scheduler 管理 Pool，可按需扩缩
+system_prompt = "你是 Executor Agent，负责领取 Project、编排 Sub-Agent 执行 Task，并将结果写回白板。"
+skills = ["task-management"]
+mcp = { servers = [] }
 
 [[models]]
 model = "anthropic/claude-sonnet-4-20250514"
@@ -230,22 +248,18 @@ scope = ["board_read", "board_write"]
 max_subagents = 5
 can_call_roles = ["planner", "coder", "tester", "reviewer", "designer"]
 can_create_agents = false
-
-[skills]
-enabled = ["task-management"]
-
-[mcp]
-servers = []
 ```
 
 ### `evolver.toml`
 
 ```toml
 # evolver.toml
-[role]
 name = "evolver"
 description = "定期扫描白板，提炼模式，生成/优化 Skills 和 MCP"
-system_prompt = "定期扫描白板并提炼可复用经验。"
+pool_size = 0               # 单例，无 Pool
+system_prompt = "你是 Evolver Agent，负责从已完成项目中提炼可复用模式，生成或优化 Skills 和 MCP 配置建议。"
+skills = ["analysis", "summarization"]
+mcp = { servers = [] }
 
 [[models]]
 model = "deepseek/deepseek-chat"
@@ -257,12 +271,6 @@ scope = ["board_read", "board_write"]
 max_subagents = 0
 can_call_roles = []
 can_create_agents = false
-
-[skills]
-enabled = ["analysis", "summarization"]
-
-[mcp]
-servers = []
 ```
 
 ## P0 设计约束
@@ -273,18 +281,20 @@ servers = []
 
 ```text
 1. Scheduler 心跳超时检测（heartbeat_timeout_sec, 默认 30s）
-2. 超时 Executor 的 current_project_id → 查 Project status:
+2. 超时 Executor 的 current_project_id → 查 Project status: assigned / in_progress → 崩溃恢复路径
+   - assigned    → 清空 assigned_executor_id，Project 回退 pending（此时尚无 Task 被分配，无需级联回退）
    - in_progress → 仅在崩溃恢复路径清空 assigned_executor_id，并将 Project 回退 pending 以便重新分配
    - blocked     → Scheduler 通知 Chat，等待用户决策
    - completed/failed/cancelled → 终态不回退
 3. Project 崩溃恢复条件更新（防并发）:
    db.projects.updateOne(
-     { _id: project_id, status: { $in: ["pending", "assigned", "in_progress"] }, assigned_executor_id: old_id },
+     { _id: project_id, status: { $in: ["assigned", "in_progress"] }, assigned_executor_id: old_id },
      { $unset: { assigned_executor_id: "" }, $set: { status: "pending" } }
    )
-4. 级联回退该 Project 下由该 Executor 持有的非终态 Task：
+4. 释放该 Executor 持有的所有 merge_lock
+5. 级联回退该 Project 下由该 Executor 持有的非终态 Task：
    InProgress / InReview / Retrying → Pending（清空 assigned_executor_id）
-5. 重新分配给新 Executor 时写入原因字段（如 "reassigned_after_crash"）
+6. 重新分配给新 Executor 时写入原因字段（如 "reassigned_after_crash"）
 
 约束：普通执行失败不会自动 Failed → Pending；只有 Executor 崩溃恢复回退非终态 Task，或显式人工重试/重开才会重新进入 Pending/分配流程。
 ```
@@ -294,7 +304,7 @@ servers = []
 ```text
 ProjectTask 状态:
   pending → in_progress → in_review → (completed | failed | retrying)
-  in_progress → retrying → in_progress（下一次 attempt 开始，形成明确重试循环）
+  in_progress → retrying → pending（下一次 attempt 重新进入分配流程，形成明确重试循环）
   in_progress / in_review / retrying → pending（仅 Executor 崩溃恢复回退；普通失败不走此路径）
 
 Executor 重启后:
@@ -324,7 +334,7 @@ v0.1 Watch 定位：实时提示（best-effort），不是可靠消息队列。
 
 白板 WebSocket 断线:
   - UI 显示连接状态（disconnected / reconnecting / connected）
-  - 重连后：REST GET /board/{workspace_id} 全量拉取最新快照，覆盖当前 state
+  - 重连后：REST GET /api/workspaces/:ws_id/board 全量拉取最新快照，覆盖当前 state
 ```
 
 ### 幂等策略
