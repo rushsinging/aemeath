@@ -94,22 +94,24 @@ impl App {
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
                     self.input_area.clear_suggestions();
+                } else if !self.input_area.is_empty() {
+                    // 第一次 Ctrl+C：input 非空时清空 input area
+                    self.input_area.clear();
+                    self.status_bar.set_warning("Input cleared (Ctrl+C again to exit)");
+                    self.last_ctrlc = Some(std::time::Instant::now());
                 } else {
+                    // input 为空：两段式退出（5 秒超时）
                     let now = std::time::Instant::now();
                     if let Some(last) = self.last_ctrlc {
-                        if now.duration_since(last).as_secs_f64() < 3.0 {
+                        if now.duration_since(last).as_secs_f64() < 5.0 {
                             return UpdateResult {
                                 cmd: Cmd::Quit,
                                 pending_slash: None,
                             };
-                        } else {
-                            self.last_ctrlc = Some(now);
-                            self.status_bar.set_warning("Press Ctrl+C again to exit");
                         }
-                    } else {
-                        self.last_ctrlc = Some(now);
-                        self.status_bar.set_warning("Press Ctrl+C again to exit");
                     }
+                    self.last_ctrlc = Some(now);
+                    self.status_bar.set_warning("Press Ctrl+C again to exit");
                 }
             }
             (KeyModifiers::NONE, KeyCode::Tab) if !self.is_processing => {
