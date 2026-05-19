@@ -159,7 +159,7 @@ Scheduler 创建 Agent
      │
      ▼
 Initializing ──(初始化成功)────────────────▶ Idle
-Initializing ──(初始化失败 / 超时 30s)────▶ Error
+Initializing ──(初始化失败 / 超时 agent_init_timeout_sec，默认 30s，配置见 036-02 scheduler.*）──▶ Error
 Idle         ──(领取任务)─────────────────▶ Busy
 Idle         ──(心跳超时)─────────────────▶ HeartbeatLost
 Busy         ──(任务完成)─────────────────▶ Idle

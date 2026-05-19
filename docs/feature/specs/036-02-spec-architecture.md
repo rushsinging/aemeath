@@ -48,7 +48,7 @@
 │  └────────┬─────────┘   └──────────┬───────────────┘      │
 │           │                        │                       │
 │  ┌────────┴────────────────────────┴──────────────────┐    │
-│  │ Chat Svc │ WS Svc │ Req Svc │ Proj Svc │ Task Svc │ Board Svc │ Agent Reg │    │
+│  │ Chat Svc │ WS Svc │ Req Svc │ Proj Svc │ Task Svc │ Board Svc │ Refl Svc │ Agent Reg │    │
 │  └────────────────────────────────────────────────────┘    │
 │                          │                                  │
 │                    MongoDB（文档存储）                       │
@@ -379,6 +379,15 @@ Evolver 定时循环（interval 可配，默认 24h）:
 4. 反思结果写入白板（reflections collection）
 5. 标记 Project 为已反思
 ```
+
+**Evolver ↔ API Server gRPC 交互**：Evolver 通过以下 gRPC Service 与 API Server 通信：
+
+| Service | RPC | 用途 |
+|---------|-----|------|
+| `ProjectService` | `Watch` / `List` | 扫描已完成且未反思的 Project |
+| `ReflectionService` | `Create` | 写入反思结果（含 embedding_ref） |
+| `RequirementService` | `Watch` / `List` | 查询近期 Requirement 趋势 |
+| `ProjectTaskService` | `Watch` | 获取已完成 Task 的执行摘要 |
 
 ### Qdrant RAG 存储边界
 

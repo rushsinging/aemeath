@@ -6,7 +6,7 @@ Server 通过 REST + WebSocket 为前端白板提供数据。
 
 ### 认证
 
-所有 REST/WS 端点携带 Bearer JWT token（`Authorization: Bearer <jwt>`）；WS 在连接 query parameter 中传递 `?token=<jwt>`。gRPC 中间件校验 token 的 `scope` 字段（如 `board_read`/`board_write`/`agent_registry`），REST/WS 中间件做相同校验。RBAC scope 完整定义见架构 spec。
+所有 REST/WS 端点携带 Bearer JWT token（`Authorization: Bearer <jwt>`）；WS 在连接 query parameter 中传递 `?token=<jwt>`。gRPC 中间件校验 token 的 `scope` 字段（如 `board_read`/`board_write`/`agent_registry`），REST/WS 中间件做相同校验。RBAC scope 完整定义见 036-02-spec-architecture.md ## RBAC Scope 定义 节。
 
 ### REST 端点
 ```
