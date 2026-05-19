@@ -43,10 +43,9 @@ POST   /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id/cancel   # 取
 POST   /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id/retry    # 重开 Task（Failed → Pending，保留 retry_count）
 GET    /api/workspaces/:ws_id/agents             # Agent 实例列表
 POST   /api/workspaces/:ws_id/chats/:chat_id/messages  # 创建 ChatMessage（Chat/用户调用）
-POST   /api/workspaces/:ws_id/requirements/:id/confirm  # 确认草案并创建 Project/Task
-                                                          # Request: {}（空 body — 确认当前 draft）
-                                                          # Response: { requirement, created_projects: Vec<ProjectWithTasks> }
-POST   /api/workspaces/:ws_id/requirements/:id/reject   # 驳回草案
+POST   /api/workspaces/:ws_id/requirements/:requirement_id/confirm  # 确认草案并创建 Project/Task
+                                                                   # Request: {}（空 body — 确认当前最新 draft revision）
+                                                                   # Response: { requirement, created_projects: Vec<ProjectWithTasks> }
 ```
 
 说明：DELETE 批量删除端点的 IDs 通过 query params 传递。
@@ -212,14 +211,29 @@ service ProjectService {
   rpc Block(BlockProjectRequest) returns (Project);
   rpc Fail(FailProjectRequest) returns (Project);
   rpc Cancel(CancelProjectRequest) returns (CancelProjectResponse);
+  rpc ConfirmCancel(ConfirmCancelRequest) returns (ConfirmCancelResponse); // 两阶段 Cancel 第二阶段确认（参见 036-04）
+  rpc ForceCancel(ForceCancelRequest) returns (CancelProjectResponse);  // Scheduler 兜底强制取消（cancel_timeout_sec 超时后调用）
   rpc Watch(WatchRequest) returns (stream ProjectEvent);
 }
-
+  
 message CancelProjectResponse {
   Project project = 1;
   ProjectStatus previous_status = 2;
 }
-
+message ConfirmCancelRequest {
+  string project_id = 1;
+}
+message ConfirmCancelTaskRequest {
+  string task_id = 1;
+}
+message ConfirmCancelResponse {
+  bool ok = 1;                  // 执行成功（若已处于取消/终态则返回 false）
+}
+message ForceCancelRequest {
+  string project_id = 1;
+  string reason = 2;            // "cancel_timeout" — 取消原因
+}
+  
 message ResumeProjectResponse {
   Project project = 1;
   ProjectStatus previous_status = 2;  // Blocked
@@ -236,13 +250,24 @@ service ProjectTaskService {
   rpc Complete(CompleteTaskRequest) returns (ProjectTask);
   rpc List(ListTasksRequest) returns (ListTasksResponse);
   rpc Cancel(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc ConfirmCancel(ConfirmCancelTaskRequest) returns (ConfirmCancelTaskResponse); // 两阶段 Cancel 第二阶段确认
+  rpc ForceCancel(ForceCancelTaskRequest) returns (CancelTaskResponse);  // Scheduler 兜底强制取消
   rpc Fail(FailTaskRequest) returns (FailTaskResponse);
   rpc Retry(RetryTaskRequest) returns (ProjectTask);               // Failed → Pending 重开
   rpc Watch(WatchRequest) returns (stream ProjectTaskEvent);
 }
+  
+message ConfirmCancelTaskResponse {
+  bool ok = 1;                  // 执行成功（若已处于取消/终态则返回 false）
+}
+message ForceCancelTaskRequest {
+  string task_id = 1;
+  string reason = 2;            // "cancel_timeout"
+}
+  
 // Task 状态流转 InProgress→InReview、InReview→InProgress（返工）、InProgress→Retrying 通过 Update RPC 实现。
 ```
-
+  
 ### AgentRegistryService（agent.proto）
 
 ```protobuf
@@ -269,17 +294,26 @@ service ReflectionService {
   rpc Watch(WatchRequest) returns (stream ReflectionEvent);
 }
 
+message McpSuggestion {
+  string name = 1;                 // MCP 工具名称
+  string reason = 2;               // 建议原因
+}
+  
 message Reflection {
   string reflection_id = 1;
-  string title = 2;
-  string content = 3;              // Markdown 格式反思描述
-  string project_id = 4;           // 关联 Project（可选）
+  string title = 2;                 // 可选标题（数据模型无此字段，proto 补充用于列表展示）
+  string summary = 3;               // 反思摘要（Markdown 格式）
+  string project_id = 4;            // 关联 Project（可选）
   string workspace_id = 5;
-  repeated string related_entity_ids = 6;  // 关联实体 ID（Project / Task / Requirement）
-  string embedding_status = 7;     // pending | indexed | failed
-  string embedding_ref = 8;        // Qdrant point id（indexed 时非空）
-  int64 created_at = 9;
-  int64 reflected_at = 10;         // 反思来源 Project 的 completed 时间
+  repeated string patterns = 6;     // 发现的行为模式
+  repeated string skills_produced = 7;  // 产出的 Skill 名称
+  repeated McpSuggestion mcp_suggestions = 8;  // 建议的 MCP 工具 {name, reason}
+  repeated string referenced_chat_message_ids = 9;  // 引用的 ChatMessage ObjectId
+  string embedding_status = 10;     // pending | indexed | failed
+  string embedding_ref = 11;        // 嵌入对象 { collection, point_id } JSON，indexed 时非空
+  int64 created_at = 12;
+  int64 reflected_at = 13;          // 反思来源 Project 的 completed 时间
+  int64 updated_at = 14;            // 更新时间戳
 }
 
 message CreateReflectionRequest {
@@ -537,7 +571,8 @@ Project:
       │          │             │  │
       │          │             │  ├──▶ Blocked ──▶ InProgress (用户反馈)
       │          │             │  │       │
-      │          │             │  │       └──▶ Cancelled
+      │          │             │  │       ├──▶ Cancelled（用户主动取消）
+      │          │             │  │       └──▶ Failed（blocked_timeout_sec 超时）
       │          │             │  │
       │          │             │  ├──▶ Pending（崩溃恢复）
       │          │             │  │
@@ -552,7 +587,7 @@ Project:
     - Pending → Cancelled：用户取消或 Requirement 级联取消
     - Assigned → Cancelled：用户取消，需通知 Executor
     - InProgress → Cancelled：用户取消；Executor 采用 cooperative cancel，停止当前执行并释放 worktree / merge_lock
-    - Project 进入 Blocked 后由 Agent 主动提醒用户；无系统自动超时，用户通过反馈解锁或手动取消
+    - Project 进入 Blocked 后由 Agent 主动提醒用户；支持系统自动超时（`blocked_timeout_sec`，默认 3600s，配置见 036-02 scheduler.*），也支持用户通过反馈解锁或手动取消
     - Blocked → InProgress：用户反馈通过 `ChatMessage(message_type=feedback)` 写入并关联 Project/Task，然后调用 ProjectService.Resume / REST resume 入口恢复执行
     - Blocked → Cancelled：用户主动取消，适用于长时间无法解决的阻塞
     - Failed 为普通执行失败终态之一，不自动回退 Pending；只有显式人工重试/重开才可创建新的分配流程
@@ -566,8 +601,10 @@ ProjectTask:
                 │   │
                 │   └── retry_needed / 可重试失败 ──▶ Retrying
                 │                                      │
-                └──────────────────────────────────────┘
-                  （下一次 attempt 开始：Retrying→InProgress）
+                │                                      └── 短暂冷却后（retry_cooldown）──▶ Pending
+                │                                                                          │
+                └──────────────────────────────────────────────────────────────────────────┘
+                  （Retrying→Pending→InProgress：下一次 attempt 由 Scheduler 重新分配 Executor 后开始）
 
   Pending ──▶ Cancelled
   InProgress / InReview / Retrying ──(Executor 崩溃恢复)──▶ Pending

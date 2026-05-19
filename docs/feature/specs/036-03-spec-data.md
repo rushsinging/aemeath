@@ -389,7 +389,7 @@ pub struct BoardSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoardSnapshotUpdate {
     pub snapshot_id: String,        // 基于哪个快照做 diff
-    pub changed_workspace: Option<WorkspaceInfo>,  // Workspace 元信息变更（name/provider/model 等；None = 本次无变更）
+    pub changed_workspace: Option<WorkspaceInfo>,  // Workspace 元信息变更（name/provider/model 等；首次消息 is_full_snapshot=true 时必须为 Some；None = 本次无变更）
     pub is_full_snapshot: bool,     // 首次 Watch 消息为 true
     pub timestamp: i64,
     pub changed_requirements: Vec<Requirement>,   // 新增/变更的 Requirement

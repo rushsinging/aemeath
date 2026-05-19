@@ -48,11 +48,17 @@
 │  └────────┬─────────┘   └──────────┬───────────────┘      │
 │           │                        │                       │
 │  ┌────────┴────────────────────────┴──────────────────┐    │
-│  │ Chat Svc │ WS Svc │ Req Svc │ Proj Svc │ Task Svc │ Board Svc │ Refl Svc │ Agent Reg │    │
+│  │ Chat Svc │Workspace│ Req Svc │ Proj Svc │ Task Svc │ Board Svc │Reflection│ Agent Reg │   │
+│  │          │  Svc    │         │          │          │           │   Svc    │           │   │
 │  └────────────────────────────────────────────────────┘    │
 │                          │                                  │
 │                    MongoDB（文档存储）                       │
+│                                                              │
+│                    Qdrant（向量存储，RAG）                     │
 └──────────────────────────────────────────────────────────┘
+
+> **注**：MongoDB 和 Qdrant 是独立部署的外部数据服务，不运行于 API Server 进程内。API Server 通过 MongoDB Driver 和 Qdrant Client 分别连接。Qdrant 向量写入由 API Server 的异步 embedding task 完成，MongoDB 与 Qdrant 之间无直接通信。
+
         ▲                      ▲
         │ gRPC Watch / CRUD    │ gRPC Watch / CRUD
         │                      │
@@ -294,6 +300,7 @@ Assistant Pool 大小 = min(max_concurrent_assistant, max(min_concurrent_assista
 - `blocked_timeout_sec`（默认 3600，即 1 小时）：Project 最长 Blocked 时长（见 State spec Blocked 说明）。超时后自动 Blocked→Failed 并释放 merge_lock。
 - `cancel_timeout_sec`（默认 60）：Cooperative Cancel 等待 Executor 确认的超时。超时后 Scheduler 按崩溃恢复处理。
 - `busy_timeout_sec`（默认 600，即 10 分钟）：Chat Agent Busy 超时（见 State spec Chat 双通道健康模型）。超时后 Scheduler 标记 AgentStatus→Error。
+- `token_ttl_sec`（默认 3600，即 1 小时）：Agent Token 有效期。Agent 在剩余 < 5min 时主动刷新。
 
 配置示例（`~/.aemeath/config.json` 中 `scheduler.pool` 段）:
 ```jsonc
@@ -384,8 +391,8 @@ Evolver 定时循环（interval 可配，默认 24h）:
 
 | Service | RPC | 用途 |
 |---------|-----|------|
-| `ProjectService` | `Watch` / `List` | 扫描已完成且未反思的 Project |
-| `ReflectionService` | `Create` | 写入反思结果（含 embedding_ref） |
+| `ProjectService` | `Watch` / `List` / `Update` | 扫描已完成且未反思的 Project；反思完成后标记 `reflected_at` |
+| `ReflectionService` | `Create` / `List` / `Get` | 写入反思结果（含 embedding_ref）；查询已有 Reflection 去重 |
 | `RequirementService` | `Watch` / `List` | 查询近期 Requirement 趋势 |
 | `ProjectTaskService` | `Watch` | 获取已完成 Task 的执行摘要 |
 
@@ -481,7 +488,7 @@ cost_tier = "low"
 
 [permissions]
 allowed_tools = ["read", "write", "grep", "glob"]
-scope = ["board_read", "board_write"]
+scope = ["board_read", "board_write", "agent_registry"]
 can_call_roles = []
 max_subagents = 0
 can_create_agents = false
@@ -502,7 +509,7 @@ cost_tier = "low"
 
 [permissions]
 allowed_tools = ["web_search"]
-scope = ["board_read", "board_write"]
+scope = ["board_read", "board_write", "agent_registry"]
 max_subagents = 0
 can_call_roles = []
 can_create_agents = false
@@ -553,7 +560,7 @@ cost_tier = "medium"
 [permissions]
 allowed_tools = ["agent_call"]
 # agent_call 是 allowed_tools（runtime 工具），不属于 scope
-scope = ["board_read", "board_write"]
+scope = ["agent_registry", "board_read", "board_write"]
 max_subagents = 5
 can_call_roles = ["planner", "coder", "tester", "reviewer", "designer"]
 can_create_agents = false
@@ -580,3 +587,11 @@ enum TokenScope {
 ```
 
 **Chat Agent 注册例外**：Chat 的连接层注册绕过 Scheduler-only 约束，由服务端内部完成 Register（无外部 API）。
+
+### Token 生命周期
+
+1. **签发**：`AgentRegistryService.Register` 成功后，API Server 签发 JWT（HS256，密钥服务端持有）。Payload：`{ agent_id, role, workspace_id, scope[], aud, iss, iat, exp }`。默认有效期 1h（可配 `token_ttl_sec`）。
+2. **传递**：gRPC metadata key `authorization`，值格式 `Bearer <jwt>`（与 REST 统一）。
+3. **刷新**：调用方为 Agent 自身——在剩余有效期 < 5min 时主动调用 `RefreshToken` RPC。服务端用 metadata 中旧 token 鉴权后签发新 token。
+4. **过期**：gRPC 拦截器拒绝过期 token → `UNAUTHENTICATED`。Agent 心跳使用 token，过期则心跳失败 → 心跳超时 → HeartbeatLost。Scheduler 通过心跳超时间接感知 token 过期。
+5. **Scope 更新**：v0.1 scope 在签发时确定，不支持热更新。角色变更需 Deregister + 重新 Register。
