@@ -75,19 +75,28 @@ pub(crate) async fn run_chat(mut args: Args) {
 
     // 获取 API key: CLI args > env vars > resolved config
     let api_key = args.api_key.take().unwrap_or_else(|| {
+        let driver_env = match api_type {
+            ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
+            ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
+            ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+            ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
+        };
         std::env::var("AEMEATH_API_KEY")
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-            .or_else(|_| std::env::var("OPENAI_API_KEY"))
-            .or_else(|_| std::env::var("LLM_API_KEY"))
-            .unwrap_or_else(|_| {
+            .ok()
+            .or_else(|| driver_env.and_then(|name| std::env::var(name).ok()))
+            .or_else(|| std::env::var("LLM_API_KEY").ok())
+            .or_else(|| {
                 if !resolved_model.source_config.api_key.is_empty() {
-                    return resolved_model.source_config.api_key.clone();
+                    Some(resolved_model.source_config.api_key.clone())
+                } else {
+                    None
                 }
-                eprintln!("Error: API key not set. Use --api-key, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
+            })
+            .unwrap_or_else(|| {
+                eprintln!("Error: API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
                 std::process::exit(1);
             })
     });
-
     let base_url = args.base_url.clone().or_else(|| {
         if resolved_model.source_config.base_url.is_empty() {
             None

@@ -33,7 +33,10 @@ impl ConfigManager {
 
     /// Load configuration from all sources
     pub async fn load(&self) -> Result<Config, String> {
-        let mut config = Config::default();
+        let mut config = Config {
+            models: volcengine_coding_plan_config(),
+            ..Default::default()
+        };
 
         // Load global config
         if self.global_path.exists() {

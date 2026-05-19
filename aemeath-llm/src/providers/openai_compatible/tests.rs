@@ -110,6 +110,18 @@ fn thinking_budget_effort_boundaries() {
 }
 
 #[test]
+fn volcengine_thinking_budget_maps_to_reasoning_effort() {
+    let config = ReasoningConfig::ThinkingBudget(40000);
+    let mut body = base_body();
+
+    OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("reasoning"), Some(&json!({"effort":"xhigh"})));
+    assert!(body.get("thinking").is_none());
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
 fn openai_provider_config_from_api_driver_sets_fields() {
     use aemeath_core::provider::ApiDriverKind;
     let openai = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "source-openai");
@@ -121,6 +133,12 @@ fn openai_provider_config_from_api_driver_sets_fields() {
     assert_eq!(zhipu.source_key, "source-zhipu");
     assert_eq!(zhipu.api, ApiDriverKind::Zhipu);
     assert_eq!(zhipu.chat_api_suffix, "/chat/completions");
+
+    let volcengine =
+        OpenAIProviderConfig::from_api_driver(ApiDriverKind::Volcengine, "source-volcengine");
+    assert_eq!(volcengine.source_key, "source-volcengine");
+    assert_eq!(volcengine.api, ApiDriverKind::Volcengine);
+    assert_eq!(volcengine.chat_api_suffix, "/chat/completions");
 }
 
 #[test]

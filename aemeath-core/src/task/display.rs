@@ -46,10 +46,7 @@ impl TaskStore {
                 ],
             )
             .await;
-        tasks
-            .iter()
-            .position(|t| t.id == global_id)
-            .map(|i| i + 1)
+        tasks.iter().position(|t| t.id == global_id).map(|i| i + 1)
     }
 
     /// Resolve an array of task id strings (may be display numbers or global
@@ -99,10 +96,7 @@ impl TaskStore {
                 ],
             )
             .await;
-        tasks
-            .into_iter()
-            .nth(display_num - 1)
-            .map(|t| t.id)
+        tasks.into_iter().nth(display_num - 1).map(|t| t.id)
     }
 
     /// Get the batch id used for display number resolution.
@@ -139,12 +133,7 @@ mod tests {
         TaskStore::new()
     }
 
-    async fn add_task(
-        store: &TaskStore,
-        id: &str,
-        batch: u64,
-        status: TaskStatus,
-    ) {
+    async fn add_task(store: &TaskStore, id: &str, batch: u64, status: TaskStatus) {
         let task = Task {
             id: id.to_string(),
             subject: format!("task-{id}"),
@@ -171,11 +160,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_display_id_local_number_in_current_batch() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         // Batch 1 has tasks with global ids 8, 9, 10
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::InProgress).await;
@@ -208,11 +193,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_display_number_within_batch() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::InProgress).await;
         add_task(&store, "10", 1, TaskStatus::Pending).await;
@@ -234,11 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_display_number_excludes_deleted() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         add_task(&store, "1", 1, TaskStatus::Pending).await;
         add_task(&store, "2", 1, TaskStatus::Deleted).await;
         add_task(&store, "3", 1, TaskStatus::InProgress).await;
@@ -255,11 +232,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_display_ids_batch() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         add_task(&store, "5", 1, TaskStatus::Pending).await;
         add_task(&store, "6", 1, TaskStatus::Pending).await;
 
@@ -272,11 +245,7 @@ mod tests {
     #[tokio::test]
     async fn test_to_display_ids_batch() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         add_task(&store, "5", 1, TaskStatus::Pending).await;
         add_task(&store, "6", 1, TaskStatus::Pending).await;
 
@@ -313,11 +282,7 @@ mod tests {
     #[tokio::test]
     async fn test_format_display_id_with_mapping() {
         let store = setup_store_with_batches().await;
-        store
-            .batches
-            .lock()
-            .await
-            .push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1));
         add_task(&store, "99", 1, TaskStatus::Pending).await;
 
         assert_eq!(store.format_display_id("99").await, "1");

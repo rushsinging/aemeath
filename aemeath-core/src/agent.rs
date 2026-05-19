@@ -179,7 +179,7 @@ impl<'a> Agent<'a> {
             })
             .collect();
         self.execute_tools(&owned).await
-  }
+    }
 }
 
 #[cfg(test)]
