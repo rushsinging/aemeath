@@ -100,3 +100,74 @@ fn format_tool_group(name: &str, summaries: &[&str]) -> String {
         format!("{name}{suffix}")
     }
 }
+
+/// Extract a short preview string from partial JSON arguments for a given tool name.
+/// Returns empty string if no useful preview can be extracted yet.
+pub(super) fn extract_tool_preview(name: &str, partial_args: &str) -> String {
+    // Key parameter names for each tool — the first found non-empty value wins.
+    let keys: &[&str] = match name {
+        "Read" | "ReadFile" => &["file_path", "path"],
+        "Edit" | "EditFile" => &["file_path", "path"],
+        "Write" | "WriteFile" => &["file_path", "path"],
+        "Bash" => &["command"],
+        "Grep" => &["pattern"],
+        "Glob" => &["pattern"],
+        "Agent" => &["description"],
+        _ => &[],
+    };
+    if keys.is_empty() {
+        return String::new();
+    }
+
+    // Try to extract value from partial JSON using simple string scanning.
+    // This is faster and more tolerant than full JSON parsing for incomplete JSON.
+    for &key in keys {
+        if let Some(value) = extract_string_value(partial_args, key) {
+            return truncate_ellipsis(&value, 80);
+        }
+    }
+    String::new()
+}
+
+/// Extract a string value from (possibly incomplete) JSON by scanning for `"key":"value"`.
+/// Handles escaped quotes and partial values (value may be cut off at the end).
+fn extract_string_value(json: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let start = json.find(&needle)?;
+    // Skip past "key"
+    let after_key = start + needle.len();
+    let rest = json.get(after_key..)?;
+    // Skip optional whitespace and colon
+    let mut pos = 0;
+    let chars: Vec<char> = rest.chars().collect();
+    while pos < chars.len() && (chars[pos] == ' ' || chars[pos] == ':' || chars[pos] == '\t' || chars[pos] == '\n' || chars[pos] == '\r') {
+        pos += 1;
+    }
+    // Expect opening quote
+    if pos >= chars.len() || chars[pos] != '"' {
+        return None;
+    }
+    pos += 1;
+    // Read until closing unescaped quote
+    let mut result = String::new();
+    while pos < chars.len() {
+        let ch = chars[pos];
+        if ch == '\\' && pos + 1 < chars.len() {
+            // Escaped character
+            pos += 1;
+            result.push(chars[pos]);
+        } else if ch == '"' {
+            // Closing quote — complete value
+            return Some(result);
+        } else {
+            result.push(ch);
+        }
+        pos += 1;
+    }
+    // Reached end of string without closing quote — partial value, still useful
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}

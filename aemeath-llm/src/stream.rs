@@ -33,6 +33,7 @@ pub async fn parse_stream(
     const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
     const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
     let mut last_event_time: Option<std::time::Instant> = None;
+    let mut tool_index: usize = 0;
 
     let byte_stream = response
         .bytes_stream()
@@ -109,7 +110,8 @@ pub async fn parse_stream(
                         current_tool_id = id;
                         current_tool_name = name.clone();
                         current_tool_json.clear();
-                        handler.on_tool_use_start(&name);
+                        handler.on_tool_use_start(&name, tool_index);
+                        tool_index += 1;
                     }
                     ContentBlockPayload::Thinking { thinking } => {
                         current_thinking = thinking;
