@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
+| 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条、completed 排序错乱 | 高 | 待确认 | 未确认 | 2026-05 | F 轮修复(2026-05-19)：completed 扩展补齐后重新按显示编号排序，修复最近 completed 插在旧 completed 前导致窗口顺序错乱 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
 | 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
@@ -229,6 +229,11 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 13. **根因**：温和扩展和下限保护阶段只在 TTL 过滤后的 `completed_for_display` 中选取，当大量 completed 超过 TTL（5 分钟）后，TTL 过滤移除了大部分 completed，剩余 completed 不够补齐窗口。
 14. **修复**：新增 `shown_ids: HashSet<&str>` 跟踪已显示的 task id 避免重复；温和扩展先从 TTL 过滤后 completed 补充，仍有余量时从 `all_completed_sorted`（未过滤）回退补齐；下限保护也从 `all_completed_sorted` 选取。所有选取阶段先 `collect()` 再遍历避免借用冲突。
 15. **回归测试**：新增 `test_bug32_window_stays_full_with_ttl_pressure`（8 completed + 1 in_progress，窗口保持 7 条）和 `test_bug32_window_never_shrinks_during_progression`（4 阶段渐进完成，窗口始终 7 条）。`cargo test -p aemeath-cli` 135 通过。
+
+**修复（2026-05-19 F 轮）**：用户复现 session `019e359e-4a50-77a7-a752-56f6ac115240`：窗口显示 `✓ #8 修复 architecture.md` 后接 `✓ #1/#2/#3/#4`，completed 区块排序错乱。
+16. **根因**：`build_task_window()` 先按 `updated_at` 选出最近 completed（如 #8），再把温和扩展补齐的旧 completed 插入到 `1 + comp_show` 之后，导致 completed 区块变成「最近完成 + 旧 completed 升序」，而不是视觉上的显示编号升序。
+17. **修复**：新增 `merge_completed_lines()`，每次 completed 扩展补齐后重建 completed 区块并按显示编号排序；窗口仍按 `updated_at` 选择最近 completed 作为候选，只修正最终显示顺序。
+18. **回归测试**：新增 `test_bug32_completed_expansion_keeps_display_order_for_user_snapshot`，覆盖用户截图中的 #8/#1/#2/#3/#4/#9/#10 顺序；同步调整 `test_completed_lines_keep_task_id_order_when_expanded` 和 mix 场景期望。`cargo test -p aemeath-cli task_window` 22 通过。
 
 **关联**：
 - Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
