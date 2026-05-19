@@ -154,8 +154,8 @@ pub(crate) async fn parse_ollama_stream(
         content_blocks.push(ContentBlock::Text { text: current_text });
     }
 
-    for (id, name, input) in final_tool_calls {
-        handler.on_tool_use_start(&name);
+    for (idx, (id, name, input)) in final_tool_calls.into_iter().enumerate() {
+        handler.on_tool_use_start(&name, idx);
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 

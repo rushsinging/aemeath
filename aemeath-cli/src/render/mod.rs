@@ -304,7 +304,7 @@ impl StreamHandler for TerminalStreamHandler {
         }
     }
 
-    fn on_tool_use_start(&mut self, name: &str) {
+    fn on_tool_use_start(&mut self, name: &str, _index: usize) {
         if self.in_thinking {
             self.in_thinking = false;
             let mut stdout = io::stdout();

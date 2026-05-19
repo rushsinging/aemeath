@@ -36,9 +36,12 @@ impl StreamHandler for TuiStreamHandler {
             }
         }
     }
-    fn on_tool_use_start(&mut self, name: &str) {
-        if let Err(e) = self.tx.try_send(UiEvent::ToolCallStart(name.to_string())) {
-            log::warn!("UI channel full, dropped ToolCallStart({name}): {e}");
+    fn on_tool_use_start(&mut self, name: &str, index: usize) {
+        if let Err(e) = self.tx.try_send(UiEvent::ToolCallStart {
+            name: name.to_string(),
+            index,
+        }) {
+            log::warn!("UI channel full, dropped ToolCallStart({name}[{index}]): {e}");
         }
     }
     fn on_error(&mut self, error: &str) {
@@ -65,6 +68,17 @@ impl StreamHandler for TuiStreamHandler {
             log::warn!(
                 "UI channel full, dropped Thinking event ({} bytes): {e}",
                 text.len()
+            );
+        }
+    }
+    fn on_tool_arguments_delta(&mut self, index: usize, name: &str, partial_args: &str) {
+        if let Err(e) = self.tx.try_send(UiEvent::ToolArgumentsDelta {
+            index,
+            name: name.to_string(),
+            partial_args: partial_args.to_string(),
+        }) {
+            log::warn!(
+                "UI channel full, dropped ToolArgumentsDelta({name}[{index}]): {e}"
             );
         }
     }
