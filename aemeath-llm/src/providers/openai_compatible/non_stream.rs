@@ -129,7 +129,9 @@ impl OpenAICompatibleProvider {
                                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
                                 handler.on_tool_use_start(&name);
-                                content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                                if !name.is_empty() {
+                                    content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                                }
                             }
                         }
                     }
