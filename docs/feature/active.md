@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」，操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾而非单独一行；纯选择模式（仅有 options 无 free_input）改为键盘上下键高亮选项 + Enter 确认 |
+| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」；操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾，不单独占行；纯选择模式（仅 options、无 free_input）改为上下键高亮选项 + Enter 确认 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
@@ -475,16 +475,20 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ### #4 AskUserQuestion TUI 美化
 
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
+**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 的等待输入界面要清楚说明下一步操作，并避免提示文字挤占过多 output area。
 
-**当前状态**：基础功能已实现（`UiEvent::AskUser` + `update.rs` 中 `ask_user_reply_tx` 机制），但显示为普通 system message + 纯文本选项，缺乏视觉层次。
+**当前状态**：待实施。基础问答链路已存在（`UiEvent::AskUser` + `ask_user_reply_tx`），本轮聚焦交互文案和选择模式：
 
-**待改进**：
-- 问题文本高亮/醒目样式
-- 选项列表带序号和视觉区分
-- 输入提示区域样式优化
+- AskUserQuestion 等待输入时，在 output area 提示「请在下方输入区域输入」。
+- 操作指引放在提示文字末尾：`[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项`，不再单独占一行。
+- 纯选择模式（仅 options、无 free_input）不要求用户手动输入选项文本，改为上下键高亮选项 + Enter 确认。
+- 多选/自由输入保持现有能力，但提示文案需要与实际可用快捷键一致。
 
-**涉及路径**：`aemeath-cli/src/tui/app/update.rs`（`UiEvent::AskUser` 处理）、`aemeath-cli/src/tui/output_area/`（渲染样式）
+**涉及路径**：
+- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换与等待提示）
+- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、确认/取消、自由输入）
+- `aemeath-cli/src/tui/output_area/content.rs`（AskUserQuestion 提示与选项渲染）
+- `aemeath-cli/src/tui/output_area/types.rs`（AskUserQuestion 行样式）
 
 ---
 
