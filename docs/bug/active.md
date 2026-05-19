@@ -6,7 +6,7 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
 | 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
-| 47 | LLM 声称派发多个 reviewer 但 Agent 实际串行执行 | 高 | 活动中 | 未确认 | 2026-05 | 用户观察到 LLM 表述“派发 6 个 reviewer”像是并行，但实际 Agent/reviewer 调用串行运行；需检查 Agent tool 调度、tool call 并发执行层和提示语是否误导 |
+| 47 | LLM 声称派发多个 reviewer 但 Agent 实际串行执行 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：execute_non_agent 按并发安全分组并行执行 + Agent tool description 新增并行指引引导 LLM 批量发出 tool calls |
 
 ## 专案
 
@@ -301,8 +301,7 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-cli/src/tui/app/slash_tests.rs`
 
 ### #47 LLM 声称派发多个 reviewer 但 Agent 实际串行执行
-
-**状态**：活动中
+**状态**：待确认
 
 **症状**：
 - LLM 在回复中说“派发 6 个 reviewer”或类似表述，用户预期多个 reviewer/Agent 会并行执行
@@ -314,24 +313,20 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 2. 观察 TUI/tool call 执行顺序和 task list 状态
 3. LLM 文案声称“派发多个 reviewer”，但实际只有前一个 Agent 完成后才启动下一个
 
-**疑似根因**：
-1. Agent tool 调用层可能没有真正并发调度多个 Agent tool call，或上层 LLM 生成 tool call 时被串行执行
-2. tool call 执行器可能按返回顺序/工具类型串行处理，而非对独立 Agent call 并发执行
-3. system prompt 或用户可见文案使用“派发”暗示并行，但未区分“计划派发”和“实际并行启动”
-4. task dispatcher 并发限制或队列策略可能导致 reviewer 排队，但 UI/文案未展示排队状态
+**根因**：
+1. **`execute_non_agent` 串行执行所有 non-agent tool calls**：`tools.rs` 中 `execute_non_agent` 使用 `for call in &other_calls` 逐个串行执行，即使工具标记为 `is_concurrency_safe()` 也不并行。每个 call 单独调用 `agent.execute_tools(slice::from_ref(&call))`，完全绕过了 `Agent.execute_tools` 的并发分组逻辑。
+2. **LLM 分多轮生成 Agent tool calls**：部分 provider 的 LLM 倾向在不同轮次中逐个生成 Agent tool call，而非在同一轮中批量发出多个 tool_use blocks。Agent tool description 中缺少明确的并行指引。
+3. **`execute_agent_calls` 已支持并行**：`agent_calls.rs` 使用 `chunks(batch_size)` + `join_all` 并行执行 Agent calls，此路径无问题。
 
-**修复方向**：
-1. 检查主 agent tool execution 是否支持同一轮多个 Agent tool call 并发执行；若不支持，明确改成并发或调整文案
-2. 若 dispatcher 有并发限制，在 TUI/task list 中展示 Pending/InProgress 的真实状态，避免“已派发”误导
-3. system prompt 约束：只有确认并发启动时才说“并行派发/同时启动”；否则应说“依次调用”或“排队执行”
-4. 增加回归测试或集成测试，覆盖多 Agent tool call 的启动顺序/并发行为
+**修复**：
+1. **`execute_non_agent` 并发安全工具并行化**：重构为按 `is_concurrency_safe()` 分组——并发安全工具使用 `Semaphore` + `join_all` 并行执行，非安全工具保持串行。保持原始 tool call 顺序不变。新增 `execute_one_non_agent` 提取单个 tool call 的执行逻辑（hook chain + execute + post hooks + UI result）。
+2. **Agent tool description 新增并行指引**：在 tool description 中添加 `IMPORTANT — Parallel execution` 段，明确告知 LLM “同一轮中发出多个 Agent tool calls 会并行执行”、“不要跨多轮逐个发出”。
+3. **回归测试**：新增 4 个 `execute_tools` 并发测试——并发安全工具并行执行、非安全工具串行执行、结果顺序保持原始顺序、混合并发/串行场景。
 
 **涉及路径**：
-- `aemeath-tools/src/agent.rs`（Agent tool 调度与 taskId 桥接）
-- `aemeath-cli/src/agent_runner/`（主 agent tool call 执行循环）
-- `aemeath-core/src/tool.rs`（tool 执行抽象/并发策略）
-- system prompt 中关于 sub-agent/reviewer 派发的指引
-
+- `aemeath-cli/src/tui/app/stream/tools.rs`（`execute_non_agent` 并行化）
+- `aemeath-tools/src/agent_tool.rs`（Agent tool description 并行指引）
+- `aemeath-core/src/agent.rs` + `agent_tests.rs`（并发分组测试）
 ### #36 TaskListCreate 后新任务编号未从 1 开始（已归档 2026-05-14）
 
 用户确认修复。修复内容：TUI 渲染改用 batch 内局部显示编号，list_current_batch() 过滤已归档 batch。详见 docs/bug/archived/036-task-list-numbering.md。
