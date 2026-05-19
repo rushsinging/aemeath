@@ -103,7 +103,10 @@ impl InputArea {
 
         let (row, _) = self.textarea.cursor();
         if row == 0 {
-            self.history_up();
+            // 仅当 input 非空或已在历史浏览模式时才触发历史翻看
+            if !self.is_empty() || self.history_index.is_some() {
+                self.history_up();
+            }
         } else {
             self.textarea.move_cursor(CursorMove::Up);
         }
