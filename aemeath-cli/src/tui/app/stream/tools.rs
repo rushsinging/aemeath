@@ -31,6 +31,17 @@ pub(crate) async fn execute_tool_round(
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
     let denied_results = deny_tool_calls(&denied, tx, hook_ui, hook_runner).await;
 
+    // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
+    for call in &approved {
+        let _ = tx
+            .send(UiEvent::ToolCall {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                summary: call.input.to_string(),
+            })
+            .await;
+    }
+
     let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) =
         approved.into_iter().partition(|c| c.name == "Agent");
     let non_agent_calls: Vec<ToolCall> = non_agent_approved
@@ -123,17 +134,7 @@ async fn execute_non_agent(
         .iter()
         .filter(|c| c.name != "AskUserQuestion")
         .collect();
-    // Send all ToolCall UI events upfront so the user sees what's queued
-    for call in &other_calls {
-        let _ = tx
-            .send(UiEvent::ToolCall {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                summary: call.input.to_string(),
-            })
-            .await;
-    }
-
+  
     if other_calls.is_empty() {
         return Vec::new();
     }
