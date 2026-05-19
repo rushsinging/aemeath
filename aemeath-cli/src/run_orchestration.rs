@@ -4,7 +4,7 @@ mod setup;
 
 use crate::cli::Args;
 use crate::logging_setup::{init_logging, set_session_id};
-use crate::mcp_loader::load_mcp_tools;
+use crate::mcp_loader::spawn_mcp_connect;
 use crate::model_selection::select_model_for_run;
 use crate::prompt::build_system_prompt_parts;
 use aemeath_core::provider::ApiDriverKind;
@@ -13,6 +13,7 @@ use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
 use aemeath_llm::providers::openai_compatible::ReasoningConfig;
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// 主聊天逻辑（原 main 主体）
 pub(crate) async fn run_chat(mut args: Args) {
@@ -193,10 +194,11 @@ pub(crate) async fn run_chat(mut args: Args) {
         log::info!("[Skills] loaded {} skills", skills_map.len());
     }
     let skills = std::sync::Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
-    let mut registry = ToolRegistry::new();
-    aemeath_tools::register_all_tools(&mut registry, task_store.clone(), skills.clone());
+    let registry = ToolRegistry::new();
+    aemeath_tools::register_all_tools(&registry, task_store.clone(), skills.clone());
 
-    let _mcp_manager = load_mcp_tools(&mut registry, &cwd).await;
+    let registry = Arc::new(registry);
+    let _mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
 
     // Create hook runner before agent_runner so it can be shared
     let cwd_str = cwd.display().to_string();

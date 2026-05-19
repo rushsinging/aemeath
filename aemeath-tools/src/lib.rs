@@ -42,7 +42,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub fn register_all_tools(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
@@ -138,7 +138,7 @@ pub fn register_subagent_tools(
 }
 
 pub fn register_all_tools_except_agent(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {

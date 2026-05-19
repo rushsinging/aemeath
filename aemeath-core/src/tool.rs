@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -135,42 +136,45 @@ pub trait Tool: Send + Sync {
 }
 
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn register(&mut self, tool: Box<dyn Tool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+    pub fn register(&self, tool: Box<dyn Tool>) {
+        self.tools
+            .write()
+            .insert(tool.name().to_string(), Arc::from(tool));
     }
 
-    pub fn unregister(&mut self, name: &str) -> bool {
-        self.tools.remove(name).is_some()
+    pub fn unregister(&self, name: &str) -> bool {
+        self.tools.write().remove(name).is_some()
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
+        self.tools.read().contains_key(name)
     }
 
     pub fn len(&self) -> usize {
-        self.tools.len()
+        self.tools.read().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
+        self.tools.read().is_empty()
     }
 
-    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.as_ref())
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.read().get(name).cloned()
     }
 
     pub fn schemas(&self) -> Vec<Value> {
         self.tools
+            .read()
             .values()
             .map(|tool| {
                 serde_json::json!({
@@ -182,8 +186,8 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub fn names(&self) -> Vec<&str> {
-        self.tools.keys().map(|s| s.as_str()).collect()
+    pub fn names(&self) -> Vec<String> {
+        self.tools.read().keys().cloned().collect()
     }
 }
 
@@ -226,7 +230,7 @@ mod tool_registry_tests {
 
     #[test]
     fn test_tool_registry_unregister_existing_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register(Box::new(DummyTool::new("dummy", "first")));
 
         assert!(registry.contains("dummy"));
@@ -238,7 +242,7 @@ mod tool_registry_tests {
 
     #[test]
     fn test_tool_registry_unregister_missing_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
 
         assert!(!registry.unregister("missing"));
         assert!(registry.is_empty());
@@ -246,7 +250,7 @@ mod tool_registry_tests {
 
     #[test]
     fn test_tool_registry_register_overwrites_existing_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register(Box::new(DummyTool::new("dummy", "first")));
         registry.register(Box::new(DummyTool::new("dummy", "second")));
 

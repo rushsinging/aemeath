@@ -33,7 +33,7 @@ pub(crate) type PendingImages = std::sync::Arc<std::sync::Mutex<Vec<crate::image
 #[allow(clippy::too_many_arguments)]
 pub async fn run_repl(
     client: Arc<LlmClient>,
-    registry: ToolRegistry,
+    registry: Arc<ToolRegistry>,
     system_blocks: Vec<SystemBlock>,
     system_prompt_text: String,
     mut user_context: String,

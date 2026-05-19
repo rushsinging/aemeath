@@ -309,7 +309,7 @@ impl McpConnectionManager {
     }
 
     /// Register MCP tools into a tool registry
-    pub async fn register_tools(&self, registry: &mut ToolRegistry) {
+    pub async fn register_tools(&self, registry: &ToolRegistry) {
         let connections = self.connections.lock().await;
 
         for connection in connections.values() {

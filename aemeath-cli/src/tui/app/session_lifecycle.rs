@@ -14,7 +14,7 @@ impl App {
     pub async fn run(
         &mut self,
         client: Arc<aemeath_llm::client::LlmClient>,
-        registry: ToolRegistry,
+        registry: Arc<ToolRegistry>,
         system_blocks: Vec<aemeath_llm::types::SystemBlock>,
         system_prompt_text: String,
         mut user_context: String,
@@ -129,7 +129,7 @@ impl App {
         let mut terminal = Terminal::new(backend)?;
 
         let interrupted = Arc::new(AtomicBool::new(false));
-        let registry = Arc::new(registry);
+        // registry is already Arc<ToolRegistry>, shared with MCP background connector
 
         // Run SessionStart hooks: inject additional_context into user_context,
         // and display system_message in the output area.

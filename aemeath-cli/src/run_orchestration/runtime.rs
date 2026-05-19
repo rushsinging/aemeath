@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_no_tui(
     client: Arc<LlmClient>,
-    registry: ToolRegistry,
+    registry: Arc<ToolRegistry>,
     system_blocks: Vec<SystemBlock>,
     system_prompt_text: String,
     user_context: String,
@@ -52,7 +52,7 @@ pub(super) async fn run_no_tui(
 pub(super) async fn run_tui(
     session_id: String,
     client: Arc<LlmClient>,
-    registry: ToolRegistry,
+    registry: Arc<ToolRegistry>,
     system_blocks: Vec<SystemBlock>,
     system_prompt_text: String,
     user_context: String,
