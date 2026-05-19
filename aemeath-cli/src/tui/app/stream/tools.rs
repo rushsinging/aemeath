@@ -74,7 +74,7 @@ pub(crate) async fn execute_tool_round(
         .collect()
 }
 
-async fn deny_tool_calls(
+pub(crate) async fn deny_tool_calls(
     denied: &[&ToolCall],
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
