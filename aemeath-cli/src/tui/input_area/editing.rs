@@ -97,9 +97,7 @@ impl InputArea {
 
     /// Move cursor up (or select previous suggestion, or browse history)
     pub fn move_up(&mut self) {
-        log::debug!("move_up called");
         if self.select_previous() {
-            log::debug!("move_up: select_previous handled it");
             return;
         }
 
@@ -113,9 +111,7 @@ impl InputArea {
 
     /// Move cursor down (or select next suggestion, or browse history)
     pub fn move_down(&mut self) {
-        log::debug!("move_down called");
         if self.select_next() {
-            log::debug!("move_down: select_next handled it");
             return;
         }
 

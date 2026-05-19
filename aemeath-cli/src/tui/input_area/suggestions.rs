@@ -13,18 +13,11 @@ impl InputArea {
     pub fn set_suggestions(&mut self, suggestions: Vec<Suggestion>) {
         self.selected_suggestion = if suggestions.is_empty() { -1 } else { 0 };
         self.show_suggestions = !suggestions.is_empty();
-        log::debug!(
-            "set_suggestions: count={}, show={}, selected={}",
-            suggestions.len(),
-            self.show_suggestions,
-            self.selected_suggestion,
-        );
         self.suggestions = suggestions;
     }
 
     /// Clear suggestions
     pub fn clear_suggestions(&mut self) {
-        log::debug!("clear_suggestions (was show={})", self.show_suggestions);
         self.suggestions.clear();
         self.selected_suggestion = -1;
         self.show_suggestions = false;
@@ -37,12 +30,6 @@ impl InputArea {
 
     /// Move selection up in suggestions
     pub fn select_previous(&mut self) -> bool {
-        log::debug!(
-            "select_previous: show={}, suggestions={}, selected={}",
-            self.show_suggestions,
-            self.suggestions.len(),
-            self.selected_suggestion,
-        );
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion > 0 {
                 self.selected_suggestion -= 1;
@@ -57,12 +44,6 @@ impl InputArea {
 
     /// Move selection down in suggestions
     pub fn select_next(&mut self) -> bool {
-        log::debug!(
-            "select_next: show={}, suggestions={}, selected={}",
-            self.show_suggestions,
-            self.suggestions.len(),
-            self.selected_suggestion,
-        );
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion < self.suggestions.len() as i32 - 1 {
                 self.selected_suggestion += 1;
@@ -101,8 +82,25 @@ impl InputArea {
 
         let max_visible = 5;
         let max_cols = area.width as usize;
-        for (i, suggestion) in self.suggestions.iter().take(max_visible).enumerate() {
-            let is_selected = i as i32 == self.selected_suggestion;
+        let selected = if self.selected_suggestion >= 0 {
+            self.selected_suggestion as usize
+        } else {
+            0
+        };
+        // Compute scroll offset so the selected item is always visible
+        let scroll_offset = if selected >= max_visible {
+            selected - max_visible + 1
+        } else {
+            0
+        };
+        for (i, suggestion) in self
+            .suggestions
+            .iter()
+            .skip(scroll_offset)
+            .take(max_visible)
+            .enumerate()
+        {
+            let is_selected = (i + scroll_offset) as i32 == self.selected_suggestion;
             let y = area.y + i as u16;
             let bg_color = if is_selected {
                 Color::Cyan
