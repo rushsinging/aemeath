@@ -3,13 +3,11 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
-| 37 | Task list 全部完成后切换对话仍显示旧 task | 中 | 待确认 | 未确认 | 2026-05 | 当前 batch 所有 task 已 completed，但下一轮新用户消息开始时未清空/隐藏旧 task list |
-| 39 | 超大工具结果触发 API 400 string_above_max_length | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TUI 主 loop 与子 Agent loop 在工具结果进入 LLM 前持久化超大输出 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 43 | TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：TaskStore 新增 display.rs 双向映射（resolve_display_id / format_display_id），TaskUpdate/TaskCreate/TaskList/TaskGet/TaskOutput 统一使用 batch 局部编号 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
-| 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 活动中 | 未确认 | 2026-05 | 输入 `/` 后弹出命令候选列表，但按上下键无法在候选中移动高亮，上下键仍被当作历史命令翻页处理 |
+| 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：建议列表渲染添加 scroll_offset 跟随选中位置，选中项超出可见区域时自动滚动 (5f98e2e) |
 | 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
+| 47 | LLM 声称派发多个 reviewer 但 Agent 实际串行执行 | 高 | 活动中 | 未确认 | 2026-05 | 用户观察到 LLM 表述“派发 6 个 reviewer”像是并行，但实际 Agent/reviewer 调用串行运行；需检查 Agent tool 调度、tool call 并发执行层和提示语是否误导 |
 
 ## 专案
 
@@ -302,6 +300,38 @@ Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
 - `aemeath-cli/src/tui/app/update/ui_event.rs`
 - `aemeath-cli/src/tui/app/event.rs`
 - `aemeath-cli/src/tui/app/slash_tests.rs`
+
+### #47 LLM 声称派发多个 reviewer 但 Agent 实际串行执行
+
+**状态**：活动中
+
+**症状**：
+- LLM 在回复中说“派发 6 个 reviewer”或类似表述，用户预期多个 reviewer/Agent 会并行执行
+- 实际观察到 reviewer/Agent 调用按一个接一个串行运行，整体耗时接近所有 reviewer 时间相加
+- 表述和实际执行模型不一致，容易误导用户对并行能力与进度的判断
+
+**复现路径**：
+1. 让 LLM 对同一问题或多个独立文件派发多个 reviewer/Agent
+2. 观察 TUI/tool call 执行顺序和 task list 状态
+3. LLM 文案声称“派发多个 reviewer”，但实际只有前一个 Agent 完成后才启动下一个
+
+**疑似根因**：
+1. Agent tool 调用层可能没有真正并发调度多个 Agent tool call，或上层 LLM 生成 tool call 时被串行执行
+2. tool call 执行器可能按返回顺序/工具类型串行处理，而非对独立 Agent call 并发执行
+3. system prompt 或用户可见文案使用“派发”暗示并行，但未区分“计划派发”和“实际并行启动”
+4. task dispatcher 并发限制或队列策略可能导致 reviewer 排队，但 UI/文案未展示排队状态
+
+**修复方向**：
+1. 检查主 agent tool execution 是否支持同一轮多个 Agent tool call 并发执行；若不支持，明确改成并发或调整文案
+2. 若 dispatcher 有并发限制，在 TUI/task list 中展示 Pending/InProgress 的真实状态，避免“已派发”误导
+3. system prompt 约束：只有确认并发启动时才说“并行派发/同时启动”；否则应说“依次调用”或“排队执行”
+4. 增加回归测试或集成测试，覆盖多 Agent tool call 的启动顺序/并发行为
+
+**涉及路径**：
+- `aemeath-tools/src/agent.rs`（Agent tool 调度与 taskId 桥接）
+- `aemeath-cli/src/agent_runner/`（主 agent tool call 执行循环）
+- `aemeath-core/src/tool.rs`（tool 执行抽象/并发策略）
+- system prompt 中关于 sub-agent/reviewer 派发的指引
 
 ### #36 TaskListCreate 后新任务编号未从 1 开始（已归档 2026-05-14）
 
