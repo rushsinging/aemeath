@@ -5,7 +5,6 @@
 | 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条 | 高 | 待确认 | 未确认 | 2026-05 | E 轮修复(2026-05-18)：温和扩展和下限保护从未过滤 completed 回退补齐，窗口始终保持 max_lines 行 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
-| 45 | / 命令自动补全时上下键不能翻页选择候选 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：建议列表渲染添加 scroll_offset 跟随选中位置，选中项超出可见区域时自动滚动 (5f98e2e) |
 | 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
 | 47 | LLM 声称派发多个 reviewer 但 Agent 实际串行执行 | 高 | 活动中 | 未确认 | 2026-05 | 用户观察到 LLM 表述“派发 6 个 reviewer”像是并行，但实际 Agent/reviewer 调用串行运行；需检查 Agent tool 调度、tool call 并发执行层和提示语是否误导 |
 
