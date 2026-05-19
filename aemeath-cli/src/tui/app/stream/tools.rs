@@ -123,6 +123,7 @@ async fn execute_non_agent(
         .iter()
         .filter(|c| c.name != "AskUserQuestion")
         .collect();
+    // Send all ToolCall UI events upfront so the user sees what's queued
     for call in &other_calls {
         let _ = tx
             .send(UiEvent::ToolCall {
@@ -133,67 +134,190 @@ async fn execute_non_agent(
             .await;
     }
 
-    let mut non_agent_results = Vec::new();
-    for call in &other_calls {
-        let _ = hook_ui
-            .run_plain(
-                hook_runner,
-                HookEvent::PermissionRequest,
-                Some(&call.name),
-                HookData::Permission(aemeath_core::hook::PermissionHookData {
-                    tool_name: call.name.clone(),
-                    permission_rule: "auto".to_string(),
-                }),
-            )
-            .await;
-        let call = ToolCall {
-            id: call.id.clone(),
-            name: call.name.clone(),
-            input: call.input.clone(),
-        };
-        let pre_results = hook_ui
-            .run_plain(
-                hook_runner,
-                HookEvent::PreToolUse,
-                Some(&call.name),
-                HookData::Tool(ToolHookData {
-                    tool_name: call.name.clone(),
-                    tool_input: call.input.clone(),
-                    tool_output: None,
-                    is_error: None,
-                }),
-            )
-            .await;
-        if pre_results.iter().any(|r| r.blocked) {
-            let result = (
-                call.id.clone(),
-                "Blocked by PreToolUse hook".to_string(),
-                true,
-                Vec::new(),
-            );
-            send_tool_result(tx, &call, &result).await;
-            non_agent_results.push(result);
-            continue;
-        }
-        let results = agent.execute_tools(std::slice::from_ref(&call)).await;
-        for (id, output, is_error, images) in results {
-            log_tool_result(
-                json_logger,
-                turn_count,
-                client_model,
-                &id,
-                &call.name,
-                is_error,
-                &output,
-            );
-            run_post_tool_hooks(tx, hook_ui, hook_runner, &call, &output, is_error).await;
-            run_task_hooks(tx, hook_ui, hook_runner, &call, &output, is_error).await;
-            let result = (id, output, is_error, images);
-            send_tool_result(tx, &call, &result).await;
-            non_agent_results.push(result);
+    if other_calls.is_empty() {
+        return Vec::new();
+    }
+
+    // Single tool call — skip grouping overhead
+    if other_calls.len() == 1 {
+        return execute_one_non_agent(
+            agent,
+            tx,
+            hook_ui,
+            hook_runner,
+            json_logger,
+            turn_count,
+            client_model,
+            other_calls[0],
+        )
+        .await;
+    }
+
+    // Multiple calls: partition into concurrent-safe vs sequential,
+    // preserving original order via position tracking.
+    let total_len = other_calls.len();
+    let mut results: Vec<Option<UiToolResult>> = vec![None; total_len];
+
+    let mut concurrent_positions: Vec<usize> = Vec::new();
+    let mut sequential_positions: Vec<usize> = Vec::new();
+    for (i, call) in other_calls.iter().enumerate() {
+        let is_safe = agent
+            .registry
+            .get(&call.name)
+            .map(|t| t.is_concurrency_safe())
+            .unwrap_or(false);
+        if is_safe {
+            concurrent_positions.push(i);
+        } else {
+            sequential_positions.push(i);
         }
     }
-    non_agent_results
+
+    // Execute concurrent-safe tools in parallel
+    if !concurrent_positions.is_empty() {
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
+            agent.ctx.max_tool_concurrency,
+        ));
+        let futures: Vec<_> = concurrent_positions
+            .iter()
+            .filter_map(|&pos| {
+                let call = other_calls[pos];
+                let agent_ref = agent;
+                let tx = tx.clone();
+                let hook_ui = hook_ui.clone();
+                let hook_runner = hook_runner.clone();
+                let json_logger = json_logger.clone();
+                let sem = semaphore.clone();
+                Some(async move {
+                    let _permit = sem.acquire().await.expect("semaphore closed");
+                    let result = execute_one_non_agent(
+                        agent_ref,
+                        &tx,
+                        &hook_ui,
+                        &hook_runner,
+                        &json_logger,
+                        turn_count,
+                        client_model,
+                        call,
+                    )
+                    .await;
+                    (pos, result)
+                })
+            })
+            .collect();
+        let concurrent_results = futures::future::join_all(futures).await;
+        for (pos, result_vec) in concurrent_results {
+            // Each call produces exactly one result
+            if let Some(r) = result_vec.into_iter().next() {
+                results[pos] = Some(r);
+            }
+        }
+    }
+
+    // Execute non-concurrent-safe tools sequentially
+    for &pos in &sequential_positions {
+        let call = other_calls[pos];
+        let result_vec = execute_one_non_agent(
+            agent,
+            tx,
+            hook_ui,
+            hook_runner,
+            json_logger,
+            turn_count,
+            client_model,
+            call,
+        )
+        .await;
+        if let Some(r) = result_vec.into_iter().next() {
+            results[pos] = Some(r);
+        }
+    }
+
+    results
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            r.unwrap_or_else(|| {
+                panic!(
+                    "execute_non_agent: result slot {i} was not filled — this is a bug"
+                )
+            })
+        })
+        .collect()
+}
+
+/// Execute a single non-agent tool call (hook chain + execute + post hooks + UI result).
+#[allow(clippy::too_many_arguments)]
+async fn execute_one_non_agent(
+    agent: &Agent<'_>,
+    tx: &mpsc::Sender<UiEvent>,
+    hook_ui: &HookUi,
+    hook_runner: &aemeath_core::hook::HookRunner,
+    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
+    turn_count: usize,
+    client_model: &str,
+    call: &ToolCall,
+) -> Vec<UiToolResult> {
+    let _ = hook_ui
+        .run_plain(
+            hook_runner,
+            HookEvent::PermissionRequest,
+            Some(&call.name),
+            HookData::Permission(aemeath_core::hook::PermissionHookData {
+                tool_name: call.name.clone(),
+                permission_rule: "auto".to_string(),
+            }),
+        )
+        .await;
+    let owned_call = ToolCall {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        input: call.input.clone(),
+    };
+    let pre_results = hook_ui
+        .run_plain(
+            hook_runner,
+            HookEvent::PreToolUse,
+            Some(&owned_call.name),
+            HookData::Tool(ToolHookData {
+                tool_name: owned_call.name.clone(),
+                tool_input: owned_call.input.clone(),
+                tool_output: None,
+                is_error: None,
+            }),
+        )
+        .await;
+    if pre_results.iter().any(|r| r.blocked) {
+        let result = (
+            owned_call.id.clone(),
+            "Blocked by PreToolUse hook".to_string(),
+            true,
+            Vec::new(),
+        );
+        send_tool_result(tx, &owned_call, &result).await;
+        return vec![result];
+    }
+    let exec_results = agent
+        .execute_tools(std::slice::from_ref(&owned_call))
+        .await;
+    let mut out = Vec::new();
+    for (id, output, is_error, images) in exec_results {
+        log_tool_result(
+            json_logger,
+            turn_count,
+            client_model,
+            &id,
+            &owned_call.name,
+            is_error,
+            &output,
+        );
+        run_post_tool_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
+        run_task_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
+        let result = (id, output, is_error, images);
+        send_tool_result(tx, &owned_call, &result).await;
+        out.push(result);
+    }
+    out
 }
 
 pub(crate) async fn run_post_tool_hooks(
