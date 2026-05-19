@@ -183,8 +183,12 @@ pub(crate) async fn parse_openai_stream(
                                 if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
                                     // First time we see this tool call's name — notify the
                                     // handler immediately so the UI can show it in real time.
-                                    let is_new = entry.1.is_empty();
-                                    entry.1 = name.to_string();
+                                    // Skip empty names: some providers send name="" in early
+                                    // deltas before the real name arrives.
+                                    let is_new = entry.1.is_empty() && !name.is_empty();
+                                    if !name.is_empty() {
+                                        entry.1 = name.to_string();
+                                    }
                                     if entry.0.is_empty() {
                                         // 某些 provider 不发送 tool call ID
                                         entry.0 = format!("call_{}", index);
@@ -226,7 +230,13 @@ pub(crate) async fn parse_openai_stream(
 
     let mut truncated_tool: Option<(String, String, usize, u32)> = None;
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
-        if !name.is_empty() {
+        if name.is_empty() {
+            log::warn!(
+                "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
+                id, arguments.len(), delta_count
+            );
+            continue;
+        }
             // Note: on_tool_use_start was already called during streaming
             // when the name first appeared in a delta chunk. No need to
             // call it again here.
@@ -269,7 +279,6 @@ pub(crate) async fn parse_openai_stream(
                 }
             };
             content_blocks.push(ContentBlock::ToolUse { id, name, input });
-        }
     }
 
     // 如果 args 因 EOF 截断（典型上游断流症状），向上抛错让 client 层重试，
