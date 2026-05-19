@@ -85,6 +85,6 @@ pub(crate) fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send
         ApiDriverKind::OpenAI => Box::new(OpenAiDriver),
         ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
         ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
-        ApiDriverKind::Anthropic => Box::new(OpenAiDriver),
+        ApiDriverKind::Anthropic | ApiDriverKind::Volcengine => Box::new(OpenAiDriver),
     }
 }

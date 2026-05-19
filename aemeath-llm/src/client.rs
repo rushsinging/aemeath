@@ -89,6 +89,7 @@ impl OpenAIProviderConfig {
             chat_api_suffix: match api {
                 ApiDriverKind::Zhipu => "/chat/completions".to_string(),
                 ApiDriverKind::Anthropic => "/v1/messages".to_string(),
+                ApiDriverKind::Volcengine => "/chat/completions".to_string(),
                 ApiDriverKind::OpenAI | ApiDriverKind::LiteLLM => {
                     "/v1/chat/completions".to_string()
                 }
@@ -139,7 +140,10 @@ impl LlmClient {
                 max_tokens,
                 thinking_max_tokens,
             )),
-            ApiDriverKind::OpenAI | ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => {
+            ApiDriverKind::OpenAI
+            | ApiDriverKind::Zhipu
+            | ApiDriverKind::LiteLLM
+            | ApiDriverKind::Volcengine => {
                 let config = OpenAIProviderConfig::from_api_driver(api, api.as_str());
                 Arc::new(crate::providers::OpenAICompatibleProvider::new(
                     config,

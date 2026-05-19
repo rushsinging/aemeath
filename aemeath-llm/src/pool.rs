@@ -125,22 +125,26 @@ impl LlmClientPool {
         } else {
             None
         };
-        // API key — config first, then env var
+        // API key — config first, then driver-specific / generic env vars.
         let api_key = if provider_config.api_key.is_empty() {
-            // Fall back to generic env var for now (config.json already handles per-provider keys)
-            std::env::var("LLM_API_KEY")
-                .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-                .or_else(|_| std::env::var("OPENAI_API_KEY"))
-                .map_err(|_| {
-                    format!(
-                        "no API key for provider '{}'. Set it in config.json or LLM_API_KEY env var",
+            let driver_env = match api {
+                ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
+                ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
+                ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+                ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
+            };
+            driver_env
+                .and_then(|name| std::env::var(name).ok())
+                .or_else(|| std::env::var("LLM_API_KEY").ok())
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .ok_or_else(|| {                    format!(
+                        "no API key for provider '{}'. Set it in config.json or provider-specific env var",
                         provider_name
                     )
                 })?
         } else {
             provider_config.api_key.clone()
         };
-
         let base_url = if provider_config.base_url.is_empty() {
             None
         } else {

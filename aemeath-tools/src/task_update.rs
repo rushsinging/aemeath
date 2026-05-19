@@ -61,15 +61,16 @@ impl Tool for TaskUpdateTool {
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_blocked_by = if let Some(arr) = input.get("addBlockedBy").and_then(|v| v.as_array()) {
-            let display_ids: Vec<String> = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            self.store.resolve_display_ids(&display_ids).await
-        } else {
-            Vec::new()
-        };
+        let resolved_blocked_by =
+            if let Some(arr) = input.get("addBlockedBy").and_then(|v| v.as_array()) {
+                let display_ids: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                self.store.resolve_display_ids(&display_ids).await
+            } else {
+                Vec::new()
+            };
         let resolved_blocks = if let Some(arr) = input.get("addBlocks").and_then(|v| v.as_array()) {
             let display_ids: Vec<String> = arr
                 .iter()

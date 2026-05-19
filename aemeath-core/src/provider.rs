@@ -12,6 +12,7 @@ pub enum ApiDriverKind {
     OpenAI,
     Zhipu,
     LiteLLM,
+    Volcengine,
 }
 
 impl Default for ApiDriverKind {
@@ -28,6 +29,7 @@ impl ApiDriverKind {
             "openai" => Some(ApiDriverKind::OpenAI),
             "zhipu" => Some(ApiDriverKind::Zhipu),
             "litellm" => Some(ApiDriverKind::LiteLLM),
+            "volcengine" => Some(ApiDriverKind::Volcengine),
             _ => None,
         }
     }
@@ -38,6 +40,7 @@ impl ApiDriverKind {
             ApiDriverKind::OpenAI => "openai",
             ApiDriverKind::Zhipu => "zhipu",
             ApiDriverKind::LiteLLM => "litellm",
+            ApiDriverKind::Volcengine => "volcengine",
         }
     }
 }
@@ -68,6 +71,14 @@ mod tests {
     }
 
     #[test]
+    fn test_from_str_volcengine() {
+        assert_eq!(
+            ApiDriverKind::from_str("volcengine"),
+            Some(ApiDriverKind::Volcengine)
+        );
+    }
+
+    #[test]
     fn test_from_str_rejects_openai_compatible() {
         assert_eq!(ApiDriverKind::from_str("openai-compatible"), None);
         assert_eq!(ApiDriverKind::from_str("openai-completions"), None);
@@ -91,5 +102,10 @@ mod tests {
     #[test]
     fn test_as_str_litellm() {
         assert_eq!(ApiDriverKind::LiteLLM.as_str(), "litellm");
+    }
+
+    #[test]
+    fn test_as_str_volcengine() {
+        assert_eq!(ApiDriverKind::Volcengine.as_str(), "volcengine");
     }
 }

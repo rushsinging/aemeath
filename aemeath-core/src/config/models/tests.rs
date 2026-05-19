@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::models::resolve::normalize_model_key;
+use crate::config::{Config, ConfigManager};
 use crate::provider::ApiDriverKind;
 use std::collections::HashMap;
 
@@ -29,6 +30,77 @@ fn test_config() -> ModelsConfig {
         providers,
         guidance: HashMap::new(),
     }
+}
+
+#[test]
+fn test_default_models_config_includes_volcengine_coding_plan() {
+    let config = volcengine_coding_plan_config();
+    let provider = config.providers.get("Volcengine").unwrap();
+
+    assert_eq!(
+        config.default,
+        "Volcengine/doubao-seed-2-0-code-preview-260215"
+    );
+    assert_eq!(provider.api, "volcengine");
+    assert_eq!(
+        provider.base_url,
+        "https://ark.cn-beijing.volces.com/api/coding/v3"
+    );
+    assert!(provider.api_key.is_empty());
+    assert!(provider
+        .models
+        .iter()
+        .any(|m| m.id == "doubao-seed-2-0-code-preview-260215"));
+}
+
+#[test]
+fn test_default_models_config_keeps_latest_vendor_models() {
+    let config = volcengine_coding_plan_config();
+    let provider = config.providers.get("Volcengine").unwrap();
+    let ids: Vec<&str> = provider.models.iter().map(|m| m.id.as_str()).collect();
+
+    assert!(ids.contains(&"glm-4-7-251222"));
+    assert!(ids.contains(&"deepseek-v3-2-251201"));
+    assert!(ids.contains(&"kimi-k2-thinking-251104"));
+    assert!(ids.contains(&"doubao-seed-2-0-pro-260215"));
+    assert!(ids.contains(&"doubao-seed-2-0-lite-260428"));
+    assert!(ids.contains(&"doubao-seed-2-0-mini-260428"));
+    assert!(!ids.iter().any(|id| id.contains("minimax")));
+}
+
+#[test]
+fn test_default_models_config_resolves_volcengine_default() {
+    let config = volcengine_coding_plan_config();
+    let resolved = config.resolve_default_model().unwrap();
+
+    assert_eq!(resolved.source_key, "Volcengine");
+    assert_eq!(resolved.api, ApiDriverKind::Volcengine);
+    assert_eq!(resolved.model.id, "doubao-seed-2-0-code-preview-260215");
+    assert_eq!(resolved.model.reasoning, Some(true));
+    assert_eq!(resolved.model.thinking_max_tokens, 131_072);
+}
+
+#[test]
+fn test_empty_models_config_keeps_empty_default_semantics() {
+    let config = ModelsConfig::default();
+
+    assert!(config.default.is_empty());
+    assert!(config.providers.is_empty());
+}
+
+#[test]
+fn test_merge_config_keeps_volcengine_builtin_without_overriding_user_default() {
+    let builtin = Config {
+        models: volcengine_coding_plan_config(),
+        ..Default::default()
+    };
+    let mut user = Config::default();
+    user.models.default = "Custom/custom-model".to_string();
+
+    let merged = ConfigManager::merge_config(builtin, user);
+
+    assert_eq!(merged.models.default, "Custom/custom-model");
+    assert!(merged.models.providers.contains_key("Volcengine"));
 }
 
 #[test]

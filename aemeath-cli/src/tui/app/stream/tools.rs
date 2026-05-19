@@ -175,9 +175,8 @@ async fn execute_non_agent(
 
     // Execute concurrent-safe tools in parallel
     if !concurrent_positions.is_empty() {
-        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
-            agent.ctx.max_tool_concurrency,
-        ));
+        let semaphore =
+            std::sync::Arc::new(tokio::sync::Semaphore::new(agent.ctx.max_tool_concurrency));
         let futures: Vec<_> = concurrent_positions
             .iter()
             .filter_map(|&pos| {
@@ -238,9 +237,7 @@ async fn execute_non_agent(
         .enumerate()
         .map(|(i, r)| {
             r.unwrap_or_else(|| {
-                panic!(
-                    "execute_non_agent: result slot {i} was not filled — this is a bug"
-                )
+                panic!("execute_non_agent: result slot {i} was not filled — this is a bug")
             })
         })
         .collect()
@@ -297,9 +294,7 @@ async fn execute_one_non_agent(
         send_tool_result(tx, &owned_call, &result).await;
         return vec![result];
     }
-    let exec_results = agent
-        .execute_tools(std::slice::from_ref(&owned_call))
-        .await;
+    let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
     let mut out = Vec::new();
     for (id, output, is_error, images) in exec_results {
         log_tool_result(
