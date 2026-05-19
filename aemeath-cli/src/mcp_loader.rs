@@ -81,19 +81,39 @@ pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
     manager
 }
 
+/// Maximum time to wait for all MCP server connections during startup.
+const MCP_CONNECT_TIMEOUT_SECS: u64 = 15;
+
 pub async fn load_mcp_tools(registry: &mut ToolRegistry, cwd: &Path) -> Arc<McpConnectionManager> {
     let manager = load_mcp_manager(cwd).await;
 
-    for (name, result) in manager.connect_all().await {
-        match result {
-            Ok(connection) => {
-                log::info!("[MCP] {} registered {} tools", name, connection.tools.len());
+    let connect_future = async {
+        for (name, result) in manager.connect_all().await {
+            match result {
+                Ok(connection) => {
+                    log::info!("[MCP] {} registered {} tools", name, connection.tools.len());
+                }
+                Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
             }
-            Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
+        }
+        manager.register_tools(registry).await;
+    };
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(MCP_CONNECT_TIMEOUT_SECS),
+        connect_future,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(_) => {
+            log::warn!(
+                "[MCP] connection timed out after {}s — some servers may not be available",
+                MCP_CONNECT_TIMEOUT_SECS
+            );
         }
     }
 
-    manager.register_tools(registry).await;
     manager
 }
 

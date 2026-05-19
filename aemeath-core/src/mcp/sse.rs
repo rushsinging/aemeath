@@ -68,9 +68,17 @@ pub fn resolve_endpoint_url(base_url: &str, endpoint_path: &str) -> Result<Strin
     Ok(resolved.to_string())
 }
 
-/// Build a reqwest client with optional custom headers.
+/// Default timeout for SSE endpoint handshake (seconds).
+const SSE_CONNECT_TIMEOUT_SECS: u64 = 10;
+
+/// Default timeout for individual JSON-RPC requests (seconds).
+const SSE_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Build a reqwest client with optional custom headers and sane timeouts.
 pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, String> {
-    let mut builder = reqwest::Client::builder();
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS))
+        .timeout(std::time::Duration::from_secs(SSE_REQUEST_TIMEOUT_SECS));
     // Attach default headers if provided
     if !headers.is_empty() {
         let mut header_map = reqwest::header::HeaderMap::new();
@@ -140,27 +148,48 @@ impl SseTransport {
             let mut buffer = String::new();
             let mut endpoint_url: Option<String> = None;
 
-            // Read chunks until we get the endpoint event
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result.map_err(|e| format!("SSE read error: {e}"))?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+            let deadline =
+                tokio::time::Instant::now() + std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS);
 
-                for event in parse_sse_events(&buffer) {
-                    if event.event_type == "endpoint" {
-                        endpoint_url = Some(resolve_endpoint_url(sse_url, &event.data)?);
-                    } else {
-                        // Forward non-endpoint events to the channel
-                        let _ = event_tx.send(event).await;
+            // Read chunks until we get the endpoint event (with timeout)
+            loop {
+                let chunk_result = tokio::time::timeout_at(
+                    deadline,
+                    stream.next(),
+                )
+                .await;
+
+                match chunk_result {
+                    Ok(Some(Ok(chunk))) => {
+                        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                        for event in parse_sse_events(&buffer) {
+                            if event.event_type == "endpoint" {
+                                endpoint_url = Some(resolve_endpoint_url(sse_url, &event.data)?);
+                            } else {
+                                let _ = event_tx.send(event).await;
+                            }
+                        }
+                        if let Some(pos) = buffer.rfind("\n\n") {
+                            buffer = buffer[pos + 2..].to_string();
+                        }
+
+                        if endpoint_url.is_some() {
+                            break;
+                        }
                     }
-                }
-                // Clear processed events — crude but works for the initial handshake
-                // since events come as complete blocks
-                if let Some(pos) = buffer.rfind("\n\n") {
-                    buffer = buffer[pos + 2..].to_string();
-                }
-
-                if endpoint_url.is_some() {
-                    break;
+                    Ok(Some(Err(e))) => {
+                        return Err(format!("SSE read error: {e}"));
+                    }
+                    Ok(None) => {
+                        return Err("SSE stream ended before sending 'endpoint' event".to_string());
+                    }
+                    Err(_) => {
+                        return Err(format!(
+                            "SSE endpoint handshake timed out after {}s",
+                            SSE_CONNECT_TIMEOUT_SECS
+                        ));
+                    }
                 }
             }
 
@@ -250,6 +279,9 @@ impl SseTransport {
     async fn wait_for_response(&self, id: u64) -> Result<Value, String> {
         let mut rx = self.event_rx.lock().await;
 
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(SSE_REQUEST_TIMEOUT_SECS);
+
         loop {
             // Check existing buffered events first
             while let Some(event) = rx.try_recv().ok() {
@@ -258,8 +290,14 @@ impl SseTransport {
                 }
             }
 
-            // Wait for new events
-            self.notify.notified().await;
+            // Wait for new events with timeout
+            let notified = tokio::time::timeout_at(deadline, self.notify.notified()).await;
+            if notified.is_err() {
+                return Err(format!(
+                    "MCP SSE response timed out after {}s (request id={})",
+                    SSE_REQUEST_TIMEOUT_SECS, id
+                ));
+            }
 
             // Drain newly arrived events
             while let Some(event) = rx.try_recv().ok() {
