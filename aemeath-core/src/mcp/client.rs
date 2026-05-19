@@ -29,7 +29,7 @@ struct JsonRpcError {
 }
 
 /// Stdio transport state
-struct StdioTransport {
+pub struct StdioTransport {
     #[allow(dead_code)]
     child: Child,
     stdin: Mutex<tokio::process::ChildStdin>,

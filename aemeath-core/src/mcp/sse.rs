@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, Mutex, Notify};
 
 /// Parsed SSE event
 #[derive(Debug, Clone)]
-pub(crate) struct SseEvent {
+pub struct SseEvent {
     pub event_type: String,
     pub data: String,
 }
@@ -76,9 +76,12 @@ const SSE_REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// Build a reqwest client with optional custom headers and sane timeouts.
 pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, String> {
+    // NOTE: We do NOT set a global .timeout() here because SSE is a long-lived
+    // streaming connection.  Timeouts are applied at the call site via
+    // tokio::time::timeout for specific phases (endpoint handshake, request
+    // response).
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS))
-        .timeout(std::time::Duration::from_secs(SSE_REQUEST_TIMEOUT_SECS));
+        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS));
     // Attach default headers if provided
     if !headers.is_empty() {
         let mut header_map = reqwest::header::HeaderMap::new();
