@@ -103,7 +103,10 @@ impl InputArea {
 
         let (row, _) = self.textarea.cursor();
         if row == 0 {
-            self.history_up();
+            // 仅当 input 非空或已在历史浏览模式时才触发历史翻看
+            if !self.is_empty() || self.history_index.is_some() {
+                self.history_up();
+            }
         } else {
             self.textarea.move_cursor(CursorMove::Up);
         }
@@ -188,5 +191,71 @@ fn char_width(ch: char) -> usize {
         4
     } else {
         ch.width().unwrap_or(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tui::input_area::InputArea;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    /// 辅助：创建一个渲染过的 InputArea（content_width > 0）
+    fn rendered_input() -> InputArea {
+        let mut input = InputArea::new();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 5,
+        };
+        let mut buf = Buffer::empty(area);
+        input.render(area, &mut buf);
+        input
+    }
+
+    #[test]
+    fn test_move_up_empty_input_does_not_enter_history() {
+        let mut input = rendered_input();
+        input.add_history("previous message");
+
+        // input 为空，按上键不应进入历史浏览
+        input.move_up();
+        assert!(
+            input.history_index.is_none(),
+            "空 input 按上键不应进入历史浏览模式"
+        );
+        assert!(input.is_empty(), "空 input 按上键后应仍为空");
+    }
+
+    #[test]
+    fn test_move_up_nonempty_input_enters_history() {
+        let mut input = rendered_input();
+        input.add_history("previous message");
+
+        // input 非空，按上键应进入历史浏览
+        input.input('x');
+        input.move_up();
+        assert!(
+            input.history_index.is_some(),
+            "非空 input 按上键应进入历史浏览模式"
+        );
+        assert_eq!(input.get_text(), "previous message");
+    }
+
+    #[test]
+    fn test_move_up_empty_then_type_then_up_works() {
+        let mut input = rendered_input();
+        input.add_history("old");
+
+        // 先空 input 按上键 — 无反应
+        input.move_up();
+        assert!(input.history_index.is_none());
+
+        // 输入内容后按上键 — 正常进入历史
+        input.input('a');
+        input.move_up();
+        assert!(input.history_index.is_some());
+        assert_eq!(input.get_text(), "old");
     }
 }
