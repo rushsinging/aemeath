@@ -21,7 +21,7 @@ pub(super) enum CtrlCAction {
 }
 
 /// Ctrl+C 两段式退出超时（秒）
-const CTRL_C_TIMEOUT_SECS: f64 = 5.0;
+const CTRL_C_TIMEOUT_SECS: f64 = 3.0;
 
 /// 根据 input 是否为空和上次 Ctrl+C 时间戳决定动作。
 fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> CtrlCAction {
@@ -54,6 +54,18 @@ impl App {
                 cmd: Cmd::None,
                 pending_slash: None,
             };
+        }
+
+        // Ctrl+C 超时复原：上次 Ctrl+C 已过期则重置状态
+        if let Some(last) = self.last_ctrlc {
+            if std::time::Instant::now()
+                .duration_since(last)
+                .as_secs_f64()
+                >= CTRL_C_TIMEOUT_SECS
+            {
+                self.last_ctrlc = None;
+                self.status_bar.set_success("Ready");
+            }
         }
 
         // Dialog mode
@@ -291,7 +303,7 @@ mod tests {
     #[test]
     fn test_ctrlc_action_empty_expired_second_press_warns() {
         // 空 input、上次已过期 → 重新提示
-        let expired = std::time::Instant::now() - std::time::Duration::from_secs(6);
+        let expired = std::time::Instant::now() - std::time::Duration::from_secs(4);
         assert_eq!(
             ctrlc_action(true, Some(expired)),
             CtrlCAction::WarnExit,
@@ -301,20 +313,20 @@ mod tests {
 
     #[test]
     fn test_ctrlc_action_boundary_timeout() {
-        // 刚好在超时边界上（略小于 5 秒 → Quit）
-        let just_inside = std::time::Instant::now() - std::time::Duration::from_millis(4900);
+        // 刚好在超时边界上（略小于 3 秒 → Quit）
+        let just_inside = std::time::Instant::now() - std::time::Duration::from_millis(2900);
         assert_eq!(
             ctrlc_action(true, Some(just_inside)),
             CtrlCAction::Quit,
-            "4.9 秒前 → Quit"
+            "2.9 秒前 → Quit"
         );
 
-        // 刚好超出（略大于 5 秒 → WarnExit）
-        let just_outside = std::time::Instant::now() - std::time::Duration::from_millis(5100);
+        // 刚好超出（略大于 3 秒 → WarnExit）
+        let just_outside = std::time::Instant::now() - std::time::Duration::from_millis(3100);
         assert_eq!(
             ctrlc_action(true, Some(just_outside)),
             CtrlCAction::WarnExit,
-            "5.1 秒前 → WarnExit"
+            "3.1 秒前 → WarnExit"
         );
     }
 }
