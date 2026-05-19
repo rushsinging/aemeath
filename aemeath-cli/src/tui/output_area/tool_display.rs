@@ -145,11 +145,11 @@ impl super::OutputArea {
 
         // 查找第一个匹配的 pending 占位行，原地替换
         let prefix = format!("pending:{name}:");
-        if let Some(pos) = self
-            .lines
-            .iter()
-            .position(|line| line.tool_id.as_deref().is_some_and(|id| id.starts_with(&prefix)))
-        {
+        if let Some(pos) = self.lines.iter().position(|line| {
+            line.tool_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with(&prefix))
+        }) {
             // 原地更新 header 行
             self.lines[pos].content = header;
             self.lines[pos].style = LineStyle::ToolCallRunning;

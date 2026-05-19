@@ -19,6 +19,7 @@ impl App {
         self.ask_user_reply_tx = None;
         self.ask_user_state = None;
         self.pending_reflection = None;
+        self.turn_count = 0;
         if let Ok(mut reminders) = self.session_reminders.lock() {
             reminders.clear();
         }

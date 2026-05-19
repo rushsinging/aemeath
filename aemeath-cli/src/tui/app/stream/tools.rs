@@ -134,7 +134,7 @@ async fn execute_non_agent(
         .iter()
         .filter(|c| c.name != "AskUserQuestion")
         .collect();
-  
+
     if other_calls.is_empty() {
         return Vec::new();
     }

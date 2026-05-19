@@ -12,13 +12,13 @@ impl super::super::App {
         args: &str,
         ui_tx: Option<mpsc::Sender<UiEvent>>,
     ) {
-        if !self.memory_config.reflection.enabled {
+        if !self.memory_config.enabled || !self.memory_config.reflection.enabled {
             self.output_area.push_error("Reflection 系统已禁用。");
             return;
         }
 
         match args.trim() {
-            "" => self.spawn_llm_reflection(ui_tx),
+            "" => self.spawn_llm_reflection(ui_tx, true),
             "apply" => self.apply_pending_reflection(),
             "stats" | "history" => self
                 .output_area
@@ -29,7 +29,7 @@ impl super::super::App {
         }
     }
 
-    fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>) {
+    fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>, foreground: bool) {
         let Some(client) = self.client.clone() else {
             self.output_area
                 .push_error("当前没有可用的 LLM client，无法执行 Reflection。");
@@ -61,14 +61,18 @@ impl super::super::App {
         )];
         let cancel = CancellationToken::new();
 
-        self.output_area.push_system("[reflection: calling LLM...]");
-        self.output_area.start_spinner();
-        self.output_area.set_spinner_phase("Reflecting...");
-        self.is_processing = true;
+        if foreground {
+            self.output_area.push_system("[reflection: calling LLM...]");
+            self.output_area.start_spinner();
+            self.output_area.set_spinner_phase("Reflecting...");
+            self.is_processing = true;
+        }
 
         if let Some(tx) = ui_tx {
             tokio::spawn(async move {
-                let _ = tx.send(UiEvent::ReflectionStarted).await;
+                if foreground {
+                    let _ = tx.send(UiEvent::ReflectionStarted).await;
+                }
                 let raw_output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
                 let raw_output_for_callback = raw_output.clone();
                 let response = match client
@@ -136,6 +140,21 @@ impl super::super::App {
         if self.apply_reflection_output(output) {
             self.pending_reflection = None;
         }
+    }
+
+    pub(crate) fn maybe_auto_reflect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        self.turn_count += 1;
+        let reflection = &self.memory_config.reflection;
+        if !self.memory_config.enabled || !reflection.enabled || reflection.interval_turns == 0 {
+            return;
+        }
+        if self.pending_reflection.is_some() {
+            return;
+        }
+        if self.turn_count % reflection.interval_turns != 0 {
+            return;
+        }
+        self.spawn_llm_reflection(Some(ui_tx.clone()), false);
     }
 
     pub(crate) fn apply_reflection_output(&mut self, output: ReflectionOutput) -> bool {

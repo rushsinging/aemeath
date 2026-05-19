@@ -3,8 +3,8 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」，操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾而非单独一行；纯选择模式（仅有 options 无 free_input）改为键盘上下键高亮选项 + Enter 确认 |
-| 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
-| 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
+| 8 | Memory 系统 | - | 待确认 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
+| 9 | 反思系统 | - | 待确认 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
@@ -592,7 +592,7 @@ enum MemoryCategory {
 
 **依赖**：无外部依赖，纯文件系统存储 + JSON 序列化。
 
-#### 完成度评估（2026-05-09）：~75%
+#### 完成度评估（2026-05-19）：待确认
 
 **已实现**：
 
@@ -604,13 +604,14 @@ enum MemoryCategory {
 | 两层存储：Global + Project | `memory/store.rs` |
 | 去重（Jaccard 相似度） | `memory/dedup.rs` |
 | 评分（injection_score + eviction_score） | `memory/scoring.rs` |
-| System Prompt 注入（`top_for_inject` → `# Project Memory`） | `prompt.rs:223-251` |
+| System Prompt 注入（`top_for_inject` → `# Project Memory`，受 `MemoryConfig.max_inject_count` 控制） | `prompt.rs` |
 | `/memory` 命令（add/delete/pin/search/compact/stats） | `command/commands/memory.rs` |
 | `MemoryTool`（LLM 可通过 tool call 操作 memory） | `memory_tool.rs` |
 | `SessionReminders`（会话级提醒） | `memory/session_reminder.rs` |
+| TUI/REPL 对话结束后展示 session reminder recap，`/clear` 清空 | `tui/app/update/reminder_recap.rs`、`repl/mod.rs` |
 | 配置（`MemoryConfig` + `ReflectionConfig`） | `config/memory.rs` |
 
-**未实现**：
+**暂缓/未实现**：
 
 | 需求 | 说明 |
 |------|------|
@@ -717,42 +718,42 @@ struct ReflectionEntry {
 
 ### #9 反思系统（实施版）
 
-#### 完成度评估（2026-05-09）：~45%
+#### 完成度评估（2026-05-19）：待确认
 
 **已实现**：
 
 | 组件 | 位置 |
 |------|------|
-| `ReflectionEngine`（解析 JSON、格式化输出） | `reflection/mod.rs` |
+| `ReflectionEngine`（解析 JSON、格式化输出） | `reflection/` |
 | Prompt 模板（偏差检测 + 建议记忆 + 过时记忆） | `reflection/prompt.rs` |
-| `ReflectionOutput` 结构 | `reflection/mod.rs` |
-| `run_reflection()` 共享函数（TUI + REPL 复用） | `cli/src/reflection.rs` |
-| 定时触发（每 N turns，LLM 调用） | `stream.rs:415` |
-| Lightweight fallback（LLM 失败时的轻量反思） | `reflection.rs:131` |
-| `/reflect` 命令（手动触发 + apply 子命令） | `command/commands/reflect.rs` |
-| `apply_outdated()` 标记过时记忆 | `reflection/mod.rs:49` |
-| `recent_messages_summary()` 提取对话摘要 | `reflection/mod.rs:122` |
+| `ReflectionOutput` 结构 | `reflection/types.rs` |
+| `/reflect` 命令（后台异步触发 + apply/stats/history 子命令占位） | `tui/app/slash/reflection.rs` |
+| pending 建议与 `/reflect apply` 写入 MemoryStore | `tui/app/slash/reflection.rs` |
+| `auto_apply_suggestions` 自动应用 suggested memories 与 outdated markers | `tui/app/update/ui_event.rs` |
+| `apply_outdated()` 标记过时记忆 | `reflection/apply.rs` |
+| `recent_messages_summary()` 提取对话摘要 | `reflection/format.rs` |
+| 自动 N 轮触发（`reflection.interval_turns`，0 表示禁用自动触发；后台静默执行，不锁住输入） | `tui/app/slash/reflection.rs`、`tui/app/update/ui_event.rs` |
 | 配置（`ReflectionConfig`） | `config/memory.rs` |
 
-**未实现（核心缺口——反思结果没有闭环）**：
+**暂缓/未实现**：
 
 | 需求 | 说明 |
 |------|------|
-| **建议记忆自动写入 MemoryStore** | `suggested_memories` 只展示、从未写入 store。`auto_apply_suggestions` 配置项存在但无使用代码 |
-| **过时记忆自动标记** | `apply_outdated()` 已实现但从未被调用 |
 | 连续工具失败触发反思 | spec P1 |
-| SessionEnd 反思 | agent loop 结束时未触发反思 |
+| SessionEnd 反思 | agent loop 结束时暂不触发反思 |
 | SubagentStop 反思 | spec P2 |
 | 用户中断反思 | spec P2 |
 | 错误恢复后反思 | spec P2 |
+| 独立 reflection model | `ReflectionConfig.model` 字段保留，但本轮使用当前 client，避免新增模型路由复杂度 |
+| PostCompact 后反思 | 暂缓，避免压缩后上下文损失 |
 
-**行为与 spec 不一致**：
+**行为取舍**：
 
-| spec 要求 | 实际行为 |
+| 原 spec | 本轮实现 |
 |-----------|----------|
-| 反思结果静默写入 MemoryStore，不显示在对话中 | 当前通过 `UiEvent::SystemMessage` **展示给用户** |
-| 使用独立轻量模型（成本优化） | `ReflectionConfig.model` 字段存在，但 `run_reflection()` 使用传入的主模型 client |
-| 后台异步执行（不阻塞主循环） | `run_reflection()` 是 `.await` 的，**阻塞** agent loop |
+| 反思结果静默写入 MemoryStore，不显示在对话中 | TUI 中展示 Reflection 摘要；若 `auto_apply_suggestions = false`，提示用户运行 `/reflect apply` |
+| 使用独立轻量模型（成本优化） | 使用当前默认模型 |
+| 后台异步执行（不阻塞主循环） | `/reflect` 与自动 N 轮触发均通过后台任务回传 `ReflectionDone` |
 
 **目标**：在关键节点（任务完成、Stop、错误恢复后、用户显式触发）执行反思流程，对最近的行为、决策、失败、用户反馈做结构化总结，将有价值的经验写入 Memory 系统（#8），让 agent 在未来会话中能够基于历史经验做更好的决策。
 
