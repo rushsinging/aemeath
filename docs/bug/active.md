@@ -2,11 +2,8 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 32 | Task list 窗口化显示异常：任务接近完成时窗口收缩为 1-2 条、completed 排序错乱 | 高 | 待确认 | 未确认 | 2026-05 | F 轮修复(2026-05-19)：completed 扩展补齐后重新按显示编号排序，修复最近 completed 插在旧 completed 前导致窗口顺序错乱 |
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 44 | Bash 工具设置 600s timeout 仍被 120s 截断 | 中 | 待确认 | 未确认 | 2026-05 | 已修复：BashTool 覆写 timeout_secs() 返回 600s，匹配 schema 最大允许值；agent.rs 外层超时不再在 Bash 内部 timeout 前截断 (355aca6) |
-| 46 | Output area Markdown 表格行选中复制内容错位 | 高 | 待确认 | 未确认 | 2026-05 | 已修复：render 记录 Markdown 表格渲染后的逻辑行文本，selection 统一使用 screen_line_map 对应的数据源，避免 box drawing 表格和原始 Markdown offset 错位 |
-| 47 | LLM 声称派发多个 reviewer 但 Agent 实际串行执行 | 高 | 待确认 | 未确认 | 2026-05 | 已修复 v2：请求体添加 parallel_tool_calls=true 让 LLM 一次返回多个 tool calls；v1 修复 execute_non_agent 并行化 + Agent tool 并行指引 |
+| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 未确认 | 2026-05 | agent loop 最后一轮（stop_reason=stop）时，用户在 input area 提交的新消息不会被消费，内容继续留在 input queue 显示区域；疑似 loop 退出条件先于 input queue 消费检查 |
 
 ## 专案
 
