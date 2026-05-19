@@ -1,6 +1,7 @@
 pub mod client;
 pub mod config;
 pub mod response_limit;
+pub mod sse;
 pub mod validation;
 
 pub use client::McpClient;

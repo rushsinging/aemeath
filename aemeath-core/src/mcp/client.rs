@@ -1,23 +1,16 @@
 use super::config::{McpServerConfig, McpToolDef, McpTransportKind};
+use super::sse::SseTransport;
 use super::validation::{filter_env, validate_command, validate_remote_url};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-/// JSON-RPC request
-#[derive(Serialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
-    id: u64,
-    method: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    params: Option<Value>,
-}
-
-/// JSON-RPC response
+/// JSON-RPC response (stdio transport)
 #[derive(Deserialize)]
 struct JsonRpcResponse {
     #[allow(dead_code)]
@@ -35,28 +28,41 @@ struct JsonRpcError {
     message: String,
 }
 
-/// MCP stdio client — communicates with an MCP server via stdin/stdout
-pub struct McpClient {
-    name: String,
+/// Stdio transport state
+struct StdioTransport {
+    #[allow(dead_code)]
     child: Child,
     stdin: Mutex<tokio::process::ChildStdin>,
     stdout: Mutex<BufReader<tokio::process::ChildStdout>>,
-    next_id: Mutex<u64>,
 }
+
+/// MCP client supporting both stdio and SSE transports.
+pub enum McpClient {
+    Stdio {
+        name: String,
+        transport: StdioTransport,
+        next_id: Arc<AtomicU64>,
+    },
+    Sse {
+        name: String,
+        transport: SseTransport,
+        next_id: Arc<AtomicU64>,
+    },
+}
+
 impl McpClient {
-    /// Connect to an MCP server
+    /// Connect to an MCP server using the configured transport.
     pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
         let kind = config.transport_kind()?;
         match kind {
             McpTransportKind::Stdio => Self::connect_stdio(name, config).await,
             McpTransportKind::Sse | McpTransportKind::StreamableHttp => {
-                Self::connect_http(name, config, kind).await
+                Self::connect_sse(name, config).await
             }
         }
     }
 
     async fn connect_stdio(name: &str, config: &McpServerConfig) -> Result<Self, String> {
-        // Validate command safety
         let command = config
             .command
             .as_deref()
@@ -67,9 +73,8 @@ impl McpClient {
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped()); // Capture stderr for debugging instead of discarding
+            .stderr(Stdio::piped());
 
-        // Filter dangerous environment variables
         let safe_env = filter_env(&config.env);
         for (k, v) in &safe_env {
             cmd.env(k, v);
@@ -83,7 +88,6 @@ impl McpClient {
         let stdout = child.stdout.take().ok_or("failed to get stdout")?;
         let stderr = child.stderr.take().ok_or("failed to get stderr")?;
 
-        // Spawn a background task to log stderr output
         let server_name = name.to_string();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
@@ -92,15 +96,16 @@ impl McpClient {
             }
         });
 
-        let client = Self {
+        let client = Self::Stdio {
             name: name.to_string(),
-            child,
-            stdin: Mutex::new(stdin),
-            stdout: Mutex::new(BufReader::new(stdout)),
-            next_id: Mutex::new(1),
+            transport: StdioTransport {
+                child,
+                stdin: Mutex::new(stdin),
+                stdout: Mutex::new(BufReader::new(stdout)),
+            },
+            next_id: Arc::new(AtomicU64::new(1)),
         };
 
-        // Initialize the connection
         client
             .send_request(
                 "initialize",
@@ -115,7 +120,6 @@ impl McpClient {
             )
             .await?;
 
-        // Send initialized notification
         client
             .send_notification("notifications/initialized", None)
             .await?;
@@ -123,68 +127,99 @@ impl McpClient {
         Ok(client)
     }
 
-    async fn connect_http(
-        name: &str,
-        config: &McpServerConfig,
-        kind: McpTransportKind,
-    ) -> Result<Self, String> {
+    async fn connect_sse(name: &str, config: &McpServerConfig) -> Result<Self, String> {
         let url = config
             .url
             .as_deref()
-            .ok_or_else(|| "remote MCP server requires url".to_string())?;
+            .ok_or_else(|| "SSE MCP server requires url".to_string())?;
         validate_remote_url(url)?;
-        Err(format!(
-            "MCP {kind} transport for '{name}' is not yet supported"
-        ))
-    }
 
-    pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, String> {
-        let mut id = self.next_id.lock().await;
-        let req_id = *id;
-        *id += 1;
-        drop(id);
+        let transport = SseTransport::connect(url, &config.headers).await?;
 
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: req_id,
-            method: method.to_string(),
-            params,
+        let client = Self::Sse {
+            name: name.to_string(),
+            transport,
+            next_id: Arc::new(AtomicU64::new(1)),
         };
 
-        let mut line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-        line.push('\n');
+        client
+            .send_request(
+                "initialize",
+                Some(serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "aemeath",
+                        "version": "0.1.0"
+                    }
+                })),
+            )
+            .await?;
 
-        let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| format!("write error: {e}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| format!("flush error: {e}"))?;
-        drop(stdin);
+        client
+            .send_notification("notifications/initialized", None)
+            .await?;
 
-        // Read response
-        let mut stdout = self.stdout.lock().await;
-        let mut response_line = String::new();
-        stdout
-            .read_line(&mut response_line)
-            .await
-            .map_err(|e| format!("read error: {e}"))?;
-        drop(stdout);
-
-        let response: JsonRpcResponse = serde_json::from_str(&response_line)
-            .map_err(|e| format!("invalid JSON-RPC response: {e}"))?;
-
-        if let Some(error) = response.error {
-            return Err(format!("MCP error: {}", error.message));
-        }
-
-        response.result.ok_or_else(|| "empty result".to_string())
+        Ok(client)
     }
 
-    /// Send a JSON-RPC ping request to verify the MCP server is responsive.
+    fn alloc_id(&self) -> u64 {
+        let counter = match self {
+            McpClient::Stdio { next_id, .. } => next_id,
+            McpClient::Sse { next_id, .. } => next_id,
+        };
+        counter.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Send a JSON-RPC request and return the response.
+    pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, String> {
+        let req_id = self.alloc_id();
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": method,
+            "params": params.unwrap_or(Value::Object(serde_json::Map::new()))
+        });
+
+        match self {
+            McpClient::Stdio { transport, .. } => {
+                let mut line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
+                line.push('\n');
+
+                let mut stdin = transport.stdin.lock().await;
+                stdin
+                    .write_all(line.as_bytes())
+                    .await
+                    .map_err(|e| format!("write error: {e}"))?;
+                stdin
+                    .flush()
+                    .await
+                    .map_err(|e| format!("flush error: {e}"))?;
+                drop(stdin);
+
+                let mut stdout = transport.stdout.lock().await;
+                let mut response_line = String::new();
+                stdout
+                    .read_line(&mut response_line)
+                    .await
+                    .map_err(|e| format!("read error: {e}"))?;
+                drop(stdout);
+
+                let response: JsonRpcResponse = serde_json::from_str(&response_line)
+                    .map_err(|e| format!("invalid JSON-RPC response: {e}"))?;
+
+                if let Some(error) = response.error {
+                    return Err(format!("MCP error: {}", error.message));
+                }
+
+                response.result.ok_or_else(|| "empty result".to_string())
+            }
+            McpClient::Sse { transport, .. } => transport.send_request(&request).await,
+        }
+    }
+
+    /// Send a JSON-RPC ping request.
     pub async fn ping(&self) -> Result<(), String> {
         self.send_request("ping", None).await.map(|_| ())
     }
@@ -196,23 +231,30 @@ impl McpClient {
             "params": params.unwrap_or(Value::Object(serde_json::Map::new()))
         });
 
-        let mut line = serde_json::to_string(&notification).map_err(|e| e.to_string())?;
-        line.push('\n');
+        match self {
+            McpClient::Stdio { transport, .. } => {
+                let mut line = serde_json::to_string(&notification).map_err(|e| e.to_string())?;
+                line.push('\n');
 
-        let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| format!("write error: {e}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| format!("flush error: {e}"))?;
-
-        Ok(())
+                let mut stdin = transport.stdin.lock().await;
+                stdin
+                    .write_all(line.as_bytes())
+                    .await
+                    .map_err(|e| format!("write error: {e}"))?;
+                stdin
+                    .flush()
+                    .await
+                    .map_err(|e| format!("flush error: {e}"))?;
+                Ok(())
+            }
+            McpClient::Sse { transport, .. } => {
+                transport.send_request(&notification).await?;
+                Ok(())
+            }
+        }
     }
 
-    /// List available tools from the MCP server
+    /// List available tools from the MCP server.
     pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, String> {
         let result = self.send_request("tools/list", None).await?;
         let tools = result
@@ -229,7 +271,7 @@ impl McpClient {
         Ok(defs)
     }
 
-    /// Call a tool on the MCP server
+    /// Call a tool on the MCP server.
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<String, String> {
         let result = self
             .send_request(
@@ -241,7 +283,6 @@ impl McpClient {
             )
             .await?;
 
-        // Extract text content from result
         if let Some(content) = result.get("content").and_then(|v| v.as_array()) {
             let texts: Vec<&str> = content
                 .iter()
@@ -253,19 +294,31 @@ impl McpClient {
         }
     }
 
-    /// Get the server name
+    /// Get the server name.
     pub fn name(&self) -> &str {
-        &self.name
+        match self {
+            McpClient::Stdio { name, .. } => name,
+            McpClient::Sse { name, .. } => name,
+        }
     }
 
-    /// Shutdown the MCP server
+    /// Shutdown the MCP server connection.
     pub async fn shutdown(&mut self) {
-        let _ = self.child.kill().await;
+        match self {
+            McpClient::Stdio { transport, .. } => {
+                let _ = transport.child.kill().await;
+            }
+            McpClient::Sse { .. } => {
+                // SSE transport drops the HTTP connection on Drop
+            }
+        }
     }
 }
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        if let McpClient::Stdio { transport, .. } = self {
+            let _ = transport.child.start_kill();
+        }
     }
 }

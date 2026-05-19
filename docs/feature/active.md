@@ -5,7 +5,7 @@
 | 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」；操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾，不单独占行；纯选择模式（仅 options、无 free_input）改为上下键高亮选项 + Enter 确认 |
 | 8 | Memory 系统 | - | 实施中 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入；本轮补齐注入配置化与对话结束后的 session reminder recap。Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 实施中 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
-| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
+| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现（`mcp::sse` 模块），支持远程 MCP server 通过 SSE event stream 连接、endpoint 发现、JSON-RPC over POST；Streamable HTTP 传输待后续补充；P2 不在本轮 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
