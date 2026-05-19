@@ -43,6 +43,9 @@ impl App {
             self.update_task_status(&task_store, self.is_processing)
                 .await;
 
+            // Ctrl+C 超时复原 status line
+            self.check_ctrlc_timeout();
+
             // Draw UI
             self.draw(terminal)?;
 

@@ -149,6 +149,20 @@ impl App {
         }
     }
 
+    /// Check if Ctrl+C timeout has expired and restore status line.
+    fn check_ctrlc_timeout(&mut self) {
+        if let Some(last) = self.last_ctrlc {
+            if std::time::Instant::now()
+                .duration_since(last)
+                .as_secs_f64()
+                >= update::CTRL_C_TIMEOUT_SECS
+            {
+                self.last_ctrlc = None;
+                self.status_bar.set_success("Ready");
+            }
+        }
+    }
+
     /// Draw the TUI frame.
     fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         let mut output_rect = Rect::default();
