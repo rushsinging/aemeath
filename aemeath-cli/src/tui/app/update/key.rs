@@ -8,6 +8,39 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+/// Ctrl+C 在非 processing、非 suggestions 状态下的动作。
+/// 提取为纯函数以便单元测试。
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum CtrlCAction {
+    /// 清空 input area 内容
+    ClearInput,
+    /// 显示「再按一次退出」提示
+    WarnExit,
+    /// 退出 TUI
+    Quit,
+}
+
+/// Ctrl+C 两段式退出超时（秒）
+const CTRL_C_TIMEOUT_SECS: f64 = 5.0;
+
+/// 根据 input 是否为空和上次 Ctrl+C 时间戳决定动作。
+fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> CtrlCAction {
+    if !input_empty {
+        CtrlCAction::ClearInput
+    } else {
+        let now = std::time::Instant::now();
+        if let Some(last) = last_ctrlc {
+            if now.duration_since(last).as_secs_f64() < CTRL_C_TIMEOUT_SECS {
+                CtrlCAction::Quit
+            } else {
+                CtrlCAction::WarnExit
+            }
+        } else {
+            CtrlCAction::WarnExit
+        }
+    }
+}
+
 impl App {
     pub(super) fn update_key(
         &mut self,
@@ -94,24 +127,25 @@ impl App {
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
                     self.input_area.clear_suggestions();
-                } else if !self.input_area.is_empty() {
-                    // 第一次 Ctrl+C：input 非空时清空 input area
-                    self.input_area.clear();
-                    self.status_bar.set_warning("Input cleared (Ctrl+C again to exit)");
-                    self.last_ctrlc = Some(std::time::Instant::now());
                 } else {
-                    // input 为空：两段式退出（5 秒超时）
-                    let now = std::time::Instant::now();
-                    if let Some(last) = self.last_ctrlc {
-                        if now.duration_since(last).as_secs_f64() < 5.0 {
+                    match ctrlc_action(self.input_area.is_empty(), self.last_ctrlc) {
+                        CtrlCAction::ClearInput => {
+                            self.input_area.clear();
+                            self.status_bar
+                                .set_warning("Input cleared (Ctrl+C again to exit)");
+                            self.last_ctrlc = Some(std::time::Instant::now());
+                        }
+                        CtrlCAction::WarnExit => {
+                            self.last_ctrlc = Some(std::time::Instant::now());
+                            self.status_bar.set_warning("Press Ctrl+C again to exit");
+                        }
+                        CtrlCAction::Quit => {
                             return UpdateResult {
                                 cmd: Cmd::Quit,
                                 pending_slash: None,
                             };
                         }
                     }
-                    self.last_ctrlc = Some(now);
-                    self.status_bar.set_warning("Press Ctrl+C again to exit");
                 }
             }
             (KeyModifiers::NONE, KeyCode::Tab) if !self.is_processing => {
@@ -211,5 +245,76 @@ impl App {
             cmd: Cmd::None,
             pending_slash: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ctrlc_action_input_nonempty_clears() {
+        // input 非空时，无论 last_ctrlc 状态如何，都应清空 input
+        assert_eq!(
+            ctrlc_action(false, None),
+            CtrlCAction::ClearInput,
+            "非空 input、无上次记录 → ClearInput"
+        );
+        assert_eq!(
+            ctrlc_action(false, Some(std::time::Instant::now())),
+            CtrlCAction::ClearInput,
+            "非空 input、有上次记录 → ClearInput"
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_empty_first_press_warns() {
+        // 空 input、首次按 Ctrl+C → 提示退出
+        assert_eq!(
+            ctrlc_action(true, None),
+            CtrlCAction::WarnExit,
+            "空 input、无上次记录 → WarnExit"
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_empty_quick_second_press_quits() {
+        // 空 input、上次在超时窗口内 → 退出
+        let recent = std::time::Instant::now();
+        assert_eq!(
+            ctrlc_action(true, Some(recent)),
+            CtrlCAction::Quit,
+            "空 input、超时窗口内 → Quit"
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_empty_expired_second_press_warns() {
+        // 空 input、上次已过期 → 重新提示
+        let expired = std::time::Instant::now() - std::time::Duration::from_secs(6);
+        assert_eq!(
+            ctrlc_action(true, Some(expired)),
+            CtrlCAction::WarnExit,
+            "空 input、超时已过 → WarnExit"
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_boundary_timeout() {
+        // 刚好在超时边界上（略小于 5 秒 → Quit）
+        let just_inside = std::time::Instant::now() - std::time::Duration::from_millis(4900);
+        assert_eq!(
+            ctrlc_action(true, Some(just_inside)),
+            CtrlCAction::Quit,
+            "4.9 秒前 → Quit"
+        );
+
+        // 刚好超出（略大于 5 秒 → WarnExit）
+        let just_outside = std::time::Instant::now() - std::time::Duration::from_millis(5100);
+        assert_eq!(
+            ctrlc_action(true, Some(just_outside)),
+            CtrlCAction::WarnExit,
+            "5.1 秒前 → WarnExit"
+        );
     }
 }
