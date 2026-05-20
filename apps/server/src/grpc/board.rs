@@ -1,8 +1,8 @@
 use crate::model::app::AppState;
 use crate::proto::aemeath::v1::board_service_server::BoardService;
 use crate::proto::aemeath::v1::{
-    BoardEvent, BoardSnapshot, Chat, ChatMessage, GetBoardSnapshotRequest, GetBoardSnapshotResponse,
-    WatchRequest, WorkspaceInfo,
+    BoardEvent, BoardSnapshot, Chat, ChatMessage, GetBoardSnapshotRequest,
+    GetBoardSnapshotResponse, WatchRequest, WorkspaceInfo,
 };
 use std::pin::Pin;
 use tokio_stream::{Stream, empty};

@@ -1,9 +1,7 @@
-use crate::model::app::{
-    analyze_message_type, AppState, Chat, ChatMessage, StoreError, Workspace,
-};
+use crate::model::app::{AppState, Chat, ChatMessage, StoreError, Workspace, analyze_message_type};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -44,6 +42,12 @@ struct AddMessageRequest {
 }
 
 #[derive(Deserialize)]
+struct ListMessagesQuery {
+    limit: Option<usize>,
+    before: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct AnalyzeMessageRequest {
     content: String,
 }
@@ -65,6 +69,13 @@ struct AddMessageResponse {
 }
 
 #[derive(Serialize)]
+struct ListMessagesResponse {
+    messages: Vec<ChatMessage>,
+    has_more: bool,
+    next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
 struct AnalyzeMessageResponse {
     message_type: String,
     reason: String,
@@ -77,7 +88,10 @@ struct ErrorResponse {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/api/workspaces", post(create_workspace).get(list_workspaces))
+        .route(
+            "/api/workspaces",
+            post(create_workspace).get(list_workspaces),
+        )
         .route(
             "/api/workspaces/{workspace_id}",
             get(get_workspace)
@@ -98,7 +112,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/workspaces/{workspace_id}/chats/{chat_id}/messages",
-            post(add_message),
+            post(add_message).get(list_messages),
         )
         .with_state(state)
 }
@@ -210,6 +224,24 @@ async fn add_message(
     Ok(Json(AddMessageResponse {
         message: result.message,
         deduplicated: result.deduplicated,
+    }))
+}
+
+async fn list_messages(
+    State(state): State<AppState>,
+    Path((workspace_id, chat_id)): Path<(String, String)>,
+    Query(query): Query<ListMessagesQuery>,
+) -> Result<Json<ListMessagesResponse>, ApiError> {
+    let page = state.list_chat_messages(
+        &workspace_id,
+        &chat_id,
+        query.limit.unwrap_or(50),
+        query.before.as_deref(),
+    )?;
+    Ok(Json(ListMessagesResponse {
+        messages: page.messages,
+        has_more: page.has_more,
+        next_cursor: page.next_cursor,
     }))
 }
 
@@ -344,6 +376,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_message_router_lists_messages_with_pagination() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "first".into(),
+                "k1".into(),
+            )
+            .expect("first message added");
+        let second = state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "second".into(),
+                "k2".into(),
+            )
+            .expect("second message added")
+            .message;
+        let third = state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "third".into(),
+                "k3".into(),
+            )
+            .expect("third message added")
+            .message;
+        let app = router(state);
+        let uri = format!(
+            "/api/workspaces/{}/chats/{}/messages?limit=2",
+            workspace.id, chat.id
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("request succeeds");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains(&format!("\"id\":\"{}\"", third.id)));
+        assert!(body.contains(&format!("\"id\":\"{}\"", second.id)));
+        assert!(body.contains("\"has_more\":true"));
+        assert!(body.contains(&format!("\"next_cursor\":\"{}\"", second.id)));
+    }
+
+    #[tokio::test]
+    async fn test_message_router_returns_not_found_for_unknown_chat() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let app = router(state);
+        let uri = format!(
+            "/api/workspaces/{}/chats/missing/messages?limit=2",
+            workspace.id
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("request succeeds");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn test_chat_router_analyzes_message() {
         let state = AppState::default();
         let workspace = state
@@ -353,10 +477,7 @@ mod tests {
             .create_chat(&workspace.id, "General".into())
             .expect("chat created");
         let app = router(state);
-        let uri = format!(
-            "/api/workspaces/{}/chats/{}/analyze",
-            workspace.id, chat.id
-        );
+        let uri = format!("/api/workspaces/{}/chats/{}/analyze", workspace.id, chat.id);
 
         let response = app
             .oneshot(

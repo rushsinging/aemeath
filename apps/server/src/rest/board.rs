@@ -1,4 +1,4 @@
-use crate::model::app::{AppState, BoardEventKind, BoardUpdate, ChatMessage};
+use crate::model::app::{AppState, BoardUpdate, Chat, ChatMessage};
 use axum::{
     Json, Router,
     extract::{Path, State, ws::WebSocketUpgrade},
@@ -26,18 +26,27 @@ struct BoardSnapshot {
 }
 
 #[derive(Serialize)]
+struct BoardSnapshotUpdate {
+    snapshot_id: String,
+    changed_workspace: Option<WorkspaceInfo>,
+    is_full_snapshot: bool,
+    timestamp: i64,
+    changed_chats: Vec<Chat>,
+    removed_chat_ids: Vec<String>,
+    new_messages: Vec<ChatMessage>,
+    updated_messages: Vec<ChatMessage>,
+}
+
+#[derive(Serialize)]
 struct BoardEvent {
+    #[serde(rename = "type")]
     event_type: &'static str,
-    snapshot: Option<BoardSnapshot>,
-    message: Option<ChatMessage>,
+    payload: BoardSnapshotUpdate,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route(
-            "/ws/workspaces/{workspace_id}/board",
-            get(board_websocket),
-        )
+        .route("/ws/workspaces/{workspace_id}/board", get(board_websocket))
         .route(
             "/api/workspaces/{workspace_id}/board/snapshot",
             get(get_board_snapshot),
@@ -63,9 +72,8 @@ async fn board_websocket(
         let mut updates = state.subscribe_board_updates();
         if let Ok(snapshot) = build_snapshot(&state, &workspace_id) {
             let event = BoardEvent {
-                event_type: "full_snapshot",
-                snapshot: Some(snapshot),
-                message: None,
+                event_type: "snapshot",
+                payload: BoardSnapshotUpdate::from_snapshot(snapshot),
             };
             if let Ok(payload) = serde_json::to_string(&event) {
                 if socket
@@ -83,9 +91,8 @@ async fn board_websocket(
                 continue;
             }
             let event = BoardEvent {
-                event_type: event_type(&update),
-                snapshot: None,
-                message: Some(update.message),
+                event_type: "update",
+                payload: BoardSnapshotUpdate::from_board_update(update),
             };
             if let Ok(payload) = serde_json::to_string(&event) {
                 if socket
@@ -98,12 +105,6 @@ async fn board_websocket(
             }
         }
     })
-}
-
-fn event_type(update: &BoardUpdate) -> &'static str {
-    match update.event_kind {
-        BoardEventKind::MessageAdded => "message_added",
-    }
 }
 
 fn build_snapshot(
@@ -126,6 +127,41 @@ fn build_snapshot(
     })
 }
 
+impl BoardSnapshotUpdate {
+    fn from_snapshot(snapshot: BoardSnapshot) -> Self {
+        Self {
+            snapshot_id: snapshot.snapshot_id,
+            changed_workspace: Some(snapshot.workspace),
+            is_full_snapshot: true,
+            timestamp: now_millis(),
+            changed_chats: snapshot.chats,
+            removed_chat_ids: Vec::new(),
+            new_messages: snapshot.recent_messages,
+            updated_messages: Vec::new(),
+        }
+    }
+
+    fn from_board_update(update: BoardUpdate) -> Self {
+        Self {
+            snapshot_id: uuid_like_snapshot_id(),
+            changed_workspace: None,
+            is_full_snapshot: false,
+            timestamp: now_millis(),
+            changed_chats: Vec::new(),
+            removed_chat_ids: Vec::new(),
+            new_messages: vec![update.message],
+            updated_messages: Vec::new(),
+        }
+    }
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_millis() as i64
+}
+
 fn uuid_like_snapshot_id() -> String {
     mongodb::bson::oid::ObjectId::new().to_hex()
 }
@@ -143,14 +179,15 @@ mod tests {
         let snapshot = build_snapshot(&state, &workspace.id).expect("snapshot built");
 
         let payload = serde_json::to_string(&BoardEvent {
-            event_type: "full_snapshot",
-            snapshot: Some(snapshot),
-            message: None,
+            event_type: "snapshot",
+            payload: BoardSnapshotUpdate::from_snapshot(snapshot),
         })
         .expect("event serialized");
 
-        assert!(payload.contains("\"event_type\":\"full_snapshot\""));
-        assert!(payload.contains("\"snapshot\""));
+        assert!(payload.contains("\"type\":\"snapshot\""));
+        assert!(payload.contains("\"payload\""));
+        assert!(payload.contains("\"is_full_snapshot\":true"));
+        assert!(!payload.contains("event_type"));
     }
 
     #[test]
@@ -173,14 +210,20 @@ mod tests {
             .expect("message added");
 
         let payload = serde_json::to_string(&BoardEvent {
-            event_type: "message_added",
-            snapshot: None,
-            message: Some(result.message),
+            event_type: "update",
+            payload: BoardSnapshotUpdate::from_board_update(BoardUpdate {
+                workspace_id: workspace.id.clone(),
+                event_kind: crate::model::app::BoardEventKind::MessageAdded,
+                message: result.message,
+            }),
         })
         .expect("event serialized");
 
-        assert!(payload.contains("\"event_type\":\"message_added\""));
+        assert!(payload.contains("\"type\":\"update\""));
+        assert!(payload.contains("\"new_messages\""));
         assert!(payload.contains("\"content\":\"hello\""));
+        assert!(payload.contains("\"is_full_snapshot\":false"));
+        assert!(!payload.contains("event_type"));
     }
 
     #[test]
