@@ -144,8 +144,53 @@ message WatchRequest {
 }
 
 message Empty {}
+  
+// === 通用 Event 定义（每个实体对应一种 EventType + entity） ===
+// 约定：Watch stream 返回的 event 包含 EventType 枚举 + 对应的实体消息（或仅 id 表示删除）
+  
+enum EventType {
+  UNSPECIFIED = 0;
+  CREATED = 1;
+  UPDATED = 2;
+  DELETED = 3;
+}
+  
+message ChatEvent {
+  EventType event_type = 1;
+  optional ChatMessage entity = 2;  // CREATED/UPDATED 时填充；DELETED 时仅 id 字段有值
+}
+  
+message WorkspaceEvent {
+  EventType event_type = 1;
+  optional Workspace entity = 2;
+}
+  
+message RequirementEvent {
+  EventType event_type = 1;
+  optional Requirement entity = 2;
+}
+  
+message ProjectEvent {
+  EventType event_type = 1;
+  optional Project entity = 2;
+}
+  
+message ProjectTaskEvent {
+  EventType event_type = 1;
+  optional ProjectTask entity = 2;
+}
+  
+message AgentEvent {
+  EventType event_type = 1;
+  optional AgentInstance entity = 2;
+}
+  
+message ReflectionEvent {
+  EventType event_type = 1;
+  optional Reflection entity = 2;
+}
 ```
-
+  
 ### ChatService（chat.proto）
 
 ```protobuf
@@ -159,8 +204,43 @@ service ChatService {
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
   rpc Watch(WatchRequest) returns (stream ChatEvent);
 }
+// ChatMessage — 核心数据结构，BoardSnapshot / ChatService / WebSocket 均使用
+// 字段精确对齐 036-03-spec-data.md chat_messages collection
+message ChatMessage {
+  string id = 1;                            // ObjectId hex
+  string chat_id = 2;
+  string workspace_id = 3;
+  string sender_type = 4;                   // "user" | "agent" | "system"
+  string sender_id = 5;                     // User._id 或 AgentInstance._id（system 消息为 ""）
+  string role = 6;                          // "user" | "chat" | "system"
+  string content = 7;
+  repeated ToolCall tool_calls = 8;
+  repeated ToolResult tool_results = 9;
+  optional string idempotency_key = 10;     // 调用方（前端 SDK）生成，用于幂等去重
+  optional TokenUsage token_usage = 11;     // agent 消息的 token 用量
+  int64 created_at = 12;                    // unix ms
+  uint64 version = 13;                      // 乐观锁
+}
+  
+message TokenUsage {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}
+  
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments = 3;                     // JSON string
+}
+  
+message ToolResult {
+  string id = 1;
+  string name = 2;
+  string content = 3;                       // tool 返回结果
+}
 ```
-
+  
 ### WorkspaceService（workspace.proto）
 
 ```protobuf
@@ -185,6 +265,7 @@ service RequirementService {
   rpc Analyze(AnalyzeRequirementRequest) returns (Requirement);   // Assistant 原子抢占 Pending→Analyzing；Rejected 可重新提交→Analyzing（驳回后可重新分析）
   rpc Confirm(ConfirmRequirementRequest) returns (Requirement);   // 用户确认草案
   rpc Reject(RejectRequirementRequest) returns (Requirement);     // 用户驳回草案
+  rpc Resubmit(ResubmitRequirementRequest) returns (Requirement);  // Rejected→Analyzing 重新提交分析（REST 别名，内部委托至 Analyze handler + status 校验）
   rpc Cancel(CancelRequirementRequest) returns (CancelRequirementResponse); // 软取消，状态→Cancelled
   rpc Watch(WatchRequest) returns (stream RequirementEvent);
 }
@@ -291,6 +372,7 @@ service ReflectionService {
   rpc Get(GetReflectionRequest) returns (Reflection);
   rpc List(ListReflectionsRequest) returns (ListReflectionsResponse);
   rpc TriggerReflection(TriggerReflectionRequest) returns (Reflection);  // 手动触发 Project 反思
+  rpc Delete(DeleteReflectionRequest) returns (Empty);               // 删除旧 Reflection（对应 EventType.DELETED）
   rpc Watch(WatchRequest) returns (stream ReflectionEvent);
 }
 

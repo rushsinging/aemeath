@@ -93,6 +93,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "chat_id": ObjectId,           // 关联的 Chat
   "workspace_id": ObjectId,      // 关联的 Workspace（冗余，方便跨 Chat 查询）
   "sender_type": "user",        // user | agent | system — sender_id 的引用域；system 消息 sender_id 为 null
+  "sender_id": ObjectId,        // 发送者 ObjectId（user=User._id, agent=AgentInstance._id）；system 消息此字段为 null
   // sender_type → role 映射：user → user, agent → chat（Chat Main Agent 作为发送方）, system → system
   "role": "user",               // user | chat | system（与 sender_type 冗余存储，加速查询）
   "content": "帮我做一个登录页面...",
