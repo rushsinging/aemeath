@@ -6,6 +6,8 @@
 
 **Architecture:** 继续使用内存 `AppState`，在 `AppState` 内增加 `tokio::sync::broadcast` 事件总线；`add_message` 在非幂等重复写入时发布 `BoardEventKind::MessageAdded`。`rest::board` WebSocket 连接先发送全量 `BoardSnapshot`，随后订阅当前 workspace 的 board event 并发送增量 JSON。
 
+**Spec alignment note:** 本计划已执行并落地，但 WS payload 使用的是 Sprint 1 临时格式：`event_type="full_snapshot" | "message_added"`。最新 `036-05-spec-api.md` 已将正式协议定为 `type="snapshot"|"update" + payload: BoardSnapshotUpdate`；后续 Sprint 1 收尾切片 MUST 迁移到正式协议，避免 Sprint 2 前端绑定临时格式。
+
 **Tech Stack:** Rust、axum WebSocket、tokio broadcast、serde JSON、tower/axum test utilities。
 
 ---
