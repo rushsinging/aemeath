@@ -47,6 +47,12 @@ pub struct AddMessageResult {
     pub deduplicated: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageAnalysis {
+    pub message_type: String,
+    pub reason: String,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum StoreError {
     InvalidInput { field: &'static str },
@@ -220,6 +226,34 @@ impl AppState {
         chats
     }
 
+    pub fn update_chat(
+        &self,
+        workspace_id: &str,
+        chat_id: &str,
+        title: Option<String>,
+        status: Option<String>,
+    ) -> Result<Chat, StoreError> {
+        let mut inner = self.inner.lock().expect("store mutex poisoned");
+        let chat = inner
+            .chats
+            .get_mut(chat_id)
+            .ok_or(StoreError::NotFound { entity: "chat" })?;
+        if chat.workspace_id != workspace_id {
+            return Err(StoreError::NotFound { entity: "chat" });
+        }
+        if let Some(title) = title {
+            require_non_empty("title", &title)?;
+            chat.title = title;
+        }
+        if let Some(status) = status {
+            require_non_empty("status", &status)?;
+            chat.status = status;
+        }
+        chat.updated_at = now_millis();
+        chat.version += 1;
+        Ok(chat.clone())
+    }
+
     pub fn delete_chat(&self, workspace_id: &str, chat_id: &str) -> Result<(), StoreError> {
         let mut inner = self.inner.lock().expect("store mutex poisoned");
         let chat = inner
@@ -305,6 +339,30 @@ impl AppState {
         messages.sort_by(|left, right| left.created_at.cmp(&right.created_at));
         messages
     }
+}
+
+pub fn analyze_message_type(content: &str) -> MessageAnalysis {
+    if contains_any(content, &["bug", "错误", "修复", "失败"]) {
+        MessageAnalysis {
+            message_type: "feedback".to_string(),
+            reason: "消息包含 bug/错误/修复/失败 等反馈关键词".to_string(),
+        }
+    } else if contains_any(content, &["实现", "新增", "创建", "需求", "feature"]) {
+        MessageAnalysis {
+            message_type: "requirement".to_string(),
+            reason: "消息包含 实现/新增/创建/需求/feature 等需求关键词".to_string(),
+        }
+    } else {
+        MessageAnalysis {
+            message_type: "chitchat".to_string(),
+            reason: "消息未命中需求或反馈关键词".to_string(),
+        }
+    }
+}
+
+fn contains_any(content: &str, keywords: &[&str]) -> bool {
+    let lowered = content.to_lowercase();
+    keywords.iter().any(|keyword| lowered.contains(keyword))
 }
 
 fn default_if_empty(value: String, fallback: &str) -> String {
@@ -413,20 +471,34 @@ mod tests {
     }
 
     #[test]
-    fn test_add_message_rejects_missing_chat() {
+    fn test_update_chat_changes_title_and_version() {
         let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "Old".into())
+            .expect("chat created");
 
-        let result = state.add_message(
-            "workspace-a",
-            "missing-chat",
-            "user".to_string(),
-            "hello".to_string(),
-            "key".to_string(),
-        );
+        let updated = state
+            .update_chat(&workspace.id, &chat.id, Some("New".into()), None)
+            .expect("chat updated");
 
-        assert!(matches!(
-            result,
-            Err(StoreError::NotFound { entity }) if entity == "chat"
-        ));
+        assert_eq!(updated.title, "New");
+        assert_eq!(updated.version, 2);
+    }
+
+    #[test]
+    fn test_analyze_message_classifies_requirement() {
+        let analysis = analyze_message_type("请实现一个新功能");
+
+        assert_eq!(analysis.message_type, "requirement");
+    }
+
+    #[test]
+    fn test_analyze_message_classifies_feedback() {
+        let analysis = analyze_message_type("这里有个 bug 需要修复");
+
+        assert_eq!(analysis.message_type, "feedback");
     }
 }

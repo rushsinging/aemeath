@@ -1,8 +1,9 @@
-use crate::model::app::{AppState, StoreError};
+use crate::model::app::{analyze_message_type, AppState, StoreError};
 use crate::proto::aemeath::v1::chat_service_server::ChatService;
 use crate::proto::aemeath::v1::{
-    AddMessageRequest, AddMessageResponse, Chat, ChatEvent, CreateChatRequest, CreateChatResponse,
-    DeleteChatRequest, Empty, GetChatRequest, GetChatResponse, ListChatsRequest, ListChatsResponse,
+    AddMessageRequest, AddMessageResponse, AnalyzeMessageRequest, AnalyzeMessageResponse, Chat,
+    ChatEvent, CreateChatRequest, CreateChatResponse, DeleteChatRequest, Empty, GetChatRequest,
+    GetChatResponse, ListChatsRequest, ListChatsResponse, UpdateChatRequest, UpdateChatResponse,
     WatchRequest,
 };
 use std::pin::Pin;
@@ -88,6 +89,25 @@ impl ChatService for ChatGrpc {
         }))
     }
 
+    async fn update_chat(
+        &self,
+        request: Request<UpdateChatRequest>,
+    ) -> Result<Response<UpdateChatResponse>, Status> {
+        let request = request.into_inner();
+        let chat = self
+            .state
+            .update_chat(
+                &request.workspace_id,
+                &request.chat_id,
+                request.title,
+                request.status,
+            )
+            .map_err(status_from_store_error)?;
+        Ok(Response::new(UpdateChatResponse {
+            chat: Some(chat.into()),
+        }))
+    }
+
     async fn delete_chat(
         &self,
         request: Request<DeleteChatRequest>,
@@ -97,6 +117,21 @@ impl ChatService for ChatGrpc {
             .delete_chat(&request.workspace_id, &request.chat_id)
             .map_err(status_from_store_error)?;
         Ok(Response::new(Empty {}))
+    }
+
+    async fn analyze_message(
+        &self,
+        request: Request<AnalyzeMessageRequest>,
+    ) -> Result<Response<AnalyzeMessageResponse>, Status> {
+        let request = request.into_inner();
+        self.state
+            .get_chat(&request.workspace_id, &request.chat_id)
+            .map_err(status_from_store_error)?;
+        let analysis = analyze_message_type(&request.content);
+        Ok(Response::new(AnalyzeMessageResponse {
+            message_type: analysis.message_type,
+            reason: analysis.reason,
+        }))
     }
 
     type WatchStream = Pin<Box<dyn Stream<Item = Result<ChatEvent, Status>> + Send + 'static>>;

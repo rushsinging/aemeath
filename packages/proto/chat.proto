@@ -9,7 +9,9 @@ service ChatService {
   rpc AddMessage(AddMessageRequest) returns (AddMessageResponse);
   rpc GetChat(GetChatRequest) returns (GetChatResponse);
   rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+  rpc UpdateChat(UpdateChatRequest) returns (UpdateChatResponse);
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
+  rpc AnalyzeMessage(AnalyzeMessageRequest) returns (AnalyzeMessageResponse);
   rpc Watch(WatchRequest) returns (stream ChatEvent);
 }
 
@@ -78,9 +80,31 @@ message ListChatsResponse {
   string next_page_token = 2;
 }
 
+message UpdateChatRequest {
+  string workspace_id = 1;
+  string chat_id = 2;
+  optional string title = 3;
+  optional string status = 4;
+}
+
+message UpdateChatResponse {
+  Chat chat = 1;
+}
+
 message DeleteChatRequest {
   string workspace_id = 1;
   string chat_id = 2;
+}
+
+message AnalyzeMessageRequest {
+  string workspace_id = 1;
+  string chat_id = 2;
+  string content = 3;
+}
+
+message AnalyzeMessageResponse {
+  string message_type = 1;
+  string reason = 2;
 }
 
 message ChatEvent {

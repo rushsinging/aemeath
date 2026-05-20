@@ -1,4 +1,6 @@
-use crate::model::app::{AppState, Chat, ChatMessage, StoreError, Workspace};
+use crate::model::app::{
+    analyze_message_type, AppState, Chat, ChatMessage, StoreError, Workspace,
+};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -29,10 +31,21 @@ struct CreateChatRequest {
 }
 
 #[derive(Deserialize)]
+struct UpdateChatRequest {
+    title: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct AddMessageRequest {
     role: Option<String>,
     content: String,
     idempotency_key: String,
+}
+
+#[derive(Deserialize)]
+struct AnalyzeMessageRequest {
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -49,6 +62,12 @@ struct ListChatsResponse {
 struct AddMessageResponse {
     message: ChatMessage,
     deduplicated: bool,
+}
+
+#[derive(Serialize)]
+struct AnalyzeMessageResponse {
+    message_type: String,
+    reason: String,
 }
 
 #[derive(Serialize)]
@@ -71,7 +90,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/workspaces/{workspace_id}/chats/{chat_id}",
-            get(get_chat).delete(delete_chat),
+            get(get_chat).patch(update_chat).delete(delete_chat),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/chats/{chat_id}/analyze",
+            post(analyze_message),
         )
         .route(
             "/api/workspaces/{workspace_id}/chats/{chat_id}/messages",
@@ -151,6 +174,19 @@ async fn get_chat(
     Ok(Json(state.get_chat(&workspace_id, &chat_id)?))
 }
 
+async fn update_chat(
+    State(state): State<AppState>,
+    Path((workspace_id, chat_id)): Path<(String, String)>,
+    Json(request): Json<UpdateChatRequest>,
+) -> Result<Json<Chat>, ApiError> {
+    Ok(Json(state.update_chat(
+        &workspace_id,
+        &chat_id,
+        request.title,
+        request.status,
+    )?))
+}
+
 async fn delete_chat(
     State(state): State<AppState>,
     Path((workspace_id, chat_id)): Path<(String, String)>,
@@ -175,6 +211,17 @@ async fn add_message(
         message: result.message,
         deduplicated: result.deduplicated,
     }))
+}
+
+async fn analyze_message(
+    Path((_workspace_id, _chat_id)): Path<(String, String)>,
+    Json(request): Json<AnalyzeMessageRequest>,
+) -> Json<AnalyzeMessageResponse> {
+    let analysis = analyze_message_type(&request.content);
+    Json(AnalyzeMessageResponse {
+        message_type: analysis.message_type,
+        reason: analysis.reason,
+    })
 }
 
 struct ApiError(StoreError);
@@ -263,6 +310,71 @@ mod tests {
             .await
             .unwrap();
         assert!(String::from_utf8_lossy(&body).contains("\"deduplicated\":true"));
+    }
+
+    #[tokio::test]
+    async fn test_chat_router_updates_chat_title() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "Old".into())
+            .expect("chat created");
+        let app = router(state);
+        let uri = format!("/api/workspaces/{}/chats/{}", workspace.id, chat.id);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"New"}"#))
+                    .unwrap(),
+            )
+            .await
+            .expect("request succeeds");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("\"title\":\"New\""));
+    }
+
+    #[tokio::test]
+    async fn test_chat_router_analyzes_message() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        let app = router(state);
+        let uri = format!(
+            "/api/workspaces/{}/chats/{}/analyze",
+            workspace.id, chat.id
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"content":"请实现一个新功能"}"#))
+                    .unwrap(),
+            )
+            .await
+            .expect("request succeeds");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("\"message_type\":\"requirement\""));
     }
 
     async fn post_message(app: Router, uri: &str) -> axum::response::Response {
