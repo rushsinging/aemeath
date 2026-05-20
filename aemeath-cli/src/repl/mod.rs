@@ -63,8 +63,6 @@ pub async fn run_repl(
     };
 
     let mut messages = Vec::new();
-    let tool_schemas = registry.schemas();
-    let tool_schema_tokens = compact::estimate_tool_schemas_tokens(&tool_schemas);
     let mut total_input_tokens = 0;
     let mut total_output_tokens = 0;
     let mut total_api_calls = 0;
@@ -106,6 +104,11 @@ pub async fn run_repl(
             InputAction::Exit => break,
             InputAction::Ready => {}
         }
+
+        // Refresh tool schemas each turn so dynamically registered MCP tools
+        // are visible to the LLM once the background connector finishes.
+        let tool_schemas = registry.schemas();
+        let tool_schema_tokens = compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         compact_before_api(
             &mut messages,

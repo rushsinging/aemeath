@@ -80,8 +80,22 @@ impl McpConnectionManager {
 
         match client {
             Ok(client) => {
-                // Discover tools
-                let tools = client.list_tools().await.unwrap_or_default();
+                // Discover tools (retry up to 3 times for transient SSE issues)
+                let mut tools = Vec::new();
+                for attempt in 1..=3 {
+                    match client.list_tools().await {
+                        Ok(t) => {
+                            tools = t;
+                            break;
+                        }
+                        Err(e) if attempt < 3 => {
+                            log::warn!("[MCP] tools/list attempt {attempt} failed: {e}, retrying...");
+                        }
+                        Err(e) => {
+                            log::warn!("[MCP] tools/list failed after 3 attempts: {e}");
+                        }
+                    }
+                }
 
                 // Check for resource support
                 let supports_resources = self.check_resource_support(&client).await;

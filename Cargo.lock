@@ -46,6 +46,7 @@ name = "aemeath-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
  "dirs",
  "futures",

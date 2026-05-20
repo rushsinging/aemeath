@@ -81,35 +81,29 @@ pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
     manager
 }
 
-/// Spawn MCP server connections in the background.
+/// Connect all configured MCP servers and register their tools.
 ///
-/// Returns the `McpConnectionManager` immediately without waiting for any
-/// connections.  MCP tools are registered into `registry` asynchronously as
-/// each server connects.  The TUI can start right away.
+/// Awaits completion so that tools are available before the first LLM turn.
 pub async fn spawn_mcp_connect(
     registry: Arc<ToolRegistry>,
     cwd: &Path,
 ) -> Arc<McpConnectionManager> {
     let manager = load_mcp_manager(cwd).await;
-    let mgr = manager.clone();
 
-    log::info!("[MCP] spawning background connector for {} servers", mgr.server_count());
+    log::info!("[MCP] connecting {} servers", manager.server_count());
 
-    tokio::spawn(async move {
-        log::info!("[MCP] background connector started");
-        for (name, result) in manager.connect_all().await {
-            match result {
-                Ok(connection) => {
-                    log::info!("[MCP] {} connected with {} tools", name, connection.tools.len());
-                }
-                Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
+    for (name, result) in manager.connect_all().await {
+        match result {
+            Ok(connection) => {
+                log::info!("[MCP] {} connected with {} tools", name, connection.tools.len());
             }
+            Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
         }
-        manager.register_tools(&registry).await;
-        log::info!("[MCP] background connector finished");
-    });
+    }
+    manager.register_tools(&registry).await;
+    log::info!("[MCP] all servers connected");
 
-    mgr
+    manager
 }
 
 #[cfg(test)]

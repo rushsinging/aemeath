@@ -62,9 +62,6 @@ pub async fn process_in_background(
 ) {
     let hook_ui = HookUi::new(tx.clone());
 
-    let tool_schemas = registry.schemas();
-    let tool_schema_tokens = aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
-
     let ctx = ToolContext {
         cwd: cwd.clone(),
         path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
@@ -101,6 +98,13 @@ pub async fn process_in_background(
     loop {
         turn_count += 1;
         crate::set_current_turn(turn_count);
+
+        // Refresh tool schemas each turn so dynamically registered MCP tools
+        // are visible to the LLM once the background connector finishes.
+        let tool_schemas = registry.schemas();
+        let tool_schema_tokens =
+            aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
+
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
             messages.truncate(messages_at_start);
