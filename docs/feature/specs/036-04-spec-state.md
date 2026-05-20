@@ -4,6 +4,18 @@
 
 状态枚举 Rust 侧使用 PascalCase，序列化到 MongoDB 使用 snake_case（通过 `#[serde(rename_all = "snake_case")]`）。
 
+### ConversationStatus（Conversation 状态枚举）
+
+> **DDD 语义**：Conversation 是 Conversation Context 的聚合根（原"Chat"实体）。
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConversationStatus {
+    Active,     // 进行中，可接收消息
+    Archived,   // 已归档，不再接收新消息
+}
+```
+
 ### RequirementStatus（Requirement 状态枚举）
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,7 +44,9 @@ pub enum ProjectStatus {
 }
 ```
 
-### ProjectTaskStatus（ProjectTask 状态枚举 — Project 聚合内的子实体状态机，所有状态转换通过 ProjectService RPC 完成）
+### ProjectTaskStatus（ProjectTask 状态枚举）
+
+> **DDD 语义**：ProjectTask 是 **Project 聚合的子实体**，非独立聚合根。所有状态转换通过 ProjectService RPC 完成。Task 状态由 Orchestration Context 的 ExecutorAssignment 聚合驱动变更，最终写回 Project Context。
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +74,28 @@ pub enum AgentStatus {
 ```
 
 说明：销毁（删除 AgentInstance 文档）即 Agent 销毁流程，无需单独的 `Destroyed` 终态。
+
+### AssignmentStatus（ExecutorAssignment 状态枚举）
+
+> **DDD 语义**：ExecutorAssignment 是 Orchestration Context 的独立聚合根，维护"一个 Project 同时只有一个 Active Assignment"的不变量。
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssignmentStatus {
+    Active,     // Executor 正在执行对应 Project
+    Released,   // 正常完成或取消后释放
+    Crashed,    // Executor 崩溃，待 Scheduler 触发恢复
+}
+```
+
+状态流转：
+```
+Active ──(Project Completed / Cancelled)──▶ Released
+Active ──(Executor 心跳超时 / 崩溃)───────▶ Crashed
+Crashed ──(Scheduler 崩溃恢复完成)────────▶ Released
+```
+
+不变量：同一 Project 在任意时刻最多有一个 `Active` AssignmentStatus 记录。Scheduler 负责在创建新 Assignment 前确认旧 Assignment 已非 Active。
 
 ## 状态流转
 

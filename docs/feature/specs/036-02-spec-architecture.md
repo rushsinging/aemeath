@@ -14,6 +14,84 @@
 - **P0 设计约束**— Executor 崩溃恢复、Task 重试、幂等性、Watch 断线恢复
 
 
+## DDD 架构
+
+> 本节基于 [DDD 设计文档](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md)。
+
+### Bounded Context 划分
+
+系统分为六个 Bounded Context：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Core Domain                              │
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ Conversation │    │  Requirement │    │    Project        │  │
+│  │  Context     │───▶│  Context     │───▶│    Context        │  │
+│  │              │    │              │    │                   │  │
+│  │  Chat Agent  │    │  Assistant   │    │  Project / Task   │  │
+│  └──────────────┘    └──────────────┘    └────────┬──────────┘  │
+│                                                   │             │
+│                                          ┌────────▼──────────┐  │
+│                                          │  Orchestration    │  │
+│                                          │  Context          │  │
+│                                          │                   │  │
+│                                          │  Scheduler        │  │
+│                                          │  Executor         │  │
+│                                          │  SubAgent         │  │
+│                                          └───────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌──────────────────┐        ┌───────────────────────────────────┐
+│  Evolution       │        │  Platform Context                 │
+│  Context         │        │                                   │
+│  (Supporting)    │        │  Workspace / Auth / API Server    │
+│  Evolver Agent   │        │  MongoDB / gRPC / WebSocket       │
+└──────────────────┘        └───────────────────────────────────┘
+```
+
+| BC | 职责 | 主要 Agent |
+|---|---|---|
+| Conversation Context | 维护用户对话线程（Conversation），分类用户输入，向用户汇报状态 | Chat Agent |
+| Requirement Context | 将用户意图结构化为 Requirement，等待用户确认后流向 Project Context | Assistant Agent |
+| Project Context | 管理 Project / Task 完整生命周期，Task 是 Project 的内部实体 | — |
+| Orchestration Context | 调度 Executor、驱动 SubAgent、管理故障恢复与重试（Core Domain 心脏） | Scheduler / Executor |
+| Evolution Context | 异步扫描已完成 Project，提炼 Skill（Supporting Subdomain） | Evolver Agent |
+| Platform Context | 多租户隔离、MongoDB 持久化、gRPC/REST/WS 传输（Infrastructure） | API Server |
+
+### Context Map
+
+| 上游 BC | 下游 BC | 集成模式 | 说明 |
+|---|---|---|---|
+| Conversation | Requirement | **Partnership** | 发布 `UserIntentCaptured` 事件，两者紧密协作 |
+| Requirement | Project | **Customer/Supplier** | 用户确认后发布 `RequirementConfirmed`，Project BC 消费并创建 Project/Task |
+| Project | Orchestration | **Published Language** | 发布 `TaskReadyForExecution` 等标准事件，双方通过事件契约解耦 |
+| Orchestration | Project | **Customer/Supplier（写回）** | 完成执行后写回 Task 状态 |
+| Orchestration | Platform | **Conformist** | 直接使用 API Server 接口 |
+| Orchestration | LLM（packages/llm） | **Anticorruption Layer** | 隔离 provider 接口变动 |
+| Evolution | Project | **Conformist** | 单向读取已完成 Project 数据 |
+
+### 领域事件
+
+跨 BC 的业务流转通过领域事件驱动。**领域事件是业务语义层，gRPC Watch 是传输机制层，两者不可混用。**
+
+| 发布方 BC | 事件 | 订阅方 BC |
+|---|---|---|
+| Conversation | `UserIntentCaptured { conversation_id, intent, captured_at }` | Requirement |
+| Requirement | `RequirementDraftCreated { requirement_id, draft }` | Conversation（汇报用户） |
+| Requirement | `RequirementConfirmed { requirement_id, workspace_id, confirmed_at }` | Project |
+| Requirement | `RequirementRejected { requirement_id, reason }` | Conversation |
+| Project | `ProjectCreated { project_id, requirement_id, workspace_id }` | Orchestration |
+| Project | `TaskReadyForExecution { project_id, task_id, spec }` | Orchestration |
+| Project | `TaskStatusChanged { project_id, task_id, old_status, new_status }` | Conversation（汇报用户） |
+| Project | `ProjectCompleted { project_id, completed_at }` | Evolution |
+| Orchestration | `ProjectAssignedToExecutor { project_id, executor_id, assignment_id }` | Project |
+| Orchestration | `SubAgentInvocationCompleted { assignment_id, task_id, result }` | Project |
+| Orchestration | `ExecutorCrashed { executor_id, project_id, crashed_at }` | Orchestration（触发恢复） |
+| Orchestration | `AssignmentReleased { assignment_id, project_id, reason }` | Project |
+
+
 ## 核心决策
 
 | 维度 | 决策 |
@@ -24,7 +102,7 @@
 | 数据库 | MongoDB（文档型，无外键，数组存引用） |
 | 调度层次 | 两条链路：Scheduler → Assistant；Scheduler → Executor → Sub-Agent |
 | 租户隔离 | Workspace 归属租户（个人/团队） |
-| Session 策略 | 5 类 Main Agent（Chat / Scheduler / Executor / Assistant / Evolver）各自管理上下文；Sub-Agent 无状态，上下文由 Executor 进程内调用传递 |
+| Session 策略 | 5 类 MainAgent 各持有独立 LlmContext（消息历史窗口）；Chat Agent 管理 Conversation（用户对话线程）；SubAgent 无状态，LlmContext 由调用方在请求中传递 |
 | 白板访问 | Chat / Scheduler / Executor / Assistant / Evolver 可访问；Sub-Agent 不可访问 |
 | Agent 实现 | 一个通用模板 + 装配器（role → skill/MCP/prompt/权限），角色配置由 TOML 定义，支持用户自定义 Role |
 | 需求分析 | Chat 接收用户消息 + 分析消息类型；Scheduler 调度 Assistant 做需求深度拆解 → Project/Task，草案存入 `Requirement.draft`，用户确认后写入 Project/Task |
@@ -132,7 +210,7 @@ docs/
 ┌─────────────────────┐
 │  Executor Pool      │
 │  #1, #2, ...        │
-│  （持有 Session，   │
+│  （持有 LlmContext，│
 │   访问白板）         │
 └──────────┬──────────┘
            │ 唤起 Sub-Agent（进程内调用；Sub-Agent 与 Executor 同进程，异步调用）

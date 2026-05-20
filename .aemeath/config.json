@@ -10,6 +10,11 @@
         "matcher": "",
         "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-unsafe-text-ops.sh\"",
         "timeout": 120
+      },
+      {
+        "matcher": "",
+        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-rust-file-lines.sh\"",
+        "timeout": 120
       }
     ]
   }

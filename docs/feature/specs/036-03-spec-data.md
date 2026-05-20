@@ -2,22 +2,22 @@
 
 > **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — 聚合根（Project、ExecutorAssignment、AgentInstance）、值对象（TaskSpec、InvocationInput/Output 等）、Repository 归属以该文档为准。
 
-## Session 与白板访问权限
+## LlmContext 与白板访问权限
 
 ### 角色分类
 
-| 类型 | Agent | Session | 白板访问 | 说明 |
+| 类型 | Agent | LlmContext | 白板访问 | 说明 |
 |---|---|---|---|---|
-| Main Agent | Chat | 有 | 有 | 面向用户多轮对话，接收用户消息，Watch BoardSnapshot + Requirement 汇报用户 |
-| Main Agent | Scheduler | 无（控制循环） | 有 | Watch + 分配决策，管理 Executor/Assistant Pool，不参与对话 |
-| Main Agent | Executor | 有 | 有 | 持有 Project 执行上下文，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Chat（由 Chat 汇报用户） |
-| Main Agent | Assistant | 有 | 有 | 后台 worker，分析需求、拆解 Project/Task、产出草案、结果汇总，Pool 由 Scheduler 调度 |
-| Main Agent | Evolver | 无（定时循环） | 有 | 独立后台，定期扫描已完成 Project 和 Executor 记录，提炼可复用模式，生成/优化 Skills、MCP 配置 |
-| Sub-Agent | Planner | 无 | 无 | 一次性：接收需求 → 返回计划 |
-| Sub-Agent | Coder | 无 | 无 | 一次性：接收 spec → 返回代码 |
-| Sub-Agent | Tester | 无 | 无 | 一次性：接收代码 → 返回测试结果 |
-| Sub-Agent | Reviewer | 无 | 无 | 一次性：接收 PR → 返回 review 意见 |
-| Sub-Agent | Designer | 无 | 无 | 一次性：接收描述 → 返回设计稿 |
+| Main Agent | Chat | 有 LlmContext | 有 | 管理 Conversation（用户对话线程），面向用户多轮对话，接收用户消息，Watch BoardSnapshot + Requirement 汇报用户 |
+| Main Agent | Scheduler | 无 LlmContext（控制循环） | 有 | Watch + 分配决策，管理 Executor/Assistant Pool，不参与对话 |
+| Main Agent | Executor | 有 LlmContext | 有 | 持有 Project 执行上下文，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Chat（由 Chat 汇报用户） |
+| Main Agent | Assistant | 有 LlmContext | 有 | 后台 worker，分析需求、拆解 Project/Task、产出草案、结果汇总，Pool 由 Scheduler 调度 |
+| Main Agent | Evolver | 无 LlmContext（定时循环） | 有 | 独立后台，定期扫描已完成 Project 和 Executor 记录，提炼可复用模式，生成/优化 Skills、MCP 配置 |
+| Sub-Agent | Planner | 无 LlmContext | 无 | 一次性：接收需求 → 返回计划 |
+| Sub-Agent | Coder | 无 LlmContext | 无 | 一次性：接收 spec → 返回代码 |
+| Sub-Agent | Tester | 无 LlmContext | 无 | 一次性：接收代码 → 返回测试结果 |
+| Sub-Agent | Reviewer | 无 LlmContext | 无 | 一次性：接收 PR → 返回 review 意见 |
+| Sub-Agent | Designer | 无 LlmContext | 无 | 一次性：接收描述 → 返回设计稿 |
 
 ### 上下文传递
 
@@ -52,7 +52,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 
 | 区域 | 数据源 | 说明 |
 |---|---|---|
-| 用户需求消息 | Requirement | 用户通过 Chat 提交的需求记录（1:1 关联 ChatMessage） |
+| 用户需求消息 | Requirement | 用户通过 Chat 提交的需求记录（1:1 关联 ConversationMessage） |
 | 草案 | Requirement.draft | Assistant（由 Scheduler 调度）拆解产出的 Project/Task 草案 |
 | Project & Task | Project + ProjectTask（聚合内父子关系） | 需求拆解后的项目与任务 |
 | Agent 状态 | Agent Registry | 当前活跃的 Agent 实例、状态 |
@@ -63,7 +63,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 
 所有关联通过文档内数组存引用 ID，不使用外键约束。
 
-### Workspace
+### Workspace（Platform Context 实体）
 ```jsonc
 {
   "_id": ObjectId,
@@ -75,7 +75,10 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 }
 ```
 
-### Chat（用户会话）
+### Conversation（用户会话）
+
+> **DDD 语义**：Conversation 是 Conversation Context 的聚合根，表示 Chat Agent 与用户的一次对话线程。
+
 ```jsonc
 {
   "_id": ObjectId,
@@ -88,12 +91,15 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 }
 ```
 
-### ChatMessage（会话消息）
+### ConversationMessage（会话消息）
+
+> **DDD 语义**：ConversationMessage 是 Conversation 聚合的内部实体，有身份（message_id），顺序和类型有业务意义。UserIntent 是其分析结果，为值对象（不可变快照）。
+
 ```jsonc
 {
   "_id": ObjectId,
-  "chat_id": ObjectId,           // 关联的 Chat
-  "workspace_id": ObjectId,      // 关联的 Workspace（冗余，方便跨 Chat 查询）
+  "conversation_id": ObjectId,   // 关联的 Conversation
+  "workspace_id": ObjectId,      // 关联的 Workspace（冗余，方便跨 Conversation 查询）
   "sender_type": "user",        // user | agent | system — sender_id 的引用域；system 消息 sender_id 为 null
   "sender_id": ObjectId,        // 发送者 ObjectId（user=User._id, agent=AgentInstance._id）；system 消息此字段为 null
   // sender_type → role 映射：user → user, agent → chat（Chat Main Agent 作为发送方）, system → system
@@ -101,7 +107,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "content": "帮我做一个登录页面...",
   /*
    * message_type 由 Chat Agent 异步分析后写入，完整枚举：question | requirement | feedback | clarification | chitchat | system_notification
-   * 触发机制：Chat Agent 通过 Watch chat_messages Change Stream 监听新消息，分析后回写 message_type
+   * 触发机制：Chat Agent 通过 Watch conversation_messages Change Stream 监听新消息，分析后回写 message_type
    *   question            - 用户简单提问，不产生 Requirement，不需要拆解
    *   requirement   - 用户提出可执行需求，1:1 关联 Requirement 文档
    *   feedback      - 用户对草案/执行结果的反馈或确认
@@ -112,7 +118,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "requirement_id": ObjectId,    // 可选；仅 requirement 消息有，1:1 关联 Requirement
   "metadata": {},                // 扩展字段
   "embedding_ref": {
-    "collection": "chat_messages",
+    "collection": "conversation_messages",
     "point_id": "<message_object_id>"
   },                              // Qdrant 引用；仅 message_type=requirement 时有值（非 requirement 消息为 null 且 embedding_status=not_applicable）
   "embedding_status": "not_applicable", // not_applicable | pending | indexed | failed
@@ -122,12 +128,12 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 }
 ```
 
-### Requirement
+### Requirement（Requirement Context 聚合根）
 ```jsonc
 {
   "_id": ObjectId,
   "workspace_id": ObjectId,
-  "source_message_id": ObjectId,     // 1:1 关联 ChatMessage
+  "source_message_id": ObjectId,     // 1:1 关联 ConversationMessage
   "title": "登录页面重构",
   "description": "需要重新设计登录页面...",
   "category": "raw",                 // raw | organized
@@ -162,7 +168,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "patterns": ["..."],              // 提取的可复用模式列表
   "skills_produced": ["..."],       // 生成的 Skill 名称列表
   "mcp_suggestions": [{ "name": "...", "reason": "..." }],  // MCP 配置建议
-  "referenced_chat_message_ids": [ObjectId],  // 引用的聊天内容
+  "referenced_conversation_message_ids": [ObjectId],  // 引用的聊天内容
   "embedding_ref": {
     "collection": "reflections",
     "point_id": "<reflection_object_id>"
@@ -252,7 +258,7 @@ db.projects.createIndex(
   "depends_type": "all",               // all（全部完成）/ any（任一完成）
   "priority": 1,
   /*
-   * related_message_ids — 关联的 ChatMessage
+   * related_message_ids — 关联的 ConversationMessage
    * 执行过程中产生的上下文消息（如：Executor 提问、Chat 回复）
    */
   "related_message_ids": [ObjectId],
@@ -272,7 +278,7 @@ db.projects.createIndex(
 > 
 > **级联行为**：Project 取消/删除时，所有非终态 ProjectTask 的级联取消在 Project 聚合内部完成（MongoDB 多文档事务），不由外部服务协调。
 
-### AgentInstance
+### AgentInstance（Orchestration Context 聚合根）
 ```jsonc
 {
   "_id": ObjectId,
@@ -303,15 +309,58 @@ db.agent_instances.createIndex(
   { unique: true, partialFilterExpression: { current_project_id: { $exists: true } } }
 )
 ```
+
+#### ExecutorAssignment（Orchestration Context 聚合根）
+
+> **DDD 语义**：ExecutorAssignment 是 Orchestration Context 的聚合根，维护"一个 Project 同时只有一个 Active Assignment"的不变量。与 AgentInstance 和 Project 的生命周期解耦。
+
+```jsonc
+{
+  "_id": ObjectId,
+  "project_id": ObjectId,
+  "executor_id": ObjectId,              // AgentInstance._id
+  "workspace_id": ObjectId,
+  "assigned_at": ISODate,
+  "status": "active",                   // active | released | crashed
+  "invocations": [                      // SubAgentInvocation 子实体列表
+    {
+      "_id": ObjectId,
+      "task_id": ObjectId,
+      "role": "coder",                  // Sub-Agent 角色
+      "input_summary": "...",           // 值对象（不可变快照）
+      "output_summary": "...",          // 值对象（不可变快照）；null = 未完成
+      "retry_count": 0,
+      "started_at": ISODate,
+      "completed_at": ISODate           // null = 未完成
+    }
+  ],
+  "released_at": ISODate,               // null = 仍 active
+  "release_reason": "",                 // crashed | completed | cancelled
+  "idempotency_key": "",
+  "created_at": ISODate,
+  "updated_at": ISODate
+}
+```
+
+索引：
+```javascript
+// 唯一索引：一个 Project 同时只有一个 active Assignment
+db.executor_assignments.createIndex(
+  { project_id: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "active" } }
+)
+db.executor_assignments.createIndex({ executor_id: 1, status: 1 })
+db.executor_assignments.createIndex({ workspace_id: 1, created_at: -1 })
+```
   
 ### idempotency_records（幂等记录）
 ```jsonc
 {
   "_id": ObjectId,
   "key": "uuid_or_hash",              // 幂等键
-  "entity_type": "requirement | project | task | chat_message",
+  "entity_type": "requirement | project | task | conversation_message",
   "entity_id": ObjectId,              // 幂等操作产出的实体 ID
-  "scope": "workspace_id | chat_id",  // 幂等作用域
+  "scope": "workspace_id | conversation_id",  // 幂等作用域
   "created_at": ISODate
 }
 /*
@@ -355,11 +404,11 @@ db.agent_instances.createIndex(
   
 | 集合 | 索引 | 用途 |
 |---|---|---|
-| `chats` | `{ workspace_id: 1, status: 1 }` | 按 Workspace 列出 Chat |
-| `chat_messages` | `{ chat_id: 1, created_at: 1 }` | 按 Chat 分页加载消息 |
-| `chat_messages` | `{ workspace_id: 1, message_type: 1 }` | 按类型筛选 |
-| `chat_messages` | `{ requirement_id: 1 }` | 1:1 反向查找 |
-| `chat_messages` | `{ embedding_status: 1 }` | 重试失败的 embedding |
+| `conversations` | `{ workspace_id: 1, status: 1 }` | 按 Workspace 列出 Conversation |
+| `conversation_messages` | `{ conversation_id: 1, created_at: 1 }` | 按 Conversation 分页加载消息 |
+| `conversation_messages` | `{ workspace_id: 1, message_type: 1 }` | 按类型筛选 |
+| `conversation_messages` | `{ requirement_id: 1 }` | 1:1 反向查找 |
+| `conversation_messages` | `{ embedding_status: 1 }` | 重试失败的 embedding |
 | `requirements` | `{ embedding_status: 1 }` | 重试失败的 embedding |
 | `requirements` | `{ workspace_id: 1, status: 1 }` | 按状态列出 Requirement |
 | `requirements` | `{ source_message_id: 1 }` | 1:1 反向查找 |
@@ -376,7 +425,7 @@ db.agent_instances.createIndex(
 | `agent_instances` | `{ current_project_id: 1 }`，partial `{ current_project_id: { $exists: true } }`，unique | 确保一个 Project 只绑一个 Active Executor |
 | `projects` | `{ "merge_lock.locked_by_executor": 1 }`，partial `{ "merge_lock.locked_by_executor": { $exists: true } }` | 按 Executor 查找被锁 Project |
 | `projects` | `{ reflected_at: 1 }`，partial `{ status: "completed", reflected_at: null }` | Evolver 定期扫描未反思 Project |
-| `chat_messages` | `{ workspace_id: 1, created_at: -1 }` | Board 全量拉取最近消息（BoardSnapshot.recent_messages） |
+| `conversation_messages` | `{ workspace_id: 1, created_at: -1 }` | Board 全量拉取最近消息（BoardSnapshot.recent_messages） |
 | `idempotency_records` | `{ key: 1, entity_type: 1, scope: 1 }`，unique | 幂等去重 |
 | `agent_heartbeats` | `{ agent_instance_id: 1, heartbeat_at: -1 }` | 查询 Agent 最近心跳 |
 | `agent_heartbeats` | `{ heartbeat_at: 1 }`，TTL 120s | 自动清理过期心跳数据 |
@@ -392,8 +441,8 @@ pub struct BoardSnapshot {
     pub snapshot_id: String,                     // 当前快照 ID，用于增量订阅一致性校验
     pub workspace_id: ObjectId,                  // 当前 Workspace ID
     pub workspace: WorkspaceInfo,
-    pub chats: Vec<Chat>,                         // Chat 会话
-    pub recent_messages: Vec<ChatMessage>,        // 近期 Chat 消息（默认最近 50 条）
+    pub conversations: Vec<Conversation>,          // Conversation 会话
+    pub recent_messages: Vec<ConversationMessage>, // 近期 Conversation 消息（默认最近 50 条）
     pub requirements: Vec<Requirement>,           // Requirement 记录与草案
     pub projects: Vec<ProjectWithTasks>,           // Project & Tasks
     pub agent_instances: Vec<AgentInstance>,       // Agent 状态
@@ -411,10 +460,10 @@ pub struct BoardSnapshotUpdate {
     pub changed_tasks: Vec<ProjectTask>,          // 新增/变更的 ProjectTask（包括 status/results 等运行时变更）
     pub removed_project_ids: Vec<ObjectId>,       // 删除/移除的 Project ID
     pub removed_task_ids: Vec<ObjectId>,          // 删除/移除的 ProjectTask ID
-    pub changed_chats: Vec<Chat>,                 // 新增/变更的 Chat 会话
-    pub removed_chat_ids: Vec<ObjectId>,          // 删除/移除的 Chat ID
-    pub new_messages: Vec<ChatMessage>,           // 新增 Chat 消息（首次出现）
-    pub updated_messages: Vec<ChatMessage>,       // 已有消息的任何字段变更（content/message_type/元数据等；异步写入的 message_type 也在此）
+    pub changed_conversations: Vec<Conversation>, // 新增/变更的 Conversation 会话
+    pub removed_conversation_ids: Vec<ObjectId>,  // 删除/移除的 Conversation ID
+    pub new_messages: Vec<ConversationMessage>,   // 新增 Conversation 消息（首次出现）
+    pub updated_messages: Vec<ConversationMessage>, // 已有消息的任何字段变更（content/message_type/元数据等；异步写入的 message_type 也在此）
     pub changed_agents: Vec<AgentInstance>,       // 新增/变更的 Agent 状态
     pub removed_agent_ids: Vec<ObjectId>,         // 删除/移除的 Agent ID
 }
