@@ -6,6 +6,8 @@
 
 **Architecture:** 继续使用当前内存 `AppState` 作为 Sprint 1 可验证 store，不引入 MongoDB 持久化；将 Chat 更新、消息分类、board 增量事件先做成进程内可测试逻辑。Gateway 仅提供本地开发反向代理配置，不引入运行时鉴权。
 
+**Spec alignment note:** 本计划已执行并落地。REST `analyze` 已补入 `036-05-spec-api.md` 作为调试/前端辅助端点，正式 Agent 间通信仍以 gRPC `ChatService.AnalyzeMessage` 为准。本文使用 `Chat` 命名；DDD 语义中的 `Conversation` 在 #36 v0.1 中与 `Chat` 等价。
+
 **Tech Stack:** Rust、axum REST/WS、tonic gRPC、prost proto、tokio broadcast、nginx config、Docker Compose。
 
 ---

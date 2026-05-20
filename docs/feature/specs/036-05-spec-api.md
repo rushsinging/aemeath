@@ -45,6 +45,7 @@ POST   /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id/cancel   # 取
 POST   /api/workspaces/:ws_id/projects/:project_id/tasks/:task_id/retry    # 重开 Task（Failed → Pending，保留 retry_count）
 GET    /api/workspaces/:ws_id/agents             # Agent 实例列表
 POST   /api/workspaces/:ws_id/chats/:chat_id/messages  # 创建 ChatMessage（Chat/用户调用）
+POST   /api/workspaces/:ws_id/chats/:chat_id/analyze   # 调试/前端辅助：按 content 预判 message_type；内部语义对齐 ChatService.AnalyzeMessage
 POST   /api/workspaces/:ws_id/requirements/:requirement_id/confirm  # 确认草案并创建 Project/Task
                                                                    # Request: {}（空 body — 确认当前最新 draft revision）
                                                                    # Response: { requirement, created_projects: Vec<ProjectWithTasks> }
@@ -54,19 +55,26 @@ POST   /api/workspaces/:ws_id/requirements/:requirement_id/confirm  # 确认草�
 
 说明：Requirement 和 Project 不暴露 REST DELETE 端点；使用 POST `.../cancel` 进行软取消（status → Cancelled）。仅 Workspace 和 Chat 支持 REST DELETE。
 
+说明：本文中 `Conversation` 是 DDD 语义名；API 路径、proto 和当前 Rust 类型沿用 `Chat` / `ChatMessage` 命名，二者在 #36 v0.1 中等价。是否把代码重命名为 Conversation 另行决策，避免在 Sprint 1 中混合迁移。
+
+说明：REST `POST /api/workspaces/:ws_id/chats/:chat_id/analyze` 是前端/调试辅助端点，功能与 gRPC `ChatService.AnalyzeMessage` 对齐；正式 Agent 间通信仍以 gRPC 为准。
+
 ### WebSocket
 ```
 WS /ws/workspaces/:ws_id/board
   → 实时推送 BoardSnapshot / BoardSnapshotUpdate 事件
-  → 首次连接：全量 BoardSnapshot（is_full_snapshot=true）
-  → 后续：增量 BoardSnapshotUpdate（各 changed/removed 字段列表）
+  → 首次连接：全量 BoardSnapshotUpdate（type="snapshot", is_full_snapshot=true）
+  → 后续：增量 BoardSnapshotUpdate（type="update", changed/removed/new_* 字段只携带本次变化）
   → snapshot_id 格式：UUIDv7 字符串（按生成时间大致有序，断线后用于比对判断是否需全量重拉）
 
 应用层消息类型：
 - `{"type": "Heartbeat", "snapshot_id": "018f2f8e-7c7b-7c6a-9f7a-2a4f4f0d6a4b"}` — Server 每 30s 发送；客户端无需回复，仅用于保活和断线超时检测
 - `{"type": "Error", "code": "UNAUTHORIZED", "message": "..."}` — WS 级错误（鉴权失败、限流等）
-- BoardSnapshot 和 BoardSnapshotUpdate 的 type 字段分别为 `"snapshot"` 和 `"update"`
+- `{"type": "snapshot", "payload": BoardSnapshotUpdate}` — 首次连接或服务端判定需要全量重拉时发送，payload.is_full_snapshot 必须为 true
+- `{"type": "update", "payload": BoardSnapshotUpdate}` — 后续增量，payload.is_full_snapshot 必须为 false
 ```
+
+Sprint 1 当前实现曾使用临时 `event_type="full_snapshot" | "message_added"` 载荷；后续 Sprint 1 收尾切片 MUST 迁移到上面的 `type + payload: BoardSnapshotUpdate` 格式，避免前端在 Sprint 2 绑定临时协议。
 
 ### Board 聚合响应结构
 ```rust
@@ -374,11 +382,11 @@ service AgentRegistryService {
 }
 
 // ===== ReflectionService =====
-// 独立 proto 文件：share/proto/reflection.proto
+// 独立 proto 文件：packages/proto/reflection.proto
 ```
 
 ```protobuf
-// share/proto/reflection.proto
+// packages/proto/reflection.proto
 service ReflectionService {
   rpc Create(CreateReflectionRequest) returns (Reflection);        // Evolver 写入 Reflection
   rpc Get(GetReflectionRequest) returns (Reflection);
@@ -463,166 +471,67 @@ service BoardService {
 
 ### Crate 依赖关系
 ```
-ui/              # 纯 UI ──HTTP/WS──▶ server
-                  #   ──依赖──▶ share/openapi/sdk/ts
-server/          # API Server ──依赖──▶ share
-agents/          # Agent 运行时（独立部署）──依赖──▶ share
-                  #   ──gRPC──▶ server
-infra/           # 基建与部署 ──不依赖──▶ 其他模块
-cli/             # CLI（保留）──依赖──▶ share
-share/           # 共享层
-  ├── core       #   共享核心库（类型、错误、工具抽象）
-  ├── llm        #   LLM 客户端
-  ├── tools      #   工具注册
-  ├── proto/     #   gRPC protobuf 定义
-  │   └── sdk/   #   生成的 gRPC SDK（rust + ts）
-  └── openapi/   #   OpenAPI 3 schema（REST + WS）
-      └── sdk/   #   生成的 API SDK（rust + ts）
+apps/cli          # CLI / TUI ──依赖──▶ packages/{core,llm,tools}
+apps/server       # API Server ──依赖──▶ packages/proto；对外提供 REST/WS/gRPC
+apps/agents       # Agent runtime ──依赖──▶ packages/proto；通过 gRPC 调用 apps/server
+packages/core     # 核心库：消息、工具、配置、会话、成本追踪、压缩
+packages/llm      # LLM 客户端：provider API 调用、流式响应、模型池
+packages/tools    # 工具注册：文件读写、搜索、Bash、Agent、Web 等
+packages/proto    # gRPC protobuf 定义，供 server/agents/sdk 生成代码
+packages/sdk      # 外部 SDK，占位用于 REST/WS/gRPC 客户端生成
+infra             # MongoDB、Gateway、部署与本地开发编排
 ```
 
 ### 目录结构
 
 ```
 aemeath/
-├── share/                        # ★ 共享层
-│   ├── aemeath-core/             #   核心库（不变）
-│   ├── aemeath-llm/              #   LLM 客户端（不变）
-│   ├── aemeath-tools/            #   工具注册（不变）
-│   ├── proto/                    #   gRPC protobuf 定义
-│   │   ├── chat.proto
+├── apps/
+│   ├── cli/                          # CLI 二进制入口 + TUI + 旧版 REPL
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   ├── server/                       # #36 API Server：REST/WS + gRPC
+│   │   ├── Cargo.toml
+│   │   ├── build.rs                  # 编译 packages/proto/*.proto
+│   │   └── src/
+│   │       ├── main.rs               # 服务入口，组装 REST/WS 与 gRPC listener
+│   │       ├── config.rs
+│   │       ├── db.rs
+│   │       ├── proto.rs
+│   │       ├── model/                # Sprint 1 内存 domain store；后续替换/下沉 MongoDB repository
+│   │       ├── rest/                 # Workspace / Chat / Board REST + WebSocket handler
+│   │       └── grpc/                 # Workspace / Chat / Board / AgentRegistry gRPC handler
+│   └── agents/                       # #36 Agent runtime 与角色配置
+│       ├── Cargo.toml
+│       ├── src/
+│       │   ├── config.rs
+│       │   └── features/             # chat / assistant / scheduler / executor / evolver / sub_agent role 模块
+│       └── roles/                    # role TOML 配置
+├── packages/
+│   ├── core/                         # package name: aemeath-core
+│   ├── llm/                          # package name: aemeath-llm
+│   ├── tools/                        # package name: aemeath-tools
+│   ├── proto/                        # gRPC protobuf 定义
+│   │   ├── common.proto
 │   │   ├── workspace.proto
-│   │   ├── requirement.proto
-│   │   ├── project.proto
-│   │   ├── project_task.proto       #   ProjectTask / ProjectTaskEvent message 定义（无独立 service）
+│   │   ├── chat.proto
+│   │   ├── board.proto
 │   │   ├── agent.proto
-│   │   ├── common.proto           #   共享枚举/类型（如 CostTier）
-│   │   ├── reflection.proto
-│   │   ├── board.proto            #   BoardService
-│   │   └── sdk/                  #   proto 生成的 SDK
-│   │       ├── rust/             #     tonic 生成
-│   │       └── ts/               #     protobuf-ts 生成
-│   └── openapi/                  #   OpenAPI 3 schema
-│       ├── spec.yaml             #     REST + WS 接口定义
-│       └── sdk/                  #     OpenAPI 生成的 SDK
-│           ├── rust/             #       Rust SDK（reqwest）
-│           └── ts/               #       TypeScript SDK（fetch）
-├── cli/                          # CLI（保留）
-│   └── src/main.rs
-├── server/                       # ★ API Server（按 feature 组织）
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── main.rs               #   服务入口（组装 feature）
-│   │   ├── share/                #   server 内部共享层（feature 间通信接口）
-│   │   │   ├── mod.rs
-│   │   │   ├── types.rs          #     共享类型（WorkspaceId, ProjectId 等）
-│   │   │   ├── repo_traits.rs    #     各 feature repository 暴露的 trait
-│   │   │   └── event_bus.rs      #     内部事件总线（feature 间解耦通知）
-│   │   └── features/             #   feature 模块
-│   │       ├── chat/             #     chat feature
-│   │       │   ├── mod.rs        #       对外暴露 pub 模块声明
-│   │       │   ├── grpc.rs
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── workspace/        #     workspace feature
-│   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── requirement/      #     requirement feature
-│   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── project/          #     project feature（Project + ProjectTask）
-│   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs         #       ProjectService gRPC handler（含 Task 子实体 RPC）
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── project_task/     #     project_task 子实体（仅 repository — gRPC 由 project/grpc.rs 处理）
-│   │       │   ├── mod.rs
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── agent/            #     agent feature（Agent Registry，非独立 crate）
-│   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs
-│   │       │   ├── rest.rs
-│   │       │   └── repository.rs
-│   │       ├── board/            #     board feature（白板聚合）
-│   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs       #       BoardService gRPC handler (Watch + GetBoardSnapshot)
-│   │       │   ├── rest.rs       #       GET /api/workspaces/:ws_id/board
-│   │       │   └── aggregator.rs #       跨 feature 聚合逻辑
-│   │       └── ws/               #     WebSocket feature
-│   │           ├── mod.rs
-│   │           └── handler.rs    #       WS 连接管理 + BoardSnapshot 推送
-│   │       └── reflection/        #     reflection feature（Evolver 写入反思）
-│   │           ├── mod.rs
-│   │           ├── grpc.rs
-│   │           ├── rest.rs
-│   │           └── repository.rs
-├── agents/                       # ★ Agent 运行时（独立部署，按 role 组织）
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── main.rs               #   Agent 进程入口
-│   │   ├── share/                #   agents 内部共享层（role 间通信接口）
-│   │   │   ├── mod.rs
-│   │   │   ├── types.rs          #     共享类型（AgentId / ProjectId / TaskContext 等）
-│   │   │   ├── template.rs       #     通用 Agent 模板 trait
-│   │   │   └── pool.rs           #     Pool trait（Executor 实现）
-│   │   └── features/             #   role feature 模块
-│   │       ├── scheduler/        #     Scheduler（调度 + Watch + 对账）
-│   │       │   ├── mod.rs
-│   │       │   └── scheduler.rs
-│   │       ├── executor/         #     Executor（任务执行 + Pool 管理）
-│   │       │   ├── mod.rs
-│   │       │   └── executor.rs
-│   │       ├── evolver/          #     Evolver（反思引擎 + 知识优化）
-│   │       │   ├── mod.rs
-│   │       │   └── evolver.rs
-│   │       ├── chat/             #     Chat（用户对话 + 汇报）
-│   │       │   ├── mod.rs
-│   │       │   └── chat.rs
-│   │       ├── assistant/        #     Assistant（后台需求分析/草案 Worker，由 Scheduler 调度）
-│   │       │   ├── mod.rs
-│   │       │   └── assistant.rs
-│   │       └── sub_agent/        #     Sub-Agent（进程内 tokio task 执行）
-│   │           ├── mod.rs
-│   │           └── sub_agent.rs
-│   └── roles/                    #   角色配置（TOML）
-│       ├── chat.toml
-│       ├── assistant.toml
-│       ├── scheduler.toml
-│       ├── executor.toml
-│       ├── evolver.toml
-│       ├── planner.toml
-│       ├── coder.toml
-│       ├── tester.toml
-│       ├── reviewer.toml
-│       ├── designer.toml
-│       └── custom/
-├── infra/                          # ★ 基建与部署（开发环境）
-│   ├── mongodb/                    #   MongoDB 初始化脚本
-│   │   ├── init-collections.js    #     collection + 索引创建
-│   │   └── seed.js                #     开发环境种子数据
-│   ├── gateway/                    #   反向代理（NGINX）
-│   │   └── nginx.conf
-│   └── deploy/                     #   部署编排
-│       ├── docker-compose.dev.yaml     #     本地开发（Server + MongoDB + Gateway）
-│       └── Dockerfile             #     开发镜像
-├── ui/                           # ★ 纯 Web 前端（Vue 3 + Element Plus，Vite 构建）
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   └── src/
-│       ├── views/                # 页面：会话 / 白板 / 需求详情 / 项目管理
-│       ├── components/           # 组件：ChatMessage / BoardCard / StatusBadge / DAGView
-│       ├── composables/          # useBoardSnapshot / useWS / useChat
-│       ├── stores/               # Pinia 状态管理
-│       └── lib/                  # 工具函数、类型定义
+│   │   ├── requirement.proto         # Sprint 3+
+│   │   ├── project.proto             # Sprint 4+
+│   │   ├── project_task.proto        # ProjectTask 类型定义；service 并入 ProjectService
+│   │   └── reflection.proto          # Sprint 5+
+│   └── sdk/                          # 外部 SDK，占位；TS/Rust 生成物按需放入子目录
+├── infra/
+│   ├── mongodb/                      # MongoDB 初始化脚本
+│   ├── gateway/                      # NGINX 反向代理
+│   └── deploy/                       # docker-compose.dev.yaml / Dockerfile.server
+├── docs/
 ├── CLAUDE.md
-├── TODO.md
-└── docs/
+└── TODO.md
 ```
+
+> 注意：早期草案中的 `share/`、顶层 `server/`、顶层 `agents/`、顶层 `cli/` 和 `ui/` 目录已经被 Sprint 0.5 monorepo 迁移取代。除历史说明外，后续实现计划 MUST 使用 `apps/*` 与 `packages/*` 路径。
 
 ## 实现前必须定稿的架构决策
 
