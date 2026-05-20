@@ -1,5 +1,7 @@
 # #36 多 Agent 框架 — Spec / 状态机设计
 
+> **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — ProjectTask 是 Project 聚合的子实体（非独立聚合根），ExecutorAssignment 是 Orchestration Context 的独立聚合根。
+
 状态枚举 Rust 侧使用 PascalCase，序列化到 MongoDB 使用 snake_case（通过 `#[serde(rename_all = "snake_case")]`）。
 
 ### RequirementStatus（Requirement 状态枚举）

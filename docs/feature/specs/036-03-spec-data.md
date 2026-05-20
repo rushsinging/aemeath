@@ -1,5 +1,7 @@
 # #36 多 Agent 框架 — Spec / 数据模型
 
+> **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — 聚合根（Project、ExecutorAssignment、AgentInstance）、值对象（TaskSpec、InvocationInput/Output 等）、Repository 归属以该文档为准。
+
 ## Session 与白板访问权限
 
 ### 角色分类

@@ -1,5 +1,7 @@
 # #36 多 Agent 框架 — Spec / 架构与 Agent 设计
 
+> **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — Bounded Context 划分、Context Map、领域事件设计以该文档为准。
+
 ## 概述
 
 将当前单 Agent 架构升级为多 Agent 协作框架，参考 K8s 控制面设计：

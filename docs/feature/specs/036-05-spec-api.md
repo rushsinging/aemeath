@@ -1,5 +1,7 @@
 # #36 多 Agent 框架 — Spec / API & 项目结构
 
+> **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — API 端点的归属遵循 Bounded Context 边界，跨 BC 调用通过领域事件而非直接 API 调用。
+
 ## REST / WebSocket API 设计（前端接口）
 
 Server 通过 REST + WebSocket 为前端白板提供数据。
