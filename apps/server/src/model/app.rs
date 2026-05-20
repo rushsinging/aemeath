@@ -55,6 +55,13 @@ pub struct MessageAnalysis {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessagePage {
+    pub messages: Vec<ChatMessage>,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BoardEventKind {
     MessageAdded,
 }
@@ -192,7 +199,9 @@ impl AppState {
                 entity: "workspace",
             });
         }
-        inner.chats.retain(|_, chat| chat.workspace_id != workspace_id);
+        inner
+            .chats
+            .retain(|_, chat| chat.workspace_id != workspace_id);
         inner
             .messages
             .retain(|_, message| message.workspace_id != workspace_id);
@@ -292,7 +301,9 @@ impl AppState {
             return Err(StoreError::NotFound { entity: "chat" });
         }
         inner.chats.remove(chat_id);
-        inner.messages.retain(|_, message| message.chat_id != chat_id);
+        inner
+            .messages
+            .retain(|_, message| message.chat_id != chat_id);
         inner
             .message_idempotency
             .retain(|key, _| !key.starts_with(&format!("{workspace_id}:{chat_id}:")));
@@ -371,6 +382,59 @@ impl AppState {
             .collect();
         messages.sort_by(|left, right| left.created_at.cmp(&right.created_at));
         messages
+    }
+
+    pub fn list_chat_messages(
+        &self,
+        workspace_id: &str,
+        chat_id: &str,
+        limit: usize,
+        before: Option<&str>,
+    ) -> Result<MessagePage, StoreError> {
+        let inner = self.inner.lock().expect("store mutex poisoned");
+        let chat = inner
+            .chats
+            .get(chat_id)
+            .ok_or(StoreError::NotFound { entity: "chat" })?;
+        if chat.workspace_id != workspace_id {
+            return Err(StoreError::NotFound { entity: "chat" });
+        }
+
+        let mut messages: Vec<_> = inner
+            .messages
+            .values()
+            .filter(|message| message.workspace_id == workspace_id && message.chat_id == chat_id)
+            .cloned()
+            .collect();
+        messages.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+
+        if let Some(before) = before {
+            let before_position = messages
+                .iter()
+                .position(|message| message.id == before)
+                .ok_or(StoreError::NotFound { entity: "message" })?;
+            messages = messages.into_iter().skip(before_position + 1).collect();
+        }
+
+        let limit = limit.max(1);
+        let has_more = messages.len() > limit;
+        let mut page_messages: Vec<_> = messages.into_iter().take(limit).collect();
+        let next_cursor = if has_more {
+            page_messages.last().map(|message| message.id.clone())
+        } else {
+            None
+        };
+
+        Ok(MessagePage {
+            messages: std::mem::take(&mut page_messages),
+            has_more,
+            next_cursor,
+        })
     }
 }
 
@@ -584,6 +648,67 @@ mod tests {
     }
 
     #[test]
+    fn test_list_chat_messages_returns_newest_page_with_cursor() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        let first = add_test_message(&state, &workspace.id, &chat.id, "first", "k1");
+        let second = add_test_message(&state, &workspace.id, &chat.id, "second", "k2");
+        let third = add_test_message(&state, &workspace.id, &chat.id, "third", "k3");
+
+        let page = state
+            .list_chat_messages(&workspace.id, &chat.id, 2, None)
+            .expect("messages listed");
+
+        assert_eq!(page.messages.len(), 2);
+        assert_eq!(page.messages[0].id, third.id);
+        assert_eq!(page.messages[1].id, second.id);
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, Some(second.id));
+        assert_ne!(page.next_cursor, Some(first.id));
+    }
+
+    #[test]
+    fn test_list_chat_messages_uses_before_cursor_for_older_page() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        let first = add_test_message(&state, &workspace.id, &chat.id, "first", "k1");
+        let second = add_test_message(&state, &workspace.id, &chat.id, "second", "k2");
+        let third = add_test_message(&state, &workspace.id, &chat.id, "third", "k3");
+
+        let page = state
+            .list_chat_messages(&workspace.id, &chat.id, 2, Some(&third.id))
+            .expect("messages listed");
+
+        assert_eq!(page.messages.len(), 2);
+        assert_eq!(page.messages[0].id, second.id);
+        assert_eq!(page.messages[1].id, first.id);
+        assert!(!page.has_more);
+        assert_eq!(page.next_cursor, None);
+    }
+
+    #[test]
+    fn test_list_chat_messages_rejects_unknown_chat() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+
+        let result = state.list_chat_messages(&workspace.id, "missing", 50, None);
+
+        assert!(matches!(result, Err(StoreError::NotFound { entity }) if entity == "chat"));
+    }
+
+    #[test]
     fn test_analyze_message_classifies_requirement() {
         let analysis = analyze_message_type("请实现一个新功能");
 
@@ -595,5 +720,24 @@ mod tests {
         let analysis = analyze_message_type("这里有个 bug 需要修复");
 
         assert_eq!(analysis.message_type, "feedback");
+    }
+
+    fn add_test_message(
+        state: &AppState,
+        workspace_id: &str,
+        chat_id: &str,
+        content: &str,
+        idempotency_key: &str,
+    ) -> ChatMessage {
+        state
+            .add_message(
+                workspace_id,
+                chat_id,
+                "user".into(),
+                content.into(),
+                idempotency_key.into(),
+            )
+            .expect("message added")
+            .message
     }
 }

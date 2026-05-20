@@ -1,4 +1,4 @@
-use crate::model::app::{analyze_message_type, AppState, StoreError};
+use crate::model::app::{AppState, StoreError, analyze_message_type};
 use crate::proto::aemeath::v1::chat_service_server::ChatService;
 use crate::proto::aemeath::v1::{
     AddMessageRequest, AddMessageResponse, AnalyzeMessageRequest, AnalyzeMessageResponse, Chat,
@@ -177,7 +177,9 @@ impl From<crate::model::app::ChatMessage> for crate::proto::aemeath::v1::ChatMes
 
 fn status_from_store_error(error: StoreError) -> Status {
     match error {
-        StoreError::InvalidInput { field } => Status::invalid_argument(format!("字段 {field} 不能为空")),
+        StoreError::InvalidInput { field } => {
+            Status::invalid_argument(format!("字段 {field} 不能为空"))
+        }
         StoreError::NotFound { entity } => Status::not_found(format!("{entity} 不存在")),
     }
 }
