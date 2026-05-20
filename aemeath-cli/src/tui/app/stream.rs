@@ -306,6 +306,16 @@ pub async fn process_in_background(
                     }
                 }
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                    // Bug #49: drain queued user input before finishing the loop.
+                    // If user submitted new messages while the last turn was running,
+                    // consume them and continue instead of exiting.
+                    if let Some(queued) = drain_queued_input(&queue_request_tx).await {
+                        for input in queued {
+                            messages.push(Message::user(input));
+                        }
+                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                        continue;
+                    }
                     if let Some(text) = crate::reflection::run_reflection(
                         &memory_config,
                         turn_count,
