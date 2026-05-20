@@ -37,7 +37,7 @@
 
 | 组件 | 选型 | 版本约束 | 说明 |
 |------|------|---------|------|
-| **gRPC** | **tonic** | 0.12+ | Rust 最成熟的 gRPC 框架，async/.await 原生支持，proto 驱动 9 个 Service 的代码生成 |
+| **gRPC** | **tonic** | 0.12+ | Rust 最成熟的 gRPC 框架，async/.await 原生支持，proto 驱动 8 个 Service 的代码生成 |
 | **HTTP / REST** | **axum** | 0.8+ | 基于 tower + tokio，WebSocket 原生支持（`axum::extract::ws`） |
 | **端口模型** | 拆端口部署 | — | REST/WebSocket 监听 `3000`，gRPC 监听 `50051`；避免 tonic + axum 共享端口分流增加 MVP 复杂度 |
 | **MongoDB** | **mongodb** crate（官方） | 3.x | 支持 Change Streams + Transaction（依赖 MongoDB 5.0+ replica set） |
@@ -49,7 +49,7 @@
 
 | 端口 | 协议 | 处理方 | 内容 |
 |------|------|--------|------|
-| 50051 | gRPC（tonic） | API Server | 9 个 Service 的全部 RPC |
+| 50051 | gRPC（tonic） | API Server | 8 个 Service 的全部 RPC |
 | 3000 | HTTP/1.1 + WS（axum） | API Server | REST CRUD 端点 + WebSocket（BoardSnapshot / Chat） |
 | — | — | Agent | agent 不监听端口，作为 gRPC client 通过 AgentRegistryService.Heartbeat 单向上报 |
 
@@ -95,8 +95,8 @@ docs/
 │  └────────┬─────────┘   └──────────┬───────────────┘      │
 │           │                        │                       │
 │  ┌────────┴────────────────────────┴──────────────────┐    │
-│  │ Chat Svc │Workspace│ Req Svc │ Proj Svc │ Task Svc │ Board Svc │Reflection│ Agent Reg │   │
-│  │          │  Svc    │         │          │          │           │   Svc    │           │   │
+│  │ Chat Svc │Workspace│ Req Svc │  Proj Svc（含 Task 子实体 CRUD）  │ Board Svc │Reflection│ Agent Reg │   │
+│  │          │  Svc    │         │                                │           │   Svc    │           │   │
 │  └────────────────────────────────────────────────────┘    │
 │                          │                                  │
 │                    MongoDB（文档存储）                       │
@@ -105,6 +105,8 @@ docs/
 └──────────────────────────────────────────────────────────┘
 
 > **注**：MongoDB 和 Qdrant 是独立部署的外部数据服务，不运行于 API Server 进程内。API Server 通过 MongoDB Driver 和 Qdrant Client 分别连接。Qdrant 向量写入由 API Server 的异步 embedding task 完成，MongoDB 与 Qdrant 之间无直接通信。
+>
+> **DDD 限界上下文**：Project 上下文的聚合根只有 `Project`，`ProjectTask` 是 Project 聚合的子实体。ProjectTask 的 CRUD 和生命周期管理均通过 `ProjectService` 执行，不暴露独立的 gRPC Service。Project→ProjectTask 的级联操作（如取消 Project 时级联取消所有未完成的 Task）在 `ProjectService` 内以聚合内事务方式处理。
 
         ▲                      ▲
         │ gRPC Watch / CRUD    │ gRPC Watch / CRUD
@@ -439,10 +441,9 @@ Evolver 定时循环（interval 可配，默认 24h）:
 
 | Service | RPC | 用途 |
 |---------|-----|------|
-| `ProjectService` | `Watch` / `List` / `Update` | 扫描已完成且未反思的 Project；反思完成后标记 `reflected_at` |
+| `ProjectService` | `Watch` / `List` / `Update` / `WatchTasks` | 扫描已完成且未反思的 Project；反思完成后标记 `reflected_at`；获取已完成 Task 的执行摘要 |
 | `ReflectionService` | `Create` / `List` / `Get` | 写入反思结果（含 embedding_ref）；查询已有 Reflection 去重 |
 | `RequirementService` | `Watch` / `List` | 查询近期 Requirement 趋势 |
-| `ProjectTaskService` | `Watch` | 获取已完成 Task 的执行摘要 |
 
 ### Qdrant RAG 存储边界
 

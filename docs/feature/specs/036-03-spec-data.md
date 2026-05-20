@@ -52,7 +52,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 |---|---|---|
 | 用户需求消息 | Requirement | 用户通过 Chat 提交的需求记录（1:1 关联 ChatMessage） |
 | 草案 | Requirement.draft | Assistant（由 Scheduler 调度）拆解产出的 Project/Task 草案 |
-| Project & Task | Project + ProjectTask | 需求拆解后的项目与任务 |
+| Project & Task | Project + ProjectTask（聚合内父子关系） | 需求拆解后的项目与任务 |
 | Agent 状态 | Agent Registry | 当前活跃的 Agent 实例、状态 |
 | 自定义数据区块 | 扩展注册 | 支持新增其他数据类型渲染 |
 
@@ -133,6 +133,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "version": 0,
   "project_ids": [ObjectId],         // 关联的 Project（N:N，由 API Server 在 Confirm RPC / Project 增删时同步维护，非 Executor 直接写入）
   "task_ids": [ObjectId],            // 关联的 ProjectTask（N:N，完成判定；由 API Server 在 ProjectTask 增删时同步维护，非 Executor 直接写入）
+                                     // ⚠️ 冗余字段：真实数据源为 ProjectService 内的 Task 子实体查询；此字段仅用于快速概览，不保证实时一致
   "draft": {
     "projects": [ { "name": "...", "tasks": [...] } ],
     "summary": "...",
@@ -171,6 +172,9 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 ```
   
 ### Project
+
+> **DDD 语义**：Project 是聚合根（Aggregate Root），ProjectTask 是其子实体。ProjectTask 的生命周期（创建、状态变更、级联删除/取消）完全由 Project 聚合管理，所在事务范围限定于 Project 聚合内（MongoDB 多文档事务）。
+
 ```jsonc
 {
   "_id": ObjectId,
@@ -180,6 +184,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
    * assigned_executor_id — 当前分配的 Executor Agent ID
    * 可选；仅 assigned 后有值
    * 独占保证：Scheduler 事务 + AgentInstance.current_project_id 部分唯一索引，详见 Scheduler 独占分配机制
+   * ⚠️ 跨聚合引用：AgentInstance 是独立聚合，此字段为引用关系
    */
   "assigned_executor_id": ObjectId,
   "name": "登录页 UI 重构",
@@ -224,6 +229,9 @@ db.projects.createIndex(
 ```
 
 ### ProjectTask
+
+> **DDD 语义**：ProjectTask 是 **Project 聚合的子实体**，非独立聚合。保留独立 collection 是出于 MongoDB 文档大小限制和独立查询性能的工程考量。ProjectTask 的生命周期（创建、状态变更、取消）由 Project 聚合根管理，级联操作在 MongoDB 多文档事务中完成。
+
 ```jsonc
 {
   "_id": ObjectId,
@@ -238,7 +246,7 @@ db.projects.createIndex(
   "max_task_retries": 3,              // 最大重试次数（默认 3）
   "retry_count": 0,                   // 当前重试次数（崩溃恢复时保留，不清零）
   "last_error": "",                   // 最近一次失败的错误信息（重试时携带，Sub-Agent 可据此调整策略）
-  "depends_on": [ObjectId],            // 前置 Task ID 列表
+  "depends_on": [ObjectId],            // 前置 Task ID 列表（聚合内引用：仅引用同一 Project 下的兄弟 Task）
   "depends_type": "all",               // all（全部完成）/ any（任一完成）
   "priority": 1,
   /*
@@ -259,6 +267,8 @@ db.projects.createIndex(
 ```
 
 > v0.1 说明：`requires_approval` 审批字段/审批状态流暂不实现；Task 状态机不包含等待审批/审批通过/审批拒绝路径。后续版本若启用该字段，需要同步补充对应状态与转移规则。
+> 
+> **级联行为**：Project 取消/删除时，所有非终态 ProjectTask 的级联取消在 Project 聚合内部完成（MongoDB 多文档事务），不由外部服务协调。
 
 ### AgentInstance
 ```jsonc
@@ -277,7 +287,7 @@ db.projects.createIndex(
       { "model": "openai/gpt-5-codex", "status": "healthy" }
     ]
   },
-  "current_project_id": Option<ObjectId>, // 当前处理的 Project（Executor 专用）；空闲时为 None/null
+  "current_project_id": Option<ObjectId>, // 当前处理的 Project（Executor 专用）；空闲时为 None/null；⚠️ 跨聚合引用（AgentInstance 是独立聚合）
   "last_heartbeat": ISODate,
   "created_at": ISODate,
   "updated_at": ISODate

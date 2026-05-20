@@ -280,28 +280,51 @@ message CancelRequirementResponse {
 
 ```protobuf
 service ProjectService {
-  rpc Create(CreateProjectRequest) returns (Project);
-  rpc Update(UpdateProjectRequest) returns (Project);
-  rpc Get(GetProjectRequest) returns (Project);
-  rpc List(ListProjectsRequest) returns (ListProjectsResponse);
-  rpc Assign(AssignProjectRequest) returns (Project);             // Scheduler 分配→Executor
-  rpc Accept(AcceptProjectRequest) returns (Project);             // Executor 接受
-  rpc Resume(ResumeProjectRequest) returns (ResumeProjectResponse);
-  rpc Retry(RetryProjectRequest) returns (Project);                // Failed → Pending 重开
-  rpc Complete(CompleteProjectRequest) returns (Project);
-  rpc Block(BlockProjectRequest) returns (Project);
-  rpc Fail(FailProjectRequest) returns (Project);
-  rpc Cancel(CancelProjectRequest) returns (CancelProjectResponse);
-  rpc ConfirmCancel(ConfirmCancelRequest) returns (ConfirmCancelResponse); // 两阶段 Cancel 第二阶段确认（参见 036-04）
-  rpc ForceCancel(ForceCancelRequest) returns (CancelProjectResponse);  // Scheduler 兜底强制取消（cancel_timeout_sec 超时后调用）
-  rpc Watch(WatchRequest) returns (stream ProjectEvent);
+  // === Project ===
+  rpc CreateProject(CreateProjectRequest) returns (Project);
+  rpc UpdateProject(UpdateProjectRequest) returns (Project);
+  rpc GetProject(GetProjectRequest) returns (Project);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);
+
+  // Project 生命周期
+  rpc AssignProject(AssignProjectRequest) returns (Project);             // Scheduler 分配→Executor
+  rpc AcceptProject(AcceptProjectRequest) returns (Project);             // Executor 接受
+  rpc ResumeProject(ResumeProjectRequest) returns (ResumeProjectResponse);
+  rpc RetryProject(RetryProjectRequest) returns (Project);                // Failed → Pending 重开
+  rpc CompleteProject(CompleteProjectRequest) returns (Project);
+  rpc BlockProject(BlockProjectRequest) returns (Project);
+  rpc FailProject(FailProjectRequest) returns (Project);
+  rpc CancelProject(CancelProjectRequest) returns (CancelProjectResponse);  // 级联取消在 ProjectService 内以 MongoDB 事务原子执行（Project + 所有非终态 Task）
+  rpc ConfirmCancelProject(ConfirmCancelProjectRequest) returns (ConfirmCancelResponse); // 两阶段 Cancel 第二阶段确认（参见 036-04）
+  rpc ForceCancelProject(ForceCancelProjectRequest) returns (CancelProjectResponse);  // Scheduler 兜底强制取消（cancel_timeout_sec 超时后调用）
+  rpc WatchProjects(WatchProjectsRequest) returns (stream ProjectEvent);
+
+  // === ProjectTask（Project 聚合子实体） ===
+  rpc CreateTask(CreateTaskRequest) returns (ProjectTask);
+  rpc UpdateTask(UpdateTaskRequest) returns (ProjectTask);
+  rpc GetTask(GetTaskRequest) returns (ProjectTask);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc DeleteTask(DeleteTaskRequest) returns (google.protobuf.Empty);
+
+  // Task 生命周期
+  rpc StartTask(StartTaskRequest) returns (ProjectTask);                  // Pending → InProgress
+  rpc SubmitTaskForReview(SubmitTaskForReviewRequest) returns (ProjectTask);  // InProgress → InReview
+  rpc ReworkTask(ReworkTaskRequest) returns (ProjectTask);                // InReview → InProgress
+  rpc StartRetry(StartRetryRequest) returns (ProjectTask);                // Pending → Retrying（原名 Retry）
+  rpc CompleteTask(CompleteTaskRequest) returns (ProjectTask);
+  rpc FailTask(FailTaskRequest) returns (FailTaskResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc ConfirmCancelTask(ConfirmCancelTaskRequest) returns (ConfirmCancelResponse);
+  rpc ForceCancelTask(ForceCancelTaskRequest) returns (CancelTaskResponse);
+  rpc WatchTasks(WatchTasksRequest) returns (stream ProjectTaskEvent);
 }
-  
+    
 message CancelProjectResponse {
   Project project = 1;
   ProjectStatus previous_status = 2;
 }
-message ConfirmCancelRequest {
+message ConfirmCancelProjectRequest {
   string project_id = 1;
 }
 message ConfirmCancelTaskRequest {
@@ -310,45 +333,32 @@ message ConfirmCancelTaskRequest {
 message ConfirmCancelResponse {
   bool ok = 1;                  // 执行成功（若已处于取消/终态则返回 false）
 }
-message ForceCancelRequest {
+message ForceCancelProjectRequest {
   string project_id = 1;
   string reason = 2;            // "cancel_timeout" — 取消原因
-}
-  
-message ResumeProjectResponse {
-  Project project = 1;
-  ProjectStatus previous_status = 2;  // Blocked
-}
-```
-
-### ProjectTaskService（project_task.proto）
-
-```protobuf
-service ProjectTaskService {
-  rpc Create(CreateTaskRequest) returns (ProjectTask);
-  rpc Get(GetTaskRequest) returns (ProjectTask);
-  rpc Update(UpdateTaskRequest) returns (ProjectTask);
-  rpc Complete(CompleteTaskRequest) returns (ProjectTask);
-  rpc List(ListTasksRequest) returns (ListTasksResponse);
-  rpc Cancel(CancelTaskRequest) returns (CancelTaskResponse);
-  rpc ConfirmCancel(ConfirmCancelTaskRequest) returns (ConfirmCancelTaskResponse); // 两阶段 Cancel 第二阶段确认
-  rpc ForceCancel(ForceCancelTaskRequest) returns (CancelTaskResponse);  // Scheduler 兜底强制取消
-  rpc Fail(FailTaskRequest) returns (FailTaskResponse);
-  rpc Retry(RetryTaskRequest) returns (ProjectTask);               // Failed → Pending 重开
-  rpc Watch(WatchRequest) returns (stream ProjectTaskEvent);
-}
-  
-message ConfirmCancelTaskResponse {
-  bool ok = 1;                  // 执行成功（若已处于取消/终态则返回 false）
 }
 message ForceCancelTaskRequest {
   string task_id = 1;
   string reason = 2;            // "cancel_timeout"
 }
-  
-// Task 状态流转 InProgress→InReview、InReview→InProgress（返工）、InProgress→Retrying 通过 Update RPC 实现。
+message ResumeProjectResponse {
+  Project project = 1;
+  ProjectStatus previous_status = 2;  // Blocked
+}
+message CancelTaskResponse {
+  string task_id = 1;
+  ProjectTaskStatus previous_status = 2;
+}
+message FailTaskResponse {
+  string task_id = 1;
+  optional string error_message = 2;
+}
 ```
-  
+
+### ProjectTask（project_task.proto — Project 聚合子实体）
+
+> **DDD 语义**：ProjectTask 是 Project 聚合的子实体，其 gRPC Service 已并入 `ProjectService`（见上方）。`project_task.proto` 文件仅保留 `ProjectTask`、`ProjectTaskEvent` 及相关 message 的类型定义，不再包含独立的 `service` 声明。所有 ProjectTask CRUD 和生命周期 RPC（CreateTask/UpdateTask/GetTask/ListTasks/DeleteTask/StartTask/SubmitTaskForReview/ReworkTask/StartRetry/CompleteTask/FailTask/CancelTask/ConfirmCancelTask/ForceCancelTask/WatchTasks）通过 `ProjectService` 统一暴露。
+
 ### AgentRegistryService（agent.proto）
 
 ```protobuf
@@ -481,7 +491,7 @@ aemeath/
 │   │   ├── workspace.proto
 │   │   ├── requirement.proto
 │   │   ├── project.proto
-│   │   ├── project_task.proto
+│   │   ├── project_task.proto       #   ProjectTask / ProjectTaskEvent message 定义（无独立 service）
 │   │   ├── agent.proto
 │   │   ├── common.proto           #   共享枚举/类型（如 CostTier）
 │   │   ├── reflection.proto
@@ -521,14 +531,13 @@ aemeath/
 │   │       │   ├── grpc.rs
 │   │       │   ├── rest.rs
 │   │       │   └── repository.rs
-│   │       ├── project/          #     project feature
+│   │       ├── project/          #     project feature（Project + ProjectTask）
 │   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs
+│   │       │   ├── grpc.rs         #       ProjectService gRPC handler（含 Task 子实体 RPC）
 │   │       │   ├── rest.rs
 │   │       │   └── repository.rs
-│   │       ├── project_task/     #     project_task feature
+│   │       ├── project_task/     #     project_task 子实体（仅 repository — gRPC 由 project/grpc.rs 处理）
 │   │       │   ├── mod.rs
-│   │       │   ├── grpc.rs
 │   │       │   ├── rest.rs
 │   │       │   └── repository.rs
 │   │       ├── agent/            #     agent feature（Agent Registry，非独立 crate）
@@ -1379,7 +1388,7 @@ API Server 在 Agent 注册/注销 gRPC handler 中硬编码校验：
 - Scheduler Token 通过启动时配置预置密钥签发，不可被其他 Agent 获取
 
 #### 影响范围
-- `proto/project_task.proto` — Cancel RPC
+- `proto/project.proto` — Cancel RPC（ProjectService.CancelProject / ConfirmCancelProject / ForceCancelProject / CancelTask / ConfirmCancelTask / ForceCancelTask）
 - `proto/agent.proto` — RefreshToken RPC + Register/Deregister 硬校验
 - `agents/src/sub_agent.rs` — deadline 检查逻辑
 - `server/src/grpc/` — 所有 handler 统一错误码
