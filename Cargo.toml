@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "aemeath-core",
-    "aemeath-llm",
-    "aemeath-tools",
-    "aemeath-cli",
-    "server",
-    "agents",
+    "packages/core",
+    "packages/llm",
+    "packages/tools",
+    "apps/cli",
+    "apps/server",
+    "apps/agents",
 ]
 
 [workspace.dependencies]

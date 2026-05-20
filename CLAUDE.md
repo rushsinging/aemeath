@@ -18,10 +18,17 @@
 
 ```
 aemeath/                    # workspace root
-├── aemeath-core/           # 核心库：消息、工具、配置、会话、成本追踪、压缩
-├── aemeath-cli/            # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
-├── aemeath-llm/            # LLM 客户端：provider API 调用、流式响应、模型池
-├── aemeath-tools/          # 工具注册：文件读写、搜索、Bash、Agent、Web 等
+├── apps/
+│   ├── cli/                # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
+│   ├── server/             # #36 API Server：REST/WS + gRPC
+│   └── agents/             # #36 Agent runtime 与角色配置
+├── packages/
+│   ├── core/               # 核心库：消息、工具、配置、会话、成本追踪、压缩
+│   ├── llm/                # LLM 客户端：provider API 调用、流式响应、模型池
+│   ├── tools/              # 工具注册：文件读写、搜索、Bash、Agent、Web 等
+│   ├── proto/              # 共享 proto 定义
+│   └── sdk/                # 外部 SDK
+├── infra/                  # MongoDB、部署与本地开发编排
 ├── docs/                   # bug / feature 追踪（active.md + archived/）
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
 └── CLAUDE.md               # 本文件

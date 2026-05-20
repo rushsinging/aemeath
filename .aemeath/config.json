@@ -3,7 +3,7 @@
     "Stop": [
       {
         "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/build.sh\"",
+        "command": "\"{AEMEATH_PROJECT_DIR}/build_cli.sh\"",
         "timeout": 600
       },
       {

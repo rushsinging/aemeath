@@ -4,7 +4,7 @@
 
 **Goal:** 搭建 #36 多 Agent 框架的可编译、可启动、可验证空架子，为 Sprint 1 的 Workspace/Chat API 提供目录、配置、proto、MongoDB 和 Agent role 基础设施。
 
-**Architecture:** Sprint 0 只建立骨架，不实现业务 CRUD。`server/` 提供 axum REST/WS 监听 `3000` 与 tonic gRPC 监听 `50051` 的启动框架；`share/proto/` 管理跨 server/agents/ui 共享 proto；`infra/` 管理 MongoDB replica set 与本地开发 compose；`agents/` 管理 Main Agent/Sub-Agent role 与配置装配器骨架。
+**Architecture:** Sprint 0 只建立骨架，不实现业务 CRUD。当前已产出 `server/`、`agents/`、`share/proto/` 骨架；Sprint 0.5 会在业务 API 前将其迁移为 `apps/server`、`apps/agents`、`packages/proto`，并把既有 CLI/公共库迁移到 `apps/cli` 与 `packages/{core,llm,tools}`。
 
 **Tech Stack:** Rust workspace、tonic 0.12、prost 0.13、axum 0.8、mongodb 3.x、tokio、serde、toml、Docker Compose、MongoDB replica set。
 
@@ -12,7 +12,8 @@
 
 ## 对齐的 spec 决策
 
-- 目录采用 `share/`、`server/`、`agents/`、`infra/`，不使用根目录 `proto/` 或 `aemeath-server/`。
+- Sprint 0 目录采用 `share/`、`server/`、`agents/`、`infra/`，不使用根目录 `proto/` 或 `aemeath-server/`。
+- Sprint 0.5 必须在 Sprint 1 前执行 monorepo 迁移：`apps/{cli,server,agents}` + `packages/{core,llm,tools,proto,sdk}`；迁移完成后移除 `share/`。
 - MVP 端口采用拆端口：REST/WS `0.0.0.0:3000`，gRPC `0.0.0.0:50051`。
 - WebSocket / Board `snapshot_id` 统一使用 UUIDv7 字符串，不使用 ULID。
 - Sprint 0 只做基础设施；Workspace/Chat CRUD、BoardSnapshot 数据组装、idempotency_records 去重属于 Sprint 1。
