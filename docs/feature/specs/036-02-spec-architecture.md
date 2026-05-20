@@ -39,21 +39,21 @@
 |------|------|---------|------|
 | **gRPC** | **tonic** | 0.12+ | Rust 最成熟的 gRPC 框架，async/.await 原生支持，proto 驱动 9 个 Service 的代码生成 |
 | **HTTP / REST** | **axum** | 0.8+ | 基于 tower + tokio，WebSocket 原生支持（`axum::extract::ws`） |
-| **共享端口** | tonic + axum 叠加 | — | 同一 TcpListener（port 50051），通过 `Accept` 头 `application/grpc` 分流：tonic 处理 gRPC，axum 处理 REST/WebSocket |
+| **端口模型** | 拆端口部署 | — | REST/WebSocket 监听 `3000`，gRPC 监听 `50051`；避免 tonic + axum 共享端口分流增加 MVP 复杂度 |
 | **MongoDB** | **mongodb** crate（官方） | 3.x | 支持 Change Streams + Transaction（依赖 MongoDB 5.0+ replica set） |
 | **Qdrant** | **qdrant-client** crate（官方） | 1.x | 向量存储 + CRUD + Search |
-| **Proto 管理** | tonic-build + prost | — | 编译期从 .proto 生成 Rust 代码；proto 文件驻留在 `proto/` 目录，独立于 Rust workspace |
-| **Cargo workspace** | 新增 1 个 crate | — | API Server 独立 crate：`aemeath-server/`（含 gRPC handler + axum router + DB 操作） |
+| **Proto 管理** | tonic-build + prost | — | 编译期从 .proto 生成 Rust 代码；proto 文件驻留在 `share/proto/` 目录，独立于 Rust workspace |
+| **Cargo workspace** | 新增 1 个 crate | — | API Server 独立 crate：`server/`（含 gRPC handler + axum router + DB 操作） |
 
 ### 端口与服务映射
 
 | 端口 | 协议 | 处理方 | 内容 |
 |------|------|--------|------|
 | 50051 | gRPC（tonic） | API Server | 9 个 Service 的全部 RPC |
-| 50051 | HTTP/1.1 + WS（axum） | API Server | REST CRUD 端点 + WebSocket（BoardSnapshot / Chat） |
+| 3000 | HTTP/1.1 + WS（axum） | API Server | REST CRUD 端点 + WebSocket（BoardSnapshot / Chat） |
 | — | — | Agent | agent 不监听端口，作为 gRPC client 通过 AgentRegistryService.Heartbeat 单向上报 |
 
- > tonic + axum 共享单一端口是 Rust 生态的成熟模式：`tonic::transport::Server` 和 `axum::Router` 通过 `tower::make::Shared` 叠加，`accept` 时检查 header 区分协议；无需额外端口，运维简单。
+> MVP 采用拆端口部署：REST/WS 与 gRPC 分别绑定 listener。共享端口可作为后续运维收敛项评估，但不是 #36 v0.1 的默认实现。
 
 
 ## 架构概览

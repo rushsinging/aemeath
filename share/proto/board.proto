@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package aemeath.v1;
+
+import "common.proto";
+import "chat.proto";
+
+service BoardService {
+  rpc GetBoardSnapshot(GetBoardSnapshotRequest) returns (GetBoardSnapshotResponse);
+  rpc Watch(WatchRequest) returns (stream BoardEvent);
+}
+
+message WorkspaceInfo {
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  string model = 4;
+}
+
+message BoardSnapshot {
+  string snapshot_id = 1;
+  string workspace_id = 2;
+  WorkspaceInfo workspace = 3;
+  repeated Chat chats = 4;
+  repeated ChatMessage recent_messages = 5;
+  bool is_full_snapshot = 6;
+}
+
+message BoardSnapshotUpdate {
+  string snapshot_id = 1;
+  string workspace_id = 2;
+  WorkspaceInfo changed_workspace = 3;
+  repeated Chat changed_chats = 4;
+  repeated ChatMessage new_messages = 5;
+  repeated ChatMessage updated_messages = 6;
+  repeated string removed_chat_ids = 7;
+}
+
+message GetBoardSnapshotRequest {
+  string workspace_id = 1;
+}
+
+message GetBoardSnapshotResponse {
+  BoardSnapshot snapshot = 1;
+}
+
+message BoardEvent {
+  oneof payload {
+    BoardSnapshot snapshot = 1;
+    BoardSnapshotUpdate update = 2;
+  }
+}
