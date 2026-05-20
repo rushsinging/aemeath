@@ -67,9 +67,8 @@ pub fn resolve_endpoint_url(base_url: &str, endpoint_path: &str) -> Result<Strin
 /// Default timeout for SSE endpoint handshake (seconds).
 const SSE_CONNECT_TIMEOUT_SECS: u64 = 10;
 
-/// Default timeout for individual JSON-RPC requests via SSE stream fallback (seconds).
-/// POST body is the primary response path; SSE stream is a safety net only.
-const SSE_REQUEST_TIMEOUT_SECS: u64 = 10;
+/// Default timeout for individual JSON-RPC requests via SSE stream (seconds).
+const SSE_REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// Build a reqwest client with optional custom headers and sane timeouts.
 pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, String> {
@@ -112,47 +111,135 @@ impl SseReadStream {
     async fn read_chunk(&mut self) -> Result<bool, String> {
         match self.stream.next().await {
             Some(Ok(chunk)) => {
+                let len = chunk.len();
                 self.buffer.push_str(&String::from_utf8_lossy(&chunk));
+                log::info!("[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes", self.buffer.len());
+                if self.buffer.len() > 100 {
+                    let preview: String = self.buffer.chars().take(200).collect();
+                    log::info!("[MCP:SSE] buffer preview: {preview:?}");
+                }
                 Ok(true)
             }
-            Some(Err(e)) => Err(format!("SSE read error: {e}")),
-            None => Ok(false), // stream ended
+            Some(Err(e)) => {
+                log::warn!("[MCP:SSE] read_chunk error: {e}");
+                Err(format!("SSE read error: {e}"))
+            }
+            None => {
+                log::info!("[MCP:SSE] read_chunk: stream EOF");
+                Ok(false)
+            }
         }
     }
 
     /// Drain all complete SSE events from the buffer, returning them.
+    /// Also attempts to parse events that may be missing the trailing \n\n
+    /// (some servers don't send the delimiter for the last event before a pause).
     fn drain_events(&mut self) -> Vec<SseEvent> {
-        // SSE events are separated by \n\n. We split on \n\n to find complete events.
-        // We keep the last incomplete segment in the buffer.
         let mut events = Vec::new();
         while let Some(pos) = self.buffer.find("\n\n") {
             let block = self.buffer[..pos].to_string();
             self.buffer = self.buffer[pos + 2..].to_string();
-
-            let block = block.trim();
-            if block.is_empty() {
-                continue;
-            }
-            let mut event_type = String::from("message");
-            let mut data = String::new();
-            for line in block.lines() {
-                if let Some(val) = line.strip_prefix("event:") {
-                    event_type = val.trim().to_string();
-                } else if let Some(val) = line.strip_prefix("data:") {
-                    if data.is_empty() {
-                        data = val.trim().to_string();
-                    } else {
-                        data.push('\n');
-                        data.push_str(val.trim());
-                    }
-                }
-            }
-            if !data.is_empty() {
-                events.push(SseEvent { event_type, data });
+            if let Some(event) = parse_single_event(&block) {
+                events.push(event);
             }
         }
+
+        // Fallback: if buffer has data but no \n\n delimiter, try to parse
+        // the event anyway (handles servers that omit the trailing \n\n).
+        // Only attempt this if the buffer contains what looks like a complete
+        // JSON-RPC response (matching braces in the data line).
+        if events.is_empty() && !self.buffer.is_empty() {
+            if let Some(event) = try_parse_incomplete_event(&self.buffer) {
+                log::info!("[MCP:SSE] parsed incomplete event (no trailing \\n\\n)");
+                self.buffer.clear();
+                events.push(event);
+            }
+        }
+
         events
     }
+}
+
+/// Parse a single SSE event block (the text between \n\n delimiters).
+fn parse_single_event(block: &str) -> Option<SseEvent> {
+    let block = block.trim();
+    if block.is_empty() {
+        return None;
+    }
+    let mut event_type = String::from("message");
+    let mut data = String::new();
+    for line in block.lines() {
+        if let Some(val) = line.strip_prefix("event:") {
+            event_type = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("data:") {
+            if data.is_empty() {
+                data = val.trim().to_string();
+            } else {
+                data.push('\n');
+                data.push_str(val.trim());
+            }
+        }
+    }
+    if !data.is_empty() {
+        log::info!("[MCP:SSE] drain: event={event_type} data_len={}", data.len());
+        Some(SseEvent { event_type, data })
+    } else {
+        None
+    }
+}
+
+/// Try to parse an SSE event that may be missing the trailing \n\n.
+/// Checks if the data line contains valid JSON with balanced braces.
+fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
+      // Extract the data: value
+      let data_start = buffer.find("data:")?;
+      let data_content = &buffer[data_start + 5..];
+
+      log::info!("[MCP:SSE] try_parse_incomplete: data_content_len={}", data_content.len());
+
+      // Check if the data looks like complete JSON (balanced braces)
+      let mut brace_depth = 0i32;
+    let mut in_string = false;
+    let mut escape_next = false;
+    for ch in data_content.chars() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '{' | '[' => brace_depth += 1,
+            '}' | ']' => brace_depth -= 1,
+            _ => {}
+        }
+    }
+
+    if brace_depth != 0 {
+        log::info!("[MCP:SSE] try_parse_incomplete: brace_depth={brace_depth}, not balanced");
+        return None; // Unbalanced braces — JSON not complete yet
+    }
+
+    // Looks complete — parse the event normally
+    let event_part = &buffer[..data_start];
+    let event_type = event_part
+        .lines()
+        .find_map(|line| line.strip_prefix("event:"))
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|| "message".to_string());
+
+    let data = data_content.trim().to_string();
+    log::info!("[MCP:SSE] incomplete-fallback: event={event_type} data_len={}", data.len());
+    Some(SseEvent { event_type, data })
 }
 
 impl SseTransport {
@@ -254,30 +341,17 @@ impl SseTransport {
             return Err(format!("MCP endpoint returned {status}: {text}"));
         }
 
-        // Some SSE servers return the JSON-RPC response in the POST body directly.
-        // Check if the POST response contains a JSON-RPC response with matching id.
-        if let Some(expected_id) = req_id {
-            // Try to read POST body as JSON-RPC response
-            let post_body = resp.text().await.unwrap_or_default();
-            if !post_body.is_empty() {
-                if let Ok(value) = serde_json::from_str::<Value>(&post_body) {
-                    let resp_id = value.get("id").and_then(|v| v.as_u64());
-                    if resp_id == Some(expected_id) {
-                        if let Some(error) = value.get("error") {
-                            return Err(format!("MCP error: {error}"));
-                        }
-                        if let Some(result) = value.get("result") {
-                            log::info!("[MCP:SSE] response received via POST body (id={expected_id})");
-                            return Ok(result.clone());
-                        }
-                    }
-                }
-            }
-            log::info!("[MCP:SSE] POST body empty or no match, falling back to SSE stream (id={expected_id})");
+        // Consume and discard the POST response body to avoid blocking the
+        // HTTP/2 flow control window (which can prevent the SSE stream from
+        // receiving further data from the server).
+        let mut resp = resp;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("POST body read: {e}"))? {
+            let _ = chunk; // discard
         }
 
         // Notifications have no response
         if req_id.is_none() {
+            // Drop the response body without reading (avoids blocking on chunked encoding)
             return Ok(Value::Null);
         }
         let expected_id = req_id.unwrap();
