@@ -5,6 +5,7 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 未确认 | 2026-05 | 根因：process_in_background 中 tool_calls.is_empty() || stop_reason==EndTurn 时直接 break 退出 loop，未调用 drain_queued_input 消费 input_queue 中用户排队消息。修复：break 前先 drain queued input，有消息则 continue 继续 loop |
 | 51 | Output area 复制时复制出 Markdown 源码而非渲染后纯文本 | 中 | 修复中 | 未确认 | 2026-05 | 根因：get_selected_text 直接从 OutputLine.content 读取原始 Markdown 文本（含 **bold**、*italic*、`code` 等格式标记），而 TUI 渲染时通过 inline_markdown_spans 剥离了这些标记。修复：新增 strip_inline_formatting 函数剥离内联格式标记，在 get_selected_text 返回前应用 |
+| 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 活动中 | 未确认 | 2026-05 | 偶现：output area 中某条 tool call（如 `● Edit...`）前面的白点持续闪烁，但 Edit 工具的执行结果始终未显示；疑似 tool 执行完成但结果未正确注入 output area，或 tool call 状态卡在 pending 未转为 completed |
 
 ## 专案
 
