@@ -16,10 +16,11 @@ impl OpenAICompatibleProvider {
         messages: Vec<serde_json::Value>,
         stream: bool,
     ) -> serde_json::Value {
+        let max_tokens_field = self.driver.max_tokens_field();
         let mut request_body = serde_json::json!({
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.current_max_tokens(),
+            max_tokens_field: self.current_max_tokens(),
             "stream": stream,
         });
 

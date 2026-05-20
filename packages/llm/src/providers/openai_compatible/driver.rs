@@ -15,6 +15,10 @@ pub fn effort_from_thinking_tokens(tokens: u32) -> &'static str {
 }
 
 pub trait ChatApiDriver: Send + Sync {
+    fn max_tokens_field(&self) -> &'static str {
+        "max_tokens"
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -31,6 +35,9 @@ pub struct ZhipuDriver;
 
 #[derive(Debug)]
 pub struct LiteLlmDriver;
+
+#[derive(Debug)]
+pub struct VolcengineDriver;
 
 impl ChatApiDriver for OpenAiDriver {
     fn apply_reasoning_fields(
@@ -80,11 +87,32 @@ impl ChatApiDriver for LiteLlmDriver {
     }
 }
 
+impl ChatApiDriver for VolcengineDriver {
+    fn max_tokens_field(&self) -> &'static str {
+        "max_output_tokens"
+    }
+
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        _reasoning_enabled: bool,
+    ) {
+        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
+            request_body["reasoning"] = reasoning.clone();
+        } else if let Some(ReasoningConfig::ThinkingBudget(tokens)) = reasoning_config {
+            request_body["reasoning"] =
+                serde_json::json!({"effort": effort_from_thinking_tokens(*tokens)});
+        }
+    }
+}
+
 pub(crate) fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send + Sync> {
     match api {
         ApiDriverKind::OpenAI => Box::new(OpenAiDriver),
         ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
         ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
-        ApiDriverKind::Anthropic | ApiDriverKind::Volcengine => Box::new(OpenAiDriver),
+        ApiDriverKind::Volcengine => Box::new(VolcengineDriver),
+        ApiDriverKind::Anthropic => Box::new(OpenAiDriver),
     }
 }
