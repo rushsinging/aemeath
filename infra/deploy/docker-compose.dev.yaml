@@ -23,8 +23,8 @@ services:
       AEMEATH_SERVER_HTTP_ADDR: 0.0.0.0:3000
       AEMEATH_SERVER_GRPC_ADDR: 0.0.0.0:50051
     ports:
-      - "3000:3000"
-      - "50051:50051"
+      - "${AEMEATH_SERVER_HTTP_PORT:-13000}:3000"
+      - "${AEMEATH_SERVER_GRPC_PORT:-15051}:50051"
     depends_on:
       mongodb:
         condition: service_healthy
