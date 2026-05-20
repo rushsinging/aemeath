@@ -3,9 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.0.8",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc --noEmit"
+    "generate:openapi": "cargo run -p server --bin export_openapi -- ../openapi/aemeath.json",
+    "generate:schema": "openapi-typescript ../openapi/aemeath.json -o src/generated/schema.d.ts",
+    "generate": "pnpm generate:openapi && pnpm generate:schema",
+    "build": "pnpm generate && tsc --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.15.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.10.1",
+    "typescript": "^5.6.0"
   }
 }

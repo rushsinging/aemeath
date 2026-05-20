@@ -1,11 +1,12 @@
 use mongodb::bson::oid::ObjectId;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
 pub struct Workspace {
     pub id: String,
     pub tenant_id: String,
@@ -17,7 +18,7 @@ pub struct Workspace {
     pub version: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
 pub struct Chat {
     pub id: String,
     pub workspace_id: String,
@@ -28,7 +29,7 @@ pub struct Chat {
     pub version: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq, Serialize)]
 pub struct ChatMessage {
     pub id: String,
     pub chat_id: String,
