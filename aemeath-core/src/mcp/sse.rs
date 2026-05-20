@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, Mutex};
 
 /// Parsed SSE event
 #[derive(Debug, Clone)]
@@ -111,8 +111,6 @@ pub struct SseTransport {
     _event_tx: mpsc::Sender<SseEvent>,
     /// Channel receiver — consumers read events from here
     event_rx: Arc<Mutex<mpsc::Receiver<SseEvent>>>,
-    /// Notifier for when a new event arrives
-    notify: Arc<Notify>,
 }
 
 impl SseTransport {
@@ -144,7 +142,6 @@ impl SseTransport {
         }
 
         let (event_tx, event_rx) = mpsc::channel::<SseEvent>(256);
-        let notify = Arc::new(Notify::new());
 
         // We need to read the first chunk(s) to find the endpoint event,
         // then hand off the stream to a background task.
@@ -164,16 +161,19 @@ impl SseTransport {
                     Ok(Some(Ok(chunk))) => {
                         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                        for event in parse_sse_events(&buffer) {
-                            if event.event_type == "endpoint" {
-                                endpoint_url =
-                                    Some(resolve_endpoint_url(sse_url, &event.data)?);
-                            } else {
-                                let _ = event_tx.send(event).await;
-                            }
-                        }
+                        // Only parse complete SSE events
                         if let Some(pos) = buffer.rfind("\n\n") {
+                            let complete = buffer[..pos + 2].to_string();
                             buffer = buffer[pos + 2..].to_string();
+
+                            for event in parse_sse_events(&complete) {
+                                if event.event_type == "endpoint" {
+                                    endpoint_url =
+                                        Some(resolve_endpoint_url(sse_url, &event.data)?);
+                                } else {
+                                    let _ = event_tx.send(event).await;
+                                }
+                            }
                         }
 
                         if endpoint_url.is_some() {
@@ -203,7 +203,6 @@ impl SseTransport {
         };
 
         // Phase 2: spawn background task to continue reading SSE events
-        let notify_clone = notify.clone();
         let tx_clone = event_tx.clone();
         tokio::spawn(async move {
             let mut buffer = String::new();
@@ -213,11 +212,18 @@ impl SseTransport {
                 match chunk_result {
                     Ok(chunk) => {
                         buffer.push_str(&String::from_utf8_lossy(&chunk));
-                        for event in parse_sse_events(&buffer) {
-                            let _ = tx_clone.send(event).await;
-                        }
-                        if let Some(pos) = buffer.rfind("\n\n") {
+
+                        // Only parse complete SSE events (delimited by \n\n)
+                        let complete = if let Some(pos) = buffer.rfind("\n\n") {
+                            let up_to_delim = buffer[..pos + 2].to_string();
                             buffer = buffer[pos + 2..].to_string();
+                            up_to_delim
+                        } else {
+                            continue; // No complete event yet
+                        };
+
+                        for event in parse_sse_events(&complete) {
+                            let _ = tx_clone.send(event).await;
                         }
                     }
                     Err(e) => {
@@ -225,10 +231,8 @@ impl SseTransport {
                         break;
                     }
                 }
-                notify_clone.notify_waiters();
             }
             log::info!("[MCP:SSE] background reader finished");
-            notify_clone.notify_waiters();
         });
 
         log::info!("[MCP:SSE] connected, endpoint={endpoint_url}");
@@ -238,7 +242,6 @@ impl SseTransport {
             endpoint_url,
             _event_tx: event_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
-            notify,
         })
     }
 
@@ -247,39 +250,39 @@ impl SseTransport {
     /// POSTs the request body to the endpoint URL, then waits for an SSE
     /// `message` event whose JSON-RPC `id` matches.
     pub async fn send_request(&self, request_body: &Value) -> Result<Value, String> {
-        let body = serde_json::to_string(request_body)
-            .map_err(|e| format!("serialize request: {e}"))?;
+      let body = serde_json::to_string(request_body)
+          .map_err(|e| format!("serialize request: {e}"))?;
 
-        let req_id = request_body
-            .get("id")
-            .and_then(|v| v.as_u64());
+      let req_id = request_body
+          .get("id")
+          .and_then(|v| v.as_u64());
 
-        let resp = self
-            .http_client
-            .post(&self.endpoint_url)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| format!("POST to MCP endpoint failed: {e}"))?;
+      let resp = self
+          .http_client
+          .post(&self.endpoint_url)
+          .header("Content-Type", "application/json")
+          .body(body)
+          .send()
+          .await
+          .map_err(|e| format!("POST to MCP endpoint failed: {e}"))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(format!("MCP endpoint returned {status}: {text}"));
-        }
+      if !resp.status().is_success() {
+          let status = resp.status();
+          let text = resp.text().await.unwrap_or_default();
+          return Err(format!("MCP endpoint returned {status}: {text}"));
+      }
 
-        // For SSE transport, the response comes via the SSE event stream,
-        // not from the POST response itself. The POST response is typically
-        // 202 Accepted or 200 OK with empty body.
-        // Wait for the response on the SSE channel.
-        if let Some(id) = req_id {
-            self.wait_for_response(id).await
-        } else {
-            // Notification — no response expected
-            Ok(Value::Null)
-        }
-    }
+      // For SSE transport, the response comes via the SSE event stream,
+      // not from the POST response itself. The POST response is typically
+      // 202 Accepted or 200 OK with empty body.
+      // Wait for the response on the SSE channel.
+      if let Some(id) = req_id {
+          self.wait_for_response(id).await
+      } else {
+          // Notification — no response expected
+          Ok(Value::Null)
+      }
+  }
 
     /// Wait for a JSON-RPC response with the given `id` from the SSE stream.
     async fn wait_for_response(&self, id: u64) -> Result<Value, String> {
@@ -296,17 +299,17 @@ impl SseTransport {
                 }
             }
 
-            // Wait for new events with timeout
-            let notified = tokio::time::timeout_at(deadline, self.notify.notified()).await;
-            if notified.is_err() {
+            // Wait for an event to arrive (channel recv is level-triggered)
+            let recv_result = tokio::time::timeout_at(deadline, rx.recv()).await;
+            if recv_result.is_err() {
                 return Err(format!(
                     "MCP SSE response timed out after {}s (request id={})",
                     SSE_REQUEST_TIMEOUT_SECS, id
                 ));
             }
 
-            // Drain newly arrived events
-            while let Some(event) = rx.try_recv().ok() {
+            // Process the received event
+            if let Some(event) = recv_result.unwrap() {
                 if let Some(response) = try_extract_response(&event.data, id)? {
                     return Ok(response);
                 }
