@@ -10,13 +10,15 @@
     "generate:openapi": "cargo run -p server --bin export_openapi -- ../openapi/aemeath.json",
     "generate:schema": "openapi-typescript ../openapi/aemeath.json -o src/generated/schema.d.ts",
     "generate": "pnpm generate:openapi && pnpm generate:schema",
-    "build": "pnpm generate && tsc --noEmit"
+    "build": "pnpm generate && tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "openapi-fetch": "^0.15.0"
   },
   "devDependencies": {
     "openapi-typescript": "^7.10.1",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.0.0"
   }
 }
