@@ -5,6 +5,8 @@ members = [
     "aemeath-llm",
     "aemeath-tools",
     "aemeath-cli",
+    "server",
+    "agents",
 ]
 
 [workspace.dependencies]

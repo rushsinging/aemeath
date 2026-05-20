@@ -58,10 +58,10 @@ WS /ws/workspaces/:ws_id/board
   → 实时推送 BoardSnapshot / BoardSnapshotUpdate 事件
   → 首次连接：全量 BoardSnapshot（is_full_snapshot=true）
   → 后续：增量 BoardSnapshotUpdate（各 changed/removed 字段列表）
-  → snapshot_id 格式：ULID（单调递增，断线后比对判断是否需全量重拉）
+  → snapshot_id 格式：UUIDv7 字符串（按生成时间大致有序，断线后用于比对判断是否需全量重拉）
 
 应用层消息类型：
-- `{"type": "Heartbeat", "snapshot_id": "01AR..."}` — Server 每 30s 发送；客户端无需回复，仅用于保活和断线超时检测
+- `{"type": "Heartbeat", "snapshot_id": "018f2f8e-7c7b-7c6a-9f7a-2a4f4f0d6a4b"}` — Server 每 30s 发送；客户端无需回复，仅用于保活和断线超时检测
 - `{"type": "Error", "code": "UNAUTHORIZED", "message": "..."}` — WS 级错误（鉴权失败、限流等）
 - BoardSnapshot 和 BoardSnapshotUpdate 的 type 字段分别为 `"snapshot"` 和 `"update"`
 ```

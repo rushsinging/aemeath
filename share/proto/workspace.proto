@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package aemeath.v1;
+
+import "common.proto";
+
+service WorkspaceService {
+  rpc Watch(WatchRequest) returns (stream WorkspaceEvent);
+}
+
+message Workspace {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string provider = 4;
+  string model = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+  uint64 version = 8;
+}
+
+message WorkspaceEvent {
+  EventType event_type = 1;
+  optional Workspace entity = 2;
+}
