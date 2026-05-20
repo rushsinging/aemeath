@@ -30,7 +30,8 @@ pub enum ProjectStatus {
 }
 ```
 
-### ProjectTaskStatus（ProjectTask 状态枚举）
+### ProjectTaskStatus（ProjectTask 状态枚举 — Project 聚合内的子实体状态机，所有状态转换通过 ProjectService RPC 完成）
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectTaskStatus {
@@ -75,7 +76,7 @@ Scheduler Watch 到 Pending Project
      │                         │
      │                         └── Executor 开始执行
      │                             ▼
-     │                          InProgress ──▶ Pending（崩溃恢复；下属非终态 ProjectTask 一并回退到 Pending）
+     │                          InProgress ──▶ Pending（崩溃恢复；通过 ProjectService.ForceRollbackTask RPC 将下属非终态 ProjectTask 一并回退到 Pending）
      │                             │
      │                             ├── Executor 调用 ProjectService.Complete RPC；API Server 校验所有 Task 终态后原子写入 ──▶ Completed
      │                             │
@@ -132,6 +133,8 @@ InProgress ──▶ Cancelled（用户取消）
 
 ### ProjectTask 状态流转
 
+> **DDD 语义**：ProjectTask 是 **Project 聚合的子实体**，所有状态转换通过 `ProjectService` RPC 作为统一入口执行，不通过独立的 TaskService。级联操作（Project 取消/失败 → Task 取消/失败）在 ProjectService 内以 MongoDB 多文档事务原子完成。
+
 ```
 pending ──▶ in_progress（Executor 分配给 Sub-Agent 并开始执行）
 in_progress ──▶ in_review
@@ -154,16 +157,16 @@ retrying    ──▶ pending（Executor 崩溃恢复，保留 retry_count + las
 
 ### Cooperative Cancel 协议
 
-Project `InProgress → Cancelled` / ProjectTask `* → cancelled` 触发流程：
+Project `InProgress → Cancelled` 触发流程（级联取消下属 Task 在 ProjectService 内部以 MongoDB 事务原子执行）：
 
 > 说明：Executor 是 gRPC client（调用 API Server），非 server。取消信号通过 Watch / Change Stream 的 pull 模型传递，而非 Server→Executor 的 push 模型。
 > Cooperative Cancel 两阶段模型：阶段 1 — REST 端仅设置 `cancel_requested_at`（非 `status`），不立即改变状态；阶段 2 — Executor Watch 感知后主动停止并回调 API Server 确认，届时才设置 `status = cancelled` 并清零 `cancel_requested_at`。
 
-1. 用户通过 REST `POST .../cancel` 发起取消 → **API Server 的 ProjectService / ProjectTaskService 写入 `cancel_requested_at` 时间戳**（⚠ 此时不改变 `status`，仍为 InProgress / Blocked）。该字段由 API Server 的 REST handler 直接写入，不依赖 Scheduler 同步参与。
+1. 用户通过 REST `POST .../cancel` 发起取消 → **API Server 的 ProjectService 写入 `cancel_requested_at` 时间戳**（⚠ 此时不改变 `status`，仍为 InProgress / Blocked）。该字段由 API Server 的 REST handler 直接写入，不依赖 Scheduler 同步参与。
 2. Executor 的 `Watch` stream 推送文档变更（`cancel_requested_at` 变为非空 → Executor 感知取消请求）
-3. Executor 在每步 Sub-Agent 调用间检查 `cancel_requested_at`。检测到取消后：停止当前 Sub-Agent → 释放 merge_lock → 清理 worktree → 通过 `ProjectService.ConfirmCancel`（或 `ProjectTaskService.ConfirmCancel`）RPC 回调 API Server，由 API Server 原子地将 `status` 设为 `cancelled` 并将 `cancel_requested_at` 清零
+3. Executor 在每步 Sub-Agent 调用间检查 `cancel_requested_at`。检测到取消后：停止当前 Sub-Agent → 释放 merge_lock → 清理 worktree → 通过 `ProjectService.ConfirmCancel` RPC 回调 API Server，由 API Server 原子地将 `status` 设为 `cancelled` 并将 `cancel_requested_at` 清零（级联取消下属 Task 在同一事务中原子执行）
   > 单文档 findAndModify 天然原子，无需 MongoDB 多文档事务。
-4. 强制超时：从 `cancel_requested_at` 字段时间戳起算，经过 `cancel_timeout_sec`（默认 60s，配置见 036-02 `scheduler.*` 段）后若 Executor 未回调确认，由 Scheduler 调用 `ProjectService.ForceCancel`（或 `ProjectTaskService.ForceCancel`）RPC，由 API Server 原子执行：设 `status=cancelled`、清零 `cancel_requested_at`、释放 merge_lock、级联取消所有非终态 Task（参见上文级联规则）
+4. 强制超时：从 `cancel_requested_at` 字段时间戳起算，经过 `cancel_timeout_sec`（默认 60s，配置见 036-02 `scheduler.*` 段）后若 Executor 未回调确认，由 Scheduler 调用 `ProjectService.ForceCancel` RPC，由 API Server 原子执行：设 `status=cancelled`、清零 `cancel_requested_at`、释放 merge_lock、级联取消所有非终态 Task（同一 MongoDB 事务内完成）
   
 > **竞态处理**：ConfirmCancel 和 ForceCancel 均以 `cancel_requested_at` 非空作为执行前置条件（findAndModify 原子检查）。先到达者将 `cancel_requested_at` 清零 + 设 `status=cancelled`；后到达者因 `cancel_requested_at` 已为空，操作幂等返回 `ok=false`。确保不会重复设 status。
 
