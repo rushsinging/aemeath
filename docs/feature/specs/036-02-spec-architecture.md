@@ -42,8 +42,8 @@
 | **端口模型** | 拆端口部署 | — | REST/WebSocket 监听 `3000`，gRPC 监听 `50051`；避免 tonic + axum 共享端口分流增加 MVP 复杂度 |
 | **MongoDB** | **mongodb** crate（官方） | 3.x | 支持 Change Streams + Transaction（依赖 MongoDB 5.0+ replica set） |
 | **Qdrant** | **qdrant-client** crate（官方） | 1.x | 向量存储 + CRUD + Search |
-| **Proto 管理** | tonic-build + prost | — | 编译期从 .proto 生成 Rust 代码；proto 文件驻留在 `share/proto/` 目录，独立于 Rust workspace |
-| **Cargo workspace** | 新增 1 个 crate | — | API Server 独立 crate：`server/`（含 gRPC handler + axum router + DB 操作） |
+| **Proto 管理** | tonic-build + prost | — | 编译期从 .proto 生成 Rust 代码；Sprint 0 使用 `share/proto/`，Sprint 0.5 后迁移到 `packages/proto/`，独立于 Rust workspace |
+| **Cargo workspace** | apps + packages monorepo | — | 应用放 `apps/`（cli/server/agents），公共库与协议/SDK 放 `packages/`（core/llm/tools/proto/sdk） |
 
 ### 端口与服务映射
 
@@ -58,12 +58,36 @@
 
 ## 架构概览
 
+### 仓库目录布局
+
+#36 从 Sprint 0.5 起采用 apps + packages 的 monorepo 布局：
+
+```text
+apps/
+  cli/        # 原 aemeath-cli，终端入口、TUI、REPL
+  server/     # #36 API Server：REST/WS + gRPC + DB access
+  agents/     # #36 Agent runtime、role config、Main/Sub-Agent features
+  ui/         # 后续 Sprint 2 引入的白板 Web UI
+packages/
+  core/       # 原 aemeath-core，公共核心库
+  llm/        # 原 aemeath-llm，LLM client 公共库
+  tools/      # 原 aemeath-tools，Tool 实现公共库
+  proto/      # 共享 proto 定义，替代 share/proto
+  sdk/        # REST/WS/gRPC SDK，替代 share/openapi/sdk
+infra/
+  mongodb/
+  deploy/
+docs/
 ```
-                    白板 UI（Vue + Element Plus，ui/）
+
+约束：`share/` 在 Sprint 0.5 后不再保留；Rust package 名为兼容现有代码可继续使用 `aemeath-core`、`aemeath-llm`、`aemeath-tools`、`aemeath-cli`。
+
+```
+                    白板 UI（Vue + Element Plus，apps/ui/）
                          │  REST / WebSocket
                          ▼
 ┌──────────────────────────────────────────────────────────┐
-│              API Server（server/）                          │
+│              API Server（apps/server/）                    │
 │                                                            │
 │  ┌──────────────────┐   ┌──────────────────────────┐      │
 │  │  REST / WS 网关   │   │   gRPC Service（Agent 接入）│      │

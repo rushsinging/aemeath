@@ -8,9 +8,9 @@ name = "aemeath"
 path = "src/main.rs"
 
 [dependencies]
-aemeath-core = { path = "../aemeath-core" }
-aemeath-llm = { path = "../aemeath-llm" }
-aemeath-tools = { path = "../aemeath-tools" }
+aemeath-core = { path = "../../packages/core" }
+aemeath-llm = { path = "../../packages/llm" }
+aemeath-tools = { path = "../../packages/tools" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
