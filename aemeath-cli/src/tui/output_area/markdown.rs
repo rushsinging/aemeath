@@ -7,6 +7,91 @@ mod tests;
 
 pub use table::{is_table_row, is_table_separator, render_table_block};
 
+/// 剥离内联 Markdown 格式标记，返回纯文本。
+/// 用于复制选中内容时去除 `**`、`#`、`` ` `` 等格式标记。
+///
+/// 支持的语法：
+/// - `**bold**`, `__bold__` → `bold`
+/// - `*italic*`, `_italic_` → `italic`
+/// - `` `code` `` → `code`
+/// - `~~strikethrough~~` → `strikethrough`
+/// - `[text](url)` → `text`
+/// - 格式不完整时保留原始文本
+pub fn strip_inline_formatting(text: &str) -> String {
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next();
+                strip_delimited(&mut result, &mut chars, "**", "**");
+            }
+            '_' if chars.peek() == Some(&'_') => {
+                chars.next();
+                strip_delimited(&mut result, &mut chars, "__", "__");
+            }
+            '*' => strip_delimited(&mut result, &mut chars, "*", "*"),
+            '_' => strip_delimited(&mut result, &mut chars, "_", "_"),
+            '`' => strip_delimited(&mut result, &mut chars, "`", "`"),
+            '~' if chars.peek() == Some(&'~') => {
+                chars.next();
+                strip_delimited(&mut result, &mut chars, "~~", "~~");
+            }
+            '[' => {
+                if !strip_link(&mut result, &mut chars) {
+                    result.push('[');
+                }
+            }
+            other => result.push(other),
+        }
+    }
+    result
+}
+
+fn strip_delimited(
+    result: &mut String,
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    marker: &str,
+    literal: &str,
+) {
+    match find_closing(chars, marker) {
+        Some(inner) => {
+            result.push_str(&inner);
+            advance_chars(chars, inner.chars().count() + marker.chars().count());
+        }
+        None => result.push_str(literal),
+    }
+}
+
+fn strip_link(result: &mut String, chars: &mut std::iter::Peekable<std::str::Chars>) -> bool {
+    let rest: String = chars.clone().collect();
+    let Some(close_bracket) = rest.find(']') else {
+        return false;
+    };
+    let after_bracket = rest.get(close_bracket + 1..).unwrap_or("");
+    if !after_bracket.starts_with('(') {
+        return false;
+    }
+    let url_start = close_bracket + 2;
+    let url_rest = rest.get(url_start..).unwrap_or("");
+    let Some(close_paren) = url_rest.find(')') else {
+        return false;
+    };
+    let inner = rest.get(0..close_bracket).unwrap_or("");
+    let url = rest.get(url_start..url_start + close_paren).unwrap_or("");
+    if inner.is_empty() || url.is_empty() {
+        return false;
+    }
+
+    result.push_str(inner);
+    advance_chars(
+        chars,
+        inner.chars().count() + 1 + 1 + url.chars().count() + 1,
+    );
+    true
+}
+
 /// 将纯文本中的内联 Markdown 标记转换为 styled Span 列表。
 ///
 /// 支持的语法：

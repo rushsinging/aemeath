@@ -1,5 +1,6 @@
 use aemeath_core::string_idx::{char_to_byte, CharIdx, StrSlice};
 
+use crate::tui::output_area::markdown;
 use crate::tui::safe_text::{safe_char_slice, safe_str_slice_by_char};
 
 impl super::OutputArea {
@@ -213,7 +214,9 @@ impl super::OutputArea {
         if result.is_empty() {
             None
         } else {
-            Some(result)
+            // Bug #51: strip inline Markdown formatting so copied text
+            // matches the rendered visual appearance, not raw source.
+            Some(markdown::strip_inline_formatting(&result))
         }
     }
 
