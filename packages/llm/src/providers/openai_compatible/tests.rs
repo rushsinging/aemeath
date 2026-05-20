@@ -114,7 +114,7 @@ fn volcengine_thinking_budget_maps_to_reasoning_effort() {
     let config = ReasoningConfig::ThinkingBudget(40000);
     let mut body = base_body();
 
-    OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+    VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
     assert_eq!(body.get("reasoning"), Some(&json!({"effort":"xhigh"})));
     assert!(body.get("thinking").is_none());
@@ -181,6 +181,28 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
     provider.set_max_tokens(0);
     let body = provider.base_request_body(Vec::new(), false);
     assert_eq!(body.get("max_tokens"), Some(&json!(32000)));
+}
+
+#[test]
+fn volcengine_provider_uses_max_output_tokens_field() {
+    let config = OpenAIProviderConfig::from_api_driver(
+        aemeath_core::provider::ApiDriverKind::Volcengine,
+        "volcengine",
+    );
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        None,
+        Some("test-model".to_string()),
+        32000,
+        false,
+        None,
+    );
+
+    provider.set_max_tokens(8192);
+    let body = provider.base_request_body(Vec::new(), false);
+    assert_eq!(body.get("max_output_tokens"), Some(&json!(8192)));
+    assert!(body.get("max_tokens").is_none());
 }
 
 #[test]
