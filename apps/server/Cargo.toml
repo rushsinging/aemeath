@@ -4,16 +4,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aide = { version = "0.16.0-alpha.4", features = ["axum", "axum-json", "axum-query", "macros"] }
 axum = { version = "0.8", features = ["ws"] }
 dirs = "6"
 mongodb = "3.2"
 prost = "0.13"
+schemars = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = "0.1"
-tonic = "0.12"
 tower = "0.5"
+tonic = "0.12"
 
 [build-dependencies]
 tonic-build = "0.12"

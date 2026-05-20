@@ -1,64 +1,42 @@
-use crate::model::app::{AppState, BoardUpdate, Chat, ChatMessage};
+use crate::model::app::{AppState, BoardUpdate};
+use crate::rest::board_dto::{BoardEvent, BoardSnapshot, BoardSnapshotUpdate, WorkspaceInfo};
+use crate::rest::dto::ErrorResponse;
+use crate::rest::path::WorkspacePath;
+use aide::axum::{ApiRouter, routing::get_with};
 use axum::{
     Json, Router,
     extract::{Path, State, ws::WebSocketUpgrade},
     response::IntoResponse,
     routing::get,
 };
-use serde::Serialize;
 
-#[derive(Serialize)]
-struct WorkspaceInfo {
-    id: String,
-    name: String,
-    provider: String,
-    model: String,
-}
-
-#[derive(Serialize)]
-struct BoardSnapshot {
-    snapshot_id: String,
-    workspace_id: String,
-    workspace: WorkspaceInfo,
-    chats: Vec<crate::model::app::Chat>,
-    recent_messages: Vec<crate::model::app::ChatMessage>,
-    is_full_snapshot: bool,
-}
-
-#[derive(Serialize)]
-struct BoardSnapshotUpdate {
-    snapshot_id: String,
-    changed_workspace: Option<WorkspaceInfo>,
-    is_full_snapshot: bool,
-    timestamp: i64,
-    changed_chats: Vec<Chat>,
-    removed_chat_ids: Vec<String>,
-    new_messages: Vec<ChatMessage>,
-    updated_messages: Vec<ChatMessage>,
-}
-
-#[derive(Serialize)]
-struct BoardEvent {
-    #[serde(rename = "type")]
-    event_type: &'static str,
-    payload: BoardSnapshotUpdate,
+pub fn api_router() -> ApiRouter<AppState> {
+    ApiRouter::new()
+        .route("/ws/workspaces/{workspace_id}/board", get(board_websocket))
+        .api_route(
+            "/api/workspaces/{workspace_id}/board/snapshot",
+            get_with(get_board_snapshot, |op| {
+                op.id("getBoardSnapshot")
+                    .summary("Get board snapshot")
+                    .response_with::<200, axum::Json<BoardSnapshot>, _>(|res| {
+                        res.description("Board snapshot returned")
+                    })
+                    .response_with::<404, axum::Json<ErrorResponse>, _>(|res| {
+                        res.description("Workspace not found")
+                    })
+            }),
+        )
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/ws/workspaces/{workspace_id}/board", get(board_websocket))
-        .route(
-            "/api/workspaces/{workspace_id}/board/snapshot",
-            get(get_board_snapshot),
-        )
-        .with_state(state)
+    api_router().with_state(state).into()
 }
 
 async fn get_board_snapshot(
     State(state): State<AppState>,
-    Path(workspace_id): Path<String>,
+    Path(path): Path<WorkspacePath>,
 ) -> Result<Json<BoardSnapshot>, axum::http::StatusCode> {
-    build_snapshot(&state, &workspace_id)
+    build_snapshot(&state, &path.workspace_id)
         .map(Json)
         .map_err(|_| axum::http::StatusCode::NOT_FOUND)
 }
@@ -72,7 +50,7 @@ async fn board_websocket(
         let mut updates = state.subscribe_board_updates();
         if let Ok(snapshot) = build_snapshot(&state, &workspace_id) {
             let event = BoardEvent {
-                event_type: "snapshot",
+                event_type: "snapshot".to_string(),
                 payload: BoardSnapshotUpdate::from_snapshot(snapshot),
             };
             if let Ok(payload) = serde_json::to_string(&event) {
@@ -91,7 +69,7 @@ async fn board_websocket(
                 continue;
             }
             let event = BoardEvent {
-                event_type: "update",
+                event_type: "update".to_string(),
                 payload: BoardSnapshotUpdate::from_board_update(update),
             };
             if let Ok(payload) = serde_json::to_string(&event) {
@@ -179,7 +157,7 @@ mod tests {
         let snapshot = build_snapshot(&state, &workspace.id).expect("snapshot built");
 
         let payload = serde_json::to_string(&BoardEvent {
-            event_type: "snapshot",
+            event_type: "snapshot".to_string(),
             payload: BoardSnapshotUpdate::from_snapshot(snapshot),
         })
         .expect("event serialized");
@@ -210,7 +188,7 @@ mod tests {
             .expect("message added");
 
         let payload = serde_json::to_string(&BoardEvent {
-            event_type: "update",
+            event_type: "update".to_string(),
             payload: BoardSnapshotUpdate::from_board_update(BoardUpdate {
                 workspace_id: workspace.id.clone(),
                 event_kind: crate::model::app::BoardEventKind::MessageAdded,

@@ -8,7 +8,7 @@
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 36 | Multi-Agent 框架 | 高 | 实施中 | 未确认 | Sprint 0/Sprint 0.5 已完成；Sprint 1 已完成 Workspace/Chat API 收尾切片：REST Workspace/Chat/Message、GET messages 分页、PATCH Chat、REST/gRPC AnalyzeMessage、WebSocket BoardSnapshotUpdate 正式 payload、ChatService/BoardService gRPC 骨架、gateway 配置、idempotency_key 去重与 server 内部 EventBus 骨架；下一步进入 Sprint 2 UI 核心或继续补 MongoDB 持久化/Watch 恢复语义。详见 [spec](specs/036-multi-agent-framework.md) |
+| 36 | Multi-Agent 框架 | 高 | 实施中 | 未确认 | Sprint 0/Sprint 0.5 已完成；Sprint 1 已完成 Workspace/Chat API 收尾切片：REST Workspace/Chat/Message、GET messages 分页、PATCH Chat、REST/gRPC AnalyzeMessage、WebSocket BoardSnapshotUpdate 正式 payload、ChatService/BoardService gRPC 骨架、gateway 配置、idempotency_key 去重与 server 内部 EventBus 骨架；当前切片新增 Rust server 通过 aide 导出 OpenAPI、TS SDK 由 OpenAPI 自动生成、Stop hook 校验 OpenAPI/SDK 一致性；下一步进入 Sprint 2 UI 核心或继续补 MongoDB 持久化/Watch 恢复语义。详见 [spec](specs/036-multi-agent-framework.md) |
 | 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider |
 | 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 
