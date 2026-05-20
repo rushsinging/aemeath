@@ -58,6 +58,11 @@ impl McpConnectionManager {
         Ok(())
     }
 
+    /// Number of configured servers
+    pub fn server_count(&self) -> usize {
+        self.config.servers.len()
+    }
+
     /// Connect to a specific server
     pub async fn connect_server(&self, name: &str) -> Result<McpServerConnection, String> {
         let connection = {

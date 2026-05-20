@@ -93,7 +93,10 @@ pub async fn spawn_mcp_connect(
     let manager = load_mcp_manager(cwd).await;
     let mgr = manager.clone();
 
+    log::info!("[MCP] spawning background connector for {} servers", mgr.server_count());
+
     tokio::spawn(async move {
+        log::info!("[MCP] background connector started");
         for (name, result) in manager.connect_all().await {
             match result {
                 Ok(connection) => {
@@ -103,6 +106,7 @@ pub async fn spawn_mcp_connect(
             }
         }
         manager.register_tools(&registry).await;
+        log::info!("[MCP] background connector finished");
     });
 
     mgr

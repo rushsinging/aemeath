@@ -127,6 +127,8 @@ impl SseTransport {
     ) -> Result<Self, String> {
         let http_client = build_http_client(headers)?;
 
+        log::info!("[MCP:SSE] connecting to {sse_url}");
+
         // Phase 1: connect and read until we get the endpoint event
         let response = http_client
             .get(sse_url)
@@ -151,16 +153,12 @@ impl SseTransport {
             let mut buffer = String::new();
             let mut endpoint_url: Option<String> = None;
 
-            let deadline =
-                tokio::time::Instant::now() + std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS);
+            let deadline = tokio::time::Instant::now()
+                + std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS);
 
             // Read chunks until we get the endpoint event (with timeout)
             loop {
-                let chunk_result = tokio::time::timeout_at(
-                    deadline,
-                    stream.next(),
-                )
-                .await;
+                let chunk_result = tokio::time::timeout_at(deadline, stream.next()).await;
 
                 match chunk_result {
                     Ok(Some(Ok(chunk))) => {
@@ -168,7 +166,8 @@ impl SseTransport {
 
                         for event in parse_sse_events(&buffer) {
                             if event.event_type == "endpoint" {
-                                endpoint_url = Some(resolve_endpoint_url(sse_url, &event.data)?);
+                                endpoint_url =
+                                    Some(resolve_endpoint_url(sse_url, &event.data)?);
                             } else {
                                 let _ = event_tx.send(event).await;
                             }
@@ -185,7 +184,9 @@ impl SseTransport {
                         return Err(format!("SSE read error: {e}"));
                     }
                     Ok(None) => {
-                        return Err("SSE stream ended before sending 'endpoint' event".to_string());
+                        return Err(
+                            "SSE stream ended before sending 'endpoint' event".to_string()
+                        );
                     }
                     Err(_) => {
                         return Err(format!(
@@ -229,6 +230,8 @@ impl SseTransport {
             log::info!("[MCP:SSE] background reader finished");
             notify_clone.notify_waiters();
         });
+
+        log::info!("[MCP:SSE] connected, endpoint={endpoint_url}");
 
         Ok(Self {
             http_client,
