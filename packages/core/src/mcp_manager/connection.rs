@@ -80,19 +80,21 @@ impl McpConnectionManager {
 
         match client {
             Ok(client) => {
-                // Discover tools (retry up to 3 times for transient SSE issues)
+                // Discover tools (retry up to 5 times for transient SSE issues).
+                // Stale SSE responses from timed-out attempts are handled by
+                // try_extract_response accepting older response IDs.
                 let mut tools = Vec::new();
-                for attempt in 1..=3 {
+                for attempt in 1..=5 {
                     match client.list_tools().await {
                         Ok(t) => {
                             tools = t;
                             break;
                         }
-                        Err(e) if attempt < 3 => {
+                        Err(e) if attempt < 5 => {
                             log::warn!("[MCP] tools/list attempt {attempt} failed: {e}, retrying...");
                         }
                         Err(e) => {
-                            log::warn!("[MCP] tools/list failed after 3 attempts: {e}");
+                            log::warn!("[MCP] tools/list failed after 5 attempts: {e}");
                         }
                     }
                 }

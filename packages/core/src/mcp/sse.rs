@@ -68,12 +68,17 @@ pub fn resolve_endpoint_url(base_url: &str, endpoint_path: &str) -> Result<Strin
 const SSE_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// Default timeout for individual JSON-RPC requests via SSE stream (seconds).
-const SSE_REQUEST_TIMEOUT_SECS: u64 = 30;
+///
+/// Some SSE servers (e.g. z.ai) split large responses across multiple chunks
+/// with long pauses between them. A shorter timeout with retries via stale
+/// response acceptance is more reliable than a single long timeout.
+const SSE_REQUEST_TIMEOUT_SECS: u64 = 15;
 
 /// Build a reqwest client with optional custom headers and sane timeouts.
 pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, String> {
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS));
+        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS))
+        .pool_max_idle_per_host(0); // disable connection pooling
     if !headers.is_empty() {
         let mut header_map = reqwest::header::HeaderMap::new();
         for (key, value) in headers {
@@ -95,7 +100,13 @@ pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, St
 /// The SSE GET stream is wrapped in `Mutex<SseReadStream>` so that
 /// `send_request` can exclusively read the next response.
 pub struct SseTransport {
-    http_client: Client,
+    /// Client used for the SSE GET stream (must NOT be shared with POST).
+    /// Kept alive to ensure the SSE TCP connection stays open.
+    #[allow(dead_code)]
+    stream_client: Client,
+    /// Separate client for POST requests — avoids HTTP/2 flow control issues
+    /// where consuming the POST body interferes with the SSE GET stream.
+    post_client: Client,
     endpoint_url: String,
     stream: Arc<Mutex<SseReadStream>>,
 }
@@ -113,11 +124,7 @@ impl SseReadStream {
             Some(Ok(chunk)) => {
                 let len = chunk.len();
                 self.buffer.push_str(&String::from_utf8_lossy(&chunk));
-                log::info!("[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes", self.buffer.len());
-                if self.buffer.len() > 100 {
-                    let preview: String = self.buffer.chars().take(200).collect();
-                    log::info!("[MCP:SSE] buffer preview: {preview:?}");
-                }
+                log::debug!("[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes", self.buffer.len());
                 Ok(true)
             }
             Some(Err(e)) => {
@@ -144,13 +151,15 @@ impl SseReadStream {
             }
         }
 
-        // Fallback: if buffer has data but no \n\n delimiter, try to parse
-        // the event anyway (handles servers that omit the trailing \n\n).
-        // Only attempt this if the buffer contains what looks like a complete
-        // JSON-RPC response (matching braces in the data line).
-        if events.is_empty() && !self.buffer.is_empty() {
+        // Fallback: if remaining buffer has data but no \n\n delimiter,
+        // try to parse the event anyway by directly parsing JSON.
+        // Handles servers (e.g. z.ai) that omit the trailing \n\n.
+        if !self.buffer.is_empty() && self.buffer.contains("data:") {
             if let Some(event) = try_parse_incomplete_event(&self.buffer) {
-                log::info!("[MCP:SSE] parsed incomplete event (no trailing \\n\\n)");
+                log::info!(
+                    "[MCP:SSE] parsed incomplete event (no trailing \\n\\n), data_len={}",
+                    event.data.len()
+                );
                 self.buffer.clear();
                 events.push(event);
             }
@@ -181,55 +190,35 @@ fn parse_single_event(block: &str) -> Option<SseEvent> {
         }
     }
     if !data.is_empty() {
-        log::info!("[MCP:SSE] drain: event={event_type} data_len={}", data.len());
         Some(SseEvent { event_type, data })
     } else {
         None
     }
 }
 
-/// Try to parse an SSE event that may be missing the trailing \n\n.
-/// Checks if the data line contains valid JSON with balanced braces.
+/// Try to parse an SSE event that may be missing the trailing `\n\n`.
+///
+/// Some servers (notably z.ai) omit the `\n\n` delimiter after the last SSE
+/// event, causing the client to buffer the data forever.  We work around this
+/// by extracting the `data:` payload and attempting a direct JSON parse.
 fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
-      // Extract the data: value
-      let data_start = buffer.find("data:")?;
-      let data_content = &buffer[data_start + 5..];
+    // Quick check — must contain "data:"
+    let data_start = buffer.find("data:")?;
+    let data_content = buffer[data_start + 5..].trim_start();
 
-      log::info!("[MCP:SSE] try_parse_incomplete: data_content_len={}", data_content.len());
-
-      // Check if the data looks like complete JSON (balanced braces)
-      let mut brace_depth = 0i32;
-    let mut in_string = false;
-    let mut escape_next = false;
-    for ch in data_content.chars() {
-        if escape_next {
-            escape_next = false;
-            continue;
-        }
-        if ch == '\\' && in_string {
-            escape_next = true;
-            continue;
-        }
-        if ch == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        match ch {
-            '{' | '[' => brace_depth += 1,
-            '}' | ']' => brace_depth -= 1,
-            _ => {}
-        }
+    // Fast check: does the data end with something that looks like JSON end?
+    // (avoids expensive JSON parse attempt on obviously incomplete data)
+    let trimmed = data_content.trim_end();
+    if !trimmed.ends_with('}') && !trimmed.ends_with(']') {
+        return None;
     }
 
-    if brace_depth != 0 {
-        log::info!("[MCP:SSE] try_parse_incomplete: brace_depth={brace_depth}, not balanced");
-        return None; // Unbalanced braces — JSON not complete yet
+    // Attempt actual JSON parse
+    if serde_json::from_str::<Value>(data_content).is_err() {
+        return None;
     }
 
-    // Looks complete — parse the event normally
+    // JSON is valid — build the event
     let event_part = &buffer[..data_start];
     let event_type = event_part
         .lines()
@@ -237,8 +226,11 @@ fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
         .map(|v| v.trim().to_string())
         .unwrap_or_else(|| "message".to_string());
 
-    let data = data_content.trim().to_string();
-    log::info!("[MCP:SSE] incomplete-fallback: event={event_type} data_len={}", data.len());
+    let data = data_content.to_string();
+    log::info!(
+        "[MCP:SSE] incomplete-fallback: event={event_type} data_len={}",
+        data.len()
+    );
     Some(SseEvent { event_type, data })
 }
 
@@ -248,11 +240,12 @@ impl SseTransport {
         sse_url: &str,
         headers: &HashMap<String, String>,
     ) -> Result<Self, String> {
-        let http_client = build_http_client(headers)?;
+        let stream_client = build_http_client(headers)?;
+        let post_client = build_http_client(headers)?;
 
         log::info!("[MCP:SSE] connecting to {sse_url}");
 
-        let response = http_client
+        let response = stream_client
             .get(sse_url)
             .header("Accept", "text/event-stream")
             .send()
@@ -312,7 +305,8 @@ impl SseTransport {
         log::info!("[MCP:SSE] connected, endpoint={endpoint_url}");
 
         Ok(Self {
-            http_client,
+            stream_client,
+            post_client,
             endpoint_url,
             stream: Arc::new(Mutex::new(stream_state)),
         })
@@ -325,9 +319,9 @@ impl SseTransport {
 
         let req_id = request_body.get("id").and_then(|v| v.as_u64());
 
-        // POST the request
+        // POST the request using the separate client
         let resp = self
-            .http_client
+            .post_client
             .post(&self.endpoint_url)
             .header("Content-Type", "application/json")
             .body(body)
@@ -389,6 +383,9 @@ impl SseTransport {
 }
 
 /// Try to parse an SSE event's data as a JSON-RPC response matching `expected_id`.
+///
+/// Accepts responses where `resp_id == expected_id` (exact match) or
+/// `resp_id < expected_id` (stale response from a previous timed-out request).
 fn try_extract_response(data: &str, expected_id: u64) -> Result<Option<Value>, String> {
     let value: Value = match serde_json::from_str(data) {
         Ok(v) => v,
@@ -396,8 +393,14 @@ fn try_extract_response(data: &str, expected_id: u64) -> Result<Option<Value>, S
     };
 
     let resp_id = value.get("id").and_then(|v| v.as_u64());
-    if resp_id != Some(expected_id) {
-        return Ok(None);
+
+    // Accept exact match or stale response from a previous attempt
+    match resp_id {
+        Some(rid) if rid == expected_id => {}
+        Some(rid) if rid < expected_id => {
+            log::info!("[MCP:SSE] accepting stale response id={rid} (expected {expected_id})");
+        }
+        _ => return Ok(None),
     }
 
     if let Some(error) = value.get("error") {
@@ -481,9 +484,18 @@ mod tests {
 
     #[test]
     fn test_try_extract_response_wrong_id() {
-        let data = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
+        // id > expected_id should be rejected
+        let data = r#"{"jsonrpc":"2.0","id":5,"result":{}}"#;
         let result = try_extract_response(data, 2).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_extract_response_stale_id_accepted() {
+        // id < expected_id (stale from previous attempt) should be accepted
+        let data = r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}"#;
+        let result = try_extract_response(data, 3).unwrap();
+        assert!(result.is_some());
     }
 
     #[test]
@@ -497,5 +509,26 @@ mod tests {
     fn test_try_extract_response_not_json() {
         let result = try_extract_response("not json", 1).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_parse_incomplete_event_valid_json() {
+        // SSE event without trailing \n\n but with valid JSON
+        let buffer = "event:message\ndata:{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
+        let event = try_parse_incomplete_event(buffer).unwrap();
+        assert_eq!(event.event_type, "message");
+        assert!(event.data.contains("\"id\":1"));
+    }
+
+    #[test]
+    fn test_try_parse_incomplete_event_invalid_json() {
+        // SSE event with truncated JSON
+        let buffer = "event:message\ndata:{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"na";
+        assert!(try_parse_incomplete_event(buffer).is_none());
+    }
+
+    #[test]
+    fn test_try_parse_incomplete_event_no_data() {
+        assert!(try_parse_incomplete_event("event:message\n").is_none());
     }
 }

@@ -198,9 +198,7 @@ pub(crate) async fn run_chat(mut args: Args) {
     aemeath_tools::register_all_tools(&registry, task_store.clone(), skills.clone());
 
     let registry = Arc::new(registry);
-    // TODO: MCP loading temporarily disabled — SSE transport has reliability issues (#28).
-    //       Re-enable once the SSE stream parsing is fixed.
-    // let _mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
+    let _mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
 
     // Create hook runner before agent_runner so it can be shared
     let cwd_str = cwd.display().to_string();
