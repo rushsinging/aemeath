@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::broadcast;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Workspace {
@@ -53,15 +54,38 @@ pub struct MessageAnalysis {
     pub reason: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BoardEventKind {
+    MessageAdded,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoardUpdate {
+    pub workspace_id: String,
+    pub event_kind: BoardEventKind,
+    pub message: ChatMessage,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum StoreError {
     InvalidInput { field: &'static str },
     NotFound { entity: &'static str },
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct AppState {
     inner: Arc<Mutex<StoreInner>>,
+    board_events: broadcast::Sender<BoardUpdate>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        let (board_events, _) = broadcast::channel(256);
+        Self {
+            inner: Arc::new(Mutex::new(StoreInner::default())),
+            board_events,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +97,10 @@ struct StoreInner {
 }
 
 impl AppState {
+    pub fn subscribe_board_updates(&self) -> broadcast::Receiver<BoardUpdate> {
+        self.board_events.subscribe()
+    }
+
     pub fn create_workspace(
         &self,
         tenant_id: String,
@@ -320,6 +348,11 @@ impl AppState {
             .message_idempotency
             .insert(idempotency_scope, message.id.clone());
         inner.messages.insert(message.id.clone(), message.clone());
+        let _ = self.board_events.send(BoardUpdate {
+            workspace_id: workspace_id.to_string(),
+            event_kind: BoardEventKind::MessageAdded,
+            message: message.clone(),
+        });
         Ok(AddMessageResult {
             message,
             deduplicated: false,
@@ -428,6 +461,68 @@ mod tests {
             result,
             Err(StoreError::InvalidInput { field }) if field == "name"
         ));
+    }
+
+    #[test]
+    fn test_add_message_publishes_board_update() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        let mut updates = state.subscribe_board_updates();
+
+        let result = state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "hello".into(),
+                "k1".into(),
+            )
+            .expect("message added");
+
+        let update = updates.try_recv().expect("update published");
+        assert_eq!(update.workspace_id, workspace.id);
+        assert_eq!(update.event_kind, BoardEventKind::MessageAdded);
+        assert_eq!(update.message.id, result.message.id);
+    }
+
+    #[test]
+    fn test_add_message_deduplicated_request_does_not_publish_board_update() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+
+        state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "hello".into(),
+                "k1".into(),
+            )
+            .expect("message added");
+        let mut updates = state.subscribe_board_updates();
+
+        let result = state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "hello again".into(),
+                "k1".into(),
+            )
+            .expect("message deduplicated");
+
+        assert!(result.deduplicated);
+        assert!(updates.try_recv().is_err());
     }
 
     #[test]

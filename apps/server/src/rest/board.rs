@@ -1,4 +1,4 @@
-use crate::model::app::AppState;
+use crate::model::app::{AppState, BoardEventKind, BoardUpdate, ChatMessage};
 use axum::{
     Json, Router,
     extract::{Path, State, ws::WebSocketUpgrade},
@@ -27,7 +27,9 @@ struct BoardSnapshot {
 
 #[derive(Serialize)]
 struct BoardEvent {
-    snapshot: BoardSnapshot,
+    event_type: &'static str,
+    snapshot: Option<BoardSnapshot>,
+    message: Option<ChatMessage>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -58,13 +60,50 @@ async fn board_websocket(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |mut socket| async move {
+        let mut updates = state.subscribe_board_updates();
         if let Ok(snapshot) = build_snapshot(&state, &workspace_id) {
-            let event = BoardEvent { snapshot };
+            let event = BoardEvent {
+                event_type: "full_snapshot",
+                snapshot: Some(snapshot),
+                message: None,
+            };
             if let Ok(payload) = serde_json::to_string(&event) {
-                let _ = socket.send(axum::extract::ws::Message::Text(payload.into())).await;
+                if socket
+                    .send(axum::extract::ws::Message::Text(payload.into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+
+        while let Ok(update) = updates.recv().await {
+            if update.workspace_id != workspace_id {
+                continue;
+            }
+            let event = BoardEvent {
+                event_type: event_type(&update),
+                snapshot: None,
+                message: Some(update.message),
+            };
+            if let Ok(payload) = serde_json::to_string(&event) {
+                if socket
+                    .send(axum::extract::ws::Message::Text(payload.into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
         }
     })
+}
+
+fn event_type(update: &BoardUpdate) -> &'static str {
+    match update.event_kind {
+        BoardEventKind::MessageAdded => "message_added",
+    }
 }
 
 fn build_snapshot(
@@ -94,6 +133,55 @@ fn uuid_like_snapshot_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_full_snapshot_event_serializes_event_type() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let snapshot = build_snapshot(&state, &workspace.id).expect("snapshot built");
+
+        let payload = serde_json::to_string(&BoardEvent {
+            event_type: "full_snapshot",
+            snapshot: Some(snapshot),
+            message: None,
+        })
+        .expect("event serialized");
+
+        assert!(payload.contains("\"event_type\":\"full_snapshot\""));
+        assert!(payload.contains("\"snapshot\""));
+    }
+
+    #[test]
+    fn test_message_added_event_serializes_message() {
+        let state = AppState::default();
+        let workspace = state
+            .create_workspace("t1".into(), "Main".into(), "p".into(), "m".into())
+            .expect("workspace created");
+        let chat = state
+            .create_chat(&workspace.id, "General".into())
+            .expect("chat created");
+        let result = state
+            .add_message(
+                &workspace.id,
+                &chat.id,
+                "user".into(),
+                "hello".into(),
+                "k1".into(),
+            )
+            .expect("message added");
+
+        let payload = serde_json::to_string(&BoardEvent {
+            event_type: "message_added",
+            snapshot: None,
+            message: Some(result.message),
+        })
+        .expect("event serialized");
+
+        assert!(payload.contains("\"event_type\":\"message_added\""));
+        assert!(payload.contains("\"content\":\"hello\""));
+    }
 
     #[test]
     fn test_build_snapshot_returns_workspace_chats_and_messages() {
