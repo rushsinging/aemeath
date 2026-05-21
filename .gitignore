@@ -23,6 +23,7 @@ Thumbs.db
 
 # AI tools
 .claude/
+.gstack/
 .serena/
 .worktrees/
 
