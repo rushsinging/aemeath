@@ -12,6 +12,47 @@
 | 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
 | 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；不引入运行时主题切换、不改布局、不引入外部配置 |
+| 40 | 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取 | 高 | 待实施 | 未确认 | 将当前 `.aemeath` / `CLAUDE.md` / skill 读取链路调整为 Codex 方向：全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；指令读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills 读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`；实现时必须考虑 git worktree 下 repo root / checkout root / cwd 的配置继承与去重，并提供现有配置迁移到新模式的方案。 |
+
+### #40 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取
+
+**目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
+
+**核心要求**：
+
+1. **全局配置目录**：默认使用 `~/.agents` 作为全局配置根，且该根目录本身必须可配置。
+2. **Agent 配置文件**：Aemeath 的主配置文件改为 `aemeath.json`，默认路径为 `~/.agents/aemeath.json`；项目级配置后续可按 Codex 风格放在项目 `.agents` / `.codex` 同类目录中评估，但本 feature 的明确目标是先统一全局配置与 agent 配置命名。
+3. **AGENTS.md 指令读取**：读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`，用于替代当前 `CLAUDE.md` 方向；拼接顺序、冲突处理和 prompt injection 扫描需在实现前明确。
+4. **skills 读取目录**：skills 固定优先读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`，保持 skill 包与命名空间机制可用。
+5. **现有配置迁移**：实现时必须提供从当前模式迁移到新模式的路径，包括但不限于 `~/.aemeath/config.json`、`{cwd}/.aemeath/config.json`、`~/.aemeath/skills`、`{cwd}/.aemeath/skills`、`{cwd}/CLAUDE.md`、`~/.claude/CLAUDE.md` 到新路径的迁移、兼容读取或提示方案。
+6. **Worktree 场景**：必须考虑 git worktree。读取项目指令和 repo skills 时，不能只假设 `cwd` 就是主 checkout；需要明确 cwd、worktree checkout root、git common dir / repo root 的关系，避免 linked worktree 中漏读项目级 `.agents/skills` 或重复读取同一份配置。
+
+**推荐设计方向**：
+
+- 新增统一的配置根解析逻辑：默认 `~/.agents`，允许通过 CLI 参数、环境变量或现有配置 bootstrap 指定其他目录；解析后统一供配置、skills、AGENTS.md 使用，避免各模块重复拼路径。
+- 新增迁移/兼容层：首次发现旧配置但新配置不存在时，提示或自动迁移到 `~/.agents/aemeath.json`；迁移完成前可保留只读兼容窗口，但新写入必须写到新路径。
+- 项目指令读取从 `CLAUDE.md` 改为 `AGENTS.md`：全局 `~/.agents/AGENTS.md` + 当前工作目录 `{cwd}/AGENTS.md`。后续如需 Codex 的父目录链式读取，应单独拆 feature，避免本轮范围失控。
+- Skills 读取收敛到 `~/.agents/skills` 与 `{cwd}/.agents/skills`；旧目录仅作为迁移来源，不应继续作为长期主路径。
+- Worktree 处理应优先基于 git 信息确定 worktree checkout root，并在 cwd 与 checkout root 不同时定义清楚读取策略：至少保证当前 cwd 的 `{cwd}/AGENTS.md`、`{cwd}/.agents/skills` 可用；如后续引入 checkout root 级读取，必须做路径 canonicalize 与去重。
+
+**涉及路径（预计）**：
+
+- `packages/core/src/config/manager/mod.rs`：配置文件路径与加载层级调整。
+- `packages/core/src/config/mod.rs`：配置 schema / 默认路径常量调整。
+- `apps/cli/src/prompt.rs`：`CLAUDE.md` 读取迁移到 `AGENTS.md`。
+- `packages/core/src/skill/loader.rs`：skill root 调整为 `~/.agents/skills` 与 `{cwd}/.agents/skills`。
+- `packages/core/src/state/settings.rs`：若仍保留 settings 写入，需迁移到新配置根或明确废弃。
+- `docs/feature/active.md`：实现进度同步更新。
+
+**验收标准**：
+
+1. 新安装用户默认读取 `~/.agents/aemeath.json`、`~/.agents/AGENTS.md`、`~/.agents/skills`。
+2. 项目内默认读取 `{cwd}/AGENTS.md` 与 `{cwd}/.agents/skills`。
+3. 旧 `~/.aemeath/config.json` / `.aemeath/config.json` / `.aemeath/skills` / `CLAUDE.md` 存在时，有清晰迁移或兼容提示，不静默丢配置。
+4. 在 linked worktree 中启动时，项目级 AGENTS.md 与 skills 读取行为稳定、可预测，且不会重复加载同一路径。
+5. 新写入的配置落到新模式，不再写回旧路径。
+
+---
 
 ### #36 Multi-Agent 框架
 
