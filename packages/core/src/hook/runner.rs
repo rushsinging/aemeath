@@ -150,7 +150,9 @@ impl HookRunner {
                 HookResult {
                     blocked,
                     output: stdout,
-                    error: if code != 0 && code != 2 {
+                    error: if code == 2 {
+                        non_empty_text(&stderr)
+                    } else if code != 0 {
                         Some(format!("exit code {code}: {stderr}"))
                     } else {
                         None
@@ -275,5 +277,14 @@ impl HookRunner {
         let results = self.run_hooks(event, tool_name, data).await;
         let blocked = results.iter().any(|r| r.blocked);
         (blocked, results)
+    }
+}
+
+fn non_empty_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }

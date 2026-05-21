@@ -89,31 +89,49 @@ fn stop_hook_feedback(
 ) -> Option<String> {
     hook_results
         .iter()
-        .find(|(_, result, json)| {
+        .filter(|(_, result, json)| {
             result.blocked
                 || json
                     .as_ref()
                     .is_some_and(|j| j.decision.as_deref() == Some("block"))
         })
-        .map(|(entry, result, json)| {
-            let reason = json
-                .as_ref()
-                .and_then(|j| {
-                    j.reason
-                        .clone()
-                        .or_else(|| j.system_message.clone())
-                        .or_else(|| j.additional_context.clone())
-                        .or_else(|| j.stop_reason.clone())
+        .find_map(|(entry, result, json)| hook_reason(result, json).map(|reason| (entry, reason)))
+        .or_else(|| {
+            hook_results
+                .iter()
+                .find(|(_, result, json)| {
+                    result.blocked
+                        || json
+                            .as_ref()
+                            .is_some_and(|j| j.decision.as_deref() == Some("block"))
                 })
-                .or_else(|| result.error.clone())
-                .or_else(|| non_empty_text(&result.output))
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_else(|| "Stop hook 阻止了停止，但没有提供原因".to_string());
+                .map(|(entry, _, _)| {
+                    (
+                        entry,
+                        "Stop hook 阻止了停止，但没有提供原因".to_string(),
+                    )
+                })
+        })
+        .map(|(entry, reason)| {
             format!(
                 "Stop hook 阻止了停止，请先解决以下问题后再结束：\n命令：{}\n{}",
                 entry.command, reason
             )
         })
+}
+
+fn hook_reason(result: &HookResult, json: &Option<HookJsonOutput>) -> Option<String> {
+    json.as_ref()
+        .and_then(|j| {
+            j.reason
+                .clone()
+                .or_else(|| j.system_message.clone())
+                .or_else(|| j.additional_context.clone())
+                .or_else(|| j.stop_reason.clone())
+        })
+        .or_else(|| result.error.clone())
+        .or_else(|| non_empty_text(&result.output))
+        .filter(|text| !text.trim().is_empty())
 }
 
 fn non_empty_text(text: &str) -> Option<String> {
@@ -123,6 +141,27 @@ fn non_empty_text(text: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn hook_result(
+    command: &str,
+    blocked: bool,
+    output: &str,
+    error: Option<&str>,
+) -> (aemeath_core::config::hooks::HookEntry, HookResult, Option<HookJsonOutput>) {
+    (
+        aemeath_core::config::hooks::HookEntry {
+            matcher: String::new(),
+            command: command.to_string(),
+            timeout: 60,
+        },
+        HookResult {
+            blocked,
+            output: output.to_string(),
+            error: error.map(str::to_string),
+        },
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -158,6 +197,20 @@ mod tests {
     }
 
     #[test]
+    fn test_stop_hook_feedback_uses_later_stdout_after_empty_blocked_result() {
+        let results = vec![
+            hook_result("build.sh", false, "build ok", None),
+            hook_result("line-check.sh", true, "", None),
+            hook_result("line-check.sh", true, "line limit exceeded", None),
+        ];
+
+        let feedback = stop_hook_feedback(&results).unwrap();
+
+        assert!(feedback.contains("line-check.sh"));
+        assert!(feedback.contains("line limit exceeded"));
+    }
+
+    #[test]
     fn test_stop_hook_feedback_uses_json_reason() {
         let results = vec![hook_result_with_json_reason("check.sh", "fix line count")];
 
@@ -165,27 +218,6 @@ mod tests {
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("fix line count"));
-    }
-
-    fn hook_result(
-        command: &str,
-        blocked: bool,
-        output: &str,
-        error: Option<&str>,
-    ) -> (HookEntry, HookResult, Option<HookJsonOutput>) {
-        (
-            HookEntry {
-                matcher: String::new(),
-                command: command.to_string(),
-                timeout: 60,
-            },
-            HookResult {
-                blocked,
-                output: output.to_string(),
-                error: error.map(str::to_string),
-            },
-            None,
-        )
     }
 
     fn hook_result_with_json_reason(
