@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use aemeath_core::config::MemoryConfig;
+use aemeath_core::config::{paths, MemoryConfig};
 use aemeath_core::hook::HookRunner;
 use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
@@ -11,7 +11,7 @@ pub struct SystemPromptParts {
     pub static_part: String,
     /// Dynamic context (date, git status) that changes per session.
     pub dynamic_part: String,
-    /// CLAUDE.md content, injected separately as a user-context message.
+    /// AGENTS.md content, injected separately as a user-context message.
     pub claude_md: String,
 }
 
@@ -112,8 +112,8 @@ pub async fn build_system_prompt_parts(
         dynamic.push_str(&memory_context);
     }
 
-    // --- CLAUDE.md: will be injected as a separate user-context message ---
-    let claude_md = load_claude_md(cwd, hook_runner).await;
+    // --- AGENTS.md: will be injected as a separate user-context message ---
+    let claude_md = load_agents_md(cwd, hook_runner).await;
 
     SystemPromptParts {
         static_part,
@@ -179,41 +179,34 @@ pub async fn is_git_repo(cwd: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
+pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     let mut parts: Vec<String> = Vec::new();
 
-    // Check project-level CLAUDE.md
-    let project_path = cwd.join("CLAUDE.md");
-    if project_path.exists() {
-        if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
-            // Trigger InstructionsLoaded hook
-            let file_path_str = project_path.to_string_lossy().to_string();
+    let global_path = paths::global_agents_md_path();
+    if global_path.exists() {
+        if let Ok(content) = tokio::fs::read_to_string(&global_path).await {
+            let file_path_str = global_path.to_string_lossy().to_string();
             hook_runner
-                .on_instructions_loaded(&file_path_str, "claude_md")
+                .on_instructions_loaded(&file_path_str, "agents_md")
                 .await;
             parts.push(content);
         }
     }
 
-    // Check home directory ~/.claude/CLAUDE.md (global instructions)
-    if let Some(home) = dirs::home_dir() {
-        let global_path = home.join(".claude").join("CLAUDE.md");
-        if global_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&global_path).await {
-                // Trigger InstructionsLoaded hook
-                let file_path_str = global_path.to_string_lossy().to_string();
-                hook_runner
-                    .on_instructions_loaded(&file_path_str, "claude_md")
-                    .await;
-                parts.push(content);
-            }
+    let project_path = paths::project_agents_md_path(cwd);
+    if project_path.exists() {
+        if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
+            let file_path_str = project_path.to_string_lossy().to_string();
+            hook_runner
+                .on_instructions_loaded(&file_path_str, "agents_md")
+                .await;
+            parts.push(content);
         }
     }
 
-    let mut claude_md = parts.join("\n\n");
+    let mut agents_md = parts.join("\n\n");
 
-    // Scan CLAUDE.md for prompt injection
-    let warnings = aemeath_core::security::scan_content("CLAUDE.md", &claude_md);
+    let warnings = aemeath_core::security::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(
@@ -225,11 +218,11 @@ pub async fn load_claude_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
             );
         }
         if let Some(prefix) = aemeath_core::security::format_warnings(&warnings) {
-            claude_md = format!("{}\n\n{}", prefix, claude_md);
+            agents_md = format!("{}\n\n{}", prefix, agents_md);
         }
     }
 
-    claude_md
+    agents_md
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
