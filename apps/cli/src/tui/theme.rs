@@ -18,6 +18,8 @@ pub const ACCENT: Color = Color::Rgb(125, 180, 255);
 pub const ACCENT_BRIGHT: Color = Color::Rgb(169, 203, 255);
 /// 深色背景。
 pub const SURFACE: Color = Color::Rgb(20, 23, 31);
+/// 状态栏背景。
+pub const STATUS_BG: Color = Color::Rgb(35, 43, 58);
 /// 浮层背景。
 pub const SURFACE_ELEVATED: Color = Color::Rgb(30, 35, 46);
 /// 选中背景。

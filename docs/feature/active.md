@@ -11,7 +11,7 @@
 | 36 | Multi-Agent 框架 | 高 | 实施中 | 未确认 | Sprint 0/Sprint 0.5 已完成；Sprint 1 已完成 Workspace/Chat API 收尾切片：REST Workspace/Chat/Message、GET messages 分页、PATCH Chat、REST/gRPC AnalyzeMessage、WebSocket BoardSnapshotUpdate 正式 payload、ChatService/BoardService gRPC 骨架、gateway 配置、idempotency_key 去重与 server 内部 EventBus 骨架；当前切片新增 Rust server OpenAPI 导出、TS SDK 自动生成、Stop hook 校验，以及 SDK WebSocket URL / idempotency_key / message request helper；Sprint 2 UI 已收敛为全屏 Sticky Whiteboard Workbench，选定静态 mockup `docs/feature/mockups/036-sprint-2-sticky-whiteboard-workbench.html`，并新增 `ui/` Vue 3 + Vite + Pinia + Element Plus 核心骨架：左右抽屉、紧凑便利贴、Requirement/Project 状态、agent 标识、点击详情和底部 chat dock 已用静态 Board store 落地；下一步接入 `@aemeath/sdk` REST/WS 真实 BoardSnapshot，或继续补 MongoDB 持久化/Watch 恢复语义。详见 [spec](specs/036-01-plan.md) |
 | 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
 | 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
-| 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；不引入运行时主题切换、不改布局、不引入外部配置 |
+| 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；不引入运行时主题切换、不改布局、不引入外部配置 |
 
 ### #36 Multi-Agent 框架
 
