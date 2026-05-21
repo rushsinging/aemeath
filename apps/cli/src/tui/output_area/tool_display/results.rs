@@ -13,7 +13,7 @@ impl super::super::OutputArea {
     ) {
         self.finish_streaming();
 
-        let header_idx = self.mark_tool_header_done(tool_id, is_error);
+        let header_idx = self.mark_tool_header_done(tool_id, tool_name, is_error);
         let id_tag = Some(tool_id.to_string());
         let mut result_lines = render_tool_result(tool_name, result, is_error, &id_tag);
         append_image_note(image_note, &id_tag, &mut result_lines);
@@ -31,7 +31,7 @@ impl super::super::OutputArea {
         self.insert_lines_at(insert_at, result_lines);
     }
 
-    fn mark_tool_header_done(&mut self, tool_id: &str, is_error: bool) -> Option<usize> {
+    fn mark_tool_header_done(&mut self, tool_id: &str, tool_name: &str, is_error: bool) -> Option<usize> {
         let done_icon = if is_error { "✗" } else { "✓" };
         let done_style = if is_error {
             LineStyle::ToolCallError
@@ -39,6 +39,7 @@ impl super::super::OutputArea {
             LineStyle::ToolCallSuccess
         };
 
+        // Phase 1: exact tool_id match
         for (idx, line) in self.lines.iter_mut().enumerate() {
             if matches!(line.style, LineStyle::ToolCallRunning)
                 && line.tool_id.as_deref() == Some(tool_id)
@@ -49,6 +50,21 @@ impl super::super::OutputArea {
             }
         }
 
+        // Phase 2: match pending placeholder by tool name prefix
+        // (e.g., pending:{tool_name}:{index}) — handles orphaned
+        // placeholders whose ToolCall event was not processed
+        let pending_prefix = format!("pending:{tool_name}:");
+        for (idx, line) in self.lines.iter_mut().enumerate().rev() {
+            if matches!(line.style, LineStyle::ToolCallRunning)
+                && line.tool_id.as_deref().is_some_and(|id| id.starts_with(&pending_prefix))
+            {
+                line.content = line.content.replacen('●', done_icon, 1);
+                line.style = done_style;
+                return Some(idx);
+            }
+        }
+
+        // Phase 3: last-resort — any ToolCallRunning line
         for (idx, line) in self.lines.iter_mut().enumerate().rev() {
             if matches!(line.style, LineStyle::ToolCallRunning) {
                 line.content = line.content.replacen('●', done_icon, 1);

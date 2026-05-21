@@ -5,7 +5,8 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 未确认 | 2026-05 | 根因：process_in_background 中 tool_calls.is_empty() || stop_reason==EndTurn 时直接 break 退出 loop，未调用 drain_queued_input 消费 input_queue 中用户排队消息。修复：break 前先 drain queued input，有消息则 continue 继续 loop |
 | 51 | Output area 复制时复制出 Markdown 源码而非渲染后纯文本 | 中 | 修复中 | 未确认 | 2026-05 | 根因：get_selected_text 直接从 OutputLine.content 读取原始 Markdown 文本（含 **bold**、*italic*、`code` 等格式标记），而 TUI 渲染时通过 inline_markdown_spans 剥离了这些标记。修复：新增 strip_inline_formatting 函数剥离内联格式标记，在 get_selected_text 返回前应用 |
-| 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 活动中 | 未确认 | 2026-05 | 偶现：output area 中某条 tool call（如 `● Edit...`）前面的白点持续闪烁，但 Edit 工具的执行结果始终未显示；疑似 tool 执行完成但结果未正确注入 output area，或 tool call 状态卡在 pending 未转为 completed |
+| 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 修复中 | 未确认 | 2026-05 | 根因：deny_tool_calls 只发送 ToolResult 事件（携带 LLM 的 tool_use_id）不发送 ToolCall 事件，导致 pending placeholder 的 tool_id（pending:{name}:{index}）无法被 mark_tool_header_done 精确匹配；fallback 盲目抓最后一个 ToolCallRunning 行，当同轮存在其他 running tool 时会抓错行，被拒绝的 tool 的占位行永远保持 ToolCallRunning 状态。修复：(1) deny_tool_calls 先发 ToolCall 再发 ToolResult；(2) mark_tool_header_done fallback 增加 pending 前缀匹配阶段 |
+| 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 活动中 | 未确认 | 2026-05 | AskUserQuestion 含多个选项时（如 A/B/C），选项没有换行逐条显示，而是挤在同一行被截断；期望每个选项独占一行 |
 
 ## 专案
 
@@ -574,3 +575,27 @@ Tool Bash timed out after 120s
 **关联**：
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
+
+### #52 Tool call spinner 一直闪烁且 tool 结果未更新
+
+**状态**：修复中
+
+**症状**：当一轮 LLM 响应同时包含已批准和被拒绝的 tool call 时，output area 中被拒绝的 tool call（如 `● Edit...`）前面的白点持续闪烁，且拒绝结果（如 "Tool Edit denied"）未在该 tool call 下方正确展示。
+
+**复现路径**：
+1. `allow_all` 关闭（默认），LLM 发起一个 Approved 工具（如 Read）+ 一个 Denied 工具（如 Edit）
+2. 流式阶段两个 tool call 均创建 `pending:{name}:{index}` 占位行
+3. `deny_tool_calls` 对 Denied 工具仅发送 `ToolResult` 事件（携带 LLM 原生的 `tool_use_id`）
+4. `push_tool_result_with_diff` → `mark_tool_header_done(tool_use_id)` 精确匹配失败（占位行的 tool_id 是 `pending:Edit:0`，不是 `tool_use_id`）
+5. 触发 fallback → 抓**最后一个** `ToolCallRunning` 行（可能是 Read 的占位行），错误地标记 Read 为完成
+6. Edit 的占位行 `pending:Edit:0` 永远保持 `ToolCallRunning` → 白点持续闪烁
+
+**根因**：`deny_tool_calls`（`tools.rs`）只发送 `ToolResult` 事件，不发送 `ToolCall` 事件，导致 pending placeholder 的 `tool_id`（格式 `pending:{name}:{index}`）永远无法被 `mark_tool_header_done` 的精确匹配阶段命中。fallback 的"抓最后一个 `ToolCallRunning`"逻辑在同轮存在多个 running tool 时会抓错行。
+
+**修复（2026-05-20）**：
+1. **`apps/cli/src/tui/app/stream/tools.rs`**：`deny_tool_calls` 对每个被拒绝的 call 先发送 `UiEvent::ToolCall`（让 `push_tool_call` 将占位行的 tool_id 更新为 LLM 的 `tool_use_id`），再发送 `ToolResult`
+2. **`apps/cli/src/tui/output_area/tool_display/results.rs`**：`mark_tool_header_done` fallback 从单阶段改为三阶段：(Phase 1) 精确 tool_id 匹配 → (Phase 2) pending 占位行前缀匹配（`pending:{tool_name}:`）→ (Phase 3) 最后兜底：任意 `ToolCallRunning` 行
+
+**涉及路径**：
+- `apps/cli/src/tui/app/stream/tools.rs`（`deny_tool_calls` 新增 ToolCall 发送）
+- `apps/cli/src/tui/output_area/tool_display/results.rs`（`mark_tool_header_done` 三阶段 fallback）

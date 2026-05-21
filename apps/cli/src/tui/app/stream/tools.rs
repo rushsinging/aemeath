@@ -104,6 +104,15 @@ async fn deny_tool_calls(
                 }),
             )
             .await;
+        // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
+        // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
+        let _ = tx
+            .send(UiEvent::ToolCall {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                summary: call.input.to_string(),
+            })
+            .await;
         let result = (
             call.id.clone(),
             format!(
