@@ -8,11 +8,11 @@
 
 | 类型 | Agent | LlmContext | 白板访问 | 说明 |
 |---|---|---|---|---|
-| Main Agent | Chat | 有 LlmContext | 有 | 管理 Conversation（用户对话线程），面向用户多轮对话，接收用户消息，Watch BoardSnapshot + Requirement 汇报用户 |
-| Main Agent | Scheduler | 无 LlmContext（控制循环） | 有 | Watch + 分配决策，管理 Executor/Assistant Pool，不参与对话 |
-| Main Agent | Executor | 有 LlmContext | 有 | 持有 Project 执行上下文，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Chat（由 Chat 汇报用户） |
-| Main Agent | Assistant | 有 LlmContext | 有 | 后台 worker，分析需求、拆解 Project/Task、产出草案、结果汇总，Pool 由 Scheduler 调度 |
-| Main Agent | Evolver | 无 LlmContext（定时循环） | 有 | 独立后台，定期扫描已完成 Project 和 Executor 记录，提炼可复用模式，生成/优化 Skills、MCP 配置 |
+| Main Agent | Chat | 有 LlmContext | 有 | 管理 Conversation（用户对话线程），面向用户多轮对话，接收用户消息，通过 REST snapshot + Redis-backed BoardEvent 汇报用户 |
+| Main Agent | Scheduler | 无 LlmContext（控制循环） | 有 | 多实例 controller，通过 ControllerLease reconcile Workspace，创建 WorkItem，不直接调度进程 |
+| Main Agent | Executor | 有 LlmContext | 有 | 消费 executor WorkQueue，claim WorkItem，编排 Sub-Agent 执行 Tasks，有意义问题反馈 Chat（由 Chat 汇报用户） |
+| Main Agent | Assistant | 有 LlmContext | 有 | 后台 worker，消费 assistant WorkQueue，分析需求、拆解 Project/Task、产出草案、结果汇总 |
+| Main Agent | Evolver | 无 LlmContext（定时循环） | 有 | 可多实例后台 worker/controller，定期扫描已完成 Project 和 Executor 记录，提炼可复用模式，生成/优化 Skills、MCP 配置 |
 | Sub-Agent | Planner | 无 LlmContext | 无 | 一次性：接收需求 → 返回计划 |
 | Sub-Agent | Coder | 无 LlmContext | 无 | 一次性：接收 spec → 返回代码 |
 | Sub-Agent | Tester | 无 LlmContext | 无 | 一次性：接收代码 → 返回测试结果 |
@@ -22,13 +22,13 @@
 ### 上下文传递
 
 ```
-白板（持久上下文，Mongo）──▶ Executor 读取 ──▶ 精简摘要（gRPC 请求体）──▶ Sub-Agent 执行
+白板（持久上下文，MongoDB）──▶ Executor 读取 ──▶ 精简摘要（进程内输入）──▶ Sub-Agent 执行
                                                               │
                                                               ▼
-                                                        结果（gRPC 响应）
+                                                        结果（值对象）
                                                               │
                                                               ▼
-                              Executor 写回 ◀── 白板（持久化）
+                              Executor 通过应用服务写回 ◀── Project / Task 聚合
 ```
 
 Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久上下文 → 工作摘要 → Sub-Agent → 收集结果 → 写回白板。
@@ -37,15 +37,16 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 
 | 校验层 | 位置 | 规则 |
 |---|---|---|
-| Board 范围 | API Server gRPC 中间件 | Chat/Scheduler/Executor/Assistant/Evolver 的 token `scope` 包含 `board_read`/`board_write`；Main Agent 请求被 gRPC 中间件拦截（token 中携带 role/scope）；Sub-Agent 不直接连 API Server |
+| Board 范围 | REST/WS 中间件 + Application Service | UI 与 Main Agent 的 token `scope` 包含 `board_read`/`board_write`；Agent 不通过 RPC 访问 Server，写入必须走应用服务边界 |
+| WorkItem 范围 | Agent runtime + Application Service | 消费 WorkQueue 后必须校验 `work_item_claim` / `work_item_complete` scope，并校验 MongoDB lease owner |
 | Tool allowlist | Agent 装配时注入 | 按 RoleConfig.permissions 的 `allowed_tools` 过滤运行时工具（Bash/Read/Write/WebSearch/Grep/Glob 等） |
 | Sub-Agent 调用 | Executor 端校验 | 按 RoleConfig.permissions 的 `can_call_roles` 限制可选角色 |
-| 凭据隔离 | 装配时注入 | Sub-Agent 无 board 访问 token；Executor 不传递自身 credential |
+| 凭据隔离 | 装配时注入 | Sub-Agent 无 board/redis/mongo 访问凭据；Executor 不传递自身 credential |
 
 权限分层：
-- `scope` 是 API Server 资源权限，用于 gRPC/REST 中间件鉴权，例如 `board_read`、`board_write`、`agent_registry`。
+- `scope` 是 API / Application Service 资源权限，例如 `board_read`、`board_write`、`work_item_claim`、`work_item_complete`。
 - `allowed_tools` 是 Agent runtime 可调用的工具白名单，例如 `Bash`、`Read`、`Write`、`WebSearch`、`Grep`、`Glob`。
-- `board_read` / `board_write` 不属于 `allowed_tools`，只能出现在 token `scope` 或角色的 API 资源权限说明中。
+- `board_read` / `board_write` 不属于 `allowed_tools`，只能出现在 token `scope` 或角色的资源权限说明中。
 
 
 ## 白板渲染区域
@@ -55,7 +56,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
 | 用户需求消息 | Requirement | 用户通过 Chat 提交的需求记录（1:1 关联 ConversationMessage） |
 | 草案 | Requirement.draft | Assistant（由 Scheduler 调度）拆解产出的 Project/Task 草案 |
 | Project & Task | Project + ProjectTask（聚合内父子关系） | 需求拆解后的项目与任务 |
-| Agent 状态 | Agent Registry | 当前活跃的 Agent 实例、状态 |
+| Agent 状态 | AgentInstance + Redis presence | 当前活跃的 Agent 实例、状态；MongoDB 为可查询摘要，Redis TTL 为短期在线信号 |
 | 自定义数据区块 | 扩展注册 | 支持新增其他数据类型渲染 |
 
 
@@ -107,7 +108,7 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "content": "帮我做一个登录页面...",
   /*
    * message_type 由 Chat Agent 异步分析后写入，完整枚举：question | requirement | feedback | clarification | chitchat | system_notification
-   * 触发机制：Chat Agent 通过 Watch conversation_messages Change Stream 监听新消息，分析后回写 message_type
+   * 触发机制：ConversationMessage 写入后产生 DomainEvent/OutboxEvent；Chat/Assistant 通过 Redis WorkQueue 或 IntegrationEvent 处理并回写 message_type
    *   question            - 用户简单提问，不产生 Requirement，不需要拆解
    *   requirement   - 用户提出可执行需求，1:1 关联 Requirement 文档
    *   feedback      - 用户对草案/执行结果的反馈或确认
@@ -139,8 +140,8 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "category": "raw",                 // raw | organized
   "status": "pending",               // pending | analyzing | draft | in_progress | completed | rejected | cancelled
   "version": 0,
-  "project_ids": [ObjectId],         // 关联的 Project（N:N，由 API Server 在 Confirm RPC / Project 增删时同步维护，非 Executor 直接写入）
-  "task_ids": [ObjectId],            // 关联的 ProjectTask（N:N，完成判定；由 API Server 在 ProjectTask 增删时同步维护，非 Executor 直接写入）
+  "project_ids": [ObjectId],         // 关联的 Project（N:N，由应用服务在 Confirm / Project 增删时同步维护，非 Executor 直接写入）
+  "task_ids": [ObjectId],            // 关联的 ProjectTask（N:N，完成判定；由 Project Context 应用服务在 ProjectTask 增删时同步维护，非 Executor 直接写入）
                                      // ⚠️ 冗余字段：真实数据源为 ProjectService 内的 Task 子实体查询；此字段仅用于快速概览，不保证实时一致
   "draft": {
     "projects": [ { "name": "...", "tasks": [...] } ],
@@ -189,10 +190,10 @@ Sub-Agent **不感知白板存在**。Executor 是上下文的翻译层：持久
   "workspace_id": ObjectId,
   "requirement_ids": [ObjectId], // 关联的 Requirement（N:N）
   /*
-   * assigned_executor_id — 当前分配的 Executor Agent ID
-   * 可选；仅 assigned 后有值
-   * 独占保证：Scheduler 事务 + AgentInstance.current_project_id 部分唯一索引，详见 Scheduler 独占分配机制
-   * ⚠️ 跨聚合引用：AgentInstance 是独立聚合，此字段为引用关系
+   * assigned_executor_id — 当前执行该 Project 的 Executor Agent ID
+   * 可选；仅 assigned/in_progress 且存在 Active ExecutorAssignment 时有值
+   * 独占保证：ExecutorAssignment active partial unique index + WorkItem lease + Project 条件更新
+   * ⚠️ 跨聚合引用：AgentInstance 是独立聚合，此字段为查询冗余，真实执行权以 WorkItem/ExecutorAssignment 为准
    */
   "assigned_executor_id": ObjectId,
   "name": "登录页 UI 重构",
@@ -283,31 +284,138 @@ db.projects.createIndex(
 {
   "_id": ObjectId,
   "workspace_id": ObjectId,
-  "role": "executor",            // 角色标识（内置 + 用户自定义）
+  "agent_type": "executor",        // chat | scheduler | executor | assistant | evolver
+  "role": "executor",              // 角色标识（内置 + 用户自定义）
   "role_config_ref": "roles/executor.toml",
-  "status": "idle",              // initializing | idle | busy | heartbeat_lost | error
-  "version": 0,                  // 乐观锁
+  "capabilities": ["work_item_claim", "project_execute"],
+  "status": "idle",                // initializing | idle | busy | draining | offline | lost | error
+  "version": 0,
+  "max_concurrency": 1,
+  "active_work_item_ids": [ObjectId],
   "active_model": "anthropic/claude-sonnet-4-20250514",
   "model_state": {
-    // status: healthy | degraded | unhealthy
     "models": [
       { "model": "anthropic/claude-sonnet-4-20250514", "status": "healthy" },
       { "model": "openai/gpt-5-codex", "status": "healthy" }
     ]
   },
-  "current_project_id": Option<ObjectId>, // 当前处理的 Project（Executor 专用）；空闲时为 None/null；⚠️ 跨聚合引用（AgentInstance 是独立聚合）
-  "last_heartbeat": ISODate,
+  "last_heartbeat_at": ISODate,     // MongoDB 中的可查询摘要；短期在线状态以 Redis presence TTL 为准
+  "presence_key": "aemeath:<tenant>:presence:<agent_instance_id>",
   "created_at": ISODate,
   "updated_at": ISODate
 }
 ```
 
 ```javascript
-// AgentInstance 部分唯一索引：确保一个 Executor 同一时刻只绑定一个 Project
-db.agent_instances.createIndex(
-  { current_project_id: 1 },
-  { unique: true, partialFilterExpression: { current_project_id: { $exists: true } } }
-)
+// 按 workspace / role / status 查询可见 Agent 状态
+db.agent_instances.createIndex({ workspace_id: 1, agent_type: 1, status: 1 })
+db.agent_instances.createIndex({ last_heartbeat_at: 1 })
+```
+
+### WorkItem（Orchestration Context 聚合根）
+```jsonc
+{
+  "_id": ObjectId,
+  "workspace_id": ObjectId,
+  "required_agent_type": "executor",     // chat | scheduler | executor | assistant | evolver
+  "kind": "execute_project",             // analyze_requirement | reconcile_workspace | execute_project | execute_task | evolve_skill | ...
+  "payload_ref": {
+    "collection": "projects",
+    "id": ObjectId
+  },
+  "status": "pending",                   // pending | leased | running | succeeded | failed | cancelled
+  "idempotency_key": "workspace:project:task:kind",
+  "lease_owner": ObjectId,                // AgentInstance._id；null = 未租约
+  "lease_expires_at": ISODate,
+  "attempt": 0,
+  "max_attempts": 3,
+  "result_ref": {
+    "collection": "agent_runs",
+    "id": ObjectId
+  },
+  "cancel_requested_at": null,
+  "last_error": "",
+  "created_at": ISODate,
+  "updated_at": ISODate
+}
+```
+
+索引：
+```javascript
+db.work_items.createIndex({ workspace_id: 1, status: 1, required_agent_type: 1 })
+db.work_items.createIndex({ lease_owner: 1, lease_expires_at: 1 })
+db.work_items.createIndex({ idempotency_key: 1 }, { unique: true })
+```
+
+### AgentRun（Orchestration Context 聚合根）
+```jsonc
+{
+  "_id": ObjectId,
+  "workspace_id": ObjectId,
+  "work_item_id": ObjectId,
+  "agent_instance_id": ObjectId,
+  "attempt": 1,
+  "status": "started",                  // started | succeeded | failed | cancelled | timed_out
+  "started_at": ISODate,
+  "finished_at": null,
+  "audit_refs": [
+    { "kind": "llm_request", "ref": "agent.log:..." }
+  ],
+  "error": null,
+  "created_at": ISODate,
+  "updated_at": ISODate
+}
+```
+
+索引：
+```javascript
+db.agent_runs.createIndex({ work_item_id: 1, attempt: 1 }, { unique: true })
+db.agent_runs.createIndex({ agent_instance_id: 1, started_at: -1 })
+```
+
+### ControllerLease（Orchestration Context 聚合根）
+```jsonc
+{
+  "_id": ObjectId,
+  "workspace_id": ObjectId,
+  "controller_type": "scheduler",       // scheduler | evolver
+  "owner_agent_id": ObjectId,
+  "lease_expires_at": ISODate,
+  "generation": 1,
+  "created_at": ISODate,
+  "updated_at": ISODate
+}
+```
+
+索引：
+```javascript
+db.controller_leases.createIndex({ workspace_id: 1, controller_type: 1 }, { unique: true })
+db.controller_leases.createIndex({ lease_expires_at: 1 })
+```
+
+### OutboxEvent（Platform Context 一致性记录）
+```jsonc
+{
+  "_id": ObjectId,
+  "workspace_id": ObjectId,
+  "aggregate_type": "Project",
+  "aggregate_id": ObjectId,
+  "domain_event_type": "TaskReadyForExecution",
+  "payload": {},
+  "status": "pending",                  // pending | publishing | published | failed
+  "publish_attempt": 0,
+  "published_stream": null,
+  "published_stream_id": null,
+  "idempotency_key": "event:...",
+  "created_at": ISODate,
+  "updated_at": ISODate
+}
+```
+
+索引：
+```javascript
+db.outbox_events.createIndex({ status: 1, created_at: 1 })
+db.outbox_events.createIndex({ idempotency_key: 1 }, { unique: true })
 ```
 
 #### ExecutorAssignment（Orchestration Context 聚合根）
@@ -320,6 +428,7 @@ db.agent_instances.createIndex(
   "project_id": ObjectId,
   "executor_id": ObjectId,              // AgentInstance._id
   "workspace_id": ObjectId,
+  "work_item_id": ObjectId,             // 触发本次执行的 WorkItem
   "assigned_at": ISODate,
   "status": "active",                   // active | released | crashed
   "invocations": [                      // SubAgentInvocation 子实体列表
@@ -369,35 +478,34 @@ db.executor_assignments.createIndex({ workspace_id: 1, created_at: -1 })
  */
 ```
   
-### scheduler_state（Scheduler 内部状态）
+### scheduler_offsets（Scheduler 对账辅助状态）
 ```jsonc
 {
-  "_id": "singleton",                 // 固定 key—仅一条文档
-  "last_watch_resume_token": "...",   // MongoDB Change Stream resume token
-  "last_full_scan_at": ISODate,       // 最近一次全量对账时间
-  "last_heartbeat_scan_at": ISODate,  // 最近一次心跳扫描时间
-  "config_snapshot_hash": "sha256..." // 配置指纹（检测配置变更触发全量重调度）
+  "_id": "workspace:<workspace_id>:scheduler",
+  "workspace_id": ObjectId,
+  "last_full_scan_at": ISODate,
+  "last_control_stream_id": "1700000000000-0",
+  "config_snapshot_hash": "sha256..."
 }
 ```
-  
-### agent_heartbeats（Agent 心跳）
-```jsonc
-{
-  "_id": ObjectId,
-  "agent_instance_id": ObjectId,      // 关联的 AgentInstance
-  "load_metrics": {
-    "cpu_percent": 45.2,
-    "memory_mb": 256.0,
-    "active_tasks": 2
-  },
-  "heartbeat_at": ISODate             // 心跳时间戳
+
+说明：Scheduler 不保存 Change Stream resume token。Redis stream id 只用于 control signal 消费位置；真实可恢复状态来自 MongoDB 聚合与 WorkItem。
+
+### Redis presence keys（短期心跳，非 MongoDB collection）
+```text
+key: aemeath:<tenant_id>:presence:<agent_instance_id>
+ttl: presence_ttl_sec
+value: {
+  workspace_id,
+  agent_type,
+  status,
+  active_work_item_count,
+  updated_at
 }
-/*
- * 复合索引: { agent_instance_id: 1, heartbeat_at: -1 }
- * TTL 索引: { heartbeat_at: 1 }, expireAfterSeconds=120（2min 过期，旧心跳自动清理）
- */
 ```
-  
+
+说明：Redis TTL key 是短期在线信号，不是领域真相。MongoDB `agent_instances.last_heartbeat_at` 仅保存可查询摘要。
+
 ## 核心查询索引
   
 以下索引支撑各实体的主要查询路径（collection 创建脚本必须包含）：
@@ -414,21 +522,28 @@ db.executor_assignments.createIndex({ workspace_id: 1, created_at: -1 })
 | `requirements` | `{ source_message_id: 1 }` | 1:1 反向查找 |
 | `projects` | `{ embedding_status: 1 }` | 重试失败的 embedding |
 | `projects` | `{ workspace_id: 1, status: 1 }` | 按状态列出 Project |
-| `projects` | `{ assigned_executor_id: 1 }` | Executor→Project 查询 |
+| `projects` | `{ assigned_executor_id: 1 }` | Executor→Project 查询（冗余视图，真实执行权以 WorkItem/Assignment 为准） |
 | `projects` | `{ "requirement_ids": 1 }` | N:N 反向查找 |
 | `project_tasks` | `{ project_id: 1, status: 1 }` | 按 Project 列出 Task |
 | `project_tasks` | `{ assigned_executor_id: 1 }` | Executor→Task 查询 |
 | `project_tasks` | `{ embedding_status: 1 }` | 重试失败的 embedding |
 | `reflections` | `{ workspace_id: 1, project_id: 1 }` | 按 Project 查找 Reflection |
 | `reflections` | `{ embedding_status: 1 }` | 重试失败的 embedding |
-| `agent_instances` | `{ workspace_id: 1, role: 1, status: 1 }` | Pool 查询与管理 |
-| `agent_instances` | `{ current_project_id: 1 }`，partial `{ current_project_id: { $exists: true } }`，unique | 确保一个 Project 只绑一个 Active Executor |
+| `agent_instances` | `{ workspace_id: 1, agent_type: 1, status: 1 }` | Agent 状态查询 |
+| `agent_instances` | `{ last_heartbeat_at: 1 }` | Lost/Offline 对账 |
+| `work_items` | `{ workspace_id: 1, status: 1, required_agent_type: 1 }` | WorkQueue 对账与补投递 |
+| `work_items` | `{ lease_owner: 1, lease_expires_at: 1 }` | lease 续租与超时恢复 |
+| `work_items` | `{ idempotency_key: 1 }`，unique | WorkItem 幂等创建 |
+| `agent_runs` | `{ work_item_id: 1, attempt: 1 }`，unique | AgentRun attempt 幂等 |
+| `agent_runs` | `{ agent_instance_id: 1, started_at: -1 }` | Agent 执行审计 |
+| `controller_leases` | `{ workspace_id: 1, controller_type: 1 }`，unique | Scheduler/Evolver workspace lease |
+| `controller_leases` | `{ lease_expires_at: 1 }` | 过期 lease 扫描 |
+| `outbox_events` | `{ status: 1, created_at: 1 }` | Outbox publisher claim |
+| `outbox_events` | `{ idempotency_key: 1 }`，unique | Outbox 幂等发布 |
 | `projects` | `{ "merge_lock.locked_by_executor": 1 }`，partial `{ "merge_lock.locked_by_executor": { $exists: true } }` | 按 Executor 查找被锁 Project |
 | `projects` | `{ reflected_at: 1 }`，partial `{ status: "completed", reflected_at: null }` | Evolver 定期扫描未反思 Project |
 | `conversation_messages` | `{ workspace_id: 1, created_at: -1 }` | Board 全量拉取最近消息（BoardSnapshot.recent_messages） |
 | `idempotency_records` | `{ key: 1, entity_type: 1, scope: 1 }`，unique | 幂等去重 |
-| `agent_heartbeats` | `{ agent_instance_id: 1, heartbeat_at: -1 }` | 查询 Agent 最近心跳 |
-| `agent_heartbeats` | `{ heartbeat_at: 1 }`，TTL 120s | 自动清理过期心跳数据 |
 
 > **⚠️ 迁移脚本必须包含上表所有索引及下述各 schema 内注释声明的 partial/unique 索引，不可只依赖上表生成。**
 ## 关键数据结构
@@ -449,23 +564,25 @@ pub struct BoardSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoardSnapshotUpdate {
-    pub snapshot_id: String,        // 基于哪个快照做 diff
-    pub changed_workspace: Option<WorkspaceInfo>,  // Workspace 元信息变更（name/provider/model 等；首次消息 is_full_snapshot=true 时必须为 Some；None = 本次无变更）
-    pub is_full_snapshot: bool,     // 首次 Watch 消息为 true
+pub struct BoardEvent {
+    pub stream_id: Option<String>,                  // Redis stream id；发送给客户端时填充
+    pub workspace_id: ObjectId,
+    pub event_type: String,                         // snapshot_required | updated | heartbeat | error
+    pub snapshot_id: Option<String>,                // 当前 MongoDB projection snapshot；需要重拉时可为空
     pub timestamp: i64,
-    pub changed_requirements: Vec<Requirement>,   // 新增/变更的 Requirement
-    pub removed_requirement_ids: Vec<ObjectId>,   // 删除/移除的 Requirement ID
-    pub changed_projects: Vec<ProjectWithTasks>,  // 新增/变更的 Project；ProjectWithTasks.tasks 仅在 Project 首次出现（new）时填充全部 Task；增量更新（update）时 tasks 为空，Task 变更在 changed_tasks 中
-    pub changed_tasks: Vec<ProjectTask>,          // 新增/变更的 ProjectTask（包括 status/results 等运行时变更）
-    pub removed_project_ids: Vec<ObjectId>,       // 删除/移除的 Project ID
-    pub removed_task_ids: Vec<ObjectId>,          // 删除/移除的 ProjectTask ID
-    pub changed_conversations: Vec<Conversation>, // 新增/变更的 Conversation 会话
-    pub removed_conversation_ids: Vec<ObjectId>,  // 删除/移除的 Conversation ID
-    pub new_messages: Vec<ConversationMessage>,   // 新增 Conversation 消息（首次出现）
-    pub updated_messages: Vec<ConversationMessage>, // 已有消息的任何字段变更（content/message_type/元数据等；异步写入的 message_type 也在此）
-    pub changed_agents: Vec<AgentInstance>,       // 新增/变更的 Agent 状态
-    pub removed_agent_ids: Vec<ObjectId>,         // 删除/移除的 Agent ID
+    pub changed_workspace: Option<WorkspaceInfo>,
+    pub changed_requirements: Vec<Requirement>,
+    pub removed_requirement_ids: Vec<ObjectId>,
+    pub changed_projects: Vec<ProjectWithTasks>,
+    pub changed_tasks: Vec<ProjectTask>,
+    pub removed_project_ids: Vec<ObjectId>,
+    pub removed_task_ids: Vec<ObjectId>,
+    pub changed_conversations: Vec<Conversation>,
+    pub removed_conversation_ids: Vec<ObjectId>,
+    pub new_messages: Vec<ConversationMessage>,
+    pub updated_messages: Vec<ConversationMessage>,
+    pub changed_agents: Vec<AgentInstance>,
+    pub removed_agent_ids: Vec<ObjectId>,
 }
 
 /// Workspace 文档的核心子集，嵌入 BoardSnapshot；字段与 struct 定义一致
@@ -548,7 +665,7 @@ cost_tier = "medium"
 Executor 在唤起 Sub-Agent 时指定期望的 cost_tier：
 
 ```rust
-// Executor → Sub-Agent gRPC 请求
+// Executor → Sub-Agent 进程内输入值对象
 message ExecuteTaskRequest {
     string task_id = 1;
     string task_type = 2;          // "code_gen" | "planning" | "review" | "formatting"
