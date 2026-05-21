@@ -1,5 +1,7 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+
+use crate::tui::theme;
 
 mod table;
 #[cfg(test)]
@@ -155,9 +157,7 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 &mut buf,
                 &mut chars,
                 "`",
-                base_style
-                    .bg(Color::Rgb(40, 44, 52))
-                    .fg(Color::Rgb(171, 178, 191)),
+                base_style.bg(theme::CODE_BG).fg(theme::CODE_FG),
                 base_style,
                 "`",
             ),
@@ -234,7 +234,7 @@ fn push_link(
     spans.push(Span::styled(
         inner.to_string(),
         base_style
-            .fg(Color::Cyan)
+            .fg(theme::LINK)
             .add_modifier(Modifier::UNDERLINED),
     ));
     advance_chars(

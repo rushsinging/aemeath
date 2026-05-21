@@ -1,11 +1,8 @@
 use super::InputArea;
 use crate::tui::completion::{Suggestion, SuggestionType};
 use crate::tui::safe_text::truncate_unicode_width;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-};
+use crate::tui::theme;
+use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthChar;
 
 impl InputArea {
@@ -103,14 +100,14 @@ impl InputArea {
             let is_selected = (i + scroll_offset) as i32 == self.selected_suggestion;
             let y = area.y + i as u16;
             let bg_color = if is_selected {
-                Color::Cyan
+                theme::SELECTION_BG
             } else {
-                Color::Reset
+                theme::SURFACE_ELEVATED
             };
             let fg_color = if is_selected {
-                Color::Black
+                theme::SELECTION_FG
             } else {
-                Color::White
+                theme::TEXT
             };
             let text = format!(
                 " {} {}",

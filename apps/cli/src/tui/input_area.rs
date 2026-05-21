@@ -1,9 +1,6 @@
 use crate::tui::completion::Suggestion;
-use ratatui::{
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, Borders},
-};
+use crate::tui::theme;
+use ratatui::{layout::Rect, style::Style, widgets::{Block, Borders}};
 use tui_textarea::TextArea;
 
 mod editing;
@@ -103,8 +100,8 @@ impl InputArea {
 fn configured_textarea() -> TextArea<'static> {
     let mut textarea = TextArea::default();
     textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
-    textarea.set_cursor_line_style(Style::default().bg(Color::Reset));
-    textarea.set_cursor_style(Style::default().bg(Color::Cyan));
+    textarea.set_cursor_line_style(Style::default());
+    textarea.set_cursor_style(Style::default().bg(theme::ACCENT).fg(theme::SURFACE));
     textarea
 }
 

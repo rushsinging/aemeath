@@ -2,6 +2,7 @@
 //!
 //! Provides widgets for displaying task status and progress.
 
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -36,11 +37,11 @@ impl TaskStatus {
     /// Get the color for this status
     pub fn color(&self) -> Color {
         match self {
-            TaskStatus::Pending => Color::DarkGray,
-            TaskStatus::Running => Color::Yellow,
-            TaskStatus::Completed => Color::Green,
-            TaskStatus::Failed => Color::Red,
-            TaskStatus::Cancelled => Color::Gray,
+            TaskStatus::Pending => theme::TEXT_DIM,
+            TaskStatus::Running => theme::TOOL_RUNNING,
+            TaskStatus::Completed => theme::SUCCESS,
+            TaskStatus::Failed => theme::ERROR,
+            TaskStatus::Cancelled => theme::TEXT_MUTED,
         }
     }
 }
@@ -190,7 +191,7 @@ impl TaskList {
                 if self.show_ids {
                     spans.push(Span::styled(
                         format!("#{} ", task.id),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::TEXT_DIM),
                     ));
                 }
 
@@ -201,9 +202,9 @@ impl TaskList {
                     &task.subject
                 };
                 let subject_style = if self.selected == Some(i) {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::WARNING).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(theme::TEXT)
                 };
                 spans.push(Span::styled(subject_text, subject_style));
 
@@ -219,11 +220,11 @@ impl TaskList {
                     spans.push(Span::raw(" "));
                     spans.push(Span::styled(
                         bar,
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(theme::ACCENT),
                     ));
                     spans.push(Span::styled(
                         format!(" {}%", progress),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::TEXT_DIM),
                     ));
                 }
 
@@ -269,8 +270,8 @@ impl ProgressBar {
             width: 20,
             show_label: true,
             label: None,
-            color: Color::Cyan,
-            empty_color: Color::DarkGray,
+            color: theme::ACCENT,
+            empty_color: theme::TEXT_DIM,
         }
     }
 
@@ -304,7 +305,7 @@ impl ProgressBar {
         if let Some(ref label) = self.label {
             spans.push(Span::styled(
                 format!("{} ", label),
-                Style::default().fg(Color::White),
+                Style::default().fg(theme::TEXT),
             ));
         }
 
@@ -322,7 +323,7 @@ impl ProgressBar {
         if self.show_label {
             spans.push(Span::styled(
                 format!(" {}%", self.progress),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::TEXT_DIM),
             ));
         }
 
@@ -355,7 +356,11 @@ impl TaskStatusLine {
         }
 
         let mut spans = Vec::new();
-        let running: Vec<_> = self.tasks.iter().filter(|t| t.status == TaskStatus::Running).collect();
+        let running: Vec<_> = self
+              .tasks
+              .iter()
+              .filter(|t| t.status == TaskStatus::Running)
+              .collect();
         let completed = self.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
         let failed = self.tasks.iter().filter(|t| t.status == TaskStatus::Failed).count();
 
@@ -363,7 +368,7 @@ impl TaskStatusLine {
         if !running.is_empty() {
             spans.push(Span::styled(
                 format!("{} running", running.len()),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::TOOL_RUNNING),
             ));
         }
 
@@ -374,7 +379,7 @@ impl TaskStatusLine {
             }
             spans.push(Span::styled(
                 format!("✓ {} done", completed),
-                Style::default().fg(Color::Green),
+                Style::default().fg(theme::SUCCESS),
             ));
         }
 
@@ -385,7 +390,7 @@ impl TaskStatusLine {
             }
             spans.push(Span::styled(
                 format!("✗ {} failed", failed),
-                Style::default().fg(Color::Red),
+                Style::default().fg(theme::ERROR),
             ));
         }
 

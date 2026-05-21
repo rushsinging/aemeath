@@ -1,7 +1,8 @@
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -134,7 +135,7 @@ impl CommandPalette {
             lines.push(Line::default());
             lines.push(Line::styled(
                 " Enter to execute, Esc to close ",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::TEXT_DIM),
             ));
         }
 
@@ -150,29 +151,29 @@ impl Default for CommandPalette {
 
 fn search_prompt(query: &str) -> Line<'_> {
     Line::from(vec![
-        Span::styled(" ❯ ", Style::default().fg(Color::Cyan)),
-        Span::styled(query, Style::default().fg(Color::White)),
+        Span::styled(" ❯ ", Style::default().fg(theme::ACCENT)),
+        Span::styled(query, Style::default().fg(theme::TEXT)),
         Span::raw("_"),
     ])
 }
 
 fn separator(width: u16) -> Line<'static> {
-    Line::styled("─".repeat(width as usize), Style::default().fg(Color::DarkGray))
+    Line::styled("─".repeat(width as usize), Style::default().fg(theme::TEXT_DIM))
 }
 
 fn command_line(cmd: &Command, is_selected: bool) -> Line<'_> {
     let name_style = if is_selected {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme::WARNING).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(theme::TEXT)
     };
     Line::from(vec![
         Span::styled(
             if is_selected { " ❯ " } else { "   " },
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::WARNING),
         ),
         Span::styled(&cmd.name, name_style),
         Span::raw(" - "),
-        Span::styled(&cmd.description, Style::default().fg(Color::DarkGray)),
+        Span::styled(&cmd.description, Style::default().fg(theme::TEXT_DIM)),
     ])
 }

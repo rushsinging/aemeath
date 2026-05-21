@@ -2,10 +2,11 @@
 //!
 //! Provides a modal selection dialog for the TUI.
 
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -80,11 +81,11 @@ impl Dialog {
             .title(Span::styled(
                 format!(" {} ", self.title),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(theme::ACCENT));
 
         let inner = block.inner(dialog_area);
         block.render(dialog_area, buf);
@@ -96,13 +97,13 @@ impl Dialog {
                 lines.push(Line::styled(
                     format!(" > {}", option),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme::WARNING)
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
                 lines.push(Line::styled(
                     format!("   {}", option),
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(theme::TEXT_MUTED),
                 ));
             }
         }
@@ -110,7 +111,7 @@ impl Dialog {
         // Hint line
         lines.push(Line::styled(
             " Enter=select  Esc=cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::TEXT_DIM),
         ));
 
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);

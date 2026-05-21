@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use crate::tui::output_area::SpinnerState;
+use crate::tui::theme;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
 const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];
@@ -43,10 +44,10 @@ const SPINNER_VERBS: &[&str] = &[
     "Harmonizing",
 ];
 
-/// Spinner colors (warm orange theme)
-const SPINNER_BASE: Color = Color::Rgb(204, 152, 87);
-const SPINNER_HIGHLIGHT: Color = Color::Rgb(255, 210, 140);
-const SPINNER_DIM: Color = Color::Rgb(140, 105, 60);
+/// Spinner colors (theme accent)
+const SPINNER_BASE: Color = theme::SPINNER_BASE;
+const SPINNER_HIGHLIGHT: Color = theme::SPINNER_HIGHLIGHT;
+const SPINNER_DIM: Color = theme::SPINNER_DIM;
 
 /// Linear interpolation between two RGB colors
 fn lerp_color(a: Color, b: Color, t: f32) -> Color {
@@ -139,17 +140,17 @@ impl super::OutputArea {
         if elapsed >= 1 {
             spans.push(Span::styled(
                 format!("  {}s", elapsed),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::TEXT_DIM),
             ));
         }
 
         if let Some(phase) = s.phase.as_deref().filter(|p| !p.is_empty()) {
-            spans.push(Span::styled("  (", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("  (", Style::default().fg(theme::TEXT_DIM)));
             spans.push(Span::styled(
                 phase.to_string(),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::WARNING),
             ));
-            spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
 
         Some(Line::from(spans))

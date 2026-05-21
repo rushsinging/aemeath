@@ -1,5 +1,7 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+
+use crate::tui::theme;
 
 /// 检测 Markdown 表格分隔行，如 `|---|---|`、`| :---: | ---: |`
 pub fn is_table_separator(line: &str) -> bool {
@@ -66,7 +68,7 @@ pub fn render_table_block(lines: &[&str], base_style: Style) -> Vec<Vec<Span<'st
     let mut result = Vec::new();
     let mut data_row_idx = 0;
     let header_style = base_style.add_modifier(Modifier::BOLD);
-    let border_style = base_style.fg(Color::DarkGray);
+    let border_style = base_style.fg(theme::BORDER);
 
     for (i, line) in lines.iter().enumerate() {
         if is_table_separator(line) {

@@ -1,9 +1,10 @@
 use super::InputArea;
 use crate::tui::safe_text::str_display_width;
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders, Widget},
 };
 
@@ -27,9 +28,9 @@ impl InputArea {
             " Input ".to_string()
         };
         let border_style = if self.focused {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(theme::ACCENT)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::BORDER)
         };
         Block::default()
             .title(title)
@@ -44,7 +45,9 @@ impl InputArea {
         };
 
         let lines = self.textarea.lines();
-        let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
+        let selection_style = Style::default()
+            .bg(theme::SELECTION_BG)
+            .fg(theme::SELECTION_FG);
         for (row, line_text) in lines.iter().enumerate() {
             if row < start_row || row > end_row {
                 continue;
@@ -136,7 +139,7 @@ mod tests {
                 .unwrap()
                 .style()
                 .bg,
-            Some(Color::Blue)
+            Some(theme::SELECTION_BG)
         );
     }
 }
