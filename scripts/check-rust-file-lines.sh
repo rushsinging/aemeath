@@ -12,7 +12,7 @@ while IFS= read -r -d '' file; do
   lines="$(wc -l < "$file" | tr -d ' ')"
   if (( lines > LIMIT )); then
     message="rust file too large: $rel has $lines lines (limit $LIMIT)"
-    printf '%s\n' "$message"
+    printf '%s\n' "$message" >&2
     DETAILS+=("$message")
     FAILED=1
     COUNT=$((COUNT + 1))
@@ -20,7 +20,6 @@ while IFS= read -r -d '' file; do
 done < <(find "$ROOT" -path "$ROOT/target" -prune -o -path "$ROOT/.git" -prune -o -path "$ROOT/.worktrees" -prune -o -name '*.rs' -print0)
 if [[ "$FAILED" -ne 0 ]]; then
   summary="Rust file line limit exceeded ($COUNT). Split files to keep each .rs <= $LIMIT lines."
-  printf '%s\n' "$summary"
   reason="$summary"
   for detail in "${DETAILS[@]}"; do
     reason+=$'\n'"$detail"
