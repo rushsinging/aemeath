@@ -11,6 +11,7 @@ mod queue;
 mod tools;
 
 use crate::agent_runner::{AgentRunOutcome, AgentRunStatus};
+use crate::tui::app::UiEvent;
 use crate::tui::app::stream::compact::auto_compact;
 use crate::tui::app::stream::finalize::finalize_main_loop;
 use crate::tui::app::stream::handler::TuiStreamHandler;
@@ -19,14 +20,13 @@ pub(crate) use crate::tui::app::stream::input_log::logged_input_messages;
 use crate::tui::app::stream::post_batch::run_post_tool_batch;
 use crate::tui::app::stream::queue::drain_queued_input;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
-use crate::tui::app::UiEvent;
 use aemeath_core::agent::Agent;
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ToolContext, ToolRegistry};
 use aemeath_llm::types::StopReason;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -86,7 +86,6 @@ pub async fn process_in_background(
     let mut last_api_input_tokens: u64 = 0;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
-    let mut outcome: Option<AgentRunOutcome> = None;
     let mut task_reminder_state = TaskReminderState::new();
 
     // Stall detection: sliding window for text repetition
@@ -102,21 +101,32 @@ pub async fn process_in_background(
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
-        let tool_schema_tokens =
-            aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let tool_schema_tokens = aemeath_core::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
             let _ = tx.send(UiEvent::Cancelled).await;
-            outcome = Some(AgentRunOutcome {
-                status: AgentRunStatus::Cancelled,
-                turns: turn_count,
-                duration: turn_start.elapsed(),
-                role: None,
-                model: client.model_name().to_string(),
-            });
+            if finalize_main_loop(
+                &AgentRunOutcome {
+                    status: AgentRunStatus::Cancelled,
+                    turns: turn_count,
+                    duration: turn_start.elapsed(),
+                    role: None,
+                    model: client.model_name().to_string(),
+                },
+                &tx,
+                &hook_ui,
+                &hook_runner,
+                &session_id,
+                &task_store,
+            )
+            .await
+            .is_some()
+            {
+                continue;
+            }
             break;
         }
 
@@ -332,13 +342,28 @@ pub async fn process_in_background(
                     {
                         let _ = tx.send(UiEvent::SystemMessage(text)).await;
                     }
-                    outcome = Some(AgentRunOutcome {
-                        status: AgentRunStatus::Completed,
-                        turns: turn_count,
-                        duration: turn_start.elapsed(),
-                        role: None,
-                        model: client.model_name().to_string(),
-                    });
+                    if let Some(outcome) = finalize_main_loop(
+                        &AgentRunOutcome {
+                            status: AgentRunStatus::Completed,
+                            turns: turn_count,
+                            duration: turn_start.elapsed(),
+                            role: None,
+                            model: client.model_name().to_string(),
+                        },
+                        &tx,
+                        &hook_ui,
+                        &hook_runner,
+                        &session_id,
+                        &task_store,
+                    )
+                    .await
+                    {
+                        messages.push(Message::user(format!(
+                            "<system-reminder>\n{outcome}\n</system-reminder>"
+                        )));
+                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                        continue;
+                    }
                     break;
                 }
                 {
@@ -375,29 +400,30 @@ pub async fn process_in_background(
             Err(e) => {
                 let error_msg = e.to_string();
                 let _ = tx.send(UiEvent::Error(error_msg.clone())).await;
-                outcome = Some(AgentRunOutcome {
-                    status: AgentRunStatus::ApiError(error_msg),
-                    turns: turn_count,
-                    duration: turn_start.elapsed(),
-                    role: None,
-                    model: client.model_name().to_string(),
-                });
+                if let Some(outcome) = finalize_main_loop(
+                    &AgentRunOutcome {
+                        status: AgentRunStatus::ApiError(error_msg),
+                        turns: turn_count,
+                        duration: turn_start.elapsed(),
+                        role: None,
+                        model: client.model_name().to_string(),
+                    },
+                    &tx,
+                    &hook_ui,
+                    &hook_runner,
+                    &session_id,
+                    &task_store,
+                )
+                .await
+                {
+                    messages.push(Message::user(format!(
+                        "<system-reminder>\n{outcome}\n</system-reminder>"
+                    )));
+                    let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                    continue;
+                }
                 break;
             }
         }
-    }
-
-    messages.truncate(messages_at_start);
-
-    if let Some(ref outcome) = outcome {
-        finalize_main_loop(
-            outcome,
-            &tx,
-            &hook_ui,
-            &hook_runner,
-            &session_id,
-            &task_store,
-        )
-        .await;
     }
 }
