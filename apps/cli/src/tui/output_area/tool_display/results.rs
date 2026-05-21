@@ -31,7 +31,12 @@ impl super::super::OutputArea {
         self.insert_lines_at(insert_at, result_lines);
     }
 
-    fn mark_tool_header_done(&mut self, tool_id: &str, tool_name: &str, is_error: bool) -> Option<usize> {
+    fn mark_tool_header_done(
+        &mut self,
+        tool_id: &str,
+        tool_name: &str,
+        is_error: bool,
+    ) -> Option<usize> {
         let done_icon = if is_error { "✗" } else { "✓" };
         let done_style = if is_error {
             LineStyle::ToolCallError
@@ -56,7 +61,10 @@ impl super::super::OutputArea {
         let pending_prefix = format!("pending:{tool_name}:");
         for (idx, line) in self.lines.iter_mut().enumerate().rev() {
             if matches!(line.style, LineStyle::ToolCallRunning)
-                && line.tool_id.as_deref().is_some_and(|id| id.starts_with(&pending_prefix))
+                && line
+                    .tool_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with(&pending_prefix))
             {
                 line.content = line.content.replacen('●', done_icon, 1);
                 line.style = done_style;

@@ -140,7 +140,13 @@ fn extract_string_value(json: &str, key: &str) -> Option<String> {
     // Skip optional whitespace and colon
     let mut pos = 0;
     let chars: Vec<char> = rest.chars().collect();
-    while pos < chars.len() && (chars[pos] == ' ' || chars[pos] == ':' || chars[pos] == '\t' || chars[pos] == '\n' || chars[pos] == '\r') {
+    while pos < chars.len()
+        && (chars[pos] == ' '
+            || chars[pos] == ':'
+            || chars[pos] == '\t'
+            || chars[pos] == '\n'
+            || chars[pos] == '\r')
+    {
         pos += 1;
     }
     // Expect opening quote

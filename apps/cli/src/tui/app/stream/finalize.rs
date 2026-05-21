@@ -1,6 +1,6 @@
-use crate::agent_runner::{AgentRunOutcome, AgentRunStatus, log_agent_outcome};
-use crate::tui::app::UiEvent;
+use crate::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::tui::app::stream::hook_ui::HookUi;
+use crate::tui::app::UiEvent;
 use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use aemeath_core::task::{BatchStatus, TaskStore};
@@ -105,12 +105,7 @@ fn stop_hook_feedback(
                             .as_ref()
                             .is_some_and(|j| j.decision.as_deref() == Some("block"))
                 })
-                .map(|(entry, _, _)| {
-                    (
-                        entry,
-                        "Stop hook 阻止了停止，但没有提供原因".to_string(),
-                    )
-                })
+                .map(|(entry, _, _)| (entry, "Stop hook 阻止了停止，但没有提供原因".to_string()))
         })
         .map(|(entry, reason)| {
             format!(
@@ -143,12 +138,17 @@ fn non_empty_text(text: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 fn hook_result(
     command: &str,
     blocked: bool,
     output: &str,
     error: Option<&str>,
-) -> (aemeath_core::config::hooks::HookEntry, HookResult, Option<HookJsonOutput>) {
+) -> (
+    aemeath_core::config::hooks::HookEntry,
+    HookResult,
+    Option<HookJsonOutput>,
+) {
     (
         aemeath_core::config::hooks::HookEntry {
             matcher: String::new(),

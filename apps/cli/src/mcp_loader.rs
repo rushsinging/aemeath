@@ -95,7 +95,11 @@ pub async fn spawn_mcp_connect(
     for (name, result) in manager.connect_all().await {
         match result {
             Ok(connection) => {
-                log::info!("[MCP] {} connected with {} tools", name, connection.tools.len());
+                log::info!(
+                    "[MCP] {} connected with {} tools",
+                    name,
+                    connection.tools.len()
+                );
             }
             Err(e) => log::warn!("[MCP] failed to connect to {}: {e}", name),
         }

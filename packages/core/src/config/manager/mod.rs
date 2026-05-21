@@ -43,15 +43,11 @@ impl ConfigManager {
             match tokio::fs::read_to_string(&self.global_path).await {
                 Ok(content) => match serde_json::from_str::<Config>(&content) {
                     Ok(global_config) => config = Self::merge_config(config, global_config),
-                    Err(err) => log::warn!(
-                        "解析全局配置失败 {}: {err}",
-                        self.global_path.display()
-                    ),
+                    Err(err) => {
+                        log::warn!("解析全局配置失败 {}: {err}", self.global_path.display())
+                    }
                 },
-                Err(err) => log::warn!(
-                    "读取全局配置失败 {}: {err}",
-                    self.global_path.display()
-                ),
+                Err(err) => log::warn!("读取全局配置失败 {}: {err}", self.global_path.display()),
             }
         }
 
@@ -61,15 +57,11 @@ impl ConfigManager {
                 match tokio::fs::read_to_string(project_path).await {
                     Ok(content) => match serde_json::from_str::<Config>(&content) {
                         Ok(project_config) => config = Self::merge_config(config, project_config),
-                        Err(err) => log::warn!(
-                            "解析项目配置失败 {}: {err}",
-                            project_path.display()
-                        ),
+                        Err(err) => {
+                            log::warn!("解析项目配置失败 {}: {err}", project_path.display())
+                        }
                     },
-                    Err(err) => log::warn!(
-                        "读取项目配置失败 {}: {err}",
-                        project_path.display()
-                    ),
+                    Err(err) => log::warn!("读取项目配置失败 {}: {err}", project_path.display()),
                 }
             }
         }

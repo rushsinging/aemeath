@@ -1,6 +1,10 @@
 use crate::tui::completion::Suggestion;
 use crate::tui::theme;
-use ratatui::{layout::Rect, style::Style, widgets::{Block, Borders}};
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    widgets::{Block, Borders},
+};
 use tui_textarea::TextArea;
 
 mod editing;

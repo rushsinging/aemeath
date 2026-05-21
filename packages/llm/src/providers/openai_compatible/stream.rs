@@ -205,11 +205,7 @@ pub(crate) async fn parse_openai_stream(
                                     // Notify handler with accumulated arguments for
                                     // real-time UI updates (e.g. showing file path).
                                     if !entry.1.is_empty() {
-                                        handler.on_tool_arguments_delta(
-                                            index,
-                                            &entry.1,
-                                            &entry.2,
-                                        );
+                                        handler.on_tool_arguments_delta(index, &entry.1, &entry.2);
                                     }
                                 }
                             }
@@ -246,48 +242,48 @@ pub(crate) async fn parse_openai_stream(
             );
             continue;
         }
-            // Note: on_tool_use_start was already called during streaming
-            // when the name first appeared in a delta chunk. No need to
-            // call it again here.
-            let input: serde_json::Value = if arguments.is_empty() {
-                log::warn!(
+        // Note: on_tool_use_start was already called during streaming
+        // when the name first appeared in a delta chunk. No need to
+        // call it again here.
+        let input: serde_json::Value = if arguments.is_empty() {
+            log::warn!(
                     "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
                     name, id, delta_count
                 );
-                serde_json::Value::Object(serde_json::Map::new())
-            } else {
-                match serde_json::from_str(&arguments) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let is_eof = matches!(e.classify(), serde_json::error::Category::Eof);
-                        log::warn!(
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            match serde_json::from_str(&arguments) {
+                Ok(v) => v,
+                Err(e) => {
+                    let is_eof = matches!(e.classify(), serde_json::error::Category::Eof);
+                    log::warn!(
                             "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — likely upstream truncated the SSE stream mid-tool_call.",
                             name, id, delta_count, arguments.len(), e
                         );
-                        log::warn!(
-                            "[openai-compat stream] truncated args head: {}",
-                            arguments.chars().take(300).collect::<String>()
-                        );
-                        log::warn!(
-                            "[openai-compat stream] truncated args tail: {}",
-                            arguments
-                                .chars()
-                                .rev()
-                                .take(200)
-                                .collect::<String>()
-                                .chars()
-                                .rev()
-                                .collect::<String>()
-                        );
-                        if is_eof && truncated_tool.is_none() {
-                            truncated_tool =
-                                Some((id.clone(), name.clone(), arguments.len(), delta_count));
-                        }
-                        serde_json::Value::Object(serde_json::Map::new())
+                    log::warn!(
+                        "[openai-compat stream] truncated args head: {}",
+                        arguments.chars().take(300).collect::<String>()
+                    );
+                    log::warn!(
+                        "[openai-compat stream] truncated args tail: {}",
+                        arguments
+                            .chars()
+                            .rev()
+                            .take(200)
+                            .collect::<String>()
+                            .chars()
+                            .rev()
+                            .collect::<String>()
+                    );
+                    if is_eof && truncated_tool.is_none() {
+                        truncated_tool =
+                            Some((id.clone(), name.clone(), arguments.len(), delta_count));
                     }
+                    serde_json::Value::Object(serde_json::Map::new())
                 }
-            };
-            content_blocks.push(ContentBlock::ToolUse { id, name, input });
+            }
+        };
+        content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 
     // 如果 args 因 EOF 截断（典型上游断流症状），向上抛错让 client 层重试，

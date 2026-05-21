@@ -10,7 +10,7 @@
 //! Each `send_request` POSTs the request then directly reads the response from the
 //! stream — no background task, no channel, no race conditions.
 
-use futures_util::StreamExt;
+use crate::mcp::sse_stream::SseReadStream;
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -111,135 +111,9 @@ pub struct SseTransport {
     stream: Arc<Mutex<SseReadStream>>,
 }
 
-/// Wrapper holding the boxed SSE byte stream and a leftover buffer.
-struct SseReadStream {
-    buffer: String,
-    stream: std::pin::Pin<Box<dyn futures_util::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>,
-}
-
-impl SseReadStream {
-    /// Read the next chunk from the stream and append to buffer.
-    async fn read_chunk(&mut self) -> Result<bool, String> {
-        match self.stream.next().await {
-            Some(Ok(chunk)) => {
-                let len = chunk.len();
-                self.buffer.push_str(&String::from_utf8_lossy(&chunk));
-                log::debug!("[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes", self.buffer.len());
-                Ok(true)
-            }
-            Some(Err(e)) => {
-                log::warn!("[MCP:SSE] read_chunk error: {e}");
-                Err(format!("SSE read error: {e}"))
-            }
-            None => {
-                log::info!("[MCP:SSE] read_chunk: stream EOF");
-                Ok(false)
-            }
-        }
-    }
-
-    /// Drain all complete SSE events from the buffer, returning them.
-    /// Also attempts to parse events that may be missing the trailing \n\n
-    /// (some servers don't send the delimiter for the last event before a pause).
-    fn drain_events(&mut self) -> Vec<SseEvent> {
-        let mut events = Vec::new();
-        while let Some(pos) = self.buffer.find("\n\n") {
-            let block = self.buffer[..pos].to_string();
-            self.buffer = self.buffer[pos + 2..].to_string();
-            if let Some(event) = parse_single_event(&block) {
-                events.push(event);
-            }
-        }
-
-        // Fallback: if remaining buffer has data but no \n\n delimiter,
-        // try to parse the event anyway by directly parsing JSON.
-        // Handles servers (e.g. z.ai) that omit the trailing \n\n.
-        if !self.buffer.is_empty() && self.buffer.contains("data:") {
-            if let Some(event) = try_parse_incomplete_event(&self.buffer) {
-                log::info!(
-                    "[MCP:SSE] parsed incomplete event (no trailing \\n\\n), data_len={}",
-                    event.data.len()
-                );
-                self.buffer.clear();
-                events.push(event);
-            }
-        }
-
-        events
-    }
-}
-
-/// Parse a single SSE event block (the text between \n\n delimiters).
-fn parse_single_event(block: &str) -> Option<SseEvent> {
-    let block = block.trim();
-    if block.is_empty() {
-        return None;
-    }
-    let mut event_type = String::from("message");
-    let mut data = String::new();
-    for line in block.lines() {
-        if let Some(val) = line.strip_prefix("event:") {
-            event_type = val.trim().to_string();
-        } else if let Some(val) = line.strip_prefix("data:") {
-            if data.is_empty() {
-                data = val.trim().to_string();
-            } else {
-                data.push('\n');
-                data.push_str(val.trim());
-            }
-        }
-    }
-    if !data.is_empty() {
-        Some(SseEvent { event_type, data })
-    } else {
-        None
-    }
-}
-
-/// Try to parse an SSE event that may be missing the trailing `\n\n`.
-///
-/// Some servers (notably z.ai) omit the `\n\n` delimiter after the last SSE
-/// event, causing the client to buffer the data forever.  We work around this
-/// by extracting the `data:` payload and attempting a direct JSON parse.
-fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
-    // Quick check — must contain "data:"
-    let data_start = buffer.find("data:")?;
-    let data_content = buffer[data_start + 5..].trim_start();
-
-    // Fast check: does the data end with something that looks like JSON end?
-    // (avoids expensive JSON parse attempt on obviously incomplete data)
-    let trimmed = data_content.trim_end();
-    if !trimmed.ends_with('}') && !trimmed.ends_with(']') {
-        return None;
-    }
-
-    // Attempt actual JSON parse
-    if serde_json::from_str::<Value>(data_content).is_err() {
-        return None;
-    }
-
-    // JSON is valid — build the event
-    let event_part = &buffer[..data_start];
-    let event_type = event_part
-        .lines()
-        .find_map(|line| line.strip_prefix("event:"))
-        .map(|v| v.trim().to_string())
-        .unwrap_or_else(|| "message".to_string());
-
-    let data = data_content.to_string();
-    log::info!(
-        "[MCP:SSE] incomplete-fallback: event={event_type} data_len={}",
-        data.len()
-    );
-    Some(SseEvent { event_type, data })
-}
-
 impl SseTransport {
     /// Connect to an SSE MCP server.
-    pub async fn connect(
-        sse_url: &str,
-        headers: &HashMap<String, String>,
-    ) -> Result<Self, String> {
+    pub async fn connect(sse_url: &str, headers: &HashMap<String, String>) -> Result<Self, String> {
         let stream_client = build_http_client(headers)?;
         let post_client = build_http_client(headers)?;
 
@@ -264,8 +138,8 @@ impl SseTransport {
         };
 
         // Read until we get the endpoint event
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS);
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS);
 
         let mut endpoint_url: Option<String> = None;
 
@@ -285,9 +159,7 @@ impl SseTransport {
             match chunk_result {
                 Ok(Ok(true)) => {} // got data, loop to parse
                 Ok(Ok(false)) => {
-                    return Err(
-                        "SSE stream ended before sending 'endpoint' event".to_string(),
-                    );
+                    return Err("SSE stream ended before sending 'endpoint' event".to_string());
                 }
                 Ok(Err(e)) => return Err(e),
                 Err(_) => {
@@ -314,8 +186,8 @@ impl SseTransport {
 
     /// Send a JSON-RPC request and read the response directly from the SSE stream.
     pub async fn send_request(&self, request_body: &Value) -> Result<Value, String> {
-        let body = serde_json::to_string(request_body)
-            .map_err(|e| format!("serialize request: {e}"))?;
+        let body =
+            serde_json::to_string(request_body).map_err(|e| format!("serialize request: {e}"))?;
 
         let req_id = request_body.get("id").and_then(|v| v.as_u64());
 
@@ -339,7 +211,11 @@ impl SseTransport {
         // HTTP/2 flow control window (which can prevent the SSE stream from
         // receiving further data from the server).
         let mut resp = resp;
-        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("POST body read: {e}"))? {
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| format!("POST body read: {e}"))?
+        {
             let _ = chunk; // discard
         }
 
@@ -352,8 +228,8 @@ impl SseTransport {
 
         // Lock the stream and read until matching response
         let mut guard = self.stream.lock().await;
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(SSE_REQUEST_TIMEOUT_SECS);
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(SSE_REQUEST_TIMEOUT_SECS);
 
         loop {
             // Check buffered events
@@ -411,124 +287,5 @@ fn try_extract_response(data: &str, expected_id: u64) -> Result<Option<Value>, S
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_sse_events_single() {
-        let raw = "event: endpoint\ndata: /message?sessionId=abc\n\n";
-        let events = parse_sse_events(raw);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type, "endpoint");
-        assert_eq!(events[0].data, "/message?sessionId=abc");
-    }
-
-    #[test]
-    fn test_parse_sse_events_multiple() {
-        let raw = "event: endpoint\ndata: /msg\n\nevent: message\ndata: hello\n\n";
-        let events = parse_sse_events(raw);
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].event_type, "endpoint");
-        assert_eq!(events[1].event_type, "message");
-    }
-
-    #[test]
-    fn test_parse_sse_events_default_type() {
-        let raw = "data: just_data\n\n";
-        let events = parse_sse_events(raw);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type, "message");
-        assert_eq!(events[0].data, "just_data");
-    }
-
-    #[test]
-    fn test_parse_sse_events_multiline_data() {
-        let raw = "data: line1\ndata: line2\n\n";
-        let events = parse_sse_events(raw);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].data, "line1\nline2");
-    }
-
-    #[test]
-    fn test_parse_sse_events_empty() {
-        assert!(parse_sse_events("").is_empty());
-        assert!(parse_sse_events("\n\n").is_empty());
-    }
-
-    #[test]
-    fn test_resolve_endpoint_url_relative() {
-        let base = "https://api.example.com/sse?token=abc";
-        let result = resolve_endpoint_url(base, "/message?sessionId=123").unwrap();
-        assert_eq!(result, "https://api.example.com/message?sessionId=123");
-    }
-
-    #[test]
-    fn test_resolve_endpoint_url_absolute() {
-        let base = "https://api.example.com/sse";
-        let result = resolve_endpoint_url(base, "https://other.example.com/msg").unwrap();
-        assert_eq!(result, "https://other.example.com/msg");
-    }
-
-    #[test]
-    fn test_resolve_endpoint_url_invalid_base() {
-        assert!(resolve_endpoint_url("not a url", "/path").is_err());
-    }
-
-    #[test]
-    fn test_try_extract_response_matching() {
-        let data = r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#;
-        let result = try_extract_response(data, 1).unwrap();
-        assert!(result.is_some());
-        assert!(result.unwrap().get("tools").is_some());
-    }
-
-    #[test]
-    fn test_try_extract_response_wrong_id() {
-        // id > expected_id should be rejected
-        let data = r#"{"jsonrpc":"2.0","id":5,"result":{}}"#;
-        let result = try_extract_response(data, 2).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_try_extract_response_stale_id_accepted() {
-        // id < expected_id (stale from previous attempt) should be accepted
-        let data = r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}"#;
-        let result = try_extract_response(data, 3).unwrap();
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn test_try_extract_response_error() {
-        let data = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"bad"}}"#;
-        let result = try_extract_response(data, 1);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_try_extract_response_not_json() {
-        let result = try_extract_response("not json", 1).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_try_parse_incomplete_event_valid_json() {
-        // SSE event without trailing \n\n but with valid JSON
-        let buffer = "event:message\ndata:{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
-        let event = try_parse_incomplete_event(buffer).unwrap();
-        assert_eq!(event.event_type, "message");
-        assert!(event.data.contains("\"id\":1"));
-    }
-
-    #[test]
-    fn test_try_parse_incomplete_event_invalid_json() {
-        // SSE event with truncated JSON
-        let buffer = "event:message\ndata:{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"na";
-        assert!(try_parse_incomplete_event(buffer).is_none());
-    }
-
-    #[test]
-    fn test_try_parse_incomplete_event_no_data() {
-        assert!(try_parse_incomplete_event("event:message\n").is_none());
-    }
-}
+#[path = "sse_tests.rs"]
+mod tests;

@@ -1,3 +1,4 @@
+mod memory;
 mod reflection;
 mod suggestions;
 
@@ -9,34 +10,6 @@ use aemeath_core::state::AppState;
 use std::sync::Arc;
 
 impl super::App {
-    fn show_memory_reminders(&mut self) {
-        let lines = self
-            .session_reminders
-            .lock()
-            .ok()
-            .map(|reminders| {
-                reminders
-                    .list()
-                    .iter()
-                    .map(|reminder| {
-                        let marker = if reminder.done { "✓" } else { "□" };
-                        format!("{marker} {} {}", reminder.id, reminder.content)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        if lines.is_empty() {
-            self.output_area.push_system("当前没有 session reminder。");
-            return;
-        }
-
-        self.output_area.push_system("Session Reminders:");
-        for line in lines {
-            self.output_area.push_system(&line);
-        }
-    }
-
     /// Handle slash commands with an optional UI event sender for background commands.
     /// Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
     pub(crate) async fn handle_slash_command_with_events(

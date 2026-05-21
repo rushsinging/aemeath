@@ -1,6 +1,7 @@
 use crate::tui::app::stream::agent_calls::execute_agent_calls;
 use crate::tui::app::stream::ask_user::ask_user;
 use crate::tui::app::stream::hook_ui::HookUi;
+use crate::tui::app::stream::non_agent::execute_non_agent;
 use crate::tui::app::stream::permissions::split_approved_calls;
 use crate::tui::app::UiEvent;
 use aemeath_core::agent::{Agent, ToolCall};
@@ -128,203 +129,6 @@ async fn deny_tool_calls(
     denied_results
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn execute_non_agent(
-    agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &aemeath_core::hook::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
-    non_agent_calls: &[ToolCall],
-) -> Vec<UiToolResult> {
-    let other_calls: Vec<&ToolCall> = non_agent_calls
-        .iter()
-        .filter(|c| c.name != "AskUserQuestion")
-        .collect();
-  
-    if other_calls.is_empty() {
-        return Vec::new();
-    }
-
-    // Single tool call — skip grouping overhead
-    if other_calls.len() == 1 {
-        return execute_one_non_agent(
-            agent,
-            tx,
-            hook_ui,
-            hook_runner,
-            json_logger,
-            turn_count,
-            client_model,
-            other_calls[0],
-        )
-        .await;
-    }
-
-    // Multiple calls: partition into concurrent-safe vs sequential,
-    // preserving original order via position tracking.
-    let total_len = other_calls.len();
-    let mut results: Vec<Option<UiToolResult>> = vec![None; total_len];
-
-    let mut concurrent_positions: Vec<usize> = Vec::new();
-    let mut sequential_positions: Vec<usize> = Vec::new();
-    for (i, call) in other_calls.iter().enumerate() {
-        let is_safe = agent
-            .registry
-            .get(&call.name)
-            .map(|t| t.is_concurrency_safe())
-            .unwrap_or(false);
-        if is_safe {
-            concurrent_positions.push(i);
-        } else {
-            sequential_positions.push(i);
-        }
-    }
-
-    // Execute concurrent-safe tools in parallel
-    if !concurrent_positions.is_empty() {
-        let semaphore =
-            std::sync::Arc::new(tokio::sync::Semaphore::new(agent.ctx.max_tool_concurrency));
-        let futures: Vec<_> = concurrent_positions
-            .iter()
-            .filter_map(|&pos| {
-                let call = other_calls[pos];
-                let agent_ref = agent;
-                let tx = tx.clone();
-                let hook_ui = hook_ui.clone();
-                let hook_runner = hook_runner.clone();
-                let json_logger = json_logger.clone();
-                let sem = semaphore.clone();
-                Some(async move {
-                    let _permit = sem.acquire().await.expect("semaphore closed");
-                    let result = execute_one_non_agent(
-                        agent_ref,
-                        &tx,
-                        &hook_ui,
-                        &hook_runner,
-                        &json_logger,
-                        turn_count,
-                        client_model,
-                        call,
-                    )
-                    .await;
-                    (pos, result)
-                })
-            })
-            .collect();
-        let concurrent_results = futures::future::join_all(futures).await;
-        for (pos, result_vec) in concurrent_results {
-            // Each call produces exactly one result
-            if let Some(r) = result_vec.into_iter().next() {
-                results[pos] = Some(r);
-            }
-        }
-    }
-
-    // Execute non-concurrent-safe tools sequentially
-    for &pos in &sequential_positions {
-        let call = other_calls[pos];
-        let result_vec = execute_one_non_agent(
-            agent,
-            tx,
-            hook_ui,
-            hook_runner,
-            json_logger,
-            turn_count,
-            client_model,
-            call,
-        )
-        .await;
-        if let Some(r) = result_vec.into_iter().next() {
-            results[pos] = Some(r);
-        }
-    }
-
-    results
-        .into_iter()
-        .enumerate()
-        .map(|(i, r)| {
-            r.unwrap_or_else(|| {
-                panic!("execute_non_agent: result slot {i} was not filled — this is a bug")
-            })
-        })
-        .collect()
-}
-
-/// Execute a single non-agent tool call (hook chain + execute + post hooks + UI result).
-#[allow(clippy::too_many_arguments)]
-async fn execute_one_non_agent(
-    agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &aemeath_core::hook::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
-    call: &ToolCall,
-) -> Vec<UiToolResult> {
-    let _ = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PermissionRequest,
-            Some(&call.name),
-            HookData::Permission(aemeath_core::hook::PermissionHookData {
-                tool_name: call.name.clone(),
-                permission_rule: "auto".to_string(),
-            }),
-        )
-        .await;
-    let owned_call = ToolCall {
-        id: call.id.clone(),
-        name: call.name.clone(),
-        input: call.input.clone(),
-    };
-    let pre_results = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PreToolUse,
-            Some(&owned_call.name),
-            HookData::Tool(ToolHookData {
-                tool_name: owned_call.name.clone(),
-                tool_input: owned_call.input.clone(),
-                tool_output: None,
-                is_error: None,
-            }),
-        )
-        .await;
-    if pre_results.iter().any(|r| r.blocked) {
-        let result = (
-            owned_call.id.clone(),
-            "Blocked by PreToolUse hook".to_string(),
-            true,
-            Vec::new(),
-        );
-        send_tool_result(tx, &owned_call, &result).await;
-        return vec![result];
-    }
-    let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
-    let mut out = Vec::new();
-    for (id, output, is_error, images) in exec_results {
-        log_tool_result(
-            json_logger,
-            turn_count,
-            client_model,
-            &id,
-            &owned_call.name,
-            is_error,
-            &output,
-        );
-        run_post_tool_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        run_task_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        let result = (id, output, is_error, images);
-        send_tool_result(tx, &owned_call, &result).await;
-        out.push(result);
-    }
-    out
-}
-
 pub(crate) async fn run_post_tool_hooks(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
@@ -371,55 +175,7 @@ pub(crate) async fn run_post_tool_hooks(
     }
 }
 
-async fn run_task_hooks(
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &aemeath_core::hook::HookRunner,
-    call: &ToolCall,
-    output: &str,
-    is_error: bool,
-) {
-    if !is_error && call.name == "TaskCreate" {
-        emit_json_hook_context(
-            tx,
-            hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::TaskCreated,
-                    None,
-                    HookData::Tool(ToolHookData {
-                        tool_name: "TaskCreate".to_string(),
-                        tool_input: call.input.clone(),
-                        tool_output: Some(output.to_string()),
-                        is_error: Some(false),
-                    }),
-                )
-                .await,
-        )
-        .await;
-    }
-    if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
-        emit_json_hook_context(
-            tx,
-            hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::TaskCompleted,
-                    None,
-                    HookData::Tool(ToolHookData {
-                        tool_name: "TaskUpdate".to_string(),
-                        tool_input: call.input.clone(),
-                        tool_output: Some(output.to_string()),
-                        is_error: Some(false),
-                    }),
-                )
-                .await,
-        )
-        .await;
-    }
-}
-
-async fn emit_json_hook_context(
+pub(crate) async fn emit_json_hook_context(
     tx: &mpsc::Sender<UiEvent>,
     hook_results: Vec<(
         aemeath_core::config::hooks::HookEntry,
@@ -487,7 +243,7 @@ pub(crate) fn tool_results_for_api(
     aemeath_core::message::Message::tool_results_rich(results)
 }
 
-fn log_tool_result(
+pub(crate) fn log_tool_result(
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,

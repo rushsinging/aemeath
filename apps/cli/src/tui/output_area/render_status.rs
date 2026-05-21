@@ -87,12 +87,16 @@ impl OutputArea {
             }
             let line = &self.lines[li];
             let dot_color = match line.style {
-                LineStyle::ToolCallRunning if line.content.starts_with('●') => Some(if blink_on {
-                    theme::ACCENT_BRIGHT
-                } else {
-                    theme::TEXT_DIM
-                }),
-                LineStyle::ToolCallSuccess if line.content.starts_with('✓') => Some(theme::SUCCESS),
+                LineStyle::ToolCallRunning if line.content.starts_with('●') => {
+                    Some(if blink_on {
+                        theme::ACCENT_BRIGHT
+                    } else {
+                        theme::TEXT_DIM
+                    })
+                }
+                LineStyle::ToolCallSuccess if line.content.starts_with('✓') => {
+                    Some(theme::SUCCESS)
+                }
                 LineStyle::ToolCallError if line.content.starts_with('✗') => Some(theme::ERROR),
                 _ => None,
             };

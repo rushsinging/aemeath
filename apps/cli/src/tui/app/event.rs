@@ -7,7 +7,10 @@ pub enum AppEvent {
     Text(String),
     Thinking(String),
     TextBlockComplete(String),
-    ToolCallStart { name: String, index: usize },
+    ToolCallStart {
+        name: String,
+        index: usize,
+    },
     ToolArgumentsDelta {
         index: usize,
         name: String,

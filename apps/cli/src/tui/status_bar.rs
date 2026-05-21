@@ -271,21 +271,6 @@ impl StatusBar {
         paragraph.render(area, buf);
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_test_status_text(&mut self, status: &str) {
-        self.status = status.to_string();
-        self.status_type = StatusType::Normal;
-        self.input_tokens = 0;
-        self.output_tokens = 0;
-        self.last_input_tokens = 0;
-        self.session_id = None;
-        self.api_calls = 0;
-        self.model = None;
-        self.context_size = 0;
-        self.tps = 0.0;
-        self.thinking = false;
-    }
-
     /// 构建状态栏的完整文本（用于选中复制）
     fn build_full_text(&self) -> String {
         let mut parts = Vec::new();
@@ -389,42 +374,5 @@ impl StatusBar {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
-        let mut bar = StatusBar::new();
-        bar.set_test_status_text("你好a");
-        let prefix_width = " Think:OFF │ ".chars().count() as u16;
-
-        bar.start_selection(prefix_width + 2);
-        bar.update_selection(prefix_width + 6);
-
-        assert_eq!(bar.get_selected_text(), Some("好a ".to_string()));
-    }
-
-    #[test]
-    fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
-        let mut bar = StatusBar::new();
-        bar.set_test_status_text("a🚀b");
-        let prefix_width = " Think:OFF │ ".chars().count() as u16;
-
-        bar.start_selection(prefix_width + 1);
-        bar.update_selection(prefix_width + 4);
-
-        assert_eq!(bar.get_selected_text(), Some("🚀b".to_string()));
-    }
-
-    #[test]
-    fn test_status_bar_render_uses_status_background() {
-        let bar = StatusBar::new();
-        let area = Rect::new(0, 0, 40, 1);
-        let mut buf = Buffer::empty(area);
-
-        bar.render(area, &mut buf);
-
-        assert_eq!(buf.cell((0, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
-        assert_eq!(buf.cell((39, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
-    }
-}
+#[path = "status_bar_tests.rs"]
+mod tests;
