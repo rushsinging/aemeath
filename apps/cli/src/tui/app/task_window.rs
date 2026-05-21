@@ -292,5 +292,11 @@ fn format_fold_hint(n: usize, status: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "task_window_helpers_tests.rs"]
+mod helpers_tests;
+#[cfg(test)]
+#[path = "task_window_progress_tests.rs"]
+mod progress_tests;
+#[cfg(test)]
 #[path = "task_window_tests.rs"]
 mod tests;

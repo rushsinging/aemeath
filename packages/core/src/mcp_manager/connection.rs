@@ -91,7 +91,9 @@ impl McpConnectionManager {
                             break;
                         }
                         Err(e) if attempt < 5 => {
-                            log::warn!("[MCP] tools/list attempt {attempt} failed: {e}, retrying...");
+                            log::warn!(
+                                "[MCP] tools/list attempt {attempt} failed: {e}, retrying..."
+                            );
                         }
                         Err(e) => {
                             log::warn!("[MCP] tools/list failed after 5 attempts: {e}");

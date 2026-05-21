@@ -120,6 +120,9 @@ mod tests {
     fn test_config_manager_creation() {
         let mgr = ConfigManager::new(None);
         assert!(mgr.global_path().to_string_lossy().contains(".agents"));
-        assert!(mgr.global_path().to_string_lossy().ends_with("aemeath.json"));
+        assert!(mgr
+            .global_path()
+            .to_string_lossy()
+            .ends_with("aemeath.json"));
     }
 }

@@ -77,9 +77,7 @@ impl StreamHandler for TuiStreamHandler {
             name: name.to_string(),
             partial_args: partial_args.to_string(),
         }) {
-            log::warn!(
-                "UI channel full, dropped ToolArgumentsDelta({name}[{index}]): {e}"
-            );
+            log::warn!("UI channel full, dropped ToolArgumentsDelta({name}[{index}]): {e}");
         }
     }
 }
