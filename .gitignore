@@ -1,5 +1,7 @@
 /target/
 /UI_IMPROVEMENTS.md
+/ui/node_modules/
+/ui/dist/
 
 # IDE
 .idea/
