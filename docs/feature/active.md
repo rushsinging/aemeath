@@ -13,6 +13,7 @@
 | 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取 | 高 | 待确认 | 未确认 | 将当前 `.aemeath` / `CLAUDE.md` / skill 读取链路调整为 Codex 方向：全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；指令读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills 读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`；实现时必须考虑 git worktree 下 repo root / checkout root / cwd 的配置继承与去重，并由本次更新在发布/部署阶段手动迁移现有 `~/.aemeath` 数据。 |
+| 41 | Web Chat UI（类 Codex Companion） | 高 | 待实施 | 未确认 | 浏览器端 Chat 界面，通过 WebSocket 连接 aemeath server，提供与 TUI 等价的对话体验：消息渲染（Markdown/代码高亮）、tool call 展示、AskUserQuestion 交互、task list 显示；复用 #36 server 的 REST/WS 接口，前端使用 Vue 3 + TypeScript |
 
 ### #40 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取
 
