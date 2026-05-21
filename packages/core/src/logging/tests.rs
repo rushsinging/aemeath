@@ -66,6 +66,30 @@ fn test_is_rotated_log_path_error_non_numeric_suffix() {
 }
 
 #[test]
+fn test_log_path_uses_agents_logs_dir() {
+    let temp_agents_dir = std::env::temp_dir().join(format!(
+        "aemeath_log_path_{}",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let previous = std::env::var_os(crate::config::paths::AGENTS_DIR_ENV);
+    std::env::set_var(crate::config::paths::AGENTS_DIR_ENV, &temp_agents_dir);
+
+    assert_eq!(
+        log_path(LogFile::Aemeath),
+        temp_agents_dir.join("logs").join("aemeath.log")
+    );
+
+    if let Some(previous) = previous {
+        std::env::set_var(crate::config::paths::AGENTS_DIR_ENV, previous);
+    } else {
+        std::env::remove_var(crate::config::paths::AGENTS_DIR_ENV);
+    }
+}
+
+#[test]
 fn test_json_logger_log_input_happy_path_writes_user_message() {
     let temp = std::env::temp_dir().join(format!(
         "aemeath-json-logger-test-{}",
