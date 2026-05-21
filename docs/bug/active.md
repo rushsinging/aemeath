@@ -3,6 +3,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
+| 56 | Stop hook 返回 exit 2 后 LLM 仍结束 | 高 | 修复中 | 未确认 | 2026-05 | Stop hook 使用 `run_plain` 执行，忽略 blocked 结果；即使检查脚本 exit 2，也只在日志中记录，不会阻止 TUI agent loop 结束，导致 LLM 无法收到问题并继续修复 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 未确认 | 2026-05 | 根因：process_in_background 中 tool_calls.is_empty() || stop_reason==EndTurn 时直接 break 退出 loop，未调用 drain_queued_input 消费 input_queue 中用户排队消息。修复：break 前先 drain queued input，有消息则 continue 继续 loop |
 | 51 | Output area 复制时复制出 Markdown 源码而非渲染后纯文本 | 中 | 修复中 | 未确认 | 2026-05 | 根因：get_selected_text 直接从 OutputLine.content 读取原始 Markdown 文本（含 **bold**、*italic*、`code` 等格式标记），而 TUI 渲染时通过 inline_markdown_spans 剥离了这些标记。修复：新增 strip_inline_formatting 函数剥离内联格式标记，在 get_selected_text 返回前应用 |
 | 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 修复中 | 未确认 | 2026-05 | 根因：deny_tool_calls 只发送 ToolResult 事件（携带 LLM 的 tool_use_id）不发送 ToolCall 事件，导致 pending placeholder 的 tool_id（pending:{name}:{index}）无法被 mark_tool_header_done 精确匹配；fallback 盲目抓最后一个 ToolCallRunning 行，当同轮存在其他 running tool 时会抓错行，被拒绝的 tool 的占位行永远保持 ToolCallRunning 状态。修复：(1) deny_tool_calls 先发 ToolCall 再发 ToolResult；(2) mark_tool_header_done fallback 增加 pending 前缀匹配阶段 |
@@ -61,6 +62,12 @@
 - system prompt 中 task 维护指引
 
 ## 详情
+
+### #56 Stop hook 返回 exit 2 后 LLM 仍结束
+**症状**：Stop hook 中的检查脚本（如 `check-unsafe-text-ops.sh`）返回 exit 2 后，日志记录 `blocked=true`，但 TUI agent loop 仍发送 Done 并结束，LLM 没有机会根据 hook 输出继续修复。
+**根因**：TUI 收尾路径对 Stop 事件调用 `run_plain`，只展示 hook 执行过程，不读取 JSON/blocked 结果；`finalize_main_loop` 返回 `()`，无法把阻止停止的反馈传回主 loop。
+**修复方向 / 当前状态**：修复中。Stop hook 改为 `run_json`，检测 `blocked` 或 JSON `decision=block` 后返回反馈；主 loop 将反馈作为 system-reminder 追加给 LLM 并继续下一轮，不发送 Done。
+**涉及路径**：`apps/cli/src/tui/app/stream.rs`、`apps/cli/src/tui/app/stream/finalize.rs`
 
 ### #1 Resume 时 Markdown 渲染换行丢失（已修复）
 **症状**：Session resume 后 assistant 多段落文本连成一块，streaming 路径正常。

@@ -1,8 +1,8 @@
-use crate::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-use crate::tui::app::stream::hook_ui::HookUi;
+use crate::agent_runner::{AgentRunOutcome, AgentRunStatus, log_agent_outcome};
 use crate::tui::app::UiEvent;
+use crate::tui::app::stream::hook_ui::HookUi;
 use aemeath_core::config::hooks::HookEvent;
-use aemeath_core::hook::{HookData, HookRunner, StopHookData};
+use aemeath_core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use aemeath_core::task::{BatchStatus, TaskStore};
 use tokio::sync::mpsc;
 
@@ -13,13 +13,13 @@ pub(crate) async fn finalize_main_loop(
     hook_runner: &HookRunner,
     session_id: &str,
     task_store: &TaskStore,
-) {
+) -> Option<String> {
     log_agent_outcome(outcome, session_id);
 
     match &outcome.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            let _ = hook_ui
-                .run_plain(
+            let stop_results = hook_ui
+                .run_json(
                     hook_runner,
                     HookEvent::Stop,
                     None,
@@ -28,6 +28,11 @@ pub(crate) async fn finalize_main_loop(
                     }),
                 )
                 .await;
+            if let Some(feedback) = stop_hook_feedback(&stop_results) {
+                let _ = tx.send(UiEvent::SystemMessage(feedback.clone())).await;
+                return Some(feedback);
+            }
+
             let _ = tx.send(UiEvent::DoneWithDuration(outcome.duration)).await;
 
             if let Some(active) = task_store.active_list().await {
@@ -41,9 +46,11 @@ pub(crate) async fn finalize_main_loop(
                     );
                 }
             }
+            None
         }
         AgentRunStatus::Cancelled => {
             let _ = tx.send(UiEvent::Done).await;
+            None
         }
         AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
             let stop_results = hook_ui
@@ -68,6 +75,113 @@ pub(crate) async fn finalize_main_loop(
                 })
                 .await;
             let _ = tx.send(UiEvent::Done).await;
+            None
         }
+    }
+}
+
+fn stop_hook_feedback(
+    hook_results: &[(
+        aemeath_core::config::hooks::HookEntry,
+        HookResult,
+        Option<HookJsonOutput>,
+    )],
+) -> Option<String> {
+    hook_results
+        .iter()
+        .find(|(_, result, json)| {
+            result.blocked
+                || json
+                    .as_ref()
+                    .is_some_and(|j| j.decision.as_deref() == Some("block"))
+        })
+        .map(|(entry, result, json)| {
+            let reason = json
+                .as_ref()
+                .and_then(|j| j.reason.clone().or_else(|| j.system_message.clone()))
+                .or_else(|| result.error.clone())
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| "Stop hook 阻止了停止，但没有提供原因".to_string());
+            format!(
+                "Stop hook 阻止了停止，请先解决以下问题后再结束：\n命令：{}\n{}",
+                entry.command, reason
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aemeath_core::config::hooks::HookEntry;
+
+    #[test]
+    fn test_stop_hook_feedback_returns_none_without_block() {
+        let results = vec![hook_result("echo ok", false, "done", None)];
+
+        assert!(stop_hook_feedback(&results).is_none());
+    }
+
+    #[test]
+    fn test_stop_hook_feedback_uses_error_when_blocked() {
+        let results = vec![hook_result("check.sh", true, "", Some("failed"))];
+
+        let feedback = stop_hook_feedback(&results).unwrap();
+
+        assert!(feedback.contains("check.sh"));
+        assert!(feedback.contains("failed"));
+    }
+
+    #[test]
+    fn test_stop_hook_feedback_uses_json_reason() {
+        let results = vec![hook_result_with_json_reason("check.sh", "fix line count")];
+
+        let feedback = stop_hook_feedback(&results).unwrap();
+
+        assert!(feedback.contains("check.sh"));
+        assert!(feedback.contains("fix line count"));
+    }
+
+    fn hook_result(
+        command: &str,
+        blocked: bool,
+        output: &str,
+        error: Option<&str>,
+    ) -> (HookEntry, HookResult, Option<HookJsonOutput>) {
+        (
+            HookEntry {
+                matcher: String::new(),
+                command: command.to_string(),
+                timeout: 60,
+            },
+            HookResult {
+                blocked,
+                output: output.to_string(),
+                error: error.map(str::to_string),
+            },
+            None,
+        )
+    }
+
+    fn hook_result_with_json_reason(
+        command: &str,
+        reason: &str,
+    ) -> (HookEntry, HookResult, Option<HookJsonOutput>) {
+        (
+            HookEntry {
+                matcher: String::new(),
+                command: command.to_string(),
+                timeout: 60,
+            },
+            HookResult {
+                blocked: false,
+                output: String::new(),
+                error: None,
+            },
+            Some(HookJsonOutput {
+                decision: Some("block".to_string()),
+                reason: Some(reason.to_string()),
+                ..Default::default()
+            }),
+        )
     }
 }
