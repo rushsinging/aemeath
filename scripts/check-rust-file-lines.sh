@@ -17,7 +17,7 @@ while IFS= read -r -d '' file; do
 done < <(find "$ROOT" -path "$ROOT/target" -prune -o -path "$ROOT/.git" -prune -o -path "$ROOT/.worktrees" -prune -o -name '*.rs' -print0)
 if [[ "$FAILED" -ne 0 ]]; then
   echo "Rust file line limit exceeded ($COUNT). Split files to keep each .rs <= $LIMIT lines."
-  exit 1
+  exit 2
 fi
 
 echo "Rust file line limit OK (<= $LIMIT lines)."
