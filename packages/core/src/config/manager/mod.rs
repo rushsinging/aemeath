@@ -4,6 +4,7 @@ mod merge;
 mod persistence;
 
 use super::*;
+use crate::config::paths;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
@@ -20,9 +21,8 @@ pub struct ConfigManager {
 impl ConfigManager {
     /// Create a new config manager
     pub fn new(project_dir: Option<&Path>) -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let global_path = home.join(".aemeath").join("config.json");
-        let project_path = project_dir.map(|p| p.join(".aemeath").join("config.json"));
+        let global_path = paths::global_config_path();
+        let project_path = project_dir.map(paths::project_config_path);
 
         Self {
             config: RwLock::new(Config::default()),
@@ -40,20 +40,36 @@ impl ConfigManager {
 
         // Load global config
         if self.global_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&self.global_path).await {
-                if let Ok(global_config) = serde_json::from_str::<Config>(&content) {
-                    config = Self::merge_config(config, global_config);
-                }
+            match tokio::fs::read_to_string(&self.global_path).await {
+                Ok(content) => match serde_json::from_str::<Config>(&content) {
+                    Ok(global_config) => config = Self::merge_config(config, global_config),
+                    Err(err) => log::warn!(
+                        "解析全局配置失败 {}: {err}",
+                        self.global_path.display()
+                    ),
+                },
+                Err(err) => log::warn!(
+                    "读取全局配置失败 {}: {err}",
+                    self.global_path.display()
+                ),
             }
         }
 
         // Load project config
         if let Some(project_path) = &self.project_path {
             if project_path.exists() {
-                if let Ok(content) = tokio::fs::read_to_string(project_path).await {
-                    if let Ok(project_config) = serde_json::from_str::<Config>(&content) {
-                        config = Self::merge_config(config, project_config);
-                    }
+                match tokio::fs::read_to_string(project_path).await {
+                    Ok(content) => match serde_json::from_str::<Config>(&content) {
+                        Ok(project_config) => config = Self::merge_config(config, project_config),
+                        Err(err) => log::warn!(
+                            "解析项目配置失败 {}: {err}",
+                            project_path.display()
+                        ),
+                    },
+                    Err(err) => log::warn!(
+                        "读取项目配置失败 {}: {err}",
+                        project_path.display()
+                    ),
                 }
             }
         }

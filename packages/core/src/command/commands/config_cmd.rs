@@ -21,7 +21,6 @@ inventory::submit! {
             "/config get <key> - Get a config value".to_string(),
             "/config set <key> <value> - Set a config value".to_string(),
             "/config reset - Reset to defaults".to_string(),
-            "/config save - Save current config".to_string(),
         ])
         .with_aliases(vec!["cfg".to_string()])
     })
@@ -85,17 +84,13 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 ))
             }
             "set" => CommandResult::Error(
-                "`/config set` is not yet implemented. Edit ~/.aemeath/config.json directly."
+                "`/config set` is not yet implemented. Edit ~/.agents/aemeath.json directly."
                     .to_string(),
             ),
             "reset" => CommandResult::Confirm {
                 message: "Reset configuration to defaults?".to_string(),
                 action: ConfirmAction::ResetConfig,
             },
-            "save" => CommandResult::Error(
-                "`/config save` is not yet implemented. Edit ~/.aemeath/config.json directly."
-                    .to_string(),
-            ),
             _ => CommandResult::Error(format!("Unknown config command: {}", parts[0])),
         }
     }

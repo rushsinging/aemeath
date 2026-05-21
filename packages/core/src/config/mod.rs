@@ -2,8 +2,8 @@
 //!
 //! Supports layered configuration from multiple sources:
 //! 1. Default values
-//! 2. Global config file (~/.aemeath/config.json)
-//! 3. Project config file (.aemeath/config.json)
+//! 2. Global config file (`~/.agents/aemeath.json` by default)
+//! 3. Project config file (`{cwd}/.agents/aemeath.json`)
 //! 4. Environment variables
 //! 5. Command line arguments
 
@@ -13,6 +13,7 @@ pub mod logging;
 pub mod manager;
 pub mod memory;
 pub mod models;
+pub mod paths;
 pub mod permissions;
 pub mod skills;
 pub mod storage;
@@ -41,8 +42,8 @@ use serde::{Deserialize, Serialize};
 /// ## Configuration layers (priority: high → low)
 /// 1. Command line arguments
 /// 2. Environment variables (`AEMEATH_*`)
-/// 3. Project config file (`.aemeath/config.json`)
-/// 4. Global config file (`~/.aemeath/config.json`)
+/// 3. Project config file (`{cwd}/.agents/aemeath.json`)
+/// 4. Global config file (`~/.agents/aemeath.json` by default)
 /// 5. Built-in defaults
 ///
 /// ## Legacy vs. new config
@@ -118,6 +119,7 @@ mod tests {
     #[test]
     fn test_config_manager_creation() {
         let mgr = ConfigManager::new(None);
-        assert!(mgr.global_path().to_string_lossy().contains("aemeath"));
+        assert!(mgr.global_path().to_string_lossy().contains(".agents"));
+        assert!(mgr.global_path().to_string_lossy().ends_with("aemeath.json"));
     }
 }

@@ -11,15 +11,15 @@ impl ConfigManager {
         if let Some(parent) = self.global_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create config directory: {e}"))?;
+                .map_err(|e| format!("创建配置目录失败: {e}"))?;
         }
 
         let content = serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+            .map_err(|e| format!("序列化配置失败: {e}"))?;
 
         tokio::fs::write(&self.global_path, content)
             .await
-            .map_err(|e| format!("Failed to write config: {e}"))?;
+            .map_err(|e| format!("写入配置失败: {e}"))?;
 
         Ok(())
     }
@@ -29,7 +29,7 @@ impl ConfigManager {
         let project_path = self
             .project_path
             .as_ref()
-            .ok_or("No project directory set")?;
+            .ok_or("未设置项目目录")?;
 
         let config = self.config.read().await.clone();
 
@@ -37,15 +37,15 @@ impl ConfigManager {
         if let Some(parent) = project_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create config directory: {e}"))?;
+                .map_err(|e| format!("创建配置目录失败: {e}"))?;
         }
 
         let content = serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+            .map_err(|e| format!("序列化配置失败: {e}"))?;
 
         tokio::fs::write(project_path, content)
             .await
-            .map_err(|e| format!("Failed to write config: {e}"))?;
+            .map_err(|e| format!("写入配置失败: {e}"))?;
 
         Ok(())
     }

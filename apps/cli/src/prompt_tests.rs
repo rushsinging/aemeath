@@ -32,6 +32,60 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
     assert!(text.contains("prioritize the latest user request"));
 }
 
+#[tokio::test]
+async fn test_load_agents_md_reads_project_agents_md() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_agents_md_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("AGENTS.md"), "project agents instructions").unwrap();
+    std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
+
+    let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
+    let content = load_agents_md(&base, &hook_runner).await;
+
+    assert!(content.contains("project agents instructions"));
+    assert!(!content.contains("old project instructions"));
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[tokio::test]
+async fn test_load_agents_md_does_not_auto_migrate_project_claude_md() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_agents_md_no_auto_migration_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
+    let agents_dir = base.join("agents-home");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+
+    let previous = std::env::var_os("AEMEATH_AGENTS_DIR");
+    std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir);
+
+    let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
+    let content = load_agents_md(&base, &hook_runner).await;
+
+    if let Some(previous) = previous {
+        std::env::set_var("AEMEATH_AGENTS_DIR", previous);
+    } else {
+        std::env::remove_var("AEMEATH_AGENTS_DIR");
+    }
+
+    assert!(content.is_empty());
+    assert!(!base.join("AGENTS.md").exists());
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
 #[test]
 fn test_format_memory_context_empty() {
     assert!(format_memory_context(&[]).is_none());

@@ -1,4 +1,5 @@
 use super::{parse_skill, Skill};
+use crate::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -85,27 +86,20 @@ pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Sk
     let home = dirs::home_dir();
 
     // Project-level skills (highest priority)
-    // 1. {cwd}/.aemeath/skills/
-    let project_dir = cwd.join(".aemeath").join("skills");
+    // 1. {cwd}/.agents/skills/
+    let project_dir = paths::project_skills_dir(cwd);
     for skill in load_skills_from_dir(&project_dir) {
         map.insert(skill.name.clone(), skill);
     }
 
     // Global skills
-    if let Some(ref home) = home {
-        // 2. ~/.aemeath/skills/
-        let aemeath_global = home.join(".aemeath").join("skills");
-        for skill in load_skills_from_dir(&aemeath_global) {
-            map.entry(skill.name.clone()).or_insert(skill);
-        }
-        // 3. ~/.agents/skills/
-        let agents_global = home.join(".agents").join("skills");
-        for skill in load_skills_from_dir(&agents_global) {
-            map.entry(skill.name.clone()).or_insert(skill);
-        }
+    // 2. ~/.agents/skills/
+    let agents_global = paths::global_skills_dir();
+    for skill in load_skills_from_dir(&agents_global) {
+        map.entry(skill.name.clone()).or_insert(skill);
     }
 
-    // Extra skill directories from config.json (lowest priority)
+    // Extra skill directories from aemeath.json (lowest priority)
     for dir in extra_dirs {
         // Expand `~` to home directory
         let expanded = if dir.starts_with("~") {
@@ -236,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_load_skills_nested_with_namespace() {
-        // Simulate: ~/.aemeath/skills/superpowers/skills/brainstorming/SKILL.md
+        // Simulate: ~/.agents/skills/superpowers/skills/brainstorming/SKILL.md
         let base = std::env::temp_dir().join("aemeath_test_skill_ns");
         let deep = base
             .join("superpowers")
@@ -328,5 +322,58 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_load_all_skills_prefers_project_agents_skills() {
+        let base = std::env::temp_dir().join(format!(
+            "aemeath_skill_agents_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let project_skills = base.join(".agents").join("skills");
+        std::fs::create_dir_all(&project_skills).unwrap();
+        let mut file = std::fs::File::create(project_skills.join("demo.md")).unwrap();
+        write!(
+            file,
+            "---\nname: demo\ndescription: demo\n---\nproject skill"
+        )
+        .unwrap();
+
+        let skills = load_all_skills(&base, &[]);
+
+        assert!(skills.contains_key("demo"));
+        assert_eq!(skills["demo"].source_path, project_skills.join("demo.md"));
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn test_load_all_skills_does_not_auto_migrate_project_aemeath_skills() {
+        let base = std::env::temp_dir().join(format!(
+            "aemeath_skill_no_auto_migration_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let old_skills = base.join(".aemeath").join("skills");
+        std::fs::create_dir_all(&old_skills).unwrap();
+        let mut file = std::fs::File::create(old_skills.join("legacy.md")).unwrap();
+        write!(
+            file,
+            "---\nname: legacy\ndescription: legacy\n---\nlegacy skill"
+        )
+        .unwrap();
+
+        let skills = load_all_skills(&base, &[]);
+        let new_skills = base.join(".agents").join("skills");
+
+        assert!(!new_skills.exists());
+        assert!(!skills.contains_key("legacy"));
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
