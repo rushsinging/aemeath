@@ -1,4 +1,4 @@
-//! Codex 风格配置路径与手动迁移辅助。
+//! Codex 风格配置路径。
 
 use std::path::{Path, PathBuf};
 
@@ -81,120 +81,6 @@ pub fn old_project_skills_dir(cwd: &Path) -> PathBuf {
     cwd.join(OLD_AEMEATH_DIR_NAME).join(SKILLS_DIR_NAME)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MigrationRecord {
-    pub kind: &'static str,
-    pub old_path: PathBuf,
-    pub new_path: PathBuf,
-    pub migrated: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MigrationReport {
-    pub records: Vec<MigrationRecord>,
-    pub errors: Vec<String>,
-}
-
-impl MigrationReport {
-    pub fn new() -> Self {
-        Self {
-            records: Vec::new(),
-            errors: Vec::new(),
-        }
-    }
-
-    pub fn migrated_count(&self) -> usize {
-        self.records.iter().filter(|record| record.migrated).count()
-    }
-
-    pub fn is_success(&self) -> bool {
-        self.errors.is_empty()
-    }
-}
-
-pub async fn migrate_legacy_layout(project_dir: Option<&Path>) -> MigrationReport {
-    let mut report = MigrationReport::new();
-    migrate_file_record(
-        &mut report,
-        "全局配置",
-        old_global_config_path(),
-        global_config_path(),
-    )
-    .await;
-    migrate_file_record(
-        &mut report,
-        "全局指令",
-        old_global_claude_md_path(),
-        global_agents_md_path(),
-    )
-    .await;
-    migrate_dir_record(
-        &mut report,
-        "全局 skills",
-        old_global_skills_dir(),
-        global_skills_dir(),
-    );
-
-    if let Some(project_dir) = project_dir {
-        migrate_file_record(
-            &mut report,
-            "项目配置",
-            old_project_config_path(project_dir),
-            project_config_path(project_dir),
-        )
-        .await;
-        migrate_file_record(
-            &mut report,
-            "项目指令",
-            old_project_claude_md_path(project_dir),
-            project_agents_md_path(project_dir),
-        )
-        .await;
-        migrate_dir_record(
-            &mut report,
-            "项目 skills",
-            old_project_skills_dir(project_dir),
-            project_skills_dir(project_dir),
-        );
-    }
-
-    report
-}
-
-async fn migrate_file_record(
-    report: &mut MigrationReport,
-    kind: &'static str,
-    old_path: PathBuf,
-    new_path: PathBuf,
-) {
-    match migrate_file_once(&old_path, &new_path).await {
-        Ok(migrated) => report.records.push(MigrationRecord {
-            kind,
-            old_path,
-            new_path,
-            migrated,
-        }),
-        Err(err) => report.errors.push(err),
-    }
-}
-
-fn migrate_dir_record(
-    report: &mut MigrationReport,
-    kind: &'static str,
-    old_path: PathBuf,
-    new_path: PathBuf,
-) {
-    match migrate_dir_once(&old_path, &new_path) {
-        Ok(migrated) => report.records.push(MigrationRecord {
-            kind,
-            old_path,
-            new_path,
-            migrated,
-        }),
-        Err(err) => report.errors.push(err),
-    }
-}
-
 pub async fn migrate_file_once(old_path: &Path, new_path: &Path) -> Result<bool, String> {
     if new_path.exists() || !old_path.exists() {
         return Ok(false);
@@ -206,9 +92,13 @@ pub async fn migrate_file_once(old_path: &Path, new_path: &Path) -> Result<bool,
             .map_err(|e| format!("创建迁移目标目录失败 {}: {e}", parent.display()))?;
     }
 
-    tokio::fs::copy(old_path, new_path)
-        .await
-        .map_err(|e| format!("迁移文件失败 {} -> {}: {e}", old_path.display(), new_path.display()))?;
+    tokio::fs::copy(old_path, new_path).await.map_err(|e| {
+        format!(
+            "迁移文件失败 {} -> {}: {e}",
+            old_path.display(),
+            new_path.display()
+        )
+    })?;
 
     Ok(true)
 }
@@ -272,8 +162,14 @@ mod tests {
             project_config_path(&cwd),
             PathBuf::from("/tmp/demo/.agents/aemeath.json")
         );
-        assert_eq!(project_agents_md_path(&cwd), PathBuf::from("/tmp/demo/AGENTS.md"));
-        assert_eq!(project_skills_dir(&cwd), PathBuf::from("/tmp/demo/.agents/skills"));
+        assert_eq!(
+            project_agents_md_path(&cwd),
+            PathBuf::from("/tmp/demo/AGENTS.md")
+        );
+        assert_eq!(
+            project_skills_dir(&cwd),
+            PathBuf::from("/tmp/demo/.agents/skills")
+        );
     }
 
     #[test]
@@ -283,31 +179,14 @@ mod tests {
             old_project_config_path(&cwd),
             PathBuf::from("/tmp/demo/.aemeath/config.json")
         );
-        assert_eq!(old_project_claude_md_path(&cwd), PathBuf::from("/tmp/demo/CLAUDE.md"));
-        assert_eq!(old_project_skills_dir(&cwd), PathBuf::from("/tmp/demo/.aemeath/skills"));
-    }
-
-    #[test]
-    fn test_migration_report_counts_only_migrated_records() {
-        let mut report = MigrationReport::new();
-        assert!(report.is_success());
-        assert_eq!(report.migrated_count(), 0);
-
-        report.records.push(MigrationRecord {
-            kind: "项目配置",
-            old_path: PathBuf::from("old"),
-            new_path: PathBuf::from("new"),
-            migrated: true,
-        });
-        report.records.push(MigrationRecord {
-            kind: "项目指令",
-            old_path: PathBuf::from("old-md"),
-            new_path: PathBuf::from("new-md"),
-            migrated: false,
-        });
-
-        assert_eq!(report.migrated_count(), 1);
-        assert!(report.is_success());
+        assert_eq!(
+            old_project_claude_md_path(&cwd),
+            PathBuf::from("/tmp/demo/CLAUDE.md")
+        );
+        assert_eq!(
+            old_project_skills_dir(&cwd),
+            PathBuf::from("/tmp/demo/.aemeath/skills")
+        );
     }
 
     #[test]

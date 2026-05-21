@@ -65,9 +65,20 @@ async fn test_load_agents_md_does_not_auto_migrate_project_claude_md() {
     ));
     std::fs::create_dir_all(&base).unwrap();
     std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
+    let agents_dir = base.join("agents-home");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+
+    let previous = std::env::var_os("AEMEATH_AGENTS_DIR");
+    std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir);
 
     let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
     let content = load_agents_md(&base, &hook_runner).await;
+
+    if let Some(previous) = previous {
+        std::env::set_var("AEMEATH_AGENTS_DIR", previous);
+    } else {
+        std::env::remove_var("AEMEATH_AGENTS_DIR");
+    }
 
     assert!(content.is_empty());
     assert!(!base.join("AGENTS.md").exists());

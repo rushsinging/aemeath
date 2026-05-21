@@ -12,13 +12,15 @@
 | 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
 | 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；不引入运行时主题切换、不改布局、不引入外部配置 |
-| 40 | 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取 | 高 | 待实施 | 未确认 | 将当前 `.aemeath` / `CLAUDE.md` / skill 读取链路调整为 Codex 方向：全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；指令读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills 读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`；实现时必须考虑 git worktree 下 repo root / checkout root / cwd 的配置继承与去重，并提供现有配置迁移到新模式的方案。 |
+| 40 | 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取 | 高 | 待确认 | 未确认 | 将当前 `.aemeath` / `CLAUDE.md` / skill 读取链路调整为 Codex 方向：全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；指令读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills 读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`；实现时必须考虑 git worktree 下 repo root / checkout root / cwd 的配置继承与去重，并由本次更新在发布/部署阶段手动迁移现有 `~/.aemeath` 数据。 |
 
 ### #40 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取
 
 **目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
 
 **核心要求**：
+
+**实现结果（2026-05-21）**：运行时读取已切换到新路径：全局配置 `~/.agents/aemeath.json`，项目配置 `{cwd}/.agents/aemeath.json`；指令 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills `~/.agents/skills` 与 `{cwd}/.agents/skills`。程序不提供 `/config migrate` 且启动时不自动迁移；现有 `~/.aemeath`、`~/.claude/CLAUDE.md`、项目 `CLAUDE.md` 与旧 skills 由本次更新在发布/部署阶段一次性手动复制到新路径。Worktree 下以启动 `cwd` 为边界读取，不跨 checkout 共享项目配置。
 
 1. **全局配置目录**：默认使用 `~/.agents` 作为全局配置根，且该根目录本身必须可配置。
 2. **Agent 配置文件**：Aemeath 的主配置文件改为 `aemeath.json`，默认路径为 `~/.agents/aemeath.json`；项目级配置后续可按 Codex 风格放在项目 `.agents` / `.codex` 同类目录中评估，但本 feature 的明确目标是先统一全局配置与 agent 配置命名。

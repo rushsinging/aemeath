@@ -6,22 +6,21 @@ use crate::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
     ConfirmAction,
 };
-use crate::config::{paths, PermissionModeConfig};
+use crate::config::PermissionModeConfig;
 
 inventory::submit! {
     CommandDescriptor::new(|| {
-        Command::new_async(
+        Command::new(
             "config".to_string(),
             "Manage configuration settings".to_string(),
             CommandCategory::Config,
-            config_execute_async,
+            config_execute,
         )
         .with_usage(vec![
             "/config - Show current config".to_string(),
             "/config get <key> - Get a config value".to_string(),
             "/config set <key> <value> - Set a config value".to_string(),
             "/config reset - Reset to defaults".to_string(),
-            "/config migrate - Manually migrate legacy .aemeath/CLAUDE.md/skills files".to_string(),
         ])
         .with_aliases(vec!["cfg".to_string()])
     })
@@ -45,16 +44,7 @@ inventory::submit! {
     })
 }
 
-fn config_execute_async(
-    args: String,
-    ctx: &mut CommandContext,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult> + Send>> {
-    let cwd = ctx.cwd.clone();
-    let config = ctx.config.clone();
-    Box::pin(async move { config_execute(&args, &config, &cwd).await })
-}
-
-async fn config_execute(args: &str, config: &crate::config::Config, cwd: &str) -> CommandResult {
+fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
     let parts: Vec<&str> = args.trim().split_whitespace().collect();
     if parts.is_empty() {
         let output = format!(
@@ -63,22 +53,22 @@ async fn config_execute(args: &str, config: &crate::config::Config, cwd: &str) -
              UI:\n  Markdown: {}\n  Color: {}\n  TUI: {}\n\n\
              Permissions:\n  Mode: {}\n\n\
              Storage:\n  Persist sessions: {}\n",
-            config.model.name,
-            config.model.max_tokens,
-            config
+            ctx.config.model.name,
+            ctx.config.model.max_tokens,
+            ctx.config
                 .api
                 .base_url
                 .as_deref()
                 .unwrap_or("https://api.anthropic.com"),
-            config.ui.markdown,
-            config.ui.color,
-            config.ui.tui,
-            match config.permissions.mode {
+            ctx.config.ui.markdown,
+            ctx.config.ui.color,
+            ctx.config.ui.tui,
+            match ctx.config.permissions.mode {
                 PermissionModeConfig::Ask => "ask",
                 PermissionModeConfig::AutoRead => "auto-read",
                 PermissionModeConfig::AllowAll => "allow-all",
             },
-            config.storage.persist_sessions,
+            ctx.config.storage.persist_sessions,
         );
         CommandResult::Success(output)
     } else {
@@ -90,7 +80,7 @@ async fn config_execute(args: &str, config: &crate::config::Config, cwd: &str) -
                 CommandResult::Success(format!(
                     "{} = {}",
                     parts[1],
-                    get_config_value(config, parts[1])
+                    get_config_value(&ctx.config, parts[1])
                 ))
             }
             "set" => CommandResult::Error(
@@ -101,41 +91,8 @@ async fn config_execute(args: &str, config: &crate::config::Config, cwd: &str) -
                 message: "Reset configuration to defaults?".to_string(),
                 action: ConfirmAction::ResetConfig,
             },
-            "migrate" => migrate_config(cwd).await,
             _ => CommandResult::Error(format!("Unknown config command: {}", parts[0])),
         }
-    }
-}
-
-async fn migrate_config(cwd: &str) -> CommandResult {
-    let project_dir = std::path::Path::new(cwd);
-    let report = paths::migrate_legacy_layout(Some(project_dir)).await;
-
-    let mut output = format!(
-        "配置迁移完成：{} 项已迁移，{} 个错误。\n",
-        report.migrated_count(),
-        report.errors.len()
-    );
-
-    for record in &report.records {
-        if record.migrated {
-            output.push_str(&format!(
-                "已迁移 {}: {} -> {}\n",
-                record.kind,
-                record.old_path.display(),
-                record.new_path.display()
-            ));
-        }
-    }
-
-    for err in &report.errors {
-        output.push_str(&format!("错误: {err}\n"));
-    }
-
-    if report.is_success() {
-        CommandResult::Success(output)
-    } else {
-        CommandResult::Error(output)
     }
 }
 
