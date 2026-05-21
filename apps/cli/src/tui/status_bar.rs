@@ -1,9 +1,10 @@
 use crate::tui::safe_text::{col_to_char_idx, safe_char_slice};
+use crate::tui::theme;
 use aemeath_core::cost::format_tokens;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -146,19 +147,19 @@ impl StatusBar {
             spans.push(Span::styled(
                 format!(" {} ", model),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ));
-            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("│", Style::default().fg(theme::BORDER)));
         }
 
         // Thinking mode indicator
         {
             let label = if self.thinking { "ON" } else { "OFF" };
             let color = if self.thinking {
-                Color::Green
+                theme::SUCCESS
             } else {
-                Color::DarkGray
+                theme::TEXT_DIM
             };
             spans.push(Span::styled(
                 format!(" Think:{} │", label),
@@ -168,9 +169,9 @@ impl StatusBar {
 
         // Regular status
         let status_style = match self.status_type {
-            StatusType::Normal => Style::default().fg(Color::White),
-            StatusType::Success => Style::default().fg(Color::Green),
-            StatusType::Warning => Style::default().fg(Color::Yellow),
+            StatusType::Normal => Style::default().fg(theme::TEXT),
+            StatusType::Success => Style::default().fg(theme::SUCCESS),
+            StatusType::Warning => Style::default().fg(theme::WARNING),
         };
         spans.push(Span::styled(format!(" {} ", self.status), status_style));
         // Token usage: in/out + t/s + context window usage
@@ -182,14 +183,14 @@ impl StatusBar {
             );
             spans.push(Span::styled(
                 format!(" {} ", in_out),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme::TEXT_MUTED),
             ));
 
             // t/s display
             if self.tps > 0.0 {
                 spans.push(Span::styled(
                     format!(" {:.0} t/s │", self.tps),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::BORDER),
                 ));
             }
 
@@ -200,18 +201,18 @@ impl StatusBar {
                     0
                 };
                 let pct_color = if pct >= 80 {
-                    Color::Red
+                    theme::ERROR
                 } else if pct >= 50 {
-                    Color::Yellow
+                    theme::WARNING
                 } else {
-                    Color::Gray
+                    theme::TEXT_MUTED
                 };
                 spans.push(Span::styled(
                     format!("Ctx: {}% │", pct),
                     Style::default().fg(pct_color),
                 ));
             } else {
-                spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+                spans.push(Span::styled("│", Style::default().fg(theme::TEXT_MUTED)));
             }
         }
 
@@ -219,7 +220,7 @@ impl StatusBar {
         if let Some(ref id) = self.session_id {
             spans.push(Span::styled(
                 format!(" Session: {} │ Calls: {} ", id, self.api_calls),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme::TEXT_MUTED),
             ));
         }
 
@@ -243,8 +244,10 @@ impl StatusBar {
                 let selected: String = safe_char_slice(&chars, sel_start, sel_end).iter().collect();
                 let after: String = safe_char_slice(&chars, sel_end, len).iter().collect();
 
-                let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
-                let base = Style::default().bg(Color::Black);
+                let selection_style = Style::default()
+                    .bg(theme::SELECTION_BG)
+                    .fg(theme::SELECTION_FG);
+                let base = Style::default().bg(theme::SURFACE);
 
                 let mut highlighted = Vec::new();
                 if !before.is_empty() {
@@ -257,13 +260,13 @@ impl StatusBar {
                     highlighted.push(Span::styled(after, base));
                 }
                 let paragraph = Paragraph::new(Line::from(highlighted))
-                    .style(Style::default().bg(Color::Black));
+                    .style(Style::default().bg(theme::SURFACE));
                 paragraph.render(area, buf);
                 return;
             }
         }
 
-        let paragraph = Paragraph::new(line).style(Style::default().bg(Color::Black));
+        let paragraph = Paragraph::new(line).style(Style::default().bg(theme::SURFACE));
 
         paragraph.render(area, buf);
     }

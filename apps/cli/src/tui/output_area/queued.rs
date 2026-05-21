@@ -1,12 +1,11 @@
-use ratatui::{
-    style::{Color, Style},
-    text::Line,
-};
+use ratatui::{style::Style, text::Line};
+
+use crate::tui::theme;
 
 impl super::OutputArea {
     /// 渲染排队消息，保留消息内换行并为后续行补齐缩进
     pub(super) fn build_queued_message_lines(&self) -> Vec<Line<'static>> {
-        let style = Style::default().fg(Color::DarkGray);
+        let style = Style::default().fg(theme::TEXT_DIM);
         let mut lines = Vec::new();
 
         for msg in &self.queued_messages {

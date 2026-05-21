@@ -1,9 +1,8 @@
-use ratatui::{
-    style::{Color, Style},
-    text::Span,
-};
+use ratatui::{style::Style, text::Span};
 
 use aemeath_core::string_idx::CharIdx;
+
+use crate::tui::theme;
 
 impl super::OutputArea {
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
@@ -128,7 +127,9 @@ fn render_selected_chars(
     line_start: usize,
     line_end: usize,
 ) -> Vec<Span<'static>> {
-    let selection_style = Style::default().bg(Color::Blue).fg(Color::White);
+    let selection_style = Style::default()
+        .bg(theme::SELECTION_BG)
+        .fg(theme::SELECTION_FG);
     let mut result = Vec::new();
     let mut current_text = String::new();
     let mut current_style: Option<Style> = None;

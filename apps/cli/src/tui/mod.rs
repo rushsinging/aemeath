@@ -6,6 +6,7 @@ pub mod input_area;
 pub mod output_area;
 pub mod safe_text;
 pub mod status_bar;
+pub mod theme;
 
 pub use app::App;
 pub use input_area::InputArea;

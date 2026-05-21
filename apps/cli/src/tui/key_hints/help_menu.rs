@@ -1,7 +1,8 @@
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -73,11 +74,11 @@ impl HelpMenu {
         let mut lines = vec![
             Line::styled(
                 format!(" {} ", self.title),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
             ),
             Line::styled(
                 "─".repeat(area.width as usize),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::TEXT_DIM),
             ),
             Line::default(),
         ];
@@ -87,7 +88,7 @@ impl HelpMenu {
         }
         lines.push(Line::styled(
             " Press Esc to close ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::TEXT_DIM),
         ));
 
         Paragraph::new(lines)
@@ -109,12 +110,12 @@ fn append_section<'a>(
 ) {
     lines.push(Line::styled(
         format!(" {} ", section_name),
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        Style::default().fg(theme::WARNING).add_modifier(Modifier::BOLD),
     ));
     for (key, desc) in items {
         lines.push(Line::from(vec![
-            Span::styled(format!("   {:15} ", key), Style::default().fg(Color::Cyan)),
-            Span::styled(desc, Style::default().fg(Color::White)),
+            Span::styled(format!("   {:15} ", key), Style::default().fg(theme::ACCENT)),
+            Span::styled(desc, Style::default().fg(theme::TEXT)),
         ]));
     }
     lines.push(Line::default());

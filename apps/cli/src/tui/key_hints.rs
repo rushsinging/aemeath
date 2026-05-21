@@ -2,10 +2,11 @@
 //!
 //! Provides widgets for displaying keyboard shortcuts and help information.
 
+use crate::tui::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -93,7 +94,7 @@ impl KeyHints {
         for hint in &self.hints {
             append_group_separator(&mut spans, hint, self.show_groups, &mut current_group);
             if !spans.is_empty() {
-                spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(" │ ", Style::default().fg(theme::BORDER)));
             }
             spans.extend(key_description_spans(hint));
         }
@@ -114,9 +115,9 @@ impl KeyHints {
                 Line::from(vec![
                     Span::styled(
                         format!(" {:12} ", hint.key),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(hint.description.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(hint.description.as_str(), Style::default().fg(theme::TEXT)),
                 ])
             })
             .collect();
@@ -139,7 +140,7 @@ fn append_group_separator<'a>(
         }
         spans.push(Span::styled(
             format!("[{}] ", group),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::BORDER),
         ));
     }
     *current_group = hint.group.as_deref();
@@ -149,9 +150,9 @@ fn key_description_spans(hint: &KeyHint) -> Vec<Span<'_>> {
     vec![
         Span::styled(
             format!(" {} ", hint.key),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(hint.description.as_str(), Style::default().fg(Color::DarkGray)),
+        Span::styled(hint.description.as_str(), Style::default().fg(theme::BORDER)),
     ]
 }
 

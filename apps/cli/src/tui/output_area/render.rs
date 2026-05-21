@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
@@ -8,6 +8,7 @@ use ratatui::{
 use aemeath_core::string_idx::CharIdx;
 
 use crate::tui::output_area::display::wrap_line;
+use crate::tui::theme;
 
 use super::{display, markdown, render_blocks, LineStyle, OutputArea, OutputLine};
 
@@ -114,9 +115,7 @@ impl OutputArea {
     ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let mut vi = 0;
-        let code_style = Style::default()
-            .bg(Color::Rgb(40, 44, 52))
-            .fg(Color::Rgb(171, 178, 191));
+        let code_style = Style::default().bg(theme::CODE_BG).fg(theme::CODE_FG);
 
         while vi < vis_lines.len() {
             let (idx, output_line) = vis_lines[vi];
@@ -250,7 +249,7 @@ impl OutputArea {
         screen_map: &mut Vec<(usize, CharIdx, CharIdx)>,
         lines: &mut Vec<Line<'static>>,
     ) {
-        let border_style = Style::default().fg(Color::DarkGray);
+        let border_style = Style::default().fg(theme::BORDER);
         let label = if let Some(lang) = code_info.code_lang_label.get(&idx) {
             if lang.is_empty() {
                 "─".repeat(self.term_width.max(1))

@@ -124,7 +124,7 @@ fn test_parse_table_cells() {
 
 #[test]
 fn test_render_simple_table() {
-    let base = Style::default().fg(Color::Green);
+    let base = Style::default().fg(theme::SUCCESS);
     let lines = &["| Name | Value |", "| --- | --- |", "| foo  | bar   |"];
     let rendered = render_table_block(lines, base);
     assert_eq!(rendered.len(), 3);

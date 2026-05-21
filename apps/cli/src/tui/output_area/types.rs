@@ -37,17 +37,20 @@ pub enum LineStyle {
 impl LineStyle {
     pub fn to_style(&self) -> ratatui::style::Style {
         use ratatui::style::{Color, Modifier, Style};
+
+        use crate::tui::theme;
+
         match self {
-            LineStyle::Normal => Style::default(),
-            LineStyle::User => Style::default().fg(Color::Cyan),
-            LineStyle::Assistant => Style::default().fg(Color::Green),
-            LineStyle::ToolCallRunning => Style::default().fg(Color::Green),
-            LineStyle::ToolCallSuccess => Style::default().fg(Color::Green),
-            LineStyle::ToolCallError => Style::default().fg(Color::Red),
-            LineStyle::Error => Style::default().fg(Color::Red),
-            LineStyle::System => Style::default().fg(Color::DarkGray),
+            LineStyle::Normal => Style::default().fg(theme::TEXT),
+            LineStyle::User => Style::default().fg(theme::USER),
+            LineStyle::Assistant => Style::default().fg(theme::ASSISTANT),
+            LineStyle::ToolCallRunning => Style::default().fg(theme::TOOL_RUNNING),
+            LineStyle::ToolCallSuccess => Style::default().fg(theme::SUCCESS),
+            LineStyle::ToolCallError => Style::default().fg(theme::ERROR),
+            LineStyle::Error => Style::default().fg(theme::ERROR),
+            LineStyle::System => Style::default().fg(theme::TEXT_DIM),
             LineStyle::Thinking => Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::THINKING)
                 .add_modifier(Modifier::ITALIC),
             LineStyle::DiffAdd => {
                 let (r, g, b) = crate::render::theme::Theme::DIFF_ADD_BG_RGB;
@@ -64,7 +67,7 @@ impl LineStyle {
                     .fg(Color::Rgb(fr, fg, fb))
             }
             LineStyle::AskUser => Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::WARNING)
                 .add_modifier(Modifier::BOLD),
         }
     }

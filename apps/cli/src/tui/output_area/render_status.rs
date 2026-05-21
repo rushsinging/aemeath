@@ -1,12 +1,9 @@
-use ratatui::{
-    layout::Rect,
-    style::{Color, Style},
-    text::Line,
-};
+use ratatui::{layout::Rect, style::Style, text::Line};
 
 use aemeath_core::string_idx::CharIdx;
 
 use crate::tui::safe_text::clamp_split_index;
+use crate::tui::theme;
 
 use super::{LineStyle, OutputArea};
 
@@ -34,7 +31,7 @@ impl OutputArea {
                     CharIdx::new(char_count),
                 ));
                 let screen_idx = screen_start + i;
-                let task_style = Style::default().fg(Color::DarkGray);
+                let task_style = task_status_style(task_line);
                 let line = if self.has_real_selection() {
                     Line::from(self.render_line_with_selection(
                         screen_idx,
@@ -90,15 +87,13 @@ impl OutputArea {
             }
             let line = &self.lines[li];
             let dot_color = match line.style {
-                LineStyle::ToolCallRunning if line.content.starts_with('●') => {
-                    Some(if blink_on {
-                        Color::White
-                    } else {
-                        Color::DarkGray
-                    })
-                }
-                LineStyle::ToolCallSuccess if line.content.starts_with('✓') => Some(Color::Green),
-                LineStyle::ToolCallError if line.content.starts_with('✗') => Some(Color::Red),
+                LineStyle::ToolCallRunning if line.content.starts_with('●') => Some(if blink_on {
+                    theme::ACCENT_BRIGHT
+                } else {
+                    theme::TEXT_DIM
+                }),
+                LineStyle::ToolCallSuccess if line.content.starts_with('✓') => Some(theme::SUCCESS),
+                LineStyle::ToolCallError if line.content.starts_with('✗') => Some(theme::ERROR),
                 _ => None,
             };
             if let Some(color) = dot_color {
@@ -115,6 +110,20 @@ impl OutputArea {
                 }
             }
         }
+    }
+}
+
+fn task_status_style(text: &str) -> Style {
+    if text.starts_with('✓') || text.trim_start().starts_with('✓') {
+        Style::default().fg(theme::SUCCESS)
+    } else if text.starts_with('■') || text.trim_start().starts_with('■') {
+        Style::default().fg(theme::TOOL_RUNNING)
+    } else if text.starts_with('□') || text.trim_start().starts_with('□') {
+        Style::default().fg(theme::TEXT_MUTED)
+    } else if text.starts_with('…') || text.trim_start().starts_with('…') {
+        Style::default().fg(theme::TEXT_DIM)
+    } else {
+        Style::default().fg(theme::BORDER)
     }
 }
 
@@ -171,13 +180,10 @@ mod tests {
         output.render(area, &mut buf);
 
         let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
-        assert_eq!(first_selected.style().bg, Some(ratatui::style::Color::Blue));
-        assert_eq!(
-            first_selected.style().fg,
-            Some(ratatui::style::Color::White)
-        );
+        assert_eq!(first_selected.style().bg, Some(theme::SELECTION_BG));
+        assert_eq!(first_selected.style().fg, Some(theme::SELECTION_FG));
 
         let unselected = buf.cell((area.x + 9, area.y + 1)).unwrap();
-        assert_ne!(unselected.style().bg, Some(ratatui::style::Color::Blue));
+        assert_ne!(unselected.style().bg, Some(theme::SELECTION_BG));
     }
 }
