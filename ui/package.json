@@ -1,0 +1,24 @@
+{
+  "name": "@aemeath/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.0.8",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@aemeath/sdk": "file:../packages/sdk/ts",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "element-plus": "^2.11.8",
+    "pinia": "^3.0.4",
+    "vite": "^7.2.4",
+    "vue": "^3.5.25"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.1.5"
+  }
+}
