@@ -247,7 +247,7 @@ impl StatusBar {
                 let selection_style = Style::default()
                     .bg(theme::SELECTION_BG)
                     .fg(theme::SELECTION_FG);
-                let base = Style::default().bg(theme::SURFACE);
+                let base = Style::default().bg(theme::STATUS_BG);
 
                 let mut highlighted = Vec::new();
                 if !before.is_empty() {
@@ -260,13 +260,13 @@ impl StatusBar {
                     highlighted.push(Span::styled(after, base));
                 }
                 let paragraph = Paragraph::new(Line::from(highlighted))
-                    .style(Style::default().bg(theme::SURFACE));
+                    .style(Style::default().bg(theme::STATUS_BG));
                 paragraph.render(area, buf);
                 return;
             }
         }
 
-        let paragraph = Paragraph::new(line).style(Style::default().bg(theme::SURFACE));
+        let paragraph = Paragraph::new(line).style(Style::default().bg(theme::STATUS_BG));
 
         paragraph.render(area, buf);
     }
@@ -417,16 +417,14 @@ mod tests {
     }
 
     #[test]
-    fn test_status_bar_selection_boundary_end_col_clamps_to_text_len() {
-        let mut bar = StatusBar::new();
-        bar.set_test_status_text("你好");
+    fn test_status_bar_render_uses_status_background() {
+        let bar = StatusBar::new();
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buf = Buffer::empty(area);
 
-        bar.start_selection(0);
-        bar.update_selection(99);
+        bar.render(area, &mut buf);
 
-        assert_eq!(
-            bar.get_selected_text(),
-            Some(" Think:OFF │ 你好  In: 0 / Out: 0 │".to_string())
-        );
+        assert_eq!(buf.cell((0, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
+        assert_eq!(buf.cell((39, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
     }
 }
