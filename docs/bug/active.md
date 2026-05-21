@@ -7,6 +7,8 @@
 | 51 | Output area 复制时复制出 Markdown 源码而非渲染后纯文本 | 中 | 修复中 | 未确认 | 2026-05 | 根因：get_selected_text 直接从 OutputLine.content 读取原始 Markdown 文本（含 **bold**、*italic*、`code` 等格式标记），而 TUI 渲染时通过 inline_markdown_spans 剥离了这些标记。修复：新增 strip_inline_formatting 函数剥离内联格式标记，在 get_selected_text 返回前应用 |
 | 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 修复中 | 未确认 | 2026-05 | 根因：deny_tool_calls 只发送 ToolResult 事件（携带 LLM 的 tool_use_id）不发送 ToolCall 事件，导致 pending placeholder 的 tool_id（pending:{name}:{index}）无法被 mark_tool_header_done 精确匹配；fallback 盲目抓最后一个 ToolCallRunning 行，当同轮存在其他 running tool 时会抓错行，被拒绝的 tool 的占位行永远保持 ToolCallRunning 状态。修复：(1) deny_tool_calls 先发 ToolCall 再发 ToolResult；(2) mark_tool_header_done fallback 增加 pending 前缀匹配阶段 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 活动中 | 未确认 | 2026-05 | AskUserQuestion 含多个选项时（如 A/B/C），选项没有换行逐条显示，而是挤在同一行被截断；期望每个选项独占一行 |
+| 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 活动中 | 未确认 | 2026-05 | LLM 对单步或简单任务频繁调用 TaskListCreate + TaskCreate，导致 TUI 显示不必要的 task list 噪音；需在 system prompt 中加强约束：仅在多步骤复杂任务（≥3 步）时使用 task 管理，简单任务直接执行 |
+| 55 | 行内代码（`...`）自动换行处渲染异常 | 中 | 活动中 | 未确认 | 2026-05 | 当行内代码片段（如 `` `RedisSessionSto` ``）恰好在行尾触发自动换行时，换行后的渲染出现异常（高亮背景截断、文字重叠或溢出）；疑似 inline_markdown_spans 在 word wrap 边界处的 span 范围计算与实际换行位置不一致 |
 
 ## 专案
 
