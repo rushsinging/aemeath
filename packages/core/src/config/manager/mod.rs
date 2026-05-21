@@ -16,8 +16,6 @@ pub struct ConfigManager {
     global_path: PathBuf,
     /// Project config file path
     project_path: Option<PathBuf>,
-    /// Project directory used for migration and project config resolution
-    project_dir: Option<PathBuf>,
 }
 
 impl ConfigManager {
@@ -30,7 +28,6 @@ impl ConfigManager {
             config: RwLock::new(Config::default()),
             global_path,
             project_path,
-            project_dir: project_dir.map(Path::to_path_buf),
         }
     }
 
@@ -43,20 +40,36 @@ impl ConfigManager {
 
         // Load global config
         if self.global_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&self.global_path).await {
-                if let Ok(global_config) = serde_json::from_str::<Config>(&content) {
-                    config = Self::merge_config(config, global_config);
-                }
+            match tokio::fs::read_to_string(&self.global_path).await {
+                Ok(content) => match serde_json::from_str::<Config>(&content) {
+                    Ok(global_config) => config = Self::merge_config(config, global_config),
+                    Err(err) => log::warn!(
+                        "解析全局配置失败 {}: {err}",
+                        self.global_path.display()
+                    ),
+                },
+                Err(err) => log::warn!(
+                    "读取全局配置失败 {}: {err}",
+                    self.global_path.display()
+                ),
             }
         }
 
         // Load project config
         if let Some(project_path) = &self.project_path {
             if project_path.exists() {
-                if let Ok(content) = tokio::fs::read_to_string(project_path).await {
-                    if let Ok(project_config) = serde_json::from_str::<Config>(&content) {
-                        config = Self::merge_config(config, project_config);
-                    }
+                match tokio::fs::read_to_string(project_path).await {
+                    Ok(content) => match serde_json::from_str::<Config>(&content) {
+                        Ok(project_config) => config = Self::merge_config(config, project_config),
+                        Err(err) => log::warn!(
+                            "解析项目配置失败 {}: {err}",
+                            project_path.display()
+                        ),
+                    },
+                    Err(err) => log::warn!(
+                        "读取项目配置失败 {}: {err}",
+                        project_path.display()
+                    ),
                 }
             }
         }
