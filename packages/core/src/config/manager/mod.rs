@@ -4,6 +4,7 @@ mod merge;
 mod persistence;
 
 use super::*;
+use crate::config::paths;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
@@ -15,19 +16,21 @@ pub struct ConfigManager {
     global_path: PathBuf,
     /// Project config file path
     project_path: Option<PathBuf>,
+    /// Project directory used for migration and project config resolution
+    project_dir: Option<PathBuf>,
 }
 
 impl ConfigManager {
     /// Create a new config manager
     pub fn new(project_dir: Option<&Path>) -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let global_path = home.join(".aemeath").join("config.json");
-        let project_path = project_dir.map(|p| p.join(".aemeath").join("config.json"));
+        let global_path = paths::global_config_path();
+        let project_path = project_dir.map(paths::project_config_path);
 
         Self {
             config: RwLock::new(Config::default()),
             global_path,
             project_path,
+            project_dir: project_dir.map(Path::to_path_buf),
         }
     }
 
