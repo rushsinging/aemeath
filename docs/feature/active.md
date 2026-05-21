@@ -10,7 +10,7 @@
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 实施中 | 未确认 | Sprint 0/Sprint 0.5 已完成；Sprint 1 已完成 Workspace/Chat API 收尾切片：REST Workspace/Chat/Message、GET messages 分页、PATCH Chat、REST AnalyzeMessage、WebSocket payload、gateway 配置、idempotency_key 去重与 server 内部 EventBus 骨架；当前架构文档已改为 Server + Agent 分布式部署：MongoDB 作为业务状态真相源，Redis Streams 作为消息层，取消 Agent RPC / Watch 接口，调度改为 WorkItem + lease + OutboxPublisher；Sprint 2 UI 已收敛为全屏 Sticky Whiteboard Workbench，选定静态 mockup `docs/feature/mockups/036-sprint-2-sticky-whiteboard-workbench.html`，并新增 `ui/` Vue 3 + Vite + Pinia + Element Plus 核心骨架：左右抽屉、紧凑便利贴、Requirement/Project 状态、agent 标识、点击详情和底部 chat dock 已用静态 Board store 落地；下一步接入 `@aemeath/sdk` REST/WS 真实 BoardEvent，或继续补 MongoDB 持久化、Redis WorkQueue/BoardEvent 与 Outbox。详见 [spec](specs/036-01-plan.md) |
 | 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
-| 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
+| 38 | TUI 日志文件（`~/.agents/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.agents/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取 | 高 | 待确认 | 未确认 | 将当前 `.aemeath` / `CLAUDE.md` / skill 读取链路调整为 Codex 方向：全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；指令读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills 读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`；实现时必须考虑 git worktree 下 repo root / checkout root / cwd 的配置继承与去重，并由本次更新在发布/部署阶段手动迁移现有 `~/.aemeath` 数据。 |
 
@@ -20,7 +20,7 @@
 
 **核心要求**：
 
-**实现结果（2026-05-21）**：运行时读取已切换到新路径：全局配置 `~/.agents/aemeath.json`，项目配置 `{cwd}/.agents/aemeath.json`；指令 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills `~/.agents/skills` 与 `{cwd}/.agents/skills`。程序不提供 `/config migrate` 且启动时不自动迁移；现有 `~/.aemeath`、`~/.claude/CLAUDE.md`、项目 `CLAUDE.md` 与旧 skills 由本次更新在发布/部署阶段一次性手动复制到新路径。Worktree 下以启动 `cwd` 为边界读取，不跨 checkout 共享项目配置。
+**实现结果（2026-05-21）**：运行时读取已切换到新路径：全局配置 `~/.agents/aemeath.json`，项目配置 `{cwd}/.agents/aemeath.json`；指令 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`；skills `~/.agents/skills` 与 `{cwd}/.agents/skills`；应用主日志 `~/.agents/logs/aemeath.log`。程序不提供 `/config migrate` 且启动时不自动迁移；现有 `~/.aemeath`、`~/.claude/CLAUDE.md`、项目 `CLAUDE.md` 与旧 skills 由本次更新在发布/部署阶段一次性手动复制到新路径。Worktree 下以启动 `cwd` 为边界读取，不跨 checkout 共享项目配置。
 
 1. **全局配置目录**：默认使用 `~/.agents` 作为全局配置根，且该根目录本身必须可配置。
 2. **Agent 配置文件**：Aemeath 的主配置文件改为 `aemeath.json`，默认路径为 `~/.agents/aemeath.json`；项目级配置后续可按 Codex 风格放在项目 `.agents` / `.codex` 同类目录中评估，但本 feature 的明确目标是先统一全局配置与 agent 配置命名。

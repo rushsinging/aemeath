@@ -54,7 +54,7 @@ aemeath/                    # workspace root
 - **MUST** 遵循 `AemeathError` 错误类型体系。
 - **MUST** 配置优先于硬编码默认值。
 - **MUST** 异步 trait 方法使用 `async_trait`。
-- **MUST** TUI 模式下所有日志路由到 `~/.aemeath/aemeath.log`。
+- **MUST** TUI 模式下所有应用主日志路由到 `~/.agents/logs/aemeath.log`。
 - **MUST** 新增 `pub fn` 在同一文件末尾添加 `#[cfg(test)] mod tests`。
 - **MUST** 单元测试覆盖三种路径：正常路径、边界条件、错误路径。
 - **MUST** 单个 `.rs` 文件不超过 400 行（含测试代码）。超出时立即拆分职责。
@@ -119,9 +119,9 @@ aemeath/                    # workspace root
 ## 日志规范
 
 - `env_logger` 驱动，从配置文件的 `logging` 段读取 module_levels（默认 `aemeath=debug`）。
-- 日志文件：`~/.aemeath/aemeath.log`（追加模式）。
-- Panic 日志：`~/.aemeath/panic.log`。
-- Agent 审计日志：`~/.aemeath/agent.log`（LLM 请求/响应摘要、token 用量）。
+- 日志文件：`~/.agents/logs/aemeath.log`（追加模式）。
+- Panic 日志：`~/.agents/logs/panic.log`。
+- Agent 审计日志：`~/.agents/logs/agent.log`（已废弃，保留兼容枚举；当前无写入点）。
 - 设置 `AEMEATH_LOG_STDERR=1` 可恢复 stderr 输出（用于 `--no-tui` 模式）。
 
 ## 测试规范

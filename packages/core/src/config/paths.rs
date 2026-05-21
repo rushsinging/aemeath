@@ -10,6 +10,7 @@ pub const CLAUDE_MD: &str = "CLAUDE.md";
 pub const AGENTS_DIR_NAME: &str = ".agents";
 pub const OLD_AEMEATH_DIR_NAME: &str = ".aemeath";
 pub const SKILLS_DIR_NAME: &str = "skills";
+pub const LOGS_DIR_NAME: &str = "logs";
 
 pub fn global_agents_dir() -> PathBuf {
     if let Ok(value) = std::env::var(AGENTS_DIR_ENV) {
@@ -64,6 +65,10 @@ pub fn old_project_claude_md_path(cwd: &Path) -> PathBuf {
 
 pub fn global_skills_dir() -> PathBuf {
     global_agents_dir().join(SKILLS_DIR_NAME)
+}
+
+pub fn global_logs_dir() -> PathBuf {
+    global_agents_dir().join(LOGS_DIR_NAME)
 }
 
 pub fn old_global_skills_dir() -> PathBuf {
@@ -170,6 +175,27 @@ mod tests {
             project_skills_dir(&cwd),
             PathBuf::from("/tmp/demo/.agents/skills")
         );
+    }
+
+    #[test]
+    fn test_global_logs_dir_uses_agents_logs_directory() {
+        let temp_agents_dir = std::env::temp_dir().join(format!(
+            "aemeath_agents_logs_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let previous = std::env::var_os(AGENTS_DIR_ENV);
+        std::env::set_var(AGENTS_DIR_ENV, &temp_agents_dir);
+
+        assert_eq!(global_logs_dir(), temp_agents_dir.join("logs"));
+
+        if let Some(previous) = previous {
+            std::env::set_var(AGENTS_DIR_ENV, previous);
+        } else {
+            std::env::remove_var(AGENTS_DIR_ENV);
+        }
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::config::paths;
 use serde_json::json;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -29,7 +30,7 @@ impl LogFile {
 }
 
 pub fn log_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".aemeath")
+    paths::global_logs_dir()
 }
 
 pub fn log_path(log_file: LogFile) -> PathBuf {
