@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aemeath Board-Dominant Workbench Mockup</title>
+  <style>
+    :root {
+      --paper: #fbfaf7;
+      --panel: rgba(255, 255, 255, 0.84);
+      --ink: #202124;
+      --muted: #6b7280;
+      --line: #ded8ce;
+      --accent: #2457d6;
+      --accent-soft: #e8efff;
+      --green: #0f8f66;
+      --amber: #b7791f;
+      --violet: #6d5bd0;
+      --shadow: 0 18px 45px rgba(39, 37, 31, 0.10);
+      --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at 75% 8%, rgba(36, 87, 214, 0.15), transparent 30%),
+        radial-gradient(circle at 92% 78%, rgba(15, 143, 102, 0.12), transparent 32%),
+        linear-gradient(135deg, #fffdf9 0%, var(--paper) 54%, #f1ece3 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .36;
+      background-image:
+        linear-gradient(rgba(80,72,58,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(80,72,58,.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(to bottom, black 0%, transparent 92%);
+    }
+
+    .shell {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 58px 1fr;
+      gap: 12px;
+      padding: 14px;
+      animation: shell-rise 620ms cubic-bezier(.2,.8,.2,1) both;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 240px 1fr 520px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,.74);
+      box-shadow: 0 10px 30px rgba(39,37,31,.08);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand { display:flex; align-items:center; gap:10px; font-weight:780; letter-spacing:-.03em; }
+    .mark {
+      width: 28px; height: 28px; border-radius: 9px; display:grid; place-items:center;
+      color:white; background:linear-gradient(135deg,#1e3a8a,#2f6fed);
+      box-shadow: inset 0 1px rgba(255,255,255,.35), 0 8px 20px rgba(36,87,214,.24);
+      font: 800 13px var(--mono);
+    }
+    .context { display:flex; align-items:baseline; gap:12px; min-width:0; }
+    .context h1 { margin:0; font-size:16px; letter-spacing:-.025em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .actions { display:flex; justify-content:flex-end; gap:8px; }
+
+    .pill {
+      display:inline-flex; align-items:center; gap:6px; min-height:26px; padding:4px 9px;
+      border-radius:999px; border:1px solid var(--line); background:rgba(255,255,255,.72);
+      color:var(--muted); font-size:12px; white-space:nowrap;
+    }
+    .dot { width:7px; height:7px; border-radius:50%; background:var(--green); animation: live-pulse 1.8s ease-out infinite; }
+
+    button {
+      position:relative; overflow:hidden; border:1px solid var(--line); border-radius:11px;
+      padding:8px 11px; background:#fff; color:var(--ink); font-weight:650; font-size:12px;
+      box-shadow:0 1px 0 rgba(255,255,255,.9),0 6px 16px rgba(39,37,31,.05);
+      cursor:pointer; transition:transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+    button::after { content:""; position:absolute; inset:-80% auto auto -35%; width:42%; height:260%; opacity:0; transform:rotate(24deg) translateX(-120%); background:linear-gradient(90deg,transparent,rgba(255,255,255,.72),transparent); transition:transform 520ms ease, opacity 180ms ease; }
+    button:hover { transform:translateY(-1px); border-color:rgba(36,87,214,.32); box-shadow:0 1px 0 rgba(255,255,255,.9),0 12px 24px rgba(39,37,31,.10); }
+    button:hover::after { opacity:1; transform:rotate(24deg) translateX(360%); }
+    button:active { transform:translateY(0) scale(.98); }
+    button.primary { border-color:rgba(36,87,214,.25); background:var(--accent); color:#fff; }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 220px minmax(300px, .62fr) minmax(620px, 1.38fr);
+      gap: 12px;
+    }
+
+    .panel {
+      position:relative; min-height:0; border:1px solid var(--line); border-radius:22px;
+      background:var(--panel); box-shadow:var(--shadow); backdrop-filter:blur(18px); overflow:hidden;
+      transition:transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+    }
+    .panel::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:0; background:linear-gradient(135deg,rgba(255,255,255,.68),transparent 30%,rgba(36,87,214,.08)); transition:opacity 220ms ease; }
+    .panel:hover { transform:translateY(-2px); border-color:rgba(36,87,214,.22); box-shadow:0 22px 54px rgba(39,37,31,.14); }
+    .panel:hover::before { opacity:1; }
+
+    .panel-header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 15px 11px; border-bottom:1px solid rgba(222,216,206,.72); }
+    .panel-title { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.11em; color:#625b50; font-weight:800; }
+    .sidebar-content, .chat-scroll, .board-scroll { overflow:auto; min-height:0; height:calc(100% - 52px); }
+    .sidebar-content { padding:10px; }
+
+    .workspace-card, .chat-item {
+      border:1px solid transparent; border-radius:15px; background:rgba(255,255,255,.54);
+      margin-bottom:9px; padding:11px; transition:transform 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+    .workspace-card:hover, .chat-item:hover { transform:translateX(3px); border-color:rgba(36,87,214,.18); background:rgba(255,255,255,.86); box-shadow:0 10px 24px rgba(39,37,31,.08); }
+    .workspace-card.active, .chat-item.active { border-color:rgba(36,87,214,.25); background:linear-gradient(180deg,#fff,#eef4ff); box-shadow:0 10px 22px rgba(36,87,214,.10); }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .name { font-size:13px; font-weight:760; letter-spacing:-.01em; }
+    .meta { margin-top:4px; color:var(--muted); font-size:11px; }
+    .count { min-width:22px; text-align:center; padding:2px 6px; border-radius:999px; background:#efece5; color:#625b50; font:700 11px var(--mono); }
+
+    .chat-panel { display:grid; grid-template-rows:52px 1fr 88px; }
+    .chat-scroll { height:auto; padding:15px; }
+    .message { display:grid; grid-template-columns:30px minmax(0,1fr); gap:9px; margin-bottom:14px; max-width:94%; animation:message-in 420ms cubic-bezier(.2,.8,.2,1) both; }
+    .message:nth-child(2) { animation-delay:70ms; }
+    .message:nth-child(3) { animation-delay:140ms; }
+    .message.user { grid-template-columns:minmax(0,1fr) 30px; margin-left:auto; }
+    .message.user .avatar { grid-column:2; grid-row:1; }
+    .message.user .bubble { grid-column:1; grid-row:1; border-color:rgba(36,87,214,.18); background:linear-gradient(180deg,#fff,#f7faff); }
+    .avatar { width:30px; height:30px; border-radius:11px; display:grid; place-items:center; font:800 11px var(--mono); background:#f0ede7; color:#625b50; }
+    .message.assistant .avatar { background:#eaf7f1; color:var(--green); }
+    .message.user .avatar { background:var(--accent-soft); color:var(--accent); }
+    .bubble { border:1px solid rgba(222,216,206,.82); border-radius:15px; padding:11px 12px; background:rgba(255,255,255,.78); line-height:1.5; font-size:12px; transition:transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease; }
+    .message:hover .bubble { transform:translateY(-1px); border-color:rgba(36,87,214,.22); box-shadow:0 12px 26px rgba(39,37,31,.08); }
+    .bubble-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; color:var(--muted); font-size:10px; }
+    .tag { display:inline-flex; padding:3px 7px; border-radius:8px; background:#f3f0ea; color:#625b50; font:700 10px var(--mono); text-transform:uppercase; }
+    .tag.req { color:var(--violet); background:#efedff; }
+    .tag.feedback { color:var(--amber); background:#fff6df; }
+    .composer { border-top:1px solid rgba(222,216,206,.72); padding:11px; background:rgba(255,255,255,.64); }
+    .composer-box { display:grid; grid-template-columns:1fr auto; align-items:end; gap:10px; height:64px; border:1px solid var(--line); border-radius:17px; background:#fff; padding:9px; }
+    .placeholder { color:#9aa0a6; font-size:12px; align-self:center; }
+
+    .board-panel { display:grid; grid-template-rows:52px 1fr; border-color:rgba(36,87,214,.22); }
+    .board-scroll { height:auto; padding:12px; }
+    .board-grid { display:grid; grid-template-columns: 1fr; gap:10px; }
+    .board-wide { grid-column:1 / -1; }
+
+    .whiteboard-canvas {
+      position:relative;
+      min-height:620px;
+      padding:18px;
+      border-radius:24px;
+      color:#10213f;      background:
+        radial-gradient(circle at 28px 28px, rgba(36,87,214,.14) 1.4px, transparent 1.7px),
+        linear-gradient(rgba(36,87,214,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(36,87,214,.045) 1px, transparent 1px),
+        #fffefb;
+      background-size:28px 28px, 56px 56px, 56px 56px, auto;
+      border:1px solid rgba(191,182,166,.80);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.88), 0 22px 54px rgba(39,37,31,.12);
+      overflow:hidden;
+      transition:transform 220ms ease, box-shadow 220ms ease;
+    }
+    .whiteboard-canvas:hover { transform:translateY(-2px) scale(1.004); box-shadow: inset 0 0 0 1px rgba(255,255,255,.92), 0 26px 62px rgba(39,37,31,.15); }
+    .whiteboard-canvas::before {
+      content:"";
+      position:absolute;
+      inset:12px;
+      pointer-events:none;
+      border:1px dashed rgba(36,87,214,.16);
+      border-radius:20px;
+    }
+    .whiteboard-canvas::after {
+      content:"";
+      position:absolute;
+      left:22px;
+      right:22px;
+      top:168px;
+      height:126px;
+      pointer-events:none;
+      background:
+        linear-gradient(18deg, transparent 0 33%, rgba(36,87,214,.34) 34% 35%, transparent 36% 100%),
+        linear-gradient(162deg, transparent 0 35%, rgba(15,143,102,.28) 36% 37%, transparent 38% 100%);
+      opacity:.72;
+    }
+    .canvas-title { position:relative; z-index:2; margin:0 0 8px; font-size:28px; letter-spacing:-.055em; font-weight:850; }
+    .canvas-subtitle { position:relative; z-index:2; max-width:560px; }
+    .canvas-toolbar {
+      position:absolute;
+      z-index:4;
+      right:18px;
+      top:18px;
+      display:flex;
+      gap:6px;
+      padding:6px;
+      border:1px solid rgba(191,182,166,.72);
+      border-radius:14px;
+      background:rgba(255,255,255,.78);
+      box-shadow:0 12px 28px rgba(39,37,31,.10);
+      backdrop-filter:blur(14px);
+    }
+    .tool-dot { width:26px; height:26px; border-radius:9px; display:grid; place-items:center; background:#fff; border:1px solid rgba(222,216,206,.84); font:800 11px var(--mono); color:#625b50; }
+    .tool-dot.active { color:var(--accent); background:var(--accent-soft); border-color:rgba(36,87,214,.24); }
+    .float-stage { position:absolute; z-index:3; inset:116px 32px 132px; pointer-events:none; }
+    .float-card {      position:absolute;
+      width:232px;
+      padding:13px;
+      border-radius:8px 18px 18px 18px;
+      border:1px solid rgba(191,182,166,.74);
+      background:#fffdf6;
+      box-shadow:0 22px 42px rgba(39,37,31,.15), inset 0 1px rgba(255,255,255,.9);
+      pointer-events:auto;
+      transition:transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+      animation: float-in 720ms cubic-bezier(.2,.8,.2,1) both, drift 4.8s ease-in-out infinite;
+    }
+    .float-card::before {
+      content:"";
+      position:absolute;
+      left:18px;
+      top:-9px;
+      width:48px;
+      height:18px;
+      border-radius:5px;
+      background:rgba(255,221,128,.76);
+      box-shadow:0 5px 12px rgba(39,37,31,.10);
+      transform:rotate(-3deg);
+    }
+    .float-card:hover { transform:translateY(-7px) rotate(0deg) !important; border-color:rgba(36,87,214,.30); box-shadow:0 28px 54px rgba(39,37,31,.18); }
+    .float-card.requirement { left:16px; top:22px; transform:rotate(-2.2deg); background:#fff8d7; }
+    .float-card.project { left:50%; top:76px; transform:translateX(-50%) rotate(1.2deg); background:#eef6ff; animation-delay:90ms; }
+    .float-card.agent { right:18px; top:8px; transform:rotate(2deg); background:#edf9f2; animation-delay:180ms; }
+    .float-kicker { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font:800 10px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+    .float-title { margin:9px 0 6px; font-size:14px; font-weight:840; letter-spacing:-.025em; }
+    .float-desc { color:var(--muted); font-size:11px; line-height:1.42; }
+    .agent-orbit { display:flex; align-items:center; gap:7px; margin-top:10px; }
+    .agent-dot { width:8px; height:8px; border-radius:50%; background:var(--green); animation:live-pulse 1.4s ease-out infinite; }
+    .metric-grid {
+      position:absolute;
+      z-index:3;
+      left:32px;
+      right:32px;
+      bottom:34px;
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:9px;
+    }    .metric { padding:12px; border-radius:14px; background:rgba(255,255,255,.74); border:1px solid rgba(191,182,166,.72); box-shadow:0 10px 24px rgba(39,37,31,.08); transition:transform 180ms ease, background 180ms ease; }
+    .metric:hover { transform:translateY(-2px); background:rgba(255,255,255,.95); }
+    .metric strong { display:block; font:850 24px var(--mono); letter-spacing:-.05em; }
+    .metric span { color:var(--muted); font-size:10px; }
+    .section { border:1px solid rgba(222,216,206,.82); border-radius:18px; background:rgba(255,255,255,.72); overflow:hidden; transition:transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease; }
+    .section:hover { transform:translateY(-2px); border-color:rgba(36,87,214,.20); box-shadow:0 14px 30px rgba(39,37,31,.08); }
+    .section h3 { margin:0; padding:12px 13px; border-bottom:1px solid rgba(222,216,206,.72); font-size:12px; letter-spacing:.02em; }
+    .collapsible-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+    details.section { max-height:44px; }
+    details.section[open] { max-height:260px; }
+    details.section > summary {
+      min-height:44px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:0 13px;
+      cursor:pointer;
+      list-style:none;
+      font-size:12px;
+      font-weight:820;
+      letter-spacing:.02em;
+    }
+    details.section > summary::-webkit-details-marker { display:none; }
+    details.section > summary::after {
+      content:"⌄";
+      width:22px;
+      height:22px;
+      display:grid;
+      place-items:center;
+      border-radius:8px;
+      background:#f3f0ea;
+      color:#625b50;
+      transition:transform 180ms ease;
+    }
+    details.section[open] > summary::after { transform:rotate(180deg); }
+    .summary-meta { color:var(--muted); font:700 10px var(--mono); }
+    .event { display:grid; grid-template-columns:24px 1fr auto; gap:10px; align-items:start; padding:12px 13px; border-bottom:1px solid rgba(222,216,206,.45); font-size:12px; transition:background 180ms ease, transform 180ms ease; }
+    .event:hover { background:linear-gradient(90deg,rgba(232,239,255,.58),transparent); transform:translateX(2px); }
+    .event:last-child { border-bottom:0; }
+    .event-icon { width:24px; height:24px; border-radius:9px; display:grid; place-items:center; font-size:12px; background:#f3f0ea; }
+    .event-title { font-weight:740; }
+    .event-desc { margin-top:3px; color:var(--muted); line-height:1.35; }
+    .time { color:#9aa0a6; font:700 10px var(--mono); }
+
+    .lane { padding:12px 13px; border-bottom:1px solid rgba(222,216,206,.45); }
+    .lane:last-child { border-bottom:0; }
+    .lane-title { display:flex; justify-content:space-between; font-size:12px; font-weight:760; }
+    .bar { height:8px; border-radius:999px; background:#eee9df; overflow:hidden; margin-top:10px; }
+    .bar > i { display:block; height:100%; border-radius:999px; background:var(--accent); transform-origin:left; animation:bar-grow 900ms cubic-bezier(.2,.8,.2,1) both; }
+
+    .diagram { padding:14px; display:grid; gap:10px; }
+    .node { display:grid; grid-template-columns:88px 1fr auto; gap:10px; align-items:center; padding:10px; border-radius:14px; background:rgba(255,255,255,.68); border:1px solid rgba(222,216,206,.7); transition:transform 180ms ease, background 180ms ease; }
+    .node:hover { transform:translateX(3px); background:#fff; }
+    .node-label { font:800 11px var(--mono); color:var(--accent); }
+    .node-line { height:6px; border-radius:999px; background:linear-gradient(90deg,var(--accent),rgba(36,87,214,.18)); animation:bar-grow 900ms cubic-bezier(.2,.8,.2,1) both; }
+
+    @keyframes shell-rise { from { opacity:0; transform:translateY(10px) scale(.992); } to { opacity:1; transform:translateY(0) scale(1); } }
+    @keyframes message-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes float-in { from { opacity:0; translate:0 14px; filter:blur(4px); } to { opacity:1; translate:0 0; filter:blur(0); } }
+    @keyframes drift { 0%, 100% { margin-top:0; } 50% { margin-top:-5px; } }
+    @keyframes live-pulse { 0% { box-shadow:0 0 0 0 rgba(15,143,102,.28); } 70% { box-shadow:0 0 0 8px rgba(15,143,102,0); } 100% { box-shadow:0 0 0 0 rgba(15,143,102,0); } }
+    @keyframes bar-grow { from { transform:scaleX(.18); filter:saturate(.7); } to { transform:scaleX(1); filter:saturate(1); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration:1ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:1ms !important; }
+    }
+    @media (max-width: 1280px) {
+      .topbar { grid-template-columns:220px 1fr 440px; }
+      .workspace { grid-template-columns:200px minmax(280px,.68fr) minmax(520px,1.32fr); }
+      .metric-grid { grid-template-columns:repeat(2,1fr); }
+      .collapsible-grid { grid-template-columns:1fr; }
+    }  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="mark">A</span><span>Aemeath</span></div>
+      <div class="context">
+        <h1>multi-agent-framework / Board Command Center</h1>
+        <span class="pill"><span class="dot"></span> WS connected</span>
+        <span class="pill">snapshot primary · deepseek-v4-pro</span>
+      </div>
+      <div class="actions">
+        <button>Replay updates</button>
+        <button>Open snapshot JSON</button>
+        <button class="primary">Promote requirement</button>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <aside class="panel">
+        <div class="panel-header"><h2 class="panel-title">Workspaces</h2><span class="count">3</span></div>
+        <div class="sidebar-content">
+          <div class="workspace-card active"><div class="row"><span class="name">Agent Runtime</span><span class="pill">active</span></div><div class="meta">board view pinned</div></div>
+          <div class="workspace-card"><div class="row"><span class="name">CLI Refactor</span><span class="pill">idle</span></div><div class="meta">last event 18m ago</div></div>
+          <div class="workspace-card"><div class="row"><span class="name">Research Notes</span><span class="pill">draft</span></div><div class="meta">2 chats · 0 active tasks</div></div>
+          <div style="height:10px"></div>
+          <div class="panel-title" style="padding:8px 2px;">Chats</div>
+          <div class="chat-item active"><div class="row"><strong>Build Sprint 2 UI</strong><span class="count">12</span></div><div class="meta">feeds board · 2m ago</div></div>
+          <div class="chat-item"><div class="row"><strong>Agent registry review</strong><span class="count">7</span></div><div class="meta">feedback lane</div></div>
+          <div class="chat-item"><div class="row"><strong>SDK helpers</strong><span class="count">4</span></div><div class="meta">completed</div></div>
+        </div>
+      </aside>
+
+      <section class="panel chat-panel">
+        <div class="panel-header"><h2 class="panel-title">Chat Feed</h2><span class="pill">compact</span></div>
+        <div class="chat-scroll">
+          <article class="message user"><div class="avatar">U</div><div class="bubble"><div class="bubble-head"><span>Jade · 10:24</span><span class="tag req">Req</span></div>继续 feature 36，进入 Sprint 2，Board 需要成为主视角。</div></article>
+          <article class="message assistant"><div class="avatar">AI</div><div class="bubble"><div class="bubble-head"><span>Aemeath · 10:25</span><span class="tag">Plan</span></div>将右侧扩展为 Command Center：快照、事件、未来 lanes 和状态图同屏。</div></article>
+          <article class="message user"><div class="avatar">U</div><div class="bubble"><div class="bubble-head"><span>Jade · 10:27</span><span class="tag feedback">Note</span></div>Chat 作为输入源，Board 作为主要工作区。</div></article>
+        </div>
+        <div class="composer"><div class="composer-box"><div class="placeholder">输入消息；发送后 Board 优先更新…</div><button class="primary">Send</button></div></div>
+      </section>
+
+      <aside class="panel board-panel">
+        <div class="panel-header"><h2 class="panel-title">Board Command Center</h2><span class="pill"><span class="dot"></span> snapshot · 018f2f</span></div>
+        <div class="board-scroll">
+          <div class="board-grid">
+            <section class="whiteboard-canvas board-wide">
+              <div class="canvas-toolbar" aria-label="whiteboard tools">
+                <span class="tool-dot active">↖</span>
+                <span class="tool-dot">T</span>
+                <span class="tool-dot">◇</span>
+                <span class="tool-dot">⟲</span>
+              </div>
+              <h2 class="canvas-title">Agent Runtime Whiteboard</h2>
+              <div class="meta canvas-subtitle">Board-first canvas · draggable entities mockup · Requirement / Project / Agent cards float on a shared workspace.</div>
+              <div class="float-stage" aria-label="floating board cards">
+                <article class="float-card requirement">
+                  <div class="float-kicker"><span>Requirement</span><span class="tag req">new</span></div>
+                  <div class="float-title">Sprint 2 UI Workbench</div>
+                  <div class="float-desc">Board-first view with realtime snapshots, compact chat input, and visible execution state.</div>
+                </article>
+                <article class="float-card project">
+                  <div class="float-kicker"><span>Project</span><span class="tag">#36</span></div>
+                  <div class="float-title">Multi-Agent Framework</div>
+                  <div class="float-desc">Workspace / Chat / Board API 已就绪，正在进入 Vue 3 UI 核心切片。</div>
+                </article>
+                <article class="float-card agent">
+                  <div class="float-kicker"><span>Processing Agent</span><span class="tag feedback">live</span></div>
+                  <div class="float-title">UI Builder Agent</div>
+                  <div class="float-desc">正在消费 requirement，生成 Board 视图布局和交互动效。</div>
+                  <div class="agent-orbit"><span class="agent-dot"></span><span class="meta">running · 42s</span></div>
+                </article>
+              </div>
+              <div class="metric-grid">
+                <div class="metric"><strong>3</strong><span>Chats</span></div>
+                <div class="metric"><strong>12</strong><span>Messages</span></div>
+                <div class="metric"><strong>4</strong><span>Updates</span></div>
+                <div class="metric"><strong>0</strong><span>Active agents</span></div>
+              </div>
+            </section>
+            <div class="collapsible-grid board-wide">
+              <details class="section">
+                <summary><span>Workspace state flow</span><span class="summary-meta">3 nodes</span></summary>
+                <div class="diagram">
+                  <div class="node"><div class="node-label">Workspace</div><div class="node-line" style="width:92%"></div><span class="tag">stable</span></div>
+                  <div class="node"><div class="node-label">Chats</div><div class="node-line" style="width:76%; background:linear-gradient(90deg,var(--green),rgba(15,143,102,.18))"></div><span class="tag req">live</span></div>
+                  <div class="node"><div class="node-label">Messages</div><div class="node-line" style="width:84%; background:linear-gradient(90deg,var(--amber),rgba(183,121,31,.18))"></div><span class="tag feedback">hot</span></div>
+                </div>
+              </details>
+
+              <details class="section">
+                <summary><span>Realtime update stream</span><span class="summary-meta">3 events</span></summary>
+                <div class="event"><div class="event-icon">＋</div><div><div class="event-title">new_messages appended</div><div class="event-desc">Board view highlights the affected chat and lane.</div></div><div class="time">now</div></div>
+                <div class="event"><div class="event-icon">↻</div><div><div class="event-title">snapshot refreshed</div><div class="event-desc">Full BoardSnapshotUpdate applied after reconnect.</div></div><div class="time">2m</div></div>
+                <div class="event"><div class="event-icon">✓</div><div><div class="event-title">idempotency accepted</div><div class="event-desc">Duplicate request resolved to existing message.</div></div><div class="time">7m</div></div>
+              </details>
+
+              <details class="section">
+                <summary><span>Future board lanes</span><span class="summary-meta">4 lanes</span></summary>
+                <div class="lane"><div class="lane-title"><span>Requirements</span><span class="tag req">reserved</span></div><div class="bar"><i style="width: 42%"></i></div></div>
+                <div class="lane"><div class="lane-title"><span>Projects & Tasks</span><span class="tag">Sprint 4</span></div><div class="bar"><i style="width: 22%; background: var(--green)"></i></div></div>
+                <div class="lane"><div class="lane-title"><span>Agent Instances</span><span class="tag feedback">Sprint 3</span></div><div class="bar"><i style="width: 30%; background: var(--amber)"></i></div></div>
+                <div class="lane"><div class="lane-title"><span>Watch Recovery</span><span class="tag">next</span></div><div class="bar"><i style="width: 18%; background: var(--violet)"></i></div></div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>  </main>
+</body>
+</html>
