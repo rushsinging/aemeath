@@ -98,8 +98,15 @@ fn stop_hook_feedback(
         .map(|(entry, result, json)| {
             let reason = json
                 .as_ref()
-                .and_then(|j| j.reason.clone().or_else(|| j.system_message.clone()))
+                .and_then(|j| {
+                    j.reason
+                        .clone()
+                        .or_else(|| j.system_message.clone())
+                        .or_else(|| j.additional_context.clone())
+                        .or_else(|| j.stop_reason.clone())
+                })
                 .or_else(|| result.error.clone())
+                .or_else(|| non_empty_text(&result.output))
                 .filter(|text| !text.trim().is_empty())
                 .unwrap_or_else(|| "Stop hook 阻止了停止，但没有提供原因".to_string());
             format!(
@@ -107,6 +114,15 @@ fn stop_hook_feedback(
                 entry.command, reason
             )
         })
+}
+
+fn non_empty_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +145,16 @@ mod tests {
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("failed"));
+    }
+
+    #[test]
+    fn test_stop_hook_feedback_uses_stdout_when_blocked() {
+        let results = vec![hook_result("check.sh", true, "unsafe op found\n", None)];
+
+        let feedback = stop_hook_feedback(&results).unwrap();
+
+        assert!(feedback.contains("check.sh"));
+        assert!(feedback.contains("unsafe op found"));
     }
 
     #[test]
