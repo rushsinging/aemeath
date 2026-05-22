@@ -174,9 +174,8 @@ async fn write_long_hook_feedback(
     command: &str,
     details: &str,
 ) -> Option<PathBuf> {
-    let dir = dirs::home_dir()?
-        .join(".aemeath")
-        .join("hook-results")
+    let dir = std::env::temp_dir()
+        .join("aemeath-hook-results")
         .join(session_id);
     if tokio::fs::create_dir_all(&dir).await.is_err() {
         return None;
@@ -344,6 +343,7 @@ mod tests {
 
         assert!(feedback.contains("hook 输出过长"));
         assert!(feedback.contains("已保存到文件"));
+        assert!(feedback.contains(&std::env::temp_dir().display().to_string()));
     }
 
     #[test]
