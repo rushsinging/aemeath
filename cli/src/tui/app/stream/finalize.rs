@@ -4,7 +4,10 @@ use crate::tui::app::UiEvent;
 use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use aemeath_core::task::{BatchStatus, TaskStore};
+use std::path::PathBuf;
 use tokio::sync::mpsc;
+
+const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
 pub(crate) async fn finalize_main_loop(
     outcome: &AgentRunOutcome,
@@ -28,7 +31,7 @@ pub(crate) async fn finalize_main_loop(
                     }),
                 )
                 .await;
-            if let Some(feedback) = stop_hook_feedback(&stop_results) {
+            if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
                 let _ = tx.send(UiEvent::SystemMessage(feedback.clone())).await;
                 return Some(feedback);
             }
@@ -80,53 +83,135 @@ pub(crate) async fn finalize_main_loop(
     }
 }
 
-fn stop_hook_feedback(
+async fn stop_hook_feedback(
     hook_results: &[(
         aemeath_core::config::hooks::HookEntry,
         HookResult,
         Option<HookJsonOutput>,
     )],
+    session_id: &str,
 ) -> Option<String> {
-    hook_results
+    let (entry, result, json) = hook_results
         .iter()
-        .filter(|(_, result, json)| {
-            result.blocked
-                || json
-                    .as_ref()
-                    .is_some_and(|j| j.decision.as_deref() == Some("block"))
-        })
-        .find_map(|(entry, result, json)| hook_reason(result, json).map(|reason| (entry, reason)))
+        .filter(|(_, result, json)| is_stop_blocked(result, json))
+        .find(|(_, result, json)| has_hook_feedback(result, json))
         .or_else(|| {
             hook_results
                 .iter()
-                .find(|(_, result, json)| {
-                    result.blocked
-                        || json
-                            .as_ref()
-                            .is_some_and(|j| j.decision.as_deref() == Some("block"))
-                })
-                .map(|(entry, _, _)| (entry, "Stop hook 阻止了停止，但没有提供原因".to_string()))
-        })
-        .map(|(entry, reason)| {
-            format!(
-                "Stop hook 阻止了停止，请先解决以下问题后再结束：\n命令：{}\n{}",
-                entry.command, reason
-            )
-        })
+                .find(|(_, result, json)| is_stop_blocked(result, json))
+        })?;
+    let details = hook_feedback_details(result, json, session_id, &entry.command).await;
+    Some(format!(
+        "Stop hook 阻止了停止，请先解决以下问题后再结束：\n命令：{}\n{}",
+        entry.command, details
+    ))
 }
 
-fn hook_reason(result: &HookResult, json: &Option<HookJsonOutput>) -> Option<String> {
-    json.as_ref()
-        .and_then(|j| {
-            j.reason
-                .clone()
-                .or_else(|| j.system_message.clone())
-                .or_else(|| j.additional_context.clone())
-                .or_else(|| j.stop_reason.clone())
-        })
-        .or_else(|| result.error.clone())
-        .or_else(|| non_empty_text(&result.output))
-        .filter(|text| !text.trim().is_empty())
+fn is_stop_blocked(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
+    result.blocked
+        || json
+            .as_ref()
+            .is_some_and(|j| j.decision.as_deref() == Some("block"))
+}
+
+fn has_hook_feedback(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
+    hook_json_reason(json).is_some()
+        || non_empty_text(result.error.as_deref().unwrap_or_default()).is_some()
+        || non_empty_text(&result.output).is_some()
+}
+
+fn hook_json_reason(json: &Option<HookJsonOutput>) -> Option<String> {
+    json.as_ref().and_then(|j| {
+        j.reason
+            .clone()
+            .or_else(|| j.system_message.clone())
+            .or_else(|| j.additional_context.clone())
+            .or_else(|| j.stop_reason.clone())
+    })
+}
+
+async fn hook_feedback_details(
+    result: &HookResult,
+    json: &Option<HookJsonOutput>,
+    session_id: &str,
+    command: &str,
+) -> String {
+    let json_reason = hook_json_reason(json);
+    let mut sections = Vec::new();
+    if let Some(reason) = non_empty_text(json_reason.as_deref().unwrap_or_default()) {
+        sections.push(format!("JSON 反馈：\n{}", reason));
+    }
+    if let Some(error) = non_empty_text(result.error.as_deref().unwrap_or_default()) {
+        sections.push(format!("stderr/错误：\n{}", error));
+    }
+    if let Some(output) = non_empty_text(&result.output) {
+        sections.push(format!("stdout：\n{}", output));
+    }
+    if sections.is_empty() {
+        return "Stop hook 阻止了停止，但没有提供原因".to_string();
+    }
+
+    let details = sections.join("\n\n");
+    if details.len() <= INLINE_HOOK_OUTPUT_LIMIT {
+        return details;
+    }
+
+    match write_long_hook_feedback(session_id, command, &details).await {
+        Some(path) => format!(
+            "hook 输出过长，已保存到文件：{}\n请读取该文件查看完整 stdout/stderr。",
+            path.display()
+        ),
+        None => format!(
+            "hook 输出过长，以下为前 {} 字节预览：\n{}",
+            INLINE_HOOK_OUTPUT_LIMIT,
+            truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT)
+        ),
+    }
+}
+
+async fn write_long_hook_feedback(
+    session_id: &str,
+    command: &str,
+    details: &str,
+) -> Option<PathBuf> {
+    let dir = dirs::home_dir()?
+        .join(".aemeath")
+        .join("hook-results")
+        .join(session_id);
+    if tokio::fs::create_dir_all(&dir).await.is_err() {
+        return None;
+    }
+    let file_name = format!("{}.txt", sanitized_file_stem(command));
+    let path = dir.join(file_name);
+    tokio::fs::write(&path, details).await.ok()?;
+    Some(path)
+}
+
+fn sanitized_file_stem(command: &str) -> String {
+    let mut stem: String = command
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    while stem.contains("--") {
+        stem = stem.replace("--", "-");
+    }
+    stem = stem.trim_matches('-').to_string();
+    if stem.is_empty() {
+        "hook-output".to_string()
+    } else {
+        stem.chars().take(80).collect()
+    }
+}
+
+fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 fn non_empty_text(text: &str) -> Option<String> {
@@ -136,6 +221,18 @@ fn non_empty_text(text: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+#[cfg(test)]
+fn stop_hook_feedback_for_test(
+    hook_results: &[(
+        aemeath_core::config::hooks::HookEntry,
+        HookResult,
+        Option<HookJsonOutput>,
+    )],
+) -> Option<String> {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(stop_hook_feedback(hook_results, "test-session"))
 }
 
 #[cfg(test)]
@@ -173,14 +270,14 @@ mod tests {
     fn test_stop_hook_feedback_returns_none_without_block() {
         let results = vec![hook_result("echo ok", false, "done", None)];
 
-        assert!(stop_hook_feedback(&results).is_none());
+        assert!(stop_hook_feedback_for_test(&results).is_none());
     }
 
     #[test]
     fn test_stop_hook_feedback_uses_error_when_blocked() {
         let results = vec![hook_result("check.sh", true, "", Some("failed"))];
 
-        let feedback = stop_hook_feedback(&results).unwrap();
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("failed"));
@@ -190,7 +287,7 @@ mod tests {
     fn test_stop_hook_feedback_uses_stdout_when_blocked() {
         let results = vec![hook_result("check.sh", true, "unsafe op found\n", None)];
 
-        let feedback = stop_hook_feedback(&results).unwrap();
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("unsafe op found"));
@@ -204,17 +301,56 @@ mod tests {
             hook_result("line-check.sh", true, "line limit exceeded", None),
         ];
 
-        let feedback = stop_hook_feedback(&results).unwrap();
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
 
         assert!(feedback.contains("line-check.sh"));
         assert!(feedback.contains("line limit exceeded"));
     }
 
     #[test]
+    fn test_stop_hook_feedback_includes_error_and_stdout_when_blocked() {
+        let results = vec![hook_result(
+            "check.sh",
+            true,
+            "stdout details",
+            Some("stderr details"),
+        )];
+
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
+
+        assert!(feedback.contains("check.sh"));
+        assert!(feedback.contains("stderr/错误"));
+        assert!(feedback.contains("stderr details"));
+        assert!(feedback.contains("stdout："));
+        assert!(feedback.contains("stdout details"));
+    }
+
+    #[test]
+    fn test_hook_feedback_details_writes_long_output_to_file() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let long_output = "x".repeat(INLINE_HOOK_OUTPUT_LIMIT + 1);
+        let result = HookResult {
+            blocked: true,
+            output: long_output,
+            error: Some("stderr details".to_string()),
+        };
+
+        let feedback = runtime.block_on(hook_feedback_details(
+            &result,
+            &None,
+            "test-long-output",
+            "check long.sh",
+        ));
+
+        assert!(feedback.contains("hook 输出过长"));
+        assert!(feedback.contains("已保存到文件"));
+    }
+
+    #[test]
     fn test_stop_hook_feedback_uses_json_reason() {
         let results = vec![hook_result_with_json_reason("check.sh", "fix line count")];
 
-        let feedback = stop_hook_feedback(&results).unwrap();
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("fix line count"));
