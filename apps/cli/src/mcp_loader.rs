@@ -1,3 +1,4 @@
+use aemeath_core::config::paths;
 use aemeath_core::mcp::McpServerConfig;
 use aemeath_core::mcp_manager::McpConnectionManager;
 use aemeath_core::tool::ToolRegistry;
@@ -56,11 +57,9 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
 pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
     let mut servers = HashMap::new();
 
-    if let Some(global_config_path) = dirs::home_dir().map(|h| h.join(".aemeath").join("mcp.json"))
-    {
-        if let Some(global_servers) = read_mcp_servers_config(&global_config_path).await {
-            merge_mcp_servers(&mut servers, global_servers);
-        }
+    let global_config_path = paths::global_mcp_config_path();
+    if let Some(global_servers) = read_mcp_servers_config(&global_config_path).await {
+        merge_mcp_servers(&mut servers, global_servers);
     }
 
     let project_config_path = cwd.join(".mcp.json");

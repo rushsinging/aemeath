@@ -1,5 +1,6 @@
 //! 会话核心类型定义
 
+use crate::config::paths;
 use crate::message::{Message, Role};
 use crate::state;
 use crate::task::TaskSnapshot;
@@ -146,10 +147,9 @@ pub fn extract_project_name(cwd: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Get the sessions directory (~/.aemeath/sessions/)
+/// Get the sessions directory (`~/.agents/sessions/`)
 pub fn sessions_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".aemeath").join("sessions")
+    paths::global_sessions_dir()
 }
 
 /// Generate a new session ID — delegates to state::new_session_id for consistency

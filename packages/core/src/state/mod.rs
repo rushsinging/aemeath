@@ -5,6 +5,7 @@
 pub mod settings;
 pub use settings::{PermissionMode, Settings};
 
+use crate::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
@@ -163,15 +164,11 @@ pub struct AppState {
 impl AppState {
     /// Create a new state manager
     pub fn new() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let config_dir = home.join(".aemeath");
-        let sessions_dir = config_dir.join("sessions");
-
         Self {
             settings: RwLock::new(Settings::default()),
             sessions: RwLock::new(HashMap::new()),
-            settings_path: config_dir.join("settings.json"),
-            sessions_dir,
+            settings_path: paths::global_settings_path(),
+            sessions_dir: paths::global_sessions_dir(),
         }
     }
 
