@@ -15,7 +15,7 @@ impl Tool for TaskListCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a task list for one coherent user request. Use before TaskCreate when starting multi-step work. The summary helps future reminders avoid overriding unrelated new user requests."
+        "Create a task list for one coherent complex user request. Use before TaskCreate only when starting complex multi-step work that has at least 3 substantial execution steps, multiple dependent changes, or parallel sub-agent coordination. Do NOT use for simple one-step requests such as answering a question, inspecting a file, checking bug status, running a single command, or making a tiny localized edit; for those, execute directly without task management. The summary helps future reminders avoid overriding unrelated new user requests."
     }
 
     fn input_schema(&self) -> Value {
