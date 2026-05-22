@@ -30,7 +30,7 @@ pub const SELECTION_FG: Color = Color::Rgb(238, 244, 255);
 /// 用户消息色。
 pub const USER: Color = Color::Rgb(125, 180, 255);
 /// 助手消息色。
-pub const ASSISTANT: Color = Color::Rgb(126, 211, 169);
+pub const ASSISTANT: Color = TEXT;
 /// 工具运行中色。
 pub const TOOL_RUNNING: Color = Color::Rgb(214, 171, 107);
 /// 成功色。
