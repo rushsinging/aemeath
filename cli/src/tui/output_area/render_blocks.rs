@@ -70,10 +70,79 @@ where
     }
 }
 
-pub(super) fn scan_table_blocks(visible: &[(usize, &OutputLine)]) -> HashSet<usize> {
+/// 扫描可见行中的表格块信息。
+///
+/// `all_lines` 用于从文档开头预扫描不可见部分，检测跨越视口边界的
+/// 表格块（header + separator 滚出视口但数据行仍在视口内的情况）。
+pub(super) fn scan_table_blocks<'a, L>(
+    all_lines: L,
+    visible: &[(usize, &'a OutputLine)],
+) -> HashSet<usize>
+where
+    L: Iterator<Item = &'a OutputLine>,
+{
+    let start_idx = visible.first().map(|(i, _)| *i).unwrap_or(0);
+
+    // 预扫描不可见部分，收集完整的表格块（header + separator + 数据行）。
+    // 一个表格块的定义是：连续的 is_table_row / is_table_separator 行，
+    // 且其中至少包含一个 separator 行。
+    let mut pending_block_start: Option<usize> = None;
+    let mut pending_has_sep = false;
+    let mut crossed_blocks: Vec<std::ops::Range<usize>> = Vec::new();
+
+    for (i, line) in all_lines.enumerate().take(start_idx) {
+        let is_md = matches!(
+            line.style,
+            LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+        );
+        let trimmed = line.content.trim();
+        let is_tbl = is_md
+            && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed));
+
+        if is_tbl {
+            if pending_block_start.is_none() {
+                pending_block_start = Some(i);
+            }
+            if markdown::is_table_separator(trimmed) {
+                pending_has_sep = true;
+            }
+        } else {
+            if let Some(s) = pending_block_start.take() {
+                if pending_has_sep {
+                    crossed_blocks.push(s..i);
+                }
+                pending_has_sep = false;
+            }
+        }
+    }
+    // 处理末尾未关闭的块（可能延伸到可见区域）
+    if let Some(s) = pending_block_start.take() {
+        if pending_has_sep {
+            // 找到该块在可见区域的延续
+            let mut end = start_idx;
+            for &(vi, line) in visible {
+                let is_md = matches!(
+                    line.style,
+                    LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+                );
+                let trimmed = line.content.trim();
+                if is_md
+                    && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed))
+                {
+                    end = vi + 1;
+                } else {
+                    break;
+                }
+            }
+            if end > s {
+                crossed_blocks.push(s..end);
+            }
+        }
+    }
+
+    // 扫描可见区域内完整的表格块
     let mut table_block_lines = HashSet::new();
     let mut i = 0;
-
     while i < visible.len() {
         let (_, line) = visible[i];
         let is_md = matches!(
@@ -112,13 +181,32 @@ pub(super) fn scan_table_blocks(visible: &[(usize, &OutputLine)]) -> HashSet<usi
         }
     }
 
+    // 标记跨视口边界的表格块的可见行
+    for range in crossed_blocks {
+        for &(vi, _) in visible {
+            if range.contains(&vi) {
+                table_block_lines.insert(vi);
+            }
+        }
+    }
+
     table_block_lines
 }
 
-pub(super) fn render_table_cache(
-    visible: &[(usize, &OutputLine)],
+/// 表格渲染缓存，key 为可见区域起始行索引。
+///
+/// `all_lines` 用于获取滚出视口的表格 header/separator 行，
+/// 以保证列宽计算和 header 样式的正确性。
+pub(super) fn render_table_cache<'a, L>(
+    all_lines: L,
+    visible: &[(usize, &'a OutputLine)],
     table_block_lines: &HashSet<usize>,
-) -> HashMap<usize, Vec<Vec<Span<'static>>>> {
+) -> HashMap<usize, Vec<Vec<Span<'static>>>>
+where
+    L: Iterator<Item = &'a OutputLine>,
+{
+    // 收集全量行到 vec 以便随机访问
+    let all_vec: Vec<&OutputLine> = all_lines.collect();
     let mut table_render_cache = HashMap::new();
     let mut i = 0;
 
@@ -130,12 +218,51 @@ pub(super) fn render_table_cache(
             while block_end < visible.len() && table_block_lines.contains(&visible[block_end].0) {
                 block_end += 1;
             }
-            let block_lines: Vec<&str> = (block_start..block_end)
-                .map(|j| visible[j].1.content.as_str())
-                .collect();
+
+            // 向前查找滚出视口的表格行
+            let mut full_start = idx;
+            for scan_idx in (0..idx).rev() {
+                let line = all_vec.get(scan_idx);
+                let Some(line) = line else { break };
+                let is_md = matches!(
+                    line.style,
+                    LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+                );
+                let trimmed = line.content.trim();
+                if is_md
+                    && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed))
+                {
+                    full_start = scan_idx;
+                } else {
+                    break;
+                }
+            }
+
+            // 构建完整的表格行列表（包含不可见的 header/separator）
+            let mut table_lines: Vec<&str> = Vec::new();
+            for li in full_start..visible[block_end - 1].0 + 1 {
+                if let Some(line) = all_vec.get(li) {
+                    let trimmed = line.content.trim();
+                    if markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed) {
+                        table_lines.push(trimmed);
+                    }
+                }
+            }
+
             let base = visible[block_start].1.style.to_style();
-            let rendered = markdown::render_table_block(&block_lines, base);
-            table_render_cache.insert(visible[block_start].0, rendered);
+            let rendered = markdown::render_table_block(&table_lines, base);
+
+            // 只保留可见行对应的渲染结果
+            // render_table_block 输出与 table_lines 一一对应（跳过非表格行已排除）
+            // 可见行在 table_lines 中的偏移
+            let vis_offset = idx - full_start;
+            let vis_rendered: Vec<Vec<Span<'static>>> = rendered
+                .into_iter()
+                .skip(vis_offset)
+                .take(block_end - block_start)
+                .collect();
+
+            table_render_cache.insert(visible[block_start].0, vis_rendered);
             i = block_end;
         } else {
             i += 1;
@@ -143,86 +270,4 @@ pub(super) fn render_table_cache(
     }
 
     table_render_cache
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn md_line(content: &str) -> OutputLine {
-        OutputLine {
-            content: content.to_string(),
-            style: LineStyle::Assistant,
-            tool_id: None,
-        }
-    }
-
-    /// 测试开标记在视口内：正常识别代码块
-    #[test]
-    fn test_scan_code_blocks_fence_in_viewport() {
-        let all = vec![
-            md_line("hello"),
-            md_line("```rust"),
-            md_line("fn main() {}"),
-            md_line("```"),
-            md_line("after"),
-        ];
-        let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().collect();
-        let info = scan_code_blocks(all.iter(), &vis);
-        assert!(info.code_block_lines.contains(&1));
-        assert!(info.code_block_lines.contains(&2));
-        assert!(info.code_block_lines.contains(&3));
-        assert!(!info.code_block_lines.contains(&4));
-        assert_eq!(info.code_lang_label.get(&1).unwrap(), "rust");
-    }
-
-    /// 测试开标记滚出视口后，代码块内容仍被正确识别（bug #58 回归）
-    #[test]
-    fn test_scan_code_blocks_open_fence_scrolled_out() {
-        let all = vec![
-            md_line("```rust"),   // 0: 开标记，滚出视口
-            md_line("fn foo()"),  // 1: 代码内容
-            md_line("```"),       // 2: 结束标记，在视口内
-            md_line("normal"),    // 3: 应该不是代码块
-        ];
-        // 只可见行 1~3（行 0 滚出）
-        let vis: Vec<(usize, &OutputLine)> = all
-            .iter()
-            .enumerate()
-            .skip(1)
-            .collect();
-        let info = scan_code_blocks(all.iter(), &vis);
-        // 行 1（代码内容）和行 2（结束标记）应该被标记为代码块
-        assert!(info.code_block_lines.contains(&1), "code line 1 should be in code block");
-        assert!(info.code_block_lines.contains(&2), "closing fence should be in code block");
-        // 行 3 不在代码块内
-        assert!(!info.code_block_lines.contains(&3), "line after block should NOT be code");
-        // 结束标记不应被误认为开标记（不应有 lang label）
-        assert!(!info.code_lang_label.contains_key(&2), "closing fence should not have lang label");
-    }
-
-    /// 测试整个代码块都滚出视口，视口内无代码块
-    #[test]
-    fn test_scan_code_blocks_all_outside_viewport() {
-        let all = vec![
-            md_line("```"),       // 0
-            md_line("code"),      // 1
-            md_line("```"),       // 2
-            md_line("visible"),   // 3
-        ];
-        let vis: Vec<(usize, &OutputLine)> = vec![(3, &all[3])];
-        let info = scan_code_blocks(all.iter(), &vis);
-        assert!(!info.code_block_lines.contains(&3));
-    }
-
-    /// 测试嵌套反引号（行内代码）不应触发代码块
-    #[test]
-    fn test_scan_code_blocks_inline_code_not_fence() {
-        let all = vec![
-            md_line("use `code` here"),
-        ];
-        let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().collect();
-        let info = scan_code_blocks(all.iter(), &vis);
-        assert!(info.code_block_lines.is_empty());
-    }
 }

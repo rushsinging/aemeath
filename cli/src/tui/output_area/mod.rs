@@ -22,6 +22,8 @@ pub mod types;
 
 #[cfg(test)]
 mod content_tests;
+#[cfg(test)]
+mod render_blocks_tests;
 
 // 重新导出核心类型，方便外部使用
 pub use diff::build_diff_lines;

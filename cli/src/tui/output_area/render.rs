@@ -56,8 +56,8 @@ impl OutputArea {
             .take(end - start)
             .collect();
         let code_info = render_blocks::scan_code_blocks(self.lines.iter(), &vis_lines);
-        let table_block_lines = render_blocks::scan_table_blocks(&vis_lines);
-        let table_render_cache = render_blocks::render_table_cache(&vis_lines, &table_block_lines);
+        let table_block_lines = render_blocks::scan_table_blocks(self.lines.iter(), &vis_lines);
+        let table_render_cache = render_blocks::render_table_cache(self.lines.iter(), &vis_lines, &table_block_lines);
 
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
