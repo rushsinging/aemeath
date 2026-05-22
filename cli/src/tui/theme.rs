@@ -44,7 +44,7 @@ pub const THINKING: Color = Color::Rgb(128, 135, 162);
 /// Markdown 链接色。
 pub const LINK: Color = Color::Rgb(138, 173, 244);
 /// 行内代码与代码块强调色。
-pub const CODE: Color = Color::Rgb(184, 192, 224);
+pub const CODE: Color = TOOL_RUNNING;
 /// Spinner 基础色。
 pub const SPINNER_BASE: Color = Color::Rgb(139, 213, 202);
 /// Spinner 高亮色。
