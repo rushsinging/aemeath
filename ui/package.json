@@ -10,7 +10,6 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@aemeath/sdk": "file:../packages/sdk/ts",
     "@vitejs/plugin-vue": "^6.0.1",
     "element-plus": "^2.11.8",
     "pinia": "^3.0.4",

@@ -1,12 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "cli",
     "packages/core",
     "packages/llm",
     "packages/tools",
-    "apps/cli",
-    "apps/server",
-    "apps/agents",
 ]
 
 [workspace.dependencies]
