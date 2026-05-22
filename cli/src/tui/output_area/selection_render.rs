@@ -67,59 +67,6 @@ impl super::OutputArea {
             _ => false,
         }
     }
-
-    /// 对已有的 markdown spans 叠加选中高亮。
-    pub(super) fn render_spans_with_selection(
-        &self,
-        screen_idx: usize,
-        spans: &[Span<'static>],
-        screen_map: &[(usize, CharIdx, CharIdx)],
-    ) -> Vec<Span<'static>> {
-        let Some((start_logic, start_col)) = self.selection_start else {
-            return spans.to_vec();
-        };
-        let Some((end_logic, end_col)) = self.selection_end else {
-            return spans.to_vec();
-        };
-
-        let (start_logic, start_col, end_logic, end_col) =
-            if start_logic < end_logic || (start_logic == end_logic && start_col < end_col) {
-                (start_logic, start_col, end_logic, end_col)
-            } else {
-                (end_logic, end_col, start_logic, start_col)
-            };
-
-        if start_logic == end_logic && start_col == end_col {
-            return spans.to_vec();
-        }
-
-        let current_logic = if screen_idx < screen_map.len() {
-            screen_map[screen_idx].0
-        } else {
-            return spans.to_vec();
-        };
-        if current_logic < start_logic || current_logic > end_logic {
-            return spans.to_vec();
-        }
-
-        let all_chars: Vec<(char, Style)> = spans
-            .iter()
-            .flat_map(|span| span.content.chars().map(|ch| (ch, span.style)))
-            .collect();
-        let chunk_start = screen_map[screen_idx].1;
-        let line_start = if current_logic == start_logic {
-            start_col.saturating_sub(chunk_start)
-        } else {
-            0
-        };
-        let line_end = if current_logic == end_logic {
-            end_col.saturating_sub(chunk_start).min(all_chars.len())
-        } else {
-            all_chars.len()
-        };
-
-        render_selected_chars(all_chars.into_iter(), line_start, line_end)
-    }
 }
 
 fn render_selected_chars(
