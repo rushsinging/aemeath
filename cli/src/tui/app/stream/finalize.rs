@@ -210,7 +210,7 @@ fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    &text[..end]
+    &text[..end] // allow unsafe_text_op: end is adjusted to UTF-8 char boundary
 }
 
 fn non_empty_text(text: &str) -> Option<String> {

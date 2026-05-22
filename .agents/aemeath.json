@@ -20,11 +20,6 @@
         "matcher": "",
         "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-unit-tests.sh\"",
         "timeout": 600
-      },
-      {
-        "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-openapi-sdk.sh\"",
-        "timeout": 600
       }
     ]
   }

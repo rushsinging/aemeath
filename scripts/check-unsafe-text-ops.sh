@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$ROOT/apps/cli/src/tui"
+TARGET="$ROOT/cli/src/tui"
 if [[ ! -d "$TARGET" ]]; then
   echo "ERROR: target directory not found: $TARGET" >&2
-  echo "Run this script from the repository checkout; expected TUI sources under apps/cli/src/tui." >&2
+  echo "Run this script from the repository checkout; expected TUI sources under cli/src/tui." >&2
   exit 2
 fi
 
@@ -15,9 +15,9 @@ COUNT=0
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT/}"
   case "$rel" in
-    apps/cli/src/tui/safe_text.rs)
-      continue
-      ;;
+    cli/src/tui/safe_text.rs)
+        continue
+        ;;
   esac
 
   while IFS=: read -r line_no line; do    if [[ "$line" == *"allow unsafe_text_op"* ]]; then

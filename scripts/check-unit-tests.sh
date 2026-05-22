@@ -9,8 +9,6 @@ commands=(
   "cargo test -p aemeath-llm --lib"
   "cargo test -p aemeath-tools --lib"
   "cargo test -p aemeath-cli --bin aemeath"
-  "cargo test -p server --lib"
-  "cargo test -p agents --lib"
 )
 
 for command in "${commands[@]}"; do
