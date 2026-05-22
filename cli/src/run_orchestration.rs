@@ -280,7 +280,7 @@ pub(crate) async fn run_chat(mut args: Args) {
         max_agent_concurrency
     );
 
-    if args.no_tui {
+    if args.no_tui || !args.tui {
         let memory_config = config_file
             .as_ref()
             .map(|c| c.memory.clone())
