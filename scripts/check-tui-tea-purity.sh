@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$ROOT/aemeath-cli/src/tui/app/update"
+TARGET="$ROOT/cli/src/tui/app/update"
 FAILED=0
 COUNT=0
 
