@@ -115,7 +115,7 @@ impl OutputArea {
     ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let mut vi = 0;
-        let code_style = Style::default().bg(theme::CODE_BG).fg(theme::CODE_FG);
+        let code_style = Style::default().fg(theme::CODE);
 
         while vi < vis_lines.len() {
             let (idx, output_line) = vis_lines[vi];

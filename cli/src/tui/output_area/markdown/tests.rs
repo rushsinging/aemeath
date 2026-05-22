@@ -33,6 +33,8 @@ fn inline_code() {
     assert_eq!(spans.len(), 3);
     assert_eq!(spans[0].content, "use ");
     assert_eq!(spans[1].content, "HashMap");
+    assert_eq!(spans[1].style.fg, Some(theme::CODE));
+    assert_eq!(spans[1].style.bg, None);
     assert_eq!(spans[2].content, " here");
 }
 
@@ -133,7 +135,7 @@ fn line_text(line: &ratatui::text::Line<'static>) -> String {
 fn code_cells(line: &ratatui::text::Line<'static>) -> String {
     line.spans
         .iter()
-        .filter(|span| span.style.bg == Some(theme::CODE_BG))
+        .filter(|span| span.style.fg == Some(theme::CODE))
         .map(|span| span.content.as_ref())
         .collect()
 }
