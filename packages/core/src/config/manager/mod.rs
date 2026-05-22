@@ -16,6 +16,8 @@ pub struct ConfigManager {
     global_path: PathBuf,
     /// Project config file path
     project_path: Option<PathBuf>,
+    /// Claude Code project settings path
+    claude_project_settings_path: Option<PathBuf>,
 }
 
 impl ConfigManager {
@@ -23,11 +25,13 @@ impl ConfigManager {
     pub fn new(project_dir: Option<&Path>) -> Self {
         let global_path = paths::global_config_path();
         let project_path = project_dir.map(paths::project_config_path);
+        let claude_project_settings_path = project_dir.map(paths::project_claude_settings_path);
 
         Self {
             config: RwLock::new(Config::default()),
             global_path,
             project_path,
+            claude_project_settings_path,
         }
     }
 
@@ -48,6 +52,29 @@ impl ConfigManager {
                     }
                 },
                 Err(err) => log::warn!("读取全局配置失败 {}: {err}", self.global_path.display()),
+            }
+        }
+
+        // Load Claude Code project settings as a lower-priority project fallback
+        if let Some(claude_path) = &self.claude_project_settings_path {
+            if claude_path.exists() {
+                match tokio::fs::read_to_string(claude_path).await {
+                    Ok(content) => {
+                        match serde_json::from_str::<hooks::ClaudeSettingsConfig>(&content) {
+                            Ok(claude_config) => {
+                                config = Self::merge_config(config, claude_config.into_config())
+                            }
+                            Err(err) => log::warn!(
+                                "解析 Claude Code 项目设置失败 {}: {err}",
+                                claude_path.display()
+                            ),
+                        }
+                    }
+                    Err(err) => log::warn!(
+                        "读取 Claude Code 项目设置失败 {}: {err}",
+                        claude_path.display()
+                    ),
+                }
             }
         }
 
@@ -169,6 +196,11 @@ impl ConfigManager {
     /// Get project config path
     pub fn project_path(&self) -> Option<&Path> {
         self.project_path.as_deref()
+    }
+
+    /// Get Claude Code project settings path
+    pub fn claude_project_settings_path(&self) -> Option<&Path> {
+        self.claude_project_settings_path.as_deref()
     }
 }
 
@@ -306,5 +338,105 @@ mod tests {
         assert_eq!(stop.len(), 1);
         assert_eq!(stop[0].command, "echo stopped");
         assert_eq!(stop[0].timeout, 60); // explicit
+    }
+
+    #[tokio::test]
+    async fn test_load_reads_claude_settings_hooks_when_project_config_missing() {
+        let base = std::env::temp_dir().join(format!(
+            "aemeath_claude_settings_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let claude_dir = base.join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(
+            claude_dir.join("settings.json"),
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh",
+                                    "timeout": 10
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let manager = ConfigManager::new(Some(&base));
+        let config = manager.load().await.unwrap();
+
+        let pre = config.hooks.events.get(&HookEvent::PreToolUse).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].matcher, "Edit|Write");
+        assert_eq!(
+            pre[0].command,
+            "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh"
+        );
+        assert_eq!(pre[0].timeout, 10);
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_load_project_aemeath_config_overrides_claude_settings_hooks() {
+        let base = std::env::temp_dir().join(format!(
+            "aemeath_claude_settings_override_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let claude_dir = base.join(".claude");
+        let agents_dir = base.join(".agents");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            claude_dir.join("settings.json"),
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit",
+                            "hooks": [
+                                { "type": "command", "command": "claude-hook", "timeout": 10 }
+                            ]
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            agents_dir.join("aemeath.json"),
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        { "matcher": "Bash", "command": "agents-hook", "timeout": 30 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let manager = ConfigManager::new(Some(&base));
+        let config = manager.load().await.unwrap();
+
+        let pre = config.hooks.events.get(&HookEvent::PreToolUse).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].matcher, "Bash");
+        assert_eq!(pre[0].command, "agents-hook");
+        assert_eq!(pre[0].timeout, 30);
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

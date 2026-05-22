@@ -86,14 +86,20 @@ pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Sk
     let home = dirs::home_dir();
 
     // Project-level skills (highest priority)
-    // 1. {cwd}/.agents/skills/
-    let project_dir = paths::project_skills_dir(cwd);
-    for skill in load_skills_from_dir(&project_dir) {
+    // 1. {cwd}/.claude/skills/
+    let claude_project_dir = paths::project_claude_skills_dir(cwd);
+    for skill in load_skills_from_dir(&claude_project_dir) {
         map.insert(skill.name.clone(), skill);
     }
 
+    // 2. {cwd}/.agents/skills/
+    let project_dir = paths::project_skills_dir(cwd);
+    for skill in load_skills_from_dir(&project_dir) {
+        map.entry(skill.name.clone()).or_insert(skill);
+    }
+
     // Global skills
-    // 2. ~/.agents/skills/
+    // 3. ~/.agents/skills/
     let agents_global = paths::global_skills_dir();
     for skill in load_skills_from_dir(&agents_global) {
         map.entry(skill.name.clone()).or_insert(skill);
@@ -325,7 +331,41 @@ mod tests {
     }
 
     #[test]
-    fn test_load_all_skills_prefers_project_agents_skills() {
+    fn test_load_all_skills_prefers_project_claude_skills() {
+        let base = std::env::temp_dir().join(format!(
+            "aemeath_skill_claude_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let claude_skills = base.join(".claude").join("skills");
+        let agents_skills = base.join(".agents").join("skills");
+        std::fs::create_dir_all(&claude_skills).unwrap();
+        std::fs::create_dir_all(&agents_skills).unwrap();
+        let mut claude_file = std::fs::File::create(claude_skills.join("demo.md")).unwrap();
+        write!(
+            claude_file,
+            "---\nname: demo\ndescription: claude\n---\nclaude skill"
+        )
+        .unwrap();
+        let mut agents_file = std::fs::File::create(agents_skills.join("demo.md")).unwrap();
+        write!(
+            agents_file,
+            "---\nname: demo\ndescription: agents\n---\nagents skill"
+        )
+        .unwrap();
+
+        let skills = load_all_skills(&base, &[]);
+
+        assert!(skills.contains_key("demo"));
+        assert_eq!(skills["demo"].source_path, claude_skills.join("demo.md"));
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn test_load_all_skills_falls_back_to_project_agents_skills() {
         let base = std::env::temp_dir().join(format!(
             "aemeath_skill_agents_{}",
             std::time::SystemTime::now()

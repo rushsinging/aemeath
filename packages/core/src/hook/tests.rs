@@ -202,6 +202,38 @@ mod hook_tests {
     }
 
     #[tokio::test]
+    async fn test_execute_hook_sets_claude_project_dir_env() {
+        let project_dir =
+            std::env::temp_dir().join(format!("aemeath-claude-env-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(project_dir.join(".claude").join("hooks")).unwrap();
+        let script = project_dir
+            .join(".claude")
+            .join("hooks")
+            .join("print-dir.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf '%s' \"$CLAUDE_PROJECT_DIR\"\n").unwrap();
+
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: format!("sh \"{}\"", script.display()),
+            timeout: 5,
+        };
+        let project_dir_string = project_dir.display().to_string();
+        let runner = HookRunner::empty(project_dir_string.clone());
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(StopHookData { turns: 1 }),
+        };
+
+        let result = runner.execute_hook(&hook, &input).await;
+
+        assert!(!result.blocked);
+        assert!(result.error.is_none());
+        assert_eq!(result.output, project_dir_string);
+
+        let _ = std::fs::remove_dir_all(&project_dir);
+    }
+
+    #[tokio::test]
     async fn test_execute_hook_expands_project_dir_placeholder() {
         let project_dir = std::env::current_dir().unwrap().display().to_string();
         let hook = HookEntry {
@@ -239,7 +271,7 @@ mod hook_tests {
                     vec![HookEntry {
                         matcher: String::new(),
                         command: format!(
-                            "printf '%s\\n' \"$AEMEATH_HOOK_EVENT|$AEMEATH_PROJECT_DIR\" > \"{}\"; cat >> \"{}\"",
+                            "printf '%s\\n' \"$AEMEATH_HOOK_EVENT|$AEMEATH_PROJECT_DIR|$CLAUDE_PROJECT_DIR\" > \"{}\"; cat >> \"{}\"",
                             marker_path, marker_path
                         ),
                         timeout: 5,
@@ -258,7 +290,9 @@ mod hook_tests {
         assert!(marker.exists());
         let marker_content = std::fs::read_to_string(&marker).unwrap();
         assert!(
-            marker_content.contains(&format!("\"Stop\"|{project_dir_string}")),
+            marker_content.contains(&format!(
+                "\"Stop\"|{project_dir_string}|{project_dir_string}"
+            )),
             "marker content: {marker_content:?}"
         );
         let json_start = marker_content
