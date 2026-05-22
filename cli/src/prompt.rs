@@ -112,7 +112,7 @@ pub async fn build_system_prompt_parts(
         dynamic.push_str(&memory_context);
     }
 
-    // --- AGENTS.md: will be injected as a separate user-context message ---
+    // --- Project instructions: will be injected as a separate user-context message ---
     let claude_md = load_agents_md(cwd, hook_runner).await;
 
     SystemPromptParts {
@@ -193,14 +193,16 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
         }
     }
 
-    let project_path = paths::project_agents_md_path(cwd);
-    if project_path.exists() {
-        if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
-            let file_path_str = project_path.to_string_lossy().to_string();
-            hook_runner
-                .on_instructions_loaded(&file_path_str, "agents_md")
-                .await;
-            parts.push(content);
+    for project_path in project_instruction_paths(cwd) {
+        if project_path.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
+                let file_path_str = project_path.to_string_lossy().to_string();
+                hook_runner
+                    .on_instructions_loaded(&file_path_str, "agents_md")
+                    .await;
+                parts.push(content);
+            }
+            break;
         }
     }
 
@@ -223,6 +225,13 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     }
 
     agents_md
+}
+
+fn project_instruction_paths(cwd: &PathBuf) -> [PathBuf; 2] {
+    [
+        paths::old_project_claude_md_path(cwd),
+        paths::project_agents_md_path(cwd),
+    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

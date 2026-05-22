@@ -48,6 +48,64 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettingsConfig {
+    #[serde(default)]
+    pub hooks: HashMap<HookEvent, Vec<ClaudeHookMatcher>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeHookMatcher {
+    #[serde(default)]
+    pub matcher: String,
+    #[serde(default)]
+    pub hooks: Vec<ClaudeHookCommand>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeHookCommand {
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default, rename = "type")]
+    pub command_type: String,
+}
+
+impl ClaudeSettingsConfig {
+    pub fn into_config(self) -> crate::config::Config {
+        let mut config = crate::config::Config::default();
+        config.hooks = self.into_hooks_config();
+        config
+    }
+
+    pub fn into_hooks_config(self) -> HooksConfig {
+        let mut events = HashMap::new();
+        for (event, groups) in self.hooks {
+            let mut entries = Vec::new();
+            for group in groups {
+                for hook in group.hooks {
+                    if hook.command.trim().is_empty() {
+                        continue;
+                    }
+                    entries.push(HookEntry {
+                        matcher: group.matcher.clone(),
+                        command: hook.command,
+                        timeout: hook.timeout.unwrap_or_else(default_timeout_secs),
+                    });
+                }
+            }
+            if !entries.is_empty() {
+                events.insert(event, entries);
+            }
+        }
+        HooksConfig { events }
+    }
+}
+
 /// Hook 事件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -139,6 +197,83 @@ pub struct HooksConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_claude_settings_config_converts_nested_hooks() {
+        let json = r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Edit|Write|MultiEdit",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-deps.sh",
+                                "timeout": 10
+                            },
+                            {
+                                "type": "command",
+                                "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-env-templates.sh"
+                            }
+                        ]
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-verify.sh",
+                                "timeout": 600
+                            }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        let settings: ClaudeSettingsConfig = serde_json::from_str(json).unwrap();
+        let hooks = settings.into_hooks_config();
+
+        let pre = hooks.events.get(&HookEvent::PreToolUse).unwrap();
+        assert_eq!(pre.len(), 2);
+        assert_eq!(pre[0].matcher, "Edit|Write|MultiEdit");
+        assert_eq!(
+            pre[0].command,
+            "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-deps.sh"
+        );
+        assert_eq!(pre[0].timeout, 10);
+        assert_eq!(pre[1].timeout, 60);
+
+        let stop = hooks.events.get(&HookEvent::Stop).unwrap();
+        assert_eq!(stop.len(), 1);
+        assert_eq!(stop[0].matcher, "");
+        assert_eq!(stop[0].timeout, 600);
+    }
+
+    #[test]
+    fn test_claude_settings_config_ignores_empty_commands() {
+        let json = r#"{
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            { "type": "command", "command": "" },
+                            { "type": "command", "command": "echo ok" }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        let settings: ClaudeSettingsConfig = serde_json::from_str(json).unwrap();
+        let hooks = settings.into_hooks_config();
+
+        let pre = hooks.events.get(&HookEvent::PreToolUse).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].command, "echo ok");
+    }
 
     #[test]
     fn test_hooks_config_deserialize() {

@@ -74,7 +74,7 @@ aemeath/                    # workspace root
 ### 1. 配置分层（优先级从高到低）
 1. CLI 参数（`--provider`、`--model` 等）
 2. 环境变量（`AEMEATH_*`、`ANTHROPIC_API_KEY` 等）
-3. 项目级配置（`.agents/aemeath.json`）
+3. 项目级配置：`.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json` 的 hooks 配置
 4. 全局配置（`~/.agents/aemeath.json`）
 5. 硬编码默认值
 
@@ -108,6 +108,12 @@ aemeath/                    # workspace root
 - `aemeath-tools` 中各个工具实现 `Tool` trait。
 - 执行流程：LLM 返回 tool_use → `Agent.execute_tools()` → 并发执行 → 结果注入回消息。
 - MCP 工具通过 `mcp_loader.rs` 动态加载。
+
+### 7. Claude Code 兼容
+- 项目指令读取 **MUST** Claude 优先：`{cwd}/CLAUDE.md` 优先，其次 `{cwd}/AGENTS.md`；全局指令仍读取 `~/.agents/AGENTS.md`。
+- 项目配置读取 **MUST** `.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json`；Claude Code hooks 结构需转换为 Aemeath hooks。
+- 项目 skills 读取 **MUST** `.claude/skills` 优先，其次 `.agents/skills`；同名 skill 以 Claude Code 项目 skill 为准。
+- Hook 执行环境 **MUST** 同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，兼容现有 Claude Code hook 脚本。
 
 ## 验证门禁
 

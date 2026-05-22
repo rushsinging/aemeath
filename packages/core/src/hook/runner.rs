@@ -90,6 +90,7 @@ impl HookRunner {
                 serde_json::to_string(&input.event).unwrap_or_default(),
             )
             .env("AEMEATH_PROJECT_DIR", &self.project_dir)
+            .env("CLAUDE_PROJECT_DIR", &self.project_dir)
             .envs(input.data.to_env_vars())
             .spawn()
         {

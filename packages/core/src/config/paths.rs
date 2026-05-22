@@ -11,6 +11,7 @@ pub const OLD_CONFIG_FILE: &str = "config.json";
 pub const AGENTS_MD: &str = "AGENTS.md";
 pub const CLAUDE_MD: &str = "CLAUDE.md";
 pub const AGENTS_DIR_NAME: &str = ".agents";
+pub const CLAUDE_DIR_NAME: &str = ".claude";
 pub const OLD_AEMEATH_DIR_NAME: &str = ".aemeath";
 pub const SKILLS_DIR_NAME: &str = "skills";
 pub const LOGS_DIR_NAME: &str = "logs";
@@ -62,7 +63,7 @@ pub fn global_agents_md_path() -> PathBuf {
 pub fn old_global_claude_md_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
+        .join(CLAUDE_DIR_NAME)
         .join(CLAUDE_MD)
 }
 
@@ -72,6 +73,14 @@ pub fn project_agents_md_path(cwd: &Path) -> PathBuf {
 
 pub fn old_project_claude_md_path(cwd: &Path) -> PathBuf {
     cwd.join(CLAUDE_MD)
+}
+
+pub fn project_claude_settings_path(cwd: &Path) -> PathBuf {
+    cwd.join(CLAUDE_DIR_NAME).join(SETTINGS_FILE)
+}
+
+pub fn project_claude_skills_dir(cwd: &Path) -> PathBuf {
+    cwd.join(CLAUDE_DIR_NAME).join(SKILLS_DIR_NAME)
 }
 
 pub fn global_skills_dir() -> PathBuf {
@@ -215,6 +224,18 @@ mod tests {
             PathBuf::from("/tmp/demo/AGENTS.md")
         );
         assert_eq!(
+            old_project_claude_md_path(&cwd),
+            PathBuf::from("/tmp/demo/CLAUDE.md")
+        );
+        assert_eq!(
+            project_claude_settings_path(&cwd),
+            PathBuf::from("/tmp/demo/.claude/settings.json")
+        );
+        assert_eq!(
+            project_claude_skills_dir(&cwd),
+            PathBuf::from("/tmp/demo/.claude/skills")
+        );
+        assert_eq!(
             project_skills_dir(&cwd),
             PathBuf::from("/tmp/demo/.agents/skills")
         );
@@ -287,6 +308,14 @@ mod tests {
         assert_eq!(
             old_project_claude_md_path(&cwd),
             PathBuf::from("/tmp/demo/CLAUDE.md")
+        );
+        assert_eq!(
+            project_claude_settings_path(&cwd),
+            PathBuf::from("/tmp/demo/.claude/settings.json")
+        );
+        assert_eq!(
+            project_claude_skills_dir(&cwd),
+            PathBuf::from("/tmp/demo/.claude/skills")
         );
         assert_eq!(
             old_project_skills_dir(&cwd),

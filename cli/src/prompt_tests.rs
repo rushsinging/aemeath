@@ -33,7 +33,7 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
 }
 
 #[tokio::test]
-async fn test_load_agents_md_reads_project_agents_md() {
+async fn test_load_agents_md_prefers_project_claude_md() {
     let base = std::env::temp_dir().join(format!(
         "aemeath_agents_md_{}",
         std::time::SystemTime::now()
@@ -48,14 +48,34 @@ async fn test_load_agents_md_reads_project_agents_md() {
     let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
     let content = load_agents_md(&base, &hook_runner).await;
 
-    assert!(content.contains("project agents instructions"));
-    assert!(!content.contains("old project instructions"));
+    assert!(content.contains("old project instructions"));
+    assert!(!content.contains("project agents instructions"));
 
     std::fs::remove_dir_all(base).unwrap();
 }
 
 #[tokio::test]
-async fn test_load_agents_md_does_not_auto_migrate_project_claude_md() {
+async fn test_load_agents_md_falls_back_to_project_agents_md() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_agents_md_fallback_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("AGENTS.md"), "project agents instructions").unwrap();
+
+    let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
+    let content = load_agents_md(&base, &hook_runner).await;
+
+    assert!(content.contains("project agents instructions"));
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[tokio::test]
+async fn test_load_agents_md_reads_project_claude_md_without_migration() {
     let base = std::env::temp_dir().join(format!(
         "aemeath_agents_md_no_auto_migration_{}",
         std::time::SystemTime::now()
@@ -80,7 +100,7 @@ async fn test_load_agents_md_does_not_auto_migrate_project_claude_md() {
         std::env::remove_var("AEMEATH_AGENTS_DIR");
     }
 
-    assert!(content.is_empty());
+    assert!(content.contains("old project instructions"));
     assert!(!base.join("AGENTS.md").exists());
 
     std::fs::remove_dir_all(base).unwrap();
