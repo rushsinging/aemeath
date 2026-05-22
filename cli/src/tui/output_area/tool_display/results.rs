@@ -205,3 +205,60 @@ fn append_image_note(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::OutputArea;
+    use crate::tui::output_area::LineStyle;
+
+    #[test]
+    fn test_push_tool_result_marks_matching_pending_placeholder() {
+        let mut output = OutputArea::new();
+        output.push_tool_call_start("Bash", 0);
+        output.push_tool_call_start("Edit", 1);
+
+        output.push_tool_result_with_diff("edit-1", "Edit", "updated", false, "");
+
+        let bash = output
+            .lines
+            .iter()
+            .find(|line| line.tool_id.as_deref() == Some("pending:Bash:0"))
+            .expect("bash placeholder should remain");
+        assert_eq!(bash.content, "● Bash...");
+        assert!(matches!(bash.style, LineStyle::ToolCallRunning));
+
+        let edit = output
+            .lines
+            .iter()
+            .find(|line| line.tool_id.as_deref() == Some("pending:Edit:1"))
+            .expect("edit placeholder should be marked done");
+        assert_eq!(edit.content, "✓ Edit...");
+        assert!(matches!(edit.style, LineStyle::ToolCallSuccess));
+    }
+
+    #[test]
+    fn test_push_tool_result_uses_exact_tool_id_before_pending_fallback() {
+        let mut output = OutputArea::new();
+        output.push_tool_call_start("Edit", 0);
+        output.push_tool_call("edit-1", "Edit", r#"{"file_path":"src/lib.rs"}"#);
+        output.push_tool_call_start("Edit", 1);
+
+        output.push_tool_result_with_diff("edit-1", "Edit", "updated", false, "");
+
+        let exact = output
+            .lines
+            .iter()
+            .find(|line| line.tool_id.as_deref() == Some("edit-1"))
+            .expect("exact tool call should exist");
+        assert_eq!(exact.content, "✓ Edit(src/lib.rs)");
+        assert!(matches!(exact.style, LineStyle::ToolCallSuccess));
+
+        let pending = output
+            .lines
+            .iter()
+            .find(|line| line.tool_id.as_deref() == Some("pending:Edit:1"))
+            .expect("later pending placeholder should remain running");
+        assert_eq!(pending.content, "● Edit...");
+        assert!(matches!(pending.style, LineStyle::ToolCallRunning));
+    }
+}
