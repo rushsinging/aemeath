@@ -19,9 +19,6 @@ impl OutputArea {
             return;
         }
 
-        if let Some(ref mut s) = self.spinner {
-            s.frame = s.frame.wrapping_add(1);
-        }
         self.term_width = (area.width as usize).saturating_sub(2);
 
         let spinner_line = self.build_spinner_line();

@@ -74,7 +74,7 @@ impl LineStyle {
 }
 
 pub struct SpinnerState {
-    /// 动画帧计数器
+    /// 动画帧计数器，只能由固定 ticker 推进
     pub frame: u64,
     /// 当前动词文本
     pub verb: String,

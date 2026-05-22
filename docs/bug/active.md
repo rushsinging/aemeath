@@ -10,7 +10,7 @@
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 55 | 行内代码（`...`）自动换行处渲染异常 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：渲染路径先用剥离 Markdown 标记后的纯文本计算 wrap，再对每个 wrap chunk 单独调用 inline_markdown_spans；当反引号标记或行内代码内容跨越 wrap 边界时，单个 chunk 内标记不完整，导致行内代码样式丢失/截断。修复：Markdown 普通行在无选区渲染时先解析完整行的 inline spans，再按终端宽度切分 span，保留跨行样式；选区路径继续使用纯文本以保证复制/高亮坐标稳定；补充行内代码跨边界、标记卡边界、空字符串回归测试 |
-| 57 | Spinner 有时闪烁过快 | 中 | 活动中 | 未确认 | 2026-05 | 现象：TUI spinner 有时刷新/闪烁速度明显过快。可能受影响因素：spinner tick 间隔配置或默认值、事件循环 tick rate、后台事件/stream chunk 到达频率、tool/task 状态频繁更新触发的重绘、终端帧率/ratatui draw 调度、CPU 负载导致 tick 堆积后集中处理；需定位 spinner 状态推进是否绑定到每次 render/event 而非固定时间节流 |
+| 57 | Spinner 有时闪烁过快 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：OutputArea::render 每次重绘都会递增 spinner.frame，LLM stream chunk、tool/task 状态更新、终端事件和强制重绘越频繁，spinner 推进越快；AskUser 等待态还会在 stop 后 set phase 间接重启 spinner。修复：新增固定 90ms spinner_ticker，并设置 MissedTickBehavior::Skip；spinner.frame 只在 Msg::SpinnerTick 中推进，render 只读取当前帧；AskUser 等待用户时明确 stop spinner，避免 phase 更新重启 |
 ## 专案
 
 ### 专案 A：Task 系统生命周期管理（Bug #27 + #29 + #32 + #33 + #34 + #36 + #37；Feature #18 + #24 + #25 + #29 + #30 + #33）
