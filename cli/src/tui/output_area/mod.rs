@@ -20,6 +20,9 @@ pub mod streaming;
 pub mod tool_display;
 pub mod types;
 
+#[cfg(test)]
+mod content_tests;
+
 // 重新导出核心类型，方便外部使用
 pub use diff::build_diff_lines;
 pub use types::{LineStyle, OutputLine, SpinnerState, INDENT, MAX_LINES};

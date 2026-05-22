@@ -7,6 +7,17 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+fn build_option_line_ranges(start: usize, options: &[String]) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::with_capacity(options.len());
+    let mut next = start;
+    for option in options {
+        let line_count = option.lines().count().max(1);
+        ranges.push(next..next + line_count);
+        next += line_count;
+    }
+    ranges
+}
+
 impl App {
     /// Handle UI events from background processing
     pub(super) fn update_ui(
@@ -242,13 +253,14 @@ impl App {
                         .as_ref()
                         .and_then(|d| options.iter().position(|o| o == d))
                         .unwrap_or(0);
+                    let option_line_ranges = build_option_line_ranges(start, &options);
                     self.ask_user_state = Some(crate::tui::app::AskUserState {
                         reply_tx,
                         options: options.clone(),
                         cursor,
                         multi_select,
                         selected: vec![false; options.len()],
-                        option_line_start: start,
+                        option_line_ranges,
                         allow_free_input,
                     });
                 } else {

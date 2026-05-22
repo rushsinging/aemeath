@@ -24,7 +24,7 @@ impl App {
                         self.ask_user_state.as_mut().unwrap().cursor = cursor;
                         let s = self.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
-                            s.option_line_start,
+                            &s.option_line_ranges,
                             &s.options,
                             s.cursor,
                             s.multi_select,
@@ -38,7 +38,7 @@ impl App {
                         self.ask_user_state.as_mut().unwrap().cursor = cursor;
                         let s = self.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
-                            s.option_line_start,
+                            &s.option_line_ranges,
                             &s.options,
                             s.cursor,
                             s.multi_select,
@@ -51,7 +51,7 @@ impl App {
                     self.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
                     let s = self.ask_user_state.as_ref().unwrap();
                     self.output_area.update_ask_user_options(
-                        s.option_line_start,
+                        &s.option_line_ranges,
                         &s.options,
                         s.cursor,
                         s.multi_select,
