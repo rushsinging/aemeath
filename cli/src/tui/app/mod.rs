@@ -80,8 +80,8 @@ pub struct AskUserState {
     pub cursor: usize,
     pub multi_select: bool,
     pub selected: Vec<bool>,
-    /// Index in output_area.lines where option rows start
-    pub option_line_start: usize,
+    /// Ranges in output_area.lines for each rendered option row.
+    pub option_line_ranges: Vec<std::ops::Range<usize>>,
     /// Whether free-text input is allowed
     #[allow(dead_code)]
     pub allow_free_input: bool,

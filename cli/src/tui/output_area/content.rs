@@ -1,5 +1,35 @@
 use super::types::{LineStyle, OutputLine, MAX_LINES};
 
+pub fn format_ask_user_option_lines(
+    index: usize,
+    option: &str,
+    active: bool,
+    multi_select: bool,
+) -> Vec<String> {
+    let prefix = if multi_select {
+        let check = if active { "✓" } else { " " };
+        format!("  [{check}] {}. ", index + 1)
+    } else {
+        let marker = if active { "❯" } else { " " };
+        format!("  {marker} {}. ", index + 1)
+    };
+    let continuation = " ".repeat(prefix.chars().count());
+    let mut lines = Vec::new();
+    let parts: Vec<&str> = option.lines().collect();
+    if parts.is_empty() {
+        lines.push(prefix);
+        return lines;
+    }
+    for (line_idx, part) in parts.iter().enumerate() {
+        if line_idx == 0 {
+            lines.push(format!("{prefix}{part}"));
+        } else {
+            lines.push(format!("{continuation}{part}"));
+        }
+    }
+    lines
+}
+
 impl super::OutputArea {
     /// 在指定索引处插入一批行
     pub(super) fn insert_lines_at(&mut self, idx: usize, lines: Vec<OutputLine>) {
@@ -170,22 +200,21 @@ impl super::OutputArea {
 
         for (i, opt) in options.iter().enumerate() {
             let is_default = default.as_ref().map_or(i == 0, |d| opt == d);
-            let content = if multi_select {
-                let check = if is_default { "✓" } else { " " };
-                format!("  [{}] {}. {}", check, i + 1, opt)
-            } else {
-                let marker = if is_default { "❯" } else { " " };
-                format!("  {} {}. {}", marker, i + 1, opt)
-            };
-            self.push_line(OutputLine {
-                content,
-                style: if is_default {
-                    LineStyle::AskUser
-                } else {
-                    LineStyle::Normal
-                },
-                ..Default::default()
-            });
+            for (line_idx, content) in
+                format_ask_user_option_lines(i, opt, is_default, multi_select)
+                    .into_iter()
+                    .enumerate()
+            {
+                self.push_line(OutputLine {
+                    content,
+                    style: if line_idx == 0 && is_default {
+                        LineStyle::AskUser
+                    } else {
+                        LineStyle::Normal
+                    },
+                    ..Default::default()
+                });
+            }
         }
 
         // 底部空行
@@ -201,29 +230,26 @@ impl super::OutputArea {
     /// 原地更新 AskUser 选项行的显示
     pub fn update_ask_user_options(
         &mut self,
-        start: usize,
+        option_line_ranges: &[std::ops::Range<usize>],
         options: &[String],
         cursor: usize,
         multi_select: bool,
         selected: &[bool],
     ) {
         for (i, opt) in options.iter().enumerate() {
-            let content = if multi_select {
-                let check = if selected[i] { "✓" } else { " " };
-                let arrow = if i == cursor { "❯" } else { " " };
-                format!("{}[{}] {}. {}", arrow, check, i + 1, opt)
-            } else {
-                let arrow = if i == cursor { "❯" } else { " " };
-                format!("{} {}. {}", arrow, i + 1, opt)
-            };
             let is_highlight = i == cursor || (multi_select && selected[i]);
-            if let Some(line) = self.lines.get_mut(start + i) {
-                line.content = content;
-                line.style = if is_highlight {
-                    LineStyle::AskUser
-                } else {
-                    LineStyle::Normal
-                };
+            let rendered = format_ask_user_option_lines(i, opt, is_highlight, multi_select);
+            if let Some(range) = option_line_ranges.get(i) {
+                for (line_idx, line_pos) in range.clone().enumerate() {
+                    if let Some(line) = self.lines.get_mut(line_pos) {
+                        line.content = rendered.get(line_idx).cloned().unwrap_or_default();
+                        line.style = if is_highlight && line_idx == 0 {
+                            LineStyle::AskUser
+                        } else {
+                            LineStyle::Normal
+                        };
+                    }
+                }
             }
         }
     }
