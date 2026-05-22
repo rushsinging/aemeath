@@ -374,4 +374,39 @@ mod tests {
 
         assert_eq!(selected, Some(" Name  │ Status".to_string()));
     }
+
+    #[test]
+    fn test_get_selected_text_strips_inline_markdown_formatting() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "**bold** and *italic* with `code` plus [link](https://example.com)".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.selection_start = Some((0, CharIdx::new(0)));
+        output.selection_end = Some((0, CharIdx::new(output.lines[0].content.chars().count())));
+
+        let selected = output.get_selected_text();
+
+        assert_eq!(
+            selected,
+            Some("bold and italic with code plus link".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_selected_text_preserves_unclosed_markdown_marker() {
+        let mut output = OutputArea::new();
+        output.push_line(OutputLine {
+            content: "**unclosed marker".to_string(),
+            style: LineStyle::Assistant,
+            ..Default::default()
+        });
+        output.selection_start = Some((0, CharIdx::new(0)));
+        output.selection_end = Some((0, CharIdx::new(output.lines[0].content.chars().count())));
+
+        let selected = output.get_selected_text();
+
+        assert_eq!(selected, Some("**unclosed marker".to_string()));
+    }
 }
