@@ -157,7 +157,7 @@ fn flush_span(spans: &mut Vec<Span<'static>>, text: &mut String, style: &mut Opt
 /// 支持的语法：
 /// - `**bold**`, `__bold__` → Bold
 /// - `*italic*`, `_italic_` → Italic
-/// - `` `code` `` → Code (深色背景)
+/// - `` `code` `` → Code (强调色)
 /// - `~~strikethrough~~` → Strikethrough
 /// - `[text](url)` → 链接（青色+下划线样式）
 /// - 格式不完整时原样显示原始文本
@@ -215,7 +215,7 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 &mut buf,
                 &mut chars,
                 "`",
-                base_style.bg(theme::CODE_BG).fg(theme::CODE_FG),
+                base_style.fg(theme::CODE),
                 base_style,
                 "`",
             ),
