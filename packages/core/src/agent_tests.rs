@@ -61,7 +61,7 @@ fn test_ctx() -> ToolContext {
 #[tokio::test]
 async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Box::new(TimedTool {
         name: "parallel_a".to_string(),
         safe: true,
@@ -120,7 +120,7 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
 #[tokio::test]
 async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Box::new(TimedTool {
         name: "seq_a".to_string(),
         safe: false,
@@ -199,7 +199,7 @@ async fn test_execute_tools_preserves_original_order() {
     }
 
     let results = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Box::new(OrderTool {
         name: "tool_c".to_string(),
         order_counter: counter.clone(),
@@ -253,7 +253,7 @@ async fn test_execute_tools_preserves_original_order() {
 #[tokio::test]
 async fn test_execute_tools_mixed_concurrent_and_sequential() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Box::new(TimedTool {
         name: "parallel".to_string(),
         safe: true,

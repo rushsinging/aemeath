@@ -118,6 +118,8 @@ mod tests {
 
     #[test]
     fn test_config_manager_creation() {
+        let _guard = super::paths::TEST_ENV_LOCK.lock().unwrap();
+        let _ = std::env::remove_var(super::paths::AGENTS_DIR_ENV);
         let mgr = ConfigManager::new(None);
         assert!(mgr.global_path().to_string_lossy().contains(".agents"));
         assert!(mgr
