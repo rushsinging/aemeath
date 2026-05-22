@@ -55,7 +55,7 @@ impl OutputArea {
             .skip(start)
             .take(end - start)
             .collect();
-        let code_info = render_blocks::scan_code_blocks(vis_lines.iter().copied());
+        let code_info = render_blocks::scan_code_blocks(self.lines.iter(), &vis_lines);
         let table_block_lines = render_blocks::scan_table_blocks(&vis_lines);
         let table_render_cache = render_blocks::render_table_cache(&vis_lines, &table_block_lines);
 
