@@ -1,5 +1,7 @@
 //! 费用追踪器
 
+use crate::config::paths;
+
 use super::pricing::get_pricing;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -38,11 +40,9 @@ pub struct CostTracker {
 impl CostTracker {
     /// 创建新的费用追踪器
     pub fn new() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let path = home.join(".aemeath").join("cost_history.json");
         Self {
             records: Vec::new(),
-            path,
+            path: paths::global_cost_history_path(),
         }
     }
 

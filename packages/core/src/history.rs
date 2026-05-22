@@ -3,6 +3,7 @@
 //! Provides persistent storage for command history,
 //! similar to shell history files.
 
+use crate::config::paths;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -32,13 +33,10 @@ pub struct HistoryManager {
 impl HistoryManager {
     /// Create a new history manager
     pub fn new(max_entries: usize) -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let path = home.join(".aemeath").join("history.json");
-
         Self {
             entries: Vec::new(),
             max_entries,
-            path,
+            path: paths::global_history_path(),
         }
     }
 
@@ -231,6 +229,28 @@ impl HistoryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_history_path_uses_agents_directory() {
+        let temp_agents_dir = std::env::temp_dir().join(format!(
+            "aemeath_history_dir_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
+        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+
+        let history = HistoryManager::new(100);
+        assert_eq!(history.path(), &temp_agents_dir.join("history.json"));
+
+        if let Some(previous) = previous {
+            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
+        } else {
+            std::env::remove_var(paths::AGENTS_DIR_ENV);
+        }
+    }
 
     #[test]
     fn test_history_add() {

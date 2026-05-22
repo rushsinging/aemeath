@@ -74,12 +74,12 @@ aemeath/                    # workspace root
 ### 1. 配置分层（优先级从高到低）
 1. CLI 参数（`--provider`、`--model` 等）
 2. 环境变量（`AEMEATH_*`、`ANTHROPIC_API_KEY` 等）
-3. 项目级配置（`.aemeath/config.json`）
-4. 全局配置（`~/.aemeath/config.json`）
+3. 项目级配置（`.agents/aemeath.json`）
+4. 全局配置（`~/.agents/aemeath.json`）
 5. 硬编码默认值
 
 ### 2. Guidance 系统
-- Guidance 文件存放在 `~/.aemeath/guidance/`。
+- Guidance 文件存放在 `~/.agents/guidance/`。
 - `_default.md` — 所有模型通用。
 - `{prefix}.md` — 按 model id 前缀匹配（最长匹配优先）。
 - `_reasoning.md` — reasoning 开启时附加。

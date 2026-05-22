@@ -1,6 +1,6 @@
 //! Model guidance resolution logic.
 //!
-//! Guidance files are loaded from `~/.aemeath/guidance/` directory:
+//! Guidance files are loaded from `~/.agents/guidance/` directory:
 //!   - `_default.md`          — injected for ALL models
 //!   - `{prefix}.md`          — matched by model-id prefix (longest match wins)
 //!                               e.g. `glm.md` matches `glm-5.1`, `deepseek.md` matches `deepseek-chat`
@@ -12,9 +12,10 @@
 //! Guidance content lives entirely in the md files — this module only handles loading logic.
 //!
 //! **NOTE**: 不要在 DEFAULT_GUIDANCE 中硬编码具体的行为要求（如推理长度限制、语言偏好等）。
-//! 这些内容应该由用户在 `~/.aemeath/guidance/` 下的 md 文件中自行配置。
+//! 这些内容应该由用户在 `~/.agents/guidance/` 下的 md 文件中自行配置。
 //! 此处仅提供最小可用的初始模板，让用户知道文件格式和可用选项。
 
+use crate::config::paths;
 use std::path::PathBuf;
 
 pub mod constants;
@@ -26,9 +27,9 @@ pub use resolver::{
     load_named_file_async, resolve_guidance, resolve_guidance_async, resolve_model_guidance_async,
 };
 
-/// Returns the default guidance dir: `~/.aemeath/guidance/`
+/// Returns the default guidance dir: `~/.agents/guidance/`
 pub fn guidance_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".aemeath").join("guidance"))
+    Some(paths::global_guidance_dir())
 }
 
 /// Initialise the guidance directory with default files.
@@ -64,6 +65,27 @@ pub fn init_guidance_dir() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_guidance_dir_uses_agents_directory() {
+        let temp_agents_dir = std::env::temp_dir().join(format!(
+            "aemeath_guidance_dir_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
+        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+
+        assert_eq!(guidance_dir(), Some(temp_agents_dir.join("guidance")));
+
+        if let Some(previous) = previous {
+            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
+        } else {
+            std::env::remove_var(paths::AGENTS_DIR_ENV);
+        }
+    }
 
     #[test]
     fn test_init_guidance_dir_creates_files() {
