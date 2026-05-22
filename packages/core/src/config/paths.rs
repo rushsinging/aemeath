@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
-static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub const AGENTS_DIR_ENV: &str = "AEMEATH_AGENTS_DIR";
 pub const NEW_CONFIG_FILE: &str = "aemeath.json";

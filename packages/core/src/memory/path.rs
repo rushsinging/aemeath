@@ -48,6 +48,7 @@ mod tests {
 
     #[test]
     fn test_memory_base_dir_uses_agents_directory() {
+        let _guard = paths::TEST_ENV_LOCK.lock().unwrap();
         let temp_agents_dir = std::env::temp_dir().join(format!(
             "aemeath_memory_dir_{}",
             std::time::SystemTime::now()
