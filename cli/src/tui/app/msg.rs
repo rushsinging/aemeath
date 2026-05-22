@@ -8,10 +8,8 @@ pub enum Msg {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Paste(String),
-    #[allow(dead_code)]
-    Resize(u16, u16),
-    #[allow(dead_code)]
-    Tick,
+    Resize,
+    SpinnerTick,
 
     // --- Async UI events (from background LLM processing) ---
     Ui(super::UiEvent),

@@ -37,6 +37,8 @@ impl App {
             Arc::new(std::sync::Mutex::new(None));
 
         let mut event_stream = EventStream::new();
+        let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
+        spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             // Update task status lines
@@ -88,15 +90,16 @@ impl App {
                             Event::Paste(text) => Some(Msg::Paste(text)),
                             Event::Mouse(mouse) => Some(Msg::Mouse(mouse)),
                             Event::Key(key) => Some(Msg::Key(key)),
-                            Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+                            Event::Resize(_, _) => Some(Msg::Resize),
                             _ => None,
                         },
                         _ => None,
                     }
                 }
-                // Tick timeout for spinner etc.
-                _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                    None
+                // Fixed ticker for spinner animation. The frame advances only here,
+                // so stream/tool events and redraw frequency cannot speed it up.
+                _ = spinner_ticker.tick() => {
+                    Some(Msg::SpinnerTick)
                 }
             };
 

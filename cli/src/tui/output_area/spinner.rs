@@ -103,6 +103,13 @@ impl super::OutputArea {
         self.spinner = None;
     }
 
+    /// Advance the animated spinner by one fixed ticker step.
+    pub fn tick_spinner(&mut self) {
+        if let Some(ref mut s) = self.spinner {
+            s.frame = s.frame.wrapping_add(1);
+        }
+    }
+
     /// Build the animated spinner line (called during render)
     pub fn build_spinner_line(&self) -> Option<Line<'static>> {
         let s = self.spinner.as_ref()?;

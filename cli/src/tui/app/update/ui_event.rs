@@ -267,7 +267,7 @@ impl App {
                     // 无选项：退回自由输入模式
                     self.ask_user_reply_tx = Some(reply_tx);
                 }
-                self.output_area.set_spinner_phase("Waiting for user");
+                self.output_area.stop_spinner();
             }
             UiEvent::StopFailureHook {
                 system_message,

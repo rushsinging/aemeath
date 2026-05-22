@@ -95,14 +95,17 @@ impl App {
                     pending_slash: None,
                 }
             }
-            Msg::Resize(_, _) => UpdateResult {
+            Msg::Resize => UpdateResult {
                 cmd: Cmd::None,
                 pending_slash: None,
             },
-            Msg::Tick => UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            },
+            Msg::SpinnerTick => {
+                self.output_area.tick_spinner();
+                UpdateResult {
+                    cmd: Cmd::None,
+                    pending_slash: None,
+                }
+            }
             Msg::Ui(ev) => self.update_ui(ev, ui_tx, active_cancel, spawn_refs),
         }
     }
