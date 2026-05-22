@@ -56,7 +56,7 @@ pub struct RunArgs {
     pub allow_all: bool,
 
     /// Use TUI mode (default: true, use --no-tui for legacy REPL)
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub tui: bool,
 
     /// Disable TUI mode and use legacy REPL
@@ -124,7 +124,6 @@ pub struct Args {
     pub context_size: usize,
     pub resume: Option<String>,
     pub allow_all: bool,
-    #[allow(dead_code)]
     pub tui: bool,
     pub no_tui: bool,
     pub max_tool_concurrency: Option<usize>,
@@ -181,5 +180,14 @@ mod tests {
             args.model.as_deref(),
             Some("LiteLLM/anthropic/claude-opus-4-7")
         );
+    }
+
+    #[test]
+    fn test_args_from_run_args_respects_tui_flag() {
+        let cli = Cli::try_parse_from(["aemeath", "--tui", "false"]).unwrap();
+        let args = Args::from(cli.run_args);
+
+        assert!(!args.tui);
+        assert!(!args.no_tui);
     }
 }

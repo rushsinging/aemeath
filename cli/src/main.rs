@@ -1,6 +1,5 @@
 mod agent_runner;
 mod cli;
-mod config_loader;
 mod image;
 mod logging_setup;
 mod mcp_loader;
@@ -27,7 +26,7 @@ async fn main() {
 
     match cli.command {
         Some(Commands::Models { json }) => {
-            model_selection::run_models_command(json);
+            model_selection::run_models_command(json).await;
         }
         Some(Commands::Sessions {
             delete,

@@ -1,5 +1,4 @@
-use crate::config_loader::load_config;
-use aemeath_core::config::{models::ResolvedModel, Config, ModelEntryConfig};
+use aemeath_core::config::{models::ResolvedModel, Config, ConfigManager, ModelEntryConfig};
 
 /// 处理 `aemeath models` 子命令
 fn format_token_limit_k(tokens: u32) -> String {
@@ -28,13 +27,17 @@ fn model_row_display(
     )
 }
 
-pub(crate) fn run_models_command(json: bool) {
-    let config_file = load_config();
+pub(crate) async fn run_models_command(json: bool) {
+    let cwd = std::env::current_dir().ok();
+    let manager = ConfigManager::new(cwd.as_deref());
+    let config_file = manager.load().await.ok();
     match config_file {
         Some(cfg) => {
             let models = cfg.models.list_models();
             if models.is_empty() {
-                eprintln!("No models configured. Add models to ~/.aemeath/config.json");
+                eprintln!(
+                    "No models configured. Add models to ~/.agents/aemeath.json or .agents/aemeath.json"
+                );
                 std::process::exit(1);
             }
             if json {
@@ -107,7 +110,7 @@ pub(crate) fn run_models_command(json: bool) {
             }
         }
         None => {
-            eprintln!("No config file found. Create ~/.aemeath/config.json to configure models.");
+            eprintln!("No config file found. Create ~/.agents/aemeath.json to configure models.");
             std::process::exit(1);
         }
     }
@@ -118,7 +121,7 @@ pub(crate) fn select_model_for_run(
     config_file: Option<&Config>,
 ) -> Result<ResolvedModel, String> {
     let cfg = config_file.ok_or_else(|| {
-        "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.aemeath/config.json 配置 models.default".to_string()
+        "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.agents/aemeath.json 配置 models.default".to_string()
     })?;
 
     if let Some(selection) = requested_model.filter(|s| !s.trim().is_empty()) {
