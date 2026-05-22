@@ -144,6 +144,7 @@ impl OutputArea {
                 code_info.code_block_lines.contains(&idx),
                 code_style,
                 screen_map,
+                rendered_content,
                 &mut lines,
             );
             vi += 1;
@@ -199,14 +200,23 @@ impl OutputArea {
         is_code_block: bool,
         code_style: Style,
         screen_map: &mut Vec<(usize, CharIdx, CharIdx)>,
+        rendered_content: &mut std::collections::HashMap<usize, String>,
         lines: &mut Vec<Line<'static>>,
     ) {
         let style = output_line.style;
-        let wrapped = self.push_wrapped_offsets(idx, &output_line.content, screen_map);
         let is_markdown = matches!(
             style,
             LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
         );
+        let rendered_plain = if is_markdown && !is_code_block {
+            markdown::strip_inline_formatting(&output_line.content)
+        } else {
+            output_line.content.clone()
+        };
+        if rendered_plain != output_line.content {
+            rendered_content.insert(idx, rendered_plain.clone());
+        }
+        let wrapped = self.push_wrapped_offsets(idx, &rendered_plain, screen_map);
 
         if self.has_real_selection() {
             let screen_start = screen_map.len() - wrapped.len();

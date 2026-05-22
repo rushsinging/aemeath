@@ -139,6 +139,34 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
 }
 
 #[test]
+fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
+    let mut output = OutputArea::new();
+    output.push_line(OutputLine {
+        content: "活动中 Bug（`docs/bug/active.md`）".to_string(),
+        style: LineStyle::Assistant,
+        ..Default::default()
+    });
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 3,
+    };
+    let mut buf = Buffer::empty(area);
+    output.render(area, &mut buf);
+
+    output.start_selection(0, 0, &area);
+    output.update_selection(0, 32, &area);
+
+    let selected = output.get_selected_text();
+
+    assert_eq!(
+        selected,
+        Some("活动中 Bug（docs/bug/active.md）".to_string())
+    );
+}
+
+#[test]
 fn test_get_selected_text_strips_inline_markdown_formatting() {
     let mut output = OutputArea::new();
     output.push_line(OutputLine {
