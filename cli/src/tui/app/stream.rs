@@ -19,7 +19,7 @@ use crate::tui::app::stream::handler::TuiStreamHandler;
 use crate::tui::app::stream::hook_ui::HookUi;
 pub(crate) use crate::tui::app::stream::input_log::logged_input_messages;
 use crate::tui::app::stream::post_batch::run_post_tool_batch;
-use crate::tui::app::stream::queue::drain_queued_input;
+use crate::tui::app::stream::queue::append_queued_input;
 use crate::tui::app::stream::stall::StallDetector;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
 use crate::tui::app::UiEvent;
@@ -283,11 +283,7 @@ pub async fn process_in_background(
                     // Bug #49: drain queued user input before finishing the loop.
                     // If user submitted new messages while the last turn was running,
                     // consume them and continue instead of exiting.
-                    if let Some(queued) = drain_queued_input(&queue_request_tx).await {
-                        for input in queued {
-                            messages.push(Message::user(input));
-                        }
-                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                    if append_queued_input(&queue_request_tx, &tx, &mut messages).await {
                         continue;
                     }
                     if let Some(text) = crate::reflection::run_reflection(
@@ -347,11 +343,8 @@ pub async fn process_in_background(
                     messages.push(tool_results_for_api(all_results, &session_id)); // Sync after tool execution
                     let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
 
-                    if let Some(queued) = drain_queued_input(&queue_request_tx).await {
-                        for input in queued {
-                            messages.push(Message::user(input));
-                        }
-                        let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                    if append_queued_input(&queue_request_tx, &tx, &mut messages).await {
+                        continue;
                     }
 
                     run_post_tool_batch(&tx, &hook_ui, &hook_runner, turn_count).await;
