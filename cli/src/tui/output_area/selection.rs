@@ -214,8 +214,6 @@ impl super::OutputArea {
         if result.is_empty() {
             None
         } else {
-            // Bug #51: strip inline Markdown formatting so copied text
-            // matches the rendered visual appearance, not raw source.
             Some(markdown::strip_inline_formatting(&result))
         }
     }
