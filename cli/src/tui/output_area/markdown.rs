@@ -1,5 +1,6 @@
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthChar;
 
 use crate::tui::theme;
 
@@ -92,6 +93,63 @@ fn strip_link(result: &mut String, chars: &mut std::iter::Peekable<std::str::Cha
         inner.chars().count() + 1 + 1 + url.chars().count() + 1,
     );
     true
+}
+
+/// 将 Markdown 文本解析为 styled Span 后再按显示宽度切分成屏幕行。
+///
+/// 必须先解析 Markdown 再换行，避免行内代码标记（如反引号）恰好跨越
+/// wrap 边界时被当成未闭合标记，导致背景截断或文字溢出。
+pub fn inline_markdown_lines(
+    text: &str,
+    base_style: Style,
+    max_width: usize,
+) -> Vec<Line<'static>> {
+    wrap_spans(inline_markdown_spans(text, base_style), max_width)
+}
+
+fn wrap_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<'static>> {
+    if max_width == 0 {
+        return vec![Line::from(spans)];
+    }
+
+    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_style: Option<Style> = None;
+    let mut current_width = 0usize;
+
+    for span in spans {
+        for ch in span.content.chars() {
+            let ch_width = ch.width().unwrap_or(1);
+            if !current_text.is_empty() && current_width + ch_width > max_width {
+                flush_span(&mut current, &mut current_text, &mut current_style);
+                lines.push(std::mem::take(&mut current));
+                current_width = 0;
+            }
+            if current_style != Some(span.style) {
+                flush_span(&mut current, &mut current_text, &mut current_style);
+                current_style = Some(span.style);
+            }
+            current_text.push(ch);
+            current_width += ch_width;
+        }
+    }
+
+    flush_span(&mut current, &mut current_text, &mut current_style);
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    lines.into_iter().map(Line::from).collect()
+}
+
+fn flush_span(spans: &mut Vec<Span<'static>>, text: &mut String, style: &mut Option<Style>) {
+    if !text.is_empty() {
+        spans.push(Span::styled(
+            std::mem::take(text),
+            style.unwrap_or_default(),
+        ));
+    }
 }
 
 /// 将纯文本中的内联 Markdown 标记转换为 styled Span 列表。

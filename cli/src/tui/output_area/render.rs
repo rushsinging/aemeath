@@ -226,9 +226,6 @@ impl OutputArea {
                     Line::from(
                         self.render_line_with_selection(screen_idx, &chunk, code_style, screen_map),
                     )
-                } else if is_markdown {
-                    let md_spans = markdown::inline_markdown_spans(&chunk, style.to_style());
-                    Line::from(self.render_spans_with_selection(screen_idx, &md_spans, screen_map))
                 } else {
                     Line::from(self.render_line_with_selection(
                         screen_idx,
@@ -239,16 +236,24 @@ impl OutputArea {
                 };
                 lines.push(line);
             }
+        } else if is_code_block {
+            lines.extend(
+                wrapped
+                    .into_iter()
+                    .map(|chunk| Line::styled(chunk, code_style)),
+            );
+        } else if is_markdown {
+            lines.extend(markdown::inline_markdown_lines(
+                &output_line.content,
+                style.to_style(),
+                self.term_width,
+            ));
         } else {
-            lines.extend(wrapped.into_iter().map(|chunk| {
-                if is_code_block {
-                    Line::styled(chunk, code_style)
-                } else if is_markdown {
-                    Line::from(markdown::inline_markdown_spans(&chunk, style.to_style()))
-                } else {
-                    Line::styled(chunk, style.to_style())
-                }
-            }));
+            lines.extend(
+                wrapped
+                    .into_iter()
+                    .map(|chunk| Line::styled(chunk, style.to_style())),
+            );
         }
     }
 

@@ -9,7 +9,7 @@
 | 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 修复中 | 未确认 | 2026-05 | 根因：deny_tool_calls 只发送 ToolResult 事件（携带 LLM 的 tool_use_id）不发送 ToolCall 事件，导致 pending placeholder 的 tool_id（pending:{name}:{index}）无法被 mark_tool_header_done 精确匹配；fallback 盲目抓最后一个 ToolCallRunning 行，当同轮存在其他 running tool 时会抓错行，被拒绝的 tool 的占位行永远保持 ToolCallRunning 状态。修复：已保留 deny_tool_calls 先发 ToolCall 再发 ToolResult、mark_tool_header_done 三阶段匹配，并补充回归测试覆盖 pending 精确 fallback 与 exact tool_id 优先级 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 活动中 | 未确认 | 2026-05 | LLM 对单步或简单任务频繁调用 TaskListCreate + TaskCreate，导致 TUI 显示不必要的 task list 噪音；需在 system prompt 中加强约束：仅在多步骤复杂任务（≥3 步）时使用 task 管理，简单任务直接执行 |
-| 55 | 行内代码（`...`）自动换行处渲染异常 | 中 | 活动中 | 未确认 | 2026-05 | 当行内代码片段（如 `` `RedisSessionSto` ``）恰好在行尾触发自动换行时，换行后的渲染出现异常（高亮背景截断、文字重叠或溢出）；疑似 inline_markdown_spans 在 word wrap 边界处的 span 范围计算与实际换行位置不一致 |
+| 55 | 行内代码（`...`）自动换行处渲染异常 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：渲染路径先用剥离 Markdown 标记后的纯文本计算 wrap，再对每个 wrap chunk 单独调用 inline_markdown_spans；当反引号标记或行内代码内容跨越 wrap 边界时，单个 chunk 内标记不完整，导致行内代码样式丢失/截断。修复：Markdown 普通行在无选区渲染时先解析完整行的 inline spans，再按终端宽度切分 span，保留跨行样式；选区路径继续使用纯文本以保证复制/高亮坐标稳定；补充行内代码跨边界、标记卡边界、空字符串回归测试 |
 
 ## 专案
 

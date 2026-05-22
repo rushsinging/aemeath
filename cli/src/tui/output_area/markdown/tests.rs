@@ -92,6 +92,52 @@ fn multiple_bold_spans() {
     assert_eq!(spans[2].content, "b");
 }
 
+#[test]
+fn inline_code_wrap_preserves_code_style_across_boundary() {
+    let lines = inline_markdown_lines("prefix `RedisSessionStore` suffix", base(), 16);
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(line_text(&lines[0]), "prefix RedisSess");
+    assert_eq!(line_text(&lines[1]), "ionStore suffix");
+    assert_eq!(code_cells(&lines[0]), "RedisSess");
+    assert_eq!(code_cells(&lines[1]), "ionStore");
+}
+
+#[test]
+fn inline_markdown_wrap_handles_marker_on_boundary() {
+    let lines = inline_markdown_lines("123456789`RedisSessionSto`", base(), 10);
+
+    assert_eq!(line_text(&lines[0]), "123456789R");
+    assert_eq!(line_text(&lines[1]), "edisSessio");
+    assert_eq!(line_text(&lines[2]), "nSto");
+    assert_eq!(code_cells(&lines[0]), "R");
+    assert_eq!(code_cells(&lines[1]), "edisSessio");
+    assert_eq!(code_cells(&lines[2]), "nSto");
+}
+
+#[test]
+fn inline_markdown_wrap_empty_string_keeps_one_line() {
+    let lines = inline_markdown_lines("", base(), 10);
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(line_text(&lines[0]), "");
+}
+
+fn line_text(line: &ratatui::text::Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+fn code_cells(line: &ratatui::text::Line<'static>) -> String {
+    line.spans
+        .iter()
+        .filter(|span| span.style.bg == Some(theme::CODE_BG))
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
 // ── Table tests ──
 
 #[test]
