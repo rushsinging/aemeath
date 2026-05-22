@@ -13,6 +13,11 @@
       },
       {
         "matcher": "",
+        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-tui-tea-purity.sh\"",
+        "timeout": 120
+      },
+      {
+        "matcher": "",
         "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-rust-file-lines.sh\"",
         "timeout": 120
       },
