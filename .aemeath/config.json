@@ -8,13 +8,23 @@
       },
       {
         "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-unsafe-text-ops.sh\"",
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-unsafe-text-ops.sh\"",
         "timeout": 120
       },
       {
         "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-rust-file-lines.sh\"",
+        "command": "\"{AEMEATH_PROJECT_DIR}/scripts/check-tui-tea-purity.sh\"",
         "timeout": 120
+      },
+      {
+        "matcher": "",
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-rust-file-lines.sh\"",
+        "timeout": 120
+      },
+      {
+        "matcher": "",
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-unit-tests.sh\"",
+        "timeout": 600
       }
     ]
   }
