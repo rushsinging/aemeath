@@ -126,10 +126,10 @@ impl HookRunner {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let code = output.status.code().unwrap_or(-1);
 
-                // Exit code 2 = 阻止操作（仅对 PreToolUse 有效）
-                let blocked = code == 2;
+                // 任意非零退出码都表示 hook 阻止当前流程继续。
+                let blocked = code != 0;
 
-                if code != 0 && code != 2 && !stderr.is_empty() {
+                if code != 0 && !stderr.is_empty() {
                     log::warn!(
                         "hook '{}' exited with code {}: {}",
                         command,
@@ -150,10 +150,11 @@ impl HookRunner {
                 HookResult {
                     blocked,
                     output: stdout,
-                    error: if code == 2 {
-                        non_empty_text(&stderr)
-                    } else if code != 0 {
-                        Some(format!("exit code {code}: {stderr}"))
+                    error: if code != 0 {
+                        Some(format!(
+                            "exit code {code}: {}",
+                            non_empty_text(&stderr).unwrap_or_else(|| "无错误输出".to_string())
+                        ))
                     } else {
                         None
                     },

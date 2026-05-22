@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// hook 执行结果
 #[derive(Debug, Clone)]
 pub struct HookResult {
-    /// hook 是否阻止了操作（exit code 2）
+    /// hook 是否阻止了操作（任意非零退出码）
     pub blocked: bool,
     /// hook 的 stdout 输出
     pub output: String,

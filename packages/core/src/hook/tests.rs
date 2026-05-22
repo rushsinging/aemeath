@@ -111,6 +111,48 @@ mod hook_tests {
     }
 
     #[tokio::test]
+    async fn test_execute_hook_blocks_on_any_nonzero_exit_code() {
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "printf 'bad thing' >&2; exit 1".to_string(),
+            timeout: 5,
+        };
+        let runner = HookRunner::empty(".".to_string());
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(StopHookData { turns: 1 }),
+        };
+
+        let result = runner.execute_hook(&hook, &input).await;
+
+        assert!(result.blocked);
+        assert!(
+            matches!(result.error.as_deref(), Some(error) if error.contains("exit code 1") && error.contains("bad thing"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_hook_nonzero_without_stderr_still_reports_error() {
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "exit 1".to_string(),
+            timeout: 5,
+        };
+        let runner = HookRunner::empty(".".to_string());
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(StopHookData { turns: 1 }),
+        };
+
+        let result = runner.execute_hook(&hook, &input).await;
+
+        assert!(result.blocked);
+        assert!(
+            matches!(result.error.as_deref(), Some(error) if error.contains("exit code 1") && error.contains("无错误输出"))
+        );
+    }
+
+    #[tokio::test]
     async fn test_execute_hook_timeout() {
         let hook = HookEntry {
             matcher: String::new(),
