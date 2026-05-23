@@ -17,7 +17,7 @@
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 | 44 | Commit Style Context 与 AI 协作者 trailer | 中 | 待确认 | 未确认 | 已在 system prompt 中加入 commit guidance：需要创建 git commit 时，LLM 应先分析当前仓库历史 Commit Style Context，优先查看带 `Co-Authored-By` 的提交，再按项目风格生成 commit message；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 LLM client。详见 [spec](specs/044-commit-style-context.md) |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 已完成 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
-| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line 已改为两行：第一行保持模型/Token/运行状态等高频信息；第二行以均衡方案展示当前工作上下文（cwd/path_base、working_root、worktree/main 标识、branch、权限模式），初始 git/worktree 上下文已接入，后续 #43/#45 继续补齐运行时上下文切换联动。 |
+| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line V2 已按重新规划实现：第一行展示状态、模型、token in/out、t/s、ctx%、API calls，不再显示 cost/session；第二行展示真实路径（`~` 或 `/` 开头）、root（仅路径不一致时）、git/worktree、权限模式和完整 session。 |
 
 ### #46 TUI status line 增加第二行并显示 cwd/current worktree
 
@@ -26,6 +26,8 @@
 **背景**：当前 TUI status line 只有一行，信息容量不足。用户反馈“一行有点少”，并记得之前似乎增加过 cwd 显示，需要确认当前是否丢失或被布局压缩。随着 Feature #43/#45 要求 worktree 上下文切换，UI 必须清楚展示当前操作目录，避免用户误以为正在 worktree 中，实际仍在 main 工作区。
 
 **重新规划（2026-05-23）**：本 feature 不再只做“多塞一行文字”，而是把 status line 定义为两层状态架构：第一行回答“当前 agent 在做什么、花费多少、还能怎么操作”，第二行回答“当前工具实际会在哪个目录/工作树执行”。第二行必须来自运行时工具上下文，而不是静态启动 cwd，作为 #43/#45 的可视化验收面。
+
+**实现记录（2026-05-23，V2）**：根据用户反馈重新收敛信息架构：第一行只展示高频运行指标（状态、模型、token in/out、t/s、ctx%、API calls），不再显示 cost 或 session；第二行展示真实工作路径，默认不再显示 `ctx aemeath`，仅当 `path_base` 与 `working_root` 不一致时显示 `root ...`，并展示 git/worktree、权限模式和完整 session id。第二行改为语义化 span 渲染，路径、git、权限、session 使用不同视觉权重；路径显示保留 `~` 或 `/` 前缀，窄屏时优先保留真实路径前缀、权限和 session。
 
 **信息架构**：
 1. 第一行：保留模型/provider、streaming/idle/tool running 状态、token/cost、任务/压缩等高频运行信息和必要快捷键提示。
