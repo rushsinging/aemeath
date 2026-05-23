@@ -144,7 +144,7 @@ impl App {
         let mut status_bar = StatusBar::new();
         status_bar.set_session_id(&session_id);
         status_bar.set_model(&model);
-        let cwd_display = cwd.display().to_string();
+        let cwd_display = display_working_dir(&cwd);
         status_bar.set_context_paths(cwd_display.clone(), cwd_display);
         if let Some(branch) = git_branch_for(&cwd) {
             status_bar.set_git_context(worktree_kind_for(&cwd), branch);
