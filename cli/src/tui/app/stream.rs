@@ -29,7 +29,7 @@ use aemeath_core::tool::{ToolContext, ToolRegistry};
 use aemeath_llm::types::StopReason;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -83,11 +83,12 @@ pub async fn process_in_background(
         agent_semaphore,
         progress_tx: None,
         parent_session_id: Some(session_id.clone()),
+        context_stack: Arc::new(Mutex::new(Vec::new())),
     };
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+        let agent = Agent {
+            registry: &registry,
+            ctx,
+        };
 
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;

@@ -8,6 +8,7 @@ use aemeath_core::tool::{
 };
 use aemeath_llm::types::SystemBlock;
 use async_trait::async_trait;
+use std::sync::{Arc, Mutex};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -185,6 +186,7 @@ impl AgentRunner for CliAgentRunner {
             agent_semaphore: ctx.agent_semaphore.clone(),
             progress_tx: None, // sub-agents don't stream progress (yet)
             parent_session_id: ctx.parent_session_id.clone(),
+            context_stack: Arc::new(Mutex::new(Vec::new())),
         };
         let agent = Agent {
             registry: &sub_registry,

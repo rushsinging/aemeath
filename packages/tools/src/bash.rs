@@ -242,6 +242,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            context_stack: Arc::new(Mutex::new(Vec::new())),
         };
 
         let result = BashTool

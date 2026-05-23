@@ -231,6 +231,7 @@ fn build_agent<'a>(
         agent_semaphore: agent_semaphore.clone(),
         progress_tx: None,
         parent_session_id: Some(session_id.to_string()),
+        context_stack: Arc::new(Mutex::new(Vec::new())),
     };
     Agent { registry, ctx }
 }
