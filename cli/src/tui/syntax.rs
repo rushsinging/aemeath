@@ -4,13 +4,22 @@
 
 use once_cell::sync::Lazy;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::Theme as SyntectTheme;
+use syntect::highlighting::{Theme as SyntectTheme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
 use crate::tui::output_area::SpanPart;
 
 /// 全局语法集（懒加载，只加载一次）
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
+
+/// 全局主题集，使用 `base16-ocean.dark` 主题，提供丰富的语法着色。
+static THEME: Lazy<SyntectTheme> = Lazy::new(|| {
+    let ts = ThemeSet::load_defaults();
+    ts.themes
+        .get("base16-ocean.dark")
+        .expect("default ThemeSet must contain base16-ocean.dark")
+        .clone()
+});
 
 /// 从文件扩展名推断 syntect 语言，失败返回 None。
 pub fn language_by_extension(ext: &str) -> Option<syntect::parsing::SyntaxReference> {
@@ -25,8 +34,7 @@ pub fn highlight_line(
     syntax_ref: Option<&syntect::parsing::SyntaxReference>,
 ) -> Option<Vec<SpanPart>> {
     let syntax = syntax_ref?;
-    let theme = SyntectTheme::default();
-    let mut highlighter = HighlightLines::new(syntax, &theme);
+    let mut highlighter = HighlightLines::new(syntax, &*THEME);
     let ranges = highlighter.highlight_line(line, &SYNTAX_SET).ok()?;
 
     Some(

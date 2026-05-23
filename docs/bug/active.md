@@ -5,7 +5,36 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
+| 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
 ## 专案
+
+### #60 TUI 中 Markdown code 块复制时下划线被吞掉
+
+**状态**：活动中
+
+**症状**：TUI 输出区中 Markdown code 块里的文本包含下划线时，选中复制后的内容会丢失 `_`。例如 code 块中显示或期望复制 `CLAUDE_PROJECT_DIR`，实际粘贴结果变成 `CLAUDEPROJECTDIR`。
+
+**复现**：
+1. 让输出区渲染一个 Markdown code 块，内容包含 `CLAUDE_PROJECT_DIR`
+2. 在 TUI 中选中该 code 块内容并复制
+3. 粘贴到外部编辑器
+4. 观察下划线丢失，结果为 `CLAUDEPROJECTDIR`
+
+**根因假设**：
+1. 输出区复制路径可能复用了渲染后的 spans/text，而不是原始文本，导致某些样式控制或 markdown token 处理误删 `_`。
+2. code block 渲染或 copy-to-plain-text 逻辑中，`_` 可能被当作 Markdown emphasis marker、ANSI/style 控制字符或 sanitize 目标错误过滤。
+3. copy selection 的文本拼接逻辑可能没有直接使用原始 line content，而是使用去 Markdown 标记后的文本，误把 code 中的普通 `_` 当作标记移除。
+
+**修复方向**：
+1. code block 的复制应保留原始文本内容，不应对 `_`、`*`、`` ` `` 等字符做 Markdown 标记剥离。
+2. 区分 Markdown 语义层的标记字符和 code block 内的普通字符；code block / inline code 内文本应按 literal 处理。
+3. 为复制路径增加回归覆盖：`CLAUDE_PROJECT_DIR`、`A_B_C`、包含 `_`/`*`/反引号的 code 文本应原样复制。
+4. 检查 `sanitize_for_display` 是否错误移除可打印 ASCII `_`，如存在应限定只移除真实控制字符。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/` 复制/selection 逻辑
+- Markdown code block 渲染与 plain text 提取逻辑
+- `sanitize_for_display` 相关函数
 
 ### 专案 A：Task 系统生命周期管理（Bug #27 + #29 + #32 + #33 + #34 + #36 + #37；Feature #18 + #24 + #25 + #29 + #30 + #33）
 

@@ -15,6 +15,28 @@
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
 | 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
+| 44 | 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message | 中 | 待实施 | 未确认 | 在目标项目（如 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform`）中读取 git log，分析带 `Co-Authored-By` 的 commit message 风格，并在需要创建 commit message 时提示 LLM 按该项目既有风格生成。 |
+
+### #44 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message
+
+**状态**：待实施
+
+**背景**：不同项目的 commit message 风格可能不同。以 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 为例，用户希望系统查看该项目 git log 中带 `Co-Authored-By` 的 commit message，提炼其风格，并提示 LLM 在创建 commit message 时按该风格输出。
+
+**目标**：在需要生成 commit message 前，自动或按需分析当前项目历史提交中包含 `Co-Authored-By` trailer 的 commit message，提取格式习惯（如标题格式、scope/type、正文段落、footer/trailer 写法、是否中英混用等），作为上下文提示注入给 LLM，帮助生成符合项目既有习惯的 commit message。
+
+**建议范围**：
+1. 在当前 git 仓库中执行类似 `git log --format=%B --grep='Co-Authored-By'` 的历史采样，限制数量与输出长度，避免 prompt 过大。
+2. 从样本中提炼风格摘要，而不是直接把大量 commit 原文全部注入。
+3. 生成 commit message 时将风格摘要作为 guidance/context 注入，并明确保留合法 trailer 格式。
+4. 当项目没有带 `Co-Authored-By` 的历史提交时，fallback 到通用 commit message 规范。
+5. 支持按项目缓存风格摘要，并在 git log 变化后按需刷新。
+6. 不应伪造 `Co-Authored-By`；仅在确有协作者信息时添加 trailer。
+
+**涉及路径**：
+- commit message 生成/提交相关逻辑
+- guidance/system prompt 注入逻辑
+- git log 读取与项目级缓存逻辑
 
 ### #43 在 git worktree 中工作时 cwd 应设置为 worktree 目录
 
