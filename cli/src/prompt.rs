@@ -15,6 +15,23 @@ pub struct SystemPromptParts {
     pub claude_md: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct PromptContext {
+    pub cwd: PathBuf,
+    pub provider_name: Option<String>,
+    pub model_name: Option<String>,
+}
+
+impl PromptContext {
+    pub fn new(cwd: &PathBuf, provider_name: Option<&str>, model_name: Option<&str>) -> Self {
+        Self {
+            cwd: cwd.clone(),
+            provider_name: provider_name.map(str::to_string),
+            model_name: model_name.map(str::to_string),
+        }
+    }
+}
+
 fn static_system_prompt_for(cwd_str: &str, is_git: bool) -> String {
     format!(
         r#"You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
@@ -80,6 +97,30 @@ GOOD: TaskListCreate(summary) → TaskCreate(3 tasks) → Agent("do task 1", tas
 #[cfg(test)]
 fn static_system_prompt_for_test(cwd_str: &str, is_git: bool) -> String {
     static_system_prompt_for(cwd_str, is_git)
+}
+
+fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>) -> String {
+    let provider = provider_name
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("unknown");
+    let model = model_name
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("unknown");
+    let trailer = format!(
+        "Co-Authored-By: Aemeath ({provider}/{model}) <github:rushsinging/aemeath>"
+    );
+
+    format!(
+        r#"# Commit Message Guidance
+When creating a git commit message:
+- First inspect this repository's recent commit history and infer its Commit Style Context.
+- Prefer sampling commits that contain `Co-Authored-By`, for example: `git log --format=%B --grep='Co-Authored-By' -n 20`.
+- If there are no useful co-author examples, sample recent ordinary commits with a small limit.
+- Analyze title format, type/scope usage, body style, language, footer/trailer conventions, and whether AI co-author trailers are commonly used.
+- Keep the final commit message consistent with this repository's existing style.
+- Do not invent human co-authors.
+- When an AI co-author trailer is appropriate, use exactly: `{trailer}`."#
+    )
 }
 
 pub async fn build_system_prompt_parts(

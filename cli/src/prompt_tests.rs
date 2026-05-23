@@ -32,6 +32,40 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
     assert!(text.contains("prioritize the latest user request"));
 }
 
+#[test]
+fn test_build_commit_guidance_includes_provider_model_trailer() {
+    let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"));
+
+    assert!(guidance.contains("# Commit Message Guidance"));
+    assert!(guidance.contains("git log --format=%B --grep='Co-Authored-By'"));
+    assert!(guidance.contains(
+        "Co-Authored-By: Aemeath (zhipu/glm-5.1) <github:rushsinging/aemeath>"
+    ));
+    assert!(guidance.contains("Do not invent human co-authors"));
+}
+
+#[test]
+fn test_build_commit_guidance_uses_unknown_fallback() {
+    let guidance = build_commit_guidance(None, None);
+
+    assert!(guidance.contains(
+        "Co-Authored-By: Aemeath (unknown/unknown) <github:rushsinging/aemeath>"
+    ));
+}
+
+#[test]
+fn test_prompt_context_new_preserves_model_metadata() {
+    let cwd = PathBuf::from("/tmp/example");
+    let context = PromptContext::new(&cwd, Some("openrouter"), Some("anthropic/claude-sonnet-4"));
+
+    assert_eq!(context.cwd, cwd);
+    assert_eq!(context.provider_name.as_deref(), Some("openrouter"));
+    assert_eq!(
+        context.model_name.as_deref(),
+        Some("anthropic/claude-sonnet-4")
+    );
+}
+
 #[tokio::test]
 async fn test_load_agents_md_prefers_project_claude_md() {
     let base = std::env::temp_dir().join(format!(
