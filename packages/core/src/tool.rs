@@ -94,6 +94,8 @@ pub struct ToolContext {
     pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
     /// Session-local reminders shared by MemoryTool and UI/REPL.
     pub session_reminders: Option<Arc<Mutex<crate::memory::SessionReminders>>>,
+    /// Memory system configuration used by MemoryTool.
+    pub memory_config: crate::config::MemoryConfig,
     /// Whether we're in plan mode (simulated tool execution)
     pub plan_mode: Option<bool>,
     /// Whether all tools are auto-approved (skip injection checks)

@@ -43,6 +43,7 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: Some(runner),
         session_reminders: None,
+        memory_config: aemeath_core::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: false,
         max_tool_concurrency: 4,

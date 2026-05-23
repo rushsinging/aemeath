@@ -238,6 +238,7 @@ mod tests {
             read_files: Arc::new(Mutex::new(HashSet::new())),
             agent_runner: None,
             session_reminders: None,
+            memory_config: aemeath_core::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: true,
             max_tool_concurrency: 4,

@@ -17,6 +17,7 @@ fn test_ctx(cwd: PathBuf) -> ToolContext {
         session_reminders: Some(Arc::new(Mutex::new(
             aemeath_core::memory::SessionReminders::new(),
         ))),
+        memory_config: aemeath_core::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: false,
         max_tool_concurrency: 10,
@@ -82,4 +83,43 @@ async fn test_memory_tool_add_and_search() {
     let results = store.search("MemoryTool", 5).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].content.contains("MemoryTool"));
+}
+
+#[test]
+fn test_open_store_with_base_uses_memory_config_happy_path() {
+    let dir = tempdir().unwrap();
+    let mut ctx = test_ctx(dir.path().join("project"));
+    ctx.memory_config.max_entries = 2;
+    ctx.memory_config.similarity_threshold = 0.6;
+    let store = open_store_with_base(&ctx, dir.path().to_path_buf()).unwrap();
+
+    assert!(!store.needs_eviction(MemoryLayer::Project).unwrap());
+}
+
+#[test]
+fn test_open_store_with_base_rejects_zero_max_entries() {
+    let dir = tempdir().unwrap();
+    let mut ctx = test_ctx(dir.path().join("project"));
+    ctx.memory_config.max_entries = 0;
+
+    let result = open_store_with_base(&ctx, dir.path().to_path_buf());
+
+    assert!(matches!(
+        result,
+        Err(ref error) if error.contains("max_entries 必须大于 0")
+    ));
+}
+
+#[test]
+fn test_open_store_with_base_rejects_invalid_similarity_threshold() {
+    let dir = tempdir().unwrap();
+    let mut ctx = test_ctx(dir.path().join("project"));
+    ctx.memory_config.similarity_threshold = 1.1;
+
+    let result = open_store_with_base(&ctx, dir.path().to_path_buf());
+
+    assert!(matches!(
+        result,
+        Err(ref error) if error.contains("similarity_threshold 必须在 0 到 1 之间")
+    ));
 }
