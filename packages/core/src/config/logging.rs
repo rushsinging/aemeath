@@ -1,7 +1,6 @@
 //! 日志配置
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Sub-agent log configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,14 +36,14 @@ impl Default for SubAgentLogConfig {
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
-    /// Default log level for all modules (trace/debug/info/warn/error)
-    #[serde(default = "default_level")]
-    pub default_level: String,
+    /// Global log level for all modules (trace/debug/info/warn/error)
+    #[serde(default = "default_level", alias = "default_level")]
+    pub level: String,
 
-    /// Per-module log level overrides. Key = module prefix (e.g. "aemeath_llm"), value = level.
-    /// Uses env_logger filter syntax: module prefixes are matched against log targets.
-    #[serde(default)]
-    pub module_levels: HashMap<String, String>,
+    /// Deprecated legacy per-module log level overrides. Accepted for compatibility only;
+    /// runtime logging uses the global `level` for every module.
+    #[serde(default, skip_serializing)]
+    pub module_levels: serde_json::Value,
 
     /// Maximum log file size in bytes
     #[serde(default = "default_max_bytes")]
@@ -87,15 +86,8 @@ pub(crate) fn default_retention_days() -> u64 {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            default_level: "warn".to_string(),
-            module_levels: {
-                let mut m = HashMap::new();
-                m.insert("aemeath_llm".to_string(), "debug".to_string());
-                m.insert("aemeath_cli".to_string(), "debug".to_string());
-                m.insert("aemeath_core".to_string(), "debug".to_string());
-                m.insert("aemeath_tools".to_string(), "debug".to_string());
-                m
-            },
+            level: "warn".to_string(),
+            module_levels: serde_json::Value::Null,
             max_bytes: 10 * 1024 * 1024,
             max_backups: 5,
             retention_days: 30,
@@ -109,11 +101,7 @@ impl Default for LoggingConfig {
 impl LoggingConfig {
     /// Build an env_logger filter string from this config.
     pub fn to_filter_string(&self) -> String {
-        let mut parts = vec![self.default_level.clone()];
-        for (module, level) in &self.module_levels {
-            parts.push(format!("{}={}", module, level));
-        }
-        parts.join(",")
+        self.level.clone()
     }
 }
 
@@ -122,36 +110,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_logging_config_default_filter() {
+    fn test_logging_config_default_filter_is_global_level() {
         let cfg = LoggingConfig::default();
-        let filter = cfg.to_filter_string();
-        assert!(filter.starts_with("warn"));
-        assert!(filter.contains("aemeath_llm=debug"));
-        assert!(filter.contains("aemeath_tools=debug"));
+
+        assert_eq!(cfg.to_filter_string(), "warn");
     }
 
     #[test]
-    fn test_logging_config_to_filter_string_empty_module_levels() {
+    fn test_logging_config_to_filter_string_uses_global_level() {
         let cfg = LoggingConfig {
-            default_level: "info".to_string(),
-            module_levels: HashMap::new(),
+            level: "info".to_string(),
             ..Default::default()
         };
+
         assert_eq!(cfg.to_filter_string(), "info");
     }
 
     #[test]
-    fn test_logging_config_to_filter_string_custom_levels() {
-        let mut levels = HashMap::new();
-        levels.insert("my_crate".to_string(), "trace".to_string());
-        let cfg = LoggingConfig {
-            default_level: "error".to_string(),
-            module_levels: levels,
-            ..Default::default()
-        };
-        let filter = cfg.to_filter_string();
-        assert!(filter.starts_with("error"));
-        assert!(filter.contains("my_crate=trace"));
+    fn test_logging_config_deserializes_legacy_default_level_alias() {
+        let cfg: LoggingConfig = serde_json::from_str(r#"{"default_level":"debug"}"#)
+            .expect("legacy default_level should deserialize");
+
+        assert_eq!(cfg.to_filter_string(), "debug");
+    }
+
+    #[test]
+    fn test_logging_config_ignores_legacy_module_levels() {
+        let cfg: LoggingConfig = serde_json::from_str(
+            r#"{"level":"error","module_levels":{"aemeath_cli":"debug","aemeath_core":"trace"}}"#,
+        )
+        .expect("legacy module_levels should deserialize");
+
+        assert_eq!(cfg.to_filter_string(), "error");
     }
 
     #[test]
