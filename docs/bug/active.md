@@ -3,11 +3,11 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 未确认 | 2026-05 | 根因：process_in_background 中 tool_calls.is_empty() || stop_reason==EndTurn 时直接 break 退出 loop，未消费 input_queue 中用户排队消息；工具轮结束后即使消费了队列也未立即 continue，可能先执行收尾逻辑。修复：抽取 append_queued_input，在 EndTurn/无工具调用和工具轮结果同步后统一 drain queued input，有消息则同步 messages 并 continue 进入下一轮；补充正常/空队列/通道关闭单元测试 |
+| 49 | ~~last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域~~ | 高 | 已归档 | 已确认 | 2026-05 | → archived/049-input-queue-last-turn.md |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 55 | ~~行内代码（`...`）自动换行处渲染异常~~ | 中 | 已归档 | 已确认 | 2026-05 | → archived/055-inline-code-wrap.md |
-| 57 | Spinner 有时闪烁过快 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：OutputArea::render 每次重绘都会递增 spinner.frame，LLM stream chunk、tool/task 状态更新、终端事件和强制重绘越频繁，spinner 推进越快；AskUser 等待态还会在 stop 后 set phase 间接重启 spinner。修复：新增固定 90ms spinner_ticker，并设置 MissedTickBehavior::Skip；spinner.frame 只在 Msg::SpinnerTick 中推进，render 只读取当前帧；AskUser 等待用户时明确 stop spinner，避免 phase 更新重启 |
+| 57 | ~~Spinner 有时闪烁过快~~ | 中 | 已归档 | 已确认 | 2026-05 | → archived/057-spinner-flicker.md |
 | 59 | ~~Input area 翻历史记录时丢失换行且文本超出渲染框~~ | 中 | 已归档 | 已确认 | 2026-05 | → archived/059-input-history-multiline.md |
 ## 专案
 
