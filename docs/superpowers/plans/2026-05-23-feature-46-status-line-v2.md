@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Redesign the two-line TUI status line so line 1 shows runtime/model/token throughput information and line 2 shows the actual working path, git/worktree identity, and permission mode.
+**Goal:** Redesign the two-line TUI status line so line 1 shows runtime/model/token throughput/session/API call information and line 2 shows the actual working path, git/worktree identity, and permission mode.
 
-**Architecture:** Keep the change local to the existing TUI status bar and app context wiring. `StatusBar` continues to own runtime counters and `StatusLineContext`, but formatting is changed to: line 1 = status/model/token-in/token-out/tokens-per-second/context percentage, line 2 = one primary path plus git/worktree plus permission; only show both cwd/path_base and root/working_root when they differ. Path formatting must preserve a leading `~` or `/` on normal-width terminals so the user can verify it is a real path, not an abstract project label.
+**Architecture:** Keep the change local to the existing TUI status bar and app context wiring. `StatusBar` continues to own runtime counters and `StatusLineContext`, but formatting is changed to: line 1 = status/model/token-in/token-out/tokens-per-second/context percentage/session/API calls, line 2 = one primary path plus git/worktree plus permission; only show both cwd/path_base and root/working_root when they differ. Path formatting must preserve a leading `~` or `/` on normal-width terminals so the user can verify it is a real path, not an abstract project label.
 
 **Tech Stack:** Rust, ratatui `Line`/`Span` rendering, existing `theme` colors, `cargo test -p aemeath-cli status_bar -- --nocapture`, `.agents/hooks/check-architecture-guards.sh`, `cargo check -p aemeath-cli`.
 
@@ -13,15 +13,15 @@
 ## File Structure
 
 - Modify `cli/src/tui/status_bar.rs`
-  - Remove cost/session/API calls from visible runtime row.
-  - Reorder runtime row to status, model, token in, token out, t/s, ctx%.
+  - Remove cost from visible runtime row; keep session and API calls.
+  - Reorder runtime row to status, model, token in, token out, t/s, ctx%, session, API calls.
   - Render context row with semantic spans so the second row has visible colors.
 - Modify `cli/src/tui/status_bar_format.rs`
   - Replace `ctx ... │ root ... │ ... │ Perm:...` default text with `path │ git │ permission`.
   - Preserve leading `~` or `/` where possible.
   - Include root only when `path_base != working_root` after normalization.
 - Modify `cli/src/tui/status_bar_tests.rs`
-  - Update old expectations and add regression tests for no `ctx aemeath`, no cost/session/calls, visible second-row colors, path prefix, root-only-when-different.
+  - Update old expectations and add regression tests for no `ctx aemeath`, no cost, visible session/API calls, visible second-row colors, path prefix, root-only-when-different.
 - Modify `cli/src/tui/app/mod.rs`
   - Stop using `display_working_dir()` for status line context; pass full cwd display path with home-directory compaction.
   - Keep `display_working_dir()` only if other callers still need a short label.
@@ -33,7 +33,7 @@
 - `cli/src/tui/status_bar.rs` currently has `input_tokens`, `output_tokens`, `last_input_tokens`, `context_size`, and `tps` fields already wired.
 - `App::draw()` sets tokens from `self.total_input_tokens`, `self.total_output_tokens`, and `self.last_input_tokens` before rendering.
 - `UiEvent::TokensPerSecondUpdate` / `StreamingComplete` already call `status_bar.set_tps(tps)`.
-- Current runtime row still contains `Think:ON/OFF`, `Session`, and `Calls`, while the user explicitly wants token in/out and t/s, and says cost is unnecessary.
+- Current runtime row still contains `Think:ON/OFF`, verbose `Session`, and `Calls`; the user wants token in/out, t/s, session, and API calls, but does not want cost.
 - Current context row starts with `ctx ...` and shows `root ...` even when both paths are the same, which the user rejected as confusing.
 - Current `App::new()` calls `display_working_dir(&cwd)` and therefore collapses the path to `aemeath`; this must change to a real `~` or `/` path.
 
@@ -51,7 +51,7 @@ Append these tests to `cli/src/tui/status_bar_tests.rs`:
 
 ```rust
 #[test]
-fn test_runtime_row_shows_token_in_out_tps_and_ctx_without_cost_or_calls() {
+fn test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost() {
     let mut bar = StatusBar::new();
     bar.set_success("Ready");
     bar.set_model("zhipu/glm-5.1");
@@ -69,8 +69,8 @@ fn test_runtime_row_shows_token_in_out_tps_and_ctx_without_cost_or_calls() {
     assert!(text.contains("out 1.8k"));
     assert!(text.contains("42 t/s"));
     assert!(text.contains("ctx 37%"));
-    assert!(!text.contains("Session"));
-    assert!(!text.contains("Calls"));
+    assert!(text.contains("s 019-session") || text.contains("session 019-session"));
+    assert!(text.contains("api 7"));
     assert!(!text.to_ascii_lowercase().contains("cost"));
     assert!(!text.contains('$'));
 }
@@ -82,10 +82,10 @@ Run:
 
 ```bash
 cd /Users/guoyuqi/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2
-cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_and_ctx_without_cost_or_calls -- --nocapture
+cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost -- --nocapture
 ```
 
-Expected: FAIL because runtime row currently uses `In:` / `Out:` labels and still includes `Session` / `Calls` when set.
+Expected: FAIL because runtime row currently uses `In:` / `Out:` labels and uses verbose `Session` / `Calls` labels instead of the compact session/API style.
 
 - [ ] **Step 3: Update runtime segments**
 
@@ -123,18 +123,28 @@ In `cli/src/tui/status_bar.rs`, replace the body of `fn runtime_segments(&self) 
             segments.push((format!(" ctx {}% ", pct), RuntimeSegmentStyle::ContextPct(pct)));
         }
 
+        if let Some(ref session_id) = self.session_id {
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+            segments.push((format!(" s {} ", session_id), RuntimeSegmentStyle::Muted));
+        }
+
+        if self.api_calls > 0 {
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+            segments.push((format!(" api {} ", self.api_calls), RuntimeSegmentStyle::Muted));
+        }
+
         segments
     }
 ```
 
-Do not add cost, session id, or API calls to `runtime_segments()`.
+Do not add cost to `runtime_segments()`. Keep session and API calls visible in compact lowercase form.
 
 - [ ] **Step 4: Run runtime row tests**
 
 Run:
 
 ```bash
-cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_and_ctx_without_cost_or_calls -- --nocapture
+cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost -- --nocapture
 ```
 
 Expected: PASS.
@@ -587,13 +597,13 @@ git commit -m "feat: show real path in status line context (refs #46)"
 In `docs/feature/active.md`, update the #46 table row target and detail section to state:
 
 ```markdown
-status line V2：第一行展示运行状态、模型、token in/out、t/s、ctx%；不显示 cost、session、api calls；第二行默认展示一个真实工作路径（`~` 或 `/` 开头）、git/worktree、权限模式；仅当 cwd/path_base 与 working_root 不一致时显示 `root ...`。
+status line V2：第一行展示运行状态、模型、token in/out、t/s、ctx%、session、api calls；不显示 cost；第二行默认展示一个真实工作路径（`~` 或 `/` 开头）、git/worktree、权限模式；仅当 cwd/path_base 与 working_root 不一致时显示 `root ...`。
 ```
 
 In the acceptance criteria, include these bullets:
 
 ```markdown
-- 第一行必须包含 token in、token out、tokens/s、ctx%，且不显示 cost。
+- 第一行必须包含 token in、token out、tokens/s、ctx%、session、api calls，且不显示 cost。
 - 第二行不得默认显示 `ctx aemeath`；路径必须可识别为 `~` 或 `/` 开头的真实路径，窄屏可中间省略。
 - cwd/path_base 与 working_root 相同时只显示一个路径；不一致时才显示 `root ...`。
 - git 主分支显示 `main`，worktree 显示 `worktree:<branch>`，不得出现 `main:main`。
