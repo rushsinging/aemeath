@@ -67,6 +67,31 @@ fn test_prompt_context_new_preserves_model_metadata() {
 }
 
 #[tokio::test]
+async fn test_build_system_prompt_parts_includes_commit_guidance() {
+    let cwd = std::env::temp_dir().join(format!(
+        "aemeath_commit_guidance_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&cwd).unwrap();
+    let hook_runner = HookRunner::empty(cwd.display().to_string());
+    let memory_config = MemoryConfig::default();
+    let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
+
+    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config).await;
+
+    std::fs::remove_dir_all(cwd).unwrap();
+
+    assert!(parts.dynamic_part.contains("# Commit Message Guidance"));
+    assert!(parts.dynamic_part.contains(
+        "Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"
+    ));
+    assert!(!parts.dynamic_part.contains("Commit Style Context:"));
+}
+
+#[tokio::test]
 async fn test_load_agents_md_prefers_project_claude_md() {
     let base = std::env::temp_dir().join(format!(
         "aemeath_agents_md_{}",

@@ -6,7 +6,7 @@ use crate::cli::Args;
 use crate::logging_setup::{init_logging, set_session_id};
 use crate::mcp_loader::spawn_mcp_connect;
 use crate::model_selection::select_model_for_run;
-use crate::prompt::build_system_prompt_parts;
+use crate::prompt::{build_system_prompt_parts, PromptContext};
 use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
@@ -228,7 +228,13 @@ pub(crate) async fn run_chat(mut args: Args) {
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
-    let prompt_parts = build_system_prompt_parts(&cwd, &hook_runner, &prompt_memory_config).await;
+    let prompt_context = PromptContext::new(
+        &cwd,
+        Some(client.provider_name()),
+        Some(client.model_name()),
+    );
+    let prompt_parts =
+        build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
 
     let static_prompt = prompt::build_static_prompt(
         &cwd,

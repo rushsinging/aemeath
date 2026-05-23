@@ -124,10 +124,11 @@ When creating a git commit message:
 }
 
 pub async fn build_system_prompt_parts(
-    cwd: &PathBuf,
+    context: &PromptContext,
     hook_runner: &HookRunner,
     memory_config: &MemoryConfig,
 ) -> SystemPromptParts {
+    let cwd = &context.cwd;
     let cwd_str = cwd.to_string_lossy();
     let is_git = is_git_repo(cwd).await;
 
@@ -139,6 +140,12 @@ pub async fn build_system_prompt_parts(
 
     let date = current_date();
     dynamic.push_str(&format!("# currentDate\nToday's date is {date}."));
+
+    dynamic.push_str("\n\n");
+    dynamic.push_str(&build_commit_guidance(
+        context.provider_name.as_deref(),
+        context.model_name.as_deref(),
+    ));
 
     if is_git {
         let git_context = collect_git_context(cwd).await;
