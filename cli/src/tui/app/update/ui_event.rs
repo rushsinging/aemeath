@@ -18,6 +18,20 @@ fn build_option_line_ranges(start: usize, options: &[String]) -> Vec<std::ops::R
     ranges
 }
 
+fn input_queue_preview(queue: &std::collections::VecDeque<String>) -> String {
+    queue
+        .front()
+        .map(|msg| {
+            let preview: String = msg.chars().take(80).collect();
+            if msg.chars().count() > 80 {
+                format!("{preview}…")
+            } else {
+                preview
+            }
+        })
+        .unwrap_or_default()
+}
+
 impl App {
     /// Handle UI events from background processing
     pub(super) fn update_ui(
@@ -330,6 +344,17 @@ impl App {
                     "[SPINNER] Done: tool_call_active {} -> false",
                     self.tool_call_active
                 );
+                log::info!(
+                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    self.session_id,
+                    self.input_queue.len(),
+                    self.output_area.queued_messages.len(),
+                    self.is_processing,
+                    self.tool_call_active,
+                    self.active_tool_call_ids.len(),
+                    self.input_area.is_empty(),
+                    input_queue_preview(&self.input_queue)
+                );
                 self.output_area.finish_streaming();
                 self.output_area.stop_spinner();
                 self.tool_call_active = false;
@@ -343,6 +368,17 @@ impl App {
                 log::debug!(
                     "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
                     self.tool_call_active
+                );
+                log::info!(
+                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    self.session_id,
+                    self.input_queue.len(),
+                    self.output_area.queued_messages.len(),
+                    self.is_processing,
+                    self.tool_call_active,
+                    self.active_tool_call_ids.len(),
+                    self.input_area.is_empty(),
+                    input_queue_preview(&self.input_queue)
                 );
                 self.output_area.push_done(elapsed);
                 self.output_area.finish_streaming();
