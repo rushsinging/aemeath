@@ -195,8 +195,8 @@ where
 
 /// 表格渲染缓存，key 为可见区域起始行索引。
 ///
-/// `all_lines` 用于获取滚出视口的表格 header/separator 行，
-/// 以保证列宽计算和 header 样式的正确性。
+/// `all_lines` 用于获取整个表格块的所有行（包括视口前后的行），
+/// 保证列宽计算基于完整表格，滚动时列宽不会变化。
 pub(super) fn render_table_cache<'a, L>(
     all_lines: L,
     visible: &[(usize, &'a OutputLine)],
@@ -205,7 +205,6 @@ pub(super) fn render_table_cache<'a, L>(
 where
     L: Iterator<Item = &'a OutputLine>,
 {
-    // 收集全量行到 vec 以便随机访问
     let all_vec: Vec<&OutputLine> = all_lines.collect();
     let mut table_render_cache = HashMap::new();
     let mut i = 0;
@@ -219,11 +218,10 @@ where
                 block_end += 1;
             }
 
-            // 向前查找滚出视口的表格行
+            // 向前查找滚出视口的表格行，找到完整表格块的起始
             let mut full_start = idx;
             for scan_idx in (0..idx).rev() {
-                let line = all_vec.get(scan_idx);
-                let Some(line) = line else { break };
+                let Some(line) = all_vec.get(scan_idx) else { break };
                 let is_md = matches!(
                     line.style,
                     LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
@@ -238,22 +236,40 @@ where
                 }
             }
 
-            // 构建完整的表格行列表（包含不可见的 header/separator）
-            let mut table_lines: Vec<&str> = Vec::new();
-            for li in full_start..visible[block_end - 1].0 + 1 {
-                if let Some(line) = all_vec.get(li) {
-                    let trimmed = line.content.trim();
-                    if markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed) {
-                        table_lines.push(trimmed);
-                    }
+            // 向后查找视口之后的表格行，找到完整表格块的结束
+            let last_vis_idx = visible[block_end - 1].0;
+            let mut full_end = last_vis_idx + 1;
+            for scan_idx in last_vis_idx + 1..all_vec.len() {
+                let line = all_vec.get(scan_idx);
+                let Some(line) = line else { break };
+                let is_md = matches!(
+                    line.style,
+                    LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
+                );
+                let trimmed = line.content.trim();
+                if is_md
+                    && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed))
+                {
+                    full_end = scan_idx + 1;
+                } else {
+                    break;
                 }
             }
+
+            // 构建完整的表格行列表（全量行参与列宽计算）
+            let table_lines: Vec<&str> = (full_start..full_end)
+                .filter_map(|li| {
+                    all_vec.get(li).map(|line| line.content.trim())
+                })
+                .filter(|trimmed| {
+                    markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed)
+                })
+                .collect();
 
             let base = visible[block_start].1.style.to_style();
             let rendered = markdown::render_table_block(&table_lines, base);
 
-            // 只保留可见行对应的渲染结果
-            // render_table_block 输出与 table_lines 一一对应（跳过非表格行已排除）
+            // render_table_block 输出与 table_lines 一一对应
             // 可见行在 table_lines 中的偏移
             let vis_offset = idx - full_start;
             let vis_rendered: Vec<Vec<Span<'static>>> = rendered
