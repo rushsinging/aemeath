@@ -1,7 +1,7 @@
 use crate::tui::output_area::LineStyle;
 
 use super::common::{bool_arg, str_arg, truncate_ellipsis};
-use super::{ToolDisplay, ToolDisplayEntry};
+use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
 
 struct TaskCreateDisplay;
 impl ToolDisplay for TaskCreateDisplay {
@@ -20,7 +20,7 @@ impl ToolDisplay for TaskCreateDisplay {
         vec![truncate_ellipsis(desc, 80)]
     }
     fn result_max_lines(&self) -> usize {
-        20
+        TOOL_RESULT_MAX_LINES
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -45,7 +45,7 @@ impl ToolDisplay for TaskUpdateDisplay {
         vec![format!("-> {status}")]
     }
     fn result_max_lines(&self) -> usize {
-        20
+        TOOL_RESULT_MAX_LINES
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -65,7 +65,7 @@ impl ToolDisplay for TaskListDisplay {
         vec![]
     }
     fn result_max_lines(&self) -> usize {
-        20
+        TOOL_RESULT_MAX_LINES
     }
 }
 inventory::submit!(ToolDisplayEntry {

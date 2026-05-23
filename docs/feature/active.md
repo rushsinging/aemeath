@@ -14,8 +14,37 @@
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；2026-05-22 将助手正文/Markdown 默认色改为主文本浅灰，避免大段内容与成功/spinner 绿色混淆；2026-05-22 适配 Catppuccin Macchiato 风格静态配色；2026-05-22 将 status line 背景改为与主背景一致，避免显示为纯黑；2026-05-22 将 inline/code block 仅用代码强调色显示，不额外添加前景背景块；2026-05-22 将 code 强调色改为 Peach `#f5a97f`，增强与主文本区分度；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
 | 41 | Web Chat UI（类 Codex Companion） | 高 | 待实施 | 未确认 | 浏览器端 Chat 界面方向保留，但不再依赖已移除的 server/SDK；后续如继续实现，需要先重新定义轻量通信边界，可考虑直接复用 CLI runtime 或单独开轻量本地服务。 |
+| 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
 
-### #40 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取
+### #42 Allow All 模式下支持访问用户明确授权的 workspace 外路径
+
+**状态**：待实施
+
+**背景**：用户在 allow all 模式下明确要求访问 workspace 外路径时，Glob/Grep 仍被安全边界拦截。例如：
+
+```text
+Glob(**/*)
+Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is outside the workspace '/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform'.
+
+Grep /gha/notify|deployments|actor|pusher|github-actions|执行人/
+in /Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver
+Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is outside the workspace '/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform'.
+```
+
+**目标**：在 allow all 模式下，用户明确授权的外部路径应可作为临时允许的搜索/读取边界，支持 Glob/Grep/Read 等只读操作访问该路径；默认模式仍保持 workspace 安全边界，避免意外读取任意系统文件。
+
+**建议范围**：
+1. 为 ToolContext 或工具执行上下文增加“用户授权路径”集合，路径必须 canonicalize 后保存。
+2. 安全边界校验从“必须位于 workspace 内”扩展为“位于 workspace 内或位于已授权路径内”。
+3. 授权仅对当前会话或当前请求生效，避免长期扩大权限。
+4. 工具错误消息应区分“未授权外部路径”和“路径不存在/无权限”。
+5. 仅允许目录级授权，避免通过 `..`、符号链接绕过边界。
+
+**涉及路径**：
+- `aemeath-tools` 或当前工具权限校验实现（Glob/Grep/Read/Bash 等）
+- `ToolContext` / workspace path boundary 相关逻辑
+- TUI/工具调用审批 allow all 模式相关逻辑
+
 
 **目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
 

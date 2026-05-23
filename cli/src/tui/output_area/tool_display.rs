@@ -11,6 +11,9 @@ mod tool_impls;
 
 use common::{format_todowrite_value, truncate_json};
 
+/// TUI 中 tool call 结果最多显示的行数。
+pub(crate) const TOOL_RESULT_MAX_LINES: usize = 5;
+
 // ── ToolDisplay trait ──────────────────────────────────────────────
 
 /// Trait for customizing how a tool call is displayed in the TUI output area.
@@ -29,9 +32,9 @@ pub trait ToolDisplay: Send + Sync {
         LineStyle::System
     }
 
-    /// Max lines of result output to show (default 3).
+    /// Max lines of result output to show (default 5).
     fn result_max_lines(&self) -> usize {
-        10
+        TOOL_RESULT_MAX_LINES
     }
 
     /// Style for result content lines.

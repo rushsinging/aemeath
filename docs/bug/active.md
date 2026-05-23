@@ -5,11 +5,11 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 未确认 | 2026-05 | 根因：process_in_background 中 tool_calls.is_empty() || stop_reason==EndTurn 时直接 break 退出 loop，未消费 input_queue 中用户排队消息；工具轮结束后即使消费了队列也未立即 continue，可能先执行收尾逻辑。修复：抽取 append_queued_input，在 EndTurn/无工具调用和工具轮结果同步后统一 drain queued input，有消息则同步 messages 并 continue 进入下一轮；补充正常/空队列/通道关闭单元测试 |
 | 51 | Output area 复制时复制出 Markdown 源码而非渲染后纯文本 | 中 | 待确认 | 用户反馈仍存在，已补充修复 | 2026-05 | 根因：此前 get_selected_text 在返回前剥离 Markdown 标记，但 selection_start/end 仍按原始 Markdown 文本坐标计算；当行内代码或链接标记参与坐标换算时，拖选渲染后的整行会在原始内容中截断，出现复制出 `活动中 Bug（docs/bug/active.md` 这类缺右括号文本。修复：Markdown 普通行渲染时写入渲染后纯文本覆盖，并用该纯文本构建 screen_line_map/选区坐标；补充“活动中 Bug（`docs/bug/active.md`）”回归测试；修复提交 c27b42d，待用户确认 |
-| 52 | Tool call spinner 一直闪烁且 tool 结果未更新 | 中 | 修复中 | 未确认 | 2026-05 | 根因：deny_tool_calls 只发送 ToolResult 事件（携带 LLM 的 tool_use_id）不发送 ToolCall 事件，导致 pending placeholder 的 tool_id（pending:{name}:{index}）无法被 mark_tool_header_done 精确匹配；fallback 盲目抓最后一个 ToolCallRunning 行，当同轮存在其他 running tool 时会抓错行，被拒绝的 tool 的占位行永远保持 ToolCallRunning 状态。修复：已保留 deny_tool_calls 先发 ToolCall 再发 ToolResult、mark_tool_header_done 三阶段匹配，并补充回归测试覆盖 pending 精确 fallback 与 exact tool_id 优先级 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 55 | 行内代码（`...`）自动换行处渲染异常 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：渲染路径先用剥离 Markdown 标记后的纯文本计算 wrap，再对每个 wrap chunk 单独调用 inline_markdown_spans；当反引号标记或行内代码内容跨越 wrap 边界时，单个 chunk 内标记不完整，导致行内代码样式丢失/截断。修复：Markdown 普通行在无选区渲染时先解析完整行的 inline spans，再按终端宽度切分 span，保留跨行样式；选区路径继续使用纯文本以保证复制/高亮坐标稳定；补充行内代码跨边界、标记卡边界、空字符串回归测试 |
 | 57 | Spinner 有时闪烁过快 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：OutputArea::render 每次重绘都会递增 spinner.frame，LLM stream chunk、tool/task 状态更新、终端事件和强制重绘越频繁，spinner 推进越快；AskUser 等待态还会在 stop 后 set phase 间接重启 spinner。修复：新增固定 90ms spinner_ticker，并设置 MissedTickBehavior::Skip；spinner.frame 只在 Msg::SpinnerTick 中推进，render 只读取当前帧；AskUser 等待用户时明确 stop spinner，避免 phase 更新重启 |
+| 59 | ~~Input area 翻历史记录时丢失换行且文本超出渲染框~~ | 中 | 已归档 | 已确认 | 2026-05 | → archived/059-input-history-multiline.md |
 ## 专案
 
 ### 专案 A：Task 系统生命周期管理（Bug #27 + #29 + #32 + #33 + #34 + #36 + #37；Feature #18 + #24 + #25 + #29 + #30 + #33）
@@ -584,26 +584,27 @@ Tool Bash timed out after 120s
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
 
-### #52 Tool call spinner 一直闪烁且 tool 结果未更新
+### #58 TUI 中 Markdown 多行代码块滚出后，结束标记将后续内容全部渲染为代码块
 
-**状态**：修复中
+**状态**：活动中
 
-**症状**：当一轮 LLM 响应同时包含已批准和被拒绝的 tool call 时，output area 中被拒绝的 tool call（如 `● Edit...`）前面的白点持续闪烁，且拒绝结果（如 "Tool Edit denied"）未在该 tool call 下方正确展示。
+**症状**：当 LLM 输出包含多行围栏代码块（如 ``` ```123``` ```），当前面的开标记 ``` 滚出输出区视口后，渲染器丢失"正在代码块内"的状态。剩余的结束标记 ``` 被误认为是新代码块的起始，导致后续所有内容被渲染为代码块样式。
 
-**复现路径**：
-1. `allow_all` 关闭（默认），LLM 发起一个 Approved 工具（如 Read）+ 一个 Denied 工具（如 Edit）
-2. 流式阶段两个 tool call 均创建 `pending:{name}:{index}` 占位行
-3. `deny_tool_calls` 对 Denied 工具仅发送 `ToolResult` 事件（携带 LLM 原生的 `tool_use_id`）
-4. `push_tool_result_with_diff` → `mark_tool_header_done(tool_use_id)` 精确匹配失败（占位行的 tool_id 是 `pending:Edit:0`，不是 `tool_use_id`）
-5. 触发 fallback → 抓**最后一个** `ToolCallRunning` 行（可能是 Read 的占位行），错误地标记 Read 为完成
-6. Edit 的占位行 `pending:Edit:0` 永远保持 `ToolCallRunning` → 白点持续闪烁
+**复现**：
+1. LLM 输出一段包含多行代码块的内容，代码块足够长（超过可视行数）
+2. 输出区上方行逐步滚出视口，直到开标记 ``` 完全滚出
+3. 此时结束标记 ``` 仍在视口内，渲染器将其当作新代码块的开标记
+4. 结束标记之后的所有内容被渲染为代码块样式（无法恢复）
 
-**根因**：`deny_tool_calls`（`tools.rs`）只发送 `ToolResult` 事件，不发送 `ToolCall` 事件，导致 pending placeholder 的 `tool_id`（格式 `pending:{name}:{index}`）永远无法被 `mark_tool_header_done` 的精确匹配阶段命中。fallback 的"抓最后一个 `ToolCallRunning`"逻辑在同轮存在多个 running tool 时会抓错行。
+**根因**：Markdown 渲染器在渲染可见行时，从当前可见区域的第一行开始解析 block 状态；当代码块的开标记不在可见区域内时，渲染器不知道当前处于代码块中，导致状态机误判。
 
-**修复（2026-05-20）**：
-1. **`apps/cli/src/tui/app/stream/tools.rs`**：`deny_tool_calls` 对每个被拒绝的 call 先发送 `UiEvent::ToolCall`（让 `push_tool_call` 将占位行的 tool_id 更新为 LLM 的 `tool_use_id`），再发送 `ToolResult`
-2. **`apps/cli/src/tui/output_area/tool_display/results.rs`**：`mark_tool_header_done` fallback 从单阶段改为三阶段：(Phase 1) 精确 tool_id 匹配 → (Phase 2) pending 占位行前缀匹配（`pending:{tool_name}:`）→ (Phase 3) 最后兜底：任意 `ToolCallRunning` 行
+**修复方向**：
+1. **方案 A（推荐）**：在渲染前向前回溯查找开标记，确定当前可见区域的起始 block 状态（代码块/引用块/列表等），再按正确状态渲染。需维护一个轻量的 block 状态栈，从输出第一行扫描到可见区域起始行以恢复状态。
+2. **方案 B**：渲染时缓存每行的 block 状态（如 `BlockState::CodeBlock { fence_len: usize }`），滚动时直接使用缓存状态，无需回溯扫描。需处理缓存失效（内容新增时）。
+3. **方案 C**：检测跨可见边界的不完整代码块，在可见区域顶部补一行虚拟的开标记指示器，提示用户"上方存在未闭合的代码块"。
+
+推荐方案 B（缓存）结合方案 A（回溯）作为降级：缓存命中时直接使用，缓存未命中时回溯扫描并回填缓存。
 
 **涉及路径**：
-- `apps/cli/src/tui/app/stream/tools.rs`（`deny_tool_calls` 新增 ToolCall 发送）
-- `apps/cli/src/tui/output_area/tool_display/results.rs`（`mark_tool_header_done` 三阶段 fallback）
+- `apps/cli/src/tui/output_area/markdown/`（block 解析与渲染）
+- `apps/cli/src/tui/output_area/render.rs`（可见行渲染入口）

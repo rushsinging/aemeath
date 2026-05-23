@@ -1,7 +1,7 @@
 use crate::tui::output_area::{display, LineStyle, INDENT};
 
 use super::common::{file_path, str_arg, truncate_ellipsis, u64_arg};
-use super::{ToolDisplay, ToolDisplayEntry};
+use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
 
 struct BashDisplay;
 impl ToolDisplay for BashDisplay {
@@ -186,7 +186,7 @@ impl ToolDisplay for AgentDisplay {
         )]
     }
     fn result_max_lines(&self) -> usize {
-        20
+        TOOL_RESULT_MAX_LINES
     }
     fn result_style(&self) -> LineStyle {
         LineStyle::Assistant
