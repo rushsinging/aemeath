@@ -7,7 +7,44 @@
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
+| 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
 ## 专案
+
+### #62 Grep 工具执行中标题文字不可见但复制可见
+
+**状态**：修复中（已添加缓存 invalidate + 调试日志，待用户验证）
+
+**症状**：TUI 中 Grep 工具运行态显示类似：
+
+```text
+● Grep /tui\.log/
+  in /Users/guoyuqi/Nextcloud/work/claudecode/aemeath
+```
+
+但屏幕上看不到 `Grep` 字样；选中复制时文本又能正常复制出来，说明逻辑文本存在，只是渲染视觉不可见或颜色不可辨。
+
+**复现**：
+1. 触发 Grep 工具执行，例如搜索 `/tui\.log/`
+2. 在 TUI output area 观察 tool call running 行
+3. `●` spinner 和路径/参数可能可见，但 `Grep` 字样不可见
+4. 选中复制该区域，粘贴后可以看到 `Grep` 文本
+
+**根因假设**：
+1. Grep 工具标题 span 的前景色与背景色过近，或被 theme 中 running/tool_name 颜色设置为透明/背景色。
+2. tool running 状态样式覆盖了 tool name span，导致 `Grep` 文本渲染为不可见颜色。
+3. 复制路径读取的是 plain text/原始文本，渲染路径使用 styled spans，因此复制可见而屏幕不可见。
+4. 仅 Grep 受影响可能与工具名/参数分段样式、regex 参数高亮或 `in ...` 第二行缩进样式有关。
+
+**修复方向**：
+1. 检查 tool display 中 tool name、running spinner、argument/path span 的 style 合并逻辑。
+2. 检查 theme 中 tool running/tool name/secondary text 的前景色是否与当前背景冲突。
+3. 确保所有 tool call running 行的 tool name 都使用可见的主文本或工具强调色。
+4. 补充视觉/快照或样式单元测试：Grep/Glob/Read/Bash 等工具运行态 tool name span 颜色不能等于背景色。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/tool_display/`
+- TUI theme/status/tool running style 定义
+- output area selection/copy 与 styled render 分离逻辑
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 

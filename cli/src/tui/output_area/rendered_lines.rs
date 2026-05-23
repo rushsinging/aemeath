@@ -276,6 +276,10 @@ fn render_plain_line(
     term_width: usize,
     cache: &mut [Option<RenderedLine>],
 ) {
+    log::debug!(
+        "[render_plain_line] idx={}, content={:?}, style.fg={:?}",
+        idx, content, style.fg
+    );
     let sanitized = display::sanitize_for_display(content);
     let char_offsets = display::compute_char_offsets(&sanitized, term_width);
     let wrapped = wrap_line(content, term_width);
