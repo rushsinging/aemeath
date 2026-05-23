@@ -4,6 +4,8 @@ use ratatui::{
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
+use aemeath_core::string_idx::CharIdx;
+
 use super::OutputArea;
 use super::types::OutputLine;
 use super::display;
@@ -58,7 +60,7 @@ impl OutputArea {
             self.term_width,
         );
 
-        // 构建显示行
+        // 构建显示行：按 \n 拆分 rendered.line，使 display_lines 与 screen_map 一一对应
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
@@ -70,20 +72,24 @@ impl OutputArea {
                     rendered_content.insert(i, text.clone());
                 }
                 screen_map.extend(rendered.screen_entries.clone());
-                if has_selection {
-                    let screen_idx = screen_map.len() - rendered.screen_entries.len();
-                    // 每条 screen_entry 对应同一个逻辑行的不同 chunk，
-                    // 但 rendered.line 是整行，这里对整行叠加选区
-                    display_lines.push(self.apply_selection_to_line(
-                        screen_idx,
-                        &rendered.line,
-                        &screen_map,
-                    ));
-                } else {
-                    display_lines.push(rendered.line.clone());
+
+                // 将 rendered.line 按 \n 拆分为子行
+                let sub_lines = split_line_at_newlines(&rendered.line);
+                for (sub_idx, sub_line) in sub_lines.into_iter().enumerate() {
+                    let entry_idx = screen_map.len() - rendered.screen_entries.len() + sub_idx;
+                    if has_selection && entry_idx < screen_map.len() {
+                        display_lines.push(self.apply_selection_to_line(
+                            entry_idx,
+                            &sub_line,
+                            &screen_map,
+                        ));
+                    } else {
+                        display_lines.push(sub_line);
+                    }
                 }
             } else {
-                // 未渲染的行，用空行占位
+                // 未渲染的行，用空行占位，同时添加 screen_map entry 保持对齐
+                screen_map.push((i, CharIdx::ZERO, CharIdx::ZERO));
                 display_lines.push(Line::raw(""));
             }
         }
@@ -177,4 +183,36 @@ fn render_scrollbar(
 /// 供 rendered_cache.rs 使用
 pub fn wrap_line(content: &str, max_width: usize) -> Vec<String> {
     display::wrap_line(content, max_width)
+}
+
+/// 将含 \n 的 Line 拆分为不含 \n 的多个子 Line。
+/// 每个 \n 分隔的片段成为独立的 Line，与 screen_entries 一一对应。
+fn split_line_at_newlines(line: &Line<'static>) -> Vec<Line<'static>> {
+    let has_newline = line.spans.iter().any(|s| s.content.contains('\n'));
+    if !has_newline {
+        return vec![line.clone()];
+    }
+
+    let mut result = Vec::new();
+    let mut current_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+
+    for span in &line.spans {
+        if !span.content.contains('\n') {
+            current_spans.push(span.clone());
+            continue;
+        }
+        let parts: Vec<&str> = span.content.split('\n').collect();
+        for (pi, part) in parts.into_iter().enumerate() {
+            if pi > 0 {
+                result.push(Line::from(std::mem::take(&mut current_spans)));
+            }
+            if !part.is_empty() {
+                current_spans.push(ratatui::text::Span::styled(part.to_string(), span.style));
+            }
+        }
+    }
+    if !current_spans.is_empty() {
+        result.push(Line::from(current_spans));
+    }
+    result
 }
