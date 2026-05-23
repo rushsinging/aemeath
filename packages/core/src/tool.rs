@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use crate::worktree::{is_same_git_repo, WorkingContext};
+use crate::worktree::WorkingContext;
 
 #[derive(Debug, Clone)]
 pub struct ImageData {
@@ -155,95 +155,14 @@ impl ToolContext {
         }
     }
 
-    /// 进入指定 worktree：push 当前上下文，然后切换 path_base/working_root
+    /// 进入指定 worktree：委托 crate::worktree::enter_worktree
     pub fn enter_worktree(&self, path: PathBuf) -> Result<WorkingContext, String> {
-        // 拒绝嵌套：必须先 ExitWorktree 再 EnterWorktree
-        {
-            let stack = self
-                .context_stack
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if !stack.is_empty() {
-                return Err("已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的".to_string());
-            }
-        }
-
-        let path = if !path.is_absolute() {
-            self.current_path_base().join(path)
-        } else {
-            path
-        };
-
-        // 校验路径存在且是 git worktree
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| format!("路径不存在或无法访问 {}: {}", path.display(), e))?;
-
-        let output = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(&canonical)
-            .output()
-            .map_err(|e| format!("git rev-parse 执行失败: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "路径 {} 不是 git 仓库或 worktree",
-                canonical.display()
-            ));
-        }
-
-        let worktree_root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let worktree_root = PathBuf::from(&worktree_root);
-
-        // 校验是否与当前 repo 同源（同一 .git 目录）
-        let current_root = self.current_working_root();
-        if let Ok(same) = is_same_git_repo(&current_root, &worktree_root) {
-            if !same {
-                return Err(format!(
-                    "路径 {} 不属于当前仓库（当前仓库根: {}）",
-                    worktree_root.display(),
-                    current_root.display()
-                ));
-            }
-        }
-
-        // 保存当前上下文
-        let snapshot = WorkingContext {
-            path_base: self.current_path_base(),
-            working_root: self.current_working_root(),
-        };
-        self.context_stack
-            .lock()
-            .map(|mut s| s.push(snapshot.clone()))
-            .unwrap_or_else(|e| e.into_inner().push(snapshot.clone()));
-
-        // 切换到新 worktree（使用已有的 set_working_directory）
-        self.set_working_directory(canonical);
-
-        Ok(snapshot)
+        crate::worktree::enter_worktree(self, path)
     }
 
-    /// 退出当前 worktree：pop 栈恢复之前的上下文
+    /// 退出当前 worktree：委托 crate::worktree::exit_worktree
     pub fn exit_worktree(&self) -> Result<WorkingContext, String> {
-        let mut stack = self
-            .context_stack
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-
-        match stack.pop() {
-            Some(prev) => {
-                match self.working_root.lock() {
-                    Ok(mut wr) => *wr = prev.working_root.clone(),
-                    Err(poisoned) => *poisoned.into_inner() = prev.working_root.clone(),
-                }
-                match self.path_base.lock() {
-                    Ok(mut pb) => *pb = prev.path_base.clone(),
-                    Err(poisoned) => *poisoned.into_inner() = prev.path_base.clone(),
-                }
-                Ok(prev)
-            }
-            None => Err("上下文栈为空，没有可恢复的 worktree。可能已经在主工作区。".to_string()),
-        }
+        crate::worktree::exit_worktree(self)
     }
 }
 
