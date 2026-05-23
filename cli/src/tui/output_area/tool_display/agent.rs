@@ -35,6 +35,7 @@ impl super::super::OutputArea {
             content,
             style: LineStyle::System,
             tool_id: Some(tool_id.to_string()),
+            spans: None,
         };
         let insert_at = self.tool_insert_position(tool_id);
         self.insert_lines_at(insert_at, vec![progress_line]);
@@ -63,6 +64,7 @@ impl super::super::OutputArea {
             content,
             style: LineStyle::System,
             tool_id: Some(tool_id.to_string()),
+            spans: None,
         };
 
         let insert_at = self.tool_insert_position(tool_id);

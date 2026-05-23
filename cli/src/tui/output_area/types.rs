@@ -7,6 +7,24 @@ pub const DEFAULT_WIDTH: usize = 120;
 /// 工具调用详情行的缩进
 pub const INDENT: &str = "  ";
 
+use ratatui::style::Color;
+
+/// 带颜色的一段文本，用于行内分段着色（如 diff 语法高亮）
+#[derive(Clone, Debug)]
+pub struct SpanPart {
+    pub text: String,
+    pub color: Color,
+}
+
+impl SpanPart {
+    pub fn plain(text: impl Into<String>, color: Color) -> Self {
+        Self {
+            text: text.into(),
+            color,
+        }
+    }
+}
+
 /// 带样式信息的输出行
 #[derive(Clone, Debug, Default)]
 pub struct OutputLine {
@@ -14,6 +32,8 @@ pub struct OutputLine {
     pub style: LineStyle,
     /// 关联到特定 tool_use 块的标识符
     pub tool_id: Option<String>,
+    /// 行内分段着色：当 Some 时渲染层使用此字段替代 content + style
+    pub spans: Option<Vec<SpanPart>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

@@ -118,6 +118,7 @@ impl super::OutputArea {
             content: format!("● {name}..."),
             style: LineStyle::ToolCallRunning,
             tool_id: Some(format!("pending:{name}:{index}")),
+            spans: None,
         });
     }
 
@@ -172,6 +173,7 @@ impl super::OutputArea {
                     content: format!("{INDENT}{detail}"),
                     style: detail_style,
                     tool_id: Some(tool_id.to_string()),
+                    spans: None,
                 })
                 .collect();
 
@@ -186,6 +188,7 @@ impl super::OutputArea {
             content: header,
             style: LineStyle::ToolCallRunning,
             tool_id: Some(tool_id.to_string()),
+            spans: None,
         });
 
         for detail in details.iter() {
@@ -193,6 +196,7 @@ impl super::OutputArea {
                 content: format!("{INDENT}{detail}"),
                 style: detail_style,
                 tool_id: Some(tool_id.to_string()),
+                spans: None,
             });
         }
     }

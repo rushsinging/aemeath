@@ -1,4 +1,5 @@
 use crate::tui::output_area::{build_diff_lines, LineStyle, OutputLine, INDENT};
+use crate::tui::syntax::extension_from_path;
 
 use super::lookup_display;
 
@@ -24,6 +25,7 @@ impl super::super::OutputArea {
             content: String::new(),
             style: LineStyle::System,
             tool_id: id_tag,
+            spans: None,
         });
         let insert_at = header_idx
             .map(|start| self.tool_block_end(start, tool_id) + 1)
@@ -104,6 +106,7 @@ fn render_tool_result(
             content: format!("{INDENT}✗ {result}"),
             style: LineStyle::ToolCallError,
             tool_id: id_tag.clone(),
+            spans: None,
         }];
     }
 
@@ -125,16 +128,26 @@ fn render_edit_diff_result(
     let parts: Vec<&str> = result.splitn(3, "---DIFF---\n").collect();
     if parts.len() == 3 {
         let summary = parts[0].trim();
-        build_diff_lines(parts[1], parts[2], id_tag, &mut result_lines);
+        let file_ext = extract_extension_from_summary(summary);
+        build_diff_lines(parts[1], parts[2], file_ext, id_tag, &mut result_lines);
         result_lines.push(OutputLine {
             content: format!("{INDENT}✓ {summary}"),
             style: LineStyle::ToolCallSuccess,
             tool_id: id_tag.clone(),
+            spans: None,
         });
     } else {
         push_summary_lines(tool_name, result, false, id_tag, &mut result_lines);
     }
     result_lines
+}
+
+/// 从 Edit tool 结果摘要中提取文件扩展名。
+/// 摘要格式如 "replaced 1 occurrence(s) in src/lib.rs"
+fn extract_extension_from_summary(summary: &str) -> Option<&str> {
+    // 找最后一个 " in " 后面的路径
+    let path = summary.rsplit(" in ").next()?;
+    extension_from_path(path.trim())
 }
 
 fn render_result_body(tool_name: &str, result: &str, id_tag: &Option<String>) -> Vec<OutputLine> {
@@ -156,6 +169,7 @@ fn render_result_body(tool_name: &str, result: &str, id_tag: &Option<String>) ->
             content: format!("{INDENT}{line}"),
             style: result_style,
             tool_id: id_tag.clone(),
+            spans: None,
         });
     }
     if total > max_lines {
@@ -163,6 +177,7 @@ fn render_result_body(tool_name: &str, result: &str, id_tag: &Option<String>) ->
             content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
             style: result_style,
             tool_id: id_tag.clone(),
+            spans: None,
         });
     }
     lines
@@ -188,6 +203,7 @@ fn push_summary_lines(
             content: format!("{INDENT}{summary}"),
             style,
             tool_id: id_tag.clone(),
+            spans: None,
         });
     }
 }
@@ -202,6 +218,7 @@ fn append_image_note(
             content: image_note.trim().to_string(),
             style: LineStyle::System,
             tool_id: id_tag.clone(),
+            spans: None,
         });
     }
 }

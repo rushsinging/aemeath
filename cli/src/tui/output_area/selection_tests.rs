@@ -8,7 +8,8 @@ fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
     output.push_line(OutputLine {
         content: "短".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.selection_start = Some((0, CharIdx::new(4)));
     output.selection_end = Some((0, CharIdx::new(6)));
@@ -24,7 +25,8 @@ fn test_get_selected_text_skips_line_when_clamped_start_exceeds_end() {
     output.push_line(OutputLine {
         content: "ab".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.selection_start = Some((0, CharIdx::new(4)));
     output.selection_end = Some((0, CharIdx::new(1)));
@@ -40,7 +42,8 @@ fn test_get_line_content_normal_line() {
     output.push_line(OutputLine {
         content: "hello".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     assert_eq!(output.get_line_content(0), Some("hello".to_string()));
     assert_eq!(output.get_line_content(1), None);
@@ -52,7 +55,8 @@ fn test_get_line_content_task_status_line() {
     output.push_line(OutputLine {
         content: "normal".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.task_status_lines = vec!["task 1".to_string(), "task 2".to_string()];
     // idx=0 → normal line
@@ -71,7 +75,8 @@ fn test_total_virtual_line_count() {
     output.push_line(OutputLine {
         content: "a".to_string(),
         style: LineStyle::Normal,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.task_status_lines = vec!["t1".to_string(), "t2".to_string()];
     assert_eq!(output.total_virtual_line_count(), 3);
@@ -83,7 +88,8 @@ fn test_get_selected_text_task_status_only() {
     output.push_line(OutputLine {
         content: "normal line".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.task_status_lines = vec!["pending task".to_string()];
     // 选中 task_status 行（logic_idx=1）
@@ -100,7 +106,8 @@ fn test_get_selected_text_spanning_normal_and_task_status() {
     output.push_line(OutputLine {
         content: "abc".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.task_status_lines = vec!["xyz".to_string()];
     // 选中从普通行末尾到 task_status 行开头
@@ -118,7 +125,8 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
         output.push_line(OutputLine {
             content: content.to_string(),
             style: LineStyle::Assistant,
-            ..Default::default()
+            tool_id: None,
+            spans: None,
         });
     }
     let area = Rect {
@@ -144,7 +152,8 @@ fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
     output.push_line(OutputLine {
         content: "活动中 Bug（`docs/bug/active.md`）".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     let area = Rect {
         x: 0,
@@ -172,7 +181,8 @@ fn test_get_selected_text_strips_inline_markdown_formatting() {
     output.push_line(OutputLine {
         content: "**bold** and *italic* with `code` plus [link](https://example.com)".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.selection_start = Some((0, CharIdx::new(0)));
     output.selection_end = Some((0, CharIdx::new(output.lines[0].content.chars().count())));
@@ -191,7 +201,8 @@ fn test_get_selected_text_preserves_unclosed_markdown_marker() {
     output.push_line(OutputLine {
         content: "**unclosed marker".to_string(),
         style: LineStyle::Assistant,
-        ..Default::default()
+        tool_id: None,
+        spans: None,
     });
     output.selection_start = Some((0, CharIdx::new(0)));
     output.selection_end = Some((0, CharIdx::new(output.lines[0].content.chars().count())));

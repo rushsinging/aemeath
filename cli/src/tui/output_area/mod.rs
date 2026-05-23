@@ -27,7 +27,7 @@ mod render_blocks_tests;
 
 // 重新导出核心类型，方便外部使用
 pub use diff::build_diff_lines;
-pub use types::{LineStyle, OutputLine, SpinnerState, INDENT, MAX_LINES};
+pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
 /// 可滚动的输出区域，显示对话历史
 pub struct OutputArea {

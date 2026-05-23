@@ -6,6 +6,7 @@ fn md_line(content: &str) -> OutputLine {
         content: content.to_string(),
         style: LineStyle::Assistant,
         tool_id: None,
+        spans: None,
     }
 }
 

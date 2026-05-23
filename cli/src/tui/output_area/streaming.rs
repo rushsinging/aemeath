@@ -105,7 +105,8 @@ impl super::OutputArea {
                 self.lines.push_back(OutputLine {
                     content: display_line,
                     style,
-                    ..Default::default()
+                    tool_id: None,
+                    spans: None,
                 });
             }
         }
@@ -115,7 +116,8 @@ impl super::OutputArea {
             self.lines.push_back(OutputLine {
                 content: String::new(),
                 style: LineStyle::Assistant,
-                ..Default::default()
+                tool_id: None,
+                spans: None,
             });
         }
 
