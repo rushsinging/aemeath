@@ -17,12 +17,11 @@
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 | 44 | Commit Style Context 与 AI 协作者 trailer | 中 | 待确认 | 未确认 | 已在 system prompt 中加入 commit guidance：需要创建 git commit 时，LLM 应先分析当前仓库历史 Commit Style Context，优先查看带 `Co-Authored-By` 的提交，再按项目风格生成 commit message；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 LLM client。详见 [spec](specs/044-commit-style-context.md) |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 已完成 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
-
-| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 规划完成，待实施 | 未确认 | status line 明确改为两行：第一行保持模型/Token/费用/运行状态等高频信息；第二行固定展示当前工作上下文（cwd/path_base/working_root、worktree/main 标识、branch、权限模式），并与 #43/#45 的上下文切换实时联动，避免误操作 main/worktree。 |
+| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line 已改为两行：第一行保持模型/Token/运行状态等高频信息；第二行以均衡方案展示当前工作上下文（cwd/path_base、working_root、worktree/main 标识、branch、权限模式），初始 git/worktree 上下文已接入，后续 #43/#45 继续补齐运行时上下文切换联动。 |
 
 ### #46 TUI status line 增加第二行并显示 cwd/current worktree
 
-**状态**：规划完成，待实施
+**状态**：待确认
 
 **背景**：当前 TUI status line 只有一行，信息容量不足。用户反馈“一行有点少”，并记得之前似乎增加过 cwd 显示，需要确认当前是否丢失或被布局压缩。随着 Feature #43/#45 要求 worktree 上下文切换，UI 必须清楚展示当前操作目录，避免用户误以为正在 worktree 中，实际仍在 main 工作区。
 

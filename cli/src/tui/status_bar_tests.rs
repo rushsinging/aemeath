@@ -39,6 +39,12 @@ fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
     assert_eq!(bar.get_selected_text(), Some("🚀b".to_string()));
 }
 
+fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
+    (0..width)
+        .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol().to_string()))
+        .collect::<String>()
+}
+
 #[test]
 fn test_status_bar_render_uses_status_background() {
     let bar = StatusBar::new();
@@ -51,5 +57,114 @@ fn test_status_bar_render_uses_status_background() {
     assert_eq!(
         buf.cell((39, 0)).unwrap().style().bg,
         Some(theme::STATUS_BG)
+    );
+}
+
+#[test]
+fn test_status_bar_render_two_rows_includes_context_when_height_two() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
+        "/workspace/projects/example/.worktrees/topic-46-status-line",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
+    let area = Rect::new(0, 0, 100, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    let runtime = row_text(&buf, 0, area.width);
+    let context = row_text(&buf, 1, area.width);
+    assert!(runtime.contains("Think:"));
+    assert!(!runtime.contains("ctx "));
+    assert!(context.contains("ctx "));
+    assert!(context.contains("worktree:feature/46-status-line"));
+}
+
+#[test]
+fn test_status_bar_render_one_row_omits_context() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
+        "/workspace/projects/example/.worktrees/topic-46-status-line",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    let runtime = row_text(&buf, 0, area.width);
+    assert!(runtime.contains("Think:"));
+    assert!(!runtime.contains("ctx "));
+    assert!(!runtime.contains("worktree:feature/46-status-line"));
+}
+
+#[test]
+fn test_status_line_context_defaults_to_balanced_row() {
+    let mut bar = StatusBar::new();
+    bar.set_model("claude-sonnet");
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
+        "/workspace/projects/example/.worktrees/topic-46-status-line",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
+    bar.set_permission_mode("AskMe");
+
+    let row = bar.context_row_text(120);
+
+    assert!(row.contains("ctx "));
+    assert!(row.contains("…/cli/src/tui"));
+    assert!(row.contains("root …"));
+    assert!(row.contains("topic-46-status-line"));
+    assert!(row.contains("worktree:feature/46-status-line"));
+    assert!(row.contains("Perm:AskMe"));
+}
+
+#[test]
+fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update",
+        "/workspace/projects/example/.worktrees/topic-46-status-line",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
+    bar.set_permission_mode("AllowAll");
+
+    let row = bar.context_row_text(56);
+
+    assert!(row.chars().count() <= 56);
+    assert!(row.contains("…/update"));
+    assert!(row.contains("feature/46-status-line"));
+    assert!(row.contains("Perm:AllowAll"));
+}
+
+#[test]
+fn test_status_line_context_wide_truncates_to_width() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update/deep/path",
+        "/workspace/projects/example/.worktrees/topic-46-status-line/with/an/extra/long/root/path",
+    );
+    bar.set_git_context(
+        WorktreeKind::Worktree,
+        "feature/46-status-line-with-a-very-long-branch-name",
+    );
+    bar.set_permission_mode("AllowAllWithExtraLongModeName");
+
+    let row = bar.context_row_text(70);
+
+    assert!(row.chars().count() <= 70);
+}
+
+#[test]
+fn test_set_current_dir_preserves_existing_callers() {
+    let mut bar = StatusBar::new();
+
+    bar.set_current_dir("aemeath");
+
+    assert_eq!(
+        bar.context_row_text(80),
+        "ctx aemeath │ root aemeath │ main │ Perm:AskMe"
     );
 }

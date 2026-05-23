@@ -14,6 +14,7 @@ use ratatui::{
 };
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 pub use event::UiEvent;
@@ -96,12 +97,58 @@ pub(crate) fn display_working_dir(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |name| name.to_string())
 }
 
+pub(crate) fn git_branch_for(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?;
+    let branch = branch.trim();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch.to_string())
+    }
+}
+
+pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::status_bar::WorktreeKind {
+    let is_worktree = Command::new("git")
+        .args(["rev-parse", "--git-dir", "--git-common-dir"])
+        .current_dir(path)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| {
+            let mut lines = stdout.lines().map(str::trim);
+            match (lines.next(), lines.next()) {
+                (Some(git_dir), Some(common_dir)) => git_dir != common_dir,
+                _ => false,
+            }
+        })
+        .unwrap_or(false);
+
+    if is_worktree {
+        crate::tui::status_bar::WorktreeKind::Worktree
+    } else {
+        crate::tui::status_bar::WorktreeKind::Main
+    }
+}
+
 impl App {
     pub fn new(session_id: String, cwd: PathBuf, model: String) -> Self {
         let mut status_bar = StatusBar::new();
         status_bar.set_session_id(&session_id);
         status_bar.set_model(&model);
-        status_bar.set_current_dir(display_working_dir(&cwd));
+        let cwd_display = cwd.display().to_string();
+        status_bar.set_context_paths(cwd_display.clone(), cwd_display);
+        if let Some(branch) = git_branch_for(&cwd) {
+            status_bar.set_git_context(worktree_kind_for(&cwd), branch);
+        }
         let mut output_area = OutputArea::new();
         output_area.push_system("Aemeath - AI Agent");
         output_area.push_system("");
@@ -199,7 +246,7 @@ impl App {
                     Constraint::Min(10),
                     Constraint::Length(5),
                     Constraint::Length(suggestions_height),
-                    Constraint::Length(1),
+                    Constraint::Length(2),
                 ])
                 .split(size);
 
