@@ -253,6 +253,7 @@ impl super::OutputArea {
                 }
             }
         }
+        self.rendered_cache.content_changed(self.lines.len());
     }
 
     /// 添加系统消息
