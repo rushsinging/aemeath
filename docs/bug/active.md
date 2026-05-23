@@ -6,7 +6,6 @@
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
-| 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 修复中 | 待确认 | 2026-05 | 渲染缓存层已实现：滑动窗口前后各扩展 50% 并扩展到 block 边界，table 自动换行列内容。核心改动：新增 rendered_cache.rs（缓存管理+block边界扩展）+ rendered_lines.rs（行渲染函数），render.rs 改为使用缓存层；table.rs 支持按可用宽度自动换行 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
 ## 专案
 
@@ -41,47 +40,6 @@
 - `apps/cli/src/tui/output_area/markdown/` diff 渲染与语法高亮逻辑
 - output area selection 渲染/复制统一逻辑
 - Feature #35（Diff 渲染中 add 行语法高亮 + 行号显示）相关实现
-
-### #58 TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染
-
-**状态**：活动中（用户反馈仍需修改，已从归档恢复）
-
-**当前症状**：
-1. Markdown table 滚动时，如果 header 部分滚出可视区域，表格头部/相关区域会变回 Markdown 原文，失去表格渲染效果。
-2. Markdown 中的 code 没有正确渲染（需要确认是 inline code、fenced code block，还是两者都受影响）。
-3. 怀疑其他 Markdown block 也可能存在类似问题：当决定 block 类型的关键起始行滚出视口后，后续可见内容丢失 block state，导致局部退回原文或样式丢失。
-
-**历史相关问题**：
-- 多行代码块（```...```）的开标记滚出视口后，结束标记曾被误认为新开标记，导致后续内容被错误渲染为代码块样式。
-- Markdown 表格的 header/separator 行滚出视口后，数据行曾不被识别为表格，退化为普通文本。
-- 表格滚动时列宽曾随可见内容变化，出现列宽抖动。
-
-**历史修复**：
-- `scan_code_blocks` 曾改为从文档开头预扫描到可见区域起始位置，确定 `in_code_block` 初始状态（提交 `dac5759`）。
-- `scan_table_blocks` 曾改为预扫描不可见部分，检测跨越视口边界的表格块（提交 `ed77d0e`）。
-- `render_table_cache` 曾改为收集整个表格块的全部行，传给 `render_table_block` 计算列宽后只取可见行渲染结果（提交 `48f8eed`）。
-
-**当前反馈**：用户确认现在仍有 table/code 渲染问题：table header 部分滚出时头部会变回 Markdown 原文，同时 Markdown code 没有渲染。原先“已确认修复”结论撤销，重新加入 active。
-
-**根因方向**：
-1. 表格渲染可能仍依赖当前可见区域内的 header/separator，header 部分滚出后，部分行无法从 table cache/block state 中恢复渲染。
-2. 表格 header 或 separator 的虚拟/缓存渲染结果可能没有正确参与可见行裁剪，导致头部区域 fallback 到原始 Markdown 文本。
-3. code 渲染与 block/table 渲染可能走不同路径；当可见区域从中间开始时，inline code/fenced code 的 token/block state 可能未恢复。
-4. 其他 block（quote、list、heading、hr、nested block 等）也可能有同类问题：渲染器从可见行开始解析而不是从文档状态恢复，导致关键起始行不可见时样式丢失。
-5. wrapped line、scroll offset、原始 Markdown line 三者坐标可能混用，导致预扫描恢复的状态没有对应到实际可见片段。
-
-**修复方向**：
-1. 先精确复现当前反馈：table header 部分滚出后哪个区域退回原文；code 未渲染是 inline code 还是 fenced code block。
-2. 统一 Markdown block state 恢复机制：渲染可见区域前，应能从文档开头或缓存状态恢复 table/code/list/quote 等 block 状态，而不是仅扫描可见行。
-3. 对 table 使用完整表格块作为渲染输入，再按可见区域裁剪，避免 header/separator 不可见时局部 fallback。
-4. 对 code 渲染区分 inline code 与 fenced code block：inline code 应在行内 tokenization 中保留，fenced code block 应恢复跨行状态。
-5. 排查其他 block 是否同类受影响，并补充回归测试：table header 半滚出、separator 滚出、inline code、fenced code、quote/list 起始行滚出、窗口 resize、wrapped line 场景。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/markdown/render_blocks.rs`
-- `apps/cli/src/tui/output_area/markdown/render_blocks_tests.rs`
-- inline markdown/code token 渲染逻辑
-- output area 可见行、wrapped line、scroll offset 计算相关逻辑
 
 ### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 
@@ -711,28 +669,3 @@ Tool Bash timed out after 120s
 **关联**：
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
-
-### #58 TUI 中 Markdown 多行代码块滚出后，结束标记将后续内容全部渲染为代码块
-
-**状态**：活动中
-
-**症状**：当 LLM 输出包含多行围栏代码块（如 ``` ```123``` ```），当前面的开标记 ``` 滚出输出区视口后，渲染器丢失"正在代码块内"的状态。剩余的结束标记 ``` 被误认为是新代码块的起始，导致后续所有内容被渲染为代码块样式。
-
-**复现**：
-1. LLM 输出一段包含多行代码块的内容，代码块足够长（超过可视行数）
-2. 输出区上方行逐步滚出视口，直到开标记 ``` 完全滚出
-3. 此时结束标记 ``` 仍在视口内，渲染器将其当作新代码块的开标记
-4. 结束标记之后的所有内容被渲染为代码块样式（无法恢复）
-
-**根因**：Markdown 渲染器在渲染可见行时，从当前可见区域的第一行开始解析 block 状态；当代码块的开标记不在可见区域内时，渲染器不知道当前处于代码块中，导致状态机误判。
-
-**修复方向**：
-1. **方案 A（推荐）**：在渲染前向前回溯查找开标记，确定当前可见区域的起始 block 状态（代码块/引用块/列表等），再按正确状态渲染。需维护一个轻量的 block 状态栈，从输出第一行扫描到可见区域起始行以恢复状态。
-2. **方案 B**：渲染时缓存每行的 block 状态（如 `BlockState::CodeBlock { fence_len: usize }`），滚动时直接使用缓存状态，无需回溯扫描。需处理缓存失效（内容新增时）。
-3. **方案 C**：检测跨可见边界的不完整代码块，在可见区域顶部补一行虚拟的开标记指示器，提示用户"上方存在未闭合的代码块"。
-
-推荐方案 B（缓存）结合方案 A（回溯）作为降级：缓存命中时直接使用，缓存未命中时回溯扫描并回填缓存。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/markdown/`（block 解析与渲染）
-- `apps/cli/src/tui/output_area/render.rs`（可见行渲染入口）
