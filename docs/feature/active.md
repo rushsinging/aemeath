@@ -14,7 +14,6 @@
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；2026-05-22 将助手正文/Markdown 默认色改为主文本浅灰，避免大段内容与成功/spinner 绿色混淆；2026-05-22 适配 Catppuccin Macchiato 风格静态配色；2026-05-22 将 status line 背景改为与主背景一致，避免显示为纯黑；2026-05-22 将 inline/code block 仅用代码强调色显示，不额外添加前景背景块；2026-05-22 将 code 强调色改为 Peach `#f5a97f`，增强与主文本区分度；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
 | 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
-<<<<<<< Updated upstream
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 
 ### #43 在 git worktree 中工作时 cwd 应设置为 worktree 目录
@@ -26,31 +25,6 @@
 **目标**：当 Bash 切换到某个 worktree 根目录后，后续 Read/Edit/Write/Glob/Grep/LSP 等相对路径操作都以当前 `path_base` 为准，安全边界以当前 `working_root` 为准；hook 执行环境变量与进程 cwd 使用当前项目目录；TUI 状态栏显示启动工作根，减少误判。
 
 **实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中开始实现：`ToolContext` 增加可更新的 `working_root`；Bash 执行结束同步 `$PWD` 时同时更新 `path_base` 与 `working_root`；文件/搜索工具改用当前 `working_root` 做边界校验；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏新增当前工作根展示。
-=======
-| 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 待实施 | 未确认 | 当用户/系统要求在独立 git worktree 中执行修改时，工具执行上下文的 cwd/path_base 应切换到该 worktree 根目录，而不是继续停留在 main 工作区，避免读写、搜索、构建和提交操作误作用于 main 工作区。 |
-
-### #43 在 git worktree 中工作时 cwd 应设置为 worktree 目录
-
-**状态**：待实施
-
-**背景**：项目工作流要求所有代码、文档、配置修改都在独立 git worktree 中执行，完成验证并提交后再合并回 main。但当前工具执行上下文可能仍保留 main 工作区作为 cwd/path_base，导致后续 Read/Edit/Write/Glob/Grep/Bash 等相对路径操作继续落在 main 工作区。
-
-**目标**：当创建或切换到某个 git worktree 后，agent 的当前工作目录、相对路径解析基准和工具安全边界应同步切换到该 worktree 根目录。所有后续文件读写、搜索、构建、测试、git commit 等操作默认都在 worktree 内执行，避免污染 main 工作区。
-
-**建议范围**：
-1. 创建 worktree 成功后，自动将 ToolContext 的 cwd/path_base 更新为新 worktree 根目录。
-2. Bash 工具执行后的 `$PWD` 记录逻辑应支持 worktree 目录，并将相对路径基准保持在当前 worktree 内。
-3. Read/Edit/Write/Glob/Grep 等文件工具解析相对路径时，应以当前 worktree path_base 为准。
-4. 安全边界应以当前工作根（worktree root）为准，而不是固定初始 main root。
-5. 状态栏或工具上下文可显示当前工作根，方便用户确认正在 worktree 而不是 main。
-6. 切回 main 或合并清理 worktree 时，应明确重置 cwd/path_base，避免悬挂到已删除目录。
-
-**涉及路径**：
-- ToolContext / path_base / cwd 管理逻辑
-- Bash 执行后 PWD 同步逻辑
-- Read/Edit/Write/Glob/Grep 路径解析与安全边界校验
-- git worktree 创建/切换相关命令或工具封装
->>>>>>> Stashed changes
 
 ### #42 Allow All 模式下支持访问用户明确授权的 workspace 外路径
 
