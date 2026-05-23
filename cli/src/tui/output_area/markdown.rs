@@ -23,7 +23,7 @@ pub use table::{is_table_row, is_table_separator, render_table_block};
 pub fn strip_inline_formatting(text: &str) -> String {
     let mut result = String::new();
     let mut chars = text.chars().peekable();
-  
+
     while let Some(ch) = chars.next() {
         match ch {
             '*' if chars.peek() == Some(&'*') => {
@@ -324,13 +324,46 @@ fn advance_chars(chars: &mut std::iter::Peekable<std::str::Chars>, n: usize) {
 /// 右侧 flanking：后面是 None(行尾)/空白/标点。
 /// `_` 只在左 flanking 时才作为开标记触发。
 fn is_flanking(prev: Option<char>, next: Option<char>) -> bool {
-    let left_ok = prev.map_or(true, |c| !c.is_alphanumeric()) ;
+    let left_ok = prev.map_or(true, |c| !c.is_alphanumeric());
     let right_ok = next.map_or(false, |c| !c.is_whitespace() && !is_punctuation(c));
     left_ok && right_ok
 }
 
 fn is_punctuation(ch: char) -> bool {
-    matches!(ch, '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | '-' | '.' | '/' | ':' | ';' | '<' | '=' | '>' | '?' | '@' | '[' | '\\' | ']' | '^' | '_' | '`' | '{' | '|' | '}' | '~')
+    matches!(
+        ch,
+        '!' | '"'
+            | '#'
+            | '$'
+            | '%'
+            | '&'
+            | '\''
+            | '('
+            | ')'
+            | '*'
+            | '+'
+            | ','
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | ';'
+            | '<'
+            | '='
+            | '>'
+            | '?'
+            | '@'
+            | '['
+            | '\\'
+            | ']'
+            | '^'
+            | '_'
+            | '`'
+            | '{'
+            | '|'
+            | '}'
+            | '~'
+    )
 }
 
 /// 将累积的纯文本刷出为一个 Span

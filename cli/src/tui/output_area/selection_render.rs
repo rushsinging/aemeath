@@ -105,7 +105,7 @@ impl super::OutputArea {
         } else {
             usize::MAX
         };
-  
+
         let mut new_spans = Vec::new();
         let mut global_offset = 0usize;
 

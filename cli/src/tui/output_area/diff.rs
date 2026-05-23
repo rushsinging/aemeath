@@ -59,12 +59,8 @@ pub fn build_diff_lines(
                 new_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                let spans = build_insert_line(
-                    new_line,
-                    width,
-                    line_text_trimmed,
-                    syntax_ref.as_ref(),
-                );
+                let spans =
+                    build_insert_line(new_line, width, line_text_trimmed, syntax_ref.as_ref());
                 out.push(OutputLine {
                     content: format!("  + {}", line_text),
                     style: LineStyle::DiffAdd,
@@ -135,12 +131,7 @@ fn build_insert_line(
 }
 
 /// 构建上下文行 spans：`{INDENT}{old_num}  {new_num} | {text}`
-fn build_context_line(
-    old_num: usize,
-    new_num: usize,
-    width: usize,
-    text: &str,
-) -> Vec<SpanPart> {
+fn build_context_line(old_num: usize, new_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
     let mut spans = Vec::new();
     spans.push(SpanPart::plain(INDENT.to_string(), LINE_NUM_COLOR));
     spans.push(SpanPart::plain(
@@ -148,10 +139,7 @@ fn build_context_line(
         LINE_NUM_COLOR,
     ));
     spans.push(SpanPart::plain("| ", LINE_NUM_COLOR));
-    spans.push(SpanPart::plain(
-        format!("{INDENT}{text}"),
-        LINE_NUM_COLOR,
-    ));
+    spans.push(SpanPart::plain(format!("{INDENT}{text}"), LINE_NUM_COLOR));
     spans
 }
 
@@ -240,7 +228,10 @@ mod tests {
         assert!(matches!(insert_line.style, LineStyle::DiffAdd));
         let spans = insert_line.spans.as_ref().unwrap();
         // 语法高亮会产生多个不同颜色的 span
-        assert!(spans.len() > 2, "syntax highlight should produce multiple spans");
+        assert!(
+            spans.len() > 2,
+            "syntax highlight should produce multiple spans"
+        );
     }
 
     #[test]

@@ -151,11 +151,7 @@ fn render_table_range(
             let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
             cache[i] = Some(RenderedLine {
                 line: Line::from(spans.clone()),
-                screen_entries: vec![(
-                    i,
-                    CharIdx::ZERO,
-                    CharIdx::new(text.chars().count()),
-                )],
+                screen_entries: vec![(i, CharIdx::ZERO, CharIdx::new(text.chars().count()))],
                 rendered_text: Some(text),
             });
             row_idx += 1;
@@ -164,10 +160,10 @@ fn render_table_range(
             let mut sub_rows = vec![rendered_rows[row_idx].clone()];
             row_idx += 1;
 
-            let next_is_sep = (i + 1) < table_end
-                && markdown::is_table_separator(lines[i + 1].content.trim());
-            let next_is_data = (i + 1) < table_end
-                && markdown::is_table_row(lines[i + 1].content.trim());
+            let next_is_sep =
+                (i + 1) < table_end && markdown::is_table_separator(lines[i + 1].content.trim());
+            let next_is_data =
+                (i + 1) < table_end && markdown::is_table_row(lines[i + 1].content.trim());
 
             if !next_is_sep && !next_is_data {
                 while row_idx < rendered_rows.len() {
@@ -235,16 +231,22 @@ fn render_markdown_line(
         None
     };
 
-    let md_lines = markdown::inline_markdown_lines(&line.content, line.style.to_style(), term_width);
+    let md_lines =
+        markdown::inline_markdown_lines(&line.content, line.style.to_style(), term_width);
 
     let mut screen_entries = Vec::new();
     let mut char_offset = 0usize;
     for md_line in &md_lines {
         let text: String = md_line.spans.iter().map(|s| s.content.as_ref()).collect();
         let char_count = text.chars().count();
-        screen_entries.push((idx, CharIdx::new(char_offset), CharIdx::new(char_offset + char_count)));
+        screen_entries.push((
+            idx,
+            CharIdx::new(char_offset),
+            CharIdx::new(char_offset + char_count),
+        ));
         char_offset += char_count;
-    }    if md_lines.len() == 1 {
+    }
+    if md_lines.len() == 1 {
         cache[idx] = Some(RenderedLine {
             line: md_lines.into_iter().next().unwrap(),
             screen_entries,
@@ -296,9 +298,7 @@ fn render_plain_line(
     } else {
         let all_spans: Vec<Span> = wrapped
             .into_iter()
-            .flat_map(|chunk| {
-                vec![Span::styled(chunk, style), Span::raw("\n")]
-            })
+            .flat_map(|chunk| vec![Span::styled(chunk, style), Span::raw("\n")])
             .collect();
         cache[idx] = Some(RenderedLine {
             line: Line::from(all_spans),

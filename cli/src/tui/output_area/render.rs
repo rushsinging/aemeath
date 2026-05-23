@@ -6,9 +6,9 @@ use ratatui::{
 
 use aemeath_core::string_idx::CharIdx;
 
-use super::OutputArea;
-use super::types::OutputLine;
 use super::display;
+use super::types::OutputLine;
+use super::OutputArea;
 
 impl OutputArea {
     /// 渲染输出区域
@@ -53,12 +53,8 @@ impl OutputArea {
         // 从渲染缓存获取渲染结果
         // VecDeque 不支持 &[T]，转为 Vec 传给缓存层
         let lines_vec: Vec<OutputLine> = self.lines.iter().cloned().collect();
-        self.rendered_cache.ensure_rendered(
-            &lines_vec,
-            start,
-            end,
-            self.term_width,
-        );
+        self.rendered_cache
+            .ensure_rendered(&lines_vec, start, end, self.term_width);
 
         // 构建显示行：按 \n 拆分 rendered.line，使 display_lines 与 screen_map 一一对应
         let mut screen_map = Vec::new();
@@ -97,7 +93,12 @@ impl OutputArea {
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
         let task_status_lines = self.task_status_lines.clone();
-        self.append_status_lines(&mut display_lines, queued_lines, &spinner_line, &task_status_lines);
+        self.append_status_lines(
+            &mut display_lines,
+            queued_lines,
+            &spinner_line,
+            &task_status_lines,
+        );
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

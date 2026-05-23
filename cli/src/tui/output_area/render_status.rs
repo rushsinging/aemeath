@@ -17,12 +17,14 @@ impl OutputArea {
     ) {
         // queued_lines: 每行加一个不可选的 screen_map entry 保持对齐
         for _ in queued_lines.iter() {
-            self.screen_line_map.push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
+            self.screen_line_map
+                .push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
         }
         lines.extend(queued_lines);
         if let Some(sl) = spinner_line {
             // spinner 行也加一个不可选的 screen_map entry
-            self.screen_line_map.push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
+            self.screen_line_map
+                .push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
             lines.push(sl.clone());
         }
         if spinner_line.is_some() {

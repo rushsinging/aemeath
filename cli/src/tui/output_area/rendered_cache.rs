@@ -164,8 +164,7 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
                 let is_md = rendered_lines::is_markdown_style(prev.style);
                 let t = prev.content.trim();
                 if is_md
-                    && (super::markdown::is_table_row(t)
-                        || super::markdown::is_table_separator(t))
+                    && (super::markdown::is_table_row(t) || super::markdown::is_table_separator(t))
                 {
                     s = scan;
                 } else {
@@ -209,7 +208,8 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
         let end_line = &lines[end.min(total) - 1];
         if rendered_lines::is_markdown_style(end_line.style) {
             let trimmed = end_line.content.trim();
-            if super::markdown::is_table_row(trimmed) || super::markdown::is_table_separator(trimmed)
+            if super::markdown::is_table_row(trimmed)
+                || super::markdown::is_table_separator(trimmed)
             {
                 for i in end..total {
                     let next = &lines[i];
@@ -233,8 +233,8 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::LineStyle;
+    use super::*;
 
     fn md_line(content: &str) -> OutputLine {
         OutputLine {

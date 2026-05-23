@@ -118,11 +118,7 @@ fn natural_column_widths(all_cells: &[Vec<String>], num_cols: usize) -> Vec<usiz
 
 /// 将列宽约束到可用宽度内。
 /// 优先保持自然列宽，超出时等比缩小。
-fn constrain_column_widths(
-    natural: &[usize],
-    num_cols: usize,
-    available: usize,
-) -> Vec<usize> {
+fn constrain_column_widths(natural: &[usize], num_cols: usize, available: usize) -> Vec<usize> {
     // 每列开销：padding " " + 内容 + padding " "，列间 " │ " (3 chars)
     let overhead = 1 + num_cols.saturating_sub(1) * 3 + 1; // left pad + separators + right pad
     let content_budget = available.saturating_sub(overhead);
@@ -196,10 +192,7 @@ fn wrapped_row_spans(
                 .unwrap_or_else(|| vec![Span::styled(String::new(), style)]);
 
             // 计算已有宽度，补齐到列宽
-            let cell_width: usize = cell_spans
-                .iter()
-                .map(|s| s.content.width())
-                .sum();
+            let cell_width: usize = cell_spans.iter().map(|s| s.content.width()).sum();
             let col_w = col_widths[c];
             if cell_width < col_w {
                 spans.extend(cell_spans);
