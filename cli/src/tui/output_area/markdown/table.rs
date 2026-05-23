@@ -1,8 +1,10 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::theme;
+
+use super::inline_markdown_spans;
 
 /// 检测 Markdown 表格分隔行，如 `|---|---|`、`| :---: | ---: |`
 pub fn is_table_separator(line: &str) -> bool {
@@ -160,6 +162,7 @@ fn constrain_column_widths(
 }
 
 /// 将一个数据行的单元格按列宽换行，返回 1-N 行 spans。
+/// 单元格内容会先解析 inline markdown（`code`、**bold** 等）再换行。
 fn wrapped_row_spans(
     cells: &[String],
     col_widths: &[usize],
@@ -167,11 +170,12 @@ fn wrapped_row_spans(
     border_style: Style,
 ) -> Vec<Vec<Span<'static>>> {
     let num_cols = col_widths.len();
-    // 每个单元格按列宽换行为多行
-    let wrapped_cells: Vec<Vec<String>> = (0..num_cols)
+    // 每个单元格解析 inline markdown 得到 styled spans，再按列宽换行
+    let wrapped_cells: Vec<Vec<Vec<Span<'static>>>> = (0..num_cols)
         .map(|c| {
             let cell = cells.get(c).map(|s| s.as_str()).unwrap_or("");
-            wrap_cell(cell, col_widths[c])
+            let spans = inline_markdown_spans(cell, style);
+            wrap_spans_to_width(spans, col_widths[c])
         })
         .collect();
 
@@ -186,17 +190,23 @@ fn wrapped_row_spans(
             } else {
                 spans.push(Span::styled(" ".to_string(), style));
             }
-            let text = wrapped_cells[c]
+            let cell_spans = wrapped_cells[c]
                 .get(line_idx)
-                .map(|s| s.as_str())
-                .unwrap_or("");
-            let w = col_widths[c];
-            let padded = if text.width() < w {
-                format!("{}{}", text, " ".repeat(w - text.width()))
+                .cloned()
+                .unwrap_or_else(|| vec![Span::styled(String::new(), style)]);
+
+            // 计算已有宽度，补齐到列宽
+            let cell_width: usize = cell_spans
+                .iter()
+                .map(|s| s.content.width())
+                .sum();
+            let col_w = col_widths[c];
+            if cell_width < col_w {
+                spans.extend(cell_spans);
+                spans.push(Span::styled(" ".repeat(col_w - cell_width), style));
             } else {
-                text.to_string()
-            };
-            spans.push(Span::styled(padded, style));
+                spans.extend(cell_spans);
+            }
 
             if c == num_cols - 1 {
                 spans.push(Span::styled(" ".to_string(), style));
@@ -208,33 +218,63 @@ fn wrapped_row_spans(
     rows
 }
 
-/// 将单元格内容按指定宽度换行
-fn wrap_cell(text: &str, width: usize) -> Vec<String> {
-    if width == 0 || text.is_empty() {
-        return vec![String::new()];
-    }
-    let text_width = text.width();
-    if text_width <= width {
-        return vec![text.to_string()];
+/// 将 styled spans 按指定宽度换行，返回多行 spans。
+/// 纯文本超宽时按字符切分，styled span 保留样式。
+fn wrap_spans_to_width(spans: Vec<Span<'static>>, width: usize) -> Vec<Vec<Span<'static>>> {
+    if width == 0 || spans.is_empty() {
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        return if text.is_empty() {
+            vec![vec![]]
+        } else {
+            vec![spans]
+        };
     }
 
-    let mut result = Vec::new();
-    let mut current = String::new();
+    let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
+    if total_width <= width {
+        return vec![spans];
+    }
+
+    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
     let mut current_width = 0usize;
 
-    for ch in text.chars() {
-        let ch_w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-        if current_width + ch_w > width && !current.is_empty() {
-            result.push(std::mem::take(&mut current));
-            current_width = 0;
+    for span in spans {
+        let span_width = span.content.width();
+        if current_width + span_width <= width {
+            current.push(span);
+            current_width += span_width;
+        } else if current_width == 0 {
+            // 单个 span 就超过宽度，按字符切分
+            let mut buf = String::new();
+            let mut buf_width = 0usize;
+            for ch in span.content.chars() {
+                let ch_w = UnicodeWidthChar::width(ch).unwrap_or(1);
+                if buf_width + ch_w > width && !buf.is_empty() {
+                    current.push(Span::styled(std::mem::take(&mut buf), span.style));
+                    lines.push(std::mem::take(&mut current));
+                    buf_width = 0;
+                }
+                buf.push(ch);
+                buf_width += ch_w;
+            }
+            if !buf.is_empty() {
+                current.push(Span::styled(buf, span.style));
+                current_width = buf_width;
+            }
+        } else {
+            // 当前行已有内容，把当前行结束，这个 span 开新行
+            lines.push(std::mem::take(&mut current));
+            current = vec![span];
+            current_width = span_width;
         }
-        current.push(ch);
-        current_width += ch_w;
     }
-    if !current.is_empty() {
-        result.push(current);
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
     }
-    result
+
+    lines
 }
 
 fn separator_spans(col_widths: &[usize], border_style: Style) -> Vec<Span<'static>> {
@@ -280,13 +320,6 @@ mod tests {
         let result = render_table_block(&lines, Style::default(), 20);
         // header 行可能被换行成多行
         assert!(result.len() >= 3, "should have at least 3 rows");
-    }
-
-    #[test]
-    fn test_wrap_cell_basic() {
-        assert_eq!(wrap_cell("hi", 5), vec!["hi"]);
-        assert_eq!(wrap_cell("hello", 3), vec!["hel", "lo"]);
-        assert_eq!(wrap_cell("", 5), vec![""]);
     }
 
     #[test]
