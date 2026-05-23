@@ -62,6 +62,7 @@ impl OutputArea {
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
+        let has_selection = self.has_real_selection();
 
         for i in start..end {
             if let Some(ref rendered) = self.rendered_cache.get(i) {
@@ -69,7 +70,18 @@ impl OutputArea {
                     rendered_content.insert(i, text.clone());
                 }
                 screen_map.extend(rendered.screen_entries.clone());
-                display_lines.push(rendered.line.clone());
+                if has_selection {
+                    let screen_idx = screen_map.len() - rendered.screen_entries.len();
+                    // 每条 screen_entry 对应同一个逻辑行的不同 chunk，
+                    // 但 rendered.line 是整行，这里对整行叠加选区
+                    display_lines.push(self.apply_selection_to_line(
+                        screen_idx,
+                        &rendered.line,
+                        &screen_map,
+                    ));
+                } else {
+                    display_lines.push(rendered.line.clone());
+                }
             } else {
                 // 未渲染的行，用空行占位
                 display_lines.push(Line::raw(""));
