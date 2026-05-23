@@ -1,3 +1,4 @@
+use crate::tui::status_bar::StatusBarRow;
 use crossterm::event::{MouseEvent, MouseEventKind};
 use std::time::Instant;
 
@@ -71,8 +72,16 @@ impl super::App {
                     // 清除其他区域的选中
                     self.output_area.clear_selection();
                     self.input_area.clear_selection();
-                    self.status_bar
-                        .start_selection(col.saturating_sub(status_bar.x));
+                    let status_row = if row == status_bar.y.saturating_add(1) {
+                        StatusBarRow::Context
+                    } else {
+                        StatusBarRow::Runtime
+                    };
+                    self.status_bar.start_selection_at(
+                        status_row,
+                        col.saturating_sub(status_bar.x),
+                        status_bar.width,
+                    );
                 }
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
@@ -83,7 +92,7 @@ impl super::App {
                     self.input_area.update_selection(row, col, &inner);
                 } else if self.status_bar.is_selecting() {
                     self.status_bar
-                        .update_selection(col.saturating_sub(status_bar.x));
+                        .update_selection_at(col.saturating_sub(status_bar.x), status_bar.width);
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {

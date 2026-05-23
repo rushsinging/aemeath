@@ -29,6 +29,8 @@ impl App {
         max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
+        self.status_bar
+            .set_permission_mode(if allow_all { "AllowAll" } else { "AskMe" });
         self.client = Some(client.clone());
         self.system_prompt_text = system_prompt_text.clone();
         self.context_size = context_size;

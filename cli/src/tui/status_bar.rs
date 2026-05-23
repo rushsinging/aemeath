@@ -1,7 +1,8 @@
 #[path = "status_bar_format.rs"]
 mod status_bar_format;
+#[path = "status_bar_selection.rs"]
+mod status_bar_selection;
 
-use crate::tui::safe_text::{col_to_char_idx, safe_char_slice};
 use crate::tui::theme;
 use aemeath_core::cost::format_tokens;
 use ratatui::{
@@ -13,6 +14,12 @@ use ratatui::{
 };
 pub use status_bar_format::WorktreeKind;
 use status_bar_format::{context_row_text, StatusLineContext};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatusBarRow {
+    Runtime,
+    Context,
+}
 
 /// The status bar at the bottom of the screen
 pub struct StatusBar {
@@ -29,6 +36,8 @@ pub struct StatusBar {
     is_selecting: bool,
     selection_start: Option<usize>,
     selection_end: Option<usize>,
+    selection_row: StatusBarRow,
+    selection_width: u16,
     context: StatusLineContext,
     thinking: bool,
 }
@@ -73,6 +82,8 @@ impl StatusBar {
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            selection_row: StatusBarRow::Runtime,
+            selection_width: 0,
             context: StatusLineContext::default(),
             thinking: true,
         }
@@ -193,7 +204,8 @@ impl StatusBar {
                 height: 1,
                 ..area
             };
-            Paragraph::new(self.context_row_text(area.width as usize))
+            let context_line = self.context_row_spans(area.width as usize, base);
+            Paragraph::new(Line::from(context_line))
                 .style(base)
                 .render(context_area, buf);
         }
@@ -281,108 +293,29 @@ impl StatusBar {
             .collect()
     }
 
-    fn runtime_row_spans_with_selection(
-        &self,
-        start: usize,
-        end: usize,
-        base: Style,
-    ) -> Vec<Span<'static>> {
-        let (start, end) = if start < end {
-            (start, end)
-        } else {
-            (end, start)
-        };
-        if start == end {
-            return self.runtime_row_spans();
+    fn context_row_spans(&self, width: usize, base: Style) -> Vec<Span<'static>> {
+        let text = self.context_row_text(width);
+        if self.selection_row != StatusBarRow::Context {
+            return vec![Span::styled(text, Style::default().fg(theme::TEXT_MUTED))];
         }
-
-        let full_text = self.build_full_text();
-        let chars: Vec<char> = full_text.chars().collect();
-        let len = chars.len();
-        let before: String = safe_char_slice(&chars, 0, start.min(len)).iter().collect();
-        let selected: String = safe_char_slice(&chars, start.min(len), end.min(len))
-            .iter()
-            .collect();
-        let after: String = safe_char_slice(&chars, end.min(len), len).iter().collect();
-        let selection_style = Style::default()
-            .bg(theme::SELECTION_BG)
-            .fg(theme::SELECTION_FG);
-        let mut highlighted = Vec::new();
-        if !before.is_empty() {
-            highlighted.push(Span::styled(before, base));
-        }
-        if !selected.is_empty() {
-            highlighted.push(Span::styled(selected, selection_style));
-        }
-        if !after.is_empty() {
-            highlighted.push(Span::styled(after, base));
-        }
-        highlighted
+        self.spans_with_selection(text, base)
     }
 
-    fn build_full_text(&self) -> String {
+    fn runtime_row_spans_with_selection(
+        &self,
+        _start: usize,
+        _end: usize,
+        base: Style,
+    ) -> Vec<Span<'static>> {
+        self.spans_with_selection(self.build_full_text(), base)
+    }
+
+    pub(crate) fn build_full_text(&self) -> String {
         self.runtime_segments()
             .into_iter()
             .map(|(text, _)| text)
             .collect::<Vec<_>>()
             .join("")
-    }
-
-    pub fn start_selection(&mut self, col: u16) {
-        self.selection_start = Some(self.screen_col_to_char_idx(col));
-        self.selection_end = Some(self.screen_col_to_char_idx(col));
-        self.is_selecting = true;
-    }
-
-    pub fn update_selection(&mut self, col: u16) {
-        if self.is_selecting {
-            self.selection_end = Some(self.screen_col_to_char_idx(col));
-        }
-    }
-
-    pub fn end_selection(&mut self) -> Option<String> {
-        self.is_selecting = false;
-        let text = self.get_selected_text();
-        self.selection_start = None;
-        self.selection_end = None;
-        text
-    }
-
-    pub fn get_selected_text(&self) -> Option<String> {
-        let start = self.selection_start?;
-        let end = self.selection_end?;
-        let (start, end) = if start < end {
-            (start, end)
-        } else {
-            (end, start)
-        };
-        if start == end {
-            return None;
-        }
-        let full = self.build_full_text();
-        let chars: Vec<char> = full.chars().collect();
-        let selected: String = chars[start.min(chars.len())..end.min(chars.len())]
-            .iter()
-            .collect();
-        if selected.is_empty() {
-            None
-        } else {
-            Some(selected)
-        }
-    }
-
-    fn screen_col_to_char_idx(&self, col: u16) -> usize {
-        col_to_char_idx(&self.build_full_text(), col as usize)
-    }
-
-    pub fn clear_selection(&mut self) {
-        self.selection_start = None;
-        self.selection_end = None;
-        self.is_selecting = false;
-    }
-
-    pub fn is_selecting(&self) -> bool {
-        self.is_selecting
     }
 }
 

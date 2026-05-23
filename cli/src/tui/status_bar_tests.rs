@@ -134,7 +134,7 @@ fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
     let row = bar.context_row_text(56);
 
     assert!(row.chars().count() <= 56);
-    assert!(row.contains("…/update"));
+    assert!(row.contains("pdate"));
     assert!(row.contains("feature/46-status-line"));
     assert!(row.contains("Perm:AllowAll"));
 }
@@ -158,13 +158,75 @@ fn test_status_line_context_wide_truncates_to_width() {
 }
 
 #[test]
-fn test_set_current_dir_preserves_existing_callers() {
+fn test_status_bar_render_second_row_uses_muted_color() {
     let mut bar = StatusBar::new();
-
     bar.set_current_dir("aemeath");
+    let area = Rect::new(0, 0, 80, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
 
     assert_eq!(
-        bar.context_row_text(80),
-        "ctx aemeath │ root aemeath │ main │ Perm:AskMe"
+        buf.cell((0, 1)).unwrap().style().fg,
+        Some(theme::TEXT_MUTED)
     );
+    assert_eq!(buf.cell((0, 1)).unwrap().style().bg, Some(theme::STATUS_BG));
+}
+
+#[test]
+fn test_status_bar_selection_supports_context_row() {
+    let mut bar = StatusBar::new();
+    bar.set_current_dir("aemeath");
+    let width = 80;
+
+    bar.start_selection_at(StatusBarRow::Context, 4, width);
+    bar.update_selection_at(11, width);
+
+    assert_eq!(bar.get_selected_text(), Some("aemeath".to_string()));
+}
+
+#[test]
+fn test_status_bar_render_highlights_context_row_selection() {
+    let mut bar = StatusBar::new();
+    bar.set_current_dir("aemeath");
+    let area = Rect::new(0, 0, 80, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.start_selection_at(StatusBarRow::Context, 4, area.width);
+    bar.update_selection_at(11, area.width);
+    bar.render(area, &mut buf);
+
+    assert_eq!(
+        buf.cell((4, 1)).unwrap().style().bg,
+        Some(theme::SELECTION_BG)
+    );
+    assert_eq!(
+        buf.cell((4, 0)).unwrap().style().bg,
+        Some(theme::SELECTION_BG)
+    );
+}
+
+#[test]
+fn test_main_branch_does_not_repeat_main_main() {
+    let mut bar = StatusBar::new();
+    bar.set_current_dir("aemeath");
+    bar.set_git_context(WorktreeKind::Main, "main");
+
+    let row = bar.context_row_text(80);
+
+    assert!(row.contains(" │ main │ "));
+    assert!(!row.contains("main:main"));
+}
+
+#[test]
+fn test_status_line_context_keeps_permission_when_space_is_tight() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths("aemeath", "aemeath");
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+
+    let row = bar.context_row_text(24);
+
+    assert!(row.chars().count() <= 24);
+    assert!(row.contains("Perm:AskMe"));
 }
