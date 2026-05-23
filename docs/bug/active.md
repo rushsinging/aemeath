@@ -3,7 +3,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮 |
+| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 活动中 | 用户反馈仍需修改 | 2026-05 | 当前现象：table 的 header 部分滚出视口时，表格头部会变回 Markdown 原文、失去表格渲染；同时 Markdown 中的 code 没有正确渲染。怀疑其他 block 也可能存在类似“关键起始行滚出后 block 状态丢失/局部退回原文”的问题 |
@@ -71,7 +71,7 @@
 1. 为所有 LLM 结束路径统一添加 input_queue drain 检查，尤其是 EndTurn、无工具调用、hook stop、错误返回、用户 stop 后的状态切换。
 2. drain 到消息后必须显式触发下一轮处理，避免仅更新 messages 但没有继续请求 LLM。
 3. input queue UI 状态应与实际队列消费原子同步，防止残留显示。
-4. 添加日志定位：记录 last turn 入队、drain、messages append、下一轮启动、UI queue 清除等关键节点。
+4. 添加日志定位：记录 last turn 入队、drain、messages append、下一轮启动、UI queue 清除等关键节点。2026-05-23 已先补充 TUI 收到 Done/DoneWithDuration 时的 `[bug49_input_queue_at_done]` 日志，记录 input queue 与 UI queued_messages 状态。
 5. 补充/更新回归测试覆盖用户反馈路径，而不仅是已有 EndTurn/无工具调用路径。
 
 **涉及路径**：
