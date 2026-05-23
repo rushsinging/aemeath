@@ -15,7 +15,7 @@
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。logging 改为单一全局 `level`，不再支持按模块配置；旧 `default_level` 兼容读取，旧 `module_levels` 忽略。 |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
-| 44 | 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message | 中 | 待实施 | 未确认 | 在目标项目（如 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform`）中读取 git log，分析带 `Co-Authored-By` 的 commit message 风格，并在需要创建 commit message 时提示 LLM 按该项目既有风格生成。 |
+| 44 | Commit Style Context 与 AI 协作者 trailer | 中 | 设计中 | 未确认 | 在 system prompt 中加入 commit guidance：需要创建 git commit 时，LLM 应先分析当前仓库历史 Commit Style Context，优先查看带 `Co-Authored-By` 的提交，再按项目风格生成 commit message；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 LLM client。详见 [spec](specs/044-commit-style-context.md) |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 未确认 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
 | 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 规划完成，待实施 | 未确认 | status line 明确改为两行：第一行保持模型/Token/费用/运行状态等高频信息；第二行固定展示当前工作上下文（cwd/path_base/working_root、worktree/main 标识、branch、权限模式），并与 #43/#45 的上下文切换实时联动，避免误操作 main/worktree。 |
 
@@ -90,26 +90,26 @@
 - hook project dir 与 TUI 状态栏当前工作根展示
 - system prompt/tool description
 
-### #44 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message
+### #44 Commit Style Context 与 AI 协作者 trailer
 
-**状态**：待实施
+**状态**：设计中
 
-**背景**：不同项目的 commit message 风格可能不同。以 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 为例，用户希望系统查看该项目 git log 中带 `Co-Authored-By` 的 commit message，提炼其风格，并提示 LLM 在创建 commit message 时按该风格输出。
+**背景**：不同项目的 commit message 风格可能不同。用户希望系统在需要创建 commit message 时参考当前项目历史提交，尤其是带 `Co-Authored-By` 的提交风格。
 
-**目标**：在需要生成 commit message 前，自动或按需分析当前项目历史提交中包含 `Co-Authored-By` trailer 的 commit message，提取格式习惯（如标题格式、scope/type、正文段落、footer/trailer 写法、是否中英混用等），作为上下文提示注入给 LLM，帮助生成符合项目既有习惯的 commit message。
+**目标**：在 system prompt 中加入 commit guidance，但不在 session 初始化时执行 `git log` 或提前生成历史摘要。LLM 在需要创建 commit message 前，应自行分析当前仓库的 Commit Style Context，优先采样带 `Co-Authored-By` 的提交，再按项目风格生成 commit message。AI 协作者 trailer 使用固定格式 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 `LlmClient`。完整设计见 [spec](specs/044-commit-style-context.md)。
 
 **建议范围**：
-1. 在当前 git 仓库中执行类似 `git log --format=%B --grep='Co-Authored-By'` 的历史采样，限制数量与输出长度，避免 prompt 过大。
-2. 从样本中提炼风格摘要，而不是直接把大量 commit 原文全部注入。
-3. 生成 commit message 时将风格摘要作为 guidance/context 注入，并明确保留合法 trailer 格式。
-4. 当项目没有带 `Co-Authored-By` 的历史提交时，fallback 到通用 commit message 规范。
-5. 支持按项目缓存风格摘要，并在 git log 变化后按需刷新。
-6. 不应伪造 `Co-Authored-By`；仅在确有协作者信息时添加 trailer。
+1. 在 system prompt 中加入 commit guidance，要求 commit 前分析当前仓库历史风格。
+2. 优先采样带 `Co-Authored-By` 的提交；没有样本时 fallback 到近期普通提交。
+3. guidance 提供包含当前 provider/model 的 Aemeath trailer 模板。
+4. 不在 session 初始阶段自动执行 git log，不提前注入历史摘要。
+5. 不伪造人类协作者；是否添加 Aemeath trailer 由 LLM 结合历史风格和用户意图决定。
+6. TUI 与 REPL 使用同一套 prompt 构造逻辑。
 
 **涉及路径**：
-- commit message 生成/提交相关逻辑
-- guidance/system prompt 注入逻辑
-- git log 读取与项目级缓存逻辑
+- `cli/src/prompt.rs`：system prompt / dynamic context 构造。
+- `cli/src/tui/app/stream.rs`、`cli/src/repl/turns.rs`：调用 prompt 构造时传入 provider/model。
+- `packages/llm/src/client.rs`：已有 `provider_name()` / `model_name()` 可复用。
 
 ### #43 在 git worktree 中工作时 cwd 应设置为 worktree 目录
 
