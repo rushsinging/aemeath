@@ -233,18 +233,12 @@ impl ConfigManager {
             },
             memory: overlay.memory,
             logging: LoggingConfig {
-                default_level: if !overlay.logging.default_level.is_empty() {
-                    overlay.logging.default_level
+                level: if !overlay.logging.level.is_empty() {
+                    overlay.logging.level
                 } else {
-                    base.logging.default_level
+                    base.logging.level
                 },
-                module_levels: {
-                    let mut levels = base.logging.module_levels;
-                    for (k, v) in overlay.logging.module_levels {
-                        levels.insert(k, v);
-                    }
-                    levels
-                },
+                module_levels: serde_json::Value::Null,
                 max_bytes: if overlay.logging.max_bytes != logging::default_max_bytes() {
                     overlay.logging.max_bytes
                 } else {
