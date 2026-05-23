@@ -52,6 +52,7 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
         agent_semaphore: Arc::new(Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
+        context_stack: Arc::new(Mutex::new(Vec::new())),
     }
 }
 

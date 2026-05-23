@@ -62,6 +62,7 @@ mod tests {
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            context_stack: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
