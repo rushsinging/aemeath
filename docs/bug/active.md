@@ -6,9 +6,42 @@
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
-| 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 活动中 | 用户反馈仍需修改 | 2026-05 | 当前现象：table 的 header 部分滚出视口时，表格头部会变回 Markdown 原文、失去表格渲染；同时 Markdown 中的 code 没有正确渲染。怀疑其他 block 也可能存在类似“关键起始行滚出后 block 状态丢失/局部退回原文”的问题 |
+| 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 修复中 | 待确认 | 2026-05 | 渲染缓存层已实现：滑动窗口前后各扩展 50% 并扩展到 block 边界，table 自动换行列内容。核心改动：新增 rendered_cache.rs（缓存管理+block边界扩展）+ rendered_lines.rs（行渲染函数），render.rs 改为使用缓存层；table.rs 支持按可用宽度自动换行 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
+| 61 | Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失 | 中 | 活动中 | 未确认 | 2026-05 | 渲染 diff 时，行号区域顶到输出区最左侧，破坏原有缩进/边距；diff 内容可以被选中复制，但选中时语法高亮/选区高亮丧失，疑似此前统一的“选中高亮 + 复制”逻辑未覆盖新的 diff 行号/语法高亮渲染路径 |
 ## 专案
+
+### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
+
+**状态**：活动中
+
+**症状**：
+1. TUI output area 渲染 unified diff 时，新增的 old/new 行号区域顶到了最左边，没有保留输出区原有的左侧缩进/边距，导致 diff 块视觉上“贴边”，破坏整体缩进层级。
+2. diff 部分可以被选中并复制，但选中后语法高亮/选区高亮丧失，表现为选中状态下高亮样式没有正确叠加或被覆盖。
+3. 疑似之前已经统一过的“选中高亮 + 复制”逻辑没有覆盖新的 diff 行号/语法高亮渲染路径，导致 diff 使用了旁路渲染或直接 Span 输出。
+
+**复现**：
+1. 让 LLM 输出包含 unified diff 的 Markdown/code block
+2. 在 TUI output area 中观察 diff 行号区域是否贴到最左边、缺少与普通内容一致的缩进
+3. 鼠标/键盘选中 diff 区域
+4. 观察选中时 diff 原有语法高亮或选区高亮是否消失；复制内容虽然可用，但视觉反馈不一致
+
+**根因假设**：
+1. diff 行号渲染时没有继承 output line 的 content inset/padding，或直接从 area.x 开始绘制，绕过了统一缩进计算。
+2. diff 语法高亮行使用了独立 `Span`/`Line` 构造，未经过统一的 selection overlay 样式合并逻辑。
+3. selection 高亮可能以“整行覆盖 style”的方式应用，覆盖了 diff 内部语法高亮，而不是做 foreground/background 的组合叠加。
+4. 复制路径和高亮路径分离：复制已读取原始/逻辑文本，但选中渲染没有走统一 selection renderer。
+
+**修复方向**：
+1. diff 行号区域应遵循 output area 统一左边距/缩进规则，行号作为内容的一部分在缩进之后绘制。
+2. 将 diff 渲染接入统一的 selection-aware render pipeline，避免绕过已有“选中高亮 + 复制”逻辑。
+3. selection 样式应只叠加背景/反色，不应清空 diff 语法高亮的前景色；必要时定义统一 style merge 策略。
+4. 补充回归覆盖：diff 行号不贴边、选中 diff 时仍有可见选区背景、语法高亮不被完全抹掉、复制内容保留 diff 原文与换行。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/markdown/` diff 渲染与语法高亮逻辑
+- output area selection 渲染/复制统一逻辑
+- Feature #35（Diff 渲染中 add 行语法高亮 + 行号显示）相关实现
 
 ### #58 TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染
 
