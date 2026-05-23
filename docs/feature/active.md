@@ -13,13 +13,13 @@
 | 38 | TUI 日志文件（`~/.agents/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.agents/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；2026-05-22 将助手正文/Markdown 默认色改为主文本浅灰，避免大段内容与成功/spinner 绿色混淆；2026-05-22 适配 Catppuccin Macchiato 风格静态配色；2026-05-22 将 status line 背景改为与主背景一致，避免显示为纯黑；2026-05-22 将 inline/code block 仅用代码强调色显示，不额外添加前景背景块；2026-05-22 将 code 强调色改为 Peach `#f5a97f`，增强与主文本区分度；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
-| 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
+| 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
 
-### #42 Allow All 模式下支持访问用户明确授权的 workspace 外路径
+### #42 权限管控系统：交互式外部授权 + 统一权限评估
 
-**状态**：待实施
+**状态**：设计中
 
-**背景**：用户在 allow all 模式下明确要求访问 workspace 外路径时，Glob/Grep 仍被安全边界拦截。例如：
+**背景**：原始问题是在 allow all 模式下，用户明确要求访问 workspace 外路径时，Glob/Grep 仍被安全边界拦截。例如：
 
 ```text
 Glob(**/*)
@@ -30,19 +30,23 @@ in /Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver
 Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is outside the workspace '/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform'.
 ```
 
-**目标**：在 allow all 模式下，用户明确授权的外部路径应可作为临时允许的搜索/读取边界，支持 Glob/Grep/Read 等只读操作访问该路径；默认模式仍保持 workspace 安全边界，避免意外读取任意系统文件。
+**目标**：升级为完整权限管控系统。采用交互式授权体验与统一 `PermissionEngine` 评估模型：所有工具调用先归一化为 action / resource / risk / profile，再输出 Allow / Ask / Deny；权限模式包含 AskMe、Auto、Plan、AllowAll，其中 AllowAll 保留 root / YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只允许规划和分析。完整设计见 [spec](specs/042-permission-control-system.md)。
 
 **建议范围**：
-1. 为 ToolContext 或工具执行上下文增加“用户授权路径”集合，路径必须 canonicalize 后保存。
-2. 安全边界校验从“必须位于 workspace 内”扩展为“位于 workspace 内或位于已授权路径内”。
-3. 授权仅对当前会话或当前请求生效，避免长期扩大权限。
-4. 工具错误消息应区分“未授权外部路径”和“路径不存在/无权限”。
-5. 仅允许目录级授权，避免通过 `..`、符号链接绕过边界。
+1. 新增 `PermissionEngine` 与统一权限模型（request/action/resource/risk/decision/grant）。
+2. 将外部路径授权做成 TUI 交互式选择，而不是以 slash command 为主入口。
+3. `ToolContext` 或等价上下文保存 session 级授权 scope，路径必须 canonicalize 后保存。
+4. Read / Glob / Grep 先接入统一权限评估，解决原始外部路径访问场景。
+5. Edit / Write 后续接入 capability 检查，外部写入必须有 Write capability，AllowAll 除外。
+6. AllowAll 下默认允许 workspace 内外读写执行，仅记录审计，不再被 workspace 边界拦截。
+7. Sandbox 仅预留未来设计，本轮不实现；不引入复杂 modifier。
 
 **涉及路径**：
-- `aemeath-tools` 或当前工具权限校验实现（Glob/Grep/Read/Bash 等）
-- `ToolContext` / workspace path boundary 相关逻辑
-- TUI/工具调用审批 allow all 模式相关逻辑
+- `packages/core/src/permission.rs`：权限模式、授权记录、决策模型与 engine。
+- `packages/core/src/tool.rs`：`ToolContext` / session grants / path_base 与权限上下文。
+- `packages/tools/src/path_security.rs`：路径 canonicalize 与 scope 判断。
+- `packages/tools/src/file_read.rs`、`glob_tool.rs`、`grep.rs`、`file_edit.rs`、`file_write.rs`：工具接入统一权限评估。
+- `cli/src/tui/app/stream/permissions.rs`、`tools.rs`：TUI 权限 prompt、用户选择、approved/denied tool call 流程。
 
 
 **目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
