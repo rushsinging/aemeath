@@ -3,7 +3,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。修复：渲染 AskUser 选项时按 option.lines() 拆成多条 OutputLine，并用 option_line_ranges 维护多行选项的上下键高亮更新；补充单行、多行、空选项和更新范围回归测试 |
+| 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
 ## 专案
