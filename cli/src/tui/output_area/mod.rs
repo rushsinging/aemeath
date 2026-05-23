@@ -11,6 +11,7 @@ pub mod markdown;
 mod queued;
 mod render;
 mod render_blocks;
+mod render_spans;
 mod render_status;
 pub mod scroll;
 pub mod selection;
