@@ -16,6 +16,33 @@
 | 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 | 44 | 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message | 中 | 待实施 | 未确认 | 在目标项目（如 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform`）中读取 git log，分析带 `Co-Authored-By` 的 commit message 风格，并在需要创建 commit message 时提示 LLM 按该项目既有风格生成。 |
+| 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 未确认 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
+
+### #45 为 LLM 提供 EnterWorktree / ExitWorktree 工具
+
+**状态**：待实施
+
+**背景**：当前 worktree 上下文切换依赖 Bash `cd` 或工具执行后的 `$PWD` 同步，LLM 容易忘记切换或误以为已在 worktree 中，导致 Read/Edit/Write/Glob/Grep/Bash 等工具仍作用于 main 工作区。Feature #43 已要求 worktree 中工作时 cwd/path_base/working_root 应切到 worktree 目录，本 feature 进一步提供显式工具，让 LLM 能以结构化方式进入/退出 worktree。
+
+**目标**：新增两个工具：
+- `EnterWorktree`：进入指定 git worktree，将 ToolContext 的 cwd/path_base/working_root 和相关安全边界切换到该 worktree 根目录。
+- `ExitWorktree`：退出当前 worktree，恢复到进入前的工作区上下文，或显式切回 main/root 工作区。
+
+**建议范围**：
+1. `EnterWorktree` 参数包含 `path`（必填，worktree 根目录）和可选 `branch`/`expected_repo` 校验信息。
+2. 进入前必须校验路径是 git worktree，且与当前 repo 关联，避免切到任意目录。
+3. 进入后同步更新 ToolContext：`cwd`、`path_base`、`working_root`、安全边界、hook project dir、状态栏显示。
+4. `ExitWorktree` 应恢复进入前的上下文栈，支持嵌套 enter 时按栈退出；若上下文已失效（worktree 被删除），返回明确错误并建议切回 main。
+5. 工具结果应展示当前工作根、git branch、repo root，便于用户确认。
+6. 系统提示中应要求：需要在 worktree 中修改/验证/提交时优先使用 `EnterWorktree`，完成后使用 `ExitWorktree`，不要只依赖 `cd`。
+7. 与 Feature #43 复用同一套 cwd/path_base/working_root 更新逻辑，避免重复实现。
+
+**涉及路径**：
+- Tool registry / tools crate 新增工具定义与实现
+- ToolContext cwd/path_base/working_root 管理
+- Bash/Read/Edit/Write/Glob/Grep 安全边界逻辑
+- hook project dir 与 TUI 状态栏当前工作根展示
+- system prompt/tool description
 
 ### #44 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message
 

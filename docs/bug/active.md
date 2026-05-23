@@ -3,10 +3,81 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
+| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮 |
 | 53 | AskUserQuestion 选项未逐行显示，多个选项挤在一行 | 中 | 待确认 | 已修复待确认 | 2026-05 | 根因：AskUserQuestion 的 options 每个数组元素按一条 OutputLine 渲染；当模型把 A/B/C 等选项放在同一个字符串并用换行分隔时，换行符被输出区 sanitize_for_display 当作控制字符移除，导致多个选项挤在一行。补充发现：会话 019e4bd2-31a3-72ce-a67a-b6bdf28fb5fd 中 LLM 将 A/B/C 选项直接塞进 question，原文无换行。修复：渲染 options 时按 option.lines() 拆行，并强化 AskUserQuestion 工具描述，要求多选项必须逐项放入 options 数组，question 只放问题正文；补充对应 schema 描述测试 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
+| 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 活动中 | 用户反馈仍需修改 | 2026-05 | 当前现象：table 的 header 部分滚出视口时，表格头部会变回 Markdown 原文、失去表格渲染；同时 Markdown 中的 code 没有正确渲染。怀疑其他 block 也可能存在类似“关键起始行滚出后 block 状态丢失/局部退回原文”的问题 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
 ## 专案
+
+### #58 TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染
+
+**状态**：活动中（用户反馈仍需修改，已从归档恢复）
+
+**当前症状**：
+1. Markdown table 滚动时，如果 header 部分滚出可视区域，表格头部/相关区域会变回 Markdown 原文，失去表格渲染效果。
+2. Markdown 中的 code 没有正确渲染（需要确认是 inline code、fenced code block，还是两者都受影响）。
+3. 怀疑其他 Markdown block 也可能存在类似问题：当决定 block 类型的关键起始行滚出视口后，后续可见内容丢失 block state，导致局部退回原文或样式丢失。
+
+**历史相关问题**：
+- 多行代码块（```...```）的开标记滚出视口后，结束标记曾被误认为新开标记，导致后续内容被错误渲染为代码块样式。
+- Markdown 表格的 header/separator 行滚出视口后，数据行曾不被识别为表格，退化为普通文本。
+- 表格滚动时列宽曾随可见内容变化，出现列宽抖动。
+
+**历史修复**：
+- `scan_code_blocks` 曾改为从文档开头预扫描到可见区域起始位置，确定 `in_code_block` 初始状态（提交 `dac5759`）。
+- `scan_table_blocks` 曾改为预扫描不可见部分，检测跨越视口边界的表格块（提交 `ed77d0e`）。
+- `render_table_cache` 曾改为收集整个表格块的全部行，传给 `render_table_block` 计算列宽后只取可见行渲染结果（提交 `48f8eed`）。
+
+**当前反馈**：用户确认现在仍有 table/code 渲染问题：table header 部分滚出时头部会变回 Markdown 原文，同时 Markdown code 没有渲染。原先“已确认修复”结论撤销，重新加入 active。
+
+**根因方向**：
+1. 表格渲染可能仍依赖当前可见区域内的 header/separator，header 部分滚出后，部分行无法从 table cache/block state 中恢复渲染。
+2. 表格 header 或 separator 的虚拟/缓存渲染结果可能没有正确参与可见行裁剪，导致头部区域 fallback 到原始 Markdown 文本。
+3. code 渲染与 block/table 渲染可能走不同路径；当可见区域从中间开始时，inline code/fenced code 的 token/block state 可能未恢复。
+4. 其他 block（quote、list、heading、hr、nested block 等）也可能有同类问题：渲染器从可见行开始解析而不是从文档状态恢复，导致关键起始行不可见时样式丢失。
+5. wrapped line、scroll offset、原始 Markdown line 三者坐标可能混用，导致预扫描恢复的状态没有对应到实际可见片段。
+
+**修复方向**：
+1. 先精确复现当前反馈：table header 部分滚出后哪个区域退回原文；code 未渲染是 inline code 还是 fenced code block。
+2. 统一 Markdown block state 恢复机制：渲染可见区域前，应能从文档开头或缓存状态恢复 table/code/list/quote 等 block 状态，而不是仅扫描可见行。
+3. 对 table 使用完整表格块作为渲染输入，再按可见区域裁剪，避免 header/separator 不可见时局部 fallback。
+4. 对 code 渲染区分 inline code 与 fenced code block：inline code 应在行内 tokenization 中保留，fenced code block 应恢复跨行状态。
+5. 排查其他 block 是否同类受影响，并补充回归测试：table header 半滚出、separator 滚出、inline code、fenced code、quote/list 起始行滚出、窗口 resize、wrapped line 场景。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/markdown/render_blocks.rs`
+- `apps/cli/src/tui/output_area/markdown/render_blocks_tests.rs`
+- inline markdown/code token 渲染逻辑
+- output area 可见行、wrapped line、scroll offset 计算相关逻辑
+
+### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
+
+**状态**：活动中（用户反馈仍存在，已从归档恢复）
+
+**症状**：用户在 LLM 处理期间提交的消息（last turn）没有继续发送给 LLM，而是留在 input queue 区域。表现为当前轮 LLM 结束后，排队输入仍显示在队列里，没有自动进入下一轮请求。
+
+**历史修复**：此前曾抽取 `append_queued_input`，在 EndTurn/无工具调用和工具轮结果同步后统一 drain queued input；有消息则同步 messages 并 `continue` 进入下一轮，并补充正常/空队列/通道关闭单元测试。
+
+**当前反馈**：用户确认问题仍存在，因此原先“已确认修复”结论撤销，重新标记为 active。需要重点检查是否仍有 last turn 路径绕过 `append_queued_input`，或队列被 drain 后没有触发下一轮 LLM 请求。
+
+**根因假设**：
+1. 某些结束路径（stop/cancel/hook/stream error/无 tool call/EndTurn）未调用统一的 queued input drain。
+2. 队列内容被同步到 messages 后，状态机没有 `continue` 或没有重新启动后台处理。
+3. TUI input queue 区域与实际 input_queue 数据源不同步，导致已消费但 UI 未清除，或 UI 清除但消息未发送。
+4. last turn 提交时机处于 streaming 收尾与 idle 切换之间，触发了竞态，队列未被下一轮消费。
+
+**修复方向**：
+1. 为所有 LLM 结束路径统一添加 input_queue drain 检查，尤其是 EndTurn、无工具调用、hook stop、错误返回、用户 stop 后的状态切换。
+2. drain 到消息后必须显式触发下一轮处理，避免仅更新 messages 但没有继续请求 LLM。
+3. input queue UI 状态应与实际队列消费原子同步，防止残留显示。
+4. 添加日志定位：记录 last turn 入队、drain、messages append、下一轮启动、UI queue 清除等关键节点。
+5. 补充/更新回归测试覆盖用户反馈路径，而不仅是已有 EndTurn/无工具调用路径。
+
+**涉及路径**：
+- `apps/cli/src/tui/app/stream/` 或 LLM background loop 相关逻辑
+- input queue 状态管理与 TUI 展示逻辑
+- `append_queued_input` 及其调用点
 
 ### #60 TUI 中 Markdown code 块复制时下划线被吞掉
 
