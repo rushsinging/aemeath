@@ -4,6 +4,7 @@ use ratatui::text::Span;
 
 use super::{markdown, LineStyle, OutputLine};
 
+#[allow(dead_code)]
 pub(super) struct CodeBlockInfo {
     pub code_block_lines: HashSet<usize>,
     pub code_fence_lines: HashSet<usize>,
@@ -11,10 +12,7 @@ pub(super) struct CodeBlockInfo {
 }
 
 /// 扫描可见行中的代码块信息。
-///
-/// `all_lines` 用于从文档开头预扫描不可见部分，确定可见区域开始时
-/// 是否处于代码块内部（解决开标记滚出视口后状态丢失的问题）。
-/// `visible` 为当前可见的行切片。
+#[allow(dead_code)]
 pub(super) fn scan_code_blocks<'a, L>(
     all_lines: L,
     visible: &[(usize, &'a OutputLine)],
@@ -71,9 +69,7 @@ where
 }
 
 /// 扫描可见行中的表格块信息。
-///
-/// `all_lines` 用于从文档开头预扫描不可见部分，检测跨越视口边界的
-/// 表格块（header + separator 滚出视口但数据行仍在视口内的情况）。
+#[allow(dead_code)]
 pub(super) fn scan_table_blocks<'a, L>(
     all_lines: L,
     visible: &[(usize, &'a OutputLine)],
@@ -194,9 +190,7 @@ where
 }
 
 /// 表格渲染缓存，key 为可见区域起始行索引。
-///
-/// `all_lines` 用于获取整个表格块的所有行（包括视口前后的行），
-/// 保证列宽计算基于完整表格，滚动时列宽不会变化。
+#[allow(dead_code)]
 pub(super) fn render_table_cache<'a, L>(
     all_lines: L,
     visible: &[(usize, &'a OutputLine)],
@@ -267,7 +261,7 @@ where
                 .collect();
 
             let base = visible[block_start].1.style.to_style();
-            let rendered = markdown::render_table_block(&table_lines, base);
+            let rendered = markdown::render_table_block(&table_lines, base, 120);
 
             // render_table_block 输出与 table_lines 一一对应
             // 可见行在 table_lines 中的偏移

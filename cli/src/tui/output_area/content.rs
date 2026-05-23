@@ -68,6 +68,7 @@ impl super::OutputArea {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
         }
+        self.rendered_cache.content_changed(self.lines.len() + 1);
         self.lines.push_back(line);
         if !self.auto_scroll {
             self.scroll_offset += 1;
@@ -325,6 +326,7 @@ impl super::OutputArea {
     /// 清空所有内容
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.rendered_cache.content_changed(0);
         self.reset_runtime_state();
     }
 
