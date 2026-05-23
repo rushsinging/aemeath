@@ -38,9 +38,9 @@ fn test_build_commit_guidance_includes_provider_model_trailer() {
 
     assert!(guidance.contains("# Commit Message Guidance"));
     assert!(guidance.contains("git log --format=%B --grep='Co-Authored-By'"));
-    assert!(guidance.contains(
-        "Co-Authored-By: Aemeath (zhipu/glm-5.1) <github:rushsinging/aemeath>"
-    ));
+    assert!(
+        guidance.contains("Co-Authored-By: Aemeath (zhipu/glm-5.1) <github:rushsinging/aemeath>")
+    );
     assert!(guidance.contains("Do not invent human co-authors"));
 }
 
@@ -48,9 +48,9 @@ fn test_build_commit_guidance_includes_provider_model_trailer() {
 fn test_build_commit_guidance_uses_unknown_fallback() {
     let guidance = build_commit_guidance(None, None);
 
-    assert!(guidance.contains(
-        "Co-Authored-By: Aemeath (unknown/unknown) <github:rushsinging/aemeath>"
-    ));
+    assert!(
+        guidance.contains("Co-Authored-By: Aemeath (unknown/unknown) <github:rushsinging/aemeath>")
+    );
 }
 
 #[test]
@@ -85,9 +85,9 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     std::fs::remove_dir_all(cwd).unwrap();
 
     assert!(parts.dynamic_part.contains("# Commit Message Guidance"));
-    assert!(parts.dynamic_part.contains(
-        "Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"
-    ));
+    assert!(parts
+        .dynamic_part
+        .contains("Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"));
     assert!(!parts.dynamic_part.contains("Commit Style Context:"));
 }
 

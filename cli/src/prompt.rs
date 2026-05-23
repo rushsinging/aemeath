@@ -4,6 +4,9 @@ use aemeath_core::config::{paths, MemoryConfig};
 use aemeath_core::hook::HookRunner;
 use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
+mod git_context;
+use git_context::{collect_git_context, is_git_repo};
+
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 #[derive(Clone)]
 pub struct SystemPromptParts {
@@ -106,9 +109,8 @@ fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>) 
     let model = model_name
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("unknown");
-    let trailer = format!(
-        "Co-Authored-By: Aemeath ({provider}/{model}) <github:rushsinging/aemeath>"
-    );
+    let trailer =
+        format!("Co-Authored-By: Aemeath ({provider}/{model}) <github:rushsinging/aemeath>");
 
     format!(
         r#"# Commit Message Guidance
@@ -214,17 +216,6 @@ pub fn current_date() -> String {
         m += 1;
     }
     format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
-}
-
-pub async fn is_git_repo(cwd: &PathBuf) -> bool {
-    use tokio::process::Command;
-    Command::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(cwd)
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
@@ -352,92 +343,6 @@ fn format_memory_context(entries: &[MemoryEntry]) -> Option<String> {
     }
 
     Some(output)
-}
-
-pub async fn collect_git_context(cwd: &PathBuf) -> String {
-    use tokio::process::Command;
-
-    let mut parts: Vec<String> = Vec::new();
-    parts.push("# Git Context".to_string());
-
-    // Branch name
-    if let Ok(output) = Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(cwd)
-        .output()
-        .await
-    {
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !branch.is_empty() {
-            parts.push(format!("Current branch: {branch}"));
-        }
-    }
-
-    // Default branch
-    if let Ok(output) = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "origin/HEAD"])
-        .current_dir(cwd)
-        .output()
-        .await
-    {
-        let default = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !default.is_empty() && default != "origin/HEAD" {
-            let branch = default.strip_prefix("origin/").unwrap_or(&default);
-            parts.push(format!("Default branch: {branch}"));
-        }
-    }
-
-    // Git user
-    if let Ok(output) = Command::new("git")
-        .args(["config", "user.name"])
-        .current_dir(cwd)
-        .output()
-        .await
-    {
-        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !name.is_empty() {
-            parts.push(format!("Git user: {name}"));
-        }
-    }
-
-    // Status (short)
-    if let Ok(output) = Command::new("git")
-        .args(["--no-optional-locks", "status", "--short"])
-        .current_dir(cwd)
-        .output()
-        .await
-    {
-        let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !status.is_empty() {
-            let lines: Vec<&str> = status.lines().take(20).collect();
-            parts.push(format!("Status:\n{}", lines.join("\n")));
-        }
-    }
-
-    // Recent commits
-    if let Ok(output) = Command::new("git")
-        .args(["--no-optional-locks", "log", "--oneline", "-n", "5"])
-        .current_dir(cwd)
-        .output()
-        .await
-    {
-        let log = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !log.is_empty() {
-            parts.push(format!("Recent commits:\n{log}"));
-        }
-    }
-
-    let result = parts.join("\n");
-    // Truncate to ~2000 bytes, respecting UTF-8 char boundaries
-    if result.len() > 2000 {
-        let mut end = 2000;
-        while end > 0 && !result.is_char_boundary(end) {
-            end -= 1;
-        }
-        result[..end].to_string()
-    } else {
-        result
-    }
 }
 
 #[cfg(test)]
