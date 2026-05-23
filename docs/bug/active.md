@@ -159,6 +159,7 @@
 | Feature | #29 Task reminder 被动注入 | reminder：按轮次扫描并注入极简摘要 | ✅ 已完成，未确认 |
 | Feature | #30 Agent loop 收尾工作 | 收尾一致性：统一 finalize、记录停止原因、task/list 收尾检查 | ✅ 已完成，未确认 |
 | Feature | #33 优化 TaskListCreate / TaskListComplete 工具调用显示 | 展示优化：隐藏噪声，改为简洁摘要 | ✅ 已完成，未确认；已实现简洁 header、summary 详情和成功结果静默 |
+| 60 | 标识符中下划线被误判为斜体标记（如 CLAUDE_PROJECT_DIR → CLAUDEPROJECTDIR） | 中 | 已修复 | 待确认 | 2026-05 | is_flanking 检测：_ 仅在前为空白/标点/行首、后为字母数字时才作为斜体标记。同时修复 strip_inline_formatting 和 inline_markdown_spans。附带修复 table 中 inline markdown（`code`、**bold** 等）未渲染的问题 |
 
 **专案 A 相关 Feature 来源**：见 `docs/feature/active.md` 的 #18、#24、#25、#29、#30、#33。
 
