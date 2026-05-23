@@ -186,6 +186,63 @@ fn test_load_all_skills_falls_back_to_project_agents_skills() {
 }
 
 #[test]
+fn test_load_all_skills_includes_builtin_commit_skill() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_builtin_commit_skill_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&base).unwrap();
+
+    let skills = load_all_skills(&base, &[]);
+    let commit = skills
+        .get("commit")
+        .expect("commit skill should be built in");
+    let content = super::super::read_skill_content(commit);
+
+    assert_eq!(commit.name, "commit");
+    assert!(commit.aliases.contains(&"git-commit".to_string()));
+    assert!(commit.description.contains("git commit"));
+    assert!(content.contains("git status --short --branch"));
+    assert!(content.contains("git log --format=%B --grep='Co-Authored-By' -n 20"));
+    assert!(content.contains("Co-Authored-By: Aemeath"));
+    assert!(content.contains("git commit"));
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn test_project_skill_can_override_builtin_commit_skill() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_builtin_commit_override_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let project_skills = base.join(".agents").join("skills");
+    std::fs::create_dir_all(&project_skills).unwrap();
+    let mut file = std::fs::File::create(project_skills.join("commit.md")).unwrap();
+    write!(
+        file,
+        "---\nname: commit\ndescription: project commit\n---\nproject commit skill"
+    )
+    .unwrap();
+
+    let skills = load_all_skills(&base, &[]);
+
+    assert!(skills.contains_key("commit"));
+    assert_eq!(
+        skills["commit"].source_path,
+        project_skills.join("commit.md")
+    );
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn test_load_all_skills_does_not_auto_migrate_project_aemeath_skills() {
     let base = std::env::temp_dir().join(format!(
         "aemeath_skill_no_auto_migration_{}",

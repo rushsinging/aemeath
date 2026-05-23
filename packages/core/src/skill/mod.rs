@@ -42,6 +42,20 @@ struct SkillFrontmatter {
     aliases: Vec<String>,
 }
 
+const BUILTIN_SKILL_PREFIX: &str = "aemeath-builtin://";
+
+pub fn builtin_commit_skill() -> Skill {
+    Skill {
+        name: "commit".to_string(),
+        description: "Create a git commit using the repository's Commit Style Context".to_string(),
+        content: String::new(),
+        source_path: PathBuf::from(format!("{BUILTIN_SKILL_PREFIX}commit")),
+        requires_tools: Vec::new(),
+        fallback_for: Vec::new(),
+        aliases: vec!["git-commit".to_string()],
+    }
+}
+
 /// Parse a skill from a markdown file with YAML frontmatter.
 ///
 /// Only reads the YAML frontmatter (name, description, aliases, etc.) and
@@ -122,6 +136,10 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
 /// Returns the markdown body (everything after the closing `---` of the
 /// YAML frontmatter). If the file cannot be read, returns an empty string.
 pub fn read_skill_content(skill: &Skill) -> String {
+    if skill.source_path.to_string_lossy() == format!("{BUILTIN_SKILL_PREFIX}commit") {
+        return builtin_commit_skill_content().to_string();
+    }
+
     let text = match std::fs::read_to_string(&skill.source_path) {
         Ok(t) => t,
         Err(e) => {
@@ -143,6 +161,32 @@ pub fn read_skill_content(skill: &Skill) -> String {
     } else {
         String::new()
     }
+}
+
+fn builtin_commit_skill_content() -> &'static str {
+    r#"# Built-in commit skill
+
+Use this skill whenever you need to create a git commit.
+
+## Required workflow
+
+1. Inspect the working tree with `git status --short --branch`.
+2. Inspect repository commit style before writing a message. Prefer commits with AI co-author trailers:
+   `git log --format=%B --grep='Co-Authored-By' -n 20`
+3. If there are no useful co-author examples, sample recent ordinary commits with a small limit.
+4. Inspect staged and unstaged changes enough to understand the commit scope.
+5. Generate a commit message that matches this repository's Commit Style Context: title format, type/scope usage, body language, body style, footer/trailer conventions, and whether AI co-author trailers are commonly used.
+6. Do not invent human co-authors.
+7. When an AI co-author trailer is appropriate, use the exact `Co-Authored-By: Aemeath (...) <github:rushsinging/aemeath>` trailer supplied by the current system prompt.
+8. Run `git commit` with the generated message.
+
+## Safety rules
+
+- Do not stage unrelated files unless the user explicitly asks.
+- Do not amend unless the user explicitly asks.
+- If the working tree contains unrelated user changes, report them and commit only the intended paths.
+- If verification is required by the active task, verify before committing.
+"#
 }
 
 #[cfg(test)]

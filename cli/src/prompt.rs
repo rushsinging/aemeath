@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use aemeath_core::config::{paths, MemoryConfig};
+use aemeath_core::config::{MemoryConfig, paths};
 use aemeath_core::hook::HookRunner;
-use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
+use aemeath_core::memory::{MemoryEntry, MemoryStore, memory_base_dir, project_hash_from_path};
 
 mod git_context;
 use git_context::{collect_git_context, is_git_repo};
@@ -115,8 +115,8 @@ fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>) 
     format!(
         r#"# Commit Message Guidance
 When creating a git commit message:
-- First inspect this repository's recent commit history and infer its Commit Style Context.
-- Prefer sampling commits that contain `Co-Authored-By`, for example: `git log --format=%B --grep='Co-Authored-By' -n 20`.
+- Before creating any git commit, invoke the built-in `commit` skill and follow its workflow.
+- First inspect this repository's recent commit history and infer its Commit Style Context.- Prefer sampling commits that contain `Co-Authored-By`, for example: `git log --format=%B --grep='Co-Authored-By' -n 20`.
 - If there are no useful co-author examples, sample recent ordinary commits with a small limit.
 - Analyze title format, type/scope usage, body style, language, footer/trailer conventions, and whether AI co-author trailers are commonly used.
 - Keep the final commit message consistent with this repository's existing style.
