@@ -13,6 +13,8 @@ mod render;
 mod render_blocks;
 mod render_spans;
 mod render_status;
+mod rendered_cache;
+mod rendered_lines;
 pub mod scroll;
 pub mod selection;
 mod selection_render;
@@ -30,7 +32,9 @@ mod render_blocks_tests;
 pub use diff::build_diff_lines;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
-/// 可滚动的输出区域，显示对话历史
+use rendered_cache::RenderedCache;
+
+/// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
     pub lines: VecDeque<OutputLine>,
     pub scroll_offset: usize,
@@ -52,20 +56,21 @@ pub struct OutputArea {
     /// 选择结束点：(逻辑行索引, char 偏移)
     pub selection_end: Option<(usize, CharIdx)>,
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
-    /// 由 render() 构建，供 selection 使用
     pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
-    /// 渲染后的逻辑行文本覆盖：Markdown 表格等渲染文本与原始 content 不同时，selection 使用这里的数据源
+    /// 渲染后的逻辑行文本覆盖
     pub rendered_line_content: HashMap<usize, String>,
-    /// 活跃的 spinner 动画（显示为最后一行）
+    /// 活跃的 spinner 动画
     pub spinner: Option<SpinnerState>,
     /// 上次渲染时的可见高度缓存
     pub last_visible_height: usize,
     /// todo id -> subject 缓存
     pub todo_subject_cache: std::collections::HashMap<String, String>,
-    /// spinner 下方显示的任务状态行（外部更新）
+    /// spinner 下方显示的任务状态行
     pub task_status_lines: Vec<String>,
-    /// 排队的用户消息（显示在 spinner 上方）
+    /// 排队的用户消息
     pub queued_messages: Vec<String>,
+    /// 渲染缓存（滑动窗口）
+    rendered_cache: RenderedCache,
 }
 
 impl Default for OutputArea {
@@ -101,6 +106,7 @@ impl OutputArea {
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
             queued_messages: Vec::new(),
+            rendered_cache: RenderedCache::new(),
         }
     }
 }

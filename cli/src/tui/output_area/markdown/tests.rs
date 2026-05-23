@@ -174,7 +174,7 @@ fn test_parse_table_cells() {
 fn test_render_simple_table() {
     let base = Style::default().fg(theme::SUCCESS);
     let lines = &["| Name | Value |", "| --- | --- |", "| foo  | bar   |"];
-    let rendered = render_table_block(lines, base);
+    let rendered = render_table_block(lines, base, 80);
     assert_eq!(rendered.len(), 3);
     // header should be bold
     let header_spans = &rendered[0];
