@@ -1,4 +1,4 @@
-use super::{parse_skill, Skill};
+use super::{Skill, builtin_commit_skill, parse_skill};
 use crate::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -127,9 +127,12 @@ pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Sk
         }
     }
 
+    // Built-in skills (lowest priority)
+    let builtin = builtin_commit_skill();
+    map.entry(builtin.name.clone()).or_insert(builtin);
+
     map
 }
-
 /// Load skills and filter based on available tools and other skills.
 pub fn load_and_filter_skills(
     cwd: &Path,

@@ -96,20 +96,22 @@
 
 **背景**：不同项目的 commit message 风格可能不同。用户希望系统在需要创建 commit message 时参考当前项目历史提交，尤其是带 `Co-Authored-By` 的提交风格。
 
-**目标**：在 system prompt 中加入 commit guidance，但不在 session 初始化时执行 `git log` 或提前生成历史摘要。LLM 在需要创建 commit message 前，应自行分析当前仓库的 Commit Style Context，优先采样带 `Co-Authored-By` 的提交，再按项目风格生成 commit message。AI 协作者 trailer 使用固定格式 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 `LlmClient`。完整设计见 [spec](specs/044-commit-style-context.md)。
+**目标**：提供内置 `commit` skill，并在 system prompt 的 Commit Message Guidance 中要求创建 git commit 前优先调用该 skill。内置 skill 负责标准化执行流程：检查工作区、采样历史提交（优先带 `Co-Authored-By`）、归纳 Commit Style Context、检查变更范围、生成符合项目风格的 commit message，并按当前 system prompt 提供的 Aemeath trailer 规则决定是否添加 AI 协作者。仍不在 session 初始化时执行 `git log` 或提前生成历史摘要。完整设计见 [spec](specs/044-commit-style-context.md)。
 
 **建议范围**：
-1. 在 system prompt 中加入 commit guidance，要求 commit 前分析当前仓库历史风格。
-2. 优先采样带 `Co-Authored-By` 的提交；没有样本时 fallback 到近期普通提交。
-3. guidance 提供包含当前 provider/model 的 Aemeath trailer 模板。
-4. 不在 session 初始阶段自动执行 git log，不提前注入历史摘要。
-5. 不伪造人类协作者；是否添加 Aemeath trailer 由 LLM 结合历史风格和用户意图决定。
-6. TUI 与 REPL 使用同一套 prompt 构造逻辑。
+1. 新增内置 `commit` skill，作为最低优先级 fallback；项目/全局同名 skill 可覆盖。
+2. 在 system prompt 中加入 commit guidance，要求 commit 前调用内置 `commit` skill，并按 skill 流程分析当前仓库历史风格。
+3. 优先采样带 `Co-Authored-By` 的提交；没有样本时 fallback 到近期普通提交。
+4. guidance 提供包含当前 provider/model 的 Aemeath trailer 模板。
+5. 不在 session 初始阶段自动执行 git log，不提前注入历史摘要。
+6. 不伪造人类协作者；是否添加 Aemeath trailer 由 LLM 结合历史风格和用户意图决定。
+7. TUI 与 REPL 使用同一套 prompt 构造逻辑。
 
-**实现记录（2026-05-23）**：已在 system prompt dynamic context 中加入 Commit Message Guidance；该 guidance 要求 LLM 在创建 commit 前分析当前仓库历史 commit 风格，优先采样带 `Co-Authored-By` 的提交；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，provider/model 来自当前 `LlmClient`。未在 session 初始化执行 git log，也未提前生成历史摘要。
+**实现记录（2026-05-23）**：已在 system prompt dynamic context 中加入 Commit Message Guidance；该 guidance 要求 LLM 在创建 commit 前调用内置 `commit` skill，并优先采样带 `Co-Authored-By` 的提交来分析当前仓库历史 commit 风格；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，provider/model 来自当前 `LlmClient`。内置 `commit` skill 作为最低优先级 fallback 注册，项目/全局同名 skill 可覆盖；skill 内容要求检查 `git status --short --branch`、采样 commit history、检查变更范围并执行 `git commit`。未在 session 初始化执行 git log，也未提前生成历史摘要。
 
 **涉及路径**：
 - `cli/src/prompt.rs`：system prompt / dynamic context 构造。
+- `packages/core/src/skill/mod.rs`、`packages/core/src/skill/loader.rs`：内置 `commit` skill 定义、内容读取与默认注册。
 - `cli/src/tui/app/stream.rs`、`cli/src/repl/turns.rs`：调用 prompt 构造时传入 provider/model。
 - `packages/llm/src/client.rs`：已有 `provider_name()` / `model_name()` 可复用。
 

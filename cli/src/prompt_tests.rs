@@ -37,6 +37,9 @@ fn test_build_commit_guidance_includes_provider_model_trailer() {
     let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"));
 
     assert!(guidance.contains("# Commit Message Guidance"));
+    assert!(
+        guidance.contains("Before creating any git commit, invoke the built-in `commit` skill")
+    );
     assert!(guidance.contains("git log --format=%B --grep='Co-Authored-By'"));
     assert!(
         guidance.contains("Co-Authored-By: Aemeath (zhipu/glm-5.1) <github:rushsinging/aemeath>")
@@ -85,9 +88,16 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     std::fs::remove_dir_all(cwd).unwrap();
 
     assert!(parts.dynamic_part.contains("# Commit Message Guidance"));
-    assert!(parts
-        .dynamic_part
-        .contains("Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"));
+    assert!(
+        parts
+            .dynamic_part
+            .contains("Before creating any git commit, invoke the built-in `commit` skill")
+    );
+    assert!(
+        parts.dynamic_part.contains(
+            "Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"
+        )
+    );
     assert!(!parts.dynamic_part.contains("Commit Style Context:"));
 }
 
