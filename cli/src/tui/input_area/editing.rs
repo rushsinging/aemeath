@@ -101,10 +101,16 @@ impl InputArea {
             return;
         }
 
+        // 历史浏览模式：始终翻历史
+        if self.history_index.is_some() {
+            self.history_up();
+            return;
+        }
+
         let (row, _) = self.textarea.cursor();
         if row == 0 {
-            // 仅当 input 为空时触发历史翻看；非空时上键只移动光标
-            if self.is_empty() || self.history_index.is_some() {
+            // 仅当 input 为空时触发历史翻看
+            if self.is_empty() {
                 self.history_up();
             }
         } else {
@@ -118,10 +124,16 @@ impl InputArea {
             return;
         }
 
+        // 历史浏览模式：始终翻历史
+        if self.history_index.is_some() {
+            self.history_down();
+            return;
+        }
+
         let (row, _) = self.textarea.cursor();
         let line_count = self.textarea.lines().len();
         if row >= line_count - 1 {
-            self.history_down();
+            // 非历史模式，在最后一行按 down 不做任何事
         } else {
             self.textarea.move_cursor(CursorMove::Down);
         }
@@ -147,8 +159,17 @@ impl InputArea {
 
     /// Set text content
     pub fn set_text(&mut self, text: &str) {
-        self.textarea.delete_line_by_head();
-        for line in text.lines() {
+        // 全选并剪切，清空所有内容
+        self.textarea.select_all();
+        self.textarea.cut();
+        // 取消可能残留的选中状态
+        self.textarea.cancel_selection();
+
+        let lines = text.split('\n').collect::<Vec<_>>();
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                self.textarea.insert_newline();
+            }
             self.textarea.insert_str(line);
         }
     }
@@ -259,5 +280,54 @@ mod tests {
         input.move_up();
         assert!(input.history_index.is_some());
         assert_eq!(input.get_text(), "old");
+    }
+
+    #[test]
+    fn test_set_text_preserves_newlines() {
+        let mut input = rendered_input();
+        input.set_text("hello\nworld");
+        assert_eq!(input.get_text(), "hello\nworld", "set_text 应保留换行符");
+    }
+
+    #[test]
+    fn test_set_text_single_line() {
+        let mut input = rendered_input();
+        input.set_text("just one line");
+        assert_eq!(input.get_text(), "just one line");
+    }
+
+    #[test]
+    fn test_set_text_empty() {
+        let mut input = rendered_input();
+        input.set_text("");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn test_history_multiline_roundtrip() {
+        let mut input = rendered_input();
+        let multiline = "line one\nline two\nline three";
+        input.add_history(multiline);
+
+        // 翻历史到多行条目
+        input.move_up();
+        assert_eq!(input.get_text(), multiline, "历史恢复应保留多行换行");
+    }
+
+    #[test]
+    fn test_history_up_down_multiline() {
+        let mut input = rendered_input();
+        input.add_history("single");
+        input.add_history("multi\nline");
+
+        // 翻到最近（multi\nline）
+        input.move_up();
+        assert_eq!(input.get_text(), "multi\nline");
+        // 再翻到更早（single）
+        input.move_up();
+        assert_eq!(input.get_text(), "single");
+        // 翻回来（multi\nline）
+        input.move_down();
+        assert_eq!(input.get_text(), "multi\nline");
     }
 }
