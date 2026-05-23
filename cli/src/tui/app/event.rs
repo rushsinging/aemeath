@@ -85,6 +85,7 @@ pub enum AppEvent {
         blocked: bool,
         error: Option<String>,
     },
+    /// Current tool path base/working root changed.
+    WorkingDirectoryChanged(String),
 }
-
 pub type UiEvent = AppEvent;

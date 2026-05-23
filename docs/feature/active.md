@@ -98,7 +98,7 @@
 
 **目标**：当 Bash 切换到某个 worktree 根目录后，后续 Read/Edit/Write/Glob/Grep/LSP 等相对路径操作都以当前 `path_base` 为准，安全边界以当前 `working_root` 为准；hook 执行环境变量与进程 cwd 使用当前项目目录；TUI 状态栏显示启动工作根，减少误判。
 
-**实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中开始实现：`ToolContext` 增加可更新的 `working_root`；Bash 执行结束同步 `$PWD` 时同时更新 `path_base` 与 `working_root`；文件/搜索工具改用当前 `working_root` 做边界校验；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}`、`{CLAUDE_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏新增当前工作根展示。
+**实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中实现：`ToolContext` 增加可更新的 `working_root`，Bash 执行结束同步 `$PWD` 时更新 `path_base` 并通过 `git rev-parse --show-toplevel` 推导当前 checkout/worktree 根作为安全边界；Read/Edit/Write/Glob/Grep/LSP 改用当前 `path_base` 解析相对路径并以当前 `working_root` 校验；Agent scope 与子代理系统提示使用当前 `path_base`；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}`、`{CLAUDE_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏在 Bash/Agent 改变工作目录后刷新当前工作目录显示。
 
 ### #42 权限管控系统：交互式外部授权 + 统一权限评估
 

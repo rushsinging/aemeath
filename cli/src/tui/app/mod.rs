@@ -89,7 +89,7 @@ pub struct AskUserState {
     pub allow_free_input: bool,
 }
 
-fn display_working_dir(path: &Path) -> String {
+pub(crate) fn display_working_dir(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())

@@ -86,7 +86,8 @@ impl Tool for AgentTool {
         // We deliberately do NOT route these through `log::*` because that
         // would either corrupt the TUI (if stderr) or go to a file nobody
         // reads. Advisory UI messages belong in the UI channel.
-        let scope = analyze_task_scope(prompt, &ctx.cwd);
+        let cwd = ctx.current_path_base();
+        let scope = analyze_task_scope(prompt, &cwd);
 
         // Scope analysis may produce warnings but never blocks — the calling
         // agent is responsible for deciding whether the task is appropriate.
@@ -104,7 +105,7 @@ impl Tool for AgentTool {
             None => return ToolResult::error("agent runner not available"),
         };
 
-        let cwd_str = ctx.cwd.to_string_lossy();
+        let cwd_str = cwd.to_string_lossy();
         let turns = max_turns.unwrap_or(DEFAULT_AGENT_MAX_TURNS);
 
         // Resolve role and model:

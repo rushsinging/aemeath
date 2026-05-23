@@ -1,3 +1,4 @@
+use crate::path_security::validate_and_normalize_path_from_base;
 use aemeath_core::compact::safe_slice;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
@@ -64,10 +65,21 @@ impl Tool for LspTool {
             .unwrap_or_else(|| detect_language(file_path));
 
         let path_base = ctx.current_path_base();
+        let working_root = ctx.current_working_root();
+        let file_path = match validate_and_normalize_path_from_base(
+            file_path,
+            &path_base,
+            &working_root,
+            ctx.allow_all,
+        ) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
+        let file_path = file_path.to_string_lossy().to_string();
 
         match operation {
-            "diagnostics" => get_diagnostics(file_path, &language, &path_base).await,
-            "symbols" => get_symbols(file_path, &language, &path_base).await,
+            "diagnostics" => get_diagnostics(&file_path, &language, &path_base).await,
+            "symbols" => get_symbols(&file_path, &language, &path_base).await,
             _ => ToolResult::error(format!("unsupported operation: {operation}")),
         }
     }
