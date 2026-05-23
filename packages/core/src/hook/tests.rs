@@ -187,10 +187,14 @@ mod hook_tests {
     #[test]
     fn test_expand_command_placeholders_project_dir() {
         let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
-        let command =
-            runner.expand_command_placeholders("\"{AEMEATH_PROJECT_DIR}/build.sh\" --check");
+        let command = runner.expand_command_placeholders(
+            "\"{AEMEATH_PROJECT_DIR}/build.sh\" --project \"{CLAUDE_PROJECT_DIR}\"",
+        );
 
-        assert_eq!(command, "\"/tmp/aemeath-project/build.sh\" --check");
+        assert_eq!(
+            command,
+            "\"/tmp/aemeath-project/build.sh\" --project \"/tmp/aemeath-project\""
+        );
     }
 
     #[test]
@@ -265,7 +269,7 @@ mod hook_tests {
 
         let hook = HookEntry {
             matcher: String::new(),
-            command: "printf '%s|%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"{AEMEATH_PROJECT_DIR}\" \"$PWD\"".to_string(),
+            command: "printf '%s|%s|%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"{AEMEATH_PROJECT_DIR}\" \"{CLAUDE_PROJECT_DIR}\" \"$PWD\"".to_string(),
             timeout: 5,
         };
         let runner = HookRunner::empty(initial_dir.display().to_string());
@@ -281,12 +285,13 @@ mod hook_tests {
 
         assert!(!result.blocked);
         assert!(result.error.is_none());
-        assert_eq!(parts.len(), 4);
+        assert_eq!(parts.len(), 5);
         assert_eq!(parts[0], expected);
         assert_eq!(parts[1], expected);
         assert_eq!(parts[2], expected);
+        assert_eq!(parts[3], expected);
         assert_eq!(
-            std::fs::canonicalize(parts[3]).unwrap(),
+            std::fs::canonicalize(parts[4]).unwrap(),
             std::fs::canonicalize(&worktree_dir).unwrap()
         );
 

@@ -202,7 +202,10 @@ impl HookRunner {
     }
 
     pub(crate) fn expand_command_placeholders(&self, command: &str) -> String {
-        command.replace("{AEMEATH_PROJECT_DIR}", &self.project_dir())
+        let project_dir = self.project_dir();
+        command
+            .replace("{AEMEATH_PROJECT_DIR}", &project_dir)
+            .replace("{CLAUDE_PROJECT_DIR}", &project_dir)
     }
 
     /// 运行指定事件的所有匹配 hook
