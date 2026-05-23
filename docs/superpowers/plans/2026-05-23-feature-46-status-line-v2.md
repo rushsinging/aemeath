@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Redesign the two-line TUI status line so line 1 shows runtime/model/token throughput/session/API call information and line 2 shows the actual working path, git/worktree identity, and permission mode.
+**Goal:** Redesign the two-line TUI status line so line 1 shows runtime/model/token throughput/API call information and line 2 shows the actual working path, git/worktree identity, permission mode, and full session id.
 
-**Architecture:** Keep the change local to the existing TUI status bar and app context wiring. `StatusBar` continues to own runtime counters and `StatusLineContext`, but formatting is changed to: line 1 = status/model/token-in/token-out/tokens-per-second/context percentage/session/API calls, line 2 = one primary path plus git/worktree plus permission; only show both cwd/path_base and root/working_root when they differ. Path formatting must preserve a leading `~` or `/` on normal-width terminals so the user can verify it is a real path, not an abstract project label.
+**Architecture:** Keep the change local to the existing TUI status bar and app context wiring. `StatusBar` continues to own runtime counters and `StatusLineContext`, but formatting is changed to: line 1 = status/model/token-in/token-out/tokens-per-second/context percentage/API calls, line 2 = one primary path plus git/worktree plus permission plus full session id; only show both cwd/path_base and root/working_root when they differ. Path formatting must preserve a leading `~` or `/` on normal-width terminals so the user can verify it is a real path, not an abstract project label.
 
 **Tech Stack:** Rust, ratatui `Line`/`Span` rendering, existing `theme` colors, `cargo test -p aemeath-cli status_bar -- --nocapture`, `.agents/hooks/check-architecture-guards.sh`, `cargo check -p aemeath-cli`.
 
@@ -13,15 +13,16 @@
 ## File Structure
 
 - Modify `cli/src/tui/status_bar.rs`
-  - Remove cost from visible runtime row; keep session and API calls.
-  - Reorder runtime row to status, model, token in, token out, t/s, ctx%, session, API calls.
+  - Remove cost and session from visible runtime row; keep API calls.
+  - Reorder runtime row to status, model, token in, token out, t/s, ctx%, API calls.
   - Render context row with semantic spans so the second row has visible colors.
 - Modify `cli/src/tui/status_bar_format.rs`
-  - Replace `ctx ... │ root ... │ ... │ Perm:...` default text with `path │ git │ permission`.
+  - Replace `ctx ... │ root ... │ ... │ Perm:...` default text with `path │ git │ permission │ session <full-id>`.
   - Preserve leading `~` or `/` where possible.
   - Include root only when `path_base != working_root` after normalization.
+  - Show full session id in the context row when available.
 - Modify `cli/src/tui/status_bar_tests.rs`
-  - Update old expectations and add regression tests for no `ctx aemeath`, no cost, visible session/API calls, visible second-row colors, path prefix, root-only-when-different.
+  - Update old expectations and add regression tests for no `ctx aemeath`, no cost, visible API calls, full session in context row, visible second-row colors, path prefix, root-only-when-different.
 - Modify `cli/src/tui/app/mod.rs`
   - Stop using `display_working_dir()` for status line context; pass full cwd display path with home-directory compaction.
   - Keep `display_working_dir()` only if other callers still need a short label.
@@ -33,7 +34,7 @@
 - `cli/src/tui/status_bar.rs` currently has `input_tokens`, `output_tokens`, `last_input_tokens`, `context_size`, and `tps` fields already wired.
 - `App::draw()` sets tokens from `self.total_input_tokens`, `self.total_output_tokens`, and `self.last_input_tokens` before rendering.
 - `UiEvent::TokensPerSecondUpdate` / `StreamingComplete` already call `status_bar.set_tps(tps)`.
-- Current runtime row still contains `Think:ON/OFF`, verbose `Session`, and `Calls`; the user wants token in/out, t/s, session, and API calls, but does not want cost.
+- Current runtime row still contains `Think:ON/OFF`, verbose `Session`, and `Calls`; the user wants token in/out, t/s, and API calls on the runtime row, full session id on the context row, and does not want cost.
 - Current context row starts with `ctx ...` and shows `root ...` even when both paths are the same, which the user rejected as confusing.
 - Current `App::new()` calls `display_working_dir(&cwd)` and therefore collapses the path to `aemeath`; this must change to a real `~` or `/` path.
 
@@ -51,7 +52,7 @@ Append these tests to `cli/src/tui/status_bar_tests.rs`:
 
 ```rust
 #[test]
-fn test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost() {
+fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session() {
     let mut bar = StatusBar::new();
     bar.set_success("Ready");
     bar.set_model("zhipu/glm-5.1");
@@ -69,8 +70,9 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost() {
     assert!(text.contains("out 1.8k"));
     assert!(text.contains("42 t/s"));
     assert!(text.contains("ctx 37%"));
-    assert!(text.contains("s 019-session") || text.contains("session 019-session"));
     assert!(text.contains("api 7"));
+    assert!(!text.to_ascii_lowercase().contains("session"));
+    assert!(!text.contains("019-session"));
     assert!(!text.to_ascii_lowercase().contains("cost"));
     assert!(!text.contains('$'));
 }
@@ -82,10 +84,10 @@ Run:
 
 ```bash
 cd /Users/guoyuqi/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2
-cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost -- --nocapture
+cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session -- --nocapture
 ```
 
-Expected: FAIL because runtime row currently uses `In:` / `Out:` labels and uses verbose `Session` / `Calls` labels instead of the compact session/API style.
+Expected: FAIL because runtime row currently uses `In:` / `Out:` labels and still includes verbose `Session`; V2 runtime row should keep compact `api` but move session to the context row.
 
 - [ ] **Step 3: Update runtime segments**
 
@@ -123,11 +125,6 @@ In `cli/src/tui/status_bar.rs`, replace the body of `fn runtime_segments(&self) 
             segments.push((format!(" ctx {}% ", pct), RuntimeSegmentStyle::ContextPct(pct)));
         }
 
-        if let Some(ref session_id) = self.session_id {
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-            segments.push((format!(" s {} ", session_id), RuntimeSegmentStyle::Muted));
-        }
-
         if self.api_calls > 0 {
             segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((format!(" api {} ", self.api_calls), RuntimeSegmentStyle::Muted));
@@ -137,14 +134,14 @@ In `cli/src/tui/status_bar.rs`, replace the body of `fn runtime_segments(&self) 
     }
 ```
 
-Do not add cost to `runtime_segments()`. Keep session and API calls visible in compact lowercase form.
+Do not add cost or session id to `runtime_segments()`. Keep API calls visible in compact lowercase form.
 
 - [ ] **Step 4: Run runtime row tests**
 
 Run:
 
 ```bash
-cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_session_and_api_without_cost -- --nocapture
+cargo test -p aemeath-cli test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session -- --nocapture
 ```
 
 Expected: PASS.
@@ -178,10 +175,11 @@ fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
     );
     bar.set_git_context(WorktreeKind::Main, "main");
     bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(100);
 
-    assert_eq!(row, "~/Nextcloud/work/claudecode/aemeath │ main │ AskMe");
+    assert_eq!(row, "~/Nextcloud/work/claudecode/aemeath │ main │ AskMe │ session 019-session-full");
     assert!(!row.contains("ctx "));
     assert!(!row.contains("root "));
     assert!(!row.contains("Perm:"));
@@ -202,6 +200,7 @@ fn test_context_row_shows_root_only_when_different() {
     assert!(row.contains("~/Nextcloud/work/claudecode/aemeath/cli"));
     assert!(row.contains("root ~/Nextcloud/work/claudecode/aemeath"));
     assert!(row.contains(" │ main │ AskMe"));
+    assert!(row.contains("session 019-session-full"));
 }
 
 #[test]
@@ -219,7 +218,7 @@ fn test_context_row_worktree_uses_worktree_branch_label() {
     assert!(row.contains("~"));
     assert!(row.contains(".worktrees/redesign-46-status-line-v2"));
     assert!(row.contains("worktree:redesign/46-status-line-v2"));
-    assert!(row.ends_with("AskMe"));
+    assert!(row.ends_with("session 019-session-full"));
 }
 
 #[test]
@@ -237,7 +236,7 @@ fn test_context_row_narrow_preserves_path_git_and_permission() {
     assert!(row.chars().count() <= 64);
     assert!(row.starts_with('~') || row.starts_with('…'));
     assert!(row.contains("worktree:") || row.contains("redesign/46-status-line-v2"));
-    assert!(row.ends_with("AllowAll"));
+    assert!(row.ends_with("session 019-session-full") || row.ends_with("AllowAll"));
 }
 ```
 
@@ -323,10 +322,17 @@ pub(crate) fn context_row_text(context: &StatusLineContext, width: usize) -> Str
 fn context_row_fields(context: &StatusLineContext, width: usize) -> Vec<String> {
     let git = git_text(context);
     let permission = context.permission_mode.clone();
+    let session = context
+        .session_id
+        .as_ref()
+        .filter(|session| !session.is_empty())
+        .map(|session| format!("session {session}"));
     let paths_differ = normalized_path(&context.path_base) != normalized_path(&context.working_root);
     let fixed_len = git.chars().count()
         + permission.chars().count()
-        + FIELD_SEPARATOR.chars().count() * if paths_differ { 3 } else { 2 };
+        + session.as_ref().map(|s| s.chars().count()).unwrap_or(0)
+        + FIELD_SEPARATOR.chars().count()
+            * ((if paths_differ { 3 } else { 2 }) + usize::from(session.is_some()));
     let available_for_paths = width.saturating_sub(fixed_len).max(MIN_PATH_WIDTH);
 
     let mut fields = Vec::new();
@@ -342,6 +348,9 @@ fn context_row_fields(context: &StatusLineContext, width: usize) -> Vec<String> 
     }
     fields.push(git);
     fields.push(permission);
+    if let Some(session) = session {
+        fields.push(session);
+    }
     fields
 }
 
@@ -603,8 +612,9 @@ status line V2：第一行展示运行状态、模型、token in/out、t/s、ctx
 In the acceptance criteria, include these bullets:
 
 ```markdown
-- 第一行必须包含 token in、token out、tokens/s、ctx%、session、api calls，且不显示 cost。
+- 第一行必须包含 token in、token out、tokens/s、ctx%、api calls，且不显示 cost 或 session。
 - 第二行不得默认显示 `ctx aemeath`；路径必须可识别为 `~` 或 `/` 开头的真实路径，窄屏可中间省略。
+- 第二行在 session 存在时必须显示完整 session id（格式 `session <id>`）。
 - cwd/path_base 与 working_root 相同时只显示一个路径；不一致时才显示 `root ...`。
 - git 主分支显示 `main`，worktree 显示 `worktree:<branch>`，不得出现 `main:main`。
 - 权限模式直接显示 `AskMe` / `AllowAll` 等值，不加空的 `Perm:` 标签。
@@ -654,6 +664,6 @@ git commit -m "docs: update status line v2 tracking (refs #46)"
 
 ## Self-Review
 
-- Spec coverage: runtime row, token in/out, t/s, ctx%, removal of cost/session/calls, path-first context row, cwd/root deduplication, worktree label, permission display, color regression, and docs tracking are each covered by tasks.
+- Spec coverage: runtime row, token in/out, t/s, ctx%, API calls, removal of cost/runtime-session, full session in context row, path-first context row, cwd/root deduplication, worktree label, permission display, color regression, and docs tracking are each covered by tasks.
 - Placeholder scan: no TBD/TODO/fill-in-later placeholders remain.
 - Type consistency: plan uses existing `StatusBar`, `StatusLineContext`, `WorktreeKind`, `set_context_paths`, `set_git_context`, `set_permission_mode`, `set_tokens`, `set_tps`, and `context_row_text` names already present in the current codebase.
