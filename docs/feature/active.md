@@ -17,6 +17,31 @@
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 | 44 | 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message | 中 | 待实施 | 未确认 | 在目标项目（如 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform`）中读取 git log，分析带 `Co-Authored-By` 的 commit message 风格，并在需要创建 commit message 时提示 LLM 按该项目既有风格生成。 |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 未确认 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
+| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待实施 | 未确认 | 当前 status line 只有一行信息容量不足；需要增加第二行，用于显示当前 cwd/工作根/worktree 路径、分支或上下文状态，确认此前 cwd 显示能力是否丢失，并在 worktree 切换场景下明确展示当前操作目录。 |
+
+### #46 TUI status line 增加第二行并显示 cwd/current worktree
+
+**状态**：待实施
+
+**背景**：当前 TUI status line 只有一行，信息容量不足。用户反馈“一行有点少”，并记得之前似乎增加过 cwd 显示，需要确认当前是否丢失或被布局压缩。随着 Feature #43/#45 要求 worktree 上下文切换，UI 必须清楚展示当前操作目录，避免用户误以为正在 worktree 中，实际仍在 main 工作区。
+
+**目标**：将 status line 扩展为两行：
+1. 第一行保留当前模型、token/cost、状态、快捷键等核心运行状态。
+2. 第二行用于显示当前 cwd/working_root/worktree、git branch、权限模式（如 allow all）或关键上下文提示。
+
+**建议范围**：
+1. 检查历史实现中是否曾显示 cwd，如已存在但被移除/覆盖，应恢复并适配两行布局。
+2. 第二行路径应优先显示当前工具上下文的 path_base/working_root，而不是仅进程启动 cwd。
+3. 当处于 git worktree 时，应明确显示 worktree 路径和分支；当在 main 工作区时也应显示 main/root 标识。
+4. 路径过长时做中间省略，保留仓库名、worktree 名和末尾相对路径。
+5. 与 EnterWorktree/ExitWorktree、Allow All 外部授权路径联动，状态变化后立即刷新。
+6. 确保增加第二行后 output/input 区域布局高度正确，不遮挡、不越界。
+
+**涉及路径**：
+- TUI status line 渲染逻辑
+- layout 高度分配逻辑
+- ToolContext/path_base/working_root 状态读取
+- git branch/worktree 状态展示逻辑
 
 ### #45 为 LLM 提供 EnterWorktree / ExitWorktree 工具
 
