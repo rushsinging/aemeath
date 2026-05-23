@@ -27,3 +27,4 @@ pub mod task;
 pub mod token_estimation;
 pub mod tool;
 pub mod tool_result_storage;
+pub mod worktree;

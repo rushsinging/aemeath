@@ -58,6 +58,7 @@ fn test_ctx() -> ToolContext {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
+        context_stack: Arc::new(std::sync::Mutex::new(Vec::new())),
     }
 }
 
