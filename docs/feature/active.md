@@ -46,7 +46,7 @@
 
 **目标**：当 Bash 切换到某个 worktree 根目录后，后续 Read/Edit/Write/Glob/Grep/LSP 等相对路径操作都以当前 `path_base` 为准，安全边界以当前 `working_root` 为准；hook 执行环境变量与进程 cwd 使用当前项目目录；TUI 状态栏显示启动工作根，减少误判。
 
-**实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中开始实现：`ToolContext` 增加可更新的 `working_root`；Bash 执行结束同步 `$PWD` 时同时更新 `path_base` 与 `working_root`；文件/搜索工具改用当前 `working_root` 做边界校验；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏新增当前工作根展示。
+**实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中开始实现：`ToolContext` 增加可更新的 `working_root`；Bash 执行结束同步 `$PWD` 时同时更新 `path_base` 与 `working_root`；文件/搜索工具改用当前 `working_root` 做边界校验；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}`、`{CLAUDE_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏新增当前工作根展示。
 
 ### #42 Allow All 模式下支持访问用户明确授权的 workspace 外路径
 
