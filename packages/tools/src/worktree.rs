@@ -53,10 +53,10 @@ impl Tool for EnterWorktreeTool {
 
     fn description(&self) -> &'static str {
         "进入指定的 git worktree 目录，将当前工作上下文压栈保存。\
-         使用场景：当需要在不同分支的 worktree 中并行工作时，可以切换到目标 worktree \
+         使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree \
          进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。\
-         支持嵌套切换（多次 EnterWorktree 后可逐层 ExitWorktree 恢复）。\
-         注意：目标路径必须属于当前 git 仓库的 worktree。"
+         注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。\
+         目标路径必须属于当前 git 仓库的 worktree。"
     }
 
     fn input_schema(&self) -> Value {

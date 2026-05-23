@@ -157,6 +157,17 @@ impl ToolContext {
 
     /// 进入指定 worktree：push 当前上下文，然后切换 path_base/working_root
     pub fn enter_worktree(&self, path: PathBuf) -> Result<WorkingContext, String> {
+        // 拒绝嵌套：必须先 ExitWorktree 再 EnterWorktree
+        {
+            let stack = self
+                .context_stack
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if !stack.is_empty() {
+                return Err("已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的".to_string());
+            }
+        }
+
         let path = if !path.is_absolute() {
             self.current_path_base().join(path)
         } else {

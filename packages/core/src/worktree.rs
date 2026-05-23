@@ -90,4 +90,20 @@ mod tests {
         let ctx = new_test_context();
         assert!(ctx.enter_worktree(PathBuf::from("/nonexistent/path")).is_err());
     }
+
+    #[test]
+    fn test_enter_worktree_rejects_nested_enter() {
+        let ctx = new_test_context();
+        // 模拟已在 worktree 中（栈非空）
+        ctx.context_stack
+            .lock()
+            .unwrap()
+            .push(WorkingContext {
+                path_base: PathBuf::from("/tmp/prev"),
+                working_root: PathBuf::from("/tmp/prev"),
+            });
+        let result = ctx.enter_worktree(PathBuf::from("/tmp/another"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("先 ExitWorktree"));
+    }
 }
