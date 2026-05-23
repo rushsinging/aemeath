@@ -222,6 +222,8 @@ mod tests {
             "TaskGet",
             "TaskOutput",
             "TaskStop",
+            "EnterWorktree",
+            "ExitWorktree",
         ] {
             assert!(
                 !registry.contains(forbidden),
