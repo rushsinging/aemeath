@@ -1,3 +1,4 @@
+use super::done::input_queue_preview;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
 use crate::tui::app::msg::Cmd;
@@ -16,20 +17,6 @@ fn build_option_line_ranges(start: usize, options: &[String]) -> Vec<std::ops::R
         next += line_count;
     }
     ranges
-}
-
-fn input_queue_preview(queue: &std::collections::VecDeque<String>) -> String {
-    queue
-        .front()
-        .map(|msg| {
-            let preview: String = msg.chars().take(80).collect();
-            if msg.chars().count() > 80 {
-                format!("{preview}…")
-            } else {
-                preview
-            }
-        })
-        .unwrap_or_default()
 }
 
 impl App {
@@ -358,14 +345,7 @@ impl App {
                     self.input_area.is_empty(),
                     input_queue_preview(&self.input_queue)
                 );
-                self.output_area.finish_streaming();
-                self.output_area.stop_spinner();
-                self.tool_call_active = false;
-                self.active_tool_call_ids.clear();
-                self.is_processing = false;
-                self.status_bar.set_success("Ready");
-                self.push_session_reminder_recap();
-                self.maybe_auto_reflect(ui_tx);
+                self.handle_done(ui_tx, None);
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -383,15 +363,7 @@ impl App {
                     self.input_area.is_empty(),
                     input_queue_preview(&self.input_queue)
                 );
-                self.output_area.push_done(elapsed);
-                self.output_area.finish_streaming();
-                self.output_area.stop_spinner();
-                self.tool_call_active = false;
-                self.active_tool_call_ids.clear();
-                self.is_processing = false;
-                self.status_bar.set_success("Ready");
-                self.push_session_reminder_recap();
-                self.maybe_auto_reflect(ui_tx);
+                self.handle_done(ui_tx, Some(elapsed));
             }
         }
 
