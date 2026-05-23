@@ -54,7 +54,6 @@ pub enum StatusType {
 enum RuntimeSegmentStyle {
     Model,
     Border,
-    Thinking(bool),
     Status(StatusType),
     Muted,
     ContextPct(u64),
@@ -118,7 +117,9 @@ impl StatusBar {
     }
 
     pub fn set_session_id(&mut self, id: &str) {
-        self.session_id = Some(id.to_string());
+        let id = id.to_string();
+        self.session_id = Some(id.clone());
+        self.context.session_id = Some(id);
     }
 
     pub fn set_model(&mut self, model: &str) {
@@ -213,45 +214,40 @@ impl StatusBar {
 
     fn runtime_segments(&self) -> Vec<(String, RuntimeSegmentStyle)> {
         let mut segments = Vec::new();
-        if let Some(ref model) = self.model {
-            segments.push((format!(" {} ", model), RuntimeSegmentStyle::Model));
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-        }
-
-        segments.push((
-            format!(" Think:{} │", if self.thinking { "ON" } else { "OFF" }),
-            RuntimeSegmentStyle::Thinking(self.thinking),
-        ));
         segments.push((
             format!(" {} ", self.status),
             RuntimeSegmentStyle::Status(self.status_type),
         ));
+        if let Some(ref model) = self.model {
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+            segments.push((format!(" {} ", model), RuntimeSegmentStyle::Model));
+        }
+        segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
         segments.push((
-            format!(
-                " In: {} / Out: {} ",
-                format_tokens(self.input_tokens),
-                format_tokens(self.output_tokens)
-            ),
+            format!(" in {} ", format_tokens(self.input_tokens)),
+            RuntimeSegmentStyle::Muted,
+        ));
+        segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+        segments.push((
+            format!(" out {} ", format_tokens(self.output_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
         if self.tps > 0.0 {
-            segments.push((
-                format!(" {:.0} t/s │", self.tps),
-                RuntimeSegmentStyle::Border,
-            ));
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+            segments.push((format!(" {:.0} t/s ", self.tps), RuntimeSegmentStyle::Muted));
         }
         if self.context_size > 0 {
             let pct = self.context_pct();
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((
-                format!("Ctx: {}% │", pct),
+                format!(" ctx {}% ", pct),
                 RuntimeSegmentStyle::ContextPct(pct),
             ));
-        } else {
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Muted));
         }
-        if let Some(ref id) = self.session_id {
+        if self.api_calls > 0 {
+            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((
-                format!(" Session: {} │ Calls: {} ", id, self.api_calls),
+                format!(" api {} ", self.api_calls),
                 RuntimeSegmentStyle::Muted,
             ));
         }
@@ -272,8 +268,6 @@ impl StatusBar {
                 .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
             RuntimeSegmentStyle::Border => Style::default().fg(theme::BORDER),
-            RuntimeSegmentStyle::Thinking(true) => Style::default().fg(theme::SUCCESS),
-            RuntimeSegmentStyle::Thinking(false) => Style::default().fg(theme::TEXT_DIM),
             RuntimeSegmentStyle::Status(StatusType::Normal) => Style::default().fg(theme::TEXT),
             RuntimeSegmentStyle::Status(StatusType::Success) => Style::default().fg(theme::SUCCESS),
             RuntimeSegmentStyle::Status(StatusType::Warning) => Style::default().fg(theme::WARNING),
@@ -295,10 +289,40 @@ impl StatusBar {
 
     fn context_row_spans(&self, width: usize, base: Style) -> Vec<Span<'static>> {
         let text = self.context_row_text(width);
-        if self.selection_row != StatusBarRow::Context {
-            return vec![Span::styled(text, Style::default().fg(theme::TEXT_MUTED))];
+        if self.selection_row == StatusBarRow::Context {
+            return self.spans_with_selection(text, base);
         }
-        self.spans_with_selection(text, base)
+        let parts: Vec<&str> = text.split(" │ ").collect();
+        let has_session = parts
+            .last()
+            .is_some_and(|part| part.starts_with("session "));
+        let has_root = parts.get(1).is_some_and(|part| part.starts_with("root "));
+        let git_index = 1 + usize::from(has_root);
+        let permission_index = git_index + 1;
+        let session_index = permission_index + usize::from(has_session);
+        let mut spans = Vec::new();
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::styled(" │ ", Style::default().fg(theme::BORDER)));
+            }
+            let style = if index == 0 {
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD)
+            } else if has_root && index == 1 {
+                Style::default().fg(theme::TEXT_MUTED)
+            } else if index == git_index {
+                Style::default().fg(theme::SUCCESS)
+            } else if index == permission_index {
+                Style::default().fg(theme::WARNING)
+            } else if has_session && index == session_index {
+                Style::default().fg(theme::TEXT_MUTED)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            };
+            spans.push(Span::styled((*part).to_string(), style));
+        }
+        spans
     }
 
     fn runtime_row_spans_with_selection(
@@ -322,3 +346,6 @@ impl StatusBar {
 #[cfg(test)]
 #[path = "status_bar_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "status_bar_v2_tests.rs"]
+mod v2_tests;

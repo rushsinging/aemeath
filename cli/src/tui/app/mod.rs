@@ -3,6 +3,9 @@ mod resume;
 mod run_loop;
 mod runtime;
 mod session_lifecycle;
+#[cfg(test)]
+#[path = "status_path_tests.rs"]
+mod status_path_tests;
 
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use aemeath_core::message::Message;
@@ -97,6 +100,21 @@ pub(crate) fn display_working_dir(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |name| name.to_string())
 }
 
+pub(crate) fn display_status_path(path: &Path) -> String {
+    let raw = path.display().to_string();
+    let Some(home) = dirs::home_dir() else {
+        return raw;
+    };
+    let home = home.display().to_string();
+    if raw == home {
+        "~".to_string()
+    } else if let Some(rest) = raw.strip_prefix(&(home + "/")) {
+        format!("~/{rest}")
+    } else {
+        raw
+    }
+}
+
 pub(crate) fn git_branch_for(path: &Path) -> Option<String> {
     let output = Command::new("git")
         .args(["branch", "--show-current"])
@@ -144,7 +162,7 @@ impl App {
         let mut status_bar = StatusBar::new();
         status_bar.set_session_id(&session_id);
         status_bar.set_model(&model);
-        let cwd_display = display_working_dir(&cwd);
+        let cwd_display = display_status_path(&cwd);
         status_bar.set_context_paths(cwd_display.clone(), cwd_display);
         if let Some(branch) = git_branch_for(&cwd) {
             status_bar.set_git_context(worktree_kind_for(&cwd), branch);
