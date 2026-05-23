@@ -1,189 +1,363 @@
 # #36 多 Agent 框架 — Spec / 状态机设计
 
+> **DDD 设计参考**：[Multi-Agent 框架 DDD 设计](../../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) — ProjectTask 是 Project 聚合的子实体；WorkItem、AgentRun、ControllerLease、ExecutorAssignment 属于 Orchestration Context；OutboxEvent 是 MongoDB 状态写入与 Redis 发布之间的一致性边界。
+
 状态枚举 Rust 侧使用 PascalCase，序列化到 MongoDB 使用 snake_case（通过 `#[serde(rename_all = "snake_case")]`）。
 
-### RequirementStatus（Requirement 状态枚举）
+## 核心状态枚举
+
+### ConversationStatus
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConversationStatus {
+    Active,
+    Archived,
+}
+```
+
+### RequirementStatus
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RequirementStatus {
-    Pending,        // 待分析
-    Analyzing,      // Assistant 正在分析中（原子抢占，Assistant 是后台 worker）
-    Draft,          // 草案已产出，等待用户确认（允许多轮 Draft→Draft）
-    InProgress,     // 关联 ProjectTask 正在执行中
-    Completed,      // 所有关联 ProjectTask 为 Completed 或 Cancelled
-    Rejected,       // 用户驳回草案；重新提交后 → Analyzing
+    Pending,        // 待分析；Scheduler 会创建 AnalyzeRequirement WorkItem
+    Analyzing,      // Assistant WorkItem 正在执行
+    Draft,          // 草案已产出，等待用户确认
+    InProgress,     // 关联 Project/Task 正在执行中
+    Completed,      // 所有关联 Project 终态且成功完成
+    Rejected,       // 用户驳回草案
     Cancelled,      // 用户取消
 }
 ```
 
-### ProjectStatus（Project 状态枚举）
+### ProjectStatus
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectStatus {
-    Pending,        // 待 Scheduler 分配 Executor
-    Assigned,       // 已分配 Executor，等待 Accept（超时 60s → Pending）
-    InProgress,     // Executor 已接受并正在执行
-    Blocked,        // 等待用户反馈，Agent 主动提醒用户解锁（无系统自动超时）
-    Failed,         // 执行失败终态之一；普通失败不自动回退 Pending，显式人工重试/重开除外
-    Completed,      // 全部 ProjectTask 完成（冻结）
-    Cancelled,      // 用户 / Scheduler 终止
+    Pending,        // 等待 Scheduler 创建执行类 WorkItem
+    Assigned,       // 已有活跃 ExecutorAssignment / WorkItem lease，等待执行开始
+    InProgress,     // Executor 已开始执行
+    Blocked,        // 等待用户反馈
+    Failed,         // 执行失败终态之一；需人工重开
+    Completed,      // 全部 ProjectTask 完成
+    Cancelled,      // 用户或系统取消
 }
 ```
 
-### ProjectTaskStatus（ProjectTask 状态枚举）
+### ProjectTaskStatus
+
+> **DDD 语义**：ProjectTask 是 Project 聚合的子实体，所有状态变更通过 Project Context 应用服务完成。执行系统派发的是 WorkItem，不是直接派发 ProjectTask。
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectTaskStatus {
-    Pending,        // 待执行（Executor 按 DAG 调度）
-    InProgress,     // 正在执行
-    InReview,       // 进入 Review 阶段（Review 不通过 → InProgress 返工）
-    Completed,      // 执行成功
-    Failed,         // 最终失败；普通失败不自动回退 Pending，显式人工重试/重开除外
-    Retrying,       // 重试中
-    Cancelled,      // 用户取消 / Project 级联取消
+    Pending,
+    InProgress,
+    InReview,
+    Completed,
+    Failed,
+    Retrying,
+    Cancelled,
 }
 ```
 
-### AgentStatus（AgentInstance 状态枚举）
+### AgentStatus
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentStatus {
-    Initializing,   // Scheduler 创建后，正在加载配置 / 建立连接
-    Idle,           // 空闲，可接收新任务
-    Busy,           // 正在执行任务
-    HeartbeatLost,  // 心跳丢失（恢复后 → Idle）
-    Error,          // 异常状态（暂时性 → 冷却恢复 Idle；持久性 → Scheduler 回收文档）
+    Initializing,   // Agent runtime 启动并写入 AgentInstance
+    Idle,           // 在线且未达到 max_concurrency
+    Busy,           // 正在执行一个或多个 WorkItem
+    Draining,       // 停止接收新 WorkItem，等待当前执行结束或释放 lease
+    Offline,        // 正常下线
+    Lost,           // Redis presence / MongoDB heartbeat 超时
+    Error,          // 配置、依赖或执行环境异常
 }
 ```
 
-说明：销毁（删除 AgentInstance 文档）即 Agent 销毁流程，无需单独的 `Destroyed` 终态。
+说明：Redis presence TTL 是短期在线信号；MongoDB `agent_instances.status` 是可查询摘要。两者不一致时，以应用服务对账结果为准。
+
+### WorkItemStatus
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorkItemStatus {
+    Pending,        // 已创建，等待 Outbox 发布或等待 worker 消费
+    Leased,         // 某个 AgentInstance 已 claim，但尚未开始业务执行
+    Running,        // AgentRun 已开始
+    Succeeded,      // 执行成功
+    Failed,         // 重试耗尽或不可恢复失败
+    Cancelled,      // 用户或系统取消
+}
+```
+
+### AgentRunStatus
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentRunStatus {
+    Started,
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+```
+
+### ControllerLeaseStatus
+
+ControllerLease 通常不需要独立 status 字段；有效性由 `lease_expires_at > now` 判断。需要归档审计时 MAY 增加：
+
+```rust
+pub enum ControllerLeaseStatus {
+    Active,
+    Expired,
+    Released,
+}
+```
+
+### OutboxStatus
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OutboxStatus {
+    Pending,
+    Publishing,
+    Published,
+    Failed,
+}
+```
+
+### AssignmentStatus
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssignmentStatus {
+    Active,
+    Released,
+    Crashed,
+}
+```
+
+不变量：同一 Project 任意时刻最多一个 Active ExecutorAssignment。
 
 ## 状态流转
 
-### Project 状态流转
-```
-Scheduler Watch 到 Pending Project
-     │
-     ▼
-  Pending ──(分配 Executor)──▶ Assigned
-     │                         │
-     │                         ├── 用户取消（通知 Executor）──▶ Cancelled
-     │                         │
-     │                         ├── Scheduler 对账：status=assigned && assigned_at < now - assign_timeout_sec
-     │                         │   → Pending（清理分配信息并回退）
-     │                         │
-     │                         └── Executor 开始执行
-     │                             ▼
-     │                          InProgress ──▶ Pending（崩溃恢复；下属非终态 ProjectTask 一并回退到 Pending）
-     │                             │
-     │                             ├── 所有 ProjectTask 为 Completed 或 Cancelled ──▶ Completed
-     │                             │
-     │                             ├── 等待用户反馈 ──▶ Blocked ──(反馈写入 ChatMessage 并 Resume：POST .../projects/:id/resume)──▶ InProgress
-     │                             │                     │
-     │                             │                     ├── 用户取消 ──▶ Cancelled（释放 merge_lock）
-     │                             │                     │
-     │                             │                     └── 超时（blocked_timeout_sec，默认 3600s，配置见 036-02 scheduler.*）──▶ Failed
-     │                             │                                         （释放 merge_lock；Project 在 Blocked 期间持续持有 merge_lock，
-     │                             │                                          超时后强制释放。级联行为：该 Project 下所有非终态 Task（InProgress /
-     │                             │                                          InReview / Retrying / Pending）→ Failed，中断其当前工作队列）
-     │                             │
-     │                             ├── 用户取消（cooperative cancel，释放 worktree/merge_lock）──▶ Cancelled
-     │                             │
-     │                             └── 执行失败 ──▶ Failed（需人工干预重开）
-     │                                 │（释放 merge_lock；级联：同级联 Project 下所有非终态 Task → Failed）
-     │                                 │
-     │                                 └── 人工重开 ──▶ Pending
-     │
-     └── 用户取消 / 级联取消 ─────────────────────────────▶ Cancelled
-
-    - Pending → Cancelled：用户取消或 Requirement 级联取消
-    - Assigned → Cancelled：用户取消，需通知 Executor
-    - InProgress → Cancelled：用户取消；Executor 采用 cooperative cancel，停止当前执行并释放 worktree / merge_lock
-    - Blocked → Cancelled：用户取消，适用于长时间无法解决的阻塞
-```
-
 ### Requirement 状态流转
 
-```
-Pending ──▶ Analyzing（Assistant 原子抢占）
-Pending ──▶ Cancelled（用户取消）
-Analyzing ──▶ Draft（草案产出，可被确认）
-Analyzing ──▶ Pending（超时回退 / 冲突放弃）
-Analyzing ──▶ Cancelled（分析中取消）
+```text
+Pending ──(Scheduler 创建 AnalyzeRequirement WorkItem)──▶ Pending
+Pending ──(Assistant claim WorkItem)────────────────────▶ Analyzing
+Pending ──(用户取消)───────────────────────────────────▶ Cancelled
 
-Draft ──▶ Draft（用户驳回后选择重新生成：POST .../reject { regenerate: true } → Requirement 保持 Draft，Scheduler 重新调度 Assistant 产出新草案；允许多轮 Draft）
-Draft ──▶ InProgress（用户确认；前提：Confirm RPC 事务性写入所有 draft 中的 Project + ProjectTask 文档，全部成功后 Requirement 入 InProgress；任一写入失败则 Requirement 保持 Draft，已写入文档由调用方补偿回滚）
-Draft ──▶ Rejected（用户驳回并选择放弃，不触发重新生成）
-Draft ──▶ Cancelled（用户取消）
-Rejected ──▶ Analyzing（用户重新提交）
+Analyzing ──(Assistant 产出草案)────────────────────────▶ Draft
+Analyzing ──(WorkItem lease 超时 / Agent Lost)──────────▶ Pending
+Analyzing ──(分析失败但可重试)──────────────────────────▶ Pending
+Analyzing ──(重试耗尽 / 不可恢复失败)──────────────────▶ Rejected
+Analyzing ──(用户取消)─────────────────────────────────▶ Cancelled
 
-InProgress ──▶ Completed（所有 ProjectTask 为 Completed/Cancelled）
-InProgress ──▶ Cancelled（用户取消）
+Draft ──(用户确认；事务性创建 Project/Task)────────────▶ InProgress
+Draft ──(用户驳回并要求重生成)────────────────────────▶ Pending
+Draft ──(用户驳回并放弃)──────────────────────────────▶ Rejected
+Draft ──(用户取消)────────────────────────────────────▶ Cancelled
+
+Rejected ──(用户重新提交)─────────────────────────────▶ Pending
+InProgress ──(所有关联 Project 完成)──────────────────▶ Completed
+InProgress ──(用户取消；级联取消非终态 Project)────────▶ Cancelled
 ```
+
+### Project 状态流转
+
+```text
+Pending ──(Scheduler 创建 ExecuteProject/ExecuteTask WorkItem)──▶ Pending
+Pending ──(Executor claim WorkItem 并创建 Active Assignment)────▶ Assigned
+Pending ──(用户取消 / Requirement 级联取消)────────────────────▶ Cancelled
+
+Assigned ──(Executor 开始执行)────────────────────────────────▶ InProgress
+Assigned ──(WorkItem lease 超时 / Agent Lost)─────────────────▶ Pending
+Assigned ──(用户取消；释放 Assignment/WorkItem)───────────────▶ Cancelled
+
+InProgress ──(全部 Task 完成)────────────────────────────────▶ Completed
+InProgress ──(Executor 报告需要用户反馈)─────────────────────▶ Blocked
+InProgress ──(执行失败且不可自动重试)───────────────────────▶ Failed
+InProgress ──(WorkItem lease 超时 / Agent Lost)──────────────▶ Pending
+InProgress ──(用户取消；Cooperative Cancel)──────────────────▶ Cancelled
+
+Blocked ──(用户反馈已写入 ConversationMessage)──────────────▶ InProgress
+Blocked ──(blocked_timeout_sec 超时)────────────────────────▶ Failed
+Blocked ──(用户取消)────────────────────────────────────────▶ Cancelled
+
+Failed ──(人工重开)─────────────────────────────────────────▶ Pending
+Cancelled ──(人工重开，仅用户显式操作)──────────────────────▶ Pending
+```
+
+级联规则：
+
+- Project 进入 `Cancelled` 时，所有非终态 Task（Pending / InProgress / InReview / Retrying）级联为 Cancelled。
+- Project 进入 `Failed` 时，非终态且非 Pending 的 Task 级联为 Failed；Pending Task 保持 Pending，但因 Project 终态不会继续调度。
+- 崩溃恢复回到 Pending 时，仅非终态执行中 Task（InProgress / InReview / Retrying）回退 Pending，并保留 retry_count / last_error。
 
 ### ProjectTask 状态流转
 
-```
-pending ──▶ in_progress（Executor 分配给 Sub-Agent 并开始执行）
-in_progress ──▶ in_review
-in_progress ──▶ completed（仅无 Review 需求的 Task：executor_type=sequential 且所有 Sub-Agent 通过）——见下方说明
-in_progress ──▶ failed（执行失败）
-in_progress ──▶ retrying（Executor 正常自动重试）──▶ pending（短暂冷却后重新分配）──▶ in_progress
-in_review ──▶ completed / failed（产出 / 阻断）
-in_review ──▶ in_progress（返工）
-in_review ──▶ retrying（review 阶段判需重试，与 in_progress→retrying 共享 retry_count 上限）──▶ pending（冷却后重新分配）──▶ in_progress
-retrying ──▶ failed（重试耗尽：max_task_retries（默认 3，定义见 Data spec ProjectTask.max_task_retries）次后仍失败或不可重试失败）
-failed ──▶ pending（人工重开：POST .../tasks/:id/retry；v0.1 若无此 API 则需创建新 Project/Task）
-pending / in_progress / in_review / retrying ──▶ cancelled（用户取消；排除 Completed/Cancelled/Failed 终态）
+```text
+Pending ──(Executor 开始执行)──────────────────────────▶ InProgress
+InProgress ──(需要 review)────────────────────────────▶ InReview
+InProgress ──(执行成功且无需 review)──────────────────▶ Completed
+InProgress ──(可重试失败)────────────────────────────▶ Retrying
+InProgress ──(不可恢复失败)──────────────────────────▶ Failed
 
-// 崩溃恢复路径（Scheduler 心跳超时检测 → 级联回退，不在正常流转图中）:
-in_progress ──▶ pending（Executor 崩溃恢复，清空 assigned_executor_id）
-in_review   ──▶ pending（Executor 崩溃恢复，清空 assigned_executor_id）
-retrying    ──▶ pending（Executor 崩溃恢复，保留 retry_count + last_error）
-```
+InReview ──(review 通过)─────────────────────────────▶ Completed
+InReview ──(review 要求返工)─────────────────────────▶ InProgress
+InReview ──(review 判定可重试)───────────────────────▶ Retrying
+InReview ──(review 判定失败)─────────────────────────▶ Failed
 
-### Cooperative Cancel 协议
+Retrying ──(冷却后重新排队)──────────────────────────▶ Pending
+Retrying ──(重试耗尽)────────────────────────────────▶ Failed
 
-Project `InProgress → Cancelled` / ProjectTask `* → cancelled` 触发流程：
-
-> 说明：Executor 是 gRPC client（调用 API Server），非 server。取消信号通过 Watch / Change Stream 的 pull 模型传递，而非 Server→Executor 的 push 模型。
-
-1. 用户通过 REST `POST .../cancel` 发起取消 → API Server 的 ProjectService / ProjectTaskService 写入 `cancel_requested_at` 时间戳（由 Scheduler 在 MongoDB transaction 中一并设置 Project/Task 的 `status = cancelled`）
-2. Executor 的 `Watch` stream 推送文档变更（status=cancelled 或 cancel_requested_at 变为非空）
-3. Executor 在每步 Sub-Agent 调用间检查自身 Project/Task 状态是否为 cancelled；也可主动查询 `cancel_requested_at`。检测到取消后：停止当前 Sub-Agent → 释放 merge_lock → 清理 worktree
-4. 强制超时：默认 60s（可配置 `cancel_timeout_sec`，见 036-02 `scheduler.*` 配置段），超时后 Scheduler 按崩溃恢复处理
-
-### AgentInstance 生命周期
-```
-Scheduler 创建 Agent
-     │
-     ▼
-Initializing ──(初始化成功)────────────────▶ Idle
-Initializing ──(初始化失败 / 超时 30s)────▶ Error
-Idle         ──(领取任务)─────────────────▶ Busy
-Idle         ──(心跳超时)─────────────────▶ HeartbeatLost
-Busy         ──(任务完成)─────────────────▶ Idle
-Busy         ──(任务异常终止/panic)────────▶ Error
-Busy         ──(心跳超时)─────────────────▶ HeartbeatLost
-HeartbeatLost──(心跳恢复)─────────────────▶ Idle
-HeartbeatLost──(恢复失败/异常升级)─────────▶ Error
-Error        ──(冷却恢复/自动重启)─────────▶ Idle
-Error        ──(持久异常，Scheduler 回收)──▶ [销毁]
-
-> **⚠ HeartbeatLost 恢复竞态处理**：Agent 从 HeartbeatLost 恢复心跳时（HeartbeatLost→Idle），Scheduler 可能已在当前对账周期开始崩溃恢复（释放 Project、回退 Task）。恢复后的 Agent 必须在转为 Idle 后校验：
-> 1. 自身 `current_project_id` 是否已被清空（若已被 Scheduler 释放则 Agent 主动清理本地 worktree/merge_lock）
-> 2. 对比 `agent_heartbeats` 表中 `heartbeat_at` 与自身发起的最后心跳时间，判断断连窗口长度
-> 3. 如果 Scheduler 已替其回退 Task（Task.assigned_executor_id 变为 null），Agent **不得**继续执行
-> 4. 恢复周期为 `reconcile_interval_sec`（默认 5s）× 重试窗口 `heartbeat_timeout_sec`（默认 30s）——在此窗口内，Agent 心跳超时点（T0+30s）和 Scheduler 下个对账周期（≤ T0+35s）之间存在多 5s 缓冲。Agent 在 ≤ T0+35s 内恢复不会丢失任何 Task
+Failed ──(人工重开)──────────────────────────────────▶ Pending
+Cancelled ──(人工重开；所属 Project 非 Cancelled)────▶ Pending
+Pending / InProgress / InReview / Retrying ──(用户取消)──▶ Cancelled
 ```
 
-Initializing 退出条件：Agent 注册成功 → Idle；超时 30s（如连接 DB 失败或依赖初始化未完成）→ Error。
+## WorkItem 生命周期
 
-**Chat Agent 特殊说明**：Chat 创建 AgentInstance 文档（由连接层注册，非 Scheduler 分配），遵循 AgentStatus 状态机。Idle = 等待用户消息，Busy = 处理消息并写入白板。
+### 状态流转
 
-Chat Agent 使用**双通道健康模型**：
-- **WS keepalive（连接通道）**：由 WS 连接层处理。WS 断开后经短暂容忍窗口（WS graceful close，约 5s）触发 AgentInstance doc 直接删除（跳过 HeartbeatLost→Error 路径）。适用于 Chat Agent 崩溃/网络断开场景。
-- **gRPC 逻辑心跳（Scheduler 通道）**：Chat Agent 通过 `AgentRegistryService.Heartbeat` RPC 定期向 `agent_heartbeats` 表写入心跳。Scheduler 仅在 Chat Agent 为 **Busy** 状态时监控此心跳，用于检测"WS 活跃但内部卡死"场景（如 LLM 调用无限等待）。若 Busy 持续超过 `busy_timeout_sec`（默认 600s），Scheduler 标记 AgentStatus→Error。
-- WS 断开触发 Agent 删除，但 WS keepalive 时间 ≥ gRPC heartbeat 时间——两个通道互不冲突，组合覆盖全部故障场景。
+```text
+Pending ──(OutboxPublisher 投递 Redis WorkQueue)────────▶ Pending
+Pending ──(Agent XREADGROUP + MongoDB claim 成功)──────▶ Leased
+Leased ──(AgentRun 创建并开始执行)──────────────────────▶ Running
+Leased ──(lease_expires_at 超时)───────────────────────▶ Pending
+Running ──(执行成功)───────────────────────────────────▶ Succeeded
+Running ──(可重试失败)─────────────────────────────────▶ Pending
+Running ──(重试耗尽 / 不可恢复失败)───────────────────▶ Failed
+Running ──(用户取消 / control signal)──────────────────▶ Cancelled
+Running ──(lease_expires_at 超时 / Agent Lost)────────▶ Pending
+```
 
-HeartbeatLost→恢复失败→Error 路径仅适用于 Executor/Assistant 等 Scheduler 管理池内的 Agent（单通道 gRPC 心跳模型）。Chat Agent **不使用** HeartbeatLost 中间状态。
+### Redis 与 MongoDB 对账规则
+
+- Redis message pending 表示传输层尚未 XACK，不等于 WorkItem 可执行。
+- Agent 使用 `XAUTOCLAIM` 接管 pending message 后，MUST 重新加载 MongoDB WorkItem 并校验 status、lease_owner、lease_expires_at、attempt。
+- WorkItem 的 claim/start/complete MUST 是 MongoDB 原子条件更新。
+- WorkItem 成功或终态失败后，Agent MUST XACK 对应 Redis message。
+- 如果 Redis message 丢失但 MongoDB WorkItem 仍 Pending，Scheduler/reconciler MUST 能重新写 Outbox 或直接补投递 WorkQueue。
+
+### WorkItem claim 条件
+
+```text
+可 claim 条件：
+- status in [Pending, Leased, Running]
+- required_agent_type == current agent type
+- status == Pending OR lease_expires_at < now
+- attempt < max_attempts
+- cancel_requested_at is null
+```
+
+claim 成功后设置：
+
+```text
+status = Leased
+lease_owner = agent_instance_id
+lease_expires_at = now + work_item_lease_ttl
+attempt = attempt + 1
+```
+
+开始执行时：
+
+```text
+status = Running
+agent_run_id = new AgentRun
+started_at = now
+```
+
+## AgentInstance 生命周期
+
+```text
+Initializing ──(依赖初始化成功 + 注册 MongoDB 摘要 + Redis presence)──▶ Idle
+Initializing ──(配置/依赖失败)──────────────────────────────────────▶ Error
+Idle ──(claim WorkItem)────────────────────────────────────────────▶ Busy
+Idle ──(收到 drain signal)────────────────────────────────────────▶ Draining
+Idle ──(正常停止)────────────────────────────────────────────────▶ Offline
+Idle ──(presence/heartbeat 超时)──────────────────────────────────▶ Lost
+
+Busy ──(所有 WorkItem 完成)───────────────────────────────────────▶ Idle
+Busy ──(收到 drain signal)────────────────────────────────────────▶ Draining
+Busy ──(presence/heartbeat 超时)──────────────────────────────────▶ Lost
+Busy ──(执行环境异常)─────────────────────────────────────────────▶ Error
+
+Draining ──(当前 WorkItem 完成或释放 lease)───────────────────────▶ Offline
+Draining ──(drain_timeout_sec 超时)───────────────────────────────▶ Lost
+
+Lost ──(Agent 恢复并确认 lease 未被接管)──────────────────────────▶ Idle
+Lost ──(reconciler 已释放全部 lease)──────────────────────────────▶ Offline
+Error ──(可恢复错误冷却后恢复)────────────────────────────────────▶ Idle
+Error ──(不可恢复错误)────────────────────────────────────────────▶ Offline
+```
+
+Agent 恢复竞态处理：
+
+1. 恢复后先刷新 Redis presence 与 MongoDB heartbeat。
+2. 查询自己持有的 WorkItem lease。
+3. 若 lease 已过期或 owner 变更，MUST 停止本地执行并清理临时资源。
+4. 若 AgentRun 已被其他实例接管，MUST 不再写回结果。
+
+## ControllerLease 生命周期
+
+ControllerLease 用于 Scheduler/Evolver 多实例部署。
+
+```text
+Expired / Missing ──(Agent 原子抢占)──▶ Active(owner=A, generation+1)
+Active(owner=A) ──(owner A 续租)─────▶ Active(owner=A, generation+1)
+Active(owner=A) ──(lease 超时)───────▶ Expired
+Active(owner=A) ──(owner A 主动释放)─▶ Released / Missing
+Active(owner=A) ──(owner B 抢占已过期 lease)──▶ Active(owner=B, generation+1)
+```
+
+不变量：同一 `workspace_id + controller_type` 同时最多一个有效 owner。
+
+## Outbox 生命周期
+
+```text
+Pending ──(publisher claim)──────────────────────────▶ Publishing
+Publishing ──(Redis XADD 成功并记录 stream_id)──────▶ Published
+Publishing ──(Redis XADD 失败，可重试)───────────────▶ Pending
+Publishing ──(重试耗尽)─────────────────────────────▶ Failed
+Failed ──(人工或后台重试)────────────────────────────▶ Pending
+```
+
+规则：
+
+- 聚合状态写入与 OutboxEvent 写入 MUST 在同一事务或同一原子写路径中完成。
+- OutboxPublisher 可多实例运行，通过 MongoDB 原子 claim 防止重复发布。
+- Redis XADD 成功但 MongoDB 标记 Published 失败时，publisher 可能重复发布；消费者 MUST 使用 idempotency_key 去重。
+
+## Cooperative Cancel 协议
+
+取消不依赖 RPC 或 Watch，使用 MongoDB 状态 + Redis control signal：
+
+```text
+1. 用户 REST POST .../cancel
+2. API Server 写 cancel_requested_at，并写 OutboxEvent(CancelRequested)
+3. OutboxPublisher 发布 Redis control signal / BoardEvent
+4. Agent 在执行循环中检查：
+   - Redis control stream
+   - MongoDB WorkItem.cancel_requested_at / Project.cancel_requested_at
+5. Agent 停止当前 SubAgent，清理 worktree/merge_lock
+6. Agent 通过应用服务写 WorkItem/Project/Task Cancelled，并 XACK
+7. 超过 cancel_timeout_sec 未确认时，Scheduler/reconciler 强制释放 lease 并标记 Cancelled 或 Pending 重试
+```
+
+竞态处理：ConfirmCancel 与 ForceCancel 都以 `cancel_requested_at` 非空、status 非终态、version/lease_owner 匹配作为前置条件。先到达者清零 `cancel_requested_at` 并写终态；后到达者幂等返回。
+
+## BoardEvent / UI 更新状态
+
+- Board snapshot 存于 MongoDB projection，通过 REST 查询。
+- BoardEvent 经 Redis Stream 推送给 WebSocket gateway。
+- 客户端重连携带 `last_stream_id`。
+- Server 从 Redis BoardEvent stream 尝试补发；若 stream 已裁剪或检测到 gap，返回 `snapshot_required`，客户端重新 REST 拉取 snapshot。
+
+BoardEvent 不参与领域状态机，NEVER 作为业务真相。

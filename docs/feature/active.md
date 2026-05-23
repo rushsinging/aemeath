@@ -2,15 +2,60 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」，操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾而非单独一行；纯选择模式（仅有 options 无 free_input）改为键盘上下键高亮选项 + Enter 确认 |
+| 4 | AskUserQuestion TUI 美化 | - | 待实施 | 未确认 | AskUserQuestion 等待用户输入时，在 output area 提示「请在下方输入区域输入」；操作指引（[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项）放在提示文字末尾，不单独占行；纯选择模式（仅 options、无 free_input）改为上下键高亮选项 + Enter 确认 |
 | 8 | Memory 系统 | - | 待确认 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 待确认 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
-| 28 | MCP 系统完善 | 高 | 🔧 待确认 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE/Streamable HTTP 仅完成配置解析与 URL 校验，传输仍为占位存根；P2 不在本轮 |
+| 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 35 | Diff 渲染中 add 行语法高亮 | 中 | 待实施 | 未确认 | LLM 输出的 unified diff 中，`+` 开头的行（add 内容）按目标文件语言做语法高亮，提升代码变更可读性 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 36 | Multi-Agent 框架 | 高 | 设计阶段 | 未确认 | 多 Agent 协作框架，参考 K8s 控制面架构：API Server (gRPC + REST/WS) + Scheduler + Agent Pool (Assistant/Scheduler/Executor/Evolver)，白板 SSOT，MongoDB 存储，Qdrant 存 RAG 向量数据。详见 [spec](specs/036-multi-agent-framework.md) |
-| 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider |
-| 38 | TUI 日志文件（`~/.aemeath/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.aemeath/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
+| 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
+| 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
+| 38 | TUI 日志文件（`~/.agents/logs/tui.log`） | 中 | 待实施 | 未确认 | 新增 TUI 专属日志类别 `tui.log`，与现有 `aemeath.log`/`agent.log` 并列存放于 `~/.agents/logs/`，记录 TUI 事件循环、渲染、输入处理、选区/复制等 UI 层行为，方便排查 TUI 相关 bug（如 #42 乱码、#48 选中错位） |
+| 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；2026-05-22 将助手正文/Markdown 默认色改为主文本浅灰，避免大段内容与成功/spinner 绿色混淆；2026-05-22 适配 Catppuccin Macchiato 风格静态配色；2026-05-22 将 status line 背景改为与主背景一致，避免显示为纯黑；2026-05-22 将 inline/code block 仅用代码强调色显示，不额外添加前景背景块；2026-05-22 将 code 强调色改为 Peach `#f5a97f`，增强与主文本区分度；不引入运行时主题切换、不改布局、不引入外部配置 |
+| 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
+| 41 | Web Chat UI（类 Codex Companion） | 高 | 待实施 | 未确认 | 浏览器端 Chat 界面方向保留，但不再依赖已移除的 server/SDK；后续如继续实现，需要先重新定义轻量通信边界，可考虑直接复用 CLI runtime 或单独开轻量本地服务。 |
+
+### #40 配置文件改造：对齐 Codex 风格的 `~/.agents` / `AGENTS.md` / skills 读取
+
+**目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
+
+**核心要求**：
+
+**实现结果（2026-05-21）**：运行时读取已切换到新路径并加入 Claude Code 兼容：全局配置 `~/.agents/aemeath.json`，项目配置优先 `{cwd}/.agents/aemeath.json`，不存在或不覆盖的字段可由 `{cwd}/.claude/settings.json` 补充，其中 Claude Code hooks 数组结构会转换为 Aemeath hooks；全局指令读取 `~/.agents/AGENTS.md`，项目指令优先 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 skills 读取 `~/.agents/skills`；Hook 执行环境同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，兼容 Claude Code 脚本。应用主日志 `~/.agents/logs/aemeath.log`；guidance、memory、sessions、history、cost_history、mcp、settings 等运行数据统一派生自 `~/.agents`。程序不提供 `/config migrate` 且启动时不自动迁移；现有 `~/.aemeath` 与 `~/.claude/CLAUDE.md` 由发布/部署阶段手动复制到新路径。Worktree 下以启动 `cwd` 为边界读取，不跨 checkout 共享项目配置。
+
+1. **全局配置目录**：默认使用 `~/.agents` 作为全局配置根，且该根目录本身必须可配置。
+2. **Agent 配置文件**：Aemeath 的主配置文件改为 `aemeath.json`，默认路径为 `~/.agents/aemeath.json`；项目级配置后续可按 Codex 风格放在项目 `.agents` / `.codex` 同类目录中评估，但本 feature 的明确目标是先统一全局配置与 agent 配置命名。
+3. **AGENTS.md 指令读取**：读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`，用于替代当前 `CLAUDE.md` 方向；拼接顺序、冲突处理和 prompt injection 扫描需在实现前明确。
+4. **skills 读取目录**：skills 固定优先读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`，保持 skill 包与命名空间机制可用。
+5. **现有配置迁移**：实现时必须提供从当前模式迁移到新模式的路径，包括但不限于 `~/.aemeath/config.json`、`{cwd}/.aemeath/config.json`、`~/.aemeath/skills`、`{cwd}/.aemeath/skills`、`{cwd}/CLAUDE.md`、`~/.claude/CLAUDE.md` 到新路径的迁移、兼容读取或提示方案。
+6. **Worktree 场景**：必须考虑 git worktree。读取项目指令和 repo skills 时，不能只假设 `cwd` 就是主 checkout；需要明确 cwd、worktree checkout root、git common dir / repo root 的关系，避免 linked worktree 中漏读项目级 `.agents/skills` 或重复读取同一份配置。
+
+**推荐设计方向**：
+
+- 新增统一的配置根解析逻辑：默认 `~/.agents`，允许通过 CLI 参数、环境变量或现有配置 bootstrap 指定其他目录；解析后统一供配置、skills、AGENTS.md 使用，避免各模块重复拼路径。
+- 新增迁移/兼容层：首次发现旧配置但新配置不存在时，提示或自动迁移到 `~/.agents/aemeath.json`；迁移完成前可保留只读兼容窗口，但新写入必须写到新路径。
+- 项目指令读取从 `CLAUDE.md` 改为 `AGENTS.md`：全局 `~/.agents/AGENTS.md` + 当前工作目录 `{cwd}/AGENTS.md`。后续如需 Codex 的父目录链式读取，应单独拆 feature，避免本轮范围失控。
+- Skills 读取收敛到 `~/.agents/skills` 与 `{cwd}/.agents/skills`；旧目录仅作为迁移来源，不应继续作为长期主路径。
+- Worktree 处理应优先基于 git 信息确定 worktree checkout root，并在 cwd 与 checkout root 不同时定义清楚读取策略：至少保证当前 cwd 的 `{cwd}/AGENTS.md`、`{cwd}/.agents/skills` 可用；如后续引入 checkout root 级读取，必须做路径 canonicalize 与去重。
+
+**涉及路径（预计）**：
+
+- `packages/core/src/config/manager/mod.rs`：配置文件路径与加载层级调整。
+- `packages/core/src/config/mod.rs`：配置 schema / 默认路径常量调整。
+- `apps/cli/src/prompt.rs`：`CLAUDE.md` 读取迁移到 `AGENTS.md`。
+- `packages/core/src/skill/loader.rs`：skill root 调整为 `~/.agents/skills` 与 `{cwd}/.agents/skills`。
+- `packages/core/src/state/settings.rs`：若仍保留 settings 写入，需迁移到新配置根或明确废弃。
+- `docs/feature/active.md`：实现进度同步更新。
+
+**验收标准**：
+
+1. 新安装用户默认读取 `~/.agents/aemeath.json`、`~/.agents/AGENTS.md`、`~/.agents/skills`。
+2. 项目内默认读取 `{cwd}/AGENTS.md` 与 `{cwd}/.agents/skills`。
+3. 旧 `~/.aemeath/config.json` / `.aemeath/config.json` / `.aemeath/skills` / `CLAUDE.md` 存在时，有清晰迁移或兼容提示，不静默丢配置。
+4. 在 linked worktree 中启动时，项目级 AGENTS.md 与 skills 读取行为稳定、可预测，且不会重复加载同一路径。
+5. 新写入的配置落到新模式，不再写回旧路径。
+
+---
 
 ### #36 Multi-Agent 框架
 
@@ -462,9 +507,17 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 #### 已知限制
 
-- SSE/Streamable HTTP 传输未实现，`connect_http` 为 stub。
+- SSE 传输存在可靠性问题：z.ai 等远程 MCP server 的 SSE response 在 tools/list 时经常出现超时或不完整（2890 bytes 后 SSE stream 停止发送，缺少 `\n\n` 终结符）。已尝试 POST body 消费、独立 client、incomplete event fallback 等方案，均未根本解决。
+- **MCP 加载已从 TUI 启动流程中禁用**（`run_orchestration.rs` 中 `spawn_mcp_connect` 调用已注释），避免启动时因 MCP 连接超时阻塞。
 - `/mcp` restart/add/remove/list/tools 暂未接入 runtime manager bridge，仅返回状态/预览提示。
+- Streamable HTTP 传输未实现。
 - 健康检查已有单次 API，后台定时 loop 尚未接入。
+
+#### 待修复方向
+
+- SSE stream 可靠性：考虑改用 Streamable HTTP 传输（单 POST 请求返回完整 JSON-RPC response，不依赖 SSE event stream）。
+- 或者在 SSE transport 中增加更健壮的重试机制和超时策略。
+- 需要测试更多 MCP SSE server 以确认是 z.ai 特定问题还是通用问题。
 
 #### 关联
 
@@ -475,16 +528,20 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ### #4 AskUserQuestion TUI 美化
 
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 中的确认界面需要美化，提升可读性和交互体验。
+**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 的等待输入界面要清楚说明下一步操作，并避免提示文字挤占过多 output area。
 
-**当前状态**：基础功能已实现（`UiEvent::AskUser` + `update.rs` 中 `ask_user_reply_tx` 机制），但显示为普通 system message + 纯文本选项，缺乏视觉层次。
+**当前状态**：待实施。基础问答链路已存在（`UiEvent::AskUser` + `ask_user_reply_tx`），本轮聚焦交互文案和选择模式：
 
-**待改进**：
-- 问题文本高亮/醒目样式
-- 选项列表带序号和视觉区分
-- 输入提示区域样式优化
+- AskUserQuestion 等待输入时，在 output area 提示「请在下方输入区域输入」。
+- 操作指引放在提示文字末尾：`[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项`，不再单独占一行。
+- 纯选择模式（仅 options、无 free_input）不要求用户手动输入选项文本，改为上下键高亮选项 + Enter 确认。
+- 多选/自由输入保持现有能力，但提示文案需要与实际可用快捷键一致。
 
-**涉及路径**：`aemeath-cli/src/tui/app/update.rs`（`UiEvent::AskUser` 处理）、`aemeath-cli/src/tui/output_area/`（渲染样式）
+**涉及路径**：
+- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换与等待提示）
+- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、确认/取消、自由输入）
+- `aemeath-cli/src/tui/output_area/content.rs`（AskUserQuestion 提示与选项渲染）
+- `aemeath-cli/src/tui/output_area/types.rs`（AskUserQuestion 行样式）
 
 ---
 

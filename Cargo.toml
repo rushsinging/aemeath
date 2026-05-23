@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "aemeath-core",
-    "aemeath-llm",
-    "aemeath-tools",
-    "aemeath-cli",
+    "cli",
+    "packages/core",
+    "packages/llm",
+    "packages/tools",
 ]
 
 [workspace.dependencies]
@@ -15,4 +15,5 @@ async-trait = "0.1"
 thiserror = "2"
 tokio-util = { version = "0.7", features = ["io", "codec", "rt"] }
 futures-util = "0.3"
+reqwest = { version = "0.12", features = ["stream"] }
 inventory = "0.3"
