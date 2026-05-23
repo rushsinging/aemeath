@@ -65,6 +65,7 @@ pub(super) async fn run_agent_turns(
         agent_semaphore,
         session_id,
         session_reminders,
+        memory_config,
     );
 
     let mut result = TurnRunResult {
@@ -211,6 +212,7 @@ fn build_agent<'a>(
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     session_id: &str,
     session_reminders: &Arc<Mutex<aemeath_core::memory::SessionReminders>>,
+    memory_config: &aemeath_core::config::MemoryConfig,
 ) -> Agent<'a> {
     let ctx = ToolContext {
         cwd: cwd.to_path_buf(),
@@ -219,6 +221,7 @@ fn build_agent<'a>(
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),
         session_reminders: Some(session_reminders.clone()),
+        memory_config: memory_config.clone(),
         plan_mode: None,
         allow_all,
         max_tool_concurrency,

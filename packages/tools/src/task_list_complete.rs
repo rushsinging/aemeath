@@ -53,6 +53,7 @@ mod tests {
             ),
             agent_runner: None,
             session_reminders: None,
+            memory_config: aemeath_core::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: false,
             max_tool_concurrency: 4,

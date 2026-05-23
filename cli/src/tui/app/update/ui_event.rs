@@ -23,7 +23,7 @@ impl App {
     pub(super) fn update_ui(
         &mut self,
         ev: UiEvent,
-        _ui_tx: &mpsc::Sender<UiEvent>,
+        ui_tx: &mpsc::Sender<UiEvent>,
         _active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
         _spawn_refs: &SpawnContextRefs<'_>,
     ) -> UpdateResult {
@@ -337,6 +337,7 @@ impl App {
                 self.is_processing = false;
                 self.status_bar.set_success("Ready");
                 self.push_session_reminder_recap();
+                self.maybe_auto_reflect(ui_tx);
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -351,6 +352,7 @@ impl App {
                 self.is_processing = false;
                 self.status_bar.set_success("Ready");
                 self.push_session_reminder_recap();
+                self.maybe_auto_reflect(ui_tx);
             }
         }
 

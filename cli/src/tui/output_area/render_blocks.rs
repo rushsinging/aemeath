@@ -96,8 +96,8 @@ where
             LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
         );
         let trimmed = line.content.trim();
-        let is_tbl = is_md
-            && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed));
+        let is_tbl =
+            is_md && (markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed));
 
         if is_tbl {
             if pending_block_start.is_none() {
@@ -221,7 +221,9 @@ where
             // 向前查找滚出视口的表格行，找到完整表格块的起始
             let mut full_start = idx;
             for scan_idx in (0..idx).rev() {
-                let Some(line) = all_vec.get(scan_idx) else { break };
+                let Some(line) = all_vec.get(scan_idx) else {
+                    break;
+                };
                 let is_md = matches!(
                     line.style,
                     LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
@@ -258,9 +260,7 @@ where
 
             // 构建完整的表格行列表（全量行参与列宽计算）
             let table_lines: Vec<&str> = (full_start..full_end)
-                .filter_map(|li| {
-                    all_vec.get(li).map(|line| line.content.trim())
-                })
+                .filter_map(|li| all_vec.get(li).map(|line| line.content.trim()))
                 .filter(|trimmed| {
                     markdown::is_table_row(trimmed) || markdown::is_table_separator(trimmed)
                 })

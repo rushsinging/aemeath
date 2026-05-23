@@ -59,8 +59,7 @@ impl LlmProvider for BlockingReflectionProvider {
     }
 }
 
-#[tokio::test]
-async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
+fn app_with_blocking_reflection_provider() -> (App, oneshot::Receiver<()>, oneshot::Sender<()>) {
     let (started_tx, started_rx) = oneshot::channel();
     let (finish_tx, finish_rx) = oneshot::channel();
     let provider = Arc::new(BlockingReflectionProvider {
@@ -74,6 +73,12 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
         "test-model".to_string(),
     );
     app.client = Some(client);
+    (app, started_rx, finish_tx)
+}
+
+#[tokio::test]
+async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
+    let (mut app, started_rx, finish_tx) = app_with_blocking_reflection_provider();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     let elapsed = tokio::time::timeout(
@@ -102,4 +107,95 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
         }
     }
     assert!(got_done, "后台 reflection 完成后应通过 UI event 返回结果");
+}
+
+#[tokio::test]
+async fn test_auto_reflection_triggers_on_configured_interval() {
+    let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
+    app.memory_config.reflection.interval_turns = 2;
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    app.maybe_auto_reflect(&tx);
+    assert_eq!(app.turn_count, 1);
+    assert!(started_rx.try_recv().is_err(), "第一轮不应触发 reflection");
+
+    app.maybe_auto_reflect(&tx);
+    assert_eq!(app.turn_count, 2);
+    assert!(started_rx.await.is_ok(), "第二轮应触发后台 reflection");
+    assert!(!app.is_processing, "自动 reflection 不应阻塞 UI 输入");
+    assert!(
+        app.output_area.spinner.is_none(),
+        "自动 reflection 不应启动 spinner"
+    );
+
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_auto_reflection_boundary_disabled_does_not_trigger() {
+    let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
+    app.memory_config.reflection.enabled = false;
+    app.memory_config.reflection.interval_turns = 1;
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    app.maybe_auto_reflect(&tx);
+
+    assert_eq!(app.turn_count, 1);
+    assert!(started_rx.try_recv().is_err(), "禁用时不应触发 reflection");
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_auto_reflection_boundary_memory_disabled_does_not_trigger() {
+    let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
+    app.memory_config.enabled = false;
+    app.memory_config.reflection.interval_turns = 1;
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    app.maybe_auto_reflect(&tx);
+
+    assert_eq!(app.turn_count, 1);
+    assert!(
+        started_rx.try_recv().is_err(),
+        "memory 禁用时不应触发 reflection"
+    );
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
+    let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
+    app.memory_config.reflection.interval_turns = 1;
+    app.pending_reflection = Some(aemeath_core::reflection::ReflectionOutput {
+        deviations: Vec::new(),
+        suggested_memories: Vec::new(),
+        outdated_memories: Vec::new(),
+        user_alert: None,
+    });
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    app.maybe_auto_reflect(&tx);
+
+    assert_eq!(app.turn_count, 1);
+    assert!(
+        started_rx.try_recv().is_err(),
+        "已有 pending reflection 时不应重复触发"
+    );
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_auto_reflection_error_zero_interval_does_not_trigger() {
+    let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
+    app.memory_config.reflection.interval_turns = 0;
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    app.maybe_auto_reflect(&tx);
+
+    assert_eq!(app.turn_count, 1);
+    assert!(
+        started_rx.try_recv().is_err(),
+        "间隔为 0 时不应触发 reflection"
+    );
+    let _ = finish_tx.send(());
 }

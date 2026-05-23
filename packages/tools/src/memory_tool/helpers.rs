@@ -18,8 +18,13 @@ pub(super) fn open_store_with_base(
     ctx: &ToolContext,
     base_dir: PathBuf,
 ) -> Result<MemoryStore, String> {
-    MemoryStore::new(base_dir, project_hash_from_path(&ctx.cwd), 100, 0.8)
-        .map_err(|error| error.to_string())
+    MemoryStore::new(
+        base_dir,
+        project_hash_from_path(&ctx.cwd),
+        ctx.memory_config.max_entries,
+        ctx.memory_config.similarity_threshold,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {

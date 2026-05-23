@@ -39,10 +39,22 @@ fn test_scan_code_blocks_open_fence_scrolled_out() {
     ];
     let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().skip(1).collect();
     let info = scan_code_blocks(all.iter(), &vis);
-    assert!(info.code_block_lines.contains(&1), "code line 1 should be in code block");
-    assert!(info.code_block_lines.contains(&2), "closing fence should be in code block");
-    assert!(!info.code_block_lines.contains(&3), "line after block should NOT be code");
-    assert!(!info.code_lang_label.contains_key(&2), "closing fence should not have lang label");
+    assert!(
+        info.code_block_lines.contains(&1),
+        "code line 1 should be in code block"
+    );
+    assert!(
+        info.code_block_lines.contains(&2),
+        "closing fence should be in code block"
+    );
+    assert!(
+        !info.code_block_lines.contains(&3),
+        "line after block should NOT be code"
+    );
+    assert!(
+        !info.code_lang_label.contains_key(&2),
+        "closing fence should not have lang label"
+    );
 }
 
 #[test]
@@ -94,8 +106,14 @@ fn test_scan_table_blocks_header_scrolled_out() {
     ];
     let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().skip(3).collect();
     let result = scan_table_blocks(all.iter(), &vis);
-    assert!(result.contains(&3), "row 3 should be table (header scrolled out)");
-    assert!(result.contains(&4), "row 4 should be table (header scrolled out)");
+    assert!(
+        result.contains(&3),
+        "row 3 should be table (header scrolled out)"
+    );
+    assert!(
+        result.contains(&4),
+        "row 4 should be table (header scrolled out)"
+    );
     assert!(!result.contains(&5), "row 5 should NOT be table");
 }
 
@@ -104,5 +122,8 @@ fn test_scan_table_blocks_no_separator_at_all() {
     let all = vec![md_line("| a | b |"), md_line("| c | d |")];
     let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().collect();
     let result = scan_table_blocks(all.iter(), &vis);
-    assert!(result.is_empty(), "table without separator should not be recognized");
+    assert!(
+        result.is_empty(),
+        "table without separator should not be recognized"
+    );
 }

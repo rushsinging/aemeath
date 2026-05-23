@@ -72,6 +72,7 @@ pub async fn process_in_background(
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),
         session_reminders: Some(session_reminders.clone()),
+        memory_config: memory_config.clone(),
         plan_mode: None,
         allow_all,
         max_tool_concurrency,

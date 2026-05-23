@@ -54,6 +54,8 @@ pub struct App {
     pub tool_call_active: bool,
     /// Tool call IDs that have started and have not emitted a result yet.
     pub active_tool_call_ids: std::collections::HashSet<String>,
+    /// Number of completed LLM conversation turns since last /clear.
+    pub turn_count: usize,
     /// Hook runner for lifecycle events
     pub hook_runner: aemeath_core::hook::HookRunner,
     /// Pending oneshot sender for AskUserQuestion reply
@@ -131,6 +133,7 @@ impl App {
             cached_sessions: Vec::new(),
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),
+            turn_count: 0,
             hook_runner: aemeath_core::hook::HookRunner::empty(
                 std::env::current_dir()
                     .map(|p| p.display().to_string())

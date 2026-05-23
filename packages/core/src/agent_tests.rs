@@ -48,6 +48,7 @@ fn test_ctx() -> ToolContext {
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         agent_runner: None,
         session_reminders: None,
+        memory_config: crate::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: true,
         max_tool_concurrency: 10,
