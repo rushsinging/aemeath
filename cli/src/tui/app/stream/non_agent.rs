@@ -206,6 +206,7 @@ async fn execute_one_non_agent(
         return vec![result];
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
+    hook_runner.set_project_dir(agent.ctx.current_working_root().display().to_string());
     let mut out = Vec::new();
     for (id, output, is_error, images) in exec_results {
         log_tool_result(

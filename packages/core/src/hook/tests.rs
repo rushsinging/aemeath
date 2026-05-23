@@ -255,6 +255,46 @@ mod hook_tests {
     }
 
     #[tokio::test]
+    async fn test_execute_hook_uses_updated_project_dir_for_env_placeholder_and_cwd() {
+        let initial_dir =
+            std::env::temp_dir().join(format!("aemeath-hook-initial-{}", uuid::Uuid::new_v4()));
+        let worktree_dir =
+            std::env::temp_dir().join(format!("aemeath-hook-worktree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&initial_dir).unwrap();
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "printf '%s|%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"{AEMEATH_PROJECT_DIR}\" \"$PWD\"".to_string(),
+            timeout: 5,
+        };
+        let runner = HookRunner::empty(initial_dir.display().to_string());
+        runner.set_project_dir(worktree_dir.display().to_string());
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(StopHookData { turns: 1 }),
+        };
+
+        let result = runner.execute_hook(&hook, &input).await;
+        let expected = worktree_dir.display().to_string();
+        let parts: Vec<&str> = result.output.split('|').collect();
+
+        assert!(!result.blocked);
+        assert!(result.error.is_none());
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], expected);
+        assert_eq!(parts[1], expected);
+        assert_eq!(parts[2], expected);
+        assert_eq!(
+            std::fs::canonicalize(parts[3]).unwrap(),
+            std::fs::canonicalize(&worktree_dir).unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(&initial_dir);
+        let _ = std::fs::remove_dir_all(&worktree_dir);
+    }
+
+    #[tokio::test]
     async fn test_on_stop_runs_configured_hook_with_event_and_project_dir() {
         let project_dir =
             std::env::temp_dir().join(format!("aemeath-stop-hook-test-{}", uuid::Uuid::new_v4()));

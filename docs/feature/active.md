@@ -14,6 +14,17 @@
 | 39 | TUI 配色方案重新设计 | 中 | 待确认 | 未确认 | 已新增集中 TUI theme，按 Claude Code / 现代 IDE 风格统一输出区、Markdown、spinner、task list、输入区、状态栏、补全面板、dialog、快捷键帮助的语义配色；2026-05-21 修正 status line 使用专用背景色，避免近黑底；2026-05-22 将助手正文/Markdown 默认色改为主文本浅灰，避免大段内容与成功/spinner 绿色混淆；2026-05-22 适配 Catppuccin Macchiato 风格静态配色；2026-05-22 将 status line 背景改为与主背景一致，避免显示为纯黑；2026-05-22 将 inline/code block 仅用代码强调色显示，不额外添加前景背景块；2026-05-22 将 code 强调色改为 Peach `#f5a97f`，增强与主文本区分度；不引入运行时主题切换、不改布局、不引入外部配置 |
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。 |
 | 42 | Allow All 模式下支持访问用户明确授权的 workspace 外路径 | 高 | 待实施 | 未确认 | 当前 Glob/Grep 等工具在访问 `/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver` 时因路径位于 workspace `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform` 外而拒绝；allow all 模式应允许用户明确授权的外部路径执行文件搜索与内容搜索，同时保留默认安全边界。 |
+| 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
+
+### #43 在 git worktree 中工作时 cwd 应设置为 worktree 目录
+
+**状态**：修复中
+
+**背景**：项目工作流要求所有修改都在独立 git worktree 中执行，完成验证并提交后再合并回 main。此前 ToolContext 的 `cwd` 固定为初始工作区，`path_base` 虽可随 Bash 的 `$PWD` 更新，但文件/搜索工具的安全边界仍固定锚定初始 `cwd`，容易在 linked worktree 场景下拒绝正确路径或误操作 main。
+
+**目标**：当 Bash 切换到某个 worktree 根目录后，后续 Read/Edit/Write/Glob/Grep/LSP 等相对路径操作都以当前 `path_base` 为准，安全边界以当前 `working_root` 为准；hook 执行环境变量与进程 cwd 使用当前项目目录；TUI 状态栏显示启动工作根，减少误判。
+
+**实现进度（2026-05-23）**：已在 `feature/43-worktree-cwd` worktree 中开始实现：`ToolContext` 增加可更新的 `working_root`；Bash 执行结束同步 `$PWD` 时同时更新 `path_base` 与 `working_root`；文件/搜索工具改用当前 `working_root` 做边界校验；HookRunner 支持更新项目目录，hook 执行时 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、`{AEMEATH_PROJECT_DIR}` 占位符和进程 cwd 均使用当前项目目录；TUI 状态栏新增当前工作根展示。
 
 ### #42 Allow All 模式下支持访问用户明确授权的 workspace 外路径
 

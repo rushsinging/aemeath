@@ -214,9 +214,11 @@ fn build_agent<'a>(
     session_reminders: &Arc<Mutex<aemeath_core::memory::SessionReminders>>,
     memory_config: &aemeath_core::config::MemoryConfig,
 ) -> Agent<'a> {
+    let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.to_path_buf());
     let ctx = ToolContext {
-        cwd: cwd.to_path_buf(),
-        path_base: Arc::new(Mutex::new(cwd.to_path_buf())),
+        cwd,
+        working_root,
+        path_base,
         cancel: cancel.clone(),
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),

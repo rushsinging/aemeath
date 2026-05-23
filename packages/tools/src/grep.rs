@@ -38,12 +38,10 @@ impl Tool for GrepTool {
             None => return ToolResult::error("missing required parameter: pattern"),
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let path_base = ctx
-            .path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone());
-        let search_path = match validate_search_path_from_base(path_str, &path_base, &ctx.cwd) {
+        let path_base = ctx.current_path_base();
+        let working_root = ctx.current_working_root();
+        let search_path = match validate_search_path_from_base(path_str, &path_base, &working_root)
+        {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };
@@ -55,14 +53,17 @@ impl Tool for GrepTool {
             if let Some(g) = glob_filter {
                 cmd.arg("--glob").arg(g);
             }
-            cmd.arg(&search_path).current_dir(&ctx.cwd).output().await
+            cmd.arg(&search_path)
+                .current_dir(&working_root)
+                .output()
+                .await
         } else {
             let mut cmd = Command::new("grep");
             cmd.arg("-rn").arg(pattern).arg(&search_path);
             if let Some(g) = glob_filter {
                 cmd.arg("--include").arg(g);
             }
-            cmd.current_dir(&ctx.cwd).output().await
+            cmd.current_dir(&working_root).output().await
         };
 
         match output {

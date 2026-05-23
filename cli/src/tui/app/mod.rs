@@ -13,7 +13,7 @@ use ratatui::{
     Terminal,
 };
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use event::UiEvent;
@@ -89,12 +89,19 @@ pub struct AskUserState {
     pub allow_free_input: bool,
 }
 
+fn display_working_dir(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| path.display().to_string(), |name| name.to_string())
+}
+
 impl App {
     pub fn new(session_id: String, cwd: PathBuf, model: String) -> Self {
         let mut status_bar = StatusBar::new();
         status_bar.set_session_id(&session_id);
         status_bar.set_model(&model);
-
+        status_bar.set_current_dir(display_working_dir(&cwd));
         let mut output_area = OutputArea::new();
         output_area.push_system("Aemeath - AI Agent");
         output_area.push_system("");

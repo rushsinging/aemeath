@@ -86,7 +86,10 @@ pub trait AgentRunner: Send + Sync {
 
 #[derive(Clone)]
 pub struct ToolContext {
+    /// Initial workspace root, kept for compatibility with existing callers.
     pub cwd: PathBuf,
+    /// Active workspace root used as the security boundary for file/search tools.
+    pub working_root: Arc<Mutex<PathBuf>>,
     /// Base directory used to resolve relative file/tool paths.
     pub path_base: Arc<Mutex<PathBuf>>,
     pub cancel: CancellationToken,
@@ -113,6 +116,39 @@ pub struct ToolContext {
     /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
     /// back to the user-visible session.
     pub parent_session_id: Option<String>,
+}
+
+impl ToolContext {
+    pub fn new_working_paths(cwd: PathBuf) -> (PathBuf, Arc<Mutex<PathBuf>>, Arc<Mutex<PathBuf>>) {
+        let working_root = Arc::new(Mutex::new(cwd.clone()));
+        let path_base = Arc::new(Mutex::new(cwd.clone()));
+        (cwd, working_root, path_base)
+    }
+
+    pub fn current_working_root(&self) -> PathBuf {
+        self.working_root
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    pub fn current_path_base(&self) -> PathBuf {
+        self.path_base
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    pub fn set_working_directory(&self, path: PathBuf) {
+        match self.working_root.lock() {
+            Ok(mut working_root) => *working_root = path.clone(),
+            Err(poisoned) => *poisoned.into_inner() = path.clone(),
+        }
+        match self.path_base.lock() {
+            Ok(mut path_base) => *path_base = path,
+            Err(poisoned) => *poisoned.into_inner() = path,
+        }
+    }
 }
 
 #[async_trait]

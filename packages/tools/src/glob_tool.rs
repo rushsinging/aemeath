@@ -36,12 +36,9 @@ impl Tool for GlobTool {
             None => return ToolResult::error("missing required parameter: pattern"),
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let path_base = ctx
-            .path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone());
-        let base_dir = match validate_search_path_from_base(path_str, &path_base, &ctx.cwd) {
+        let path_base = ctx.current_path_base();
+        let working_root = ctx.current_working_root();
+        let base_dir = match validate_search_path_from_base(path_str, &path_base, &working_root) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };

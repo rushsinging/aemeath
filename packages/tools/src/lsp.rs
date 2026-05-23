@@ -63,9 +63,11 @@ impl Tool for LspTool {
             .map(|s| s.to_string())
             .unwrap_or_else(|| detect_language(file_path));
 
+        let path_base = ctx.current_path_base();
+
         match operation {
-            "diagnostics" => get_diagnostics(file_path, &language, &ctx.cwd).await,
-            "symbols" => get_symbols(file_path, &language, &ctx.cwd).await,
+            "diagnostics" => get_diagnostics(file_path, &language, &path_base).await,
+            "symbols" => get_symbols(file_path, &language, &path_base).await,
             _ => ToolResult::error(format!("unsupported operation: {operation}")),
         }
     }

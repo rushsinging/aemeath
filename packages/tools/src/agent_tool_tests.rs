@@ -38,6 +38,7 @@ impl AgentRunner for StubRunner {
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
     ToolContext {
         cwd: PathBuf::from("."),
+        working_root: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),
         path_base: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),

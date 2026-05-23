@@ -34,6 +34,8 @@ pub struct StatusBar {
     is_selecting: bool,
     selection_start: Option<usize>,
     selection_end: Option<usize>,
+    /// Current working root displayed to avoid operating in the wrong worktree
+    current_dir: Option<String>,
     /// Thinking/reasoning mode
     thinking: bool,
 }
@@ -68,6 +70,7 @@ impl StatusBar {
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            current_dir: None,
             thinking: true,
         }
     }
@@ -132,6 +135,11 @@ impl StatusBar {
     /// Set thinking/reasoning mode
     pub fn set_thinking(&mut self, enabled: bool) {
         self.thinking = enabled;
+    }
+
+    /// Set current working root display.
+    pub fn set_current_dir(&mut self, dir: impl Into<String>) {
+        self.current_dir = Some(dir.into());
     }
 
     /// Render the status bar
@@ -214,6 +222,14 @@ impl StatusBar {
             } else {
                 spans.push(Span::styled("│", Style::default().fg(theme::TEXT_MUTED)));
             }
+        }
+
+        // Current working root
+        if let Some(ref dir) = self.current_dir {
+            spans.push(Span::styled(
+                format!(" Dir: {} │", dir),
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
 
         // Session info
@@ -303,6 +319,9 @@ impl StatusBar {
             } else {
                 parts.push("│".to_string());
             }
+        }
+        if let Some(ref dir) = self.current_dir {
+            parts.push(format!(" Dir: {} │", dir));
         }
         if let Some(ref id) = self.session_id {
             parts.push(format!(" Session: {} │ Calls: {} ", id, self.api_calls));

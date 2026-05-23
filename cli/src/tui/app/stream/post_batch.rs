@@ -2,14 +2,17 @@ use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::UiEvent;
 use aemeath_core::config::hooks::HookEvent;
 use aemeath_core::hook::{HookData, StopHookData};
+use aemeath_core::tool::ToolContext;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_post_tool_batch(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
     hook_runner: &aemeath_core::hook::HookRunner,
+    ctx: &ToolContext,
     turn_count: usize,
 ) {
+    hook_runner.set_project_dir(ctx.current_working_root().display().to_string());
     let post_batch_results = hook_ui
         .run_json(
             hook_runner,

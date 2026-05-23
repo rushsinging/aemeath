@@ -169,6 +169,7 @@ impl AgentRunner for CliAgentRunner {
         };
         let sub_ctx = ToolContext {
             cwd: ctx.cwd.clone(),
+            working_root: std::sync::Arc::clone(&ctx.working_root),
             path_base: std::sync::Arc::clone(&ctx.path_base),
             cancel: ctx.cancel.clone(),
             read_files: std::sync::Arc::new(
