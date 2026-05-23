@@ -9,8 +9,9 @@ use tokio_util::sync::CancellationToken;
 
 fn test_ctx(cwd: PathBuf) -> ToolContext {
     ToolContext {
+        cwd: cwd.clone(),
+        working_root: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
         path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
-        cwd,
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: None,

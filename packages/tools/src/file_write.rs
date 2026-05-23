@@ -51,21 +51,17 @@ impl Tool for FileWriteTool {
             )),
         };
         // Validate path is within workspace boundary
-        let path_base = ctx
-            .path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone());
+        let path_base = ctx.current_path_base();
+        let working_root = ctx.current_working_root();
         let path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,
-            &ctx.cwd,
+            &working_root,
             ctx.allow_all,
         ) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };
-
         // For existing files, require read first
         if path.exists() {
             if let Ok(read_files) = ctx.read_files.lock() {

@@ -65,9 +65,12 @@ pub async fn process_in_background(
 ) {
     let hook_ui = HookUi::new(tx.clone());
 
+    let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.clone());
+    hook_runner.set_project_dir(cwd.display().to_string());
     let ctx = ToolContext {
         cwd: cwd.clone(),
-        path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
+        working_root,
+        path_base,
         cancel: cancel.clone(),
         read_files: read_files.clone(),
         agent_runner: agent_runner.clone(),
@@ -348,7 +351,7 @@ pub async fn process_in_background(
                         continue;
                     }
 
-                    run_post_tool_batch(&tx, &hook_ui, &hook_runner, turn_count).await;
+                    run_post_tool_batch(&tx, &hook_ui, &hook_runner, &agent.ctx, turn_count).await;
                 }
             }
             Err(e) => {

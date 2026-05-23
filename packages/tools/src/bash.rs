@@ -74,11 +74,7 @@ impl Tool for BashTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(120_000);
 
-        let path_base = ctx
-            .path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone());
+        let path_base = ctx.current_path_base();
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut child = match Command::new("bash")
@@ -158,9 +154,7 @@ impl Tool for BashTool {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
-                    if let Ok(mut path_base) = ctx.path_base.lock() {
-                        *path_base = new_path_base;
-                    }
+                    ctx.set_working_directory(new_path_base);
                 }
                 let stderr = String::from_utf8_lossy(&stderr);
                 let mut out = String::new();
@@ -231,8 +225,10 @@ mod tests {
         let worktree = workspace.path().join(".worktrees/bug35");
         std::fs::create_dir_all(&worktree).unwrap();
         let path_base = Arc::new(Mutex::new(workspace.path().to_path_buf()));
+        let working_root = Arc::new(Mutex::new(workspace.path().to_path_buf()));
         let ctx = ToolContext {
             cwd: workspace.path().to_path_buf(),
+            working_root: Arc::clone(&working_root),
             path_base: Arc::clone(&path_base),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
@@ -257,5 +253,6 @@ mod tests {
 
         assert!(!result.is_error);
         assert_eq!(*path_base.lock().unwrap(), worktree);
+        assert_eq!(*working_root.lock().unwrap(), worktree);
     }
 }

@@ -41,9 +41,11 @@ impl Tool for TimedTool {
 }
 
 fn test_ctx() -> ToolContext {
+    let cwd = std::env::current_dir().unwrap();
     ToolContext {
-        cwd: std::env::current_dir().unwrap(),
-        path_base: Arc::new(std::sync::Mutex::new(std::env::current_dir().unwrap())),
+        cwd: cwd.clone(),
+        working_root: Arc::new(std::sync::Mutex::new(cwd.clone())),
+        path_base: Arc::new(std::sync::Mutex::new(cwd)),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         agent_runner: None,

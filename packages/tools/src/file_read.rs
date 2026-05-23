@@ -39,21 +39,17 @@ impl Tool for FileReadTool {
         };
 
         // Validate path is within workspace boundary
-        let path_base = ctx
-            .path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone());
+        let path_base = ctx.current_path_base();
+        let working_root = ctx.current_working_root();
         let path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,
-            &ctx.cwd,
+            &working_root,
             ctx.allow_all,
         ) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),
         };
-
         if !path.exists() {
             return ToolResult::error(format!("file not found: {file_path}"));
         }

@@ -3,6 +3,7 @@
 use crate::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use crate::hook::data::{HookData, HookInput};
 use crate::hook::result::{HookJsonOutput, HookResult};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Hook 运行器
@@ -10,7 +11,7 @@ use std::time::Duration;
 pub struct HookRunner {
     pub(crate) config: HooksConfig,
     /// 项目根目录
-    pub(crate) project_dir: String,
+    pub(crate) project_dir: Arc<Mutex<String>>,
 }
 
 impl HookRunner {
@@ -18,7 +19,7 @@ impl HookRunner {
     pub fn new(config: HooksConfig, project_dir: String) -> Self {
         Self {
             config,
-            project_dir,
+            project_dir: Arc::new(Mutex::new(project_dir)),
         }
     }
 
@@ -26,7 +27,7 @@ impl HookRunner {
     pub fn empty(project_dir: String) -> Self {
         Self {
             config: HooksConfig::default(),
-            project_dir,
+            project_dir: Arc::new(Mutex::new(project_dir)),
         }
     }
 
@@ -34,13 +35,29 @@ impl HookRunner {
     pub fn from_config(config: &crate::config::Config, project_dir: String) -> Self {
         Self {
             config: config.hooks.clone(),
-            project_dir,
+            project_dir: Arc::new(Mutex::new(project_dir)),
         }
     }
 
     /// 返回配置的 hook 事件数量（用于调试日志）
     pub fn hook_count(&self) -> usize {
         self.config.events.len()
+    }
+
+    /// 返回当前 hook 项目目录。
+    pub fn project_dir(&self) -> String {
+        self.project_dir
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    /// 更新 hook 项目目录，用于 worktree/cwd 切换后同步内置环境变量。
+    pub fn set_project_dir(&self, project_dir: String) {
+        match self.project_dir.lock() {
+            Ok(mut current) => *current = project_dir,
+            Err(poisoned) => *poisoned.into_inner() = project_dir,
+        }
     }
 
     /// 获取匹配指定事件和工具名的 hook 列表
@@ -70,18 +87,20 @@ impl HookRunner {
         };
 
         let timeout = Duration::from_secs(hook.timeout);
+        let project_dir = self.project_dir();
         let command = self.expand_command_placeholders(&hook.command);
         log::info!(
             "hook start: event={:?} matcher={} command={} project_dir={}",
             input.event,
             hook.matcher,
             command,
-            self.project_dir
+            project_dir
         );
 
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
+            .current_dir(&project_dir)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -89,8 +108,8 @@ impl HookRunner {
                 "AEMEATH_HOOK_EVENT",
                 serde_json::to_string(&input.event).unwrap_or_default(),
             )
-            .env("AEMEATH_PROJECT_DIR", &self.project_dir)
-            .env("CLAUDE_PROJECT_DIR", &self.project_dir)
+            .env("AEMEATH_PROJECT_DIR", &project_dir)
+            .env("CLAUDE_PROJECT_DIR", &project_dir)
             .envs(input.data.to_env_vars())
             .spawn()
         {
@@ -183,7 +202,7 @@ impl HookRunner {
     }
 
     pub(crate) fn expand_command_placeholders(&self, command: &str) -> String {
-        command.replace("{AEMEATH_PROJECT_DIR}", &self.project_dir)
+        command.replace("{AEMEATH_PROJECT_DIR}", &self.project_dir())
     }
 
     /// 运行指定事件的所有匹配 hook
