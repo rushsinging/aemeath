@@ -8,7 +8,6 @@
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 58 | TUI 中 Markdown 表格 header 滚出后局部退回原文，且 code 未渲染 | 中 | 修复中 | 待确认 | 2026-05 | 渲染缓存层已实现：滑动窗口前后各扩展 50% 并扩展到 block 边界，table 自动换行列内容。核心改动：新增 rendered_cache.rs（缓存管理+block边界扩展）+ rendered_lines.rs（行渲染函数），render.rs 改为使用缓存层；table.rs 支持按可用宽度自动换行 |
 | 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
-| 61 | Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失 | 中 | 已修复 | 待确认 | 2026-05 | diff 行号前加 INDENT 前缀；新增 apply_selection_to_line 对 styled Line 逐 span/char 叠加选区高亮，恢复缓存层改造后丢失的选区高亮 |
 ## 专案
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失

@@ -1,0 +1,23 @@
+# Bug 61: Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
+
+- 状态：已修复并归档
+- 发现日期：2026-05
+- 修复提交：4968260 (main)
+
+## 症状
+
+1. Diff 输出的行号（如 `1   1 | - foo`）从最左列开始，与普通内容的 INDENT 缩进不一致
+2. 选中 diff 行或其他 styled 内容后，选区高亮不显示（渲染缓存层改造后回退）
+
+## 根因
+
+1. `diff.rs` 中 `build_delete_line`/`build_insert_line`/`build_context_line` 的行号区域没有 INDENT 前缀
+2. 渲染缓存层改造后 `render.rs` 直接使用 `RenderedLine.line`，未叠加选区高亮
+3. `rendered.line` 含 `\n` 时一个 display_line 对应多个屏幕行，但 `screen_line_map` 每行一个 entry，索引不对齐导致选区映射偏移
+
+## 修复
+
+1. diff.rs: 三处行号构建函数前加 `INDENT` 前缀
+2. selection_render.rs: 新增 `apply_selection_to_line` 方法，对 styled Line 逐 span/char 追踪偏移，在选区范围内叠加 SELECTION_BG/FG
+3. render.rs: 新增 `split_line_at_newlines` 将含 `\n` 的 Line 拆分为不含 `\n` 的子 Line，使 display_lines 与 screen_map 一一对应
+4. render_status.rs: queued_lines 和 spinner 行加不可选 screen_map entry (usize::MAX) 保持对齐
