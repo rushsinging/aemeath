@@ -17,30 +17,51 @@
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
 | 44 | 基于项目历史 Co-Authored-By commit 风格提示 LLM 生成 commit message | 中 | 待实施 | 未确认 | 在目标项目（如 `/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform`）中读取 git log，分析带 `Co-Authored-By` 的 commit message 风格，并在需要创建 commit message 时提示 LLM 按该项目既有风格生成。 |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 未确认 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
-| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待实施 | 未确认 | 当前 status line 只有一行信息容量不足；需要增加第二行，用于显示当前 cwd/工作根/worktree 路径、分支或上下文状态，确认此前 cwd 显示能力是否丢失，并在 worktree 切换场景下明确展示当前操作目录。 |
+| 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 规划完成，待实施 | 未确认 | status line 明确改为两行：第一行保持模型/Token/费用/运行状态等高频信息；第二行固定展示当前工作上下文（cwd/path_base/working_root、worktree/main 标识、branch、权限模式），并与 #43/#45 的上下文切换实时联动，避免误操作 main/worktree。 |
 
 ### #46 TUI status line 增加第二行并显示 cwd/current worktree
 
-**状态**：待实施
+**状态**：规划完成，待实施
 
 **背景**：当前 TUI status line 只有一行，信息容量不足。用户反馈“一行有点少”，并记得之前似乎增加过 cwd 显示，需要确认当前是否丢失或被布局压缩。随着 Feature #43/#45 要求 worktree 上下文切换，UI 必须清楚展示当前操作目录，避免用户误以为正在 worktree 中，实际仍在 main 工作区。
 
-**目标**：将 status line 扩展为两行：
-1. 第一行保留当前模型、token/cost、状态、快捷键等核心运行状态。
-2. 第二行用于显示当前 cwd/working_root/worktree、git branch、权限模式（如 allow all）或关键上下文提示。
+**重新规划（2026-05-23）**：本 feature 不再只做“多塞一行文字”，而是把 status line 定义为两层状态架构：第一行回答“当前 agent 在做什么、花费多少、还能怎么操作”，第二行回答“当前工具实际会在哪个目录/工作树执行”。第二行必须来自运行时工具上下文，而不是静态启动 cwd，作为 #43/#45 的可视化验收面。
 
-**建议范围**：
-1. 检查历史实现中是否曾显示 cwd，如已存在但被移除/覆盖，应恢复并适配两行布局。
-2. 第二行路径应优先显示当前工具上下文的 path_base/working_root，而不是仅进程启动 cwd。
-3. 当处于 git worktree 时，应明确显示 worktree 路径和分支；当在 main 工作区时也应显示 main/root 标识。
-4. 路径过长时做中间省略，保留仓库名、worktree 名和末尾相对路径。
-5. 与 EnterWorktree/ExitWorktree、Allow All 外部授权路径联动，状态变化后立即刷新。
-6. 确保增加第二行后 output/input 区域布局高度正确，不遮挡、不越界。
+**信息架构**：
+1. 第一行：保留模型/provider、streaming/idle/tool running 状态、token/cost、任务/压缩等高频运行信息和必要快捷键提示。
+2. 第二行：固定展示工作上下文，字段顺序建议为 `cwd/path_base` → `working_root` → `main/worktree` 标识 → `branch` → `permission mode` → 关键告警。
+3. `cwd/path_base` 表示相对路径解析基准；`working_root` 表示文件/搜索工具安全边界。两者不一致时必须同时显示，避免误判。
+4. worktree 场景必须显示 worktree 名称或路径片段以及 branch；main checkout 场景显示 `main`/`root` 标识。
+5. AllowAll/外部授权等高风险权限状态放在第二行右侧，用明显但不抢主状态的样式展示。
+
+**实施阶段**：
+1. 梳理现状：检查 status line 渲染、布局高度、主题样式，以及 #43 已新增的工作根展示是否只显示启动 cwd 或当前 working_root。
+2. 抽象数据：新增/复用 `StatusLineContext` 一类结构，统一收集 provider/model、运行状态、token/cost、path_base、working_root、git branch、worktree 标识、权限模式。
+3. 布局改造：将 status line 高度固定为 2 行，并调整 output/input/task/input queue 区域高度计算，确保极小终端高度下优雅降级。
+4. 路径显示：实现中间省略，保留 repo/worktree 名和末尾相对路径；宽度不足时按字段优先级裁剪，而不是直接截断关键标识。
+5. 状态联动：Bash `$PWD` 同步、未来 EnterWorktree/ExitWorktree、权限模式变化后必须触发 TUI 刷新；第二行展示应反映工具上下文最新值。
+6. 样式适配：复用 Feature #39 的 theme，不引入运行时主题切换；第二行视觉权重低于第一行，但 cwd/worktree/权限告警必须可读。
+
+**依赖与边界**：
+1. 与 #43 强相关：若 #43 的 working_root/path_base 更新逻辑尚未完全落地，本 feature 可先接入已有状态源，但不得硬编码 main cwd。
+2. 与 #45 强相关：EnterWorktree/ExitWorktree 上线后必须复用同一上下文数据源；本 feature 不单独实现 worktree 切换工具。
+3. 与 #42 权限系统相关：本 feature 只展示当前权限模式/授权摘要，不实现权限评估或授权交互。
+4. 不在本 feature 中重做整体 TUI 布局、主题系统、command palette 或 footer 快捷键体系。
+
+**验收标准**：
+1. TUI status line 稳定显示两行，第一行运行状态不回退，第二行始终可见当前工作上下文。
+2. 在 main checkout、linked worktree、`cd` 到子目录三种场景下，第二行能区分 path_base 与 working_root，并展示正确 branch/worktree 标识。
+3. 路径很长或终端很窄时仍保留 repo/worktree 名与末尾路径；不会遮挡 input/output，也不会造成越界 panic。
+4. Bash 改变目录或后续 EnterWorktree/ExitWorktree 改变上下文后，status line 能在下一次渲染刷新为新路径。
+5. AllowAll/外部授权等权限状态在第二行可见，用户能一眼判断当前是否处于高权限上下文。
+6. 文档实施后需同步更新本条状态；代码实现完成前保持“规划完成，待实施”，不提前标记完成。
 
 **涉及路径**：
 - TUI status line 渲染逻辑
-- layout 高度分配逻辑
+- TUI layout 高度分配逻辑
+- TUI theme/status line 样式
 - ToolContext/path_base/working_root 状态读取
+- Bash `$PWD` 同步后的上下文广播/刷新逻辑
 - git branch/worktree 状态展示逻辑
 
 ### #45 为 LLM 提供 EnterWorktree / ExitWorktree 工具
