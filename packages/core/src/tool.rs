@@ -140,15 +140,29 @@ impl ToolContext {
     }
 
     pub fn set_working_directory(&self, path: PathBuf) {
+        let working_root = detect_working_root(&path);
         match self.working_root.lock() {
-            Ok(mut working_root) => *working_root = path.clone(),
-            Err(poisoned) => *poisoned.into_inner() = path.clone(),
+            Ok(mut current) => *current = working_root,
+            Err(poisoned) => *poisoned.into_inner() = working_root,
         }
         match self.path_base.lock() {
             Ok(mut path_base) => *path_base = path,
             Err(poisoned) => *poisoned.into_inner() = path,
         }
     }
+}
+
+fn detect_working_root(path: &std::path::Path) -> PathBuf {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(path)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| PathBuf::from(stdout.trim()))
+        .filter(|root| !root.as_os_str().is_empty())
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 #[async_trait]

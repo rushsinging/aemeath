@@ -61,7 +61,7 @@ impl Tool for FileReadTool {
 
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
-        match tokio::fs::read_to_string(path).await {
+        match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
                 let lines: Vec<&str> = content.lines().collect();
                 let total = lines.len();
@@ -80,6 +80,7 @@ impl Tool for FileReadTool {
                 // Track this file as read
                 if let Ok(mut read_files) = ctx.read_files.lock() {
                     read_files.insert(file_path.to_string());
+                    read_files.insert(path.to_string_lossy().to_string());
                 }
                 if numbered.is_empty() {
                     ToolResult::success("(empty file)")

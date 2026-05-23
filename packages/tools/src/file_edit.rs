@@ -49,7 +49,8 @@ impl Tool for FileEditTool {
         };
         // Check if file was read first
         if let Ok(read_files) = ctx.read_files.lock() {
-            if !read_files.contains(file_path) {
+            let normalized_path = path.to_string_lossy();
+            if !read_files.contains(file_path) && !read_files.contains(normalized_path.as_ref()) {
                 return ToolResult::error(format!(
                     "You must read {file_path} before editing it. Use the Read tool first."
                 ));

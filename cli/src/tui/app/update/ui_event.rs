@@ -339,6 +339,9 @@ impl App {
                         .set_spinner_phase(format!("Hook {event} done"));
                 }
             }
+            UiEvent::WorkingDirectoryChanged(dir) => {
+                self.status_bar.set_current_dir(dir);
+            }
             UiEvent::Done => {
                 log::debug!(
                     "[SPINNER] Done: tool_call_active {} -> false",
