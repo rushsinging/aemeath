@@ -15,8 +15,14 @@ impl OutputArea {
         spinner_line: &Option<Line<'static>>,
         task_status_lines: &[String],
     ) {
+        // queued_lines: 每行加一个不可选的 screen_map entry 保持对齐
+        for _ in queued_lines.iter() {
+            self.screen_line_map.push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
+        }
         lines.extend(queued_lines);
         if let Some(sl) = spinner_line {
+            // spinner 行也加一个不可选的 screen_map entry
+            self.screen_line_map.push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
             lines.push(sl.clone());
         }
         if spinner_line.is_some() {
@@ -153,11 +159,16 @@ mod tests {
         let mut buf = Buffer::empty(area);
 
         output.render(area, &mut buf);
-        assert_eq!(output.screen_line_map.len(), 2);
-        assert_eq!(output.screen_line_map[1].0, output.lines.len() + 1);
+        // screen_line_map: spinner(1,不可选) + task_status(2) = 3
+        assert_eq!(output.screen_line_map.len(), 3);
+        // spinner 在 index 0, 不可选(usize::MAX)
+        assert_eq!(output.screen_line_map[0].0, usize::MAX);
+        assert_eq!(output.screen_line_map[1].0, output.lines.len());
+        assert_eq!(output.screen_line_map[2].0, output.lines.len() + 1);
         assert_eq!(output.task_status_lines.len(), 2);
-        output.start_selection(1, 0, &area);
-        output.update_selection(1, 15, &area);
+        // rel_row=2 对应第 2 个 task_status 行
+        output.start_selection(2, 0, &area);
+        output.update_selection(2, 15, &area);
 
         assert_eq!(
             output.get_selected_text(),
@@ -179,8 +190,10 @@ mod tests {
         let mut buf = Buffer::empty(area);
 
         output.render(area, &mut buf);
-        output.start_selection(0, 0, &area);
-        output.update_selection(0, 8, &area);
+        // screen_map: [spinner(usize::MAX), task_status(lines.len())]
+        // 选 task_status 行（screen 行 1）
+        output.start_selection(1, 0, &area);
+        output.update_selection(1, 8, &area);
         output.render(area, &mut buf);
 
         let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
