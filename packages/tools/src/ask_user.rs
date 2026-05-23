@@ -10,7 +10,7 @@ impl Tool for AskUserQuestionTool {
         "AskUserQuestion"
     }
     fn description(&self) -> &str {
-        "Ask the user a question and wait for their response. Use this when you need clarification, confirmation, or user input to proceed with a task."
+        "Ask the user a question and wait for their response. Use this when you need clarification, confirmation, or user input to proceed with a task. When offering predefined choices, MUST put each choice in the options array as a separate item and keep question to the prompt text only. NEVER embed choices such as A/B/C, 1/2/3, or multiple selectable alternatives directly in question."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -18,12 +18,12 @@ impl Tool for AskUserQuestionTool {
             "properties": {
                 "question": {
                     "type": "string",
-                    "description": "The question to ask the user"
+                    "description": "The question prompt only. Do not include selectable choices here; put choices in options."
                 },
                 "options": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Optional list of predefined answer choices"
+                    "description": "Optional list of predefined answer choices. For multiple-choice questions, each choice MUST be one separate array item. Do not combine choices into one string or embed them in question."
                 },
                 "allow_free_input": {
                     "type": "boolean",
@@ -102,5 +102,46 @@ impl Tool for AskUserQuestionTool {
         };
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_description_requires_choices_in_options() {
+        let tool = AskUserQuestionTool;
+        let description = tool.description();
+
+        assert!(description.contains("MUST put each choice in the options array"));
+        assert!(description.contains("keep question to the prompt text only"));
+        assert!(description.contains("NEVER embed choices"));
+    }
+
+    #[test]
+    fn test_input_schema_question_description_rejects_embedded_choices() {
+        let tool = AskUserQuestionTool;
+        let schema = tool.input_schema();
+        let description = schema["properties"]["question"]["description"]
+            .as_str()
+            .expect("question description should be a string");
+
+        assert!(description.contains("question prompt only"));
+        assert!(description.contains("Do not include selectable choices"));
+        assert!(description.contains("put choices in options"));
+    }
+
+    #[test]
+    fn test_input_schema_options_description_requires_separate_items() {
+        let tool = AskUserQuestionTool;
+        let schema = tool.input_schema();
+        let description = schema["properties"]["options"]["description"]
+            .as_str()
+            .expect("options description should be a string");
+
+        assert!(description.contains("each choice MUST be one separate array item"));
+        assert!(description.contains("Do not combine choices into one string"));
+        assert!(description.contains("embed them in question"));
     }
 }
