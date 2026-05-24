@@ -334,7 +334,9 @@ interaction
 4. 依赖方向应保持：inbound adapter → application service → domain context → outbound port → external adapter。
 5. 禁止 domain context 反向依赖 HTTP、CLI、TUI 等入口层。
 
-### 6.5 Chat 启动边界对象化
+### 6.5 Chat 启动边界对象化（实施进展附注）
+
+本节记录 #47 分阶段重构的当前落地进展，用于衔接目标架构与现有 CLI/TUI 代码。它不是新的领域边界定义，而是 Phase 3/4 对入口启动边界的过渡性实现约束。
 
 Phase 3 继续沿薄入口推进，重点整理 Chat 启动参数边界。Phase 1 已让 CLI no-TUI 与 TUI 主入口通过 `ChatApplicationService` 分发到现有 runtime；Phase 2 已让 `ChatApplicationService` 依赖 `ChatRuntimePort`，并把 `repl` / `tui::App` 调用移动到 runtime adapter。Phase 3 不改变运行行为，而是把“传什么”整理为更稳定的 application 边界对象。
 
@@ -384,11 +386,14 @@ run_tui_chat(TuiChatLaunch, ChatRuntimeContext)
 设计约束：
 
 1. `ChatRuntimeContext` 只承载启动 Chat 所需的共享运行依赖，不拥有 Agent Runtime 业务规则。
-2. `ChatLaunchOptions` 只承载 no-TUI / TUI 共同启动选项，不包含 `session_id`、`model_display`、`max_agent_concurrency` 等入口模式专属字段。
-3. `NoTuiChatLaunch` 与 `TuiChatLaunch` 用类型表达入口模式差异，避免继续使用 `mode + Option<String>` 表达 TUI 必填项。
-4. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
-5. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。
-6. HTTP / SDK 后续接入时应复用同一组 context、options 和 mode-specific launch DTO，而不是复制 CLI/TUI 专属参数结构。
+2. `system_blocks` / `system_prompt_text` 是 Guidance / PromptContract 的启动快照，当前作为过渡字段随 context 传递，后续应沉淀到入口无关的 prompt 构建用例。
+3. `agent_semaphore` 是 Agent Runtime 并发执行资源的 runtime handle，当前由 CLI bootstrap 创建并透传，后续应由 Agent Runtime 或执行环境边界统一管理。
+4. `json_logger` 是 Audit / logging projection 的适配器句柄，当前保留在 context 中以维持现有日志行为，不应扩展为 application 层业务规则。
+5. `ChatLaunchOptions` 只承载 no-TUI / TUI 共同启动选项，不包含 `session_id`、`model_display`、`max_agent_concurrency` 等入口模式专属字段。
+6. `NoTuiChatLaunch` 与 `TuiChatLaunch` 用类型表达入口模式差异，避免继续使用 `mode + Option<String>` 表达 TUI 必填项。
+7. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
+8. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。
+9. HTTP / SDK 后续接入时应复用同一组 context、options 和 mode-specific launch DTO，而不是复制 CLI/TUI 专属参数结构。
 
 ## 7. COLA 工程分层规范
 
