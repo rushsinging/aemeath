@@ -189,7 +189,10 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["path"]["type"], "string");
-        assert!(schema["required"].as_array().unwrap().contains(&Value::String("path".to_string())));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String("path".to_string())));
     }
 
     #[test]

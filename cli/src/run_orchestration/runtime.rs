@@ -1,4 +1,7 @@
-use crate::{repl, tui};
+use crate::application::chat::{
+    ChatApplicationService, ChatLaunchMode, ChatLaunchRequest, NoTuiChatDependencies,
+    TuiChatDependencies,
+};
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::LlmClient;
@@ -18,34 +21,44 @@ pub(super) async fn run_no_tui(
     agent_runner: Arc<dyn aemeath_core::tool::AgentRunner>,
     task_store: Arc<TaskStore>,
     max_tool_concurrency: usize,
+    max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     skills_map: std::collections::HashMap<String, aemeath_core::skill::Skill>,
     hook_runner: aemeath_core::hook::HookRunner,
     memory_config: aemeath_core::config::MemoryConfig,
     json_logger: Option<Arc<Mutex<aemeath_core::logging::JsonLogger>>>,
 ) {
-    repl::run_repl(
+    let request = ChatLaunchRequest {
+        mode: ChatLaunchMode::NoTui,
+        session_id: None,
+        cwd,
+        model_display: None,
+        verbose: args.verbose,
+        markdown: !args.no_markdown,
+        context_size: args.context_size,
+        resume: args.resume.clone(),
+        allow_all: args.allow_all,
+        max_tool_concurrency,
+        max_agent_concurrency,
+    };
+    let dependencies = NoTuiChatDependencies {
         client,
         registry,
         system_blocks,
         system_prompt_text,
         user_context,
-        cwd,
-        args.verbose,
-        !args.no_markdown,
-        args.context_size,
-        args.resume.clone(),
-        Some(agent_runner),
-        args.allow_all,
+        agent_runner,
         task_store,
-        max_tool_concurrency,
         agent_semaphore,
         skills_map,
         hook_runner,
         memory_config,
         json_logger,
-    )
-    .await;
+    };
+    if let Err(e) = ChatApplicationService::run_no_tui_chat(request, dependencies).await {
+        log::error!("no-TUI chat application service error: {e}");
+        std::process::exit(1);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -69,35 +82,41 @@ pub(super) async fn run_tui(
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
 ) {
-    let mut app = tui::App::new(session_id.clone(), cwd, model_display);
-    app.memory_config = memory_config;
-    app.set_skills(skills_map);
-    app.hook_runner = hook_runner;
-    app.json_logger = json_logger;
-    if let Err(e) = app
-        .run(
-            client,
-            registry,
-            system_blocks,
-            system_prompt_text,
-            user_context,
-            args.context_size,
-            args.verbose,
-            !args.no_markdown,
-            Some(agent_runner),
-            args.allow_all,
-            args.resume,
-            task_store,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            agent_semaphore,
-        )
-        .await
-    {
-        log::error!("TUI error: {e}");
-        std::process::exit(1);
+    let request = ChatLaunchRequest {
+        mode: ChatLaunchMode::Tui,
+        session_id: Some(session_id.clone()),
+        cwd,
+        model_display: Some(model_display),
+        verbose: args.verbose,
+        markdown: !args.no_markdown,
+        context_size: args.context_size,
+        resume: args.resume,
+        allow_all: args.allow_all,
+        max_tool_concurrency,
+        max_agent_concurrency,
+    };
+    let dependencies = TuiChatDependencies {
+        client,
+        registry,
+        system_blocks,
+        system_prompt_text,
+        user_context,
+        agent_runner,
+        task_store,
+        skills_map,
+        hook_runner,
+        memory_config,
+        json_logger,
+        max_agent_concurrency,
+        agent_semaphore,
+    };
+    match ChatApplicationService::run_tui_chat(request, dependencies).await {
+        Ok(session_id) => println!("aemeath --resume {}", session_id),
+        Err(e) => {
+            log::error!("TUI chat application service error: {e}");
+            std::process::exit(1);
+        }
     }
-    println!("aemeath --resume {}", session_id);
 }
 
 pub(super) fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {

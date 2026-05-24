@@ -1,4 +1,4 @@
-use super::{Skill, builtin_commit_skill, parse_skill};
+use super::{builtin_commit_skill, parse_skill, Skill};
 use crate::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
