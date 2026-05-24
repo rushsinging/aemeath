@@ -7,7 +7,38 @@
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
 | 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
+| 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 ## 专案
+
+### #65 工具结果 fenced code block 后续内容继续显示为 code 颜色
+
+**状态**：活动中
+
+**症状**：TUI 输出区展示工具结果时，如果结果内容包含 fenced code block，代码块结束后后续普通内容仍显示为 code 颜色。用户观察到如下片段后，后面的内容都变成 code 颜色：
+
+```text
+✓ replaced 1 occurrence(s) in ␠
+/Users/guoyuqi/Nextcloud/work/claudecode/aemeath/docs/superpowers/plans/2026-05-24-task-window-refactor.md
+```
+
+**影响**：工具结果后的普通 assistant 文本、后续 tool call 展示或文档内容被错误套用 code block 样式，降低可读性，也可能影响用户判断哪些内容属于代码块。
+
+**根因假设**：
+1. Markdown fence 状态机在处理 tool result 渲染片段时没有在片段结束后复位，导致 `in_code_block` 状态泄漏到后续输出。
+2. 工具结果的 styled spans/cache 跨 block 复用，code block foreground/background 样式没有在 fence 结束行后清空。
+3. fenced code block 结束标记被工具结果格式化、缩进或换行拆分影响，导致渲染器没有识别 closing fence。
+4. streaming/append 路径和历史渲染路径对 tool result 的 Markdown block state 初始化/收尾不一致。
+
+**修复方向**：
+1. 检查 output area Markdown fenced code block 状态机，确保每个消息/tool result block 渲染结束时不会把 code style 泄漏到下一个 block。
+2. 对 closing fence 的识别兼容工具结果中带缩进、语言标记、空白字符的情况。
+3. 明确 tool result 渲染缓存的 block state 生命周期：同一消息内可延续，跨消息/tool result 必须按设计复位或正确继承。
+4. 补充回归覆盖：工具结果包含完整 fenced code block 后，下一行普通文本不应使用 code foreground/background。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/markdown/` fenced code block 渲染逻辑
+- tool result display / output area styled span cache
+- streaming append 与历史消息 render 路径
 
 ### #64 Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态
 
