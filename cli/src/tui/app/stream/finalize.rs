@@ -9,6 +9,13 @@ use tokio::sync::mpsc;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
+/// Run stop/failure hooks and return feedback if the loop should continue.
+///
+/// **Bug #49 note**: input queue draining happens *before* this function is
+/// called (in `stream.rs`). If queued input exists, the loop `continue`s
+/// without reaching here. When a stop hook blocks the stop, the returned
+/// feedback is injected as a system-reminder and the loop `continue`s — the
+/// next iteration will again drain the queue first.
 pub(crate) async fn finalize_main_loop(
     outcome: &AgentRunOutcome,
     tx: &mpsc::Sender<UiEvent>,

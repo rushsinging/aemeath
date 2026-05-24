@@ -135,6 +135,13 @@ pub async fn process_in_background(
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
+            // Bug #49: drain queued input before handling cancellation,
+            // so user-submitted messages are preserved even if interrupted.
+            if append_queued_input(&queue_request_tx, &tx, &mut messages).await {
+                // User queued new input — resume with it instead of cancelling.
+                let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
+                continue;
+            }
             messages.truncate(messages_at_start);
             let _ = tx.send(UiEvent::MessagesSync(messages.clone())).await;
             let _ = tx.send(UiEvent::Cancelled).await;
@@ -250,6 +257,10 @@ pub async fn process_in_background(
                             "[agent loop stopped: LLM is producing repetitive output]".to_string(),
                         ))
                         .await;
+                    // Bug #49: drain queued input before breaking on stall.
+                    if append_queued_input(&queue_request_tx, &tx, &mut messages).await {
+                        continue;
+                    }
                     break;
                 }
 
@@ -337,6 +348,10 @@ pub async fn process_in_background(
             Err(e) => {
                 let error_msg = e.to_string();
                 let _ = tx.send(UiEvent::Error(error_msg.clone())).await;
+                // Bug #49: drain queued input before handling API error.
+                if append_queued_input(&queue_request_tx, &tx, &mut messages).await {
+                    continue;
+                }
                 if let Some(outcome) = finalize_main_loop(
                     &AgentRunOutcome {
                         status: AgentRunStatus::ApiError(error_msg),

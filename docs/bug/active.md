@@ -104,7 +104,7 @@
 
 ### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 
-**状态**：待确认（已修复渲染缓存未 invalidate 问题）（用户反馈仍存在，已从归档恢复）
+**状态**：修复中（2026-05-24 补齐三条缺失 drain 路径）
 
 **症状**：用户在 LLM 处理期间提交的消息（last turn）没有继续发送给 LLM，而是留在 input queue 区域。表现为当前轮 LLM 结束后，排队输入仍显示在队列里，没有自动进入下一轮请求。
 
@@ -117,6 +117,13 @@
 2. 队列内容被同步到 messages 后，状态机没有 `continue` 或没有重新启动后台处理。
 3. TUI input queue 区域与实际 input_queue 数据源不同步，导致已消费但 UI 未清除，或 UI 清除但消息未发送。
 4. last turn 提交时机处于 streaming 收尾与 idle 切换之间，触发了竞态，队列未被下一轮消费。
+
+**本轮修复（2026-05-24）**：审计发现 `append_queued_input` 仅覆盖了 EndTurn/无工具调用和工具轮结果同步两条路径，以下三条路径完全缺失 drain：
+1. **interrupted（用户按 Escape 取消）**：直接 truncate messages + break，队列内容被丢弃。修复：drain 优先，有内容则 continue 恢复而非取消。
+2. **stall_detector（重复输出检测）**：直接 break 退出循环。修复：drain 后有内容则 continue。
+3. **API Error**：直接进入 finalize_main_loop。修复：drain 优先，有内容则 continue 跳过错误处理。
+
+修复后所有 `break` 出口前均有 `append_queued_input` drain 检查。`finalize_main_loop`（含 stop hook）仅在队列为空时才执行。
 
 **修复方向**：
 1. 为所有 LLM 结束路径统一添加 input_queue drain 检查，尤其是 EndTurn、无工具调用、hook stop、错误返回、用户 stop 后的状态切换。
