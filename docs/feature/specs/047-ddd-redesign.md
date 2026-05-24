@@ -293,6 +293,8 @@ HTTP、CLI、TUI、SDK 等都属于 inbound adapter。它们可以负责：
 
 Application service 负责把入口命令编排到 Agent Runtime、Tool Execution、Security / Policy、Audit 等上下文。HTTP、CLI、TUI 不应各自复制一套核心流程。
 
+当前 Phase 4 的 `ChatApplicationService` 仍是过渡形态：它只做薄校验与分发，通过 `ChatRuntimePort` 调用现有 REPL/TUI adapter，以避免在一次重构中改写 agent loop 或 Tool Execution pipeline。目标形态会逐步把 CLI/TUI 初始化之外的 use case 编排上移为入口无关的 application service；本阶段先收束启动 DTO、运行上下文和 bootstrap 边界，为后续迁移铺路。
+
 ### 6.3 协议无关事件模型
 
 Agent Runtime 和相关上下文应输出协议无关事件，例如：
@@ -361,13 +363,13 @@ ChatLaunchOptions
   resume
   allow_all
   max_tool_concurrency
-  max_agent_concurrency
 
 NoTuiChatLaunch
   options: ChatLaunchOptions
 
 TuiChatLaunch
   options: ChatLaunchOptions
+  max_agent_concurrency
   session_id: String
   model_display: String
 ```
@@ -382,7 +384,7 @@ run_tui_chat(TuiChatLaunch, ChatRuntimeContext)
 设计约束：
 
 1. `ChatRuntimeContext` 只承载启动 Chat 所需的共享运行依赖，不拥有 Agent Runtime 业务规则。
-2. `ChatLaunchOptions` 只承载 no-TUI / TUI 共同启动选项，不包含 `session_id`、`model_display` 等入口模式专属字段。
+2. `ChatLaunchOptions` 只承载 no-TUI / TUI 共同启动选项，不包含 `session_id`、`model_display`、`max_agent_concurrency` 等入口模式专属字段。
 3. `NoTuiChatLaunch` 与 `TuiChatLaunch` 用类型表达入口模式差异，避免继续使用 `mode + Option<String>` 表达 TUI 必填项。
 4. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
 5. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。

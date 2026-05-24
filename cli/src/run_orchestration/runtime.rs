@@ -1,15 +1,11 @@
+use super::setup::ChatBootstrap;
 use crate::application::chat::{
     ChatApplicationService, ChatLaunchOptions, ChatRuntimeContext, ChatRuntimePort,
     NoTuiChatLaunch, TuiChatLaunch, TuiChatOutcome,
 };
 use crate::{repl, tui};
-use aemeath_core::task::TaskStore;
-use aemeath_core::tool::ToolRegistry;
-use aemeath_llm::client::LlmClient;
 use aemeath_llm::types::SystemBlock;
 use async_trait::async_trait;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 struct NoTuiChatRuntimeAdapter;
 
@@ -91,7 +87,7 @@ impl ChatRuntimePort for TuiChatRuntimeAdapter {
             launch.options.resume,
             context.task_store,
             launch.options.max_tool_concurrency,
-            launch.options.max_agent_concurrency,
+            launch.max_agent_concurrency,
             context.agent_semaphore,
         )
         .await
@@ -100,109 +96,47 @@ impl ChatRuntimePort for TuiChatRuntimeAdapter {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn run_no_tui(
-    client: Arc<LlmClient>,
-    registry: Arc<ToolRegistry>,
-    system_blocks: Vec<SystemBlock>,
-    system_prompt_text: String,
-    user_context: String,
-    cwd: PathBuf,
-    args: &crate::cli::Args,
-    agent_runner: Arc<dyn aemeath_core::tool::AgentRunner>,
-    task_store: Arc<TaskStore>,
-    max_tool_concurrency: usize,
-    max_agent_concurrency: usize,
-    agent_semaphore: Arc<tokio::sync::Semaphore>,
-    skills_map: std::collections::HashMap<String, aemeath_core::skill::Skill>,
-    hook_runner: aemeath_core::hook::HookRunner,
-    memory_config: aemeath_core::config::MemoryConfig,
-    json_logger: Option<Arc<Mutex<aemeath_core::logging::JsonLogger>>>,
-) {
+pub(super) async fn run_no_tui_from_bootstrap(bootstrap: ChatBootstrap) {
     let launch = NoTuiChatLaunch {
         options: ChatLaunchOptions {
-            cwd,
-            verbose: args.verbose,
-            markdown: !args.no_markdown,
-            context_size: args.context_size,
-            resume: args.resume.clone(),
-            allow_all: args.allow_all,
-            max_tool_concurrency,
-            max_agent_concurrency,
+            cwd: bootstrap.cwd,
+            verbose: bootstrap.args.verbose,
+            markdown: !bootstrap.args.no_markdown,
+            context_size: bootstrap.args.context_size,
+            resume: bootstrap.args.resume.clone(),
+            allow_all: bootstrap.args.allow_all,
+            max_tool_concurrency: bootstrap.max_tool_concurrency,
         },
     };
-    let context = ChatRuntimeContext {
-        client,
-        registry,
-        system_blocks,
-        system_prompt_text,
-        user_context,
-        agent_runner,
-        task_store,
-        agent_semaphore,
-        skills_map,
-        hook_runner,
-        memory_config,
-        json_logger,
-    };
     let service = ChatApplicationService::new(NoTuiChatRuntimeAdapter);
-    if let Err(e) = service.run_no_tui_chat(launch, context).await {
+    if let Err(e) = service.run_no_tui_chat(launch, bootstrap.context).await {
         log::error!("no-TUI chat application service error: {e}");
         std::process::exit(1);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn run_tui(
-    session_id: String,
-    client: Arc<LlmClient>,
-    registry: Arc<ToolRegistry>,
-    system_blocks: Vec<SystemBlock>,
-    system_prompt_text: String,
-    user_context: String,
-    cwd: PathBuf,
-    model_display: String,
-    args: crate::cli::Args,
-    agent_runner: Arc<dyn aemeath_core::tool::AgentRunner>,
-    task_store: Arc<TaskStore>,
-    skills_map: std::collections::HashMap<String, aemeath_core::skill::Skill>,
-    hook_runner: aemeath_core::hook::HookRunner,
-    memory_config: aemeath_core::config::MemoryConfig,
-    json_logger: Option<Arc<Mutex<aemeath_core::logging::JsonLogger>>>,
-    max_tool_concurrency: usize,
-    max_agent_concurrency: usize,
-    agent_semaphore: Arc<tokio::sync::Semaphore>,
-) {
+pub(super) async fn run_tui_from_bootstrap(bootstrap: ChatBootstrap) {
+    let model_display = model_display(
+        &bootstrap.resolved_model.source_key,
+        &bootstrap.resolved_model.model.name,
+        &bootstrap.resolved_model.model.id,
+    );
     let launch = TuiChatLaunch {
         options: ChatLaunchOptions {
-            cwd,
-            verbose: args.verbose,
-            markdown: !args.no_markdown,
-            context_size: args.context_size,
-            resume: args.resume.clone(),
-            allow_all: args.allow_all,
-            max_tool_concurrency,
-            max_agent_concurrency,
+            cwd: bootstrap.cwd,
+            verbose: bootstrap.args.verbose,
+            markdown: !bootstrap.args.no_markdown,
+            context_size: bootstrap.args.context_size,
+            resume: bootstrap.args.resume.clone(),
+            allow_all: bootstrap.args.allow_all,
+            max_tool_concurrency: bootstrap.max_tool_concurrency,
         },
-        session_id,
+        max_agent_concurrency: bootstrap.max_agent_concurrency,
+        session_id: bootstrap.session_id,
         model_display,
     };
-    let context = ChatRuntimeContext {
-        client,
-        registry,
-        system_blocks,
-        system_prompt_text,
-        user_context,
-        agent_runner,
-        task_store,
-        skills_map,
-        hook_runner,
-        memory_config,
-        json_logger,
-        agent_semaphore,
-    };
     let service = ChatApplicationService::new(TuiChatRuntimeAdapter);
-    match service.run_tui_chat(launch, context).await {
+    match service.run_tui_chat(launch, bootstrap.context).await {
         Ok(outcome) => println!("aemeath --resume {}", outcome.session_id),
         Err(e) => {
             log::error!("TUI chat application service error: {e}");
