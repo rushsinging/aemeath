@@ -1,15 +1,15 @@
 mod concurrency;
 mod model_runtime;
 mod permissions;
+mod prompt_bundle;
 mod provider_client;
 
-use super::{chat_mode_selection, prompt, runtime, ChatModeSelection};
+use super::{chat_mode_selection, runtime, ChatModeSelection};
 use crate::agent_runner;
 use crate::cli::Args;
 use crate::logging_setup::{init_logging, set_session_id};
 use crate::mcp_loader::spawn_mcp_connect;
 use crate::model_selection::select_model_for_run;
-use crate::prompt::{build_system_prompt_parts, PromptContext};
 use aemeath_core::config::models::ResolvedModel;
 use aemeath_core::logging::{self, JsonLogger};
 use aemeath_core::mcp_manager::McpConnectionManager;
@@ -18,6 +18,7 @@ use aemeath_llm::client::LlmClient;
 use concurrency::resolve_concurrency_limits;
 use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
+use prompt_bundle::build_chat_prompt_bundle;
 use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 use std::env;
 use std::path::PathBuf;
@@ -162,35 +163,19 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
-    let prompt_context = PromptContext::new(
-        &cwd,
-        Some(client.provider_name()),
-        Some(client.model_name()),
-    );
-    let prompt_parts =
-        build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
-
-    let static_prompt = prompt::build_static_prompt(
+    let prompt_bundle = build_chat_prompt_bundle(
         &cwd,
         &model,
         runtime_settings.reasoning,
         config_file.as_ref(),
         &hook_runner,
-        prompt_parts.clone(),
+        prompt_memory_config,
         &skills,
+        client.provider_name(),
+        client.model_name(),
     )
     .await;
-    // 构建 SystemBlock 数组用于 prompt caching
-    use aemeath_llm::types::SystemBlock;
-    let system_blocks: Vec<SystemBlock> = vec![
-        SystemBlock::cached(static_prompt),
-        SystemBlock::dynamic(prompt_parts.dynamic_part),
-    ];
 
-    // CLAUDE.md 上下文将作为 user message 前置注入
-    let user_context = prompt_parts.claude_md;
-
-    let system_prompt_text = runtime::system_prompt_text(&system_blocks);
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
@@ -212,9 +197,9 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     let context = ChatRuntimeContext {
         client,
         registry,
-        system_blocks,
-        system_prompt_text,
-        user_context,
+        system_blocks: prompt_bundle.system_blocks,
+        system_prompt_text: prompt_bundle.system_prompt_text,
+        user_context: prompt_bundle.user_context,
         agent_runner,
         task_store,
         skills_map,
