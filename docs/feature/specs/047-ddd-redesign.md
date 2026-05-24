@@ -394,6 +394,7 @@ run_tui_chat(TuiChatLaunch, ChatRuntimeContext)
 7. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
 8. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。
 9. HTTP / SDK 后续接入时应复用同一组 context、options 和 mode-specific launch DTO，而不是复制 CLI/TUI 专属参数结构。
+10. `run_orchestration::setup` 已继续把 `bootstrap_chat` 的技术性启动准备拆成局部 helper：`concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`。这些模块只表达 CLI bootstrap 过渡边界，不等同于新的领域上下文；后续若要进一步下沉，应先处理 slash command registry 的持锁 await 与 Agent Runtime 边界。
 
 ## 7. COLA 工程分层规范
 

@@ -1,4 +1,5 @@
 use crate::prompt::{build_system_prompt_parts, PromptContext};
+use crate::run_orchestration::runtime;
 use aemeath_core::config::{Config, MemoryConfig};
 use aemeath_core::hook::HookRunner;
 use aemeath_core::skill::Skill;
@@ -62,7 +63,7 @@ async fn build_chat_prompt_bundle_from_parts(
         SystemBlock::cached(static_prompt),
         SystemBlock::dynamic(prompt_parts.dynamic_part),
     ];
-    let system_prompt_text = super::runtime::system_prompt_text(&system_blocks);
+    let system_prompt_text = runtime::system_prompt_text(&system_blocks);
 
     ChatPromptBundle {
         system_blocks,

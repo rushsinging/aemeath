@@ -9,7 +9,7 @@
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
-| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；本轮已补充 `ChatRuntimeContext` 字段的 bounded context 归属说明，并验证 `ChatRuntimePort` 的 `?Send` 过渡限制仍受现有 slash command registry 持锁 await 约束，暂不移除，保持 CLI/TUI 行为不变。该方向仍是行为保持型 DDD/COLA 重构，不恢复分布式 server 工作。 |
+| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；后续已持续拆分 `bootstrap_chat` 的 setup helper：concurrency、permissions、model_runtime、provider_client、prompt_bundle、runtime_support，保持 CLI/TUI 行为不变。本轮仍保留 `ChatRuntimePort` 的 `?Send` 过渡限制，原因是 slash command registry 持锁 await 约束尚未处理。该方向仍是行为保持型 DDD/COLA 重构，不恢复分布式 server 工作。 |
 
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
@@ -19,7 +19,7 @@
 
 **设计结论**：核心域为 Agent Runtime；Agent 是配置化实体；Agent Runtime 使用 Session / Chat / Agent Looping / Turn / Task 作为统一语言；Task 属于 Agent Runtime，由 Agent Looping 推进，持久化投影进入 Session History；HTTP/CLI/TUI/SDK 等入口保持薄，通过统一 application service 接入核心域；包或模块边界应逐步靠近 Bounded Context；COLA 作为工程分层参考，要求 Adapter / Application / Domain / Infrastructure / Client 职责分离；Audit 独立；PermissionDecision 与 HookDecision 分离；Skill / Guidance 独立；Memory 不依赖 Skill / Guidance；完整设计见 [spec](specs/047-ddd-redesign.md)。
 
-**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用，继续保持 CLI/TUI 行为不变。
+**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用；随后继续把 `bootstrap_chat` 中的 setup 细节拆成 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support` 等 helper。当前仍以行为保持为前提，不直接改写 agent loop 或 slash command registry。
 
 **DDD 概念参考**：
 1. Strategic DDD：用统一语言（Ubiquitous Language）和限界上下文（Bounded Context）拆分业务语义边界；不同上下文之间通过 Context Map 明确关系。
