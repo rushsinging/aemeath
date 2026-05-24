@@ -15,7 +15,7 @@ pub use storage::{
 };
 pub use types::{
     extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id, Session,
-    SessionFilter, SessionMetadata,
+    SessionFilter, SessionMetadata, WorkspaceContext, WorkspaceStackEntry,
 };
 
 #[cfg(test)]

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-pub use event::UiEvent;
+pub use event::{StatusContextUpdate, UiEvent};
 
 /// Main TUI application
 pub struct App {
@@ -75,6 +75,8 @@ pub struct App {
     pub task_store: Option<Arc<aemeath_core::task::TaskStore>>,
     /// Whether background processing is active (LLM streaming / tool calls)
     pub is_processing: bool,
+    /// Current persisted tool/worktree workspace context.
+    pub workspace_context: Option<aemeath_core::session::WorkspaceContext>,
     /// 分化日志写入器（input.log / output.log / tool.log）
     pub json_logger: Option<Arc<std::sync::Mutex<aemeath_core::logging::JsonLogger>>>,
 }
@@ -93,6 +95,7 @@ pub struct AskUserState {
     pub allow_free_input: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn display_working_dir(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -155,6 +158,31 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::status_bar::Worktree
     } else {
         crate::tui::status_bar::WorktreeKind::Main
     }
+}
+
+#[cfg(test)]
+pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
+    status_context_for_workspace(aemeath_core::session::WorkspaceContext {
+        path_base: path_base.display().to_string(),
+        working_root: working_root.display().to_string(),
+        context_stack: Vec::new(),
+    })
+}
+
+pub(crate) fn status_context_for_workspace(
+    workspace: aemeath_core::session::WorkspaceContext,
+) -> UiEvent {
+    let path_base = PathBuf::from(&workspace.path_base);
+    let working_root = PathBuf::from(&workspace.working_root);
+    UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
+        path_base: display_status_path(&path_base),
+        working_root: display_status_path(&working_root),
+        branch: git_branch_for(&working_root),
+        kind: worktree_kind_for(&working_root),
+        raw_path_base: path_base,
+        raw_working_root: working_root,
+        workspace,
+    })
 }
 
 impl App {
@@ -220,6 +248,7 @@ impl App {
             pending_reflection: None,
             task_store: None,
             is_processing: false,
+            workspace_context: None,
             json_logger: None,
         }
     }

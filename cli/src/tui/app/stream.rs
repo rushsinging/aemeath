@@ -48,6 +48,7 @@ pub async fn process_in_background(
     mut messages: Vec<Message>,
     context_size: usize,
     cwd: PathBuf,
+    workspace_context: Option<aemeath_core::session::WorkspaceContext>,
     session_id: String,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     session_reminders: Arc<std::sync::Mutex<aemeath_core::memory::SessionReminders>>,
@@ -65,7 +66,31 @@ pub async fn process_in_background(
 ) {
     let hook_ui = HookUi::new(tx.clone());
 
-    let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.clone());
+    let (cwd, working_root, path_base, context_stack) = if let Some(workspace) = workspace_context {
+        (
+            PathBuf::from(&workspace.path_base),
+            Arc::new(Mutex::new(PathBuf::from(&workspace.working_root))),
+            Arc::new(Mutex::new(PathBuf::from(&workspace.path_base))),
+            Arc::new(Mutex::new(
+                workspace
+                    .context_stack
+                    .into_iter()
+                    .map(|entry| aemeath_core::worktree::WorkingContext {
+                        path_base: PathBuf::from(entry.path_base),
+                        working_root: PathBuf::from(entry.working_root),
+                    })
+                    .collect(),
+            )),
+        )
+    } else {
+        let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.clone());
+        (
+            cwd,
+            working_root,
+            path_base,
+            Arc::new(Mutex::new(Vec::new())),
+        )
+    };
     hook_runner.set_project_dir(cwd.display().to_string());
     let ctx = ToolContext {
         cwd: cwd.clone(),
@@ -83,12 +108,12 @@ pub async fn process_in_background(
         agent_semaphore,
         progress_tx: None,
         parent_session_id: Some(session_id.clone()),
-        context_stack: Arc::new(Mutex::new(Vec::new())),
+        context_stack,
     };
-        let agent = Agent {
-            registry: &registry,
-            ctx,
-        };
+    let agent = Agent {
+        registry: &registry,
+        ctx,
+    };
 
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;

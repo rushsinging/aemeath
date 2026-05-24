@@ -142,6 +142,7 @@ impl StatusBar {
         self.thinking = enabled;
     }
 
+    #[cfg(test)]
     pub fn set_current_dir(&mut self, dir: impl Into<String>) {
         let dir = dir.into();
         self.context.path_base = dir.clone();

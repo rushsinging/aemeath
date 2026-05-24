@@ -98,3 +98,49 @@ fn summary_no_messages() {
     // no messages → project "tmp" from Session::new("/tmp")
     assert_eq!(sess.summary(), "tmp");
 }
+
+#[test]
+fn session_new_initializes_workspace_as_none() {
+    let sess = Session::new(
+        "019e0000-0000-7000-8000-000000000000".to_string(),
+        "/tmp/project".to_string(),
+    );
+
+    assert!(sess.workspace.is_none());
+}
+
+#[test]
+fn workspace_context_round_trips_through_json() {
+    let mut sess = Session::new(
+        "019e0000-0000-7000-8000-000000000001".to_string(),
+        "/tmp/project".to_string(),
+    );
+    sess.workspace = Some(WorkspaceContext {
+        path_base: "/tmp/project/subdir".to_string(),
+        working_root: "/tmp/project-worktree".to_string(),
+        context_stack: vec![WorkspaceStackEntry {
+            path_base: "/tmp/project".to_string(),
+            working_root: "/tmp/project".to_string(),
+        }],
+    });
+
+    let json = serde_json::to_string(&sess).unwrap();
+    let loaded: Session = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(loaded.workspace, sess.workspace);
+}
+
+#[test]
+fn session_deserializes_without_workspace() {
+    let json = r#"{
+        "id":"019e0000-0000-7000-8000-000000000002",
+        "cwd":"/tmp/project",
+        "messages":[],
+        "created_at":"2026-01-01T00:00:00Z",
+        "updated_at":"2026-01-01T00:00:00Z"
+    }"#;
+
+    let loaded: Session = serde_json::from_str(json).unwrap();
+
+    assert!(loaded.workspace.is_none());
+}

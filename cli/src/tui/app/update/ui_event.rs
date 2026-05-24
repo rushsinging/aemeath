@@ -326,8 +326,16 @@ impl App {
                         .set_spinner_phase(format!("Hook {event} done"));
                 }
             }
-            UiEvent::WorkingDirectoryChanged(dir) => {
-                self.status_bar.set_current_dir(dir);
+            UiEvent::WorkingDirectoryChanged(ctx) => {
+                self.cwd = ctx.raw_path_base.clone();
+                self.workspace_context = Some(ctx.workspace.clone());
+                self.status_bar
+                    .set_context_paths(ctx.path_base, ctx.working_root);
+                if let Some(branch) = ctx.branch {
+                    self.status_bar.set_git_context(ctx.kind, branch);
+                } else {
+                    self.status_bar.set_git_context(ctx.kind, "");
+                }
             }
             UiEvent::Done => {
                 log::debug!(
