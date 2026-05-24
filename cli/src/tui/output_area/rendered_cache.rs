@@ -42,6 +42,17 @@ impl RenderedCache {
         self.dirty = true;
     }
 
+    #[cfg(test)]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    #[cfg(test)]
+    pub fn mark_clean_for_test(&mut self, width: usize) {
+        self.cached_width = width;
+        self.dirty = false;
+    }
+
     pub fn content_changed(&mut self, total_lines: usize) {
         self.dirty = true;
         if self.cache.len() > total_lines {

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use aemeath_core::config::{MemoryConfig, paths};
+use aemeath_core::config::{paths, MemoryConfig};
 use aemeath_core::hook::HookRunner;
-use aemeath_core::memory::{MemoryEntry, MemoryStore, memory_base_dir, project_hash_from_path};
+use aemeath_core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
 mod git_context;
 use git_context::{collect_git_context, is_git_repo};

@@ -96,10 +96,13 @@ impl App {
                     pending_slash: None,
                 }
             }
-            Msg::Resize => UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            },
+            Msg::Resize { width, height } => {
+                self.handle_resize(width, height);
+                UpdateResult {
+                    cmd: Cmd::None,
+                    pending_slash: None,
+                }
+            }
             Msg::SpinnerTick => {
                 self.output_area.tick_spinner();
                 UpdateResult {

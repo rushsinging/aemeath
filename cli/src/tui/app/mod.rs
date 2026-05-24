@@ -1,4 +1,5 @@
 mod event;
+mod resize;
 mod resume;
 mod run_loop;
 mod runtime;
@@ -22,6 +23,12 @@ use std::sync::Arc;
 
 pub use event::{StatusContextUpdate, UiEvent};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TerminalSize {
+    pub width: u16,
+    pub height: u16,
+}
+
 /// Main TUI application
 pub struct App {
     pub output_area: OutputArea,
@@ -39,6 +46,7 @@ pub struct App {
     pub output_area_rect: Rect,
     pub input_area_rect: Rect,
     pub status_bar_rect: Rect,
+    pub last_terminal_size: Option<TerminalSize>,
     pub just_pasted: bool,
     pub input_queue: std::collections::VecDeque<String>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
@@ -217,6 +225,7 @@ impl App {
             output_area_rect: Rect::default(),
             input_area_rect: Rect::default(),
             status_bar_rect: Rect::default(),
+            last_terminal_size: None,
             just_pasted: false,
             input_queue: std::collections::VecDeque::new(),
             last_click: None,

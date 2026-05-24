@@ -15,7 +15,7 @@
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 已完成 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
 | 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line V2 已按重新规划实现：第一行展示状态、模型、token in/out、t/s、ctx%、API calls，不再显示 cost/session；第二行展示真实路径（`~` 或 `/` 开头）、root（仅路径不一致时）、git/worktree、权限模式和完整 session。 |
 | 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | 重新从业务领域出发梳理 Aemeath：统一语言、Bounded Context、Context Map、聚合根/实体/值对象、领域服务、仓储/端口与 Anti-Corruption Layer；先形成设计 feature 和后续 spec 范围，不在本条直接改代码。 |
-| 48 | TUI 窗口 resize 时重新计算渲染层并刷新显示层 | 高 | 待实施 | 未确认 | 拖动终端窗口大小或收到 resize 事件时，TUI 应重新计算 layout、wrap、scroll、selection、Markdown/table/code/diff 等渲染缓存，并刷新显示层，避免窗口尺寸变化后显示内容仍使用旧宽高导致错位、截断、样式丢失或缓存不一致。 |
+| 48 | TUI 窗口 resize 时重新计算渲染层并刷新显示层 | 高 | 待确认 | 已完成 | TUI resize 已接入集中式处理：Resize 消息携带终端宽高，App 记录最近尺寸并统一刷新 output cache/scroll/selection 与 input width/selection；status line 继续按 render 宽度即时重算。详见 [spec](specs/048-tui-resize-render-refresh.md) |
 
 ### #48 TUI 窗口 resize 时重新计算渲染层并刷新显示层
 
