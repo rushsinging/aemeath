@@ -15,6 +15,7 @@ mod render_spans;
 mod render_status;
 mod rendered_cache;
 mod rendered_lines;
+mod resize;
 pub mod scroll;
 pub mod selection;
 mod selection_render;

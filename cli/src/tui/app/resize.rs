@@ -8,6 +8,8 @@ impl App {
         }
 
         self.last_terminal_size = Some(size);
+        let visible_height_hint = self.output_area_rect.height.max(height.saturating_sub(7));
+        self.output_area.handle_resize(width, visible_height_hint);
     }
 }
 
@@ -44,10 +46,14 @@ mod tests {
         let mut app = test_app();
         app.handle_resize(80, 24);
         app.output_area.scroll_offset = 7;
+        app.output_area.auto_scroll = false;
+        app.output_area.term_width = 7;
 
         app.handle_resize(80, 24);
 
         assert_eq!(app.output_area.scroll_offset, 7);
+        assert!(!app.output_area.auto_scroll);
+        assert_eq!(app.output_area.term_width, 7);
         assert_eq!(
             app.last_terminal_size,
             Some(TerminalSize {
