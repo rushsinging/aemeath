@@ -1,4 +1,5 @@
 mod concurrency;
+mod model_runtime;
 mod permissions;
 
 use super::{chat_mode_selection, prompt, runtime, ChatModeSelection};
@@ -16,6 +17,7 @@ use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
 use aemeath_llm::providers::openai_compatible::ReasoningConfig;
 use concurrency::resolve_concurrency_limits;
+use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
 use std::env;
 use std::path::PathBuf;
@@ -104,43 +106,28 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         }
     });
     let model = resolved_model.model.id.clone();
-    let max_tokens = args.max_tokens.unwrap_or_else(|| {
-        if resolved_model.model.max_tokens > 0 {
-            resolved_model.model.max_tokens
-        } else if config_file
-            .as_ref()
-            .map(|c| c.model.max_tokens > 0)
-            .unwrap_or(false)
-        {
-            config_file.as_ref().unwrap().model.max_tokens
-        } else {
-            32000
-        }
+    let runtime_settings = resolve_model_runtime_settings(
+        args.max_tokens,
+        &resolved_model.model,
+        config_file.as_ref(),
+        !args.no_think,
+        ReasoningConfigInput {
+            cli_reasoning_effort: args.reasoning_effort.clone(),
+            env_reasoning_effort: std::env::var("AEMEATH_REASONING_EFFORT").ok(),
+        },
+    )
+    .unwrap_or_else(|e| {
+        log::error!("{}", e);
+        std::process::exit(1);
     });
-    let thinking_max_tokens = resolved_model.model.thinking_max_tokens;
-    let reasoning = resolved_model.model.reasoning.unwrap_or(!args.no_think);
-
-    // reasoning_effort: CLI args > config.json model entry > env var > None
-    let reasoning_effort = args
-        .reasoning_effort
-        .clone()
-        .or_else(|| resolved_model.model.reasoning_effort.clone())
-        .or_else(|| std::env::var("AEMEATH_REASONING_EFFORT").ok())
-        .filter(|e| !e.is_empty());
-    if let Some(ref effort) = reasoning_effort {
-        if let Err(e) = aemeath_core::config::models::validate_reasoning_effort(effort) {
-            log::error!("{}", e);
-            std::process::exit(1);
-        }
-    }
 
     log::info!(
         "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
         resolved_model.source_key,
         api_type.as_str(),
         model,
-        reasoning,
-        reasoning_effort,
+        runtime_settings.reasoning,
+        runtime_settings.reasoning_effort,
         args.no_think
     );
 
@@ -152,12 +139,15 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
             &resolved_model.source_key,
         ))
     };
-    let reasoning_config = reasoning_effort
+    let reasoning_config = runtime_settings
+        .reasoning_effort
         .as_ref()
         .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
         .or_else(|| {
-            if thinking_max_tokens > 0 {
-                Some(ReasoningConfig::ThinkingBudget(thinking_max_tokens))
+            if runtime_settings.thinking_max_tokens > 0 {
+                Some(ReasoningConfig::ThinkingBudget(
+                    runtime_settings.thinking_max_tokens,
+                ))
             } else {
                 resolved_model.model.reasoning.map(ReasoningConfig::Bool)
             }
@@ -168,13 +158,13 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         api_key,
         base_url,
         model.clone(),
-        max_tokens,
-        thinking_max_tokens,
-        reasoning,
+        runtime_settings.max_tokens,
+        runtime_settings.thinking_max_tokens,
+        runtime_settings.reasoning,
         reasoning_config,
         openai_config,
     );
-    if let Some(effort) = reasoning_effort {
+    if let Some(effort) = runtime_settings.reasoning_effort {
         client.set_reasoning_effort(Some(effort));
     }
 
@@ -219,7 +209,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         config_file.as_ref(),
         client.clone(),
         hook_runner.clone(),
-        reasoning,
+        runtime_settings.reasoning,
         json_logger.clone(),
     );
     let prompt_memory_config = config_file
@@ -237,7 +227,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     let static_prompt = prompt::build_static_prompt(
         &cwd,
         &model,
-        reasoning,
+        runtime_settings.reasoning,
         config_file.as_ref(),
         &hook_runner,
         prompt_parts.clone(),
