@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 struct StubRunner {
     captured_max_turns: Mutex<Option<u32>>,
     captured_system: Mutex<String>,
+    run_count: Mutex<usize>,
 }
 
 #[async_trait::async_trait]
@@ -27,6 +28,7 @@ impl AgentRunner for StubRunner {
     ) -> String {
         *self.captured_max_turns.lock().unwrap() = max_turns;
         *self.captured_system.lock().unwrap() = system.to_string();
+        *self.run_count.lock().unwrap() += 1;
         prompt.to_string()
     }
 
@@ -196,6 +198,58 @@ async fn test_agent_tool_task_id_missing_task_errors() {
 
     assert!(result.is_error);
     assert!(result.output.contains("task not found"));
+}
+
+#[tokio::test]
+async fn test_agent_tool_requires_task_id_when_active_list_has_incomplete_tasks() {
+    let store = Arc::new(TaskStore::new());
+    store
+        .create_list("request".to_string(), "complex request".to_string())
+        .await;
+    store
+        .create("agent task".to_string(), "run subagent".to_string(), None)
+        .await;
+    let tool = AgentTool {
+        store: store.clone(),
+    };
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.output.contains("taskId"));
+    assert!(result.output.contains("active task list"));
+    assert_eq!(*runner.run_count.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn test_agent_tool_allows_missing_task_id_without_active_list() {
+    let store = Arc::new(TaskStore::new());
+    let tool = AgentTool { store };
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(*runner.run_count.lock().unwrap(), 1);
 }
 
 #[test]
