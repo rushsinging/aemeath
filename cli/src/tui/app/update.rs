@@ -102,7 +102,7 @@ impl App {
                     cmd: Cmd::None,
                     pending_slash: None,
                 }
-            },
+            }
             Msg::SpinnerTick => {
                 self.output_area.tick_spinner();
                 UpdateResult {

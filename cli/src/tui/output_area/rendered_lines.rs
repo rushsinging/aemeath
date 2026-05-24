@@ -2,18 +2,17 @@
 
 use std::collections::HashMap;
 
+use aemeath_core::string_idx::CharIdx;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use aemeath_core::string_idx::CharIdx;
 
 use super::display;
 use super::markdown;
 use super::render::wrap_line;
+use super::rendered_cache::RenderedLine;
 use super::types::{LineStyle, SpanPart};
 use super::OutputLine;
 use crate::tui::theme;
-
-use super::rendered_cache::RenderedLine;
 
 /// 渲染 [start, end) 范围内的所有行，写入 cache。
 pub(super) fn render_range(
@@ -174,20 +173,16 @@ fn render_table_range(
             let full_text: String = sub_rows
                 .iter()
                 .flat_map(|r| r.iter().map(|s| s.content.as_ref()))
-                .collect::<Vec<&str>>()
-                .join("");
+                .collect();
             let mut screen_entries = Vec::new();
             let mut char_offset = 0usize;
 
             for sub in &sub_rows {
                 let line_text: String = sub.iter().map(|s| s.content.as_ref()).collect();
-                let char_count = line_text.chars().count();
-                screen_entries.push((
-                    i,
-                    CharIdx::new(char_offset),
-                    CharIdx::new(char_offset + char_count),
-                ));
-                char_offset += char_count;
+                let start = char_offset;
+                let end = start + line_text.chars().count();
+                screen_entries.push((i, CharIdx::new(start), CharIdx::new(end)));
+                char_offset = end;
             }
 
             if sub_rows.len() == 1 {
@@ -275,7 +270,10 @@ fn render_plain_line(
     term_width: usize,
     cache: &mut [Option<RenderedLine>],
 ) {
-    log::debug!("[render_plain_line] idx={idx} content={content:?} fg={:?}", style.fg);
+    log::debug!(
+        "[render_plain_line] idx={idx} content={content:?} fg={:?}",
+        style.fg
+    );
     let sanitized = display::sanitize_for_display(content);
     let char_offsets = display::compute_char_offsets(&sanitized, term_width);
     let wrapped = wrap_line(content, term_width);
