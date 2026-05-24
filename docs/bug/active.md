@@ -6,38 +6,7 @@
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
-| 63 | AskUserQuestion options 模式上下选择未同步到 TUI 显示 | 中 | 活动中 | 未确认 | 2026-05 | AskUserQuestion 进入 options 选择模式后，上下方向键会改变内部当前选项，回车确认也会提交变化后的选项，但 TUI 上的高亮/选中显示没有同步更新，导致用户看到的选项与实际回车确认的选项不一致；疑似 selected index 更新后未触发视图状态/渲染缓存刷新，或渲染使用了旧选中索引 |
 ## 专案
-
-### #63 AskUserQuestion options 模式上下选择未同步到 TUI 显示
-
-**状态**：待确认（已修复渲染缓存未 invalidate 问题）
-
-**症状**：AskUserQuestion 进入 options 选择模式后，按上/下方向键会改变内部当前选项，回车确认时提交的也是变化后的选项；但 TUI 上的高亮/选中显示没有同步更新，用户看到的当前选项与实际回车确认的选项不一致。
-
-**复现**：
-1. 触发 AskUserQuestion，并提供 `options` 数组。
-2. TUI 显示问题和多个选项，进入 options 选择模式。
-3. 按上/下方向键移动选项。
-4. 观察 TUI 上选中项/高亮没有变化。
-5. 按 Enter 确认，发现实际提交的选项是内部已移动后的选项，而不是 TUI 当前显示高亮的选项。
-
-**根因假设**：
-1. options 模式的键盘事件已更新内部 selected index，但该状态没有同步到 TUI 渲染状态。
-2. selected index 更新后未触发重绘、未 invalidate 相关缓存，或 output/ask-user 区域复用了旧渲染结果。
-3. ask-user 逻辑状态与展示状态存在两份数据源，Enter 使用新状态，TUI 渲染仍使用旧状态。
-4. 多行 option 拆行渲染（Bug #53 相关修复）后，逻辑 option index 与渲染行 index 映射不一致，导致高亮应用到错误行或不更新。
-
-**修复方向**：
-1. 梳理 AskUserQuestion options 的单一状态源，确保上下键更新的 selected index 与 TUI 渲染读取的是同一份状态。
-2. 在 selected index 变化后触发必要的重绘/缓存失效，避免 TUI 继续显示旧选中项。
-3. 将多行 option 的展示行与逻辑 option index 解耦，并明确每个渲染行对应的 option index，保证高亮跟随逻辑选项。
-4. 补充回归测试：上/下键后 TUI 高亮同步变化、Enter 返回的选项与 TUI 高亮一致、边界不越界、多行 option 显示仍能正确高亮。
-
-**涉及路径**：
-- `apps/cli/src/tui/` AskUserQuestion UI 状态与 key event 分发
-- AskUserQuestion options 渲染与 selected index 状态
-- input/output area 全局按键处理与焦点优先级
 
 ### #62 Grep 工具执行中标题文字不可见但复制可见
 
