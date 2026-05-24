@@ -302,6 +302,7 @@ pub(crate) async fn run_chat(mut args: Args) {
             agent_runner,
             task_store.clone(),
             max_tool_concurrency,
+            max_agent_concurrency,
             agent_semaphore.clone(),
             skills_map.clone(),
             hook_runner.clone(),

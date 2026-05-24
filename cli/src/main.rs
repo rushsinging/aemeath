@@ -1,4 +1,5 @@
 mod agent_runner;
+mod application;
 mod cli;
 mod image;
 mod logging_setup;
