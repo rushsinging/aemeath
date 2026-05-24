@@ -52,12 +52,13 @@ mod tests {
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[derive(Default)]
     struct RecordingRuntimePort {
-        no_tui_calls: Arc<Mutex<usize>>,
-        tui_calls: Arc<Mutex<usize>>,
+        no_tui_calls: Arc<AtomicUsize>,
+        tui_calls: Arc<AtomicUsize>,
     }
 
     struct NoopAgentRunner;
@@ -90,7 +91,7 @@ mod tests {
             _launch: NoTuiChatLaunch,
             _context: ChatRuntimeContext,
         ) -> Result<(), String> {
-            *self.no_tui_calls.lock().unwrap() += 1;
+            self.no_tui_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
@@ -99,7 +100,7 @@ mod tests {
             launch: TuiChatLaunch,
             _context: ChatRuntimeContext,
         ) -> Result<TuiChatOutcome, String> {
-            *self.tui_calls.lock().unwrap() += 1;
+            self.tui_calls.fetch_add(1, Ordering::SeqCst);
             Ok(TuiChatOutcome {
                 session_id: launch.session_id,
             })
@@ -190,7 +191,7 @@ mod tests {
             .await;
 
         assert_eq!(result, Ok(()));
-        assert_eq!(*no_tui_calls.lock().unwrap(), 1);
+        assert_eq!(no_tui_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -204,6 +205,6 @@ mod tests {
             .await;
 
         assert_eq!(result, Err("TUI 启动必须提供 session_id".to_string()));
-        assert_eq!(*tui_calls.lock().unwrap(), 0);
+        assert_eq!(tui_calls.load(Ordering::SeqCst), 0);
     }
 }

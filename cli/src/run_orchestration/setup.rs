@@ -1,3 +1,6 @@
+mod concurrency;
+mod permissions;
+
 use super::{chat_mode_selection, prompt, runtime, ChatModeSelection};
 use crate::agent_runner;
 use crate::cli::Args;
@@ -12,6 +15,8 @@ use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
 use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
 use aemeath_llm::providers::openai_compatible::ReasoningConfig;
+use concurrency::resolve_concurrency_limits;
+use permissions::apply_config_permission_mode;
 use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -56,17 +61,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
             .unwrap_or(&aemeath_core::config::LoggingConfig::default()),
     );
 
-    // 应用 config.json 中的 permissions.mode（CLI --allow-all 和 env var 优先）
-    if !args.allow_all {
-        if let Some(ref cfg) = config_file {
-            if matches!(
-                cfg.permissions.mode,
-                aemeath_core::config::PermissionModeConfig::AllowAll
-            ) {
-                args.allow_all = true;
-            }
-        }
-    }
+    apply_config_permission_mode(&mut args, config_file.as_ref());
 
     let requested_model = args.model.as_deref();
     let resolved_model = select_model_for_run(requested_model, config_file.as_ref())
@@ -260,27 +255,11 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     let user_context = prompt_parts.claude_md;
 
     let system_prompt_text = runtime::system_prompt_text(&system_blocks);
-    // 解析并发限制: CLI args > config file > defaults
-    let max_tool_concurrency = args
-        .max_tool_concurrency
-        .filter(|&v| v > 0)
-        .or_else(|| {
-            config_file
-                .as_ref()
-                .map(|c| c.tools.max_concurrency)
-                .filter(|&v| v > 0)
-        })
-        .unwrap_or(10);
-    let max_agent_concurrency = args
-        .max_agent_concurrency
-        .filter(|&v| v > 0)
-        .or_else(|| {
-            config_file
-                .as_ref()
-                .map(|c| c.agents.max_concurrency)
-                .filter(|&v| v > 0)
-        })
-        .unwrap_or(4);
+    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
+        args.max_tool_concurrency,
+        args.max_agent_concurrency,
+        config_file.as_ref(),
+    );
     let agent_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
 
     log::info!(
