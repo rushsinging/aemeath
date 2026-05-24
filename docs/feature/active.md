@@ -15,13 +15,15 @@
 | 44 | Commit Style Context 与 AI 协作者 trailer | 中 | 待确认 | 未确认 | 已在 system prompt 中加入 commit guidance：需要创建 git commit 时，LLM 应先分析当前仓库历史 Commit Style Context，优先查看带 `Co-Authored-By` 的提交，再按项目风格生成 commit message；AI 协作者 trailer 使用 `Co-Authored-By: Aemeath (<provider>/<model>) <github:rushsinging/aemeath>`，其中 provider/model 来自当前 LLM client。详见 [spec](specs/044-commit-style-context.md) |
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 已完成 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
 | 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line 已改为两行：第一行保持模型/Token/运行状态等高频信息；第二行以均衡方案展示当前工作上下文（cwd/path_base、working_root、worktree/main 标识、branch、权限模式），初始 git/worktree 上下文已接入，后续 #43/#45 继续补齐运行时上下文切换联动。 |
-| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | 重新从业务领域出发梳理 Aemeath：统一语言、Bounded Context、Context Map、聚合根/实体/值对象、领域服务、仓储/端口与 Anti-Corruption Layer；先形成设计 feature 和后续 spec 范围，不在本条直接改代码。 |
+| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)：核心域为 Agent Runtime；Agent 是配置化实体；Session/Chat/Agent Looping/Turn/Task 为核心统一语言；明确 Configuration、Tool Execution、Project、Security / Policy、Audit、Memory、Skill / Guidance、Model Gateway、Hook / Automation、Interaction、Session History 等上下文边界。 |
 
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
-**状态**：设计中
+**状态**：设计中（DDD 架构设计已写入 spec）
 
 **背景**：Aemeath 已从单一 CLI 演进为包含 TUI、LLM provider、工具系统、hook、skill、memory、task、worktree、权限与会话管理的 AI 编程助手。当前代码仍主要按技术分层和 crate 边界组织，随着功能增加，领域概念之间的边界容易变得模糊，例如 Agent 会话、工具执行、权限评估、上下文压缩、项目配置、skills 与 hooks 之间的职责交叉。用户希望以 DDD（领域驱动设计）的思路重新设计项目，让后续重构先有清晰的领域模型和边界，而不是直接按文件/模块做局部移动。
+
+**设计结论**：核心域为 Agent Runtime；Agent 是配置化实体；Agent Runtime 使用 Session / Chat / Agent Looping / Turn / Task 作为统一语言；Task 属于 Agent Runtime，由 Agent Looping 推进，持久化投影进入 Session History；HTTP/CLI/TUI/SDK 等入口保持薄，通过统一 application service 接入核心域；包或模块边界应逐步靠近 Bounded Context；COLA 作为工程分层参考，要求 Adapter / Application / Domain / Infrastructure / Client 职责分离；Audit 独立；PermissionDecision 与 HookDecision 分离；Skill / Guidance 独立；Memory 不依赖 Skill / Guidance；完整设计见 [spec](specs/047-ddd-redesign.md)。
 
 **DDD 概念参考**：
 1. Strategic DDD：用统一语言（Ubiquitous Language）和限界上下文（Bounded Context）拆分业务语义边界；不同上下文之间通过 Context Map 明确关系。
@@ -29,7 +31,7 @@
 3. Anti-Corruption Layer：对外部模型或兼容层建立防腐层，避免 Claude/OpenAI/MCP/Git/终端等外部语义污染核心领域模型。
 4. 参考来源包括 Martin Fowler 对 Bounded Context 的说明、Microsoft Learn Tactical DDD 资料，以及本仓库已有 [#36 Multi-Agent DDD 设计](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md)。
 
-**目标**：新增一条架构级设计 feature，后续展开为完整 DDD 重设计 spec。该 spec 应回答：Aemeath 的核心域、支撑域、通用域分别是什么；哪些概念属于同一 Bounded Context；哪些 crate/module 是当前技术实现而不是领域边界；哪些地方需要端口/适配器、防腐层或领域事件；以及如何分阶段重构而不破坏现有 CLI/TUI 行为。
+**目标**：新增一条架构级设计 feature，后续展开为完整 DDD 重设计 spec。该 spec 应回答：Aemeath 的核心域、支撑域、通用域分别是什么；哪些概念属于同一 Bounded Context；哪些 crate/module 是当前技术实现而不是领域边界；哪些地方需要端口/适配器、防腐层或领域事件；以及如何分阶段重构而不破坏现有 CLI/TUI 行为。初版见 [spec](specs/047-ddd-redesign.md)。
 
 **建议范围**：
 1. 建立统一语言词汇表：Session、Turn、AgentRun、ToolCall、ToolResult、PermissionDecision、WorktreeContext、Skill、Hook、Memory、Compaction、Provider、Model、Cost 等术语必须定义清楚。
