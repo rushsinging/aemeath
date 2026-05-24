@@ -5,7 +5,6 @@
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
-| 60 | TUI 中 Markdown code 块复制时下划线被吞掉（如 `CLAUDE_PROJECT_DIR` 复制为 `CLAUDEPROJECTDIR`） | 中 | 活动中 | 未确认 | 2026-05 | TUI 输出区选中复制 Markdown code 块内容时，下划线 `_` 字符丢失；疑似 code block 渲染/复制路径中 `_` 被当作 ANSI/style 控制字符过滤或被 sanitize_for_display 误移除 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
 | 63 | AskUserQuestion options 模式上下选择未同步到 TUI 显示 | 中 | 活动中 | 未确认 | 2026-05 | AskUserQuestion 进入 options 选择模式后，上下方向键会改变内部当前选项，回车确认也会提交变化后的选项，但 TUI 上的高亮/选中显示没有同步更新，导致用户看到的选项与实际回车确认的选项不一致；疑似 selected index 更新后未触发视图状态/渲染缓存刷新，或渲染使用了旧选中索引 |
 ## 专案
@@ -136,34 +135,6 @@
 - input queue 状态管理与 TUI 展示逻辑
 - `append_queued_input` 及其调用点
 
-### #60 TUI 中 Markdown code 块复制时下划线被吞掉
-
-**状态**：待确认（已修复渲染缓存未 invalidate 问题）
-
-**症状**：TUI 输出区中 Markdown code 块里的文本包含下划线时，选中复制后的内容会丢失 `_`。例如 code 块中显示或期望复制 `CLAUDE_PROJECT_DIR`，实际粘贴结果变成 `CLAUDEPROJECTDIR`。
-
-**复现**：
-1. 让输出区渲染一个 Markdown code 块，内容包含 `CLAUDE_PROJECT_DIR`
-2. 在 TUI 中选中该 code 块内容并复制
-3. 粘贴到外部编辑器
-4. 观察下划线丢失，结果为 `CLAUDEPROJECTDIR`
-
-**根因假设**：
-1. 输出区复制路径可能复用了渲染后的 spans/text，而不是原始文本，导致某些样式控制或 markdown token 处理误删 `_`。
-2. code block 渲染或 copy-to-plain-text 逻辑中，`_` 可能被当作 Markdown emphasis marker、ANSI/style 控制字符或 sanitize 目标错误过滤。
-3. copy selection 的文本拼接逻辑可能没有直接使用原始 line content，而是使用去 Markdown 标记后的文本，误把 code 中的普通 `_` 当作标记移除。
-
-**修复方向**：
-1. code block 的复制应保留原始文本内容，不应对 `_`、`*`、`` ` `` 等字符做 Markdown 标记剥离。
-2. 区分 Markdown 语义层的标记字符和 code block 内的普通字符；code block / inline code 内文本应按 literal 处理。
-3. 为复制路径增加回归覆盖：`CLAUDE_PROJECT_DIR`、`A_B_C`、包含 `_`/`*`/反引号的 code 文本应原样复制。
-4. 检查 `sanitize_for_display` 是否错误移除可打印 ASCII `_`，如存在应限定只移除真实控制字符。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/` 复制/selection 逻辑
-- Markdown code block 渲染与 plain text 提取逻辑
-- `sanitize_for_display` 相关函数
-
 ### 专案 A：Task 系统生命周期管理（Bug #27 + #29 + #32 + #33 + #34 + #36 + #37；Feature #18 + #24 + #25 + #29 + #30 + #33）
 
 **统一描述**：Task 系统在状态流转、batch 隔离、跨轮次清理、窗口化显示、选中复制、reminder 注入、agent loop 收尾、工具调用展示等维度存在关联缺陷或改进项，统一作为专案 A 管理。
@@ -183,7 +154,6 @@
 | Feature | #29 Task reminder 被动注入 | reminder：按轮次扫描并注入极简摘要 | ✅ 已完成，未确认 |
 | Feature | #30 Agent loop 收尾工作 | 收尾一致性：统一 finalize、记录停止原因、task/list 收尾检查 | ✅ 已完成，未确认 |
 | Feature | #33 优化 TaskListCreate / TaskListComplete 工具调用显示 | 展示优化：隐藏噪声，改为简洁摘要 | ✅ 已完成，未确认；已实现简洁 header、summary 详情和成功结果静默 |
-| 60 | 标识符中下划线被误判为斜体标记（如 CLAUDE_PROJECT_DIR → CLAUDEPROJECTDIR） | 中 | 已修复 | 待确认 | 2026-05 | is_flanking 检测：_ 仅在前为空白/标点/行首、后为字母数字时才作为斜体标记。同时修复 strip_inline_formatting 和 inline_markdown_spans。附带修复 table 中 inline markdown（`code`、**bold** 等）未渲染的问题 |
 
 **专案 A 相关 Feature 来源**：见 `docs/feature/active.md` 的 #18、#24、#25、#29、#30、#33。
 
