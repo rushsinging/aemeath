@@ -5,6 +5,7 @@ mod finalize;
 mod handler;
 mod hook_ui;
 mod input_log;
+mod llm_log;
 mod non_agent;
 mod permissions;
 mod post_batch;
@@ -13,16 +14,17 @@ mod stall;
 mod tools;
 
 use crate::agent_runner::{AgentRunOutcome, AgentRunStatus};
+use crate::tui::app::UiEvent;
 use crate::tui::app::stream::compact::auto_compact;
 use crate::tui::app::stream::finalize::finalize_main_loop;
 use crate::tui::app::stream::handler::TuiStreamHandler;
 use crate::tui::app::stream::hook_ui::HookUi;
 pub(crate) use crate::tui::app::stream::input_log::logged_input_messages;
+use crate::tui::app::stream::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::tui::app::stream::post_batch::run_post_tool_batch;
 use crate::tui::app::stream::queue::append_queued_input;
 use crate::tui::app::stream::stall::StallDetector;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
-use crate::tui::app::UiEvent;
 use aemeath_core::agent::Agent;
 use aemeath_core::message::Message;
 use aemeath_core::tool::{ToolContext, ToolRegistry};
@@ -200,35 +202,15 @@ pub async fn process_in_background(
             last_tps_update: std::time::Instant::now(),
         };
 
-        // JsonLogger: 记录 LLM 输入快照
-        if let Some(ref jl) = json_logger {
-            let new_msgs = logged_input_messages(&messages_for_api, messages.len());
-            let sb_count = system_blocks.len();
-            let sb_summary: Vec<serde_json::Value> = system_blocks
-                .iter()
-                .map(|sb| {
-                    serde_json::json!({
-                        "type": sb.block_type,
-                        "len": sb.text.len(),
-                    })
-                })
-                .collect();
-            let schema_names: Vec<&str> = tool_schemas
-                .iter()
-                .map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?"))
-                .collect();
-            let data = serde_json::json!({
-                "messages": new_msgs,
-                "system_blocks_count": sb_count,
-                "system_blocks": sb_summary,
-                "tool_schemas_count": tool_schemas.len(),
-                "tool_schemas_names": schema_names,
-            });
-            let _ = jl
-                .lock()
-                .unwrap()
-                .log_input(turn_count, "default", client.model_name(), data);
-        }
+        log_llm_input(
+            &json_logger,
+            turn_count,
+            client.model_name(),
+            &messages_for_api,
+            messages.len(),
+            &system_blocks,
+            &tool_schemas,
+        );
 
         let api_start = std::time::Instant::now();
         let response = client
@@ -272,43 +254,15 @@ pub async fn process_in_background(
                 }
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-                // JsonLogger: 记录 LLM 完整输出 + 工具调用
-                if let Some(ref jl) = json_logger {
-                    let blocks: Vec<serde_json::Value> = resp
-                        .assistant_message
-                        .content
-                        .iter()
-                        .filter_map(|block| serde_json::to_value(block).ok())
-                        .collect();
-                    let data = serde_json::json!({
-                        "stop_reason": format!("{:?}", resp.stop_reason),
-                        "input_tokens": resp.usage.input_tokens,
-                        "output_tokens": resp.usage.output_tokens,
-                        "elapsed_secs": api_elapsed,
-                        "provider": client.provider_name(),
-                        "content_blocks": blocks,
-                    });
-                    let _ = jl.lock().unwrap().log_output(
-                        turn_count,
-                        "default",
-                        client.model_name(),
-                        data,
-                    );
-
-                    for tc in &tool_calls {
-                        let tc_data = serde_json::json!({
-                            "tool_use_id": tc.id,
-                            "tool_name": tc.name,
-                            "input": tc.input,
-                        });
-                        let _ = jl.lock().unwrap().log_tool_call(
-                            turn_count,
-                            "default",
-                            client.model_name(),
-                            tc_data,
-                        );
-                    }
-                }
+                log_llm_output_and_tool_calls(
+                    &json_logger,
+                    turn_count,
+                    client.provider_name(),
+                    client.model_name(),
+                    &resp,
+                    &tool_calls,
+                    api_elapsed,
+                );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                     // Bug #49: drain queued user input before finishing the loop.
                     // If user submitted new messages while the last turn was running,
