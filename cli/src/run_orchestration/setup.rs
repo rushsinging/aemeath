@@ -4,15 +4,14 @@ mod permissions;
 mod prompt_bundle;
 mod provider_client;
 mod runtime_support;
+mod tooling;
 
 use super::{chat_mode_selection, ChatModeSelection};
 use crate::cli::Args;
 use crate::logging_setup::{init_logging, set_session_id};
-use crate::mcp_loader::spawn_mcp_connect;
 use crate::model_selection::select_model_for_run;
 use aemeath_core::config::models::ResolvedModel;
 use aemeath_core::mcp_manager::McpConnectionManager;
-use aemeath_core::tool::ToolRegistry;
 use concurrency::resolve_concurrency_limits;
 use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
@@ -22,6 +21,7 @@ use runtime_support::{build_agent_runner, build_json_logger};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tooling::build_chat_tooling;
 
 use crate::application::chat::ChatRuntimeContext;
 
@@ -117,22 +117,12 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     let client = std::sync::Arc::new(client);
 
     let task_store = std::sync::Arc::new(aemeath_core::task::TaskStore::new());
-
-    // 加载 skills
-    let skill_dirs = config_file
-        .as_ref()
-        .map(|c| c.skills.dirs.clone())
-        .unwrap_or_default();
-    let skills_map = aemeath_core::skill::load_all_skills(&cwd, &skill_dirs);
-    if !skills_map.is_empty() {
-        log::info!("[Skills] loaded {} skills", skills_map.len());
-    }
-    let skills = std::sync::Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
-    let registry = ToolRegistry::new();
-    aemeath_tools::register_all_tools(&registry, task_store.clone(), skills.clone());
-
-    let registry = Arc::new(registry);
-    let _mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
+    let tooling = build_chat_tooling(
+        &cwd,
+        config_file.as_ref().map(|config| &config.skills),
+        task_store.clone(),
+    )
+    .await;
 
     // Create hook runner before agent_runner so it can be shared
     let cwd_str = cwd.display().to_string();
@@ -169,7 +159,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         config_file.as_ref(),
         &hook_runner,
         prompt_memory_config,
-        &skills,
+        &tooling.skills,
         client.provider_name(),
         client.model_name(),
     )
@@ -195,13 +185,13 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     let mode_selection = chat_mode_selection(&args);
     let context = ChatRuntimeContext {
         client,
-        registry,
+        registry: tooling.registry,
         system_blocks: prompt_bundle.system_blocks,
         system_prompt_text: prompt_bundle.system_prompt_text,
         user_context: prompt_bundle.user_context,
         agent_runner,
         task_store,
-        skills_map,
+        skills_map: tooling.skills_map,
         hook_runner,
         memory_config,
         json_logger,
@@ -217,6 +207,6 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         max_tool_concurrency,
         max_agent_concurrency,
         mode_selection,
-        _mcp_manager,
+        _mcp_manager: tooling.mcp_manager,
     }
 }
