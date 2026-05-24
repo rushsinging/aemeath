@@ -12,10 +12,7 @@ pub struct TaskListConfig {
     /// 最大显示行数（不含摘要行）
     #[serde(default = "default_task_max_lines")]
     pub max_lines: usize,
-    /// 最近完成的显示条数
-    #[serde(default = "default_show_last_completed")]
-    pub show_last_completed: usize,
-    /// 折叠提示格式。{n} = 隐藏数量，{status} = pending/completed
+    /// 折叠提示格式。{n} = 隐藏数量
     #[serde(default = "default_fold_hint_format")]
     pub fold_hint_format: String,
 }
@@ -23,19 +20,15 @@ pub struct TaskListConfig {
 fn default_task_max_lines() -> usize {
     7
 }
-fn default_show_last_completed() -> usize {
-    1
-}
 fn default_fold_hint_format() -> String {
-    "… +{n} more {status}".to_string()
+    "… +{n} more".to_string()
 }
 
 impl Default for TaskListConfig {
     fn default() -> Self {
         Self {
             max_lines: 7,
-            show_last_completed: 1,
-            fold_hint_format: "… +{n} more {status}".to_string(),
+            fold_hint_format: "… +{n} more".to_string(),
         }
     }
 }

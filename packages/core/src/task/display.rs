@@ -5,6 +5,8 @@
 //! bidirectional mapping so that tools (TaskUpdate, TaskCreate, TaskList)
 //! can accept and output display numbers that match what the user sees.
 
+use std::collections::HashMap;
+
 use super::{BatchStatus, TaskStatus, TaskStore};
 
 impl TaskStore {
@@ -97,6 +99,31 @@ impl TaskStore {
             )
             .await;
         tasks.into_iter().nth(display_num - 1).map(|t| t.id)
+    }
+
+    /// Batch-get display numbers for all tasks in the current display batch.
+    ///
+    /// Returns a map from global task id to 1-based display number.
+    /// Returns empty map if no active batch.
+    pub async fn get_batch_display_map(&self) -> HashMap<String, usize> {
+        let Some(batch_id) = self.display_batch_id().await else {
+            return HashMap::new();
+        };
+        let tasks = self
+            .tasks_in_batch(
+                batch_id,
+                &[
+                    TaskStatus::Pending,
+                    TaskStatus::InProgress,
+                    TaskStatus::Completed,
+                ],
+            )
+            .await;
+        tasks
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| (t.id, i + 1))
+            .collect()
     }
 
     /// Get the batch id used for display number resolution.
@@ -319,5 +346,40 @@ mod tests {
         // resolve_display_id uses current batch (1)
         assert_eq!(store.resolve_display_id("1").await, Some("8".to_string()));
         assert_eq!(store.resolve_display_id("2").await, Some("9".to_string()));
+    }
+
+    // --- get_batch_display_map ---
+
+    #[tokio::test]
+    async fn test_get_batch_display_map_empty() {
+        let store = setup_store_with_batches().await;
+        let map = store.get_batch_display_map().await;
+        assert!(map.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_batch_display_map_returns_sequential_numbers() {
+        let store = setup_store_with_batches().await;
+        store.batches.lock().await.push(Batch::new(1));
+        add_task(&store, "8", 1, TaskStatus::Pending).await;
+        add_task(&store, "9", 1, TaskStatus::InProgress).await;
+        add_task(&store, "10", 1, TaskStatus::Completed).await;
+        let map = store.get_batch_display_map().await;
+        assert_eq!(map["8"], 1);
+        assert_eq!(map["9"], 2);
+        assert_eq!(map["10"], 3);
+    }
+
+    #[tokio::test]
+    async fn test_get_batch_display_map_excludes_deleted() {
+        let store = setup_store_with_batches().await;
+        store.batches.lock().await.push(Batch::new(1));
+        add_task(&store, "1", 1, TaskStatus::Pending).await;
+        add_task(&store, "2", 1, TaskStatus::Deleted).await;
+        add_task(&store, "3", 1, TaskStatus::InProgress).await;
+        let map = store.get_batch_display_map().await;
+        assert_eq!(map.len(), 2);
+        assert_eq!(map["1"], 1);
+        assert_eq!(map["3"], 2);
     }
 }

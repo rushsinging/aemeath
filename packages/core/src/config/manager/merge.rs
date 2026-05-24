@@ -144,11 +144,6 @@ impl ConfigManager {
                     } else {
                         base.ui.task_list.max_lines
                     },
-                    show_last_completed: if overlay.ui.task_list.show_last_completed != 0 {
-                        overlay.ui.task_list.show_last_completed
-                    } else {
-                        base.ui.task_list.show_last_completed
-                    },
                     fold_hint_format: if !overlay.ui.task_list.fold_hint_format.is_empty() {
                         overlay.ui.task_list.fold_hint_format
                     } else {
