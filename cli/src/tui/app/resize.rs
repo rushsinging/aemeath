@@ -10,6 +10,8 @@ impl App {
         self.last_terminal_size = Some(size);
         let visible_height_hint = self.output_area_rect.height.max(height.saturating_sub(7));
         self.output_area.handle_resize(width, visible_height_hint);
+        let input_width = self.input_area_rect.width.max(width);
+        self.input_area.handle_resize(input_width);
     }
 }
 
@@ -39,6 +41,15 @@ mod tests {
                 height: 24,
             })
         );
+    }
+
+    #[test]
+    fn handle_resize_updates_input_content_width() {
+        let mut app = test_app();
+
+        app.handle_resize(80, 24);
+
+        assert_eq!(app.input_area.content_width, 78);
     }
 
     #[test]

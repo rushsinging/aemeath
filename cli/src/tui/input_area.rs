@@ -10,6 +10,7 @@ use tui_textarea::TextArea;
 mod editing;
 mod history;
 mod render;
+mod resize;
 mod selection;
 mod suggestions;
 
