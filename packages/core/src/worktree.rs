@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::session::{WorkspaceContext, WorkspaceStackEntry};
 use crate::tool::ToolContext;
 
 /// 保存进入 worktree 前的工作上下文快照
@@ -124,6 +125,72 @@ pub fn exit_worktree(ctx: &ToolContext) -> Result<WorkingContext, String> {
         }
         None => Err("上下文栈为空，没有可恢复的 worktree。可能已经在主工作区。".to_string()),
     }
+}
+
+/// 将当前 ToolContext 的工作上下文转换为可持久化的会话工作区上下文。
+pub fn workspace_context_from_tool_context(ctx: &ToolContext) -> WorkspaceContext {
+    let stack = ctx
+        .context_stack
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|entry| WorkspaceStackEntry {
+            path_base: entry.path_base.display().to_string(),
+            working_root: entry.working_root.display().to_string(),
+        })
+        .collect();
+
+    WorkspaceContext {
+        path_base: ctx.current_path_base().display().to_string(),
+        working_root: ctx.current_working_root().display().to_string(),
+        context_stack: stack,
+    }
+}
+
+/// 从会话工作区上下文恢复 ToolContext 的 path_base/working_root/context_stack。
+pub fn restore_workspace_context(
+    ctx: &ToolContext,
+    workspace: &WorkspaceContext,
+) -> Result<(), String> {
+    let path_base = PathBuf::from(&workspace.path_base);
+    let working_root = PathBuf::from(&workspace.working_root);
+
+    if !path_base.exists() {
+        return Err(format!(
+            "恢复工作目录失败：路径不存在 {}",
+            path_base.display()
+        ));
+    }
+    if !working_root.exists() {
+        return Err(format!(
+            "恢复仓库根目录失败：路径不存在 {}",
+            working_root.display()
+        ));
+    }
+
+    let stack = workspace
+        .context_stack
+        .iter()
+        .map(|entry| WorkingContext {
+            path_base: PathBuf::from(&entry.path_base),
+            working_root: PathBuf::from(&entry.working_root),
+        })
+        .collect::<Vec<_>>();
+
+    match ctx.working_root.lock() {
+        Ok(mut wr) => *wr = working_root,
+        Err(poisoned) => *poisoned.into_inner() = working_root,
+    }
+    match ctx.path_base.lock() {
+        Ok(mut pb) => *pb = path_base,
+        Err(poisoned) => *poisoned.into_inner() = path_base,
+    }
+    match ctx.context_stack.lock() {
+        Ok(mut current_stack) => *current_stack = stack,
+        Err(poisoned) => *poisoned.into_inner() = stack,
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

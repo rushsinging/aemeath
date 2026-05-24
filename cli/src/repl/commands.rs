@@ -127,6 +127,7 @@ pub(crate) async fn handle_slash_command(
                     updated_at: session::now_iso(),
                     metadata: existing.metadata.clone(),
                     tasks: None,
+                    workspace: existing.workspace.clone(),
                 }
             } else {
                 let mut s = Session::new(session_id.to_string(), cwd.to_string_lossy().to_string());
@@ -267,7 +268,9 @@ pub(crate) async fn handle_slash_command(
                             }
                             "allow-all" => {
                                 *allow_all = true;
-                                println!("Permission mode set to: allow-all (warning: all tools will be auto-approved)");
+                                println!(
+                                    "Permission mode set to: allow-all (warning: all tools will be auto-approved)"
+                                );
                             }
                             _ => eprintln!("Unknown permission mode: {}", mode),
                         },

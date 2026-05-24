@@ -1,5 +1,17 @@
 use aemeath_core::message::Message;
 use aemeath_core::tool::{AgentProgressEvent, ImageData};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusContextUpdate {
+    pub path_base: String,
+    pub working_root: String,
+    pub branch: Option<String>,
+    pub kind: crate::tui::status_bar::WorktreeKind,
+    pub raw_path_base: PathBuf,
+    pub raw_working_root: PathBuf,
+    pub workspace: aemeath_core::session::WorkspaceContext,
+}
 
 /// Events sent from background task to UI
 #[derive(Debug)]
@@ -86,6 +98,6 @@ pub enum AppEvent {
         error: Option<String>,
     },
     /// Current tool path base/working root changed.
-    WorkingDirectoryChanged(String),
+    WorkingDirectoryChanged(StatusContextUpdate),
 }
 pub type UiEvent = AppEvent;

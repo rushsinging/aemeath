@@ -103,10 +103,11 @@ async fn execute_one_agent(
         .get("Agent")
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
-    hook_runner.set_project_dir(ag_ctx.current_working_root().display().to_string());
+    let working_root = ag_ctx.current_working_root();
+    hook_runner.set_project_dir(working_root.display().to_string());
     let _ = tx
-        .send(UiEvent::WorkingDirectoryChanged(
-            crate::tui::app::display_working_dir(&ag_ctx.current_path_base()),
+        .send(crate::tui::app::status_context_for_workspace(
+            aemeath_core::worktree::workspace_context_from_tool_context(&ag_ctx),
         ))
         .await;
     let results = vec![(

@@ -44,6 +44,22 @@ impl App {
                 Ok(s) => {
                     let msg_count = s.messages.len();
                     self.session_created_at = Some(s.created_at.clone());
+                    if let Some(workspace) = &s.workspace {
+                        self.workspace_context = Some(workspace.clone());
+                        let path_base = std::path::PathBuf::from(&workspace.path_base);
+                        let working_root = std::path::PathBuf::from(&workspace.working_root);
+                        self.cwd = path_base.clone();
+                        if let super::UiEvent::WorkingDirectoryChanged(ctx) =
+                            super::status_context_for_workspace(workspace.clone())
+                        {
+                            self.status_bar
+                                .set_context_paths(ctx.path_base, ctx.working_root);
+                            self.status_bar
+                                .set_git_context(ctx.kind, ctx.branch.unwrap_or_default());
+                        }
+                        self.hook_runner
+                            .set_project_dir(working_root.display().to_string());
+                    }
                     // Restore task snapshot if present
                     if let (Some(ts), Some(snapshot)) = (&self.task_store, s.tasks) {
                         ts.restore(snapshot).await;

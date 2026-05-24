@@ -93,6 +93,7 @@ impl App {
             updated_at: now_iso(),
             metadata: Default::default(),
             tasks: task_snapshot,
+            workspace: self.workspace_context.clone(),
         }
     }
 

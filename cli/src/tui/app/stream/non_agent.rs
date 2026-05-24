@@ -208,13 +208,11 @@ async fn execute_one_non_agent(
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
     let working_root = agent.ctx.current_working_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    if owned_call.name == "Bash" {
-        let _ = tx
-            .send(UiEvent::WorkingDirectoryChanged(
-                crate::tui::app::display_working_dir(&agent.ctx.current_path_base()),
-            ))
-            .await;
-    }
+    let _ = tx
+        .send(crate::tui::app::status_context_for_workspace(
+            aemeath_core::worktree::workspace_context_from_tool_context(&agent.ctx),
+        ))
+        .await;
     let mut out = Vec::new();
     for (id, output, is_error, images) in exec_results {
         log_tool_result(

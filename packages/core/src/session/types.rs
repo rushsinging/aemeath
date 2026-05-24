@@ -30,6 +30,20 @@ pub struct SessionMetadata {
     pub project: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceContext {
+    pub path_base: String,
+    pub working_root: String,
+    #[serde(default)]
+    pub context_stack: Vec<WorkspaceStackEntry>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceStackEntry {
+    pub path_base: String,
+    pub working_root: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
@@ -43,6 +57,8 @@ pub struct Session {
     /// Task snapshot for resuming in-progress tasks
     #[serde(default)]
     pub tasks: Option<TaskSnapshot>,
+    #[serde(default)]
+    pub workspace: Option<WorkspaceContext>,
 }
 
 impl Session {
@@ -60,6 +76,7 @@ impl Session {
                 ..Default::default()
             },
             tasks: None,
+            workspace: None,
         }
     }
 

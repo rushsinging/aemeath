@@ -25,6 +25,7 @@ impl App {
             messages: self.messages.clone(),
             context_size: spawn_refs.context_size,
             cwd: self.cwd.clone(),
+            workspace_context: self.workspace_context.clone(),
             session_id: self.session_id.clone(),
             read_files: spawn_refs.read_files.clone(),
             session_reminders: spawn_refs.session_reminders.clone(),

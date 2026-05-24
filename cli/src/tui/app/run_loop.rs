@@ -139,6 +139,7 @@ impl App {
                         messages: self.messages.clone(),
                         context_size,
                         cwd: self.cwd.clone(),
+                        workspace_context: self.workspace_context.clone(),
                         session_id: self.session_id.clone(),
                         read_files: read_files.clone(),
                         session_reminders: self.session_reminders.clone(),
