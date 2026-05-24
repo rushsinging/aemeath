@@ -1,10 +1,26 @@
 use crate::agent_runner;
+use crate::logging_setup::set_session_id;
 use aemeath_core::config::Config;
 use aemeath_core::hook::HookRunner;
 use aemeath_core::logging::{self, JsonLogger};
 use aemeath_llm::client::LlmClient;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+pub(super) fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
+    let cwd_str = cwd.display().to_string();
+    match config_file {
+        Some(config) => HookRunner::from_config(config, cwd_str),
+        None => HookRunner::empty(cwd_str),
+    }
+}
+
+pub(super) fn start_session(resume_session_id: Option<String>) -> String {
+    let session_id = resume_session_id.unwrap_or_else(aemeath_core::session::new_session_id);
+    set_session_id(session_id.clone());
+    log::info!("session started");
+    session_id
+}
 
 pub(super) fn build_json_logger(
     session_id: &str,
@@ -105,6 +121,7 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use aemeath_core::config::models::ProviderModelsConfig;
     use aemeath_core::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
     use std::collections::HashMap;
@@ -118,6 +135,48 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_build_hook_runner_accepts_empty_config() {
+        let hook_runner = build_hook_runner(None, Path::new("."));
+
+        assert_eq!(hook_runner.hook_count(), 0);
+        assert_eq!(hook_runner.project_dir(), ".");
+    }
+
+    #[test]
+    fn test_build_hook_runner_uses_config_hooks() {
+        let mut config = Config::default();
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::PreToolUse,
+            vec![HookEntry {
+                matcher: "Bash".to_string(),
+                command: "true".to_string(),
+                timeout: 60,
+            }],
+        );
+        config.hooks = HooksConfig { events };
+
+        let hook_runner = build_hook_runner(Some(&config), Path::new("project-root"));
+
+        assert_eq!(hook_runner.hook_count(), 1);
+        assert_eq!(hook_runner.project_dir(), "project-root");
+    }
+
+    #[test]
+    fn test_start_session_uses_resume_session_id() {
+        let session_id = start_session(Some("resume-id".to_string()));
+
+        assert_eq!(session_id, "resume-id");
+    }
+
+    #[test]
+    fn test_start_session_generates_session_id_without_resume() {
+        let session_id = start_session(None);
+
+        assert!(!session_id.is_empty());
     }
 
     #[test]

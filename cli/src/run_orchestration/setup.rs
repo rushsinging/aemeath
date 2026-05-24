@@ -8,7 +8,7 @@ mod tooling;
 
 use super::{chat_mode_selection, ChatModeSelection};
 use crate::cli::Args;
-use crate::logging_setup::{init_logging, set_session_id};
+use crate::logging_setup::init_logging;
 use crate::model_selection::select_model_for_run;
 use aemeath_core::config::models::ResolvedModel;
 use aemeath_core::mcp_manager::McpConnectionManager;
@@ -17,7 +17,7 @@ use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
 use prompt_bundle::build_chat_prompt_bundle;
 use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
-use runtime_support::{build_agent_runner, build_json_logger};
+use runtime_support::{build_agent_runner, build_hook_runner, build_json_logger, start_session};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -124,21 +124,8 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     )
     .await;
 
-    // Create hook runner before agent_runner so it can be shared
-    let cwd_str = cwd.display().to_string();
-    let hook_runner = if let Some(ref cfg) = config_file {
-        aemeath_core::hook::HookRunner::from_config(cfg, cwd_str.clone())
-    } else {
-        aemeath_core::hook::HookRunner::empty(cwd_str.clone())
-    };
-
-    // 确定 session ID（尽早生成，以便分化日志、agent_runner 等使用）
-    let session_id = args
-        .resume
-        .clone()
-        .unwrap_or_else(aemeath_core::session::new_session_id);
-    set_session_id(session_id.clone());
-    log::info!("session started");
+    let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
+    let session_id = start_session(args.resume.clone());
 
     let json_logger = build_json_logger(&session_id, config_file.as_ref());
     let agent_runner = build_agent_runner(
