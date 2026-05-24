@@ -6,7 +6,33 @@
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
+| 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
 ## 专案
+
+### #64 Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态
+
+**状态**：修复中
+
+**症状**：session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，主 LLM 已创建 task list 并填充多个任务。Task 1 完成后，系统提示 Task 2 已解除阻塞；随后主 LLM 启动 Task 2 subagent，subagent 实际运行并修改代码，但 task list 中 Task 2 仍保持 `pending`，界面上只看到 `done` 与 `pending`，没有 `doing / in_progress`。
+
+**日志证据**：
+1. `TaskUpdate taskId=1 status=completed` 返回 `Unblocked tasks now ready: → #2`。
+2. 后续 `Agent(description="Implement Task 2", ...)` 调用缺少结构化 `taskId` 字段。
+3. subagent 返回 `DONE_WITH_CONCERNS` 并产生文件修改，证明任务实际执行。
+4. 因 AgentTool 未绑定 task，TaskStore 未自动执行 `Pending → InProgress → Completed/Pending` 生命周期。
+
+**根因**：AgentTool 目前只在输入包含 `taskId` 时桥接 task 生命周期；当 active task batch 存在未完成任务时，未传 `taskId` 的 Agent 仍会启动。工具描述要求模型传 `taskId`，但没有工具层强制约束，LLM 遗漏参数时系统不会阻止，导致 subagent 执行和 task 状态投影脱钩。
+
+**修复方向**：
+1. 当 TaskStore 存在 active list 且有 pending/in_progress 任务时，AgentTool 缺少 `taskId` 应直接返回错误，提示传入 `taskId` 或先完成/关闭 task list。
+2. 保留无 active task list 时的自由 Agent 调用能力，避免破坏普通并行调研/review 场景。
+3. 保留已有 `taskId` 生命周期管理：绑定 task 成功时标记 InProgress，成功后 Completed，失败后 Pending。
+4. 增加回归测试覆盖 active task list + missing taskId 拒绝启动，且验证 subagent runner 未被调用。
+
+**涉及路径**：
+- `packages/tools/src/agent_tool.rs`
+- `packages/tools/src/agent_tool_tests.rs`
+- `packages/core/src/task/` TaskStore active list / batch 状态查询
 
 ### #62 Grep 工具执行中标题文字不可见但复制可见
 
