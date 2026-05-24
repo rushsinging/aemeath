@@ -115,10 +115,8 @@ mod tests {
             resume: None,
             allow_all: false,
             max_tool_concurrency: 10,
-            max_agent_concurrency: 4,
         }
     }
-
     fn valid_no_tui_launch() -> NoTuiChatLaunch {
         NoTuiChatLaunch {
             options: base_options(),
@@ -134,11 +132,11 @@ mod tests {
     fn valid_tui_launch() -> TuiChatLaunch {
         TuiChatLaunch {
             options: base_options(),
+            max_agent_concurrency: 4,
             session_id: "session-1".to_string(),
             model_display: "provider/model".to_string(),
         }
     }
-
     fn invalid_tui_launch() -> TuiChatLaunch {
         let mut launch = valid_tui_launch();
         launch.session_id = String::new();
