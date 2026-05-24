@@ -90,7 +90,7 @@ impl App {
                             Event::Paste(text) => Some(Msg::Paste(text)),
                             Event::Mouse(mouse) => Some(Msg::Mouse(mouse)),
                             Event::Key(key) => Some(Msg::Key(key)),
-                            Event::Resize(_, _) => Some(Msg::Resize),
+                            Event::Resize(width, height) => Some(Msg::Resize { width, height }),
                             _ => None,
                         },
                         _ => None,

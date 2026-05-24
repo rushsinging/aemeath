@@ -96,7 +96,7 @@ impl App {
                     pending_slash: None,
                 }
             }
-            Msg::Resize => UpdateResult {
+            Msg::Resize { .. } => UpdateResult {
                 cmd: Cmd::None,
                 pending_slash: None,
             },

@@ -8,7 +8,7 @@ pub enum Msg {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Paste(String),
-    Resize,
+    Resize { width: u16, height: u16 },
     SpinnerTick,
 
     // --- Async UI events (from background LLM processing) ---
