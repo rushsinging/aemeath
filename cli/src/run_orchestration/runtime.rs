@@ -1,6 +1,6 @@
 use crate::application::chat::{
-    ChatApplicationService, ChatLaunchMode, ChatLaunchRequest, ChatRuntimePort,
-    NoTuiChatDependencies, TuiChatDependencies, TuiChatOutcome,
+    ChatApplicationService, ChatLaunchOptions, ChatRuntimeContext, ChatRuntimePort,
+    NoTuiChatLaunch, TuiChatLaunch, TuiChatOutcome,
 };
 use crate::{repl, tui};
 use aemeath_core::task::TaskStore;
@@ -17,29 +17,29 @@ struct NoTuiChatRuntimeAdapter;
 impl ChatRuntimePort for NoTuiChatRuntimeAdapter {
     async fn run_no_tui_chat(
         &self,
-        request: ChatLaunchRequest,
-        dependencies: NoTuiChatDependencies,
+        launch: NoTuiChatLaunch,
+        context: ChatRuntimeContext,
     ) -> Result<(), String> {
         repl::run_repl(
-            dependencies.client,
-            dependencies.registry,
-            dependencies.system_blocks,
-            dependencies.system_prompt_text,
-            dependencies.user_context,
-            request.cwd,
-            request.verbose,
-            request.markdown,
-            request.context_size,
-            request.resume,
-            Some(dependencies.agent_runner),
-            request.allow_all,
-            dependencies.task_store,
-            request.max_tool_concurrency,
-            dependencies.agent_semaphore,
-            dependencies.skills_map,
-            dependencies.hook_runner,
-            dependencies.memory_config,
-            dependencies.json_logger,
+            context.client,
+            context.registry,
+            context.system_blocks,
+            context.system_prompt_text,
+            context.user_context,
+            launch.options.cwd,
+            launch.options.verbose,
+            launch.options.markdown,
+            launch.options.context_size,
+            launch.options.resume,
+            Some(context.agent_runner),
+            launch.options.allow_all,
+            context.task_store,
+            launch.options.max_tool_concurrency,
+            context.agent_semaphore,
+            context.skills_map,
+            context.hook_runner,
+            context.memory_config,
+            context.json_logger,
         )
         .await;
         Ok(())
@@ -47,8 +47,8 @@ impl ChatRuntimePort for NoTuiChatRuntimeAdapter {
 
     async fn run_tui_chat(
         &self,
-        _request: ChatLaunchRequest,
-        _dependencies: TuiChatDependencies,
+        _launch: TuiChatLaunch,
+        _context: ChatRuntimeContext,
     ) -> Result<TuiChatOutcome, String> {
         Err("NoTuiChatRuntimeAdapter 不支持 TUI 启动".to_string())
     }
@@ -60,46 +60,39 @@ struct TuiChatRuntimeAdapter;
 impl ChatRuntimePort for TuiChatRuntimeAdapter {
     async fn run_no_tui_chat(
         &self,
-        _request: ChatLaunchRequest,
-        _dependencies: NoTuiChatDependencies,
+        _launch: NoTuiChatLaunch,
+        _context: ChatRuntimeContext,
     ) -> Result<(), String> {
         Err("TuiChatRuntimeAdapter 不支持 no-TUI 启动".to_string())
     }
 
     async fn run_tui_chat(
         &self,
-        request: ChatLaunchRequest,
-        dependencies: TuiChatDependencies,
+        launch: TuiChatLaunch,
+        context: ChatRuntimeContext,
     ) -> Result<TuiChatOutcome, String> {
-        let session_id = request
-            .session_id
-            .clone()
-            .ok_or_else(|| "TUI 启动必须提供 session_id".to_string())?;
-        let model_display = request
-            .model_display
-            .clone()
-            .ok_or_else(|| "TUI 启动必须提供 model_display".to_string())?;
-        let mut app = tui::App::new(session_id.clone(), request.cwd, model_display);
-        app.memory_config = dependencies.memory_config;
-        app.set_skills(dependencies.skills_map);
-        app.hook_runner = dependencies.hook_runner;
-        app.json_logger = dependencies.json_logger;
+        let session_id = launch.session_id;
+        let mut app = tui::App::new(session_id.clone(), launch.options.cwd, launch.model_display);
+        app.memory_config = context.memory_config;
+        app.set_skills(context.skills_map);
+        app.hook_runner = context.hook_runner;
+        app.json_logger = context.json_logger;
         app.run(
-            dependencies.client,
-            dependencies.registry,
-            dependencies.system_blocks,
-            dependencies.system_prompt_text,
-            dependencies.user_context,
-            request.context_size,
-            request.verbose,
-            request.markdown,
-            Some(dependencies.agent_runner),
-            request.allow_all,
-            request.resume,
-            dependencies.task_store,
-            request.max_tool_concurrency,
-            dependencies.max_agent_concurrency,
-            dependencies.agent_semaphore,
+            context.client,
+            context.registry,
+            context.system_blocks,
+            context.system_prompt_text,
+            context.user_context,
+            launch.options.context_size,
+            launch.options.verbose,
+            launch.options.markdown,
+            Some(context.agent_runner),
+            launch.options.allow_all,
+            launch.options.resume,
+            context.task_store,
+            launch.options.max_tool_concurrency,
+            launch.options.max_agent_concurrency,
+            context.agent_semaphore,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -126,20 +119,19 @@ pub(super) async fn run_no_tui(
     memory_config: aemeath_core::config::MemoryConfig,
     json_logger: Option<Arc<Mutex<aemeath_core::logging::JsonLogger>>>,
 ) {
-    let request = ChatLaunchRequest {
-        mode: ChatLaunchMode::NoTui,
-        session_id: None,
-        cwd,
-        model_display: None,
-        verbose: args.verbose,
-        markdown: !args.no_markdown,
-        context_size: args.context_size,
-        resume: args.resume.clone(),
-        allow_all: args.allow_all,
-        max_tool_concurrency,
-        max_agent_concurrency,
+    let launch = NoTuiChatLaunch {
+        options: ChatLaunchOptions {
+            cwd,
+            verbose: args.verbose,
+            markdown: !args.no_markdown,
+            context_size: args.context_size,
+            resume: args.resume.clone(),
+            allow_all: args.allow_all,
+            max_tool_concurrency,
+            max_agent_concurrency,
+        },
     };
-    let dependencies = NoTuiChatDependencies {
+    let context = ChatRuntimeContext {
         client,
         registry,
         system_blocks,
@@ -154,7 +146,7 @@ pub(super) async fn run_no_tui(
         json_logger,
     };
     let service = ChatApplicationService::new(NoTuiChatRuntimeAdapter);
-    if let Err(e) = service.run_no_tui_chat(request, dependencies).await {
+    if let Err(e) = service.run_no_tui_chat(launch, context).await {
         log::error!("no-TUI chat application service error: {e}");
         std::process::exit(1);
     }
@@ -181,20 +173,21 @@ pub(super) async fn run_tui(
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
 ) {
-    let request = ChatLaunchRequest {
-        mode: ChatLaunchMode::Tui,
-        session_id: Some(session_id.clone()),
-        cwd,
-        model_display: Some(model_display),
-        verbose: args.verbose,
-        markdown: !args.no_markdown,
-        context_size: args.context_size,
-        resume: args.resume,
-        allow_all: args.allow_all,
-        max_tool_concurrency,
-        max_agent_concurrency,
+    let launch = TuiChatLaunch {
+        options: ChatLaunchOptions {
+            cwd,
+            verbose: args.verbose,
+            markdown: !args.no_markdown,
+            context_size: args.context_size,
+            resume: args.resume.clone(),
+            allow_all: args.allow_all,
+            max_tool_concurrency,
+            max_agent_concurrency,
+        },
+        session_id,
+        model_display,
     };
-    let dependencies = TuiChatDependencies {
+    let context = ChatRuntimeContext {
         client,
         registry,
         system_blocks,
@@ -206,11 +199,10 @@ pub(super) async fn run_tui(
         hook_runner,
         memory_config,
         json_logger,
-        max_agent_concurrency,
         agent_semaphore,
     };
     let service = ChatApplicationService::new(TuiChatRuntimeAdapter);
-    match service.run_tui_chat(request, dependencies).await {
+    match service.run_tui_chat(launch, context).await {
         Ok(outcome) => println!("aemeath --resume {}", outcome.session_id),
         Err(e) => {
             log::error!("TUI chat application service error: {e}");

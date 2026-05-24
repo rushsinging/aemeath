@@ -332,6 +332,62 @@ interaction
 4. 依赖方向应保持：inbound adapter → application service → domain context → outbound port → external adapter。
 5. 禁止 domain context 反向依赖 HTTP、CLI、TUI 等入口层。
 
+### 6.5 Chat 启动边界对象化
+
+Phase 3 继续沿薄入口推进，重点整理 Chat 启动参数边界。Phase 1 已让 CLI no-TUI 与 TUI 主入口通过 `ChatApplicationService` 分发到现有 runtime；Phase 2 已让 `ChatApplicationService` 依赖 `ChatRuntimePort`，并把 `repl` / `tui::App` 调用移动到 runtime adapter。Phase 3 不改变运行行为，而是把“传什么”整理为更稳定的 application 边界对象。
+
+当前 `ChatLaunchRequest` 同时承载 no-TUI 与 TUI 字段，`NoTuiChatDependencies` / `TuiChatDependencies` 重复承载大量共同依赖。后续应拆为三类对象：
+
+```text
+ChatRuntimeContext
+  client
+  registry
+  system_blocks
+  system_prompt_text
+  user_context
+  agent_runner
+  task_store
+  skills_map
+  hook_runner
+  memory_config
+  json_logger
+  agent_semaphore
+
+ChatLaunchOptions
+  cwd
+  verbose
+  markdown
+  context_size
+  resume
+  allow_all
+  max_tool_concurrency
+  max_agent_concurrency
+
+NoTuiChatLaunch
+  options: ChatLaunchOptions
+
+TuiChatLaunch
+  options: ChatLaunchOptions
+  session_id: String
+  model_display: String
+```
+
+调整后的 port 边界应表达为：
+
+```text
+run_no_tui_chat(NoTuiChatLaunch, ChatRuntimeContext)
+run_tui_chat(TuiChatLaunch, ChatRuntimeContext)
+```
+
+设计约束：
+
+1. `ChatRuntimeContext` 只承载启动 Chat 所需的共享运行依赖，不拥有 Agent Runtime 业务规则。
+2. `ChatLaunchOptions` 只承载 no-TUI / TUI 共同启动选项，不包含 `session_id`、`model_display` 等入口模式专属字段。
+3. `NoTuiChatLaunch` 与 `TuiChatLaunch` 用类型表达入口模式差异，避免继续使用 `mode + Option<String>` 表达 TUI 必填项。
+4. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
+5. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。
+6. HTTP / SDK 后续接入时应复用同一组 context、options 和 mode-specific launch DTO，而不是复制 CLI/TUI 专属参数结构。
+
 ## 7. COLA 工程分层规范
 
 DDD 用于回答领域边界和统一语言是什么，COLA 用于约束代码如何分层落地。Aemeath 后续重构应把二者结合：先按 DDD 确定 Bounded Context，再用 COLA 风格组织入口、应用服务、领域模型和基础设施适配器。
