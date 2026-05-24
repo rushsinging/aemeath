@@ -1,6 +1,7 @@
 mod concurrency;
 mod model_runtime;
 mod permissions;
+mod provider_client;
 
 use super::{chat_mode_selection, prompt, runtime, ChatModeSelection};
 use crate::agent_runner;
@@ -12,13 +13,12 @@ use crate::prompt::{build_system_prompt_parts, PromptContext};
 use aemeath_core::config::models::ResolvedModel;
 use aemeath_core::logging::{self, JsonLogger};
 use aemeath_core::mcp_manager::McpConnectionManager;
-use aemeath_core::provider::ApiDriverKind;
 use aemeath_core::tool::ToolRegistry;
-use aemeath_llm::client::{LlmClient, OpenAIProviderConfig};
-use aemeath_llm::providers::openai_compatible::ReasoningConfig;
+use aemeath_llm::client::LlmClient;
 use concurrency::resolve_concurrency_limits;
 use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
+use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -73,38 +73,12 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         });
     let api_type = resolved_model.api;
 
-    // 获取 API key: CLI args > env vars > resolved config
-    let api_key = args.api_key.take().unwrap_or_else(|| {
-        let driver_env = match api_type {
-            ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
-            ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
-            ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
-            ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
-        };
-        std::env::var("AEMEATH_API_KEY")
-            .ok()
-            .or_else(|| driver_env.and_then(|name| std::env::var(name).ok()))
-            .or_else(|| std::env::var("LLM_API_KEY").ok())
-            .or_else(|| {
-                if !resolved_model.source_config.api_key.is_empty() {
-                    Some(resolved_model.source_config.api_key.clone())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| {
-                eprintln!("Error: API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
-                std::process::exit(1);
-            })
+    let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).unwrap_or_else(|| {
+        eprintln!("Error: API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json");
+        std::process::exit(1);
     });
 
-    let base_url = args.base_url.clone().or_else(|| {
-        if resolved_model.source_config.base_url.is_empty() {
-            None
-        } else {
-            Some(resolved_model.source_config.base_url.clone())
-        }
-    });
+    let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
     let model = resolved_model.model.id.clone();
     let runtime_settings = resolve_model_runtime_settings(
         args.max_tokens,
@@ -131,42 +105,14 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         args.no_think
     );
 
-    let openai_config = if matches!(api_type, ApiDriverKind::Anthropic) {
-        None
-    } else {
-        Some(OpenAIProviderConfig::from_api_driver(
-            api_type,
-            &resolved_model.source_key,
-        ))
-    };
-    let reasoning_config = runtime_settings
-        .reasoning_effort
-        .as_ref()
-        .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
-        .or_else(|| {
-            if runtime_settings.thinking_max_tokens > 0 {
-                Some(ReasoningConfig::ThinkingBudget(
-                    runtime_settings.thinking_max_tokens,
-                ))
-            } else {
-                resolved_model.model.reasoning.map(ReasoningConfig::Bool)
-            }
-        });
-
-    let client = LlmClient::from_config(
+    let client = build_llm_client(
         api_type,
         api_key,
         base_url,
         model.clone(),
-        runtime_settings.max_tokens,
-        runtime_settings.thinking_max_tokens,
-        runtime_settings.reasoning,
-        reasoning_config,
-        openai_config,
+        &resolved_model,
+        &runtime_settings,
     );
-    if let Some(effort) = runtime_settings.reasoning_effort {
-        client.set_reasoning_effort(Some(effort));
-    }
 
     let client = std::sync::Arc::new(client);
 
