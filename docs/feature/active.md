@@ -8,7 +8,6 @@
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
-| 37 | 火山引擎（Volcengine）Coding Plan Provider | 高 | 待确认 | 未确认 | 新增 `volcengine` ApiDriverKind，复用 OpenAI-compatible Provider；2026-05-20 修正 Volcengine 请求体 max token 字段为 `max_output_tokens`，避免错误发送 `max_tokens` |
 | 40 | 配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取 | 高 | 待确认 | 未确认 | 全局配置根默认迁移到 `~/.agents` 且可配置，agent 配置文件使用 `aemeath.json`；项目指令 Claude 优先读取 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`，全局仍读取 `~/.agents/AGENTS.md`；项目配置优先级为 `{cwd}/.agents/aemeath.json` > `{cwd}/.claude/settings.json` > 全局 `~/.agents/aemeath.json`，其中 Claude Code hooks 结构转换为 Aemeath hooks；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 `~/.agents/skills` 作为 fallback；guidance、memory、sessions、history、cost_history、mcp、settings、logs 等运行数据也迁移到 `~/.agents`。logging 改为单一全局 `level`，不再支持按模块配置；旧 `default_level` 兼容读取，旧 `module_levels` 忽略。 |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
 | 43 | 在 git worktree 中工作时 cwd 应设置为 worktree 目录 | 高 | 修复中 | 未确认 | 当切换到 git worktree 后，工具上下文的 cwd/path_base/安全边界应同步到当前工作根，避免文件工具、搜索、构建和提交误作用于 main 工作区。 |
@@ -16,6 +15,31 @@
 | 45 | 为 LLM 提供 EnterWorktree / ExitWorktree 工具 | 高 | 待实施 | 已完成 | 新增显式 worktree 上下文切换工具，让 LLM 可调用 EnterWorktree 进入指定 git worktree 并切换 cwd/path_base/working_root，完成后调用 ExitWorktree 恢复原工作区，避免依赖 Bash cd 隐式切换。 |
 | 46 | TUI status line 增加第二行并显示 cwd/current worktree | 中 | 待确认 | 未确认 | status line V2 已按重新规划实现：第一行展示状态、模型、token in/out、t/s、ctx%、API calls，不再显示 cost/session；第二行展示真实路径（`~` 或 `/` 开头）、root（仅路径不一致时）、git/worktree、权限模式和完整 session。 |
 | 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | 重新从业务领域出发梳理 Aemeath：统一语言、Bounded Context、Context Map、聚合根/实体/值对象、领域服务、仓储/端口与 Anti-Corruption Layer；先形成设计 feature 和后续 spec 范围，不在本条直接改代码。 |
+| 48 | TUI 窗口 resize 时重新计算渲染层并刷新显示层 | 高 | 待实施 | 未确认 | 拖动终端窗口大小或收到 resize 事件时，TUI 应重新计算 layout、wrap、scroll、selection、Markdown/table/code/diff 等渲染缓存，并刷新显示层，避免窗口尺寸变化后显示内容仍使用旧宽高导致错位、截断、样式丢失或缓存不一致。 |
+
+### #48 TUI 窗口 resize 时重新计算渲染层并刷新显示层
+
+**状态**：待实施
+
+**背景**：用户拖动终端窗口大小时，TUI 的可用宽高、输出区/输入区/status line 布局、文本 wrap、scroll offset、selection 区域、Markdown 渲染缓存都会变化。如果显示层继续使用旧尺寸下的渲染结果，容易出现错位、截断、块渲染失效、选区偏移、表格列宽错误或 diff/code 高亮异常。
+
+**目标**：收到终端 resize 事件后，应触发一次完整的显示重排：重新计算 layout 与渲染层缓存，并刷新显示层，让 output/input/status 等区域都基于最新宽高重新渲染。
+
+**建议范围**：
+1. resize 事件进入 TUI update 后，应标记 layout/render cache dirty，并触发 redraw。
+2. 重新计算 output area 可见高度、scroll clamp、wrapped line 映射、Markdown block state、table/code/diff 渲染缓存。
+3. 重新计算 input area wrap、cursor row/col、viewport offset，避免输入内容越界。
+4. selection 区域应按新 wrapped line 坐标重算，避免选中高亮与复制区域错位。
+5. status line 两行布局（Feature #46）应参与整体高度分配，resize 后不遮挡 output/input。
+6. 避免每帧无条件重建重缓存；仅在尺寸变化、内容变化或主题变化时失效。
+7. 可在 debug 日志中记录 resize 前后尺寸、dirty cache、重绘耗时，便于排查。
+
+**涉及路径**：
+- TUI event/update loop 的 resize 事件处理
+- layout 高度/宽度分配逻辑
+- output area render cache / markdown table code diff 渲染逻辑
+- input area wrap/cursor/viewport 逻辑
+- selection highlight/copy 坐标映射逻辑
 
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
