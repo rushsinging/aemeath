@@ -58,12 +58,10 @@ impl App {
             // Check lifecycle: if previous batch was completed and auto-cleared
             self.output_area.set_task_status(Vec::new());
         } else {
+            let display_map = task_store.get_batch_display_map().await;
             let task_list_config = aemeath_core::config::TaskListConfig::default();
-            let lines = task_window::build_task_window(
-                &active,
-                task_list_config.max_lines,
-                task_list_config.show_last_completed,
-            );
+            let lines =
+                task_window::build_task_window(&active, &display_map, task_list_config.max_lines);
             self.output_area.set_task_status(lines);
         }
     }

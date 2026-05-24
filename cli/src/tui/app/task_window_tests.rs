@@ -1,65 +1,91 @@
-use super::helpers_tests::{make_task, make_task_with_ts};
+use super::helpers_tests::{make_display_map, make_task, make_task_with_ts};
 use super::*;
 
 #[test]
-fn test_build_task_window_empty() {
-    let result = build_task_window(&[], 7, 1);
+fn test_empty() {
+    let result = build_task_window(&[], &Default::default(), 7);
     assert!(result.is_empty());
 }
 
 #[test]
-fn test_build_task_window_max_lines_zero() {
+fn test_max_lines_zero() {
     let tasks = vec![make_task("1", "test", TaskStatus::Pending)];
-    let result = build_task_window(&tasks, 0, 1);
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 0);
     assert!(result.is_empty());
 }
 
 #[test]
-fn test_build_task_window_single_pending() {
+fn test_single_pending() {
     let tasks = vec![make_task("1", "do thing", TaskStatus::Pending)];
-    let result = build_task_window(&tasks, 7, 1);
-    assert_eq!(result.len(), 2); // summary + 1 task
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert_eq!(result.len(), 2);
     assert!(result[0].contains("0/1"));
     assert!(result[1].contains("□ #1 do thing"));
 }
 
 #[test]
-fn test_build_task_window_single_in_progress() {
+fn test_single_in_progress() {
     let tasks = vec![make_task("1", "in progress", TaskStatus::InProgress)];
-    let result = build_task_window(&tasks, 7, 1);
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
     assert!(result[1].contains("■ #1"));
 }
 
 #[test]
-fn test_build_task_window_single_completed() {
+fn test_single_completed() {
     let tasks = vec![make_task("1", "done", TaskStatus::Completed)];
-    let result = build_task_window(&tasks, 7, 1);
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
     assert!(result[1].contains("✓ #1 done"));
 }
 
 #[test]
-fn test_build_task_window_mix() {
+fn test_status_group_ordering() {
+    // completed 按 updated_at 降序：task 7 (ts=700) → task 3 (ts=300) → task 1 (ts=100)
+    // in_progress 按 updated_at 升序：task 4 (ts=400)
+    // pending 按 display_number 升序：task 2 (display=2) → task 5 (display=5)
     let tasks = vec![
-        make_task("1", "done a", TaskStatus::Completed),
-        make_task("2", "done b", TaskStatus::Completed),
-        make_task("3", "doing c", TaskStatus::InProgress),
-        make_task("4", "pending d", TaskStatus::Pending),
-        make_task("5", "pending e", TaskStatus::Pending),
+        make_task_with_ts("1", "done x", TaskStatus::Completed, 100),
+        make_task_with_ts("2", "pending a", TaskStatus::Pending, 200),
+        make_task_with_ts("3", "done y", TaskStatus::Completed, 300),
+        make_task_with_ts("4", "doing a", TaskStatus::InProgress, 400),
+        make_task_with_ts("5", "pending b", TaskStatus::Pending, 500),
+        make_task_with_ts("7", "done z", TaskStatus::Completed, 700),
     ];
-    let result = build_task_window(&tasks, 7, 1);
-    // 温和扩展会补充额外的 completed → summary + 2 completed + in_progress + 2 pending = 6
-    assert_eq!(result.len(), 6);
-    assert!(result[0].contains("2/5"));
-    assert!(result[1].contains("✓ #1 done a")); // completed 区块按显示编号排序
-    assert!(result[2].contains("✓ #2 done b"));
-    assert!(result[3].contains("■ #3 doing c")); // in_progress
-    assert!(result[4].contains("□ #4"));
-    assert!(result[5].contains("□ #5"));
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert_eq!(result.len(), 7); // summary + 6 tasks
+    assert!(result[0].contains("3/6"));
+    // completed group: updated_at desc → #6(done z,ts=700), #3(done y,ts=300), #1(done x,ts=100)
+    assert!(result[1].contains("✓ #6 done z"));
+    assert!(result[2].contains("✓ #3 done y"));
+    assert!(result[3].contains("✓ #1 done x"));
+    // in_progress group
+    assert!(result[4].contains("■ #4 doing a"));
+    // pending group: display_number asc → #2, #5
+    assert!(result[5].contains("□ #2 pending a"));
+    assert!(result[6].contains("□ #5 pending b"));
 }
 
 #[test]
-fn test_build_task_window_all_completed() {
-    let tasks: Vec<_> = (1..=10)
+fn test_truncation_with_fold_hint() {
+    let tasks: Vec<Task> = (1..=20)
+        .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskStatus::Pending))
+        .collect();
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    // summary + 7 tasks + fold hint
+    assert_eq!(result.len(), 9);
+    assert!(result[0].contains("0/20"));
+    assert!(result.last().unwrap().contains("+13 more"));
+}
+
+#[test]
+fn test_all_completed() {
+    // make_task uses id as updated_at, so higher id = more recent → desc order
+    let tasks: Vec<Task> = (1..=10)
         .map(|i| {
             make_task(
                 &i.to_string(),
@@ -68,259 +94,86 @@ fn test_build_task_window_all_completed() {
             )
         })
         .collect();
-    let result = build_task_window(&tasks, 7, 1);
-    // summary + 7 completed + fold hint = 9 lines
-    assert_eq!(result.len(), 9);
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert_eq!(result.len(), 9); // summary + 7 + fold
     assert!(result[0].contains("10/10"));
-    assert!(result.last().unwrap().contains("+3 more completed"));
+    // completed sorted by updated_at desc → #10, #9, #8, ...
+    assert!(result[1].contains("✓ #10"));
+    assert!(result[2].contains("✓ #9"));
+    assert!(result.last().unwrap().contains("+3 more"));
 }
 
 #[test]
-fn test_build_task_window_overflow_pending() {
-    let tasks: Vec<_> = (1..=20)
-        .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskStatus::Pending))
-        .collect();
-    let result = build_task_window(&tasks, 7, 1);
-    // summary + 7 pending + fold
-    assert_eq!(result.len(), 9);
-    assert!(result[0].contains("0/20"));
-    assert!(result.last().unwrap().contains("+13 more"));
+fn test_display_numbers_match_store_numbering() {
+    // Global ids are non-sequential: 8, 9, 10
+    // Display numbers should be 1, 2, 3 (batch-local)
+    let tasks = vec![
+        make_task("8", "first", TaskStatus::Pending),
+        make_task("9", "second", TaskStatus::InProgress),
+        make_task("10", "third", TaskStatus::Completed),
+    ];
+    let map = make_display_map(&tasks);
+    assert_eq!(map["8"], 1);
+    assert_eq!(map["9"], 2);
+    assert_eq!(map["10"], 3);
+    let result = build_task_window(&tasks, &map, 7);
+    // completed (id=10, display=3) → in_progress (id=9, display=2) → pending (id=8, display=1)
+    assert!(result[1].contains("✓ #3 third"));
+    assert!(result[2].contains("■ #2 second"));
+    assert!(result[3].contains("□ #1 first"));
 }
 
 #[test]
-fn test_build_task_window_in_progress_overflow() {
-    let mut tasks: Vec<_> = (1..=10)
+fn test_deleted_tasks_excluded() {
+    let tasks = vec![
+        make_task("1", "done", TaskStatus::Completed),
+        make_task("2", "deleted", TaskStatus::Deleted),
+        make_task("3", "pending", TaskStatus::Pending),
+    ];
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    let task_lines: Vec<_> = result.iter().skip(1).collect();
+    assert_eq!(task_lines.len(), 2);
+    assert!(task_lines[0].contains("✓ #1"));
+    assert!(task_lines[1].contains("□ #2"));
+}
+
+#[test]
+fn test_owner_display() {
+    let mut task = make_task("1", "owned task", TaskStatus::InProgress);
+    task.owner = Some("agent-1".to_string());
+    let tasks = vec![task];
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert!(result[1].contains("@agent-1"));
+}
+
+#[test]
+fn test_window_truncates_across_groups() {
+    let mut tasks: Vec<Task> = (1..=5)
         .map(|i| {
             make_task(
                 &i.to_string(),
-                &format!("task {}", i),
-                TaskStatus::InProgress,
+                &format!("done {}", i),
+                TaskStatus::Completed,
             )
         })
         .collect();
-    tasks.push(make_task("11", "pending", TaskStatus::Pending));
-    let result = build_task_window(&tasks, 7, 1);
-    // summary + 7 in_progress (pending falls off) + fold
-    assert_eq!(result.len(), 9);
-    assert!(result.last().unwrap().contains("+4 more"));
-}
-
-#[test]
-fn test_build_task_window_no_in_progress() {
-    let tasks = vec![
-        make_task("1", "done a", TaskStatus::Completed),
-        make_task("2", "pending b", TaskStatus::Pending),
-        make_task("3", "pending c", TaskStatus::Pending),
-        make_task("4", "pending d", TaskStatus::Pending),
-    ];
-    let result = build_task_window(&tasks, 7, 1);
-    // summary + 1 completed + 3 pending = 5
-    assert_eq!(result.len(), 5);
-    assert!(result[0].contains("1/4"));
-    assert!(result[1].contains("✓ #1"));
-    assert!(result[2].contains("□ #2"));
-}
-
-#[test]
-fn test_build_task_window_displays_batch_local_numbers() {
-    let tasks = vec![
-        make_task("6", "second batch first", TaskStatus::Pending),
-        make_task("7", "second batch second", TaskStatus::InProgress),
-    ];
-    let result = build_task_window(&tasks, 7, 1);
-
-    assert!(result[1].contains("■ #2 second batch second"));
-    assert!(result[2].contains("□ #1 second batch first"));
-    assert!(!result.iter().any(|line| line.contains("#6")));
-    assert!(!result.iter().any(|line| line.contains("#7")));
-}
-
-// --- Bug #32 新增测试 ---
-
-#[test]
-fn test_lower_bound_serial_execution() {
-    // 场景：10 tasks, 1 in_progress, 9 pending, 0 completed
-    // 期望 >= 3 条 task（不含摘要）
-    let mut tasks: Vec<_> = Vec::new();
-    for i in 1..=10 {
-        tasks.push(make_task(
-            &i.to_string(),
-            &format!("task {}", i),
-            TaskStatus::Pending,
-        ));
-    }
-    tasks[8].status = TaskStatus::InProgress; // #9 in_progress
-    let result = build_task_window(&tasks, 7, 1);
-    let task_lines = result.len() - 1;
-    assert!(task_lines >= 3, "task_lines={}, expected >= 3", task_lines);
-    assert!(result[0].contains("0/10"));
-}
-
-#[test]
-fn test_lower_bound_with_completed_fill() {
-    // 场景：10 tasks, 8 completed, 1 in_progress, 1 pending
-    // show_last_completed=1 → 只有 1 completed
-    // 下限保护应该补充更多 completed
-    let mut tasks: Vec<_> = Vec::new();
-    for i in 1..=10 {
-        let status = match i {
-            1..=8 => TaskStatus::Completed,
-            9 => TaskStatus::InProgress,
-            _ => TaskStatus::Pending,
-        };
-        tasks.push(make_task(&i.to_string(), &format!("task {}", i), status));
-    }
-    let result = build_task_window(&tasks, 7, 1);
-    let task_lines = result.len() - 1;
-    assert!(task_lines >= 3, "task_lines={}, expected >= 3", task_lines);
-    // 应该显示不止 1 条 completed
-    let comp_count = result.iter().filter(|l| l.starts_with('✓')).count();
-    assert!(
-        comp_count >= 2,
-        "expected >= 2 completed, got {}",
-        comp_count
-    );
-}
-
-#[test]
-fn test_pending_sequential_order() {
-    // pending 应该按 id 升序显示，不跳跃
-    let tasks = vec![
-        make_task("10", "skip early", TaskStatus::Pending),
-        make_task("2", "first", TaskStatus::Pending),
-        make_task("5", "second", TaskStatus::Pending),
-        make_task("3", "in progress", TaskStatus::InProgress),
-    ];
-    let result = build_task_window(&tasks, 7, 1);
-    // summary + in_progress + 3 pending = 5
-    assert_eq!(result.len(), 5);
-    assert!(result[1].contains("■ #2 in progress")); // in_progress
-    assert!(result[2].contains("□ #1 first")); // smallest id first
-    assert!(result[3].contains("□ #3 second"));
-    assert!(result[4].contains("□ #4 skip early"));
-}
-
-#[test]
-fn test_completed_lines_keep_task_id_order_when_expanded() {
-    let tasks = vec![
-        make_task_with_ts(
-            "1",
-            "检查 bug 35 与 worktree 约定",
-            TaskStatus::Completed,
-            100,
-        ),
-        make_task_with_ts(
-            "2",
-            "创建 bug35 worktree 并验证基线",
-            TaskStatus::Completed,
-            300,
-        ),
-        make_task_with_ts("3", "定位 bug 35 根因", TaskStatus::Completed, 200),
-        make_task_with_ts(
-            "4",
-            "添加回归测试并修复 bug 35",
-            TaskStatus::InProgress,
-            400,
-        ),
-        make_task_with_ts("5", "验证并更新文档", TaskStatus::Pending, 500),
-    ];
-
-    let result = build_task_window(&tasks, 7, 1);
-
-    assert!(result[1].contains("✓ #1 检查 bug 35 与 worktree 约定"));
-    assert!(result[2].contains("✓ #2 创建 bug35 worktree 并验证基线"));
-    assert!(result[3].contains("✓ #3 定位 bug 35 根因"));
-    assert!(result[4].contains("■ #4 添加回归测试并修复 bug 35"));
-    assert!(result[5].contains("□ #5 验证并更新文档"));
-}
-
-#[test]
-fn test_bug32_completed_expansion_keeps_display_order_for_user_snapshot() {
-    let tasks = vec![
-        make_task_with_ts(
-            "8",
-            "修复 architecture.md（7项）",
-            TaskStatus::Completed,
-            800,
-        ),
-        make_task_with_ts("1", "审阅 state.md", TaskStatus::Completed, 100),
-        make_task_with_ts("2", "审阅 data.md", TaskStatus::Completed, 200),
-        make_task_with_ts("3", "审阅 architecture.md", TaskStatus::Completed, 300),
-        make_task_with_ts("4", "审阅 api.md", TaskStatus::Completed, 400),
-        make_task_with_ts("9", "修复 api.md（5项）", TaskStatus::InProgress, 900),
-        make_task_with_ts("10", "修复 plan.md（8项）", TaskStatus::Pending, 1000),
-    ];
-
-    let result = build_task_window(&tasks, 7, 1);
-
-    assert!(result[1].contains("✓ #1 审阅 state.md"));
-    assert!(result[2].contains("✓ #2 审阅 data.md"));
-    assert!(result[3].contains("✓ #3 审阅 architecture.md"));
-    assert!(result[4].contains("✓ #4 审阅 api.md"));
-    assert!(result[5].contains("✓ #5 修复 architecture.md（7项）"));
-    assert!(result[6].contains("■ #6 修复 api.md（5项）"));
-    assert!(result[7].contains("□ #7 修复 plan.md（8项）"));
-}
-
-#[test]
-fn test_fold_hint_counts_only_unshown_tasks() {
-    let tasks = vec![
-        make_task("1", "done", TaskStatus::Completed),
-        make_task("2", "doing", TaskStatus::InProgress),
-        make_task("3", "pending a", TaskStatus::Pending),
-        make_task("4", "pending b", TaskStatus::Pending),
-        make_task("5", "pending c", TaskStatus::Pending),
-    ];
-
-    let result = build_task_window(&tasks, 4, 1);
-
+    tasks.push(make_task("6", "doing", TaskStatus::InProgress));
+    tasks.push(make_task("7", "pending", TaskStatus::Pending));
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 4);
+    // summary + 4 tasks + fold hint
     assert_eq!(result.len(), 6);
-    assert!(result[1].contains("✓ #1 done"));
-    assert!(result[2].contains("■ #2 doing"));
-    assert!(result[3].contains("□ #3 pending a"));
-    assert!(result[4].contains("□ #4 pending b"));
-    assert!(result[5].contains("+1 more pending"));
+    // completed sorted by updated_at desc → #5, #4, #3, #2 (first 4 shown)
+    assert!(result[1].contains("✓ #5 done 5"));
+    assert!(result[4].contains("✓ #2 done 2"));
+    assert!(result[5].contains("+3 more"));
 }
 
 #[test]
-fn test_completed_ttl_excludes_old() {
-    // TTL only applies when completed count exceeds max_lines.
-    // With max_lines=7 and only 2 completed, TTL does NOT filter → both shown.
-    let now: u64 = 10000;
-    let tasks = vec![
-        make_task_with_ts("1", "old done", TaskStatus::Completed, now - 3600),
-        make_task_with_ts("2", "recent done", TaskStatus::Completed, now - 5),
-        make_task_with_ts("3", "in progress", TaskStatus::InProgress, now),
-        make_task_with_ts("4", "pending", TaskStatus::Pending, now),
-    ];
-    let result = build_task_window(&tasks, 7, 1);
-    // Summary uses all_completed_count (2), not TTL-filtered
-    assert!(result[0].contains("2/4"));
-    // Both completed shown (within max_lines, no TTL filtering)
-    assert!(result.iter().any(|l| l.contains("✓ #2")));
-    assert!(result.iter().any(|l| l.contains("✓ #1")));
-
-    // Now test with many completed (> max_lines) where TTL kicks in
-    let mut many_tasks: Vec<Task> = Vec::new();
-    for i in 0..10 {
-        let ts = if i < 5 { now - 600 } else { now - 5 }; // first 5 are old
-        many_tasks.push(make_task_with_ts(
-            &format!("{}", i),
-            &format!("task {}", i),
-            TaskStatus::Completed,
-            ts,
-        ));
-    }
-    many_tasks.push(make_task_with_ts("10", "pending", TaskStatus::Pending, now));
-    let result2 = build_task_window(&many_tasks, 7, 1);
-    // Summary still shows all completed
-    assert!(result2[0].contains("10/11"));
-    // Old completed (0..4) should be filtered by TTL
-    assert!(!result2.iter().any(|l| l.contains("✓ #0 ")));
-}
-
-#[test]
-fn test_recent_completed_uses_updated_at_desc_before_id_order() {
+fn test_recent_completed_before_older() {
     let tasks = vec![
         make_task_with_ts("1", "old completed", TaskStatus::Completed, 100),
         make_task_with_ts("2", "middle completed", TaskStatus::Completed, 200),
@@ -328,73 +181,11 @@ fn test_recent_completed_uses_updated_at_desc_before_id_order() {
         make_task_with_ts("4", "current", TaskStatus::InProgress, 400),
         make_task_with_ts("5", "next", TaskStatus::Pending, 500),
     ];
-
-    let result = build_task_window(&tasks, 3, 1);
-
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 3);
+    // 5 ordered tasks, max_lines=3 → show 3 most recent completed + fold hint
     assert!(result[1].contains("✓ #3 newest completed"));
-    assert!(result[2].contains("■ #4 current"));
-    assert!(result[3].contains("□ #5 next"));
-    assert!(!result.iter().any(|line| line.contains("#1 old completed")));
-}
-
-#[test]
-fn test_bug32_user_snapshot_keeps_full_window_when_only_recent_completed_and_in_progress() {
-    let tasks = vec![
-        make_task_with_ts(
-            "1",
-            "Critical 1: 删除 ProjectTaskStatus.Assigned，统一状态机",
-            TaskStatus::Completed,
-            100,
-        ),
-        make_task_with_ts("2", "Critical 2: already done", TaskStatus::Completed, 200),
-        make_task_with_ts("3", "Critical 3: already done", TaskStatus::Completed, 300),
-        make_task_with_ts(
-            "4",
-            "Critical 4: 定稿 Sub-Agent 部署模型",
-            TaskStatus::Completed,
-            400,
-        ),
-        make_task_with_ts(
-            "5",
-            "Critical 5: 定稿 Agent 进程模型",
-            TaskStatus::Completed,
-            500,
-        ),
-        make_task_with_ts(
-            "6",
-            "Important 1-3: 补 timeout/cancel/token/gRPC 错误码",
-            TaskStatus::Completed,
-            600,
-        ),
-        make_task_with_ts(
-            "7",
-            "Important 4+6: 补缺失 collection schema + 简化 model_health",
-            TaskStatus::Completed,
-            700,
-        ),
-        make_task_with_ts(
-            "8",
-            "Important 5: 明确 Scheduler Watch 语义",
-            TaskStatus::Completed,
-            800,
-        ),
-        make_task_with_ts(
-            "9",
-            "Important 7: can_create_agents 硬校验",
-            TaskStatus::Completed,
-            900,
-        ),
-        make_task_with_ts(
-            "10",
-            "Minor 1-6: 排版修复 + 开放问题清理 + 小修补",
-            TaskStatus::InProgress,
-            1000,
-        ),
-    ];
-
-    let result = build_task_window(&tasks, 7, 1);
-
-    assert_eq!(result.len(), 8);
-    assert!(result[1].contains("✓ #4 Critical 4: 定稿 Sub-Agent 部署模型"));
-    assert!(result[7].contains("■ #10 Minor 1-6: 排版修复 + 开放问题清理 + 小修补"));
+    assert!(result[2].contains("✓ #2 middle completed"));
+    assert!(result[3].contains("✓ #1 old completed"));
+    assert!(result[4].contains("+2 more"));
 }
