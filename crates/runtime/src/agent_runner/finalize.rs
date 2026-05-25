@@ -1,11 +1,11 @@
-use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind};
-use ::runtime::api::provider::client::LlmClient;
+use crate::api::core::hook::HookRunner;
+use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind};
+use crate::api::provider::client::LlmClient;
 use std::time::Duration;
 
 /// Agent 循环退出状态
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum AgentRunStatus {
+pub enum AgentRunStatus {
     Completed,        // 正常完成
     Cancelled,        // 用户打断
     TimedOut,         // 子 agent 超时（10 分钟）
@@ -15,7 +15,7 @@ pub(crate) enum AgentRunStatus {
 
 /// Agent 循环统一结果
 #[derive(Debug, Clone)]
-pub(crate) struct AgentRunOutcome {
+pub struct AgentRunOutcome {
     pub status: AgentRunStatus,
     pub turns: usize,
     pub duration: Duration,
@@ -24,7 +24,7 @@ pub(crate) struct AgentRunOutcome {
 }
 
 /// 主 loop 和子 agent 共用的结构化日志摘要
-pub(crate) fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
+pub fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
     log::info!(
         "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
         session_id,

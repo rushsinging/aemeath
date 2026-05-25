@@ -1,5 +1,5 @@
-use crate::agent_runner;
 use crate::logging_setup::set_session_id;
+use ::runtime::api::agent_runner;
 use ::runtime::api::core::config::Config;
 use ::runtime::api::core::hook::HookRunner;
 use ::runtime::api::core::logging::{self, JsonLogger};

@@ -1,5 +1,5 @@
-use ::runtime::api::core::agent::ToolCall;
-use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+use crate::api::core::agent::ToolCall;
+use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 pub(crate) fn build_tool_calls_progress_event(
     sequence: usize,
