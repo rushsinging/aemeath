@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use ::runtime::api::core::config::ModelsConfig;
 use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::storage::logging::JsonLogger;
 use ::runtime::api::core::memory::SessionReminders;
 use ::runtime::api::core::session::WorkspaceContext;
 use ::runtime::api::core::task::TaskStore;

@@ -41,7 +41,6 @@ pub struct App {
     // 基础设施引用（Phase 4 移入 CmdExecutor）
     pub cmd_exec: CmdExecutor,
 }
-}
 
 #[cfg(test)]
 pub(crate) fn display_working_dir(path: &Path) -> String {

@@ -5,6 +5,7 @@
 
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
+use project::worktree;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
