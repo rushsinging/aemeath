@@ -5,7 +5,7 @@
 
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use project::worktree;
+use share::worktree_ops;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -79,7 +79,7 @@ impl Tool for EnterWorktreeTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        match project::worktree::enter_worktree(ctx, PathBuf::from(&args.path)) {
+        match worktree_ops::enter_worktree(ctx, PathBuf::from(&args.path)) {
             Ok(_snapshot) => {
                 let working_root = ctx.current_working_root();
                 let branch = get_current_branch(&working_root);
@@ -137,7 +137,7 @@ impl Tool for ExitWorktreeTool {
 
         if let Some(path) = args.path {
             // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match project::worktree::enter_worktree(ctx, PathBuf::from(&path)) {
+            match worktree_ops::enter_worktree(ctx, PathBuf::from(&path)) {
                 Ok(_) => {
                     // 弹出 enter_worktree 刚压入的快照
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
@@ -154,7 +154,7 @@ impl Tool for ExitWorktreeTool {
             }
         } else {
             // 恢复上一上下文
-            match project::worktree::exit_worktree(ctx) {
+            match worktree_ops::exit_worktree(ctx) {
                 Ok(prev) => {
                     let working_root = ctx.current_working_root();
                     let branch = get_current_branch(&working_root);

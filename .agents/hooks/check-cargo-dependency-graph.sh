@@ -10,18 +10,19 @@ import subprocess
 import sys
 
 business_allow = {
-    "cli": {"runtime"},
-    "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit"},
-    "project": {"core"},
-    "policy": {"core"},
-    "prompt": {"core"},
-    "provider": {"core"},
-    "tools": {"core"},
-    "storage": {"core"},
-    "hook": {"core"},
-    "audit": {"core"},
-    "core": set(),
-}
+      "cli": {"runtime"},
+      "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share"},
+      "share": {"core", "project"},
+      "project": {"core"},
+      "policy": {"core"},
+      "prompt": {"core"},
+      "provider": {"core"},
+      "tools": {"core", "share"},
+      "storage": {"core"},
+      "hook": {"core"},
+      "audit": {"core"},
+      "core": set(),
+  }
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"]))
 workspace_names = {package["name"] for package in metadata["packages"]}

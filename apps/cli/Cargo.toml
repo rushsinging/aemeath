@@ -8,7 +8,7 @@ name = "aemeath"
 path = "src/main.rs"
 
 [dependencies]
-runtime = { path = "../../crates/runtime" }
+runtime = { path = "../../services/runtime" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
