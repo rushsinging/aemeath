@@ -1,0 +1,4 @@
+# Keep normal cargo commands from creating per-checkout/worktree target directories.
+# This also covers cargo commands launched by hooks from this repository.
+[build]
+target-dir = "/Users/guoyuqi/.cache/aemeath-target"
