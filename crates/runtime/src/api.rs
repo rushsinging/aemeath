@@ -1,4 +1,5 @@
 pub use crate::agent_runner;
+pub use crate::bootstrap;
 pub use crate::chat;
 pub use aemeath_core as core;
 pub use audit;

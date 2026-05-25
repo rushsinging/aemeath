@@ -1,13 +1,12 @@
-use crate::logging_setup::set_session_id;
-use ::runtime::api::agent_runner;
-use ::runtime::api::core::config::Config;
-use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::logging::{self, JsonLogger};
-use ::runtime::api::provider::client::LlmClient;
+use crate::api::agent_runner;
+use crate::api::core::config::Config;
+use crate::api::core::hook::HookRunner;
+use crate::api::core::logging::{self, JsonLogger};
+use crate::api::provider::client::LlmClient;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub(super) fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
+pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
     let cwd_str = cwd.display().to_string();
     match config_file {
         Some(config) => HookRunner::from_config(config, cwd_str),
@@ -15,15 +14,13 @@ pub(super) fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> Hoo
     }
 }
 
-pub(super) fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id =
-        resume_session_id.unwrap_or_else(::runtime::api::core::session::new_session_id);
-    set_session_id(session_id.clone());
+pub fn start_session(resume_session_id: Option<String>) -> String {
+    let session_id = resume_session_id.unwrap_or_else(crate::api::core::session::new_session_id);
     log::info!("session started");
     session_id
 }
 
-pub(super) fn build_json_logger(
+pub fn build_json_logger(
     session_id: &str,
     config_file: Option<&Config>,
 ) -> Option<Arc<Mutex<JsonLogger>>> {
@@ -48,7 +45,7 @@ pub(super) fn build_json_logger(
     }
 }
 
-pub(super) fn build_agent_runner(
+pub fn build_agent_runner(
     config_file: Option<&Config>,
     client: Arc<LlmClient>,
     hook_runner: HookRunner,
@@ -81,13 +78,13 @@ pub(super) fn build_agent_runner(
 fn build_llm_client_pool(
     config_file: Option<&Config>,
     client: Arc<LlmClient>,
-    models_config: Arc<::runtime::api::core::config::ModelsConfig>,
-) -> Option<Arc<::runtime::api::provider::LlmClientPool>> {
+    models_config: Arc<crate::api::core::config::ModelsConfig>,
+) -> Option<Arc<crate::api::provider::LlmClientPool>> {
     if !has_multi_provider_or_agent_roles(config_file, &models_config) {
         return None;
     }
 
-    Some(Arc::new(::runtime::api::provider::LlmClientPool::new(
+    Some(Arc::new(crate::api::provider::LlmClientPool::new(
         client,
         models_config,
     )))
@@ -95,7 +92,7 @@ fn build_llm_client_pool(
 
 fn has_multi_provider_or_agent_roles(
     config_file: Option<&Config>,
-    models_config: &::runtime::api::core::config::ModelsConfig,
+    models_config: &crate::api::core::config::ModelsConfig,
 ) -> bool {
     models_config.providers.len() > 1
         || !config_file
@@ -122,9 +119,9 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
-    use ::runtime::api::core::config::models::ProviderModelsConfig;
-    use ::runtime::api::core::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
+    use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use crate::api::core::config::models::ProviderModelsConfig;
+    use crate::api::core::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
     use std::collections::HashMap;
 
     fn config_with_logging(role_logs_enabled: bool, logs_dir: Option<&str>) -> Config {

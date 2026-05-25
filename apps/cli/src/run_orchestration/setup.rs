@@ -1,47 +1,27 @@
-mod concurrency;
-mod model_runtime;
-mod permissions;
 mod prompt_bundle;
-mod provider_client;
-mod runtime_support;
 mod tooling;
 
-use super::{chat_mode_selection, ChatModeSelection};
 use crate::cli::Args;
 use crate::logging_setup::init_logging;
 use crate::model_selection::select_model_for_run;
-use ::runtime::api::core::config::models::ResolvedModel;
-use ::runtime::api::core::mcp_manager::McpConnectionManager;
-use concurrency::resolve_concurrency_limits;
-use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
-use permissions::apply_config_permission_mode;
 use prompt_bundle::build_chat_prompt_bundle;
-use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
-use runtime_support::{build_agent_runner, build_hook_runner, build_json_logger, start_session};
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tooling::build_chat_tooling;
 
 use crate::application::chat::ChatRuntimeContext;
+pub(super) use ::runtime::api::bootstrap::ChatBootstrap;
+use ::runtime::api::bootstrap::{
+    apply_config_permission_mode, build_agent_runner, build_hook_runner, build_json_logger,
+    build_llm_client, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
+    resolve_model_runtime_settings, ChatBootstrapArgs, ReasoningConfigInput,
+};
 
-pub(super) struct ChatBootstrap {
-    pub args: Args,
-    pub cwd: PathBuf,
-    pub resolved_model: ResolvedModel,
-    pub session_id: String,
-    pub context: ChatRuntimeContext,
-    pub max_tool_concurrency: usize,
-    pub max_agent_concurrency: usize,
-    pub mode_selection: ChatModeSelection,
-    pub _mcp_manager: Arc<McpConnectionManager>,
+pub(super) async fn bootstrap_chat(args: Args) -> ChatBootstrap {
+    bootstrap_chat_runtime(args.into()).await
 }
 
-pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
-    // 加载 config.json 以获取 provider 默认值 (apiKey, baseUrl, model)
-    // 优先级: CLI args > env vars > 项目 config.json > 全局 config.json > built-in defaults
-
-    // 初始化 guidance 目录（首次运行时生成默认 guidance 文件）
+async fn bootstrap_chat_runtime(mut args: ChatBootstrapArgs) -> ChatBootstrap {
     ::runtime::api::core::guidance::init_guidance_dir();
 
     let cwd = args
@@ -55,7 +35,6 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         .await
         .ok();
 
-    // 初始化日志系统（在 config 加载之后，使用配置中的日志级别）
     init_logging(
         config_file
             .as_ref()
@@ -125,7 +104,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     .await;
 
     let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
-    let session_id = start_session(args.resume.clone());
+    let session_id = start_session_and_cli_log(args.resume.clone());
 
     let json_logger = build_json_logger(&session_id, config_file.as_ref());
     let agent_runner = build_agent_runner(
@@ -169,7 +148,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
-    let mode_selection = chat_mode_selection(&args);
+    let mode_selection = args.mode_selection();
     let context = ChatRuntimeContext {
         client,
         registry: tooling.registry,
@@ -196,4 +175,10 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         mode_selection,
         _mcp_manager: tooling.mcp_manager,
     }
+}
+
+fn start_session_and_cli_log(resume_session_id: Option<String>) -> String {
+    let session_id = ::runtime::api::bootstrap::start_session(resume_session_id);
+    crate::logging_setup::set_session_id(session_id.clone());
+    session_id
 }

@@ -535,7 +535,7 @@ core
 2. 将 `contexts/provider` 迁移为 `crates/provider`，保持 provider API、streaming、pricing、model pool 行为不变。
 3. 将 `contexts/tool` 迁移为 `crates/tools`，保持 tool schema、registry、MCP 生命周期、权限/hook gate 行为不变。
 4. 从 `shared/kernel` 拆出 `crates/project`、`crates/policy`、`crates/prompt`、`crates/storage`、`crates/hook`、`crates/audit` 的低耦合类型和端口；剩余稳定共享类型进入 `crates/core`。
-5. 让 `crates/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。（Phase 2 checkpoint：先迁移低 UI 耦合的 chat application contract 与 agent_runner 到 runtime，保留 TUI/REPL adapter 在 apps/cli；run_orchestration 需在后续继续拆成 runtime bootstrap API 与 CLI adapter）
+5. 让 `crates/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。（Phase 2 checkpoint：已迁移低 UI 耦合的 chat application contract、agent_runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 到 runtime；TUI/REPL adapter、prompt/tooling adapter、logging adapter 仍暂留 apps/cli）
 6. 增加 architecture guard：禁止 `apps/cli` 直接依赖 `core` 和 supporting domain crate；禁止 supporting domain 反向依赖 `runtime` / `apps/cli`。
 7. 移除 `contexts/`、`shared/` 过渡目录，更新 `.agents/aemeath.json` 与 `.agents/hooks/*` 中的旧路径、旧 package 名和架构守卫，再运行完整验收。（首轮实施已完成，后续继续拆分 support domain 内部职责）
 
@@ -609,7 +609,7 @@ run_tui_chat(TuiChatLaunch, ChatRuntimeContext)
 7. `ChatApplicationService` 继续只负责校验和分发，不直接调用 `repl`、`tui::App` 或任何入口实现。
 8. runtime adapter 继续负责把 application port DTO 映射到现有 `repl::run_repl` / `tui::App::run` 参数，不重写 agent loop。
 9. HTTP / SDK 后续接入时应复用同一组 context、options 和 mode-specific launch DTO，而不是复制 CLI/TUI 专属参数结构。
-10. `run_orchestration::setup` 已继续把 `bootstrap_chat` 的技术性启动准备拆成局部 helper：`concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`、`tooling`，并由 `runtime_support` 收束 hook/session 启动细节。这些模块只表达 CLI bootstrap 过渡边界，不等同于新的领域上下文；后续若要进一步下沉，应先处理 slash command registry 的持锁 await 与 Agent Runtime 边界。
+10. `run_orchestration::setup` 已把 `bootstrap_chat` 的技术性启动准备拆成局部 helper；其中 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`runtime_support` 已迁移到 `crates/runtime::bootstrap`，`prompt_bundle`、`tooling` 与 CLI logging/session adapter 暂留入口侧。这些模块只表达 runtime bootstrap 过渡边界，不等同于新的领域上下文；后续若要进一步下沉，应先处理 slash command registry 的持锁 await 与 Agent Runtime 边界。
 
 ## 7. COLA 工程分层规范
 
