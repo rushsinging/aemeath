@@ -214,3 +214,33 @@ inventory::submit!(ToolDisplayEntry {
     name: "WebFetch",
     display: || Box::new(WebFetchDisplay)
 });
+
+struct AskUserQuestionDisplay;
+impl ToolDisplay for AskUserQuestionDisplay {
+    fn name(&self) -> &str {
+        "AskUserQuestion"
+    }
+    fn format_header(&self, input: &serde_json::Value) -> String {
+        let question = str_arg(input, "question", "?");
+        let preview = truncate_ellipsis(question, 60usize.saturating_sub(INDENT.len()));
+        format!("● AskUserQuestion({preview})")
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn result_max_lines(&self) -> usize {
+        // answer is already shown via push_user_message; suppress redundant display
+        0
+    }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ 回答失败".to_string()]
+        } else {
+            vec!["✓ 已回答".to_string()]
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "AskUserQuestion",
+    display: || Box::new(AskUserQuestionDisplay)
+});

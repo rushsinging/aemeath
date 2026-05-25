@@ -124,6 +124,7 @@ impl App {
                         }
                     };
 
+                    self.output_area.dismiss_ask_user_block();
                     if !answer.is_empty() {
                         self.output_area.push_user_message(&answer);
                     }
@@ -133,6 +134,7 @@ impl App {
                 }
                 KeyCode::Esc => {
                     let state = self.input.ask_user_state.take().unwrap();
+                    self.output_area.dismiss_ask_user_block();
                     self.input_area.clear();
                     let _ = state.reply_tx.send(String::new());
                     self.output_area.set_spinner_phase("Generating...");
@@ -155,6 +157,7 @@ impl App {
                     let text = self.input_area.get_text();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
+                            self.output_area.dismiss_ask_user_block();
                             self.output_area.push_user_message(&text);
                             self.input_area.clear();
                             let _ = reply_tx.send(text);
@@ -168,6 +171,7 @@ impl App {
                 }
                 KeyCode::Esc => {
                     if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
+                        self.output_area.dismiss_ask_user_block();
                         self.input_area.clear();
                         let _ = reply_tx.send(String::new());
                         self.output_area.set_spinner_phase("Generating...");
@@ -201,6 +205,7 @@ impl App {
                 let text = self.input_area.get_text();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
+                    self.output_area.dismiss_ask_user_block();
                     self.output_area.push_user_message(&text);
                     self.input_area.clear();
                     let _ = state.reply_tx.send(text);

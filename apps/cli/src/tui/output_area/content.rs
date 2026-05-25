@@ -132,6 +132,7 @@ impl super::OutputArea {
         multi_select: bool,
     ) -> Option<usize> {
         self.finish_streaming();
+        self.ask_user_block_start = Some(self.lines.len());
 
         // 分隔标题行
         self.push_line(OutputLine {
@@ -331,6 +332,19 @@ impl super::OutputArea {
         self.reset_runtime_state();
     }
 
+    /// 移除 AskUserQuestion 互动块（separator + 问题 + 提示行），用于用户提交答案后折叠。
+    /// 必须在 push_user_message 之前调用，否则会把答案行一起删除。
+    pub fn dismiss_ask_user_block(&mut self) {
+        if let Some(start) = self.ask_user_block_start.take() {
+            let start = start.min(self.lines.len());
+            let drain_count = self.lines.len().saturating_sub(start);
+            for _ in 0..drain_count {
+                self.lines.pop_back();
+            }
+            self.rendered_cache.content_changed(self.lines.len());
+        }
+    }
+
     /// 重置输出区域的运行态临时数据
     pub fn reset_runtime_state(&mut self) {
         self.scroll_offset = 0;
@@ -349,6 +363,7 @@ impl super::OutputArea {
         self.todo_subject_cache.clear();
         self.task_status_lines.clear();
         self.queued_messages.clear();
+        self.ask_user_block_start = None;
     }
 
     /// 更新 spinner 下方显示的任务状态行

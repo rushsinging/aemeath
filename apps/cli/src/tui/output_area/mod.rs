@@ -70,6 +70,8 @@ pub struct OutputArea {
     pub task_status_lines: Vec<String>,
     /// 排队的用户消息
     pub queued_messages: Vec<String>,
+    /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
+    pub ask_user_block_start: Option<usize>,
     /// 渲染缓存（滑动窗口）
     rendered_cache: RenderedCache,
 }
@@ -107,6 +109,7 @@ impl OutputArea {
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
             queued_messages: Vec::new(),
+            ask_user_block_start: None,
             rendered_cache: RenderedCache::new(),
         }
     }
