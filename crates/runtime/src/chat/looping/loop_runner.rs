@@ -11,6 +11,7 @@ use crate::chat::looping::post_batch::run_post_tool_batch;
 use crate::chat::looping::queue::append_queued_input;
 use crate::chat::looping::stall::StallDetector;
 use crate::chat::looping::task_reminder::TaskReminderState;
+use crate::chat::looping::tool_context::{build_tool_context, ToolContextParts};
 use crate::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::chat::looping::{
     ChatEventSink, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
@@ -113,27 +114,24 @@ where
         )
     };
     hook_runner.set_project_dir(cwd.display().to_string());
-    let ctx = ToolContext {
-        cwd: cwd.clone(),
-        working_root,
-        path_base,
-        cancel: cancel.clone(),
-        read_files: read_files.clone(),
-        agent_runner: agent_runner.clone(),
-        session_reminders: Some(session_reminders.clone()),
-        memory_config: memory_config.clone(),
-        plan_mode: None,
-        allow_all,
-        max_tool_concurrency,
-        max_agent_concurrency,
-        agent_semaphore,
-        progress_tx: None,
-        parent_session_id: Some(session_id.clone()),
-        context_stack,
-    };
     let agent = Agent {
         registry: &registry,
-        ctx,
+        ctx: build_tool_context(ToolContextParts {
+            cwd: cwd.clone(),
+            working_root,
+            path_base,
+            cancel: cancel.clone(),
+            read_files: read_files.clone(),
+            agent_runner: agent_runner.clone(),
+            session_reminders: session_reminders.clone(),
+            memory_config: memory_config.clone(),
+            allow_all,
+            max_tool_concurrency,
+            max_agent_concurrency,
+            agent_semaphore,
+            session_id: session_id.clone(),
+            context_stack,
+        }),
     };
 
     let messages_at_start = messages.len();

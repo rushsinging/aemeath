@@ -15,6 +15,7 @@ mod reflection;
 mod stall;
 mod stream_handler;
 mod task_reminder;
+mod tool_context;
 mod tools;
 
 pub use events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
