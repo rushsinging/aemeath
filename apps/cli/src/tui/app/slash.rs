@@ -12,13 +12,13 @@ use help::SLASH_HELP_LINES;
 use std::sync::Arc;
 impl super::App {
     fn open_model_selection_dialog(&mut self) -> Option<String> {
-        let models = self.models_config.list_models();
+        let models = self.cmd_exec.models_config.list_models();
         if models.is_empty() {
             self.output_area
                 .push_system("No models configured. Add models to ~/.aemeath/config.json");
             return None;
         }
-        let current = self.current_model_display.clone();
+        let current = self.session.current_model_display.clone();
         let mut options = Vec::new();
         let mut keys = Vec::new();
         for (provider_name, model) in &models {
@@ -39,8 +39,8 @@ impl super::App {
             ));
             keys.push(key);
         }
-        self.active_dialog = Some(crate::tui::dialog::Dialog::select("Select Model", options));
-        self.dialog_model_keys = keys;
+        self.layout.active_dialog = Some(crate::tui::dialog::Dialog::select("Select Model", options));
+        self.layout.dialog_model_keys = keys;
         None
     }
 
@@ -61,11 +61,11 @@ impl super::App {
 
         match cmd {
             cmd if cmd == format!("/{}", cmd::EXIT) || cmd == format!("/{}", cmd::QUIT) => {
-                self.should_exit = true
+                self.layout.should_exit = true
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
-                self.messages.clear();
-                self.pending_images.clear();
+                self.chat.messages.clear();
+                self.chat.pending_images.clear();
                 self.input_area.set_pending_images(0);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
@@ -74,17 +74,17 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
                 use ::runtime::api::core::compact;
                 let (compacted, was_compacted) = compact::compact_messages(
-                    &mut self.messages,
-                    &self.system_prompt_text,
-                    self.context_size,
+                    &mut self.chat.messages,
+                    &self.chat.system_prompt_text,
+                    self.chat.context_size,
                 );
                 if was_compacted {
-                    let old_len = self.messages.len();
-                    self.messages = compacted;
+                    let old_len = self.chat.messages.len();
+                    self.chat.messages = compacted;
                     self.output_area.push_system(&format!(
                         "[compacted: {} → {} messages]",
                         old_len,
-                        self.messages.len()
+                        self.chat.messages.len()
                     ));
                 } else {
                     self.output_area.push_system("[no compaction needed]");
@@ -93,21 +93,21 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
                 use ::runtime::api::core::cost::format_tokens;
-                let total = self.total_input_tokens + self.total_output_tokens;
+                let total = self.chat.total_input_tokens + self.chat.total_output_tokens;
                 self.output_area.push_system(&format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
-                    self.total_api_calls,
-                    format_tokens(self.total_input_tokens),
-                    format_tokens(self.total_output_tokens),
+                    self.chat.total_api_calls,
+                    format_tokens(self.chat.total_input_tokens),
+                    format_tokens(self.chat.total_output_tokens),
                     format_tokens(total)
                 ));
             }
             "/save" => {
-                let s = self.build_session(self.messages.clone()).await;
+                let s = self.build_session(self.chat.messages.clone()).await;
                 match session::save_session(&s).await {
                     Ok(()) => self
                         .output_area
-                        .push_system(&format!("[session saved: {}]", self.session_id)),
+                        .push_system(&format!("[session saved: {}]", self.session.session_id)),
                     Err(e) => self
                         .output_area
                         .push_error(&format!("Failed to save session: {e}")),
@@ -115,15 +115,15 @@ impl super::App {
             }
             "/context" => {
                 use ::runtime::api::core::compact;
-                let estimated = compact::estimate_messages_tokens(&self.messages)
-                    + compact::estimate_tokens(&self.system_prompt_text);
-                let pct = estimated * 100 / self.context_size.max(1);
+                let estimated = compact::estimate_messages_tokens(&self.chat.messages)
+                    + compact::estimate_tokens(&self.chat.system_prompt_text);
+                let pct = estimated * 100 / self.chat.context_size.max(1);
                 self.output_area.push_system(&format!(
                     "Context window: ~{} / {} tokens ({}%)",
-                    estimated, self.context_size, pct
+                    estimated, self.chat.context_size, pct
                 ));
                 self.output_area
-                    .push_system(&format!("Messages: {}", self.messages.len()));
+                    .push_system(&format!("Messages: {}", self.chat.messages.len()));
                 if pct > 80 {
                     self.output_area
                         .push_system("[auto-compaction will trigger at 80%]");
@@ -150,9 +150,9 @@ impl super::App {
                 match result {
                     Ok(img) => {
                         let size = img.final_size;
-                        self.pending_images.push(img);
+                        self.chat.pending_images.push(img);
                         self.input_area
-                            .set_pending_images(self.pending_images.len());
+                            .set_pending_images(self.chat.pending_images.len());
                         self.output_area
                             .push_system(&format!("[clipboard image added ({} bytes)]", size));
                     }
@@ -163,12 +163,12 @@ impl super::App {
                 }
             }
             "/images" => {
-                if self.pending_images.is_empty() {
+                if self.chat.pending_images.is_empty() {
                     self.output_area.push_system("No pending images.");
                 } else {
                     self.output_area
-                        .push_system(&format!("Pending images: {}", self.pending_images.len()));
-                    for (i, img) in self.pending_images.iter().enumerate() {
+                        .push_system(&format!("Pending images: {}", self.chat.pending_images.len()));
+                    for (i, img) in self.chat.pending_images.iter().enumerate() {
                         self.output_area.push_system(&format!(
                             "  {}. [image {}] ({} bytes)",
                             i + 1,
@@ -179,7 +179,7 @@ impl super::App {
                 }
             }
             "/clear-images" => {
-                self.pending_images.clear();
+                self.chat.pending_images.clear();
                 self.input_area.set_pending_images(0);
                 self.output_area.push_system("[pending images cleared]");
             }
@@ -197,11 +197,11 @@ impl super::App {
                     let mut ctx = CommandContext::new(
                         Arc::new(state),
                         config,
-                        self.cwd.to_string_lossy().to_string(),
-                        self.session_id.clone(),
+                        self.session.cwd.to_string_lossy().to_string(),
+                        self.session.session_id.clone(),
                     );
-                    ctx.models_config = self.models_config.clone();
-                    ctx.current_model = self.current_model_display.clone();
+                    ctx.models_config = self.cmd_exec.models_config.clone();
+                    ctx.current_model = self.session.current_model_display.clone();
 
                     match cmd_obj.execute(&args, &mut ctx).await {
                         CommandResult::Success(msg) => self.output_area.push_system(&msg),
@@ -209,11 +209,11 @@ impl super::App {
                         CommandResult::Action(action) => {
                             match action {
                                 ::runtime::api::core::command::CommandAction::Exit => {
-                                    self.should_exit = true
+                                    self.layout.should_exit = true
                                 }
                                 ::runtime::api::core::command::CommandAction::Clear => {
-                                    self.messages.clear();
-                                    self.pending_images.clear();
+                                    self.chat.messages.clear();
+                                    self.chat.pending_images.clear();
                                     self.input_area.set_pending_images(0);
                                     self.output_area.clear();
                                     self.reset_runtime_state().await;
@@ -222,12 +222,12 @@ impl super::App {
                                 ::runtime::api::core::command::CommandAction::Compact => {
                                     use ::runtime::api::core::compact;
                                     let (compacted, was_compacted) = compact::compact_messages(
-                                        &mut self.messages,
-                                        &self.system_prompt_text,
-                                        self.context_size,
+                                        &mut self.chat.messages,
+                                        &self.chat.system_prompt_text,
+                                        self.chat.context_size,
                                     );
                                     if was_compacted {
-                                        self.messages = compacted;
+                                        self.chat.messages = compacted;
                                         self.output_area.push_system("[compacted]");
                                     } else {
                                         self.output_area.push_system("[no compaction needed]");
@@ -268,7 +268,7 @@ impl super::App {
 
                                     // Model config takes priority; keep current reasoning only when unset.
                                     let reasoning = reasoning
-                                        .or_else(|| self.client.as_ref().map(|c| c.is_reasoning()))
+                                        .or_else(|| self.cmd_exec.client.as_ref().map(|c| c.is_reasoning()))
                                         .unwrap_or(true);
                                     let reasoning_config = Some(
                                         ::runtime::api::provider::providers::openai_compatible::ReasoningConfig::Bool(
@@ -288,9 +288,9 @@ impl super::App {
                                             openai_config,
                                         );
 
-                                    self.client = Some(Arc::new(new_client));
+                                    self.cmd_exec.client = Some(Arc::new(new_client));
                                     if context_window > 0 {
-                                        self.context_size = context_window;
+                                        self.chat.context_size = context_window;
                                         self.status_bar.set_context_size(context_window as u64);
                                     }
                                     let display_name = if model_name.is_empty() {
@@ -299,7 +299,7 @@ impl super::App {
                                         &model_name
                                     };
                                     let display = format!("{}/{}", provider_name, display_name);
-                                    self.current_model_display = display.clone();
+                                    self.session.current_model_display = display.clone();
                                     self.status_bar.set_model(&display);
                                     self.status_bar.set_thinking(reasoning);
                                     self.output_area
@@ -319,12 +319,12 @@ impl super::App {
                                     desired,
                                 ) => {
                                     let current = self
-                                        .client
+                                        .cmd_exec.client
                                         .as_ref()
                                         .map(|c| c.is_reasoning())
                                         .unwrap_or(true);
                                     let new_state = desired.unwrap_or(!current);
-                                    if let Some(ref client) = self.client {
+                                    if let Some(ref client) = self.cmd_exec.client {
                                         client.set_reasoning(new_state);
                                     }
                                     let label = if new_state { "ON" } else { "OFF" };

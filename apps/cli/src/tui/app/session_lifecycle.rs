@@ -31,24 +31,24 @@ impl App {
     ) -> io::Result<()> {
         self.status_bar
             .set_permission_mode(if allow_all { "AllowAll" } else { "AskMe" });
-        self.client = Some(client.clone());
-        self.system_prompt_text = system_prompt_text.clone();
-        self.context_size = context_size;
+        self.cmd_exec.client = Some(client.clone());
+        self.chat.system_prompt_text = system_prompt_text.clone();
+        self.chat.context_size = context_size;
         self.status_bar.set_context_size(context_size as u64);
         self.status_bar.set_thinking(client.is_reasoning());
-        self.task_store = Some(task_store.clone());
+        self.cmd_exec.task_store = Some(task_store.clone());
 
         // Resume existing session if requested
         if let Some(ref id) = resume_id {
             match ::runtime::api::core::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
-                    self.session_created_at = Some(s.created_at.clone());
+                    self.session.session_created_at = Some(s.created_at.clone());
                     if let Some(workspace) = &s.workspace {
-                        self.workspace_context = Some(workspace.clone());
+                        self.cmd_exec.workspace_context = Some(workspace.clone());
                         let path_base = std::path::PathBuf::from(&workspace.path_base);
                         let working_root = std::path::PathBuf::from(&workspace.working_root);
-                        self.cwd = path_base.clone();
+                        self.session.cwd = path_base.clone();
                         if let super::UiEvent::WorkingDirectoryChanged(ctx) =
                             super::status_context_for_workspace(workspace.clone())
                         {
@@ -57,11 +57,11 @@ impl App {
                             self.status_bar
                                 .set_git_context(ctx.kind, ctx.branch.unwrap_or_default());
                         }
-                        self.hook_runner
+                        self.cmd_exec.hook_runner
                             .set_project_dir(working_root.display().to_string());
                     }
                     // Restore task snapshot if present
-                    if let (Some(ts), Some(snapshot)) = (&self.task_store, s.tasks) {
+                    if let (Some(ts), Some(snapshot)) = (&self.cmd_exec.task_store, s.tasks) {
                         ts.restore(snapshot).await;
                     }
                     let mut msgs = s.messages;
@@ -83,7 +83,7 @@ impl App {
                         };
                         self.render_history_message(&msgs[i], subsequent);
                     }
-                    self.messages = msgs;
+                    self.chat.messages = msgs;
                     self.output_area.push_system(&format!(
                         "[resumed session {} ({} messages)]",
                         id, msg_count
@@ -124,7 +124,7 @@ impl App {
                         serde_json::from_str::<::runtime::api::core::config::Config>(&content)
                     {
                         if !config.models.providers.is_empty() {
-                            self.models_config = config.models;
+                            self.cmd_exec.models_config = config.models;
                             break;
                         }
                     }
@@ -155,7 +155,7 @@ impl App {
             use ::runtime::api::core::config::hooks::HookEvent;
             use ::runtime::api::core::hook::{HookData, SessionHookData};
             let hook_results = self
-                .hook_runner
+                .cmd_exec.hook_runner
                 .run_hooks_with_json(
                     HookEvent::SessionStart,
                     None,
@@ -204,8 +204,8 @@ impl App {
             .await;
 
         // Auto-save session on exit
-        if !self.messages.is_empty() {
-            let s = self.build_session(self.messages.clone()).await;
+        if !self.chat.messages.is_empty() {
+            let s = self.build_session(self.chat.messages.clone()).await;
             if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
                 log::warn!("failed to auto-save session: {e}");
             }
@@ -213,7 +213,7 @@ impl App {
 
         // Run SessionEnd hooks: display system_message in the output area
         {
-            let hook_results = self.hook_runner.on_session_end().await;
+            let hook_results = self.cmd_exec.hook_runner.on_session_end().await;
             for (_, result, json_output) in &hook_results {
                 if let Some(json) = json_output {
                     if let Some(ref msg) = json.system_message {

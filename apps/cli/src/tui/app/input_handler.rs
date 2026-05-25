@@ -36,35 +36,35 @@ impl super::App {
         }
 
         // Dialog mode
-        if self.active_dialog.is_some() {
+        if self.layout.active_dialog.is_some() {
             match key.code {
                 KeyCode::Up => {
-                    if let Some(ref mut d) = self.active_dialog {
+                    if let Some(ref mut d) = self.layout.active_dialog {
                         d.select_prev();
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(ref mut d) = self.active_dialog {
+                    if let Some(ref mut d) = self.layout.active_dialog {
                         d.select_next();
                     }
                 }
                 KeyCode::Enter => {
-                    let selected = self.active_dialog.as_ref().and_then(|d| d.get_selected());
+                    let selected = self.layout.active_dialog.as_ref().and_then(|d| d.get_selected());
                     if let Some(idx) = selected {
-                        if idx < self.dialog_model_keys.len() {
-                            let model_key = self.dialog_model_keys[idx].clone();
-                            self.input_queue.push_back(format!("/model {}", model_key));
-                            self.active_dialog = None;
-                            self.dialog_model_keys.clear();
+                        if idx < self.layout.dialog_model_keys.len() {
+                            let model_key = self.layout.dialog_model_keys[idx].clone();
+                            self.input.input_queue.push_back(format!("/model {}", model_key));
+                            self.layout.active_dialog = None;
+                            self.layout.dialog_model_keys.clear();
                             return KeyResult::DialogModelSwitch;
                         }
                     }
-                    self.active_dialog = None;
-                    self.dialog_model_keys.clear();
+                    self.layout.active_dialog = None;
+                    self.layout.dialog_model_keys.clear();
                 }
                 KeyCode::Esc => {
-                    self.active_dialog = None;
-                    self.dialog_model_keys.clear();
+                    self.layout.active_dialog = None;
+                    self.layout.dialog_model_keys.clear();
                 }
                 _ => {}
             }
@@ -95,15 +95,15 @@ impl super::App {
                     self.input_area.clear_suggestions();
                 } else {
                     let now = std::time::Instant::now();
-                    if let Some(last) = self.last_ctrlc {
+                    if let Some(last) = self.layout.last_ctrlc {
                         if now.duration_since(last).as_secs_f64() < 3.0 {
-                            self.should_exit = true;
+                            self.layout.should_exit = true;
                         } else {
-                            self.last_ctrlc = Some(now);
+                            self.layout.last_ctrlc = Some(now);
                             self.status_bar.set_warning("Press Ctrl+C again to exit");
                         }
                     } else {
-                        self.last_ctrlc = Some(now);
+                        self.layout.last_ctrlc = Some(now);
                         self.status_bar.set_warning("Press Ctrl+C again to exit");
                     }
                 }
@@ -135,9 +135,9 @@ impl super::App {
                     let input = self.input_area.get_text();
                     self.input_area.add_history(&input);
                     self.input_area.clear();
-                    self.input_queue.push_back(input.clone());
+                    self.input.input_queue.push_back(input.clone());
                     self.output_area.queued_messages.push(input);
-                    let n = self.input_queue.len();
+                    let n = self.input.input_queue.len();
                     self.status_bar
                         .set_warning(&format!("{n} message(s) queued"));
                 }
@@ -193,9 +193,9 @@ impl super::App {
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
             (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
-                if !*is_processing && !self.just_pasted =>
+                if !*is_processing && !self.input.just_pasted =>
             {
-                self.just_pasted = true;
+                self.input.just_pasted = true;
                 let tx = ui_tx.clone();
                 tokio::spawn(async move {
                     tx.send(UiEvent::SystemMessage(
@@ -246,7 +246,7 @@ impl super::App {
             // Slash commands need async — store for caller and add to history
             self.input_area.add_history(&input);
             self.input_area.clear();
-            self.input_queue.push_back(input);
+            self.input.input_queue.push_back(input);
             return KeyResult::SlashCommand;
         }
 
@@ -289,15 +289,15 @@ impl super::App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self
+        let images: Vec<(String, String)> = self.chat
             .pending_images
             .drain(..)
             .map(|img| (img.base64, img.media_type))
             .collect();
         if images.is_empty() {
-            self.messages.push(Message::user(&input));
+            self.chat.messages.push(Message::user(&input));
         } else {
-            self.messages
+            self.chat.messages
                 .push(Message::user_with_images(&input, images));
         }
 
@@ -319,11 +319,11 @@ impl super::App {
             system_blocks: spawn_ctx.system_blocks.clone(),
             system_prompt_text: spawn_ctx.system_prompt_text.to_string(),
             user_context: spawn_ctx.user_context.to_string(),
-            messages: self.messages.clone(),
+            messages: self.chat.messages.clone(),
             context_size: spawn_ctx.context_size,
-            cwd: self.cwd.clone(),
-            workspace_context: self.workspace_context.clone(),
-            session_id: self.session_id.clone(),
+            cwd: self.session.cwd.clone(),
+            workspace_context: self.cmd_exec.workspace_context.clone(),
+            session_id: self.session.session_id.clone(),
             read_files: spawn_ctx.read_files.clone(),
             session_reminders: spawn_ctx.session_reminders.clone(),
             agent_runner: spawn_ctx.agent_runner.clone(),

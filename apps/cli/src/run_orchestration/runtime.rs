@@ -69,10 +69,10 @@ impl ChatRuntimePort for TuiChatRuntimeAdapter {
     ) -> Result<TuiChatOutcome, String> {
         let session_id = launch.session_id;
         let mut app = tui::App::new(session_id.clone(), launch.options.cwd, launch.model_display);
-        app.memory_config = context.memory_config;
+        app.session.memory_config = context.memory_config;
         app.set_skills(context.skills_map);
-        app.hook_runner = context.hook_runner;
-        app.json_logger = context.json_logger;
+        app.cmd_exec.hook_runner = context.hook_runner;
+        app.cmd_exec.json_logger = context.json_logger;
         app.run(
             context.client,
             context.registry,

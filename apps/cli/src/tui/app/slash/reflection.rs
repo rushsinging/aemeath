@@ -12,7 +12,7 @@ impl super::super::App {
         args: &str,
         ui_tx: Option<mpsc::Sender<UiEvent>>,
     ) {
-        if !self.memory_config.enabled || !self.memory_config.reflection.enabled {
+        if !self.session.memory_config.enabled || !self.session.memory_config.reflection.enabled {
             self.output_area.push_error("Reflection 系统已禁用。");
             return;
         }
@@ -30,7 +30,7 @@ impl super::super::App {
     }
 
     fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>, foreground: bool) {
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.cmd_exec.client.clone() else {
             self.output_area
                 .push_error("当前没有可用的 LLM client，无法执行 Reflection。");
             return;
@@ -52,7 +52,7 @@ impl super::super::App {
             }
         };
         let project_memory = ReflectionEngine::memory_summary(&memories);
-        let recent_summary = ReflectionEngine::recent_messages_summary(&self.messages, 6000);
+        let recent_summary = ReflectionEngine::recent_messages_summary(&self.chat.messages, 6000);
         let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
         let messages = vec![::runtime::api::core::message::Message::user(prompt)];
         let system = vec![SystemBlock::dynamic(
@@ -65,7 +65,7 @@ impl super::super::App {
             self.output_area.push_system("[reflection: calling LLM...]");
             self.output_area.start_spinner();
             self.output_area.set_spinner_phase("Reflecting...");
-            self.is_processing = true;
+            self.chat.is_processing = true;
         }
 
         if let Some(tx) = ui_tx {
@@ -131,27 +131,27 @@ impl super::super::App {
     }
 
     fn apply_pending_reflection(&mut self) {
-        let Some(output) = self.pending_reflection.clone() else {
+        let Some(output) = self.chat.pending_reflection.clone() else {
             self.output_area
                 .push_system("没有待应用的 Reflection 建议。");
             return;
         };
 
         if self.apply_reflection_output(output) {
-            self.pending_reflection = None;
+            self.chat.pending_reflection = None;
         }
     }
 
     pub(crate) fn maybe_auto_reflect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        self.turn_count += 1;
-        let reflection = &self.memory_config.reflection;
-        if !self.memory_config.enabled || !reflection.enabled || reflection.interval_turns == 0 {
+        self.chat.turn_count += 1;
+        let reflection = &self.session.memory_config.reflection;
+        if !self.session.memory_config.enabled || !reflection.enabled || reflection.interval_turns == 0 {
             return;
         }
-        if self.pending_reflection.is_some() {
+        if self.chat.pending_reflection.is_some() {
             return;
         }
-        if self.turn_count % reflection.interval_turns != 0 {
+        if self.chat.turn_count % reflection.interval_turns != 0 {
             return;
         }
         self.spawn_llm_reflection(Some(ui_tx.clone()), false);
@@ -186,12 +186,12 @@ impl super::super::App {
         &self,
     ) -> Result<::runtime::api::core::memory::MemoryStore, String> {
         let base_dir = ::runtime::api::core::memory::memory_base_dir();
-        let project_hash = ::runtime::api::core::memory::project_hash_from_path(&self.cwd);
+        let project_hash = ::runtime::api::core::memory::project_hash_from_path(&self.session.cwd);
         ::runtime::api::core::memory::MemoryStore::new(
             base_dir,
             project_hash,
-            self.memory_config.max_entries,
-            self.memory_config.similarity_threshold,
+            self.session.memory_config.max_entries,
+            self.session.memory_config.similarity_threshold,
         )
         .map_err(|error| error.to_string())
     }

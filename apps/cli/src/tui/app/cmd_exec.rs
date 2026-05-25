@@ -1,21 +1,39 @@
-use super::{processing, App, UiEvent};
+use super::{processing, UiEvent};
 use crate::tui::app::msg::Cmd;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use ::runtime::api::core::config::ModelsConfig;
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::core::memory::SessionReminders;
+use ::runtime::api::core::session::WorkspaceContext;
+use ::runtime::api::core::task::TaskStore;
 
-impl App {
-    /// Execute a single Cmd (recursive for Batch).
+/// 副作用执行器：持有所有 runtime::api 基础设施引用
+/// CLI 只依赖 runtime，不直接依赖 llm / core / provider
+pub struct CmdExecutor {
+    pub client: Option<Arc<::runtime::api::provider::client::LlmClient>>,
+    pub models_config: ModelsConfig,
+    pub hook_runner: HookRunner,
+    pub session_reminders: Arc<std::sync::Mutex<SessionReminders>>,
+    pub task_store: Option<Arc<TaskStore>>,
+    pub workspace_context: Option<WorkspaceContext>,
+    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
+}
+
+impl CmdExecutor {
+    /// Execute side-effect commands (no &mut App access).
+    /// Quit and SaveSession are handled by the caller.
     pub(super) async fn exec_one_cmd(
-        app: &mut App,
+        &self,
         active_cancel: &std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
         ui_tx: &mpsc::Sender<UiEvent>,
         cmd: Cmd,
     ) {
         match cmd {
             Cmd::None => {}
-            Cmd::Quit => {
-                app.should_exit = true;
-            }
+            Cmd::Quit => {} // handled by caller
             Cmd::SpawnProcessing(ctx) => {
                 if let Ok(mut guard) = active_cancel.lock() {
                     *guard = Some(ctx.cancel.clone());
@@ -28,16 +46,9 @@ impl App {
                 }
             }
             Cmd::QueueInput(_) => {}
-            Cmd::SaveSession(msgs) => {
-                if !msgs.is_empty() {
-                    let s = app.build_session(msgs).await;
-                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
-                        log::warn!("failed to auto-save session on sync: {e}");
-                    }
-                }
-            }
+            Cmd::SaveSession(_) => {} // handled by caller
             Cmd::RunHookNotification { message, kind } => {
-                let hook_runner = app.hook_runner.clone();
+                let hook_runner = self.hook_runner.clone();
                 tokio::spawn(async move {
                     let _ = hook_runner.on_notification(&message, &kind).await;
                 });

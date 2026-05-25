@@ -30,9 +30,9 @@ impl App {
         agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
-        let session_reminders = self.session_reminders.clone();
+        let session_reminders = self.cmd_exec.session_reminders.clone();
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
-        self.is_processing = false;
+        self.chat.is_processing = false;
         let active_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>> =
             Arc::new(std::sync::Mutex::new(None));
 
@@ -42,7 +42,7 @@ impl App {
 
         loop {
             // Update task status lines
-            self.update_task_status(&task_store, self.is_processing)
+            self.update_task_status(&task_store, self.chat.is_processing)
                 .await;
 
             // Ctrl+C 超时复原 status line
@@ -52,9 +52,9 @@ impl App {
             self.draw(terminal)?;
 
             // Build spawn context refs for update()
-            let hook_runner_clone = self.hook_runner.clone();
-            let memory_config_clone = self.memory_config.clone();
-            let json_logger_clone = self.json_logger.clone();
+            let hook_runner_clone = self.cmd_exec.hook_runner.clone();
+            let memory_config_clone = self.session.memory_config.clone();
+            let json_logger_clone = self.cmd_exec.json_logger.clone();
             let spawn_refs = processing::SpawnContextRefs {
                 client: &client,
                 registry: &registry,
@@ -104,7 +104,7 @@ impl App {
             };
 
             let Some(msg) = msg else {
-                self.just_pasted = false;
+                self.input.just_pasted = false;
                 continue;
             };
 
@@ -118,12 +118,12 @@ impl App {
                     .await;
                 if let Some(prompt) = review_prompt {
                     self.output_area.push_user_message(&input);
-                    self.messages
+                    self.chat.messages
                         .push(::runtime::api::core::message::Message::user(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
                     self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
-                    self.is_processing = true;
+                    self.chat.is_processing = true;
                     let cancel = CancellationToken::new();
                     if let Ok(mut guard) = active_cancel.lock() {
                         *guard = Some(cancel.clone());
@@ -136,13 +136,13 @@ impl App {
                         system_blocks: system_blocks.clone(),
                         system_prompt_text: system_prompt_text.clone(),
                         user_context: user_context.clone(),
-                        messages: self.messages.clone(),
+                        messages: self.chat.messages.clone(),
                         context_size,
-                        cwd: self.cwd.clone(),
-                        workspace_context: self.workspace_context.clone(),
-                        session_id: self.session_id.clone(),
+                        cwd: self.session.cwd.clone(),
+                        workspace_context: self.cmd_exec.workspace_context.clone(),
+                        session_id: self.session.session_id.clone(),
                         read_files: read_files.clone(),
-                        session_reminders: self.session_reminders.clone(),
+                        session_reminders: self.cmd_exec.session_reminders.clone(),
                         agent_runner: agent_runner.clone(),
                         allow_all,
                         interrupted: interrupted.clone(),
@@ -151,99 +151,28 @@ impl App {
                         max_tool_concurrency,
                         max_agent_concurrency,
                         agent_semaphore: agent_semaphore.clone(),
-                        hook_runner: self.hook_runner.clone(),
-                        memory_config: self.memory_config.clone(),
-                        json_logger: self.json_logger.clone(),
+                        hook_runner: self.cmd_exec.hook_runner.clone(),
+                        memory_config: self.session.memory_config.clone(),
+                        json_logger: self.cmd_exec.json_logger.clone(),
                     });
                 }
             }
 
             // --- TEA command execution ---
-            match result.cmd {
-                Cmd::None => {}
-                Cmd::Quit => {
-                    self.should_exit = true;
-                }
-                Cmd::SpawnProcessing(ctx) => {
-                    if let Ok(mut guard) = active_cancel.lock() {
-                        *guard = Some(ctx.cancel.clone());
-                    }
-                    processing::spawn_processing(ctx);
-                }
-                Cmd::SendEvents(events) => {
-                    for ev in events {
-                        let _ = ui_tx.send(ev).await;
+            // Handle &mut App cases first (Quit, SaveSession) to avoid borrow conflicts
+            match &result.cmd {
+                Cmd::Quit => self.layout.should_exit = true,
+                Cmd::SaveSession(msgs) if !msgs.is_empty() => {
+                    let s = self.build_session(msgs.clone()).await;
+                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
+                        log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }
-                Cmd::QueueInput(_) => {
-                    // Handled via pending_slash above
-                }
-                Cmd::SaveSession(msgs) => {
-                    if !msgs.is_empty() {
-                        let s = self.build_session(msgs).await;
-                        if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
-                            log::warn!("failed to auto-save session on sync: {e}");
-                        }
-                    }
-                }
-                Cmd::RunHookNotification { message, kind } => {
-                    let hook_runner = self.hook_runner.clone();
-                    tokio::spawn(async move {
-                        let _ = hook_runner.on_notification(&message, &kind).await;
-                    });
-                }
-                Cmd::ReadClipboardImage => {
-                    let tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match ::runtime::api::image::read_clipboard_image().await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[clipboard image added ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "No image in clipboard: {e}"
-                                    )))
-                                    .await;
-                            }
-                        }
-                    });
-                }
-                Cmd::ProcessImageFile(path) => {
-                    let tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match ::runtime::api::image::process_image_file(&path).await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[image loaded ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "Failed to load image: {e}"
-                                    )))
-                                    .await;
-                            }
-                        }
-                    });
-                }
+                _ => self.cmd_exec.exec_one_cmd(&active_cancel, &ui_tx, result.cmd).await,
             }
 
-            self.just_pasted = false;
-            if self.should_exit {
+            self.input.just_pasted = false;
+            if self.layout.should_exit {
                 break;
             }
         }
