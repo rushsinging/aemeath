@@ -1,15 +1,14 @@
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{CompactHookData, HookData, HookRunner};
-use ::runtime::api::core::message::Message;
-use tokio::sync::mpsc;
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::{CompactHookData, HookData, HookRunner};
+use crate::api::core::message::Message;
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 
 /// Run auto-compaction if the context is approaching the limit.
 /// Returns true if the messages were modified.
-pub(crate) async fn auto_compact(
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
+pub(crate) async fn auto_compact<S>(
+    sink: &S,
+    hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     turn_count: usize,
     messages: &mut Vec<Message>,
@@ -17,8 +16,11 @@ pub(crate) async fn auto_compact(
     context_size: usize,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
-) -> bool {
-    use ::runtime::api::core::compact;
+) -> bool
+where
+    S: TuiLoopEventSink,
+{
+    use crate::api::core::compact;
 
     // PreCompact hook
     let pre_compact_results = hook_ui
@@ -43,10 +45,14 @@ pub(crate) async fn auto_compact(
     for (_entry, _result, json_output) in &pre_compact_results {
         if let Some(json) = json_output {
             if let Some(ref ctx) = json.additional_context {
-                let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::SystemMessage(ctx.clone()))
+                    .await;
             }
             if let Some(ref msg) = json.system_message {
-                let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::SystemMessage(msg.clone()))
+                    .await;
             }
         }
     }
@@ -86,8 +92,8 @@ pub(crate) async fn auto_compact(
         if was_compacted {
             let new_len = compacted.len();
             *messages = compacted;
-            let _ = tx
-                .send(UiEvent::SystemMessage(format!(
+            let _ = sink
+                .send_event(RuntimeStreamEvent::SystemMessage(format!(
                     "[auto-compacted: {} → {} messages]",
                     old_len, new_len
                 )))
@@ -110,10 +116,14 @@ pub(crate) async fn auto_compact(
             for (_entry, _result, json_output) in &post_compact_results {
                 if let Some(json) = json_output {
                     if let Some(ref ctx) = json.additional_context {
-                        let _ = tx.send(UiEvent::SystemMessage(ctx.clone())).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::SystemMessage(ctx.clone()))
+                            .await;
                     }
                     if let Some(ref msg) = json.system_message {
-                        let _ = tx.send(UiEvent::SystemMessage(msg.clone())).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::SystemMessage(msg.clone()))
+                            .await;
                     }
                 }
             }

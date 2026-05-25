@@ -1,27 +1,29 @@
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::agent::{Agent, ToolCall};
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, ToolHookData};
-use ::runtime::api::core::logging::JsonLogger;
+use crate::api::core::agent::{Agent, ToolCall};
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::{HookData, ToolHookData};
+use crate::api::core::logging::JsonLogger;
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use super::tools::{
     emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result, UiToolResult,
 };
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn execute_non_agent(
+pub(super) async fn execute_non_agent<S>(
     agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
     non_agent_calls: &[ToolCall],
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let other_calls: Vec<&ToolCall> = non_agent_calls
         .iter()
         .filter(|c| c.name != "AskUserQuestion")
@@ -34,7 +36,7 @@ pub(super) async fn execute_non_agent(
     if other_calls.len() == 1 {
         return execute_one_non_agent(
             agent,
-            tx,
+            sink,
             hook_ui,
             hook_runner,
             json_logger,
@@ -47,7 +49,7 @@ pub(super) async fn execute_non_agent(
 
     execute_multiple_non_agent(
         agent,
-        tx,
+        sink,
         hook_ui,
         hook_runner,
         json_logger,
@@ -59,16 +61,19 @@ pub(super) async fn execute_non_agent(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_multiple_non_agent(
+async fn execute_multiple_non_agent<S>(
     agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
     other_calls: &[&ToolCall],
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let total_len = other_calls.len();
     let mut results: Vec<Option<UiToolResult>> = vec![None; total_len];
     let (concurrent_positions, sequential_positions) = partition_calls(agent, other_calls);
@@ -79,7 +84,7 @@ async fn execute_multiple_non_agent(
             .iter()
             .map(|&pos| {
                 let call = other_calls[pos];
-                let tx = tx.clone();
+                let sink = sink.clone();
                 let hook_ui = hook_ui.clone();
                 let hook_runner = hook_runner.clone();
                 let json_logger = json_logger.clone();
@@ -88,7 +93,7 @@ async fn execute_multiple_non_agent(
                     let _permit = sem.acquire().await.expect("semaphore closed");
                     let result = execute_one_non_agent(
                         agent,
-                        &tx,
+                        &sink,
                         &hook_ui,
                         &hook_runner,
                         &json_logger,
@@ -112,7 +117,7 @@ async fn execute_multiple_non_agent(
         let call = other_calls[pos];
         let result_vec = execute_one_non_agent(
             agent,
-            tx,
+            sink,
             hook_ui,
             hook_runner,
             json_logger,
@@ -156,22 +161,25 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_one_non_agent(
+async fn execute_one_non_agent<S>(
     agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
     call: &ToolCall,
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let _ = hook_ui
         .run_plain(
             hook_runner,
             HookEvent::PermissionRequest,
             Some(&call.name),
-            HookData::Permission(::runtime::api::core::hook::PermissionHookData {
+            HookData::Permission(crate::api::core::hook::PermissionHookData {
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
@@ -202,16 +210,19 @@ async fn execute_one_non_agent(
             true,
             Vec::new(),
         );
-        send_tool_result(tx, &owned_call, &result).await;
+        send_tool_result(sink, &owned_call, &result).await;
         return vec![result];
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
     let working_root = agent.ctx.current_working_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    let _ = tx
-        .send(crate::tui::app::status_context_for_workspace(
-            ::runtime::api::core::worktree::workspace_context_from_tool_context(&agent.ctx),
-        ))
+    let workspace = crate::api::core::worktree::workspace_context_from_tool_context(&agent.ctx);
+    let _ = sink
+        .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
+            path_base: workspace.path_base.clone(),
+            working_root: workspace.working_root.clone(),
+            workspace,
+        })
         .await;
     let mut out = Vec::new();
     for (id, output, is_error, images) in exec_results {
@@ -224,26 +235,28 @@ async fn execute_one_non_agent(
             is_error,
             &output,
         );
-        run_post_tool_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        run_task_hooks(tx, hook_ui, hook_runner, &owned_call, &output, is_error).await;
+        run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
+        run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         let result = (id, output, is_error, images);
-        send_tool_result(tx, &owned_call, &result).await;
+        send_tool_result(sink, &owned_call, &result).await;
         out.push(result);
     }
     out
 }
 
-async fn run_task_hooks(
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+async fn run_task_hooks<S>(
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,
-) {
+) where
+    S: TuiLoopEventSink,
+{
     if !is_error && call.name == "TaskCreate" {
         emit_json_hook_context(
-            tx,
+            sink,
             hook_ui
                 .run_json(
                     hook_runner,
@@ -262,7 +275,7 @@ async fn run_task_hooks(
     }
     if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
         emit_json_hook_context(
-            tx,
+            sink,
             hook_ui
                 .run_json(
                     hook_runner,

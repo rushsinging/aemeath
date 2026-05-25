@@ -250,18 +250,17 @@ impl App {
                 let llm_option_count = options.len();
                 let mut all_options = options.clone();
                 if llm_option_count > 0 {
-                    all_options.push(
-                        crate::tui::app::BUILTIN_OPTION_ALL.to_string(),
-                    );
-                    all_options.push(
-                        crate::tui::app::BUILTIN_OPTION_CHAT.to_string(),
-                    );
+                    all_options.push(crate::tui::app::BUILTIN_OPTION_ALL.to_string());
+                    all_options.push(crate::tui::app::BUILTIN_OPTION_CHAT.to_string());
                 }
 
                 let default_ref = default.as_deref();
-                let option_line_start =
-                    self.output_area
-                        .push_ask_user(&question, &all_options, default_ref, multi_select);
+                let option_line_start = self.output_area.push_ask_user(
+                    &question,
+                    &all_options,
+                    default_ref,
+                    multi_select,
+                );
 
                 if let Some(start) = option_line_start {
                     let cursor = default

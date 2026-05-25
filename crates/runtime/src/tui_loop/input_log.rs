@@ -1,8 +1,8 @@
-use ::runtime::api::core::message::Message;
+use crate::api::core::message::Message;
 
 /// Extract the messages that were injected by the system (not from the session history)
 /// plus the last persisted message for input logging purposes.
-pub(crate) fn logged_input_messages(
+pub fn logged_input_messages(
     messages_for_api: &[Message],
     persisted_message_count: usize,
 ) -> Vec<serde_json::Value> {
@@ -29,7 +29,7 @@ pub(crate) fn logged_input_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::message::Message;
+    use crate::api::core::message::Message;
 
     #[test]
     fn test_logged_input_messages_happy_path_includes_latest_user_message() {

@@ -1,11 +1,10 @@
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::UiEvent;
-use ::runtime::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
-use ::runtime::api::core::task::{BatchStatus, TaskStore};
+use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
+use crate::api::core::task::{BatchStatus, TaskStore};
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 use std::path::PathBuf;
-use tokio::sync::mpsc;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
@@ -16,14 +15,17 @@ const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 /// without reaching here. When a stop hook blocks the stop, the returned
 /// feedback is injected as a system-reminder and the loop `continue`s — the
 /// next iteration will again drain the queue first.
-pub(crate) async fn finalize_main_loop(
+pub(crate) async fn finalize_main_loop<S>(
     outcome: &AgentRunOutcome,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
+    sink: &S,
+    hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     session_id: &str,
     task_store: &TaskStore,
-) -> Option<String> {
+) -> Option<String>
+where
+    S: TuiLoopEventSink,
+{
     log_agent_outcome(outcome, session_id);
 
     match &outcome.status {
@@ -39,11 +41,15 @@ pub(crate) async fn finalize_main_loop(
                 )
                 .await;
             if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
-                let _ = tx.send(UiEvent::SystemMessage(feedback.clone())).await;
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::SystemMessage(feedback.clone()))
+                    .await;
                 return Some(feedback);
             }
 
-            let _ = tx.send(UiEvent::DoneWithDuration(outcome.duration)).await;
+            let _ = sink
+                .send_event(RuntimeStreamEvent::DoneWithDuration(outcome.duration))
+                .await;
 
             if let Some(active) = task_store.active_list().await {
                 if task_store.is_batch_completed(active.id).await {
@@ -59,7 +65,7 @@ pub(crate) async fn finalize_main_loop(
             None
         }
         AgentRunStatus::Cancelled => {
-            let _ = tx.send(UiEvent::Done).await;
+            let _ = sink.send_event(RuntimeStreamEvent::Done).await;
             None
         }
         AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
@@ -78,13 +84,13 @@ pub(crate) async fn finalize_main_loop(
                 .find_map(|(_, _, json_output)| json_output)
                 .map(|output| (output.system_message, output.additional_context))
                 .unwrap_or((None, None));
-            let _ = tx
-                .send(UiEvent::StopFailureHook {
+            let _ = sink
+                .send_event(RuntimeStreamEvent::StopFailureHook {
                     system_message,
                     additional_context,
                 })
                 .await;
-            let _ = tx.send(UiEvent::Done).await;
+            let _ = sink.send_event(RuntimeStreamEvent::Done).await;
             None
         }
     }
@@ -92,7 +98,7 @@ pub(crate) async fn finalize_main_loop(
 
 async fn stop_hook_feedback(
     hook_results: &[(
-        ::runtime::api::core::config::hooks::HookEntry,
+        crate::api::core::config::hooks::HookEntry,
         HookResult,
         Option<HookJsonOutput>,
     )],
@@ -232,7 +238,7 @@ fn non_empty_text(text: &str) -> Option<String> {
 #[cfg(test)]
 fn stop_hook_feedback_for_test(
     hook_results: &[(
-        ::runtime::api::core::config::hooks::HookEntry,
+        crate::api::core::config::hooks::HookEntry,
         HookResult,
         Option<HookJsonOutput>,
     )],
@@ -248,12 +254,12 @@ fn hook_result(
     output: &str,
     error: Option<&str>,
 ) -> (
-    ::runtime::api::core::config::hooks::HookEntry,
+    crate::api::core::config::hooks::HookEntry,
     HookResult,
     Option<HookJsonOutput>,
 ) {
     (
-        ::runtime::api::core::config::hooks::HookEntry {
+        crate::api::core::config::hooks::HookEntry {
             matcher: String::new(),
             command: command.to_string(),
             timeout: 60,
@@ -270,7 +276,7 @@ fn hook_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::config::hooks::HookEntry;
+    use crate::api::core::config::hooks::HookEntry;
 
     #[test]
     fn test_stop_hook_feedback_returns_none_without_block() {

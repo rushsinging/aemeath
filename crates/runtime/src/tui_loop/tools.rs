@@ -1,41 +1,43 @@
-use crate::tui::app::stream::agent_calls::execute_agent_calls;
-use crate::tui::app::stream::ask_user::ask_user;
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::stream::non_agent::execute_non_agent;
-use crate::tui::app::stream::permissions::split_approved_calls;
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::agent::{Agent, ToolCall};
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, ToolHookData};
-use ::runtime::api::core::logging::JsonLogger;
-use ::runtime::api::core::tool::{ImageData, ToolRegistry};
+use crate::api::core::agent::{Agent, ToolCall};
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::{HookData, ToolHookData};
+use crate::api::core::logging::JsonLogger;
+use crate::api::core::tool::{ImageData, ToolRegistry};
+use crate::tui_loop::agent_calls::execute_agent_calls;
+use crate::tui_loop::ask_user::ask_user;
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::non_agent::execute_non_agent;
+use crate::tui_loop::permissions::split_approved_calls;
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 pub(crate) type UiToolResult = (String, String, bool, Vec<ImageData>);
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_tool_round(
+pub(crate) async fn execute_tool_round<S>(
     tool_calls: &[ToolCall],
     registry: &Arc<ToolRegistry>,
     allow_all: bool,
     agent: &Agent<'_>,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
     max_agent_concurrency: usize,
     interrupted: &Arc<std::sync::atomic::AtomicBool>,
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
-    let denied_results = deny_tool_calls(&denied, tx, hook_ui, hook_runner).await;
+    let denied_results = deny_tool_calls(&denied, sink, hook_ui, hook_runner).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
-        let _ = tx
-            .send(UiEvent::ToolCall {
+        let _ = sink
+            .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
                 summary: call.input.to_string(),
@@ -54,10 +56,10 @@ pub(crate) async fn execute_tool_round(
         })
         .collect();
 
-    let ask_user_results = ask_user(tx, hook_ui, hook_runner, &non_agent_calls).await;
+    let ask_user_results = ask_user(sink, hook_ui, hook_runner, &non_agent_calls).await;
     let non_agent_results = execute_non_agent(
         agent,
-        tx,
+        sink,
         hook_ui,
         hook_runner,
         json_logger,
@@ -70,7 +72,7 @@ pub(crate) async fn execute_tool_round(
         &agent_approved,
         registry,
         &agent.ctx,
-        tx,
+        sink,
         hook_ui,
         hook_runner,
         max_agent_concurrency,
@@ -86,12 +88,15 @@ pub(crate) async fn execute_tool_round(
         .collect()
 }
 
-async fn deny_tool_calls(
+async fn deny_tool_calls<S>(
     denied: &[&ToolCall],
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
-) -> Vec<UiToolResult> {
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let mut denied_results = Vec::new();
     for call in denied {
         let _ = hook_ui
@@ -99,7 +104,7 @@ async fn deny_tool_calls(
                 hook_runner,
                 HookEvent::PermissionDenied,
                 Some(&call.name),
-                HookData::Permission(::runtime::api::core::hook::PermissionHookData {
+                HookData::Permission(crate::api::core::hook::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
@@ -107,8 +112,8 @@ async fn deny_tool_calls(
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
-        let _ = tx
-            .send(UiEvent::ToolCall {
+        let _ = sink
+            .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
                 summary: call.input.to_string(),
@@ -123,22 +128,24 @@ async fn deny_tool_calls(
             true,
             Vec::new(),
         );
-        send_tool_result(tx, call, &result).await;
+        send_tool_result(sink, call, &result).await;
         denied_results.push(result);
     }
     denied_results
 }
 
-pub(crate) async fn run_post_tool_hooks(
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+pub(crate) async fn run_post_tool_hooks<S>(
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,
-) {
+) where
+    S: TuiLoopEventSink,
+{
     emit_json_hook_context(
-        tx,
+        sink,
         hook_ui
             .run_json(
                 hook_runner,
@@ -156,7 +163,7 @@ pub(crate) async fn run_post_tool_hooks(
     .await;
     if is_error {
         emit_json_hook_context(
-            tx,
+            sink,
             hook_ui
                 .run_json(
                     hook_runner,
@@ -175,33 +182,38 @@ pub(crate) async fn run_post_tool_hooks(
     }
 }
 
-pub(crate) async fn emit_json_hook_context(
-    tx: &mpsc::Sender<UiEvent>,
+pub(crate) async fn emit_json_hook_context<S>(
+    sink: &S,
     hook_results: Vec<(
-        ::runtime::api::core::config::hooks::HookEntry,
-        ::runtime::api::core::hook::HookResult,
-        Option<::runtime::api::core::hook::HookJsonOutput>,
+        crate::api::core::config::hooks::HookEntry,
+        crate::api::core::hook::HookResult,
+        Option<crate::api::core::hook::HookJsonOutput>,
     )>,
-) {
+) where
+    S: TuiLoopEventSink,
+{
     for (_entry, _result, json_output) in hook_results {
         if let Some(json) = json_output {
             if let Some(ctx) = json.additional_context {
-                let _ = tx.send(UiEvent::SystemMessage(ctx)).await;
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::SystemMessage(ctx))
+                    .await;
             }
             if let Some(msg) = json.system_message {
-                let _ = tx.send(UiEvent::SystemMessage(msg)).await;
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::SystemMessage(msg))
+                    .await;
             }
         }
     }
 }
 
-pub(crate) async fn send_tool_result(
-    tx: &mpsc::Sender<UiEvent>,
-    call: &ToolCall,
-    result: &UiToolResult,
-) {
-    let _ = tx
-        .send(UiEvent::ToolResult {
+pub(crate) async fn send_tool_result<S>(sink: &S, call: &ToolCall, result: &UiToolResult)
+where
+    S: TuiLoopEventSink,
+{
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ToolResult {
             id: result.0.clone(),
             tool_name: call.name.clone(),
             output: result.1.clone(),
@@ -214,8 +226,8 @@ pub(crate) async fn send_tool_result(
 #[cfg(test)]
 mod tests {
     use super::tool_results_for_api;
-    use ::runtime::api::core::compact::MAX_TOOL_RESULT_CHARS;
-    use ::runtime::api::core::message::ContentBlock;
+    use crate::api::core::compact::MAX_TOOL_RESULT_CHARS;
+    use crate::api::core::message::ContentBlock;
 
     #[test]
     fn test_tool_results_for_api_persists_oversized_tui_result() {
@@ -238,9 +250,9 @@ mod tests {
 pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
-) -> ::runtime::api::core::message::Message {
-    ::runtime::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
-    ::runtime::api::core::message::Message::tool_results_rich(results)
+) -> crate::api::core::message::Message {
+    crate::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    crate::api::core::message::Message::tool_results_rich(results)
 }
 
 pub(crate) fn log_tool_result(
