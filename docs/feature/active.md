@@ -600,25 +600,6 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize;
 
 ---
 
-### #4 AskUserQuestion TUI 美化
-
-**目标**：当 LLM 调用 AskUserQuestion tool call 时，TUI 的等待输入界面要清楚说明下一步操作，并避免提示文字挤占过多 output area。
-
-**当前状态**：待实施。基础问答链路已存在（`UiEvent::AskUser` + `ask_user_reply_tx`），本轮聚焦交互文案和选择模式：
-
-- AskUserQuestion 等待输入时，在 output area 提示「请在下方输入区域输入」。
-- 操作指引放在提示文字末尾：`[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项`，不再单独占一行。
-- 纯选择模式（仅 options、无 free_input）不要求用户手动输入选项文本，改为上下键高亮选项 + Enter 确认。
-- 多选/自由输入保持现有能力，但提示文案需要与实际可用快捷键一致。
-
-**涉及路径**：
-- `aemeath-cli/src/tui/app/update/ui_event.rs`（`UiEvent::AskUser` 状态切换与等待提示）
-- `aemeath-cli/src/tui/app/update/ask_user_key.rs`（选项导航、确认/取消、自由输入）
-- `aemeath-cli/src/tui/output_area/content.rs`（AskUserQuestion 提示与选项渲染）
-- `aemeath-cli/src/tui/output_area/types.rs`（AskUserQuestion 行样式）
-
----
-
 ### #8 Memory 系统
 
 **目标**：跨会话持久化记忆，让 agent 在不同会话间积累项目知识、用户偏好和决策上下文，避免每次从零开始。
