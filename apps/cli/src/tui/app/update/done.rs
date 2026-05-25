@@ -26,9 +26,9 @@ impl App {
         }
         self.output_area.finish_streaming();
         self.output_area.stop_spinner();
-        self.tool_call_active = false;
-        self.active_tool_call_ids.clear();
-        self.is_processing = false;
+        self.chat.tool_call_active = false;
+        self.chat.active_tool_call_ids.clear();
+        self.chat.is_processing = false;
         self.status_bar.set_success("Ready");
         self.push_session_reminder_recap();
         self.maybe_auto_reflect(ui_tx);
