@@ -2,17 +2,17 @@
 resolver = "2"
 members = [
     "apps/cli",
-    "services/core",
-    "services/runtime",
-    "services/project",
-    "services/policy",
-    "services/prompt",
-    "services/provider",
-    "services/tools",
-    "services/share",
-    "services/storage",
-    "services/hook",
-    "services/audit",
+    "agent/core",
+    "agent/runtime",
+    "agent/project",
+    "agent/policy",
+    "agent/prompt",
+    "agent/provider",
+    "agent/tools",
+    "agent/share",
+    "agent/storage",
+    "agent/hook",
+    "agent/audit",
 ]
 
 [workspace.dependencies]

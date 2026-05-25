@@ -20,8 +20,8 @@ for crate in business:
     if pattern.search(text):
         violations.append(f"apps/cli/Cargo.toml must not declare direct path dependency on {crate}")
 
-if 'runtime = { path = "../../services/runtime" }' not in text:
-    violations.append("apps/cli/Cargo.toml must depend on runtime via ../../services/runtime")
+if 'runtime = { path = "../../agent/runtime" }' not in text:
+    violations.append("apps/cli/Cargo.toml must depend on runtime via ../../agent/runtime")
 
 if violations:
     print(json.dumps({"decision": "block", "reason": "Thin CLI guard failed:\n" + "\n".join(violations)}, ensure_ascii=False))

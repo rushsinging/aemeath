@@ -10,7 +10,7 @@ import json
 import re
 import sys
 
-manifest = Path("services/core/Cargo.toml")
+manifest = Path("agent/core/Cargo.toml")
 text = manifest.read_text()
 upstream = ["runtime", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit"]
 violations = []
@@ -18,7 +18,7 @@ violations = []
 for crate in upstream:
     pattern = re.compile(rf"(?m)^\s*{re.escape(crate)}\s*=\s*\{{[^\n]*path\s*=")
     if pattern.search(text):
-        violations.append(f"services/core/Cargo.toml must not depend on upstream workspace crate {crate}")
+        violations.append(f"agent/core/Cargo.toml must not depend on upstream workspace crate {crate}")
 
 if violations:
     print(json.dumps({"decision": "block", "reason": "Core upstream dependency guard failed:\n" + "\n".join(violations)}, ensure_ascii=False))
