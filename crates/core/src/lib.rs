@@ -6,7 +6,6 @@ pub mod compact;
 pub mod config;
 pub mod cost;
 pub mod error;
-pub mod guidance;
 pub mod history;
 pub mod hook;
 pub mod logging;

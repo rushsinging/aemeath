@@ -15,11 +15,23 @@
 //! 这些内容应该由用户在 `~/.agents/guidance/` 下的 md 文件中自行配置。
 //! 此处仅提供最小可用的初始模板，让用户知道文件格式和可用选项。
 
-use crate::config::paths;
 use std::path::PathBuf;
 
 pub mod constants;
 pub mod resolver;
+
+const AGENTS_DIR_ENV: &str = "AEMEATH_AGENTS_DIR";
+
+fn global_agents_dir() -> PathBuf {
+    std::env::var_os(AGENTS_DIR_ENV)
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".agents")))
+        .unwrap_or_else(|| PathBuf::from(".agents"))
+}
+
+fn global_guidance_dir() -> PathBuf {
+    global_agents_dir().join("guidance")
+}
 
 // Re-export public API so external code can use `aemeath_core::guidance::...` unchanged.
 pub use constants::UNIVERSAL_EXECUTION_DISCIPLINE;
@@ -29,7 +41,7 @@ pub use resolver::{
 
 /// Returns the default guidance dir: `~/.agents/guidance/`
 pub fn guidance_dir() -> Option<PathBuf> {
-    Some(paths::global_guidance_dir())
+    Some(global_guidance_dir())
 }
 
 /// Initialise the guidance directory with default files.
@@ -75,15 +87,15 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
-        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+        let previous = std::env::var_os(AGENTS_DIR_ENV);
+        std::env::set_var(AGENTS_DIR_ENV, &temp_agents_dir);
 
         assert_eq!(guidance_dir(), Some(temp_agents_dir.join("guidance")));
 
         if let Some(previous) = previous {
-            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
+            std::env::set_var(AGENTS_DIR_ENV, previous);
         } else {
-            std::env::remove_var(paths::AGENTS_DIR_ENV);
+            std::env::remove_var(AGENTS_DIR_ENV);
         }
     }
 

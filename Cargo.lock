@@ -1763,7 +1763,10 @@ dependencies = [
 name = "prompt"
 version = "0.1.0"
 dependencies = [
- "core",
+ "async-trait",
+ "dirs",
+ "log",
+ "regex",
 ]
 
 [[package]]

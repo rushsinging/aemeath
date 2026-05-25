@@ -1,3 +1,4 @@
+use ::runtime::api::bootstrap::InstructionsLoadedHookRunner;
 use ::runtime::api::core::skill::Skill;
 
 pub(super) async fn build_static_prompt(
@@ -13,16 +14,17 @@ pub(super) async fn build_static_prompt(
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
-    let model_guidance = ::runtime::api::core::guidance::resolve_guidance_async(
+    let instructions_hook = InstructionsLoadedHookRunner(hook_runner);
+    let model_guidance = ::runtime::api::prompt::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
-        Some(hook_runner),
+        Some(&instructions_hook),
     )
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(::runtime::api::core::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+    prompt.push_str(::runtime::api::prompt::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
     append_skills(&mut prompt, &skills_guard);
     append_agent_roles(&mut prompt, config_file);
     if !model_guidance.is_empty() {

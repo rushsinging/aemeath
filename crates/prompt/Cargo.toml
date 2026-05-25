@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aemeath_core = { package = "core", path = "../core" }
+log = "0.4"
+dirs = "6"
+async-trait = { workspace = true }
+regex = "1"
