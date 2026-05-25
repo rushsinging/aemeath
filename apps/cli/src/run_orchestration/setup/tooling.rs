@@ -1,4 +1,4 @@
-use crate::mcp_loader::spawn_mcp_connect;
+use ::runtime::api::bootstrap::spawn_mcp_connect;
 use ::runtime::api::core::config::SkillsConfig;
 use ::runtime::api::core::mcp_manager::McpConnectionManager;
 use ::runtime::api::core::skill::Skill;

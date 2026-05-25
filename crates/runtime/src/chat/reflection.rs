@@ -1,7 +1,7 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
 
-use ::runtime::api::core::memory::MemoryStore;
-use ::runtime::api::core::reflection::ReflectionEngine;
+use crate::api::core::memory::MemoryStore;
+use crate::api::core::reflection::ReflectionEngine;
 use std::path::PathBuf;
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
@@ -9,11 +9,11 @@ use std::path::PathBuf;
 /// Returns `Some(formatted_text)` if reflection was triggered and produced output,
 /// or `None` if reflection is disabled, not due yet, or failed silently.
 pub async fn run_reflection(
-    config: &::runtime::api::core::config::MemoryConfig,
+    config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
-    messages: &[::runtime::api::core::message::Message],
+    messages: &[crate::api::core::message::Message],
     cwd: &PathBuf,
-    client: &::runtime::api::provider::client::LlmClient,
+    client: &crate::api::provider::client::LlmClient,
     system_prompt_text: &str,
 ) -> Option<String> {
     run_reflection_with_base_dir(
@@ -23,17 +23,17 @@ pub async fn run_reflection(
         cwd,
         client,
         system_prompt_text,
-        ::runtime::api::core::memory::memory_base_dir(),
+        crate::api::core::memory::memory_base_dir(),
     )
     .await
 }
 
 async fn run_reflection_with_base_dir(
-    config: &::runtime::api::core::config::MemoryConfig,
+    config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
-    messages: &[::runtime::api::core::message::Message],
+    messages: &[crate::api::core::message::Message],
     cwd: &PathBuf,
-    client: &::runtime::api::provider::client::LlmClient,
+    client: &crate::api::provider::client::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
@@ -46,14 +46,14 @@ async fn run_reflection_with_base_dir(
 
     let mut store = MemoryStore::new(
         base_dir.clone(),
-        ::runtime::api::core::memory::project_hash_from_path(cwd),
+        crate::api::core::memory::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
     .ok()?;
 
     let entries = store
-        .list(Some(::runtime::api::core::memory::MemoryLayer::Project))
+        .list(Some(crate::api::core::memory::MemoryLayer::Project))
         .ok()
         .unwrap_or_default();
 
@@ -98,15 +98,15 @@ async fn run_reflection_with_base_dir(
 
 /// Call LLM with a simple prompt and return the full text response.
 async fn call_llm_for_reflection(
-    client: &::runtime::api::provider::client::LlmClient,
+    client: &crate::api::provider::client::LlmClient,
     prompt: &str,
     system_prompt_text: &str,
 ) -> Option<String> {
-    use ::runtime::api::provider::types::SystemBlock;
-    use ::runtime::api::provider::StreamHandler;
+    use crate::api::provider::types::SystemBlock;
+    use crate::api::provider::StreamHandler;
 
     let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
-    let messages = vec![::runtime::api::core::message::Message::user(prompt)];
+    let messages = vec![crate::api::core::message::Message::user(prompt)];
 
     struct CollectHandler {
         text: String,
@@ -170,9 +170,9 @@ fn extract_json(text: &str) -> Option<String> {
 
 /// Lightweight reflection fallback: basic checks without LLM call.
 async fn lightweight_reflection_text_with_base_dir(
-    config: &::runtime::api::core::config::MemoryConfig,
+    config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
-    messages: &[::runtime::api::core::message::Message],
+    messages: &[crate::api::core::message::Message],
     cwd: &PathBuf,
     base_dir: PathBuf,
 ) -> Option<String> {
@@ -185,15 +185,15 @@ async fn lightweight_reflection_text_with_base_dir(
 
     let store = MemoryStore::new(
         base_dir,
-        ::runtime::api::core::memory::project_hash_from_path(cwd),
+        crate::api::core::memory::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
     .ok()?;
     let entries = store
-        .list(Some(::runtime::api::core::memory::MemoryLayer::Project))
+        .list(Some(crate::api::core::memory::MemoryLayer::Project))
         .ok()?;
-    let mut output = ::runtime::api::core::reflection::ReflectionOutput {
+    let mut output = crate::api::core::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: entries
@@ -214,9 +214,9 @@ async fn lightweight_reflection_text_with_base_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::memory::{MemoryCategory, MemoryLayer, MemorySource, MemoryStore};
-    use ::runtime::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
-    use ::runtime::api::provider::{LlmProvider, StreamHandler};
+    use crate::api::core::memory::{MemoryCategory, MemoryLayer, MemorySource, MemoryStore};
+    use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
+    use crate::api::provider::{LlmProvider, StreamHandler};
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -230,15 +230,15 @@ mod tests {
         async fn stream_message(
             &self,
             _system: &[SystemBlock],
-            _messages: &[::runtime::api::core::message::Message],
+            _messages: &[crate::api::core::message::Message],
             _tool_schemas: &[serde_json::Value],
             handler: &mut dyn StreamHandler,
             _cancel: &CancellationToken,
-        ) -> Result<StreamResponse, ::runtime::api::provider::LlmError> {
+        ) -> Result<StreamResponse, crate::api::provider::LlmError> {
             handler.on_text(&self.response);
             Ok(StreamResponse {
-                assistant_message: ::runtime::api::core::message::Message::placeholder(
-                    ::runtime::api::core::message::Role::Assistant,
+                assistant_message: crate::api::core::message::Message::placeholder(
+                    crate::api::core::message::Role::Assistant,
                 ),
                 usage: Usage {
                     input_tokens: 0,
@@ -263,8 +263,8 @@ mod tests {
         }
     }
 
-    fn build_client(response: &str) -> ::runtime::api::provider::client::LlmClient {
-        ::runtime::api::provider::client::LlmClient::from_provider(Arc::new(
+    fn build_client(response: &str) -> crate::api::provider::client::LlmClient {
+        crate::api::provider::client::LlmClient::from_provider(Arc::new(
             StaticReflectionProvider {
                 response: response.to_string(),
             },
@@ -291,14 +291,14 @@ mod tests {
             ]
         }"#;
         let client = build_client(response);
-        let mut config = ::runtime::api::core::config::MemoryConfig::default();
+        let mut config = crate::api::core::config::MemoryConfig::default();
         config.reflection.interval_turns = 2;
         config.reflection.auto_apply_suggestions = true;
 
         let text = run_reflection_with_base_dir(
             &config,
             2,
-            &[::runtime::api::core::message::Message::user(
+            &[crate::api::core::message::Message::user(
                 "请记住这个决策",
             )],
             &cwd,
@@ -310,7 +310,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            ::runtime::api::core::memory::project_hash_from_path(&cwd),
+            crate::api::core::memory::project_hash_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )
@@ -343,14 +343,14 @@ mod tests {
             ]
         }"#;
         let client = build_client(response);
-        let mut config = ::runtime::api::core::config::MemoryConfig::default();
+        let mut config = crate::api::core::config::MemoryConfig::default();
         config.reflection.interval_turns = 2;
         config.reflection.auto_apply_suggestions = false;
 
         let text = run_reflection_with_base_dir(
             &config,
             2,
-            &[::runtime::api::core::message::Message::user("请只展示建议")],
+            &[crate::api::core::message::Message::user("请只展示建议")],
             &cwd,
             &client,
             "system prompt",
@@ -360,7 +360,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            ::runtime::api::core::memory::project_hash_from_path(&cwd),
+            crate::api::core::memory::project_hash_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )

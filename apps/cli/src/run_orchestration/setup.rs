@@ -2,7 +2,7 @@ mod prompt_bundle;
 mod tooling;
 
 use crate::cli::Args;
-use crate::logging_setup::init_logging;
+use ::runtime::api::bootstrap::init_logging;
 use crate::model_selection::select_model_for_run;
 use prompt_bundle::build_chat_prompt_bundle;
 use std::env;
@@ -179,6 +179,6 @@ async fn bootstrap_chat_runtime(mut args: ChatBootstrapArgs) -> ChatBootstrap {
 
 fn start_session_and_cli_log(resume_session_id: Option<String>) -> String {
     let session_id = ::runtime::api::bootstrap::start_session(resume_session_id);
-    crate::logging_setup::set_session_id(session_id.clone());
+    ::runtime::api::bootstrap::set_session_id(session_id.clone());
     session_id
 }

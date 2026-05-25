@@ -144,7 +144,7 @@ impl super::App {
             "/paste" => {
                 // block_in_place allows async call from non-async context in tokio runtime
                 let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(crate::image::read_clipboard_image())
+                    tokio::runtime::Handle::current().block_on(::runtime::api::image::read_clipboard_image())
                 });
                 match result {
                     Ok(img) => {

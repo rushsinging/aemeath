@@ -1,6 +1,6 @@
 use super::tools::handle_commit;
 use super::PendingImages;
-use crate::image::process_image_file;
+use ::runtime::api::image::process_image_file;
 use ::runtime::api::core::command::{
     cmd, CommandAction, CommandContext, CommandRegistry, CommandResult,
 };
@@ -217,7 +217,7 @@ pub(crate) async fn handle_slash_command(
         }
         "/paste" => {
             println!("[reading image from clipboard...]");
-            match crate::image::read_clipboard_image().await {
+            match ::runtime::api::image::read_clipboard_image().await {
                 Ok(img) => {
                     println!("[clipboard image added ({} bytes)]", img.final_size);
                     pending_images.lock().unwrap().push(img);

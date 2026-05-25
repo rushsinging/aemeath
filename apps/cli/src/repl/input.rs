@@ -1,4 +1,4 @@
-use crate::image::{is_image_file, process_image_file};
+use ::runtime::api::image::{is_image_file, process_image_file};
 use crate::render::TerminalRenderer;
 use ::runtime::api::core::message::Message;
 use rustyline::error::ReadlineError;

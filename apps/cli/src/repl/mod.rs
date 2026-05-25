@@ -28,7 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 /// Pending images to be attached to the next message
-pub(crate) type PendingImages = std::sync::Arc<std::sync::Mutex<Vec<crate::image::ProcessedImage>>>;
+pub(crate) type PendingImages = std::sync::Arc<std::sync::Mutex<Vec<::runtime::api::image::ProcessedImage>>>;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_repl(

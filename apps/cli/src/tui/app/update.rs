@@ -73,7 +73,7 @@ impl App {
                         cmd: Cmd::ReadClipboardImage,
                         pending_slash: None,
                     };
-                } else if crate::image::is_image_file(text.trim()) {
+                } else if ::runtime::api::image::is_image_file(text.trim()) {
                     self.output_area
                         .push_system(&format!("[loading image: {}...]", text.trim()));
                     self.just_pasted = true;

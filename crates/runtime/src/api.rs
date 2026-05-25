@@ -2,6 +2,8 @@ pub use crate::agent_runner;
 pub use crate::bootstrap;
 pub use crate::chat;
 pub use crate::chat::looping;
+pub use crate::image;
+pub use crate::prompt_build;
 pub use aemeath_core as core;
 pub use audit;
 pub use hook;

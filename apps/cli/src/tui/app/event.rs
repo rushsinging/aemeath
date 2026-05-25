@@ -52,7 +52,7 @@ pub enum AppEvent {
     Done,
     DoneWithDuration(std::time::Duration),
     LiveTps(f64),
-    ClipboardImage(crate::image::ProcessedImage),
+    ClipboardImage(::runtime::api::image::ProcessedImage),
     SystemMessage(String),
     ReflectionStarted,
     ReflectionUsage {

@@ -1,4 +1,4 @@
-use crate::prompt::{build_system_prompt_parts, PromptContext};
+use ::runtime::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::run_orchestration::runtime;
 use ::runtime::api::core::config::{Config, MemoryConfig};
 use ::runtime::api::core::hook::HookRunner;
@@ -46,7 +46,7 @@ async fn build_chat_prompt_bundle_from_parts(
     reasoning: bool,
     config_file: Option<&Config>,
     hook_runner: &HookRunner,
-    prompt_parts: crate::prompt::SystemPromptParts,
+    prompt_parts: ::runtime::api::prompt_build::SystemPromptParts,
     skills: &Mutex<HashMap<String, Skill>>,
 ) -> ChatPromptBundle {
     let static_prompt = super::super::prompt::build_static_prompt(
@@ -75,7 +75,7 @@ async fn build_chat_prompt_bundle_from_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prompt::SystemPromptParts;
+    use ::runtime::api::prompt_build::SystemPromptParts;
     use ::runtime::api::core::config::Config;
     use std::path::Path;
 

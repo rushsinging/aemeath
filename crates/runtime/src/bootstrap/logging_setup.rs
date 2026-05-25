@@ -1,4 +1,4 @@
-use ::runtime::api::core::logging::{self, LogFile};
+use crate::api::core::logging::{self, LogFile};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
@@ -7,11 +7,11 @@ static SESSION_ID: OnceLock<String> = OnceLock::new();
 static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
 
 /// 设置全局 session ID（只能调用一次）
-pub(crate) fn set_session_id(id: String) {
+pub fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);
 }
 
-pub(crate) fn set_current_turn(turn: usize) {
+pub fn set_current_turn(turn: usize) {
     CURRENT_TURN.store(turn, Ordering::Relaxed);
 }
 
@@ -22,7 +22,7 @@ fn current_turn_for_log() -> Option<usize> {
     }
 }
 
-pub(crate) fn init_logging(logging_config: &::runtime::api::core::config::LoggingConfig) {
+pub fn init_logging(logging_config: &crate::api::core::config::LoggingConfig) {
     // 初始化结构化日志 — 路由到 ~/.agents/logs/aemeath.log，避免库的 log::warn! / log::error! 破坏 TUI 渲染。
     // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复 stderr 行为。
     // 日志级别由 config.json 的 logging 段控制；可通过 RUST_LOG 环境变量覆盖。
@@ -56,7 +56,7 @@ pub(crate) fn init_logging(logging_config: &::runtime::api::core::config::Loggin
     builder.init();
 }
 
-pub(crate) fn init_panic_hook() {
+pub fn init_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
         let payload = info
             .payload()

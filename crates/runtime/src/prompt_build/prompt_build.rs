@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
-use ::runtime::api::core::config::{paths, MemoryConfig};
-use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::memory::{
+use crate::api::core::config::{paths, MemoryConfig};
+use crate::api::core::hook::HookRunner;
+use crate::api::core::memory::{
     memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore,
 };
 
-mod git_context;
-use git_context::{collect_git_context, is_git_repo};
+use super::git_context::{collect_git_context, is_git_repo};
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 #[derive(Clone)]
@@ -249,7 +248,7 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
 
     let mut agents_md = parts.join("\n\n");
 
-    let warnings = ::runtime::api::core::security::scan_content("AGENTS.md", &agents_md);
+    let warnings = crate::api::prompt::security::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(
@@ -260,7 +259,7 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
                 w.matched_text
             );
         }
-        if let Some(prefix) = ::runtime::api::core::security::format_warnings(&warnings) {
+        if let Some(prefix) = crate::api::prompt::security::format_warnings(&warnings) {
             agents_md = format!("{}\n\n{}", prefix, agents_md);
         }
     }
@@ -348,5 +347,5 @@ fn format_memory_context(entries: &[MemoryEntry]) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "prompt_tests.rs"]
-mod prompt_tests;
+#[path = "prompt_build_tests.rs"]
+mod prompt_build_tests;
