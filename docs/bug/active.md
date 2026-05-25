@@ -8,7 +8,42 @@
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
 | 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
+| 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 ## 专案
+
+### #66 ExitWorktree 带 path 参数报错"已在 worktree 中"
+
+**状态**：活动中
+
+**症状**：ExitWorktree 工具传入 `path` 参数时，预期行为是退出当前 worktree 后切换到指定路径，但实际报错：
+
+```text
+✗ ExitWorktree
+  {"path":"/Users/guoyuqi/Nextcloud/work/claudecode/aemeath"}
+  ✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的
+```
+
+用户正在 worktree 中，想通过 `ExitWorktree(path="/some/target")` 一步切换回目标工作区，却被告知"已在 worktree 中，请先 ExitWorktree"。先执行无参 `ExitWorktree` 退出 worktree，再用 `EnterWorktree` 或直接 cd 目标路径才能到达，操作需拆为两步。
+
+**复现**：
+1. 先通过 `EnterWorktree` 进入任意 worktree。
+2. 调用 `ExitWorktree(path="/Users/guoyuqi/Nextcloud/work/claudecode/aemeath")`（或其他绝对/相对路径）。
+3. 观察错误返回：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`。
+4. 先执行无参 `ExitWorktree` 成功退出 worktree，再执行同样带 path 的 ExitWorktree 或手动 cd 才能到达目标路径。
+
+**根因假设**：
+1. ExitWorktree 带 `path` 参数时内部逻辑等价于 `先 EnterWorktree(path)`，导致检查到当前已在 worktree 中时直接拒绝，没有先执行 ExitWorktree。
+2. `ExitWorktree(path)` 的处理分支未区分"仅退出"和"退出+切换"：前者应直接恢复上下文栈并 `cd`，后者应在退出后跳过"已在 worktree 中"检查再执行路径切换。
+3. 路径存在性/合法性的校验也可能触发 worktree 嵌套检查，混淆了两个操作的执行边界。
+
+**修复方向**：
+1. 梳理 `ExitWorktree(path)` 的执行分支：先执行无参 ExitWorktree 的退出逻辑（pop 上下文栈、恢复工作目录），再以恢复后的工作目录为基础执行 path 切换（等价于无条件 cd 目标路径，不再嵌套检查 worktree）。
+2. 若 `ExitWorktree(path)` 在设计上不允许从 worktree 直接切换到另一个 worktree，则必须在文档/Bash 提示中明确该限制，并提供分步指引；但从用户视角来看，提供 `path` 参数本身就意味着"我要退出并切换"。
+3. 补充回归：从任意 worktree 调用 ExitWorktree(path) 应能切换到目标路径；目标路径不存在时给出明确路径错误而非 worktree 嵌套错误。
+
+**涉及路径（预计）**：
+- `ExitWorktree` 工具实现（path 参数处理与 worktree 嵌套检查）
+- `EnterWorktree` / context stack 生命周期管理
 
 ### #65 工具结果 fenced code block 后续内容继续显示为 code 颜色
 
