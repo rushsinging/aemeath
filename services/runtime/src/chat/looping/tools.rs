@@ -226,7 +226,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::tool_results_for_api;
-    use crate::api::core::compact::MAX_TOOL_RESULT_CHARS;
+    use crate::api::compact::MAX_TOOL_RESULT_CHARS;
     use crate::api::core::message::ContentBlock;
 
     #[test]

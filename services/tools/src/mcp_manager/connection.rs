@@ -2,7 +2,7 @@ use super::config::{ConnectionState, McpManagerConfig, McpServerConnection};
 use super::diff::qualified_tool_name;
 use super::wrapper::McpToolWrapper;
 use crate::mcp::{McpClient, McpServerConfig, McpToolDef};
-use crate::tool::ToolRegistry;
+use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

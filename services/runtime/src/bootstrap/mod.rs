@@ -21,7 +21,7 @@ pub use runtime_support::{
 };
 
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::mcp_manager::McpConnectionManager;
+use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 use std::sync::Arc;
 

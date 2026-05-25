@@ -18,7 +18,7 @@ pub mod truncate;
 // ---- 向后兼容的 re-exports ----
 
 // Token 估算函数（原始 compact.rs 中的 re-export）
-pub use crate::token_estimation::{
+pub use aemeath_core::token_estimation::{
     autocompact_threshold, compaction_urgency, effective_context_window, estimate_json_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, needs_compaction,
     needs_compaction_actual, needs_compaction_full, needs_compaction_with_output,

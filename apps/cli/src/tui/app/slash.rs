@@ -72,7 +72,7 @@ impl super::App {
                 self.output_area.push_system("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                use ::runtime::api::core::compact;
+                use ::runtime::api::compact;
                 let (compacted, was_compacted) = compact::compact_messages(
                     &mut self.chat.messages,
                     &self.chat.system_prompt_text,
@@ -114,7 +114,7 @@ impl super::App {
                 }
             }
             "/context" => {
-                use ::runtime::api::core::compact;
+                use ::runtime::api::compact;
                 let estimated = compact::estimate_messages_tokens(&self.chat.messages)
                     + compact::estimate_tokens(&self.chat.system_prompt_text);
                 let pct = estimated * 100 / self.chat.context_size.max(1);
@@ -220,7 +220,7 @@ impl super::App {
                                     self.output_area.push_system("[cleared]");
                                 }
                                 ::runtime::api::core::command::CommandAction::Compact => {
-                                    use ::runtime::api::core::compact;
+                                    use ::runtime::api::compact;
                                     let (compacted, was_compacted) = compact::compact_messages(
                                         &mut self.chat.messages,
                                         &self.chat.system_prompt_text,

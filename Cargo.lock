@@ -2251,6 +2251,7 @@ version = "0.1.0"
 dependencies = [
  "core",
  "project",
+ "prompt",
 ]
 
 [[package]]
@@ -2605,12 +2606,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64",
+ "bytes",
  "chrono",
  "core",
+ "futures-util",
  "glob",
  "log",
  "percent-encoding",
- "prompt",
  "reqwest",
  "serde",
  "serde_json",

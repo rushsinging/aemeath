@@ -2,12 +2,9 @@
 
 pub mod agent;
 pub mod command;
-pub mod compact;
 pub mod config;
 pub mod cost;
 pub mod error;
-pub mod mcp;
-pub mod mcp_manager;
 pub mod memory;
 pub mod message;
 pub mod provider;

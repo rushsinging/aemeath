@@ -9,7 +9,7 @@
 //! - 缺失的 id 立即在该 assistant 之后插入一个 user 占位消息补齐
 //! - 与任何 assistant.tool_use 都不匹配的孤立 tool_result 被移除
 
-use crate::message::{ContentBlock, Message, Role};
+use aemeath_core::message::{ContentBlock, Message, Role};
 use std::collections::HashSet;
 
 pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {

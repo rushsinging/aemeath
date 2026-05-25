@@ -1,6 +1,6 @@
 use crate::mcp::McpClient;
 use crate::mcp_manager::McpConnectionManager;
-use crate::tool::{Tool, ToolContext, ToolResult};
+use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;

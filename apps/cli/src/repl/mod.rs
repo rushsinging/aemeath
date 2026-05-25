@@ -1,5 +1,5 @@
 use crate::render::TerminalRenderer;
-use ::runtime::api::core::compact;
+use ::runtime::api::compact;
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::session::{self, Session};
 use ::runtime::api::prompt::skill::Skill;

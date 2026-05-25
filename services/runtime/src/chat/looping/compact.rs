@@ -20,7 +20,7 @@ pub(crate) async fn auto_compact<S>(
 where
     S: ChatEventSink,
 {
-    use crate::api::core::compact;
+    use crate::api::compact;
 
     // PreCompact hook
     let pre_compact_results = hook_ui

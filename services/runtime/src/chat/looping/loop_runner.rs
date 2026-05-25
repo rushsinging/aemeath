@@ -149,7 +149,7 @@ where
         // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
         let tool_schema_tokens =
-            crate::api::core::compact::estimate_tool_schemas_tokens(&tool_schemas);
+            crate::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);

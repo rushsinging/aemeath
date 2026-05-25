@@ -2,7 +2,7 @@
 //!
 //! 超长工具输出会在加入对话历史之前被截断为预览头 + 尾部。
 
-use crate::message::{ContentBlock, Message};
+use aemeath_core::message::{ContentBlock, Message};
 
 /// 单条工具结果在截断前的最大字符数。
 pub const MAX_TOOL_RESULT_CHARS: usize = 50_000;
@@ -82,7 +82,7 @@ pub fn apply_tool_result_budget(message: &mut Message) {
 
 /// 对 (id, output, is_error, images) 元组列表中的工具结果进行截断。
 pub fn truncate_tool_results(
-    results: &mut Vec<(String, String, bool, Vec<crate::tool::ImageData>)>,
+    results: &mut Vec<(String, String, bool, Vec<aemeath_core::tool::ImageData>)>,
 ) {
     for (_id, output, _is_error, _images) in results.iter_mut() {
         if output.len() > MAX_TOOL_RESULT_CHARS {
@@ -118,7 +118,7 @@ pub fn safe_slice_tail(s: &str, max_bytes: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{ContentBlock, Message};
+    use aemeath_core::message::{ContentBlock, Message};
 
     // ── safe_slice ──────────────────────────────────────────────
 
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn apply_tool_result_budget_under_limit_unchanged() {
         let mut msg = Message {
-            role: crate::message::Role::User,
+            role: aemeath_core::message::Role::User,
             content: vec![ContentBlock::ToolResult {
                 tool_use_id: "t1".to_string(),
                 content: serde_json::Value::String("short".to_string()),
@@ -212,7 +212,7 @@ mod tests {
     fn apply_tool_result_budget_over_limit_truncates_largest() {
         let large_content = "x".repeat(MAX_TOOL_RESULTS_PER_MESSAGE_CHARS + 1000);
         let mut msg = Message {
-            role: crate::message::Role::User,
+            role: aemeath_core::message::Role::User,
             content: vec![ContentBlock::ToolResult {
                 tool_use_id: "t1".to_string(),
                 content: serde_json::Value::String(large_content.clone()),

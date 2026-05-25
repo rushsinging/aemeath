@@ -47,7 +47,7 @@ pub(super) async fn run_agent_turns(
     hook_runner: &::runtime::api::hook::hook::HookRunner,
     memory_config: &::runtime::api::core::config::MemoryConfig,
     json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
-    compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
+    compact_state: &mut ::runtime::api::compact::AutoCompactState,
     turn_count: usize,
     verbose: bool,
     markdown: bool,
@@ -303,7 +303,7 @@ async fn maybe_compact_after_tools(
     context_size: usize,
     system_prompt_text: &str,
     tool_schema_tokens: usize,
-    compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
+    compact_state: &mut ::runtime::api::compact::AutoCompactState,
     client: &LlmClient,
     hook_runner: &::runtime::api::hook::hook::HookRunner,
     turn_count: usize,
@@ -313,14 +313,14 @@ async fn maybe_compact_after_tools(
         let new_tokens = messages
             .last()
             .map(|m| {
-                ::runtime::api::core::compact::estimate_messages_tokens(std::slice::from_ref(m))
+                ::runtime::api::compact::estimate_messages_tokens(std::slice::from_ref(m))
             })
             .unwrap_or(0) as u64;
-        ::runtime::api::core::compact::compaction_urgency(
+        ::runtime::api::compact::compaction_urgency(
             last_api_input_tokens + new_tokens,
             context_size,
         )
-    } else if ::runtime::api::core::compact::needs_compaction_full(
+    } else if ::runtime::api::compact::needs_compaction_full(
         messages,
         system_prompt_text,
         context_size,
@@ -333,7 +333,7 @@ async fn maybe_compact_after_tools(
 
     if urgency >= 1 && messages.len() > 4 {
         let old_len = messages.len();
-        ::runtime::api::core::compact::microcompact(messages, 6);
+        ::runtime::api::compact::microcompact(messages, 6);
         if urgency >= 2 && compact_state.should_attempt() {
             compact_messages_inner(
                 messages,

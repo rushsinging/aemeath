@@ -1,6 +1,6 @@
 use ::runtime::api::bootstrap::spawn_mcp_connect;
 use ::runtime::api::core::config::SkillsConfig;
-use ::runtime::api::core::mcp_manager::McpConnectionManager;
+use ::runtime::api::tools::mcp_manager::McpConnectionManager;
 use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::core::task::TaskStore;
 use ::runtime::api::core::tool::ToolRegistry;

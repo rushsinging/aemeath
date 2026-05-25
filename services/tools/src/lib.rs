@@ -12,6 +12,8 @@ pub mod glob_tool;
 pub mod grep;
 pub mod list_mcp_resources;
 pub mod lsp;
+pub mod mcp;
+pub mod mcp_manager;
 pub mod mcp_tool; // McpTool is dynamically created, not statically registered
 pub mod memory_tool;
 pub mod path_security;

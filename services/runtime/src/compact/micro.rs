@@ -2,7 +2,7 @@
 //!
 //! 清除旧消息中的工具结果内容以节省 token，仅保留最近消息的完整输出。
 
-use crate::message::{ContentBlock, Message};
+use aemeath_core::message::{ContentBlock, Message};
 
 /// 微压缩：清除旧工具结果以节省 token。
 /// 仅保留最近 `keep_recent` 条消息的工具结果内容不变。
