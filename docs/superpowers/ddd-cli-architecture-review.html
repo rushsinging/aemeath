@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aemeath DDD 架构审视 — CLI 深度分析</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0a0d14;
+    --bg-card: #131822;
+    --bg-sheet: #181e2b;
+    --bg-elevated: #1d2433;
+    --border: #262e40;
+    --border-active: #3b4660;
+    --text: #c8d0e0;
+    --text-dim: #6b7392;
+    --text-bright: #e4e9f5;
+    --accent: #5b8dee;
+    --accent-glow: rgba(91, 141, 238, 0.15);
+    --warn: #f0a050;
+    --warn-glow: rgba(240, 160, 80, 0.12);
+    --danger: #e06060;
+    --success: #50c878;
+    --context-core: #6c8cff;
+    --context-runtime: #60c080;
+    --context-prompt: #d4a0ff;
+    --context-provider: #ffa060;
+    --context-policy: #50d0e0;
+    --context-project: #ff70a0;
+    --context-tools: #f0d050;
+    --context-storage: #8090b0;
+    --context-hook: #c080e0;
+    --context-audit: #80b0c0;
+    --mono: 'IBM Plex Mono', 'JetBrains Mono', 'Cascadia Code', monospace;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0;
+  }
+
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 40px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  header {
+    padding: 60px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+  header .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  header h1 {
+    font-family: var(--mono);
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  header h1 span {
+    color: var(--accent);
+  }
+  header .subtitle {
+    font-size: 15px;
+    color: var(--text-dim);
+    margin-top: 12px;
+    max-width: 640px;
+  }
+
+  /* Section */
+  .section {
+    margin-bottom: 64px;
+  }
+  .section-title {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 24px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title::before {
+    content: '';
+    display: block;
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  /* Context Map */
+  .context-map {
+    background: var(--bg-sheet);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 48px 40px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .context-map::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 320px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  }
+  .ctx-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .ctx-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 14px;
+    position: relative;
+    transition: border-color 0.25s, box-shadow 0.25s;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+  .ctx-card:hover {
+    border-color: var(--border-active);
+    box-shadow: 0 0 0 1px var(--border-active);
+  }
+  .ctx-card .ctx-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.04em;
+  }
+  .ctx-card .ctx-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .ctx-card .ctx-dot {
+    width: 6px; height: 6px;
+    border-radius: 1px;
+    position: absolute;
+    top: 12px; right: 12px;
+  }
+  .dot-core { background: var(--context-core); }
+  .dot-runtime { background: var(--context-runtime); }
+  .dot-prompt { background: var(--context-prompt); }
+  .dot-provider { background: var(--context-provider); }
+  .dot-policy { background: var(--context-policy); }
+  .dot-project { background: var(--context-project); }
+  .dot-tools { background: var(--context-tools); }
+  .dot-storage { background: var(--context-storage); }
+  .dot-hook { background: var(--context-hook); }
+  .dot-audit { background: var(--context-audit); }
+
+  /* CLI adapter box */
+  .cli-adapter-box {
+    border: 2px dashed var(--border-active);
+    border-radius: 8px;
+    padding: 28px 32px;
+    margin-top: 24px;
+    position: relative;
+    background: rgba(91, 141, 238, 0.03);
+  }
+  .cli-adapter-box .adapter-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    position: absolute;
+    top: -10px;
+    left: 24px;
+    background: var(--bg-sheet);
+    padding: 0 12px;
+  }
+  .cli-adapter-box .adapter-title {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 16px;
+  }
+  .cli-inner-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .cli-inner-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .cli-inner-card strong {
+    display: block;
+    color: var(--text-bright);
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  /* Connection label */
+  .connection-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+    margin: 16px 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+  .connection-label::before,
+  .connection-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Problem Cards */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .problem-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warn);
+    border-radius: 0 6px 6px 0;
+    padding: 24px;
+    transition: border-color 0.25s;
+  }
+  .problem-card:hover {
+    border-left-color: var(--accent);
+    border-color: var(--border-active);
+  }
+  .problem-card .pc-icon {
+    font-family: var(--mono);
+    font-size: 28px;
+    color: var(--warn);
+    margin-bottom: 12px;
+    font-weight: 200;
+  }
+  .problem-card h3 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .problem-card p {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .problem-card ul {
+    list-style: none;
+    margin-top: 10px;
+  }
+  .problem-card ul li {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 3px 0;
+    padding-left: 14px;
+    position: relative;
+    font-family: var(--mono);
+  }
+  .problem-card ul li::before {
+    content: '>';
+    position: absolute;
+    left: 0;
+    color: var(--warn);
+    font-weight: 600;
+  }
+
+  /* Message Flow */
+  .msg-flow {
+    background: var(--bg-sheet);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 36px 32px;
+    margin-top: 24px;
+  }
+  .flow-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .flow-step {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-bright);
+    text-align: center;
+    min-width: 140px;
+    transition: border-color 0.25s;
+    position: relative;
+  }
+  .flow-step:hover {
+    border-color: var(--accent);
+  }
+  .flow-step .fs-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    letter-spacing: 0.05em;
+  }
+  .flow-arrow {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--accent);
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  /* Proposals */
+  .proposals {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .proposal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px 28px;
+    position: relative;
+    transition: all 0.3s;
+    display: flex;
+    flex-direction: column;
+  }
+  .proposal:hover {
+    border-color: var(--border-active);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .proposal.recommended {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 4px 24px var(--accent-glow);
+  }
+  .proposal .proposal-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    align-self: flex-start;
+    margin-bottom: 16px;
+  }
+  .badge-a { background: rgba(240, 160, 80, 0.15); color: var(--warn); }
+  .badge-b { background: rgba(91, 141, 238, 0.15); color: var(--accent); }
+  .badge-c { background: rgba(80, 200, 120, 0.15); color: var(--success); }
+  .proposal h3 {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .proposal .proposal-synopsis {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+  .proposal .pros-cons {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .proposal .pros-cons dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-top: 12px;
+    margin-bottom: 4px;
+  }
+  .proposal .pros-cons dt.pro { color: var(--success); }
+  .proposal .pros-cons dt.con { color: var(--danger); }
+  .proposal .pros-cons dd {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: 0;
+    padding-left: 16px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .proposal .pros-cons dd::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 6px; height: 1px;
+    background: var(--text-dim);
+  }
+
+  /* Recommended star */
+  .recommended::after {
+    content: '推荐';
+    position: absolute;
+    top: -1px; right: 24px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #fff;
+    background: var(--accent);
+    padding: 4px 12px 6px;
+    border-radius: 0 0 4px 4px;
+  }
+
+  /* Split diagram */
+  .split-diagram {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  .split-panel {
+    background: var(--bg-sheet);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px;
+  }
+  .split-panel h3 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .layer-list {
+    list-style: none;
+  }
+  .layer-list li {
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .layer-list li .layer-name {
+    color: var(--text-bright);
+    font-weight: 500;
+  }
+  .layer-list li .layer-count {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Responsive */
+  @media (max-width: 1000px) {
+    .ctx-grid { grid-template-columns: repeat(3, 1fr); }
+    .problem-grid { grid-template-columns: 1fr; }
+    .proposals { grid-template-columns: 1fr; }
+    .split-diagram { grid-template-columns: 1fr; }
+    .cli-inner-grid { grid-template-columns: repeat(2, 1fr); }
+    .flow-steps { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); }
+  }
+  @media (max-width: 640px) {
+    .ctx-grid { grid-template-columns: repeat(2, 1fr); }
+    .container { padding: 0 20px; }
+    header { padding: 32px 0 24px; }
+    header h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="eyebrow">Architecture Review &middot; Feature #47 DDD Analysis</div>
+    <h1>apps/cli 架构审视<br>DDD Bounded Context <span>完整度分析</span></h1>
+    <p class="subtitle">
+      当 #47 将所有 services/ 按 DDD 拆分为 10 个 Bounded Context 后，
+      apps/cli 被定位为"薄入口/Inbound Adapter"。但 40+ 源文件、TEA 状态机、渲染管线、事件系统 —— 
+      它真的是"薄"的吗？本次分析审视 cli 内部架构，评估是否需要独立的 DDD 设计。
+    </p>
+  </header>
+
+  <!-- Section 1: Current Architecture -->
+  <section class="section">
+    <h2 class="section-title">当前架构 — #47 DDD Bounded Context Map</h2>
+
+    <!-- Bounded Context Grid -->
+    <div class="context-map">
+      <div class="ctx-grid">
+        <div class="ctx-card">
+          <span class="ctx-dot dot-core"></span>
+          <span class="ctx-name">Core</span>
+          <span class="ctx-label">Shared Kernel</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-runtime"></span>
+          <span class="ctx-name">Runtime</span>
+          <span class="ctx-label">API Façade</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-prompt"></span>
+          <span class="ctx-name">Prompt</span>
+          <span class="ctx-label">Guidance</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-provider"></span>
+          <span class="ctx-name">Provider</span>
+          <span class="ctx-label">LLM Client</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-policy"></span>
+          <span class="ctx-name">Policy</span>
+          <span class="ctx-label">费用/重试</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-project"></span>
+          <span class="ctx-name">Project</span>
+          <span class="ctx-label">Worktree</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-tools"></span>
+          <span class="ctx-name">Tools</span>
+          <span class="ctx-label">工具注册</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-storage"></span>
+          <span class="ctx-name">Storage</span>
+          <span class="ctx-label">Mongo/Qdrant</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-hook"></span>
+          <span class="ctx-name">Hook</span>
+          <span class="ctx-label">生命周期事件</span>
+        </div>
+        <div class="ctx-card">
+          <span class="ctx-dot dot-audit"></span>
+          <span class="ctx-name">Audit</span>
+          <span class="ctx-label">日志/审计</span>
+        </div>
+      </div>
+
+      <div class="connection-label">↓ Runtime API (inbound adapter boundary) ↓</div>
+
+      <!-- CLI Adapter -->
+      <div class="cli-adapter-box">
+        <span class="adapter-label">Inbound Adapter</span>
+        <div class="adapter-title">apps/cli &mdash; 薄入口层 (#47 定位)</div>
+        <div class="cli-inner-grid">
+          <div class="cli-inner-card">
+            <strong>TUI (TEA)</strong>
+            App &rarr; State &rarr; Msg &rarr; Runtime
+          </div>
+          <div class="cli-inner-card">
+            <strong>REPL</strong>
+            rustyline 备用交互
+          </div>
+          <div class="cli-inner-card">
+            <strong>run_orchestration</strong>
+            启动编排 + 参数解析
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Problems -->
+  <section class="section">
+    <h2 class="section-title">问题区域 — apps/cli 内部的"隐藏领域逻辑"</h2>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="pc-icon">&larrb;</div>
+        <h3>TEA 状态机与事件系统</h3>
+        <p>App / Msg / State / Cmd / Runtime 形成完整的 TEA 架构。30+ Msg 变体、多 Widget 协同、异步 Cmd 执行——这不是简单的"视图渲染"。</p>
+        <ul>
+          <li>App::update() 核心分支</li>
+          <li>Msg 路由与分发逻辑</li>
+          <li>Cmd 队列与副作用管理</li>
+          <li>多 Widget 间状态同步</li>
+        </ul>
+      </div>
+
+      <div class="problem-card">
+        <div class="pc-icon">&#9883;</div>
+        <h3>渲染管线 (output_area)</h3>
+        <p>output_area 不是简单 println。它包含语言检测、markdown 渲染、diff 高亮、滚动缓冲区、流式增量更新——有独立的渲染领域模型。</p>
+        <ul>
+          <li>语言检测与语法高亮</li>
+          <li>Markdown → ANSI 转换</li>
+          <li>Diff 块识别与着色</li>
+          <li>滚动缓冲区 &amp; 视口管理</li>
+        </ul>
+      </div>
+
+      <div class="problem-card">
+        <div class="pc-icon">&rlarr;</div>
+        <h3>输入处理管线 (input_area)</h3>
+        <p>input_area 处理斜杠命令解析、自动补全、多行输入模式、粘贴检测——已形成独立的输入领域模型。</p>
+        <ul>
+          <li>斜杠命令解析与补全</li>
+          <li>文件路径自动补全</li>
+          <li>多行输入状态机</li>
+          <li>粘贴检测与批量处理</li>
+        </ul>
+      </div>
+
+      <div class="problem-card">
+        <div class="pc-icon">&orarr;</div>
+        <h3>消息流管线</h3>
+        <p>LLM 响应 stream → token 累积 → block 拆分 → 增量渲染。这构成了一条完整的实时数据处理管线，每个阶段都有自己的领域规则。</p>
+        <ul>
+          <li>Stream → Block 转换器</li>
+          <li>增量渲染调度</li>
+          <li>工具调用结果注入</li>
+          <li>用户确认中断流程</li>
+        </ul>
+      </div>
+
+      <div class="problem-card">
+        <div class="pc-icon">&#8986;</div>
+        <h3>Session 生命周期</h3>
+        <p>Session 的创建、恢复、暂停、消息历史管理、上下文压缩触发——这些生命周期管理逻辑在 cli 中有具体的实现，不是简单的 API 调用。</p>
+        <ul>
+          <li>Session 创建/恢复/保存</li>
+          <li>上下文窗口管理</li>
+          <li>压缩触发策略</li>
+          <li>历史消息分页</li>
+        </ul>
+      </div>
+
+      <div class="problem-card">
+        <div class="pc-icon">&#9874;</div>
+        <h3>Widget 协同</h3>
+        <p>多个 Widget（output_area、input_area、status_line、help_popup）需要在运行时共享状态、响应统一事件、协调焦点——这本身就是一个小型 UI 领域。</p>
+        <ul>
+          <li>焦点管理系统</li>
+          <li>Widget 间事件传播</li>
+          <li>状态行实时更新</li>
+          <li>弹窗/模态叠加</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Message Flow -->
+    <div class="msg-flow">
+      <h3 style="font-family:var(--mono);font-size:13px;color:var(--text-dim);margin-bottom:24px;letter-spacing:0.1em;">STREAM → RENDER 消息流管线</h3>
+      <div class="flow-steps">
+        <div class="flow-step">
+          LLM Stream
+          <div class="fs-label">SSE / WS</div>
+        </div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step">
+          Token Accum
+          <div class="fs-label">增量缓冲</div>
+        </div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step">
+          Block Split
+          <div class="fs-label">text / tool_use</div>
+        </div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step">
+          Markdown
+          <div class="fs-label">→ ANSI转换</div>
+        </div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step">
+          Incremental Render
+          <div class="fs-label">ratatui 帧</div>
+        </div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step">
+          Display
+          <div class="fs-label">终端输出</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Architecture Proposals -->
+  <section class="section">
+    <h2 class="section-title">方案对比 — apps/cli 架构定位</h2>
+
+    <div class="proposals">
+      <!-- Proposal A -->
+      <div class="proposal">
+        <span class="proposal-badge badge-a">方案 A</span>
+        <h3>保持现状</h3>
+        <p class="proposal-synopsis">
+          apps/cli 继续作为 Runtime 的 thin adapter。内部结构不做 DDD 级拆分，维持 TEA 架构下的 monolith。
+        </p>
+        <dl class="pros-cons">
+          <dt class="pro">优势</dt>
+          <dd>改动最小，当前 TEA 架构已运行稳定</dd>
+          <dd>团队无需学习新的 cli 内部结构</dd>
+          <dt class="con">问题</dt>
+          <dd>40+ 文件单 crate 膨胀，违反文件行数限制</dd>
+          <dd>"薄入口"定位与实际复杂度不匹配</dd>
+          <dd>新增 TUI Widget 缺乏清晰归属</dd>
+        </dl>
+      </div>
+
+      <!-- Proposal B -->
+      <div class="proposal recommended">
+        <span class="proposal-badge badge-b">方案 B</span>
+        <h3>独立 Bounded Context</h3>
+        <p class="proposal-synopsis">
+          将 apps/cli 内部拆分为 3 个独立 Context：Display（渲染）、Interaction（输入交互）、Orchestration（编排），作为 UI 层的 DDD 设计。
+        </p>
+        <dl class="pros-cons">
+          <dt class="pro">优势</dt>
+          <dd>清晰领域边界：渲染/交互/编排解耦</dd>
+          <dd>利于 #36 Server 复用渲染管线</dd>
+          <dd>可独立测试每个 Context</dd>
+          <dt class="con">问题</dt>
+          <dd>过度工程化风险——UI 层是否需要 DDD</dd>
+          <dd>Context 间通信增加复杂度</dd>
+          <dd>与 TEA 架构的 fit 需要评估</dd>
+        </dl>
+      </div>
+
+      <!-- Proposal C -->
+      <div class="proposal">
+        <span class="proposal-badge badge-c">方案 C</span>
+        <h3>TEA 分层治理</h3>
+        <p class="proposal-synopsis">
+          保持 TEA 架构，按 display / interaction / event 三层组织目录与模块边界。不引入 DDD 概念，但达成结构化治理。
+        </p>
+        <dl class="pros-cons">
+          <dt class="pro">优势</dt>
+          <dd>保持 TEA 架构一致性，学习成本低</dd>
+          <dd>与 #50 CLI 目录整理自然衔接</dd>
+          <dd>改动可控，渐进式治理</dd>
+          <dt class="con">问题</dt>
+          <dd>缺乏统一的领域语言</dd>
+          <dd>Border 仍不清晰，依赖可能缠绕</dd>
+          <dd>未来 #36 Server 复用受限</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 4: Recommended Approach Detail -->
+  <section class="section">
+    <h2 class="section-title">推荐方案细节 — 方案 B: 独立 Bounded Context</h2>
+
+    <div class="split-diagram">
+      <div class="split-panel">
+        <h3>UI Domain — Bounded Context 划分</h3>
+        <ul class="layer-list">
+          <li>
+            <span class="layer-name">Display (渲染)</span>
+            <span class="layer-count">output_area + widgets + render</span>
+          </li>
+          <li style="border-color: var(--context-prompt);">
+            <span class="layer-name">Interaction (输入交互)</span>
+            <span class="layer-count">input_area + completion + command</span>
+          </li>
+          <li style="border-color: var(--context-project);">
+            <span class="layer-name">Orchestration (编排)</span>
+            <span class="layer-count">run_orchestration + session + msg_flow</span>
+          </li>
+          <li style="border-color: var(--context-core); opacity:0.5;">
+            <span class="layer-name">TEA Kernel (共享)</span>
+            <span class="layer-count">App / State / Msg / Cmd / Runtime</span>
+          </li>
+        </ul>
+      </div>
+      <div class="split-panel">
+        <h3>与 #50 的衔接</h3>
+        <ul class="layer-list">
+          <li style="border-color: var(--success);">
+            <span class="layer-name">#50 Step 1</span>
+            <span class="layer-count">收拢碎片文件 → 对应 Context</span>
+          </li>
+          <li style="border-color: var(--success);">
+            <span class="layer-name">#50 Step 2</span>
+            <span class="layer-count">命名规范化 → Ubiquitous Language</span>
+          </li>
+          <li style="border-color: var(--accent);">
+            <span class="layer-name">本计划 Step 3</span>
+            <span class="layer-count">Context 间 API 定义</span>
+          </li>
+          <li style="border-color: var(--accent);">
+            <span class="layer-name">本计划 Step 4</span>
+            <span class="layer-count">依赖守卫 + lint 规则</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>

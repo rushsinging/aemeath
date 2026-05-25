@@ -10,6 +10,7 @@
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
 | 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 实施中 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；后续已持续拆分 `bootstrap_chat` 的 setup helper。严格方案 B 已开始落地：workspace 已迁移到 `apps/` + `crates/`，`apps/cli` 只直接依赖 `crates/runtime`，`runtime::api` 过渡 re-export `core/provider/tools/prompt` 给入口层使用，`crates/{project,policy,prompt,storage,hook,audit}` 已建立 skeleton，`shared/` 与 `contexts/` 过渡目录已移除；新增 Cargo dependency graph、forbidden import、thin CLI、core upstream dependency 架构守卫并接入 Stop hook。Phase 2 持续瘦身 `apps/cli`：chat application 契约、sub-agent runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 已迁移到 `crates/runtime`；随后从 `core` 拆出 Guidance 到 `crates/prompt`，由 runtime 提供 HookRunner 适配器，CLI 改走 `runtime::api::prompt::guidance`。Feature #47 Chat runtime stream loop 已收束到 `runtime::api::chat` / `crates/runtime/src/chat/looping`，runtime 不知道 TUI，只暴露 Chat 事件与 queue port；CLI/TUI/HTTP 等入口通过 adapter 接入。CLI 继续保留 TUI/REPL adapter、prompt/tooling adapter、启动参数解析和 logging adapter。后续需逐步把 `core` 中的配置、hook、storage、policy 等职责继续下沉到对应 support domain，避免 `core` 变成大杂烩。`ChatRuntimePort` 的 `?Send` 过渡限制仍建议作为后续独立重构处理。 |
 | 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
+| 50 | CLI TUI 目录整理：收拢碎片、统一模块层级 | 中 | 实施中 | 未确认 | 详见 [spec](specs/050-cli-tui-directory-cleanup.md) |
 
 ### #49 AskUserQuestion 增加「以上全是」与「chat about this」选项
 
@@ -56,6 +57,37 @@
 3. 不在本 feature 中重做 AskUserQuestion 渲染缓存，相关修复归 bug #63 范围。
 4. 不替换或废弃既有 free_input：原 `allow_free_input=true` 行为保持，「chat about this」是 options 模式下的补充入口，不是替代。
 
+### #50 CLI 目录整理：收拢碎片、统一模块层级
+
+**状态**：实施中
+
+**问题**：
+1. **同名文件 + 目录并存** — `tui/input_area.rs` 与 `tui/input_area/`、`tui/key_hints.rs` 与 `tui/key_hints/`，模块层级混乱
+2. **render 三层散落** — `src/render/`（diff/markdown/progress/theme）、`src/tui/render/`（chat 薄壳）、`src/tui/widgets/`（diff/markdown/tool_display），职责重叠，diff/markdown 可能重复
+3. **status_bar 碎片化** — `status_bar.rs` + `status_bar_format.rs` + `status_bar_selection.rs` + 两个 test 文件，全摊在 `tui/` 根下
+4. **application/ 废弃骨架** — `application/mod.rs` + `application/chat/mod.rs`，功能已在 runtime + TUI app 中实现
+5. **repl/ 残留** — 旧版 rustyline REPL ~10 文件仍占位
+
+**目标**：
+- 删除 `tui/app/`，按功能聚合：
+
+```
+tui/
+├── core/       ← TEA 核心 (mod/App, msg, event, update, run_loop, runtime, cmd_exec, util)
+├── input/      ← 输入处理 (input_handler, mouse_handler, paste_handler) + input_area/
+├── display/    ← 渲染 (render, stream, task_window, resize, status_bar*)
+├── session/    ← 会话 (session_lifecycle, resume, processing)
+├── slash/      ← 不变
+├── state/      ← 不变
+├── widgets/    ← 不变
+└── completion/ ← 不变
+```
+
+- 同名文件+目录统一为目录形式（`input_area.rs`→`input_area/mod.rs`，`key_hints.rs`→`key_hints/mod.rs`）
+- 顶层 `src/render/` 内容合并到 `tui/widgets/`，删除 `src/render/`
+- 删除 `application/` 废弃骨架
+- 标记 repl/ 为 deprecated 或评估是否可删
+
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
 **状态**：实施中（严格方案 B 首轮 workspace 迁移已落地，等待后续 domain 职责拆分）
@@ -64,7 +96,7 @@
 
 **设计结论**：核心域为 Runtime；Agent 是配置化实体；Runtime 使用 Session / Chat / Agent Looping / Turn / TaskBoard 作为统一语言；Task 属于 Runtime，由 Agent Looping 推进，持久化投影进入 Storage；CLI/TUI/HTTP/SDK 等入口保持薄，只能通过 `runtime::api` 接入核心域；目标 workspace 采用 `apps/` + `crates/`，`apps/cli` 严格只直接依赖 `runtime` 和纯技术库，Runtime 作为唯一编排者调度 Project、Policy、Prompt、Provider、Tools、Storage、Hook、Audit，supporting domains 默认只依赖 `core`；Cargo dependency graph、forbidden import、public API visibility 和 Stop hook 必须共同防止双向依赖与边界绕过；COLA 作为工程分层参考，要求 Adapter / Application / Domain / Infrastructure / Client 职责分离；Audit 独立；PermissionDecision 与 HookDecision 分离；Prompt 独立承载 Skill / Guidance / instruction；完整设计见 [spec](specs/047-ddd-redesign.md)。
 
-**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用；随后继续把 `bootstrap_chat` 中的 setup 细节拆成 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`、`tooling` 等 helper，最后在 `runtime_support` 中收束 hook/session 初始化。严格方案 B 首轮实施已完成：workspace 顶层收敛为 `apps/` + `crates/`，`shared/kernel`、`contexts/provider`、`contexts/tool` 已迁移为 `crates/core`、`crates/provider`、`crates/tools`，并建立 `crates/runtime` 与 `crates/{project,policy,prompt,storage,hook,audit}` skeleton；`apps/cli` 的 Cargo 依赖已收束为只直接依赖 `runtime`，入口层通过 `runtime::api` 访问过渡 re-export；新增 dependency graph、forbidden import、thin CLI、core upstream dependency 架构守卫并接入 `.agents/hooks/check-architecture-guards.sh` 与 Stop hook。Phase 2 持续瘦身：chat application 契约、sub-agent runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 已迁移到 `crates/runtime`；Guidance 已从 `core` 拆入 `crates/prompt`，CLI 通过 `runtime::api::prompt::guidance` 使用，HookRunner 由 runtime 提供适配器。Feature #47 Chat runtime stream loop 已收束到 `runtime::api::chat`，内部落点为 `crates/runtime/src/chat/looping`：tool round、hook、AskUser、auto compact、task reminder、reflection 与日志输入构造由 runtime 承担；runtime 不知道 TUI，只暴露 Chat 事件与 queue port，CLI/TUI/HTTP 等入口通过 adapter 接入。CLI 侧继续保留 thin adapter、事件映射、渲染状态更新、启动参数解析和 logging adapter。下一步不再调整顶层目录，而是逐步把仍停留在 `core` 的配置、hook、storage、policy 等职责拆入对应 support domain。P9 已完成 CLI 非 UI 模块抽取：`reflection`、`mcp_loader`、`prompt`（prompt_build）、`image`、`logging_setup` 已迁入 `crates/runtime`，CLI 只保留纯 UI/入口层（TUI、REPL、render、CLI 参数解析、run_orchestration 薄壳）。后续从 `core` 继续拆分 support domain。P10 Batch 2 已完成 Storage domain：`logging/`、`history.rs`、`tool_result_storage.rs` 已从 `core` 迁入 `crates/storage`。后续继续 Batch 3-6。P10 Batch 3 已完成 Project domain：`worktree.rs` 从 `core` 迁入 `crates/project`，`WorkingContext` 保留在 `core::tool` 避免循环依赖。P11 已完成：`crates/` 重命名为 `services/`，新增 `services/share` 跨 service 公共抽象层，worktree 工具通过 `share::worktree_ops` 间接调用 `project`，门禁更新为 `tools→{core,share}`、`share→{core,project}`。
+**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用；随后继续把 `bootstrap_chat` 中的 setup 细节拆成 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`、`tooling` 等 helper，最后在 `runtime_support` 中收束 hook/session 初始化。严格方案 B 首轮实施已完成：workspace 顶层收敛为 `apps/` + `crates/`，`shared/kernel`、`contexts/provider`、`contexts/tool` 已迁移为 `crates/core`、`crates/provider`、`crates/tools`，并建立 `crates/runtime` 与 `crates/{project,policy,prompt,storage,hook,audit}` skeleton；`apps/cli` 的 Cargo 依赖已收束为只直接依赖 `runtime`，入口层通过 `runtime::api` 访问过渡 re-export；新增 dependency graph、forbidden import、thin CLI、core upstream dependency 架构守卫并接入 `.agents/hooks/check-architecture-guards.sh` 与 Stop hook。Phase 2 持续瘦身：chat application 契约、sub-agent runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 已迁移到 `crates/runtime`；Guidance 已从 `core` 拆入 `crates/prompt`，CLI 通过 `runtime::api::prompt::guidance` 使用，HookRunner 由 runtime 提供适配器。Feature #47 Chat runtime stream loop 已收束到 `runtime::api::chat`，内部落点为 `crates/runtime/src/chat/looping`：tool round、hook、AskUser、auto compact、task reminder、reflection 与日志输入构造由 runtime 承担；runtime 不知道 TUI，只暴露 Chat 事件与 queue port，CLI/TUI/HTTP 等入口通过 adapter 接入。CLI 侧继续保留 thin adapter、事件映射、渲染状态更新、启动参数解析和 logging adapter。下一步不再调整顶层目录，而是逐步把仍停留在 `core` 的配置、hook、storage、policy 等职责拆入对应 support domain。P9 已完成 CLI 非 UI 模块抽取：`reflection`、`mcp_loader`、`prompt`（prompt_build）、`image`、`logging_setup` 已迁入 `crates/runtime`，CLI 只保留纯 UI/入口层（TUI、REPL、render、CLI 参数解析、run_orchestration 薄壳）。后续从 `core` 继续拆分 support domain。P10 Batch 2 已完成 Storage domain：`logging/`、`history.rs`、`tool_result_storage.rs` 已从 `core` 迁入 `crates/storage`。后续继续 Batch 3-6。P10 Batch 3 已完成 Project domain：`worktree.rs` 从 `core` 迁入 `crates/project`，`WorkingContext` 保留在 `core::tool` 避免循环依赖。P11 已完成：`crates/` 重命名为 `services/`，新增 `services/share` 跨 service 公共抽象层，worktree 工具通过 `share::worktree_ops` 间接调用 `project`，门禁更新为 `tools→{core,share}`、`share→{core,project}`。P10 Batch 4 已完成：skill→prompt、hook→hook、scheduler→runtime、mcp+mcp_manager→tools、compact→runtime、agent+command+cost+reflection+session+state→runtime。task 和 memory 保留在 core（被 tools/project 跨 crate 引用），WorkspaceContext 类型保留在 core::session_types。core 最终只保留：config、error、memory、message、provider、session_types、string_idx、task、token_estimation、tool。
 
 **DDD 概念参考**：
 1. Strategic DDD：用统一语言（Ubiquitous Language）和限界上下文（Bounded Context）拆分业务语义边界；不同上下文之间通过 Context Map 明确关系。
