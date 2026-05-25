@@ -203,7 +203,6 @@ where
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
 
-        // Prepend CLAUDE.md user context for the API call
         let messages_for_api: Vec<Message> = {
             let mut api_msgs = Vec::new();
             if !user_context.is_empty() {
