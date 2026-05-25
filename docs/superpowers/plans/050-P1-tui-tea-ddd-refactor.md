@@ -62,8 +62,8 @@ App 字段分类：
 │              last_terminal_size, active_dialog, dialog_model_keys,
 │              ask_user_state, ask_user_reply_tx, should_exit, last_ctrlc
 ├── 组件引用:  output_area, input_area, status_bar
-└── 基础设施:  client, hook_runner, task_store, session_reminders,
-               memory_config, json_logger
+└── 运行时引用: client, hook_runner, task_store, session_reminders,
+               memory_config, json_logger（不是展示状态，应归 CmdExecutor）
 ```
 
 单一 struct 混合了 **4 类关注点**，每次新增交互都要加字段。
@@ -215,7 +215,7 @@ pub struct UiLayout {
 }
 ```
 
-1.5 `App` 简化为：
+1.5 `App` 简化为纯 State + Components + CmdExecutor：
 ```rust
 pub struct App {
     pub chat: ChatState,
@@ -225,22 +225,28 @@ pub struct App {
     pub output_area: OutputArea,
     pub input_area: InputArea,
     pub status_bar: StatusBar,
+    pub cmd_exec: CmdExecutor,
+}
+
+/// 副作用执行器：持有所有 runtime::api 基础设施引用
+/// CLI 只依赖 runtime，不直接依赖 llm / core / tools / provider
+pub struct CmdExecutor {
     pub client: Option<Arc<LlmClient>>,
     pub hook_runner: HookRunner,
     pub task_store: Option<Arc<TaskStore>>,
     pub session_reminders: Arc<Mutex<SessionReminders>>,
-    pub memory_config: MemoryConfig,
     pub json_logger: Option<Arc<Mutex<JsonLogger>>>,
 }
 ```
-字段：64 → 14
+字段：64 → 8
 
 1.6 机械替换所有 `self.xxx` 引用：
-- 聊天投影 `self.messages` → `self.chat.messages`
-- UI 布局 `self.should_exit` → `self.layout.should_exit`
-- 会话 `self.cwd` → `self.session.cwd`
-- 输入 `self.input_queue` → `self.input_state.input_queue`
-- 注意 `self.input_area`（组件引用）保持不变，避免和 `self.input_state` 混淆
+- 聊天投影 → `self.chat.xxx`：messages, pending_images, tool_call_active, active_tool_call_ids, turn_count, pending_reflection, is_processing, total_*_tokens, total_api_calls, last_input_tokens
+- UI 布局 → `self.layout.xxx`：output_area_rect, input_area_rect, status_bar_rect, last_terminal_size, active_dialog, dialog_model_keys, ask_user_state, ask_user_reply_tx, should_exit, last_ctrlc
+- 会话 → `self.session.xxx`：session_id, cwd, session_created_at, skills, cached_sessions, workspace_context, context_size, models_config, current_model_display, system_prompt_text, memory_config
+- 输入 → `self.input_state.xxx`：input_queue, just_pasted, last_click
+- 运行时引用 → `self.cmd_exec.xxx`：client, hook_runner, task_store, session_reminders, json_logger
+- 组件引用不变：self.output_area, self.input_area, self.status_bar
 
 **验收**：`cargo check` + `cargo test -p cli` 通过，`app/mod.rs` < 80 行。
 
@@ -291,20 +297,22 @@ pub struct App {
 
 ---
 
-### Phase 4: Cmd 执行器
+### Phase 4: Cmd 执行器（副作用集中隔离）
 
-**目标**：`run_loop.rs` + `processing.rs` 的副作用逻辑集中到 `cmd_exec.rs`。
+**目标**：`run_loop.rs` + `processing.rs` 的副作用逻辑集中到 `cmd_exec.rs`。基础设施引用从 `App` 移入 `CmdExecutor`。
 
 **步骤：**
 
-4.1 创建 `cmd_exec.rs`，定义 Cmd 执行函数：
-- `execute_spawn_processing(ctx)` → 调用 `processing::process_input`
-- `execute_save_session(msgs)` → 触发异步保存
-- `execute_read_clipboard_image()` → 剪贴板读图
-- `execute_process_image_file(path)` → 图片处理
-- `execute_hook_notification(msg, kind)` → Hook 通知
+4.1 `CmdExecutor` 持有所有 `runtime::api` 基础设施引用（已在 Phase 1 创建）：
 
-4.2 `run_loop.rs` 简化为编排循环（< 200 行）：
+4.2 创建 Cmd 执行方法：
+- `execute_spawn_processing(&self, ctx)` → 调用 `processing::process_input`，使用 `self.client` + `self.msg_tx`
+- `execute_save_session(&self, msgs)` → 触发异步会话保存
+- `execute_read_clipboard_image(&self)` → 剪贴板读图
+- `execute_process_image_file(&self, path)` → 图片处理
+- `execute_hook_notification(&self, msg, kind)` → 使用 `self.hook_runner`
+
+4.3 `run_loop.rs` 简化为编排循环（< 200 行）：
 ```rust
 loop {
     tokio::select! {
@@ -372,10 +380,11 @@ loop {
 | 项目 DDD 概念 | TUI 对应 | 关系 |
 |---|---|---|
 | `runtime::chat::domain::*`（Domain Model） | `tui::state::ChatState` | State 是 Domain DTO 的视图投影 |
-| `runtime::api`（Application 公开契约） | `tui::cmd_exec.rs` | 通过 api 调用执行 Cmd |
-| `crates/core::message::Message` | `tui::state::ChatState.messages` | 直接持有 Domain 类型引用 |
-| `crates/core::config::*` | `tui::state::SessionState` | 配置值的展示副本 |
+| `runtime::api`（Application 公开契约） | `tui::cmd_exec::CmdExecutor` | CmdExecutor 持有 api 类型引用，委托执行副作用 |
+| `crates/core::message::Message` | `tui::state::ChatState.messages` | 直接持有 Domain 类型引用（通过 runtime::api::core） |
+| `crates/core::config::*` | `tui::state::SessionState` | 配置值的展示副本（通过 runtime::api::core） |
 | 不存在 | `tui::render/` | Adapter 层渲染，DDD 无对应 |
+| 不存在 | `tui::state::InputState / UiLayout` | 纯 UI 状态，DDD 无对应 |
 
 ---
 

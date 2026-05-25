@@ -134,7 +134,7 @@ h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 
 <div class="stat bad"><div class="value">96</div><div class="label">当前文件数</div></div>
 <div class="stat good"><div class="value">55</div><div class="label">目标文件数 (−42%)</div></div>
 <div class="stat neutral"><div class="value">12,457</div><div class="label">当前代码行数</div></div>
-<div class="stat good"><div class="value">14→64</div><div class="label">App struct 字段收束</div></div>
+<div class="stat good"><div class="value">8→64</div><div class="label">App struct 字段收束</div></div>
 </div>
 
 <h2>当前 vs 目标 目录结构</h2>
@@ -181,7 +181,9 @@ h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 
 ├── <span class="dir">widgets/</span>  markdown.rs diff.rs
 │   tool_display.rs spinner.rs
 ├── <span class="dir">completion/</span> <span class="dir">theme/</span> <span class="dir">clipboard/</span>
-├── msg.rs  cmd_exec.rs  run_loop.rs  app.rs
+├── msg.rs  run_loop.rs
+├── cmd_exec.rs                   <span class="comment">CmdExecutor: client, hook_runner, task_store…</span>
+└── app.rs                        <span class="comment">State + Components + CmdExecutor</span>
 </pre>
 </div>
 </div>
@@ -260,7 +262,7 @@ h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 
 <div class="ddd-arrow">▼</div>
 <div class="ddd-layer adapter">
   <div class="layer-name">Adapter Layer — apps/cli/src/tui/</div>
-  <div class="layer-desc">展示适配器：State（DTO 视图投影）+ Render（ratatui 渲染）+ Cmd Exec（副作用桥接）</div>
+  <div class="layer-desc">State（DTO 视图投影）+ Components + CmdExecutor（持有 api 引用，执行副作用）+ Render（ratatui 渲染）</div>
 </div>
 </div>
 
@@ -280,7 +282,7 @@ h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 
 <h2>关键收益</h2>
 <div class="gain-grid">
 <div class="gain"><div class="gain-icon">📉</div><div class="gain-value">−42%</div><div class="gain-label">文件数 96→55</div></div>
-<div class="gain"><div class="gain-icon">🔒</div><div class="gain-value">−78%</div><div class="gain-label">App struct 字段 64→14</div></div>
+<div class="gain"><div class="gain-icon">🔒</div><div class="gain-value">−87%</div><div class="gain-label">App struct 字段 64→8</div></div>
 <div class="gain"><div class="gain-icon">🧩</div><div class="gain-value">4 BC</div><div class="gain-label">Bounded Context 隔离</div></div>
 </div>
 
@@ -289,7 +291,7 @@ h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 
 <div class="phase"><div class="phase-num">Phase 1</div><div class="phase-title">State 拆分</div><div class="phase-desc">App 64字段 → 4个 State struct。不移动文件，只做字段归组 + self.xxx 引用更新</div></div>
 <div class="phase"><div class="phase-num">Phase 2</div><div class="phase-title">Render 重组</div><div class="phase-desc">output_area 25文件 → render/chat/ + widgets/。渲染与状态分离</div></div>
 <div class="phase"><div class="phase-num">Phase 3</div><div class="phase-title">Update 收束</div><div class="phase-desc">key.rs 320行→&lt;250行。按 Msg 类型清晰分片</div></div>
-<div class="phase"><div class="phase-num">Phase 4</div><div class="phase-title">Cmd 执行器</div><div class="phase-desc">run_loop + processing 副作用集中到 cmd_exec.rs。run_loop &lt; 200行</div></div>
+<div class="phase"><div class="phase-num">Phase 4</div><div class="phase-title">Cmd 执行器</div><div class="phase-desc">基础设施引用→CmdExecutor。run_loop &lt; 200行</div></div>
 <div class="phase"><div class="phase-num">Phase 5</div><div class="phase-title">Feature 49</div><div class="phase-desc">确认 AskUserQuestion 重构后一致，归档 Feature 49</div></div>
 <div class="phase"><div class="phase-num">Phase 6</div><div class="phase-title">清理合规</div><div class="phase-desc">行数合规、pub→pub(crate)、cargo fmt + clippy</div></div>
 </div>
