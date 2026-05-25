@@ -195,7 +195,7 @@ impl App {
                 Cmd::ReadClipboardImage => {
                     let tx = ui_tx.clone();
                     tokio::spawn(async move {
-                        match crate::image::read_clipboard_image().await {
+                        match ::runtime::api::image::read_clipboard_image().await {
                             Ok(img) => {
                                 let size = img.final_size;
                                 let _ = tx.send(UiEvent::ClipboardImage(img)).await;
@@ -219,7 +219,7 @@ impl App {
                 Cmd::ProcessImageFile(path) => {
                     let tx = ui_tx.clone();
                     tokio::spawn(async move {
-                        match crate::image::process_image_file(&path).await {
+                        match ::runtime::api::image::process_image_file(&path).await {
                             Ok(img) => {
                                 let size = img.final_size;
                                 let _ = tx.send(UiEvent::ClipboardImage(img)).await;

@@ -120,7 +120,7 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
         RuntimeStreamEvent::Cancelled => UiEvent::Cancelled,
         RuntimeStreamEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
         RuntimeStreamEvent::TurnChanged(turn) => {
-            crate::logging_setup::set_current_turn(turn);
+            ::runtime::api::bootstrap::set_current_turn(turn);
             UiEvent::SystemMessage(String::new())
         }
         RuntimeStreamEvent::StopFailureHook {

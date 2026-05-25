@@ -1,11 +1,6 @@
 mod application;
 mod cli;
-mod image;
-mod logging_setup;
-mod mcp_loader;
 mod model_selection;
-mod prompt;
-mod reflection;
 mod render;
 mod repl;
 mod run_orchestration;
@@ -17,7 +12,7 @@ use cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() {
-    logging_setup::init_panic_hook();
+    ::runtime::api::bootstrap::init_panic_hook();
 
     let cli = Cli::parse();
 

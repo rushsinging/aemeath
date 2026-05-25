@@ -304,6 +304,16 @@ impl LlmProvider for OpenAICompatibleProvider {
                         e,
                         source_chain,
                     );
+                    // SSE 流被上游截断是稳定性失败（不是瞬时网络抖动），
+                    // 重试流式请求无法解决——直接跳出重试循环走 non-stream fallback。
+                    if e.contains("upstream truncated") {
+                        handler.on_error(&format!(
+                            "Streaming error: {}, switching to non-streaming...",
+                            e
+                        ));
+                        last_error = Some(crate::LlmError::Stream(e));
+                        break;
+                    }
                     handler.on_error(&format!("Streaming error: {}, retrying...", e));
                     last_error = Some(crate::LlmError::Stream(e));
                     continue;

@@ -7,7 +7,7 @@ pub(super) async fn build_static_prompt(
     reasoning: bool,
     config_file: Option<&::runtime::api::core::config::Config>,
     hook_runner: &::runtime::api::core::hook::HookRunner,
-    prompt_parts: crate::prompt::SystemPromptParts,
+    prompt_parts: ::runtime::api::prompt_build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
     let skills_guard = skills.lock().await;

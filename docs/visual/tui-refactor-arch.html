@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TUI Architecture Refactor — TEA + DDD</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e17;
+  --panel: #111827;
+  --border: #1e293b;
+  --cyan: #06b6d4;
+  --blue: #3b82f6;
+  --amber: #f59e0b;
+  --green: #10b981;
+  --red: #ef4444;
+  --text: #cbd5e1;
+  --muted: #64748b;
+  --accent: #818cf8;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background: radial-gradient(ellipse at 20% 50%, rgba(6,182,212,0.06) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 20%, rgba(129,140,248,0.04) 0%, transparent 50%);
+  pointer-events: none; z-index: 0;
+}
+.container { max-width: 1100px; margin:0 auto; padding: 40px 24px; position:relative; z-index:1; }
+h1 {
+  font-size: 2.8rem; font-weight: 800; letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--cyan) 0%, var(--accent) 50%, var(--blue) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  margin-bottom: 6px;
+}
+h2 { font-size: 1.6rem; font-weight: 700; color: #e2e8f0; margin: 48px 0 16px; letter-spacing: -0.02em; }
+h2::before { content: '◆ '; color: var(--cyan); font-size: 0.8em; }
+h3 { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 20px 0 8px; }
+.subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 40px; }
+.stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:40px; }
+.stat {
+  background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:20px;
+  position:relative; overflow:hidden;
+}
+.stat::after { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
+.stat.bad::after { background: var(--red); }
+.stat.good::after { background: var(--green); }
+.stat.neutral::after { background: var(--amber); }
+.stat .value { font-family:'JetBrains Mono',monospace; font-size:2.2rem; font-weight:700; color:#e2e8f0; }
+.stat .label { color:var(--muted); font-size:0.85rem; margin-top:4px; }
+.compare { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.panel-box {
+  background: var(--panel); border:1px solid var(--border); border-radius:16px;
+  padding:24px; position:relative;
+}
+.panel-box.before { border-color: rgba(239,68,68,0.3); }
+.panel-box.after { border-color: rgba(16,185,129,0.3); }
+.panel-box .badge {
+  position:absolute; top:-12px; right:20px; font-size:0.75rem; font-weight:700;
+  padding:4px 12px; border-radius:20px; font-family:'JetBrains Mono',monospace;
+  letter-spacing:0.04em;
+}
+.badge.before { background:rgba(239,68,68,0.15); color:var(--red); }
+.badge.after { background:rgba(16,185,129,0.15); color:var(--green); }
+.tree { font-family:'JetBrains Mono',monospace; font-size:0.82rem; line-height:1.8; color:var(--text); }
+.tree .dir { color: var(--cyan); font-weight:700; }
+.tree .file { color: var(--muted); }
+.tree .comment { color: rgba(100,116,139,0.5); font-style:italic; }
+.decomp { display:flex; gap:24px; flex-wrap:wrap; margin:20px 0; }
+.decomp .card {
+  flex:1 1 200px; min-width:200px; background:var(--panel);
+  border:1px solid var(--border); border-radius:14px; padding:20px;
+  position:relative; overflow:hidden;
+}
+.decomp .card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+.decomp .card:nth-child(1)::before { background: var(--cyan); }
+.decomp .card:nth-child(2)::before { background: var(--accent); }
+.decomp .card:nth-child(3)::before { background: var(--amber); }
+.decomp .card:nth-child(4)::before { background: var(--blue); }
+.decomp .card .card-title { font-weight:700; font-size:1rem; margin-bottom:4px; }
+.decomp .card .card-fields { color:var(--muted); font-size:0.75rem; margin-bottom:10px; }
+.decomp .card ul { list-style:none; font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--text); }
+.decomp .card ul li { padding:2px 0; }
+.decomp .card ul li::before { content:'· '; color:var(--muted); }
+
+.ddd-layers { margin:20px 0; }
+.ddd-layer { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 20px; margin-bottom:12px; position:relative; }
+.ddd-layer.domain { border-left:3px solid var(--cyan); }
+.ddd-layer.app { border-left:3px solid var(--accent); }
+.ddd-layer.adapter { border-left:3px solid var(--green); }
+.ddd-layer .layer-name { font-weight:700; font-size:0.9rem; }
+.ddd-layer .layer-desc { font-size:0.8rem; color:var(--muted); margin-top:2px; }
+.ddd-arrow { text-align:center; color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:1.1rem; margin:4px 0; }
+
+.flow-chart { display:flex; align-items:center; gap:12px; margin:20px 0; flex-wrap:wrap; }
+.flow-node {
+  background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  padding:12px 18px; font-family:'JetBrains Mono',monospace; font-size:0.82rem;
+  text-align:center; white-space:nowrap;
+}
+.flow-node.entry { border-color:rgba(6,182,212,0.5); color:var(--cyan); }
+.flow-node.proc { border-color:rgba(129,140,248,0.5); color:var(--accent); }
+.flow-node.exit { border-color:rgba(16,185,129,0.5); color:var(--green); }
+.flow-arrow { color:var(--muted); font-size:1.2rem; }
+
+.gain-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:20px 0; }
+.gain { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:20px; text-align:center; }
+.gain .gain-icon { font-size:2rem; margin-bottom:8px; }
+.gain .gain-value { font-family:'JetBrains Mono',monospace; font-size:1.5rem; font-weight:700; color:var(--green); }
+.gain .gain-label { font-size:0.82rem; color:var(--muted); margin-top:4px; }
+
+.phase-list { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:20px 0; }
+.phase { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; }
+.phase .phase-num { font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--cyan); font-size:0.85rem; }
+.phase .phase-title { font-weight:700; margin:6px 0 4px; }
+.phase .phase-desc { font-size:0.8rem; color:var(--muted); }
+
+.footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--border); color:var(--muted); font-size:0.8rem; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Feature 50: TUI 架构重构</h1>
+<p class="subtitle">TEA（The Elm Architecture）+ DDD 分层 · Adapter 层展示状态与渲染</p>
+
+<div class="stat-grid">
+<div class="stat bad"><div class="value">96</div><div class="label">当前文件数</div></div>
+<div class="stat good"><div class="value">55</div><div class="label">目标文件数 (−42%)</div></div>
+<div class="stat neutral"><div class="value">12,457</div><div class="label">当前代码行数</div></div>
+<div class="stat good"><div class="value">14→64</div><div class="label">App struct 字段收束</div></div>
+</div>
+
+<h2>当前 vs 目标 目录结构</h2>
+<div class="compare">
+<div class="panel-box before"><span class="badge before">BEFORE</span>
+<pre class="tree">
+<span class="dir">tui/</span>                              <span class="comment">96 files, 12k+ lines</span>
+├── <span class="dir">app/</span>
+│   ├── mod.rs                       <span class="comment">App: 64 fields</span>
+│   ├── update.rs + <span class="dir">update/</span>     <span class="comment">8 sub-files</span>
+│   ├── run_loop.rs                  <span class="comment">loop + render orchestration</span>
+│   ├── processing.rs                <span class="comment">LLM process spawn</span>
+│   ├── render.rs / runtime.rs / msg.rs
+│   └── task_list.rs, task_window.rs
+├── <span class="dir">output_area/</span>                  <span class="comment">25 files mixed concerns</span>
+│   ├── render.rs, render_blocks.rs
+│   ├── content.rs, scroll.rs
+│   ├── selection.rs, streaming.rs
+│   ├── markdown.rs, markdown/
+│   ├── tool_display.rs, tool_display/
+│   ├── diff.rs, display.rs, spinner.rs ...
+├── <span class="dir">input_area/</span>                   <span class="comment">6 files</span>
+├── <span class="dir">status_bar/</span>, <span class="dir">dialog/</span>, <span class="dir">key_hints/</span>
+├── <span class="dir">completion/</span>, <span class="dir">theme/</span>, <span class="dir">clipboard/</span>
+</pre>
+</div>
+
+<div class="panel-box after"><span class="badge after">AFTER</span>
+<pre class="tree">
+<span class="dir">tui/</span>                              <span class="comment">~55 files</span>
+├── <span class="dir">state/</span>                        <span class="comment">DDD 展示状态</span>
+│   ├── mod.rs chat.rs input.rs
+│   └── session.rs layout.rs
+├── <span class="dir">update/</span>                       <span class="comment">纯状态转换</span>
+│   ├── mod.rs key.rs paste.rs
+│   ├── mouse.rs resize.rs enter.rs
+│   └── done.rs ask_user.rs ui_event.rs
+├── <span class="dir">render/</span>                       <span class="comment">纯渲染层</span>
+│   ├── mod.rs input.rs
+│   ├── status_bar.rs dialog.rs
+│   ├── task_list.rs
+│   └── <span class="dir">chat/</span> content.rs blocks.rs
+│       scroll.rs selection.rs streaming.rs
+├── <span class="dir">widgets/</span>  markdown.rs diff.rs
+│   tool_display.rs spinner.rs
+├── <span class="dir">completion/</span> <span class="dir">theme/</span> <span class="dir">clipboard/</span>
+├── msg.rs  cmd_exec.rs  run_loop.rs  app.rs
+</pre>
+</div>
+</div>
+
+<h2>State 拆分：64 字段 → 4 个 Bounded Context</h2>
+<div class="decomp">
+<div class="card">
+  <div class="card-title" style="color:var(--cyan)">ChatState</div>
+  <div class="card-fields">12 fields</div>
+  <ul>
+    <li>messages: Vec&lt;Message&gt;</li>
+    <li>pending_images</li>
+    <li>tool_call_active</li>
+    <li>active_tool_call_ids</li>
+    <li>turn_count</li>
+    <li>pending_reflection</li>
+    <li>is_processing</li>
+    <li>total_*_tokens</li>
+    <li>total_api_calls</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title" style="color:var(--accent)">InputState</div>
+  <div class="card-fields">3 fields</div>
+  <ul>
+    <li>input_queue</li>
+    <li>just_pasted</li>
+    <li>last_click</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title" style="color:var(--amber)">SessionState</div>
+  <div class="card-fields">11 fields</div>
+  <ul>
+    <li>session_id</li>
+    <li>cwd: PathBuf</li>
+    <li>session_created_at</li>
+    <li>skills: HashMap</li>
+    <li>cached_sessions</li>
+    <li>workspace_context</li>
+    <li>context_size</li>
+    <li>models_config</li>
+    <li>current_model_display</li>
+    <li>system_prompt_text</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title" style="color:var(--blue)">UiLayout</div>
+  <div class="card-fields">10 fields</div>
+  <ul>
+    <li>output_area_rect</li>
+    <li>input_area_rect</li>
+    <li>status_bar_rect</li>
+    <li>active_dialog</li>
+    <li>dialog_model_keys</li>
+    <li>ask_user_state</li>
+    <li>should_exit</li>
+    <li>last_ctrlc</li>
+  </ul>
+</div>
+</div>
+
+<h2>DDD 分层对接</h2>
+<div class="ddd-layers">
+<div class="ddd-layer domain">
+  <div class="layer-name">Domain Layer — crates/runtime/</div>
+  <div class="layer-desc">领域模型（Aggregate Root）· chat::domain · Domain Service · Repository Port</div>
+</div>
+<div class="ddd-arrow">│  runtime::api::{ChatDto, ConfigDto, SessionDto}</div>
+<div class="ddd-arrow">▼</div>
+<div class="ddd-layer app">
+  <div class="layer-name">Application Layer — crates/runtime::api</div>
+  <div class="layer-desc">公开契约：DTO、Error、Port 接口。TUI 不直接访问 Domain Model。</div>
+</div>
+<div class="ddd-arrow">│  runtime::api::* 调用</div>
+<div class="ddd-arrow">▼</div>
+<div class="ddd-layer adapter">
+  <div class="layer-name">Adapter Layer — apps/cli/src/tui/</div>
+  <div class="layer-desc">展示适配器：State（DTO 视图投影）+ Render（ratatui 渲染）+ Cmd Exec（副作用桥接）</div>
+</div>
+</div>
+
+<h2>TEA 运行循环</h2>
+<div class="flow-chart">
+<div class="flow-node entry">Terminal Event</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node proc">update(State, Msg)</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node proc">(State', Cmd)</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node proc">cmd_exec(Cmd)</div>
+<div class="flow-arrow">→</div>
+<div class="flow-node exit">render(State, Frame)</div>
+</div>
+
+<h2>关键收益</h2>
+<div class="gain-grid">
+<div class="gain"><div class="gain-icon">📉</div><div class="gain-value">−42%</div><div class="gain-label">文件数 96→55</div></div>
+<div class="gain"><div class="gain-icon">🔒</div><div class="gain-value">−78%</div><div class="gain-label">App struct 字段 64→14</div></div>
+<div class="gain"><div class="gain-icon">🧩</div><div class="gain-value">4 BC</div><div class="gain-label">Bounded Context 隔离</div></div>
+</div>
+
+<h2>实施阶段</h2>
+<div class="phase-list">
+<div class="phase"><div class="phase-num">Phase 1</div><div class="phase-title">State 拆分</div><div class="phase-desc">App 64字段 → 4个 State struct。不移动文件，只做字段归组 + self.xxx 引用更新</div></div>
+<div class="phase"><div class="phase-num">Phase 2</div><div class="phase-title">Render 重组</div><div class="phase-desc">output_area 25文件 → render/chat/ + widgets/。渲染与状态分离</div></div>
+<div class="phase"><div class="phase-num">Phase 3</div><div class="phase-title">Update 收束</div><div class="phase-desc">key.rs 320行→&lt;250行。按 Msg 类型清晰分片</div></div>
+<div class="phase"><div class="phase-num">Phase 4</div><div class="phase-title">Cmd 执行器</div><div class="phase-desc">run_loop + processing 副作用集中到 cmd_exec.rs。run_loop &lt; 200行</div></div>
+<div class="phase"><div class="phase-num">Phase 5</div><div class="phase-title">Feature 49</div><div class="phase-desc">确认 AskUserQuestion 重构后一致，归档 Feature 49</div></div>
+<div class="phase"><div class="phase-num">Phase 6</div><div class="phase-title">清理合规</div><div class="phase-desc">行数合规、pub→pub(crate)、cargo fmt + clippy</div></div>
+</div>
+
+<div class="footer">Feature 50 — TUI Arch Refactor · <a href="docs/superpowers/plans/050-P1-tui-tea-ddd-refactor.md" style="color:var(--cyan)">Implementation Plan</a></div>
+</div>
+</body>
+</html>

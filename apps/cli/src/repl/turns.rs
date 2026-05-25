@@ -244,7 +244,7 @@ async fn run_reflection(
     client: &LlmClient,
     system_prompt_text: &str,
 ) {
-    if let Some(text) = crate::reflection::run_reflection(
+    if let Some(text) = ::runtime::api::chat::reflection::run_reflection(
         memory_config,
         turn_number,
         messages,

@@ -203,7 +203,7 @@ impl super::App {
                     ))
                     .await
                     .ok();
-                    match crate::image::read_clipboard_image().await {
+                    match ::runtime::api::image::read_clipboard_image().await {
                         Ok(img) => {
                             let size = img.final_size;
                             tx.send(UiEvent::ClipboardImage(img)).await.ok();

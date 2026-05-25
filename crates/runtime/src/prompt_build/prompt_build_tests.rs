@@ -1,5 +1,5 @@
 use super::*;
-use ::runtime::api::core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use crate::api::core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -198,7 +198,7 @@ async fn test_collect_memory_context_zero_limit() {
 
 #[test]
 fn test_memory_context_options_from_config_happy_path() {
-    let config = ::runtime::api::core::config::MemoryConfig {
+    let config = crate::api::core::config::MemoryConfig {
         enabled: true,
         max_entries: 42,
         max_inject_count: 3,
@@ -215,7 +215,7 @@ fn test_memory_context_options_from_config_happy_path() {
 
 #[test]
 fn test_memory_context_options_from_config_boundary_zero_inject_count() {
-    let config = ::runtime::api::core::config::MemoryConfig {
+    let config = crate::api::core::config::MemoryConfig {
         enabled: true,
         max_entries: 42,
         max_inject_count: 0,
@@ -232,7 +232,7 @@ fn test_memory_context_options_from_config_boundary_zero_inject_count() {
 
 #[test]
 fn test_memory_context_options_from_config_disabled_uses_zero_inject_count() {
-    let config = ::runtime::api::core::config::MemoryConfig {
+    let config = crate::api::core::config::MemoryConfig {
         enabled: false,
         max_entries: 42,
         max_inject_count: 3,

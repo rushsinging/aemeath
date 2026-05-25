@@ -1,4 +1,4 @@
-use crate::image::{is_image_file, process_image_file, ProcessedImage};
+use ::runtime::api::image::{is_image_file, process_image_file, ProcessedImage};
 use std::path::Path;
 
 /// Extract image file paths from user input text.

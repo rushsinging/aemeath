@@ -42,7 +42,7 @@ pub struct App {
     pub total_api_calls: u64,
     pub last_input_tokens: u64,
     pub should_exit: bool,
-    pub pending_images: Vec<crate::image::ProcessedImage>,
+    pub pending_images: Vec<::runtime::api::image::ProcessedImage>,
     pub output_area_rect: Rect,
     pub input_area_rect: Rect,
     pub status_bar_rect: Rect,

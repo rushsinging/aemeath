@@ -9,7 +9,7 @@ impl super::App {
             // Empty paste — try to read clipboard image
             let output_tx = ui_tx.clone();
             tokio::spawn(async move {
-                match crate::image::read_clipboard_image().await {
+                match ::runtime::api::image::read_clipboard_image().await {
                     Ok(img) => {
                         let size = img.final_size;
                         let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
@@ -28,7 +28,7 @@ impl super::App {
                 }
             });
             self.output_area.push_system("[reading clipboard image...]");
-        } else if crate::image::is_image_file(text.trim()) {
+        } else if ::runtime::api::image::is_image_file(text.trim()) {
             self.output_area
                 .push_system(&format!("[loading image: {}...]", text.trim()));
             // We can't await here directly since this is a sync method,
@@ -36,7 +36,7 @@ impl super::App {
             let path = text.trim().to_string();
             let tx = ui_tx.clone();
             tokio::spawn(async move {
-                match crate::image::process_image_file(&path).await {
+                match ::runtime::api::image::process_image_file(&path).await {
                     Ok(img) => {
                         let size = img.final_size;
                         let _ = tx.send(UiEvent::ClipboardImage(img)).await;

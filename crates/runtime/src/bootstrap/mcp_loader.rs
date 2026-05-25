@@ -1,7 +1,7 @@
-use ::runtime::api::core::config::paths;
-use ::runtime::api::core::mcp::McpServerConfig;
-use ::runtime::api::core::mcp_manager::McpConnectionManager;
-use ::runtime::api::core::tool::ToolRegistry;
+use crate::api::core::config::paths;
+use crate::api::core::mcp::McpServerConfig;
+use crate::api::core::mcp_manager::McpConnectionManager;
+use crate::api::core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -112,7 +112,7 @@ pub async fn spawn_mcp_connect(
 #[cfg(test)]
 mod tests {
     use super::{merge_mcp_servers, parse_mcp_servers_config};
-    use ::runtime::api::core::mcp::McpServerConfig;
+    use crate::api::core::mcp::McpServerConfig;
     use serde_json::json;
     use std::collections::HashMap;
 
