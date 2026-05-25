@@ -11,8 +11,8 @@ BIN_NAME="aemeath"
 TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/aemeath-target}"
 export CARGO_TARGET_DIR="$TARGET_DIR"
 
-echo ">>> cargo build --release --package aemeath-cli --target-dir $TARGET_DIR"
-cargo build --release --package aemeath-cli --target-dir "$TARGET_DIR"
+echo ">>> cargo build --release --package cli --target-dir $TARGET_DIR"
+cargo build --release --package cli --target-dir "$TARGET_DIR"
 
 mkdir -p "$INSTALL_DIR"
 cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"

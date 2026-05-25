@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "cli",
-    "packages/core",
-    "packages/llm",
-    "packages/tools",
+    "apps/cli",
+    "shared/kernel",
+    "contexts/provider",
+    "contexts/tool",
 ]
 
 [workspace.dependencies]

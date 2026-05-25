@@ -7,6 +7,24 @@ FAILED=0
 COUNT=0
 DETAILS=()
 
+SOURCE_ROOTS=(
+  "$ROOT/apps"
+  "$ROOT/contexts"
+  "$ROOT/shared"
+)
+
+EXISTING_ROOTS=()
+for source_root in "${SOURCE_ROOTS[@]}"; do
+  if [[ -d "$source_root" ]]; then
+    EXISTING_ROOTS+=("$source_root")
+  fi
+done
+
+if [[ "${#EXISTING_ROOTS[@]}" -eq 0 ]]; then
+  echo "ERROR: expected DDD source roots under apps/, contexts/, or shared/." >&2
+  exit 2
+fi
+
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT/}"
   lines="$(wc -l < "$file" | tr -d ' ')"
@@ -17,7 +35,7 @@ while IFS= read -r -d '' file; do
     FAILED=1
     COUNT=$((COUNT + 1))
   fi
-done < <(find "$ROOT" -path "$ROOT/target" -prune -o -path "$ROOT/.git" -prune -o -path "$ROOT/.worktrees" -prune -o -name '*.rs' -print0)
+done < <(find "${EXISTING_ROOTS[@]}" -name '*.rs' -print0)
 if [[ "$FAILED" -ne 0 ]]; then
   summary="Rust file line limit exceeded ($COUNT). Split files to keep each .rs <= $LIMIT lines."
   reason="$summary"
