@@ -248,7 +248,7 @@ pub struct CmdExecutor {
 - 运行时引用 → `self.cmd_exec.xxx`：client, hook_runner, task_store, session_reminders, json_logger
 - 组件引用不变：self.output_area, self.input_area, self.status_bar
 
-**验收**：`cargo check` + `cargo test -p cli` 通过，`app/mod.rs` < 80 行。
+**验收**：`cargo check` + `cargo test -p cli` 通过，`app/mod.rs` < 80 行。Phase 1 结束时新增测试覆盖见下方「测试策略」。
 
 ---
 
@@ -293,7 +293,7 @@ pub struct CmdExecutor {
 
 3.3 确保每个 update 子文件只访问对应的 State 子对象（如键盘分支只读 `layout` + `input_state`）。
 
-**验收**：无单个 update 子文件超过 250 行。
+**验收**：无单个 update 子文件超过 250 行。Phase 3 结束时新增测试覆盖见下方「测试策略」。
 
 ---
 
@@ -326,7 +326,7 @@ loop {
 }
 ```
 
-**验收**：`run_loop.rs` < 200 行，`processing.rs` < 270 行。
+**验收**：`run_loop.rs` < 200 行，`processing.rs` < 270 行。Phase 4 结束时新增测试覆盖见下方「测试策略」。
 
 ---
 
@@ -385,6 +385,116 @@ loop {
 | `crates/core::config::*` | `tui::state::SessionState` | 配置值的展示副本（通过 runtime::api::core） |
 | 不存在 | `tui::render/` | Adapter 层渲染，DDD 无对应 |
 | 不存在 | `tui::state::InputState / UiLayout` | 纯 UI 状态，DDD 无对应 |
+
+---
+
+## 测试策略
+
+TEA 架构下，更新（update）是纯函数——不调 IO、不碰 runtime::api、无副作用。**测试不需要启动终端，直接构造 State + Msg，断言新 State 和 Cmd。**
+
+### 随 Phase 新增的测试
+
+**Phase 1 — State 构造测试（`state/tests.rs`）：**
+
+测试每个 State struct 的 `new()` / `default()` 行为：
+
+```rust
+fn new_chat_state() -> ChatState {
+    ChatState { messages: vec![], pending_images: vec![], /* ... */ }
+}
+
+#[test]
+fn test_chat_state_default_messages_empty() {
+    let state = new_chat_state();
+    assert!(state.messages.is_empty());
+    assert!(!state.is_processing);
+}
+
+#[test]
+fn test_session_state_default_model_display() {
+    let state = SessionState::new(config);
+    assert!(!state.current_model_display.is_empty());
+}
+
+#[test]
+fn test_ui_layout_default_not_exiting() {
+    let layout = UiLayout::default();
+    assert!(!layout.should_exit);
+    assert!(layout.active_dialog.is_none());
+}
+```
+
+**Phase 3 — Update 纯函数测试（`update/tests.rs`）：**
+
+每个 Msg 分支至少一个测试：输入 State → Msg → 断言输出 State 和 Cmd 变体：
+
+```rust
+#[test]
+fn test_key_enter_submits_input() {
+    let mut state = make_test_state();
+    state.input_state.input_queue.push_back("/quit".into());
+
+    let (new_state, cmd) = update(state, Msg::Key(Enter));
+
+    assert!(new_state.layout.should_exit);
+    assert!(matches!(cmd, Cmd::Quit));
+}
+
+#[test]
+fn test_key_ctrl_c_during_processing_sends_cancel() {
+    let mut state = make_test_state();
+    state.chat.is_processing = true;
+
+    let (_state, cmd) = update(state, Msg::Key(Ctrl('c')));
+
+    // Ctrl+C 产生 CancelCmd，不产生 Quit
+    assert!(matches!(cmd, Cmd::CancelSpinner(_)));
+    assert!(!_state.layout.should_exit);
+}
+
+#[test]
+fn test_paste_sets_flag_and_queues() {
+    let mut state = make_test_state();
+    let (new_state, _cmd) = update(state, Msg::Paste("hello".into()));
+
+    assert!(new_state.input_state.just_pasted);
+    // ...
+}
+```
+
+**Phase 4 — Cmd 构造测试：**
+
+断言 update 产生的 Cmd 变体包含正确的参数（不执行副作用）：
+
+```rust
+#[test]
+fn test_spawn_processing_cmd_has_ctx() {
+    let state = make_test_state();
+    let (_, cmd) = update(state, Msg::StartProcessing(ctx.clone()));
+
+    assert!(matches!(
+        cmd,
+        Cmd::SpawnProcessing { ctx, .. } if ctx.msg_count == 1
+    ));
+}
+```
+
+### 不需测试的部分
+
+| 跳过的 | 原因 |
+|---|---|
+| Render 输出 | 依赖 `ratatui::Frame`，渲染正确性手工确认 |
+| CmdExecutor 执行 | 内部调用 `runtime::api`，副作用已有 runtime 层测试覆盖 |
+| Theme / Clipboard / Completion | 无新增逻辑，已有测试覆盖 |
+| 存量 output_area 渲染测试 | 路径迁移，不修改断言 |
+
+### 测试点汇总
+
+| Phase | 新增测试文件 | 最少用例数 |
+|---|---|---|
+| Phase 1 | `state/tests.rs` | 9（ChatState ×3, InputState ×1, SessionState ×2, UiLayout ×3） |
+| Phase 3 | `update/tests.rs` | 6（Enter ×2, Ctrl+C ×1, Paste ×1, AskUser ×1, Resize ×1） |
+| Phase 4 | `cmd_exec/tests.rs` | 3（SpawnProcessing ×1, SaveSession ×1, HookNotify ×1） |
 
 ---
 
