@@ -1,16 +1,17 @@
-use super::{App, TerminalSize};
+use super::App;
+use crate::tui::state::TerminalSize;
 
 impl App {
     pub(crate) fn handle_resize(&mut self, width: u16, height: u16) {
         let size = TerminalSize { width, height };
-        if self.last_terminal_size == Some(size) {
+        if self.layout.last_terminal_size == Some(size) {
             return;
         }
 
-        self.last_terminal_size = Some(size);
-        let visible_height_hint = self.output_area_rect.height.max(height.saturating_sub(7));
+        self.layout.last_terminal_size = Some(size);
+        let visible_height_hint = self.layout.output_area_rect.height.max(height.saturating_sub(7));
         self.output_area.handle_resize(width, visible_height_hint);
-        let input_width = self.input_area_rect.width.max(width);
+        let input_width = self.layout.input_area_rect.width.max(width);
         self.input_area.handle_resize(input_width);
     }
 }

@@ -5,6 +5,7 @@ pub mod dialog;
 pub mod input_area;
 pub mod output_area;
 pub mod safe_text;
+pub mod state;
 pub mod status_bar;
 pub mod syntax;
 pub mod theme;

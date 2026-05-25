@@ -30,21 +30,21 @@ impl App {
     ) -> UpdateResult {
         match ev {
             UiEvent::Text(text) => {
-                if self.tool_call_active {
+                if self.chat.tool_call_active {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
-                    self.tool_call_active = false;
-                    self.active_tool_call_ids.clear();
+                    self.chat.tool_call_active = false;
+                    self.chat.active_tool_call_ids.clear();
                 }
                 self.output_area.set_spinner_phase("Generating...");
                 self.output_area.append_assistant_text(&text);
             }
             UiEvent::Thinking(text) => {
-                if self.tool_call_active {
+                if self.chat.tool_call_active {
                     log::debug!(
                         "[SPINNER] Thinking: tool_call_active was true, resetting to false"
                     );
-                    self.tool_call_active = false;
-                    self.active_tool_call_ids.clear();
+                    self.chat.tool_call_active = false;
+                    self.chat.active_tool_call_ids.clear();
                 }
                 self.output_area.set_spinner_phase("Thinking...");
                 self.output_area.append_thinking_text(&text);
@@ -56,9 +56,9 @@ impl App {
             UiEvent::ToolCallStart { name, index } => {
                 log::debug!(
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
-                    self.tool_call_active
+                    self.chat.tool_call_active
                 );
-                self.tool_call_active = true;
+                self.chat.tool_call_active = true;
                 self.output_area.push_tool_call_start(&name, index);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
@@ -78,10 +78,10 @@ impl App {
             UiEvent::ToolCall { id, name, summary } => {
                 log::debug!(
                     "[SPINNER] ToolCall({name}): tool_call_active={}",
-                    self.tool_call_active
+                    self.chat.tool_call_active
                 );
-                self.tool_call_active = true;
-                self.active_tool_call_ids.insert(id.clone());
+                self.chat.tool_call_active = true;
+                self.chat.active_tool_call_ids.insert(id.clone());
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
                 self.output_area
@@ -106,19 +106,19 @@ impl App {
                     is_error,
                     &image_note,
                 );
-                let had_active_id = self.active_tool_call_ids.remove(&id);
-                let remaining = self.active_tool_call_ids.len();
+                let had_active_id = self.chat.active_tool_call_ids.remove(&id);
+                let remaining = self.chat.active_tool_call_ids.len();
                 log::debug!(
                     "[BUG#24] ToolResult({tool_name}): removed_id={had_active_id}, remaining_active_tools={remaining}"
                 );
                 if remaining == 0 {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
-                    self.tool_call_active = false;
+                    self.chat.tool_call_active = false;
                     self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
                 } else {
-                    self.tool_call_active = true;
+                    self.chat.tool_call_active = true;
                     self.output_area.start_spinner();
                     self.output_area
                         .set_spinner_phase(format!("Calling tools... ({remaining} running)"));
@@ -130,10 +130,10 @@ impl App {
                 last_input,
                 elapsed_secs,
             } => {
-                self.total_input_tokens += input as u64;
-                self.total_output_tokens += output as u64;
-                self.total_api_calls += 1;
-                self.last_input_tokens = last_input as u64;
+                self.chat.total_input_tokens += input as u64;
+                self.chat.total_output_tokens += output as u64;
+                self.chat.total_api_calls += 1;
+                self.chat.last_input_tokens = last_input as u64;
                 let tps = if elapsed_secs > 0.0 {
                     output as f64 / elapsed_secs
                 } else {
@@ -152,13 +152,13 @@ impl App {
             UiEvent::Error(msg) => {
                 log::debug!(
                     "[SPINNER] Error: tool_call_active {} -> false",
-                    self.tool_call_active
+                    self.chat.tool_call_active
                 );
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
-                self.tool_call_active = false;
-                self.active_tool_call_ids.clear();
-                self.is_processing = false;
+                self.chat.tool_call_active = false;
+                self.chat.active_tool_call_ids.clear();
+                self.chat.is_processing = false;
                 return UpdateResult {
                     cmd: Cmd::RunHookNotification {
                         message: msg,
@@ -170,21 +170,21 @@ impl App {
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
-                self.tool_call_active = false;
-                self.active_tool_call_ids.clear();
-                self.is_processing = false;
+                self.chat.tool_call_active = false;
+                self.chat.active_tool_call_ids.clear();
+                self.chat.is_processing = false;
             }
             UiEvent::MessagesSync(msgs) => {
-                self.messages = msgs;
+                self.chat.messages = msgs;
                 return UpdateResult {
-                    cmd: Cmd::SaveSession(self.messages.clone()),
+                    cmd: Cmd::SaveSession(self.chat.messages.clone()),
                     pending_slash: None,
                 };
             }
             UiEvent::ClipboardImage(img) => {
-                self.pending_images.push(img);
+                self.chat.pending_images.push(img);
                 self.input_area
-                    .set_pending_images(self.pending_images.len());
+                    .set_pending_images(self.chat.pending_images.len());
             }
             UiEvent::SystemMessage(msg) => {
                 // Hook notification deferred to Cmd; state update stays here
@@ -200,29 +200,29 @@ impl App {
             UiEvent::ReflectionStarted => {
                 self.output_area.start_spinner();
                 self.output_area.set_spinner_phase("Reflecting...");
-                self.is_processing = true;
+                self.chat.is_processing = true;
             }
             UiEvent::ReflectionUsage { input, output } => {
-                self.total_api_calls += 1;
-                self.last_input_tokens = input as u64;
-                self.total_input_tokens += input as u64;
-                self.total_output_tokens += output as u64;
+                self.chat.total_api_calls += 1;
+                self.chat.last_input_tokens = input as u64;
+                self.chat.total_input_tokens += input as u64;
+                self.chat.total_output_tokens += output as u64;
                 self.status_bar.set_tokens(
-                    self.total_input_tokens,
-                    self.total_output_tokens,
-                    self.last_input_tokens,
+                    self.chat.total_input_tokens,
+                    self.chat.total_output_tokens,
+                    self.chat.last_input_tokens,
                 );
             }
             UiEvent::ReflectionDone { output } => {
                 let formatted =
                     ::runtime::api::core::reflection::ReflectionEngine::format_output(&output);
                 self.output_area.push_system(&formatted);
-                if self.memory_config.reflection.auto_apply_suggestions {
+                if self.session.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);
                 } else {
                     let suggestion_count = output.suggested_memories.len();
                     let outdated_count = output.outdated_memories.len();
-                    self.pending_reflection = Some(output);
+                    self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
                         self.output_area.push_system(&format!(
                             "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
@@ -230,7 +230,7 @@ impl App {
                     }
                 }
                 self.output_area.stop_spinner();
-                self.is_processing = false;
+                self.chat.is_processing = false;
                 self.status_bar.set_success("Ready");
             }
             UiEvent::AskUser {
@@ -242,16 +242,16 @@ impl App {
                 default,
                 reply_tx,
             } => {
-                self.active_tool_call_ids.remove(&id);
-                self.tool_call_active = !self.active_tool_call_ids.is_empty();
+                self.chat.active_tool_call_ids.remove(&id);
+                self.chat.tool_call_active = !self.chat.active_tool_call_ids.is_empty();
                 self.output_area.stop_spinner();
 
                 // Append built-in options when LLM provides ≥ 1 option
                 let llm_option_count = options.len();
                 let mut all_options = options.clone();
                 if llm_option_count > 0 {
-                    all_options.push(crate::tui::app::BUILTIN_OPTION_ALL.to_string());
-                    all_options.push(crate::tui::app::BUILTIN_OPTION_CHAT.to_string());
+                    all_options.push(crate::tui::state::BUILTIN_OPTION_ALL.to_string());
+                    all_options.push(crate::tui::state::BUILTIN_OPTION_CHAT.to_string());
                 }
 
                 let default_ref = default.as_deref();
@@ -269,7 +269,7 @@ impl App {
                         .unwrap_or(0);
                     let total = all_options.len();
                     let option_line_ranges = build_option_line_ranges(start, &all_options);
-                    self.ask_user_state = Some(crate::tui::app::AskUserState {
+                    self.input.ask_user_state = Some(crate::tui::state::AskUserState {
                         reply_tx,
                         options: all_options,
                         llm_option_count,
@@ -282,7 +282,7 @@ impl App {
                     });
                 } else {
                     // 无选项：退回自由输入模式
-                    self.ask_user_reply_tx = Some(reply_tx);
+                    self.input.ask_user_reply_tx = Some(reply_tx);
                 }
                 self.output_area.stop_spinner();
             }
@@ -308,7 +308,7 @@ impl App {
                 }
             }
             UiEvent::DrainQueuedInput { reply_tx } => {
-                let queued: Vec<String> = self.input_queue.drain(..).collect();
+                let queued: Vec<String> = self.input.input_queue.drain(..).collect();
                 if !queued.is_empty() {
                     let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
                     for msg in &flushed {
@@ -343,7 +343,7 @@ impl App {
                 }
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
-                self.cwd = ctx.raw_path_base.clone();
+                self.session.cwd = ctx.raw_path_base.clone();
                 self.workspace_context = Some(ctx.workspace.clone());
                 self.status_bar
                     .set_context_paths(ctx.path_base, ctx.working_root);
@@ -356,36 +356,36 @@ impl App {
             UiEvent::Done => {
                 log::debug!(
                     "[SPINNER] Done: tool_call_active {} -> false",
-                    self.tool_call_active
+                    self.chat.tool_call_active
                 );
                 log::info!(
                     "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
-                    self.session_id,
-                    self.input_queue.len(),
+                    self.session.session_id,
+                    self.input.input_queue.len(),
                     self.output_area.queued_messages.len(),
-                    self.is_processing,
-                    self.tool_call_active,
-                    self.active_tool_call_ids.len(),
+                    self.chat.is_processing,
+                    self.chat.tool_call_active,
+                    self.chat.active_tool_call_ids.len(),
                     self.input_area.is_empty(),
-                    input_queue_preview(&self.input_queue)
+                    input_queue_preview(&self.input.input_queue)
                 );
                 self.handle_done(ui_tx, None);
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
                     "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
-                    self.tool_call_active
+                    self.chat.tool_call_active
                 );
                 log::info!(
                     "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
-                    self.session_id,
-                    self.input_queue.len(),
+                    self.session.session_id,
+                    self.input.input_queue.len(),
                     self.output_area.queued_messages.len(),
-                    self.is_processing,
-                    self.tool_call_active,
-                    self.active_tool_call_ids.len(),
+                    self.chat.is_processing,
+                    self.chat.tool_call_active,
+                    self.chat.active_tool_call_ids.len(),
                     self.input_area.is_empty(),
-                    input_queue_preview(&self.input_queue)
+                    input_queue_preview(&self.input.input_queue)
                 );
                 self.handle_done(ui_tx, Some(elapsed));
             }

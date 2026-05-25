@@ -8,8 +8,8 @@ mod session_lifecycle;
 #[path = "status_path_tests.rs"]
 mod status_path_tests;
 
+use crate::tui::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use ::runtime::api::core::message::Message;
 use ::runtime::api::core::skill::Skill;
 use ratatui::{
     backend::CrosstermBackend,
@@ -23,93 +23,27 @@ use std::sync::Arc;
 
 pub use event::{StatusContextUpdate, UiEvent};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalSize {
-    pub width: u16,
-    pub height: u16,
-}
-
 /// Main TUI application
 pub struct App {
+    // 视图组件（直接持有，不随 State 变化重建）
     pub output_area: OutputArea,
     pub input_area: InputArea,
     pub status_bar: StatusBar,
-    pub messages: Vec<Message>,
-    pub cwd: PathBuf,
-    pub session_id: String,
-    pub total_input_tokens: u64,
-    pub total_output_tokens: u64,
-    pub total_api_calls: u64,
-    pub last_input_tokens: u64,
-    pub should_exit: bool,
-    pub pending_images: Vec<::runtime::api::image::ProcessedImage>,
-    pub output_area_rect: Rect,
-    pub input_area_rect: Rect,
-    pub status_bar_rect: Rect,
-    pub last_terminal_size: Option<TerminalSize>,
-    pub just_pasted: bool,
-    pub input_queue: std::collections::VecDeque<String>,
-    pub last_click: Option<(std::time::Instant, u16, u16)>,
-    pub system_prompt_text: String,
-    pub context_size: usize,
+    // 纯数据子状态
+    pub chat: ChatState,
+    pub input: InputState,
+    pub session: SessionState,
+    pub layout: UiLayout,
+    // 业务数据（非 UI 状态）
+    pub skills: std::collections::HashMap<String, Skill>,
+    // 基础设施引用（Phase 4 将移入 CmdExecutor）
     pub client: Option<Arc<::runtime::api::provider::client::LlmClient>>,
     pub models_config: ::runtime::api::core::config::ModelsConfig,
-    pub session_created_at: Option<String>,
-    pub active_dialog: Option<crate::tui::dialog::Dialog>,
-    pub dialog_model_keys: Vec<String>,
-    pub current_model_display: String,
-    pub last_ctrlc: Option<std::time::Instant>,
-    pub skills: std::collections::HashMap<String, Skill>,
-    /// Cached session list for /resume autocomplete (id, summary)
-    pub cached_sessions: Vec<(String, String)>,
-    /// Whether a tool call is currently active (suppresses thinking output)
-    pub tool_call_active: bool,
-    /// Tool call IDs that have started and have not emitted a result yet.
-    pub active_tool_call_ids: std::collections::HashSet<String>,
-    /// Number of completed LLM conversation turns since last /clear.
-    pub turn_count: usize,
-    /// Hook runner for lifecycle events
     pub hook_runner: ::runtime::api::core::hook::HookRunner,
-    /// Pending oneshot sender for AskUserQuestion reply
-    pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<String>>,
-    /// Interactive ask-user selection state
-    pub ask_user_state: Option<AskUserState>,
-    /// Session-local reminders for MemoryTool recap.
     pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
-    pub memory_config: ::runtime::api::core::config::MemoryConfig,
-    /// Pending LLM reflection output waiting for `/reflect apply`.
-    pub pending_reflection: Option<::runtime::api::core::reflection::ReflectionOutput>,
-    /// Task store (shared with tools), cleared on /clear
     pub task_store: Option<Arc<::runtime::api::core::task::TaskStore>>,
-    /// Whether background processing is active (LLM streaming / tool calls)
-    pub is_processing: bool,
-    /// Current persisted tool/worktree workspace context.
     pub workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
-    /// 分化日志写入器（input.log / output.log / tool.log）
     pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
-}
-
-/// Built-in options appended after LLM options in AskUserQuestion.
-pub const BUILTIN_OPTION_ALL: &str = "All of the above";
-pub const BUILTIN_OPTION_CHAT: &str = "Chat about this...";
-
-/// State for interactive AskUserQuestion option selection
-pub struct AskUserState {
-    pub reply_tx: tokio::sync::oneshot::Sender<String>,
-    /// All options shown to user: LLM options + built-in options.
-    pub options: Vec<String>,
-    /// Number of LLM-provided options (built-in options start at this index).
-    pub llm_option_count: usize,
-    pub cursor: usize,
-    pub multi_select: bool,
-    pub selected: Vec<bool>,
-    /// Ranges in output_area.lines for each rendered option row.
-    pub option_line_ranges: Vec<std::ops::Range<usize>>,
-    /// Whether free-text input is allowed
-    #[allow(dead_code)]
-    pub allow_free_input: bool,
-    /// When true, user is typing free-text answer via "Chat about this...".
-    pub chat_input_active: bool,
 }
 
 #[cfg(test)]
@@ -222,50 +156,29 @@ impl App {
             output_area,
             input_area: InputArea::new(),
             status_bar,
-            messages: Vec::new(),
-            cwd,
-            session_id,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_api_calls: 0,
-            last_input_tokens: 0,
-            should_exit: false,
-            pending_images: Vec::new(),
-            output_area_rect: Rect::default(),
-            input_area_rect: Rect::default(),
-            status_bar_rect: Rect::default(),
-            last_terminal_size: None,
-            just_pasted: false,
-            input_queue: std::collections::VecDeque::new(),
-            last_click: None,
-            system_prompt_text: String::new(),
-            context_size: 200_000,
+            chat: ChatState::default(),
+            input: InputState::default(),
+            session: SessionState {
+                session_id,
+                cwd,
+                session_created_at: None,
+                cached_sessions: Vec::new(),
+                current_model_display: model,
+                memory_config: ::runtime::api::core::config::MemoryConfig::default(),
+            },
+            layout: UiLayout::default(),
+            skills: std::collections::HashMap::new(),
             client: None,
             models_config: ::runtime::api::core::config::ModelsConfig::default(),
-            session_created_at: None,
-            active_dialog: None,
-            dialog_model_keys: Vec::new(),
-            current_model_display: model,
-            last_ctrlc: None,
-            skills: std::collections::HashMap::new(),
-            cached_sessions: Vec::new(),
-            tool_call_active: false,
-            active_tool_call_ids: std::collections::HashSet::new(),
-            turn_count: 0,
             hook_runner: ::runtime::api::core::hook::HookRunner::empty(
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
             ),
-            ask_user_reply_tx: None,
-            ask_user_state: None,
             session_reminders: Arc::new(std::sync::Mutex::new(
                 ::runtime::api::core::memory::SessionReminders::new(),
             )),
-            memory_config: ::runtime::api::core::config::MemoryConfig::default(),
-            pending_reflection: None,
             task_store: None,
-            is_processing: false,
             workspace_context: None,
             json_logger: None,
         }
@@ -273,11 +186,11 @@ impl App {
 
     /// Check if Ctrl+C timeout has expired and restore status line.
     fn check_ctrlc_timeout(&mut self) {
-        if let Some(last) = self.last_ctrlc {
+        if let Some(last) = self.layout.last_ctrlc {
             if std::time::Instant::now().duration_since(last).as_secs_f64()
                 >= update::CTRL_C_TIMEOUT_SECS
             {
-                self.last_ctrlc = None;
+                self.layout.last_ctrlc = None;
                 self.status_bar.set_success("Ready");
             }
         }
@@ -331,7 +244,7 @@ impl App {
                 self.status_bar.set_warning("Render error, try resizing");
             }
             self.input_area
-                .set_pending_images(self.pending_images.len());
+                .set_pending_images(self.chat.pending_images.len());
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.input_area.render(chunks[1], buf);
             }));
@@ -341,21 +254,21 @@ impl App {
                 }));
             }
             self.status_bar.set_tokens(
-                self.total_input_tokens,
-                self.total_output_tokens,
-                self.last_input_tokens,
+                self.chat.total_input_tokens,
+                self.chat.total_output_tokens,
+                self.chat.last_input_tokens,
             );
-            self.status_bar.set_api_calls(self.total_api_calls);
+            self.status_bar.set_api_calls(self.chat.total_api_calls);
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.status_bar.render(chunks[3], buf);
             }));
-            if let Some(ref dialog) = self.active_dialog {
+            if let Some(ref dialog) = self.layout.active_dialog {
                 dialog.render(size, buf);
             }
         })?;
-        self.output_area_rect = output_rect;
-        self.input_area_rect = input_rect;
-        self.status_bar_rect = status_rect;
+        self.layout.output_area_rect = output_rect;
+        self.layout.input_area_rect = input_rect;
+        self.layout.status_bar_rect = status_rect;
         Ok(())
     }
 }

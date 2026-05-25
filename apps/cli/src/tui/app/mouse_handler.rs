@@ -33,15 +33,15 @@ impl super::App {
         }
 
         // 计算各区域 rect
-        let input_area = self.input_area_rect;
-        let status_bar = self.status_bar_rect;
+        let input_area = self.layout.input_area_rect;
+        let status_bar = self.layout.status_bar_rect;
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 if point_in_rect(row, col, &output_area) {
                     // 双击检测
                     let now = Instant::now();
-                    let is_double = self
+                    let is_double = self.input
                         .last_click
                         .map(|(t, prev_row, prev_col)| {
                             prev_row == row
@@ -54,13 +54,13 @@ impl super::App {
                         self.input_area.clear_selection();
                         self.status_bar.clear_selection();
                         self.output_area.select_word(row, col, &output_area);
-                        self.last_click = None;
+                        self.input.last_click = None;
                     } else {
                         // 清除其他区域的选中
                         self.input_area.clear_selection();
                         self.status_bar.clear_selection();
                         self.output_area.start_selection(row, col, &output_area);
-                        self.last_click = Some((now, row, col));
+                        self.input.last_click = Some((now, row, col));
                     }
                 } else if point_in_rect(row, col, &input_area) {
                     // 清除其他区域的选中

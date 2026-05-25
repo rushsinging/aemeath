@@ -9,7 +9,7 @@ impl App {
         key: crossterm::event::KeyEvent,
     ) -> Option<UpdateResult> {
         // AskUserQuestion 交互模式（有选项列表）
-        if let Some(ref state) = self.ask_user_state {
+        if let Some(ref state) = self.input.ask_user_state {
             // Chat-input sub-mode: user is typing free text via "Chat about this..."
             if state.chat_input_active {
                 return self.update_ask_user_chat_input_key(key);
@@ -26,8 +26,8 @@ impl App {
                         } else {
                             state.cursor - 1
                         };
-                        self.ask_user_state.as_mut().unwrap().cursor = cursor;
-                        let s = self.ask_user_state.as_ref().unwrap();
+                        self.input.ask_user_state.as_mut().unwrap().cursor = cursor;
+                        let s = self.input.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
                             &s.option_line_ranges,
                             &s.options,
@@ -40,8 +40,8 @@ impl App {
                 KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
                     if options_count > 0 {
                         let cursor = (state.cursor + 1) % options_count;
-                        self.ask_user_state.as_mut().unwrap().cursor = cursor;
-                        let s = self.ask_user_state.as_ref().unwrap();
+                        self.input.ask_user_state.as_mut().unwrap().cursor = cursor;
+                        let s = self.input.ask_user_state.as_ref().unwrap();
                         self.output_area.update_ask_user_options(
                             &s.option_line_ranges,
                             &s.options,
@@ -60,8 +60,8 @@ impl App {
                             pending_slash: None,
                         });
                     }
-                    self.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
-                    let s = self.ask_user_state.as_ref().unwrap();
+                    self.input.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
+                    let s = self.input.ask_user_state.as_ref().unwrap();
                     self.output_area.update_ask_user_options(
                         &s.option_line_ranges,
                         &s.options,
@@ -71,7 +71,7 @@ impl App {
                     );
                 }
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                    let state = self.ask_user_state.take().unwrap();
+                    let state = self.input.ask_user_state.take().unwrap();
                     let cursor = state.cursor;
                     let llm_count = state.llm_option_count;
                     let builtin_all_idx = llm_count;
@@ -89,7 +89,7 @@ impl App {
                         all_opts.join("\n")
                     } else if cursor == builtin_chat_idx && state.options.len() > builtin_chat_idx {
                         // "Chat about this...": switch to chat input sub-mode
-                        self.ask_user_state = Some(crate::tui::app::AskUserState {
+                        self.input.ask_user_state = Some(crate::tui::state::AskUserState {
                             chat_input_active: true,
                             ..state
                         });
@@ -132,7 +132,7 @@ impl App {
                     self.output_area.set_spinner_phase("Generating...");
                 }
                 KeyCode::Esc => {
-                    let state = self.ask_user_state.take().unwrap();
+                    let state = self.input.ask_user_state.take().unwrap();
                     self.input_area.clear();
                     let _ = state.reply_tx.send(String::new());
                     self.output_area.set_spinner_phase("Generating...");
@@ -149,12 +149,12 @@ impl App {
         }
 
         // AskUserQuestion 自由输入模式（无选项列表，等待 reply_tx）
-        if self.ask_user_reply_tx.is_some() {
+        if self.input.ask_user_reply_tx.is_some() {
             match key.code {
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                     let text = self.input_area.get_text();
                     if !text.is_empty() {
-                        if let Some(reply_tx) = self.ask_user_reply_tx.take() {
+                        if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                             self.output_area.push_user_message(&text);
                             self.input_area.clear();
                             let _ = reply_tx.send(text);
@@ -167,7 +167,7 @@ impl App {
                     });
                 }
                 KeyCode::Esc => {
-                    if let Some(reply_tx) = self.ask_user_reply_tx.take() {
+                    if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                         self.input_area.clear();
                         let _ = reply_tx.send(String::new());
                         self.output_area.set_spinner_phase("Generating...");
@@ -200,7 +200,7 @@ impl App {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                 let text = self.input_area.get_text();
                 if !text.is_empty() {
-                    let state = self.ask_user_state.take().unwrap();
+                    let state = self.input.ask_user_state.take().unwrap();
                     self.output_area.push_user_message(&text);
                     self.input_area.clear();
                     let _ = state.reply_tx.send(text);
@@ -210,7 +210,7 @@ impl App {
             KeyCode::Esc => {
                 // Return to option list without submitting
                 self.input_area.clear();
-                self.ask_user_state.as_mut().unwrap().chat_input_active = false;
+                self.input.ask_user_state.as_mut().unwrap().chat_input_active = false;
             }
             _ => {
                 self.update_ask_user_input_key(key);
