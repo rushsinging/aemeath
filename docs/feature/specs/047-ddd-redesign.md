@@ -535,7 +535,7 @@ core
 2. 将 `contexts/provider` 迁移为 `crates/provider`，保持 provider API、streaming、pricing、model pool 行为不变。
 3. 将 `contexts/tool` 迁移为 `crates/tools`，保持 tool schema、registry、MCP 生命周期、权限/hook gate 行为不变。
 4. 从 `shared/kernel` 拆出 `crates/project`、`crates/policy`、`crates/prompt`、`crates/storage`、`crates/hook`、`crates/audit` 的低耦合类型和端口；剩余稳定共享类型进入 `crates/core`。
-5. 让 `crates/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。（Phase 2 checkpoint：已迁移低 UI 耦合的 chat application contract、agent_runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 到 runtime；TUI/REPL adapter、prompt/tooling adapter、logging adapter 仍暂留 apps/cli）
+5. 让 `crates/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。（Phase 2 checkpoint：已迁移低 UI 耦合的 chat application contract、agent_runner，以及 runtime bootstrap 中的 concurrency、permissions、model_runtime、provider_client、runtime_support 到 runtime；Guidance 已从 core 拆入 prompt 并通过 runtime adapter 接入 HookRunner；TUI/REPL adapter、prompt/tooling adapter、logging adapter 仍暂留 apps/cli）
 6. 增加 architecture guard：禁止 `apps/cli` 直接依赖 `core` 和 supporting domain crate；禁止 supporting domain 反向依赖 `runtime` / `apps/cli`。
 7. 移除 `contexts/`、`shared/` 过渡目录，更新 `.agents/aemeath.json` 与 `.agents/hooks/*` 中的旧路径、旧 package 名和架构守卫，再运行完整验收。（首轮实施已完成，后续继续拆分 support domain 内部职责）
 

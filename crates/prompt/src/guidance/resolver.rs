@@ -3,7 +3,11 @@
 use std::path::PathBuf;
 
 use super::guidance_dir;
-use crate::hook::HookRunner;
+
+#[async_trait::async_trait(?Send)]
+pub trait InstructionsLoadedHook {
+    async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str);
+}
 
 /// Resolve the guidance text for a given model.
 ///
@@ -51,7 +55,7 @@ pub async fn resolve_guidance_async(
     model_id: &str,
     config_guidance: &std::collections::HashMap<String, String>,
     reasoning: bool,
-    hook_runner: Option<&HookRunner>,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -100,7 +104,7 @@ fn resolve_model_guidance(
 pub async fn resolve_model_guidance_async(
     model_id: &str,
     config_guidance: &std::collections::HashMap<String, String>,
-    hook_runner: Option<&HookRunner>,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
 ) -> Option<String> {
     // Try guidance dir: prefix-matched file (longest match wins) with hook
     if let Some(content) = load_prefix_matched_file_async(model_id, hook_runner).await {
@@ -114,7 +118,7 @@ pub async fn resolve_model_guidance_async(
 /// Load prefix-matched guidance file with hook support.
 async fn load_prefix_matched_file_async(
     model_id: &str,
-    hook_runner: Option<&HookRunner>,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
 ) -> Option<String> {
     let dir = guidance_dir()?;
     let mut best_match: Option<(String, PathBuf)> = None;
@@ -161,11 +165,17 @@ fn load_named_file(name: &str) -> Option<String> {
 }
 
 /// Load a file by exact name with optional hook runner (async version).
-pub async fn load_named_file_async(name: &str, hook_runner: Option<&HookRunner>) -> Option<String> {
+pub async fn load_named_file_async(
+    name: &str,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
+) -> Option<String> {
     load_named_file_impl_async(name, hook_runner).await
 }
 
-fn load_named_file_impl(name: &str, _hook_runner: Option<&HookRunner>) -> Option<String> {
+fn load_named_file_impl(
+    name: &str,
+    _hook_runner: Option<&dyn InstructionsLoadedHook>,
+) -> Option<String> {
     let dir = guidance_dir()?;
     let path = dir.join(format!("{}.md", name));
     match std::fs::read_to_string(&path) {
@@ -179,7 +189,7 @@ fn load_named_file_impl(name: &str, _hook_runner: Option<&HookRunner>) -> Option
 
 async fn load_named_file_impl_async(
     name: &str,
-    hook_runner: Option<&HookRunner>,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
 ) -> Option<String> {
     let dir = guidance_dir()?;
     let path = dir.join(format!("{}.md", name));

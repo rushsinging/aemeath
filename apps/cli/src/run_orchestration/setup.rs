@@ -22,7 +22,7 @@ pub(super) async fn bootstrap_chat(args: Args) -> ChatBootstrap {
 }
 
 async fn bootstrap_chat_runtime(mut args: ChatBootstrapArgs) -> ChatBootstrap {
-    ::runtime::api::core::guidance::init_guidance_dir();
+    ::runtime::api::prompt::guidance::init_guidance_dir();
 
     let cwd = args
         .cwd

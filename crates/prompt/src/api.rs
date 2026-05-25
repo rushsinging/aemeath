@@ -1,3 +1,5 @@
+pub use crate::guidance;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PromptApiMarker;
 

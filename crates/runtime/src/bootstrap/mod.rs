@@ -57,6 +57,18 @@ impl ChatBootstrapArgs {
     }
 }
 
+pub struct InstructionsLoadedHookRunner<'a>(pub &'a aemeath_core::hook::HookRunner);
+
+#[async_trait::async_trait(?Send)]
+impl prompt::guidance::resolver::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
+    async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
+        let _ = self
+            .0
+            .on_instructions_loaded(file_path, instruction_type)
+            .await;
+    }
+}
+
 pub struct ChatBootstrap {
     pub args: ChatBootstrapArgs,
     pub cwd: PathBuf,
