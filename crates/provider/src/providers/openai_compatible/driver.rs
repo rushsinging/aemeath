@@ -1,6 +1,6 @@
 //! Chat API driver 抽象：不同供应商的推理字段差异化处理
 
-use aemeath_core::provider::ApiDriverKind;
+use crate::api::ApiDriverKind;
 
 use super::ReasoningConfig;
 

@@ -6,9 +6,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::types::{StreamResponse, SystemBlock};
 
-// Re-export Provider from kernel
-pub use aemeath_core::provider::ApiDriverKind;
-
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
     fn on_text(&mut self, text: &str);
