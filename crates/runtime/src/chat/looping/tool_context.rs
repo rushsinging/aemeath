@@ -17,7 +17,7 @@ pub(crate) struct ToolContextParts {
     pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) session_id: String,
-    pub(crate) context_stack: Arc<Mutex<Vec<crate::api::core::worktree::WorkingContext>>>,
+    pub(crate) context_stack: Arc<Mutex<Vec<crate::api::core::tool::WorkingContext>>>,
 }
 
 pub(crate) fn build_tool_context(parts: ToolContextParts) -> ToolContext {

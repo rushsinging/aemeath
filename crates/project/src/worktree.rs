@@ -1,14 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::session::{WorkspaceContext, WorkspaceStackEntry};
-use crate::tool::ToolContext;
-
-/// 保存进入 worktree 前的工作上下文快照
-#[derive(Debug, Clone)]
-pub struct WorkingContext {
-    pub path_base: PathBuf,
-    pub working_root: PathBuf,
-}
+use aemeath_core::session::{WorkspaceContext, WorkspaceStackEntry};
+use aemeath_core::tool::{ToolContext, WorkingContext};
 
 /// 检查两个路径是否属于同一 git 仓库
 pub fn is_same_git_repo(a: &Path, b: &Path) -> Result<bool, String> {
@@ -196,7 +189,7 @@ pub fn restore_workspace_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::ToolContext;
+    use aemeath_core::tool::ToolContext;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use tokio_util::sync::CancellationToken;
@@ -212,7 +205,7 @@ mod tests {
             read_files: Arc::new(Mutex::new(HashSet::new())),
             agent_runner: None,
             session_reminders: None,
-            memory_config: crate::config::MemoryConfig::default(),
+            memory_config: aemeath_core::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: false,
             max_tool_concurrency: 4,
@@ -229,14 +222,14 @@ mod tests {
         let ctx = new_test_context();
 
         // exit_worktree on empty stack should error
-        assert!(ctx.exit_worktree().is_err());
+        assert!(exit_worktree(&ctx).is_err());
 
         // 模拟 push/pop
         ctx.context_stack.lock().unwrap().push(WorkingContext {
             path_base: PathBuf::from("/tmp/prev"),
             working_root: PathBuf::from("/tmp/prev"),
         });
-        let result = ctx.exit_worktree().unwrap();
+        let result = exit_worktree(&ctx).unwrap();
         assert_eq!(result.path_base, PathBuf::from("/tmp/prev"));
         assert_eq!(ctx.current_path_base(), PathBuf::from("/tmp/prev"));
     }
@@ -244,9 +237,7 @@ mod tests {
     #[test]
     fn test_enter_worktree_rejects_nonexistent_path() {
         let ctx = new_test_context();
-        assert!(ctx
-            .enter_worktree(PathBuf::from("/nonexistent/path"))
-            .is_err());
+        assert!(enter_worktree(&ctx, PathBuf::from("/nonexistent/path")).is_err());
     }
 
     #[test]
@@ -257,7 +248,7 @@ mod tests {
             path_base: PathBuf::from("/tmp/prev"),
             working_root: PathBuf::from("/tmp/prev"),
         });
-        let result = ctx.enter_worktree(PathBuf::from("/tmp/another"));
+        let result = enter_worktree(&ctx, PathBuf::from("/tmp/another"));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("先 ExitWorktree"));
     }

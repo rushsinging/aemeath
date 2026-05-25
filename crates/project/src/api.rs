@@ -1,3 +1,5 @@
+pub use crate::worktree::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectApiMarker;
 
