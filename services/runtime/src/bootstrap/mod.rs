@@ -61,7 +61,7 @@ impl ChatBootstrapArgs {
     }
 }
 
-pub struct InstructionsLoadedHookRunner<'a>(pub &'a aemeath_core::hook::HookRunner);
+pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
 
 #[async_trait::async_trait(?Send)]
 impl prompt::guidance::resolver::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {

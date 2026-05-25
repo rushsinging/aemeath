@@ -2,7 +2,7 @@
 
 use super::types::SchedulerState;
 use super::TaskScheduler;
-use crate::task::TaskStatus;
+use aemeath_core::task::TaskStatus;
 
 impl TaskScheduler {
     /// Persist state to disk

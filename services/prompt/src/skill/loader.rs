@@ -1,5 +1,5 @@
 use super::{builtin_commit_skill, parse_skill, Skill};
-use crate::config::paths;
+use aemeath_core::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

@@ -1,7 +1,7 @@
 use ::runtime::api::bootstrap::spawn_mcp_connect;
 use ::runtime::api::core::config::SkillsConfig;
 use ::runtime::api::core::mcp_manager::McpConnectionManager;
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::core::task::TaskStore;
 use ::runtime::api::core::tool::ToolRegistry;
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ fn load_configured_skills(
     skills_config: Option<&SkillsConfig>,
 ) -> HashMap<String, Skill> {
     let skill_dirs = configured_skill_dirs(skills_config);
-    ::runtime::api::core::skill::load_all_skills(cwd, &skill_dirs)
+    ::runtime::api::prompt::skill::load_all_skills(cwd, &skill_dirs)
 }
 
 fn configured_skill_dirs(skills_config: Option<&SkillsConfig>) -> Vec<PathBuf> {

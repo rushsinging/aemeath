@@ -1,5 +1,5 @@
 use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, HookRunner, SessionHookData, StopHookData};
+use ::runtime::api::hook::hook::{HookData, HookRunner, SessionHookData, StopHookData};
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::session::{self, Session};
 use std::path::Path;

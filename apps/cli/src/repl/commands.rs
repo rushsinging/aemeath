@@ -6,7 +6,7 @@ use ::runtime::api::core::command::{
 use ::runtime::api::core::compact;
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::session::{self, Session};
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::core::state::AppState;
 use ::runtime::api::image::process_image_file;
 use std::path::Path;

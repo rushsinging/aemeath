@@ -1,5 +1,5 @@
 use crate::api::core::config::hooks::{HookEntry, HookEvent};
-use crate::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
+use crate::api::hook::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 #[derive(Clone)]

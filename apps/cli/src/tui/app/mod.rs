@@ -12,7 +12,7 @@ mod status_path_tests;
 use crate::tui::app::cmd_exec::CmdExecutor;
 use crate::tui::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -167,7 +167,7 @@ impl App {
             cmd_exec: CmdExecutor {
                 client: None,
                 models_config: ::runtime::api::core::config::ModelsConfig::default(),
-                hook_runner: ::runtime::api::core::hook::HookRunner::empty(
+                hook_runner: ::runtime::api::hook::hook::HookRunner::empty(
                     std::env::current_dir()
                         .map(|p| p.display().to_string())
                         .unwrap_or_default(),

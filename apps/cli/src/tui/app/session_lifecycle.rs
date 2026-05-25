@@ -153,7 +153,7 @@ impl App {
         // and display system_message in the output area.
         {
             use ::runtime::api::core::config::hooks::HookEvent;
-            use ::runtime::api::core::hook::{HookData, SessionHookData};
+            use ::runtime::api::hook::hook::{HookData, SessionHookData};
             let hook_results = self
                 .cmd_exec.hook_runner
                 .run_hooks_with_json(

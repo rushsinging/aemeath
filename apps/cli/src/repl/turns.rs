@@ -44,7 +44,7 @@ pub(super) async fn run_agent_turns(
     session_id: &str,
     session_reminders: &Arc<Mutex<::runtime::api::core::memory::SessionReminders>>,
     task_store: &Arc<::runtime::api::core::task::TaskStore>,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    hook_runner: &::runtime::api::hook::hook::HookRunner,
     memory_config: &::runtime::api::core::config::MemoryConfig,
     json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
@@ -305,7 +305,7 @@ async fn maybe_compact_after_tools(
     tool_schema_tokens: usize,
     compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
     client: &LlmClient,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    hook_runner: &::runtime::api::hook::hook::HookRunner,
     turn_count: usize,
     read_files: &Arc<Mutex<HashSet<String>>>,
 ) {

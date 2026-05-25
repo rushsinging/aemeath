@@ -1,4 +1,4 @@
-use crate::config::hooks::HookEvent;
+use aemeath_core::config::hooks::HookEvent;
 use crate::hook::data::*;
 use crate::hook::result::HookResult;
 use crate::hook::runner::HookRunner;

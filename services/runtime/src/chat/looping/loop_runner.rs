@@ -48,7 +48,7 @@ where
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: crate::api::core::hook::HookRunner,
+    pub hook_runner: crate::api::hook::hook::HookRunner,
     pub memory_config: crate::api::core::config::MemoryConfig,
     pub json_logger: Option<Arc<std::sync::Mutex<crate::api::storage::logging::JsonLogger>>>,
 }

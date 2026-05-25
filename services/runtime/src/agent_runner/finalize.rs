@@ -1,4 +1,4 @@
-use crate::api::core::hook::HookRunner;
+use crate::api::hook::hook::HookRunner;
 use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind};
 use crate::api::provider::client::LlmClient;
 use std::time::Duration;

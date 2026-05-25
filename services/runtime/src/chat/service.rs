@@ -44,7 +44,7 @@ where
 mod tests {
     use super::*;
     use crate::api::core::config::MemoryConfig;
-    use crate::api::core::hook::HookRunner;
+    use crate::api::hook::hook::HookRunner;
     use crate::api::core::task::TaskStore;
     use crate::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
     use crate::api::provider::client::LlmClient;

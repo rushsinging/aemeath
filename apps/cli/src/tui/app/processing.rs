@@ -200,7 +200,7 @@ pub(crate) struct SpawnContext {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: ::runtime::api::core::hook::HookRunner,
+    pub hook_runner: ::runtime::api::hook::hook::HookRunner,
     pub memory_config: ::runtime::api::core::config::MemoryConfig,
     pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 }
@@ -224,7 +224,7 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
-    pub hook_runner: &'a ::runtime::api::core::hook::HookRunner,
+    pub hook_runner: &'a ::runtime::api::hook::hook::HookRunner,
     pub memory_config: &'a ::runtime::api::core::config::MemoryConfig,
     pub json_logger:
         &'a Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,

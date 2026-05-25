@@ -1,6 +1,6 @@
 use super::{task_window, App};
 use ::runtime::api::core::message::Message;
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use std::sync::Arc;
 
 impl App {

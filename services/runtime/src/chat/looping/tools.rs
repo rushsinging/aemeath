@@ -1,6 +1,6 @@
 use crate::api::core::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::hook::{HookData, ToolHookData};
+use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::api::core::tool::{ImageData, ToolRegistry};
 use crate::api::storage::logging::JsonLogger;
 use crate::chat::looping::agent_calls::execute_agent_calls;
@@ -21,7 +21,7 @@ pub(crate) async fn execute_tool_round<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::core::hook::HookRunner,
+    hook_runner: &crate::api::hook::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -92,7 +92,7 @@ async fn deny_tool_calls<S>(
     denied: &[&ToolCall],
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::core::hook::HookRunner,
+    hook_runner: &crate::api::hook::hook::HookRunner,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -104,7 +104,7 @@ where
                 hook_runner,
                 HookEvent::PermissionDenied,
                 Some(&call.name),
-                HookData::Permission(crate::api::core::hook::PermissionHookData {
+                HookData::Permission(crate::api::hook::hook::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
@@ -137,7 +137,7 @@ where
 pub(crate) async fn run_post_tool_hooks<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::core::hook::HookRunner,
+    hook_runner: &crate::api::hook::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,
@@ -186,8 +186,8 @@ pub(crate) async fn emit_json_hook_context<S>(
     sink: &S,
     hook_results: Vec<(
         crate::api::core::config::hooks::HookEntry,
-        crate::api::core::hook::HookResult,
-        Option<crate::api::core::hook::HookJsonOutput>,
+        crate::api::hook::hook::HookResult,
+        Option<crate::api::hook::hook::HookJsonOutput>,
     )>,
 ) where
     S: ChatEventSink,

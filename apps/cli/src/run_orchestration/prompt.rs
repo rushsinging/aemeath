@@ -1,12 +1,12 @@
 use ::runtime::api::bootstrap::InstructionsLoadedHookRunner;
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 
 pub(super) async fn build_static_prompt(
     cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
     config_file: Option<&::runtime::api::core::config::Config>,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    hook_runner: &::runtime::api::hook::hook::HookRunner,
     prompt_parts: ::runtime::api::prompt_build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {

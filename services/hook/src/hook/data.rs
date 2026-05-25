@@ -1,6 +1,6 @@
 //! Hook 事件数据模型
 
-use crate::config::hooks::HookEvent;
+use aemeath_core::config::hooks::HookEvent;
 use serde::{Deserialize, Serialize};
 
 /// hook 输入数据（通过 stdin 传递给 hook 命令）

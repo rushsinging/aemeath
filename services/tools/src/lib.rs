@@ -35,7 +35,7 @@ pub mod worktree;
 // Re-export McpTool for dynamic creation
 pub use mcp_tool::McpTool;
 
-use aemeath_core::skill::Skill;
+use share::skill_ops::Skill;
 use aemeath_core::task::TaskStore;
 use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;

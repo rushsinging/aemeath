@@ -1,6 +1,6 @@
 use crate::api::agent_runner;
 use crate::api::core::config::Config;
-use crate::api::core::hook::HookRunner;
+use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::storage::logging::{self, JsonLogger};
 use std::path::{Path, PathBuf};

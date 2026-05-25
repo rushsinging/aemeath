@@ -24,7 +24,6 @@ pub mod stats;
 pub mod task;
 pub mod tasks;
 pub mod think;
-pub mod tools;
 
 /// Initialize all built-in commands.
 ///

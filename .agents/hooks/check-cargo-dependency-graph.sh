@@ -12,7 +12,7 @@ import sys
 business_allow = {
       "cli": {"runtime"},
       "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share"},
-      "share": {"core", "project"},
+      "share": {"core", "project", "prompt"},
       "project": {"core"},
       "policy": {"core"},
       "prompt": {"core"},

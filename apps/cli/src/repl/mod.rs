@@ -2,7 +2,7 @@ use crate::render::TerminalRenderer;
 use ::runtime::api::core::compact;
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::session::{self, Session};
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::core::task::TaskStore;
 use ::runtime::api::core::tool::ToolRegistry;
 use ::runtime::api::provider::client::LlmClient;
@@ -49,7 +49,7 @@ pub async fn run_repl(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     skills: std::collections::HashMap<String, Skill>,
-    hook_runner: ::runtime::api::core::hook::HookRunner,
+    hook_runner: ::runtime::api::hook::hook::HookRunner,
     memory_config: ::runtime::api::core::config::MemoryConfig,
     json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 ) {
@@ -228,7 +228,7 @@ async fn compact_before_api(
     context_size: usize,
     tool_schema_tokens: usize,
     client: &LlmClient,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    hook_runner: &::runtime::api::hook::hook::HookRunner,
     turn_count: usize,
     compact_state: &mut compact::AutoCompactState,
     read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
