@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::compact::MAX_TOOL_RESULT_CHARS;
+use aemeath_core::compact::MAX_TOOL_RESULT_CHARS;
 
 /// Preview: how many bytes to keep from the beginning.
 const PREVIEW_SIZE_BYTES: usize = 2_000;
@@ -121,7 +121,7 @@ pub fn format_persisted_reference(result: &PersistedResult) -> String {
 /// replacing their output with a reference. Returns the number of results persisted.
 pub fn persist_oversized_results(
     session_id: &str,
-    results: &mut Vec<(String, String, bool, Vec<crate::tool::ImageData>)>,
+    results: &mut Vec<(String, String, bool, Vec<aemeath_core::tool::ImageData>)>,
 ) -> usize {
     let mut count = 0;
     for (tool_use_id, output, _is_error, _images) in results.iter_mut() {

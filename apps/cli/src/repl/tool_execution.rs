@@ -36,7 +36,7 @@ pub(super) async fn execute_and_render_tools(
     cancel: &CancellationToken,
     session_id: &str,
     allow_all: bool,
-    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
 ) -> Vec<ToolResultTuple> {
@@ -50,7 +50,7 @@ pub(super) async fn execute_and_render_tools(
         handle.abort();
     }
 
-    let persisted = ::runtime::api::core::tool_result_storage::persist_oversized_results(
+    let persisted = ::runtime::api::storage::tool_result_storage::persist_oversized_results(
         session_id,
         &mut results,
     );
@@ -154,7 +154,7 @@ async fn update_todo_progress(store: &TaskStore, last_statuses: &mut HashMap<Str
 }
 
 fn log_tool_results(
-    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
     results: &[ToolResultTuple],

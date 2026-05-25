@@ -3,11 +3,11 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
+use crate::api::ApiDriverKind;
 use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
 use crate::providers::openai_compatible::ReasoningConfig;
 use crate::types::{StreamResponse, SystemBlock};
 use aemeath_core::message::Message;
-use crate::api::ApiDriverKind;
 use tokio_util::sync::CancellationToken;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.

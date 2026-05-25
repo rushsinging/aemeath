@@ -86,7 +86,7 @@ pub struct App {
     /// Current persisted tool/worktree workspace context.
     pub workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
     /// 分化日志写入器（input.log / output.log / tool.log）
-    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 }
 
 /// Built-in options appended after LLM options in AskUserQuestion.

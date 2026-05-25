@@ -1,6 +1,5 @@
 use super::tools::handle_commit;
 use super::PendingImages;
-use ::runtime::api::image::process_image_file;
 use ::runtime::api::core::command::{
     cmd, CommandAction, CommandContext, CommandRegistry, CommandResult,
 };
@@ -9,6 +8,7 @@ use ::runtime::api::core::message::Message;
 use ::runtime::api::core::session::{self, Session};
 use ::runtime::api::core::skill::Skill;
 use ::runtime::api::core::state::AppState;
+use ::runtime::api::image::process_image_file;
 use std::path::Path;
 use std::sync::Arc;
 

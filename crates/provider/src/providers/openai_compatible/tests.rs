@@ -143,10 +143,7 @@ fn openai_provider_config_from_api_driver_sets_fields() {
 
 #[test]
 fn openai_provider_set_max_tokens_updates_request_body() {
-    let config = OpenAIProviderConfig::from_api_driver(
-        crate::api::ApiDriverKind::OpenAI,
-        "openai",
-    );
+    let config = OpenAIProviderConfig::from_api_driver(crate::api::ApiDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -164,10 +161,7 @@ fn openai_provider_set_max_tokens_updates_request_body() {
 
 #[test]
 fn openai_provider_set_max_tokens_zero_is_ignored() {
-    let config = OpenAIProviderConfig::from_api_driver(
-        crate::api::ApiDriverKind::OpenAI,
-        "openai",
-    );
+    let config = OpenAIProviderConfig::from_api_driver(crate::api::ApiDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -185,10 +179,8 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
 
 #[test]
 fn volcengine_provider_uses_max_output_tokens_field() {
-    let config = OpenAIProviderConfig::from_api_driver(
-        crate::api::ApiDriverKind::Volcengine,
-        "volcengine",
-    );
+    let config =
+        OpenAIProviderConfig::from_api_driver(crate::api::ApiDriverKind::Volcengine, "volcengine");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),

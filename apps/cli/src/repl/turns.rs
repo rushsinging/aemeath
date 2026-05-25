@@ -46,7 +46,7 @@ pub(super) async fn run_agent_turns(
     task_store: &Arc<::runtime::api::core::task::TaskStore>,
     hook_runner: &::runtime::api::core::hook::HookRunner,
     memory_config: &::runtime::api::core::config::MemoryConfig,
-    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
     turn_count: usize,
     verbose: bool,

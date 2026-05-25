@@ -28,7 +28,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 /// Pending images to be attached to the next message
-pub(crate) type PendingImages = std::sync::Arc<std::sync::Mutex<Vec<::runtime::api::image::ProcessedImage>>>;
+pub(crate) type PendingImages =
+    std::sync::Arc<std::sync::Mutex<Vec<::runtime::api::image::ProcessedImage>>>;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_repl(
@@ -50,7 +51,7 @@ pub async fn run_repl(
     skills: std::collections::HashMap<String, Skill>,
     hook_runner: ::runtime::api::core::hook::HookRunner,
     memory_config: ::runtime::api::core::config::MemoryConfig,
-    json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 ) {
     lifecycle::run_session_start_hooks(&hook_runner, &mut user_context).await;
 

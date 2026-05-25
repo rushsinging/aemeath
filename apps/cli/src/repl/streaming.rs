@@ -16,7 +16,7 @@ pub(super) async fn stream_next_response(
     cancel: &CancellationToken,
     verbose: bool,
     markdown: bool,
-    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     turn_number: usize,
 ) -> Result<
     (
@@ -62,7 +62,7 @@ pub(super) async fn stream_next_response(
 }
 
 pub(super) fn log_response(
-    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::storage::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
     resp: &::runtime::api::provider::types::StreamResponse,

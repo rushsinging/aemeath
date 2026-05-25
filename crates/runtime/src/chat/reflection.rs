@@ -264,11 +264,9 @@ mod tests {
     }
 
     fn build_client(response: &str) -> crate::api::provider::client::LlmClient {
-        crate::api::provider::client::LlmClient::from_provider(Arc::new(
-            StaticReflectionProvider {
-                response: response.to_string(),
-            },
-        ))
+        crate::api::provider::client::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
+            response: response.to_string(),
+        }))
     }
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -298,9 +296,7 @@ mod tests {
         let text = run_reflection_with_base_dir(
             &config,
             2,
-            &[crate::api::core::message::Message::user(
-                "请记住这个决策",
-            )],
+            &[crate::api::core::message::Message::user("请记住这个决策")],
             &cwd,
             &client,
             "system prompt",

@@ -3,7 +3,7 @@
 //! Provides persistent storage for command history,
 //! similar to shell history files.
 
-use crate::config::paths;
+use aemeath_core::config::paths;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

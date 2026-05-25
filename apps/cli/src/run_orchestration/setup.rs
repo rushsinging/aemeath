@@ -2,8 +2,8 @@ mod prompt_bundle;
 mod tooling;
 
 use crate::cli::Args;
-use ::runtime::api::bootstrap::init_logging;
 use crate::model_selection::select_model_for_run;
+use ::runtime::api::bootstrap::init_logging;
 use prompt_bundle::build_chat_prompt_bundle;
 use std::env;
 use std::path::PathBuf;
