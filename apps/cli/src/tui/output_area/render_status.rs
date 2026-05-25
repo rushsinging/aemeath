@@ -1,6 +1,6 @@
 use ratatui::{layout::Rect, style::Style, text::Line};
 
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 
 use crate::tui::safe_text::clamp_split_index;
 use crate::tui::theme;

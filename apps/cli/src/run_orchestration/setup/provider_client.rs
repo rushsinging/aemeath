@@ -1,8 +1,8 @@
 use super::model_runtime::ModelRuntimeSettings;
-use kernel::config::models::ResolvedModel;
-use kernel::provider::ApiDriverKind;
-use provider::client::{LlmClient, OpenAIProviderConfig};
-use provider::providers::openai_compatible::ReasoningConfig;
+use ::runtime::api::core::config::models::ResolvedModel;
+use ::runtime::api::provider::client::{LlmClient, OpenAIProviderConfig};
+use ::runtime::api::provider::providers::openai_compatible::ReasoningConfig;
+use ::runtime::api::provider::ApiDriverKind;
 use std::env;
 
 pub(super) fn resolve_api_key(
@@ -117,7 +117,7 @@ fn reasoning_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::models::{ModelEntryConfig, ProviderModelsConfig};
+    use ::runtime::api::core::config::models::{ModelEntryConfig, ProviderModelsConfig};
 
     fn resolved_model(
         api: ApiDriverKind,

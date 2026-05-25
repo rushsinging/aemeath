@@ -1,5 +1,5 @@
 use super::super::OutputArea;
-use kernel::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 #[test]
 fn test_push_agent_progress_replaces_tool_calls_for_same_agent() {

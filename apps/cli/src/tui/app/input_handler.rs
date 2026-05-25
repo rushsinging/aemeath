@@ -1,8 +1,8 @@
 use super::UiEvent;
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, PromptHookData};
+use ::runtime::api::core::message::Message;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, PromptHookData};
-use kernel::message::Message;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::mpsc;

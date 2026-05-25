@@ -1,5 +1,5 @@
 use crate::tui::app::UiEvent;
-use kernel::message::Message;
+use ::runtime::api::core::message::Message;
 use tokio::sync::mpsc;
 
 pub(crate) async fn drain_queued_input(tx: &mpsc::Sender<UiEvent>) -> Option<Vec<String>> {

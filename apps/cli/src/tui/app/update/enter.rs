@@ -2,7 +2,7 @@ use super::UpdateResult;
 use crate::tui::app::msg::Cmd;
 use crate::tui::app::processing::SpawnContextRefs;
 use crate::tui::app::{App, UiEvent};
-use kernel::message::Message;
+use ::runtime::api::core::message::Message;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::mpsc;

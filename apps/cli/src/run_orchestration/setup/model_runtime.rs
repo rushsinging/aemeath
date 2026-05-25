@@ -1,5 +1,5 @@
-use kernel::config::models::ModelEntryConfig;
-use kernel::config::{models::validate_reasoning_effort, Config};
+use ::runtime::api::core::config::models::ModelEntryConfig;
+use ::runtime::api::core::config::{models::validate_reasoning_effort, Config};
 
 pub(super) struct ModelRuntimeSettings {
     pub max_tokens: u32,
@@ -56,8 +56,8 @@ pub(super) fn resolve_model_runtime_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::models::ModelEntryConfig;
-    use kernel::config::{Config, ModelConfig};
+    use ::runtime::api::core::config::models::ModelEntryConfig;
+    use ::runtime::api::core::config::{Config, ModelConfig};
 
     fn model_entry(max_tokens: u32) -> ModelEntryConfig {
         ModelEntryConfig {

@@ -1,4 +1,4 @@
-use provider::stream::StreamHandler;
+use ::runtime::api::provider::stream::StreamHandler;
 
 /// Silent handler for LLM-based compaction (no terminal output).
 pub(crate) struct SilentCompactHandler;

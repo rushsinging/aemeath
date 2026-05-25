@@ -1,6 +1,6 @@
-use kernel::memory::MemoryLayer;
-use kernel::reflection::{ReflectionEngine, ReflectionOutput};
-use provider::types::SystemBlock;
+use ::runtime::api::core::memory::MemoryLayer;
+use ::runtime::api::core::reflection::{ReflectionEngine, ReflectionOutput};
+use ::runtime::api::provider::types::SystemBlock;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -54,7 +54,7 @@ impl super::super::App {
         let project_memory = ReflectionEngine::memory_summary(&memories);
         let recent_summary = ReflectionEngine::recent_messages_summary(&self.messages, 6000);
         let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
-        let messages = vec![kernel::message::Message::user(prompt)];
+        let messages = vec![::runtime::api::core::message::Message::user(prompt)];
         let system = vec![SystemBlock::dynamic(
             "你是 Aemeath 的 Reflection 子系统。只输出 JSON，不要输出 Markdown 或解释。"
                 .to_string(),
@@ -182,10 +182,12 @@ impl super::super::App {
         }
     }
 
-    fn open_reflection_memory_store(&self) -> Result<kernel::memory::MemoryStore, String> {
-        let base_dir = kernel::memory::memory_base_dir();
-        let project_hash = kernel::memory::project_hash_from_path(&self.cwd);
-        kernel::memory::MemoryStore::new(
+    fn open_reflection_memory_store(
+        &self,
+    ) -> Result<::runtime::api::core::memory::MemoryStore, String> {
+        let base_dir = ::runtime::api::core::memory::memory_base_dir();
+        let project_hash = ::runtime::api::core::memory::project_hash_from_path(&self.cwd);
+        ::runtime::api::core::memory::MemoryStore::new(
             base_dir,
             project_hash,
             self.memory_config.max_entries,

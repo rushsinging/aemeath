@@ -9,8 +9,8 @@ mod session_lifecycle;
 mod status_path_tests;
 
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use kernel::message::Message;
-use kernel::skill::Skill;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::skill::Skill;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -52,8 +52,8 @@ pub struct App {
     pub last_click: Option<(std::time::Instant, u16, u16)>,
     pub system_prompt_text: String,
     pub context_size: usize,
-    pub client: Option<Arc<provider::client::LlmClient>>,
-    pub models_config: kernel::config::ModelsConfig,
+    pub client: Option<Arc<::runtime::api::provider::client::LlmClient>>,
+    pub models_config: ::runtime::api::core::config::ModelsConfig,
     pub session_created_at: Option<String>,
     pub active_dialog: Option<crate::tui::dialog::Dialog>,
     pub dialog_model_keys: Vec<String>,
@@ -69,24 +69,24 @@ pub struct App {
     /// Number of completed LLM conversation turns since last /clear.
     pub turn_count: usize,
     /// Hook runner for lifecycle events
-    pub hook_runner: kernel::hook::HookRunner,
+    pub hook_runner: ::runtime::api::core::hook::HookRunner,
     /// Pending oneshot sender for AskUserQuestion reply
     pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<String>>,
     /// Interactive ask-user selection state
     pub ask_user_state: Option<AskUserState>,
     /// Session-local reminders for MemoryTool recap.
-    pub session_reminders: Arc<std::sync::Mutex<kernel::memory::SessionReminders>>,
-    pub memory_config: kernel::config::MemoryConfig,
+    pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
+    pub memory_config: ::runtime::api::core::config::MemoryConfig,
     /// Pending LLM reflection output waiting for `/reflect apply`.
-    pub pending_reflection: Option<kernel::reflection::ReflectionOutput>,
+    pub pending_reflection: Option<::runtime::api::core::reflection::ReflectionOutput>,
     /// Task store (shared with tools), cleared on /clear
-    pub task_store: Option<Arc<kernel::task::TaskStore>>,
+    pub task_store: Option<Arc<::runtime::api::core::task::TaskStore>>,
     /// Whether background processing is active (LLM streaming / tool calls)
     pub is_processing: bool,
     /// Current persisted tool/worktree workspace context.
-    pub workspace_context: Option<kernel::session::WorkspaceContext>,
+    pub workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
     /// 分化日志写入器（input.log / output.log / tool.log）
-    pub json_logger: Option<Arc<std::sync::Mutex<kernel::logging::JsonLogger>>>,
+    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
 }
 
 /// State for interactive AskUserQuestion option selection
@@ -170,7 +170,7 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::status_bar::Worktree
 
 #[cfg(test)]
 pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
-    status_context_for_workspace(kernel::session::WorkspaceContext {
+    status_context_for_workspace(::runtime::api::core::session::WorkspaceContext {
         path_base: path_base.display().to_string(),
         working_root: working_root.display().to_string(),
         context_stack: Vec::new(),
@@ -178,7 +178,7 @@ pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) ->
 }
 
 pub(crate) fn status_context_for_workspace(
-    workspace: kernel::session::WorkspaceContext,
+    workspace: ::runtime::api::core::session::WorkspaceContext,
 ) -> UiEvent {
     let path_base = PathBuf::from(&workspace.path_base);
     let working_root = PathBuf::from(&workspace.working_root);
@@ -232,7 +232,7 @@ impl App {
             system_prompt_text: String::new(),
             context_size: 200_000,
             client: None,
-            models_config: kernel::config::ModelsConfig::default(),
+            models_config: ::runtime::api::core::config::ModelsConfig::default(),
             session_created_at: None,
             active_dialog: None,
             dialog_model_keys: Vec::new(),
@@ -243,7 +243,7 @@ impl App {
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),
             turn_count: 0,
-            hook_runner: kernel::hook::HookRunner::empty(
+            hook_runner: ::runtime::api::core::hook::HookRunner::empty(
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
@@ -251,9 +251,9 @@ impl App {
             ask_user_reply_tx: None,
             ask_user_state: None,
             session_reminders: Arc::new(std::sync::Mutex::new(
-                kernel::memory::SessionReminders::new(),
+                ::runtime::api::core::memory::SessionReminders::new(),
             )),
-            memory_config: kernel::config::MemoryConfig::default(),
+            memory_config: ::runtime::api::core::config::MemoryConfig::default(),
             pending_reflection: None,
             task_store: None,
             is_processing: false,

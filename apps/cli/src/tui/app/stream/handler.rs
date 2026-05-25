@@ -1,5 +1,5 @@
 use crate::tui::app::UiEvent;
-use provider::provider::StreamHandler;
+use ::runtime::api::provider::StreamHandler;
 use tokio::sync::mpsc;
 
 /// TUI stream handler that forwards API streaming events to the UI.

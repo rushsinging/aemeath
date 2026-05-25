@@ -1,5 +1,5 @@
-use kernel::agent::ToolCall;
-use kernel::tool::ToolRegistry;
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::tool::ToolRegistry;
 
 pub(crate) fn split_approved_calls<'a>(
     tool_calls: &'a [ToolCall],
@@ -21,7 +21,7 @@ fn is_auto_approved(call: &ToolCall, registry: &ToolRegistry) -> bool {
             .input
             .get("command")
             .and_then(|v| v.as_str())
-            .map(tool::bash::is_readonly_command)
+            .map(::runtime::api::tools::bash::is_readonly_command)
             .unwrap_or(false);
     }
 
@@ -34,7 +34,7 @@ fn is_auto_approved(call: &ToolCall, registry: &ToolRegistry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::tool::ToolRegistry;
+    use ::runtime::api::core::tool::ToolRegistry;
     use serde_json::json;
 
     fn call(name: &str, input: serde_json::Value) -> ToolCall {

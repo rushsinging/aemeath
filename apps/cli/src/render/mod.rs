@@ -3,9 +3,9 @@ pub mod markdown;
 pub mod progress;
 pub mod theme;
 
+use ::runtime::api::provider::stream::StreamHandler;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::ExecutableCommand;
-use provider::stream::StreamHandler;
 use std::io::{self, Write};
 
 pub use progress::ThinkingIndicator;

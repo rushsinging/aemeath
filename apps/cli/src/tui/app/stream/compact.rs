@@ -1,8 +1,8 @@
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::UiEvent;
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{CompactHookData, HookData, HookRunner};
-use kernel::message::Message;
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{CompactHookData, HookData, HookRunner};
+use ::runtime::api::core::message::Message;
 use tokio::sync::mpsc;
 
 /// Run auto-compaction if the context is approaching the limit.
@@ -18,7 +18,7 @@ pub(crate) async fn auto_compact(
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
 ) -> bool {
-    use kernel::compact;
+    use ::runtime::api::core::compact;
 
     // PreCompact hook
     let pre_compact_results = hook_ui

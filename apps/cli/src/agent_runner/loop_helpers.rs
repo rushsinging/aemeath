@@ -1,5 +1,5 @@
-use kernel::compact::safe_slice;
-use kernel::message::Message;
+use ::runtime::api::core::compact::safe_slice;
+use ::runtime::api::core::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
@@ -19,7 +19,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_result_summaries(
         &self,
         turn_number: usize,
-        results: &[kernel::agent::ToolResultTuple],
+        results: &[::runtime::api::core::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         for (id, output, is_error, _) in results.iter() {
@@ -46,7 +46,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_tool_results(
         &self,
         turn_number: usize,
-        results: &[kernel::agent::ToolResultTuple],
+        results: &[::runtime::api::core::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         if let Some(ref jl) = self.runner.json_logger {
@@ -74,7 +74,7 @@ impl<'a> SubAgentRun<'a> {
 
         if urgency >= 2 {
             let old_len = self.messages.len();
-            let (compacted, was_compacted) = kernel::compact::compact_messages(
+            let (compacted, was_compacted) = ::runtime::api::core::compact::compact_messages(
                 &self.messages,
                 &self.system,
                 self.ctx_context_size,
@@ -91,7 +91,7 @@ impl<'a> SubAgentRun<'a> {
                 );
             }
         } else if urgency >= 1 {
-            kernel::compact::microcompact(&mut self.messages, 4);
+            ::runtime::api::core::compact::microcompact(&mut self.messages, 4);
             (self.progress)(Some(turn_number), "Agent microcompacted");
         }
     }
@@ -114,10 +114,10 @@ impl<'a> SubAgentRun<'a> {
 
 pub(super) fn append_tool_results(
     messages: &mut Vec<Message>,
-    mut results: Vec<kernel::agent::ToolResultTuple>,
+    mut results: Vec<::runtime::api::core::agent::ToolResultTuple>,
     session_id: &str,
 ) {
-    kernel::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    ::runtime::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
         messages.push(Message::tool_results_rich(results));
@@ -133,8 +133,8 @@ pub(super) fn append_tool_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::compact::MAX_TOOL_RESULT_CHARS;
-    use kernel::message::ContentBlock;
+    use ::runtime::api::core::compact::MAX_TOOL_RESULT_CHARS;
+    use ::runtime::api::core::message::ContentBlock;
 
     #[test]
     fn test_append_tool_results_persists_oversized_sub_agent_result() {

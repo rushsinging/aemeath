@@ -1,12 +1,12 @@
 use crate::render::TerminalRenderer;
-use kernel::compact;
-use kernel::message::Message;
-use kernel::session::{self, Session};
-use kernel::skill::Skill;
-use kernel::task::TaskStore;
-use kernel::tool::ToolRegistry;
-use provider::client::LlmClient;
-use provider::types::SystemBlock;
+use ::runtime::api::core::compact;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::session::{self, Session};
+use ::runtime::api::core::skill::Skill;
+use ::runtime::api::core::task::TaskStore;
+use ::runtime::api::core::tool::ToolRegistry;
+use ::runtime::api::provider::client::LlmClient;
+use ::runtime::api::provider::types::SystemBlock;
 
 mod commands;
 mod compact_handler;
@@ -42,15 +42,15 @@ pub async fn run_repl(
     markdown: bool,
     context_size: usize,
     resume_id: Option<String>,
-    agent_runner: Option<Arc<dyn kernel::tool::AgentRunner>>,
+    agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     mut allow_all: bool,
     task_store: Arc<TaskStore>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     skills: std::collections::HashMap<String, Skill>,
-    hook_runner: kernel::hook::HookRunner,
-    memory_config: kernel::config::MemoryConfig,
-    json_logger: Option<Arc<std::sync::Mutex<kernel::logging::JsonLogger>>>,
+    hook_runner: ::runtime::api::core::hook::HookRunner,
+    memory_config: ::runtime::api::core::config::MemoryConfig,
+    json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
 ) {
     lifecycle::run_session_start_hooks(&hook_runner, &mut user_context).await;
 
@@ -79,7 +79,7 @@ pub async fn run_repl(
     let pending_images: PendingImages = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut turn_count = 0usize;
     let session_reminders = Arc::new(std::sync::Mutex::new(
-        kernel::memory::SessionReminders::new(),
+        ::runtime::api::core::memory::SessionReminders::new(),
     ));
 
     loop {
@@ -184,7 +184,7 @@ async fn resume_session(
         Ok(session) => {
             let msg_count = session.messages.len();
             *messages = session.messages.clone();
-            kernel::message::sanitize_messages(messages);
+            ::runtime::api::core::message::sanitize_messages(messages);
             let trimmed = msg_count - messages.len();
             let auto_repaired = repair_message_integrity(messages);
             *session_id = session.id.clone();
@@ -200,9 +200,9 @@ async fn resume_session(
 }
 
 fn repair_message_integrity(messages: &mut Vec<Message>) -> usize {
-    let integrity = kernel::message::check_message_integrity(messages);
+    let integrity = ::runtime::api::core::message::check_message_integrity(messages);
     if integrity.has_issues() {
-        kernel::message::deep_clean_messages(messages)
+        ::runtime::api::core::message::deep_clean_messages(messages)
     } else {
         0
     }
@@ -227,7 +227,7 @@ async fn compact_before_api(
     context_size: usize,
     tool_schema_tokens: usize,
     client: &LlmClient,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     turn_count: usize,
     compact_state: &mut compact::AutoCompactState,
     read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,

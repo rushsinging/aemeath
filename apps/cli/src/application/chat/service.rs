@@ -44,12 +44,12 @@ where
 mod tests {
     use super::*;
     use crate::application::chat::request::ChatLaunchOptions;
+    use ::runtime::api::core::config::MemoryConfig;
+    use ::runtime::api::core::hook::HookRunner;
+    use ::runtime::api::core::task::TaskStore;
+    use ::runtime::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
+    use ::runtime::api::provider::client::LlmClient;
     use async_trait::async_trait;
-    use kernel::config::MemoryConfig;
-    use kernel::hook::HookRunner;
-    use kernel::task::TaskStore;
-    use kernel::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
-    use provider::client::LlmClient;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};

@@ -8,9 +8,7 @@ name = "aemeath"
 path = "src/main.rs"
 
 [dependencies]
-kernel = { path = "../../shared/kernel" }
-provider = { path = "../../contexts/provider" }
-tool = { path = "../../contexts/tool" }
+runtime = { path = "../../crates/runtime" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }

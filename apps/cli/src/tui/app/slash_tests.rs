@@ -1,8 +1,8 @@
 use super::App;
+use ::runtime::api::core::message::{ContentBlock, Message, Role};
+use ::runtime::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
+use ::runtime::api::provider::{LlmProvider, StreamHandler};
 use async_trait::async_trait;
-use kernel::message::{ContentBlock, Message, Role};
-use provider::provider::{LlmProvider, StreamHandler};
-use provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -21,7 +21,7 @@ impl LlmProvider for BlockingReflectionProvider {
         _tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<StreamResponse, ::runtime::api::provider::LlmError> {
         if let Some(started_tx) = self.started_tx.lock().unwrap().take() {
             let _ = started_tx.send(());
         }
@@ -66,7 +66,9 @@ fn app_with_blocking_reflection_provider() -> (App, oneshot::Receiver<()>, onesh
         started_tx: Mutex::new(Some(started_tx)),
         finish_rx: Mutex::new(Some(finish_rx)),
     });
-    let client = Arc::new(provider::client::LlmClient::from_provider(provider));
+    let client = Arc::new(::runtime::api::provider::client::LlmClient::from_provider(
+        provider,
+    ));
     let mut app = App::new(
         "test-session".to_string(),
         std::env::temp_dir(),
@@ -166,7 +168,7 @@ async fn test_auto_reflection_boundary_memory_disabled_does_not_trigger() {
 async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
     let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
     app.memory_config.reflection.interval_turns = 1;
-    app.pending_reflection = Some(kernel::reflection::ReflectionOutput {
+    app.pending_reflection = Some(::runtime::api::core::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: Vec::new(),

@@ -1,14 +1,14 @@
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::UiEvent;
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, StopHookData};
-use kernel::tool::ToolContext;
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, StopHookData};
+use ::runtime::api::core::tool::ToolContext;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_post_tool_batch(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     ctx: &ToolContext,
     turn_count: usize,
 ) {

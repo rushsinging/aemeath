@@ -4,9 +4,9 @@ use super::logging::{
 };
 use super::progress::{build_tool_calls_progress_event, format_grouped_tool_summaries};
 use super::*;
-use kernel::config::AgentRoleConfig;
-use kernel::message::Message;
-use kernel::tool::AgentProgressKind;
+use ::runtime::api::core::config::AgentRoleConfig;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::tool::AgentProgressKind;
 
 #[test]
 fn test_role_max_tokens_override() {
@@ -147,8 +147,12 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     assert_eq!(data["output"], "完整输出");
 }
 
-fn test_tool_call(id: &str, name: &str, input: serde_json::Value) -> kernel::agent::ToolCall {
-    kernel::agent::ToolCall {
+fn test_tool_call(
+    id: &str,
+    name: &str,
+    input: serde_json::Value,
+) -> ::runtime::api::core::agent::ToolCall {
+    ::runtime::api::core::agent::ToolCall {
         id: id.to_string(),
         name: name.to_string(),
         input,

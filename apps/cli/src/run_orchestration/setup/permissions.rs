@@ -1,5 +1,5 @@
 use crate::cli::Args;
-use kernel::config::{Config, PermissionModeConfig};
+use ::runtime::api::core::config::{Config, PermissionModeConfig};
 
 pub(super) fn apply_config_permission_mode(args: &mut Args, config_file: Option<&Config>) {
     if args.allow_all {
@@ -20,7 +20,7 @@ fn config_allows_all(config_file: Option<&Config>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::PermissionConfig;
+    use ::runtime::api::core::config::PermissionConfig;
 
     fn args_with_allow_all(allow_all: bool) -> Args {
         Args {

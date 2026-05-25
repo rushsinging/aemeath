@@ -1,9 +1,9 @@
 use crate::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::UiEvent;
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
-use kernel::task::{BatchStatus, TaskStore};
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
+use ::runtime::api::core::task::{BatchStatus, TaskStore};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
@@ -92,7 +92,7 @@ pub(crate) async fn finalize_main_loop(
 
 async fn stop_hook_feedback(
     hook_results: &[(
-        kernel::config::hooks::HookEntry,
+        ::runtime::api::core::config::hooks::HookEntry,
         HookResult,
         Option<HookJsonOutput>,
     )],
@@ -232,7 +232,7 @@ fn non_empty_text(text: &str) -> Option<String> {
 #[cfg(test)]
 fn stop_hook_feedback_for_test(
     hook_results: &[(
-        kernel::config::hooks::HookEntry,
+        ::runtime::api::core::config::hooks::HookEntry,
         HookResult,
         Option<HookJsonOutput>,
     )],
@@ -248,12 +248,12 @@ fn hook_result(
     output: &str,
     error: Option<&str>,
 ) -> (
-    kernel::config::hooks::HookEntry,
+    ::runtime::api::core::config::hooks::HookEntry,
     HookResult,
     Option<HookJsonOutput>,
 ) {
     (
-        kernel::config::hooks::HookEntry {
+        ::runtime::api::core::config::hooks::HookEntry {
             matcher: String::new(),
             command: command.to_string(),
             timeout: 60,
@@ -270,7 +270,7 @@ fn hook_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::hooks::HookEntry;
+    use ::runtime::api::core::config::hooks::HookEntry;
 
     #[test]
     fn test_stop_hook_feedback_returns_none_without_block() {

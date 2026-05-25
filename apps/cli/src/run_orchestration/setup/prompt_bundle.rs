@@ -1,9 +1,9 @@
 use crate::prompt::{build_system_prompt_parts, PromptContext};
 use crate::run_orchestration::runtime;
-use kernel::config::{Config, MemoryConfig};
-use kernel::hook::HookRunner;
-use kernel::skill::Skill;
-use provider::types::SystemBlock;
+use ::runtime::api::core::config::{Config, MemoryConfig};
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::skill::Skill;
+use ::runtime::api::provider::types::SystemBlock;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
@@ -76,7 +76,7 @@ async fn build_chat_prompt_bundle_from_parts(
 mod tests {
     use super::*;
     use crate::prompt::SystemPromptParts;
-    use kernel::config::Config;
+    use ::runtime::api::core::config::Config;
     use std::path::Path;
 
     fn prompt_parts() -> SystemPromptParts {
@@ -134,7 +134,7 @@ mod tests {
         let mut config = Config::default();
         config.agents.roles.insert(
             "reviewer".to_string(),
-            kernel::config::AgentRoleConfig {
+            ::runtime::api::core::config::AgentRoleConfig {
                 description: "reviews code".to_string(),
                 model: "provider/model".to_string(),
                 ..Default::default()

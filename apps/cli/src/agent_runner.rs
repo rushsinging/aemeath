@@ -1,9 +1,9 @@
-use kernel::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
-use kernel::hook::HookRunner;
-use kernel::logging::JsonLogger;
-use provider::client::LlmClient;
-use provider::pool::LlmClientPool;
-use provider::stream::StreamHandler;
+use ::runtime::api::core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::provider::client::LlmClient;
+use ::runtime::api::provider::pool::LlmClientPool;
+use ::runtime::api::provider::stream::StreamHandler;
 use std::sync::Arc;
 
 mod finalize;

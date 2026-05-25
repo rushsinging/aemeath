@@ -4,7 +4,7 @@ mod status_bar_format;
 mod status_bar_selection;
 
 use crate::tui::theme;
-use kernel::cost::format_tokens;
+use ::runtime::api::core::cost::format_tokens;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

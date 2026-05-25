@@ -31,7 +31,7 @@ pub(crate) enum Cmd {
     #[allow(dead_code)]
     QueueInput(String),
     /// Save session with the given messages (async operation).
-    SaveSession(Vec<kernel::message::Message>),
+    SaveSession(Vec<::runtime::api::core::message::Message>),
     /// Run a hook notification asynchronously.
     RunHookNotification { message: String, kind: String },
     /// Read clipboard image asynchronously.

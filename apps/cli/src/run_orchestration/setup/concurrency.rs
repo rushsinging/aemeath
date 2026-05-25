@@ -1,4 +1,4 @@
-use kernel::config::Config;
+use ::runtime::api::core::config::Config;
 
 pub(super) fn resolve_concurrency_limits(
     cli_max_tool_concurrency: Option<usize>,
@@ -28,7 +28,7 @@ pub(super) fn resolve_concurrency_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::{AgentsConfig, Config, ToolsConfig};
+    use ::runtime::api::core::config::{AgentsConfig, Config, ToolsConfig};
 
     fn config_with_concurrency(tool: usize, agent: usize) -> Config {
         Config {

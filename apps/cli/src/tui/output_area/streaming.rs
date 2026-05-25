@@ -1,5 +1,5 @@
 use super::types::{LineStyle, OutputLine};
-use kernel::string_idx::{ByteIdx, StrSlice};
+use ::runtime::api::core::string_idx::{ByteIdx, StrSlice};
 
 /// 思考块的开/闭标记。这两个常量是 ASCII 字符串，长度计算是字节安全的。
 /// **不要** 替换为多字节中文/emoji 字符串——`do_rerender` 里的偏移依赖

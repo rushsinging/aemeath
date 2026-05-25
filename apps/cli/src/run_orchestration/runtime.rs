@@ -4,8 +4,8 @@ use crate::application::chat::{
     NoTuiChatLaunch, TuiChatLaunch, TuiChatOutcome,
 };
 use crate::{repl, tui};
+use ::runtime::api::provider::types::SystemBlock;
 use async_trait::async_trait;
-use provider::types::SystemBlock;
 
 struct NoTuiChatRuntimeAdapter;
 

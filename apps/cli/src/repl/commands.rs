@@ -1,12 +1,14 @@
 use super::tools::handle_commit;
 use super::PendingImages;
 use crate::image::process_image_file;
-use kernel::command::{cmd, CommandAction, CommandContext, CommandRegistry, CommandResult};
-use kernel::compact;
-use kernel::message::Message;
-use kernel::session::{self, Session};
-use kernel::skill::Skill;
-use kernel::state::AppState;
+use ::runtime::api::core::command::{
+    cmd, CommandAction, CommandContext, CommandRegistry, CommandResult,
+};
+use ::runtime::api::core::compact;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::session::{self, Session};
+use ::runtime::api::core::skill::Skill;
+use ::runtime::api::core::state::AppState;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -236,7 +238,7 @@ pub(crate) async fn handle_slash_command(
             let registry = CommandRegistry::global();
             if let Some(cmd_obj) = registry.find(cmd_name) {
                 let state = AppState::default();
-                let config = kernel::config::Config::default();
+                let config = ::runtime::api::core::config::Config::default();
                 let mut ctx = CommandContext::new(
                     Arc::new(state),
                     config,

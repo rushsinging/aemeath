@@ -2,9 +2,16 @@
 resolver = "2"
 members = [
     "apps/cli",
-    "shared/kernel",
-    "contexts/provider",
-    "contexts/tool",
+    "crates/core",
+    "crates/runtime",
+    "crates/project",
+    "crates/policy",
+    "crates/prompt",
+    "crates/provider",
+    "crates/tools",
+    "crates/storage",
+    "crates/hook",
+    "crates/audit",
 ]
 
 [workspace.dependencies]

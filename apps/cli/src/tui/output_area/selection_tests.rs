@@ -1,5 +1,5 @@
 use super::super::{LineStyle, OutputArea, OutputLine};
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 use ratatui::{buffer::Buffer, layout::Rect};
 
 #[test]

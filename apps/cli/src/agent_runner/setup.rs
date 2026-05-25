@@ -1,11 +1,13 @@
 use super::loop_run::SubAgentRun;
 use super::{CliAgentRunner, SilentHandler};
+use ::runtime::api::core::agent::Agent;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::task::TaskStore;
+use ::runtime::api::core::tool::{
+    AgentProgressEvent, AgentProgressKind, AgentRunner, ToolContext, ToolRegistry,
+};
+use ::runtime::api::provider::types::SystemBlock;
 use async_trait::async_trait;
-use kernel::agent::Agent;
-use kernel::message::Message;
-use kernel::task::TaskStore;
-use kernel::tool::{AgentProgressEvent, AgentProgressKind, AgentRunner, ToolContext, ToolRegistry};
-use provider::types::SystemBlock;
 use std::sync::{Arc, Mutex};
 
 #[async_trait]
@@ -130,7 +132,11 @@ impl AgentRunner for CliAgentRunner {
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        tool::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
+        ::runtime::api::tools::register_subagent_tools(
+            &mut sub_registry,
+            sub_task_store,
+            sub_skills,
+        );
         let sub_schemas = sub_registry.schemas();
         let messages = vec![Message::user(prompt)];
         let handler = SilentHandler;
