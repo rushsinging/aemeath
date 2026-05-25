@@ -79,7 +79,7 @@ pub enum RuntimeStreamEvent {
     },
 }
 
-pub trait TuiLoopEventSink: Clone + Send + Sync + 'static {
+pub trait ChatEventSink: Clone + Send + Sync + 'static {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
 
     fn try_send_event(&self, event: RuntimeStreamEvent);

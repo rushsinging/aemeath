@@ -1,8 +1,8 @@
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, StopHookData};
 use crate::api::core::tool::ToolContext;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,
@@ -11,7 +11,7 @@ pub(crate) async fn run_post_tool_batch<S>(
     ctx: &ToolContext,
     turn_count: usize,
 ) where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     hook_runner.set_project_dir(ctx.current_working_root().display().to_string());
     let post_batch_results = hook_ui

@@ -1,18 +1,18 @@
 use crate::api::core::config::hooks::{HookEntry, HookEvent};
 use crate::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 #[derive(Clone)]
 pub(crate) struct HookUi<S>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     sink: S,
 }
 
 impl<S> HookUi<S>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     pub(crate) fn new(sink: S) -> Self {
         Self { sink }

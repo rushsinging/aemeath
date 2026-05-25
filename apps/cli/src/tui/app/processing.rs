@@ -1,9 +1,9 @@
 use super::{StatusContextUpdate, UiEvent};
+use ::runtime::api::chat::{
+    ChatEventSink, EventFuture, QueueDrainPort, QueueFuture, RuntimeStreamEvent,
+};
 use ::runtime::api::core::tool::ToolRegistry;
 use ::runtime::api::provider::types::SystemBlock;
-use ::runtime::api::tui_loop::{
-    EventFuture, QueueDrainPort, QueueFuture, RuntimeStreamEvent, TuiLoopEventSink,
-};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ impl TuiEventSink {
     }
 }
 
-impl TuiLoopEventSink for TuiEventSink {
+impl ChatEventSink for TuiEventSink {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
         Box::pin(async move {
             let ui_event = runtime_event_to_ui_event(event);
@@ -234,7 +234,7 @@ pub(super) fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
         let sink = TuiEventSink::new(ctx.tx);
         let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
-        ::runtime::api::tui_loop::process_tui_loop(::runtime::api::tui_loop::TuiLoopContext {
+        ::runtime::api::chat::process_chat_loop(::runtime::api::chat::ChatLoopContext {
             sink,
             queue,
             client: ctx.client,

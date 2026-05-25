@@ -1,15 +1,15 @@
-use crate::tui_loop::events::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use provider::StreamHandler;
 
-/// TUI stream handler that forwards API streaming events to a runtime event sink.
-pub struct RuntimeStreamHandler<S: TuiLoopEventSink> {
+/// Chat stream handler that forwards API streaming events to a runtime event sink.
+pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub sink: S,
     pub first_text_time: Option<std::time::Instant>,
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
 }
 
-impl<S: TuiLoopEventSink> RuntimeStreamHandler<S> {
+impl<S: ChatEventSink> RuntimeStreamHandler<S> {
     pub fn new(sink: S) -> Self {
         Self {
             sink,
@@ -20,7 +20,7 @@ impl<S: TuiLoopEventSink> RuntimeStreamHandler<S> {
     }
 }
 
-impl<S: TuiLoopEventSink> StreamHandler for RuntimeStreamHandler<S> {
+impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_text(&mut self, text: &str) {
         self.sink
             .try_send_event(RuntimeStreamEvent::Text(text.to_string()));

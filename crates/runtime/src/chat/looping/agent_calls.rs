@@ -2,9 +2,9 @@ use crate::api::core::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, ToolHookData};
 use crate::api::core::tool::ToolRegistry;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub(crate) async fn execute_agent_calls<S>(
     interrupted: &Arc<AtomicBool>,
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let batch_size = max_agent_concurrency.max(1);
     let mut agent_results = Vec::new();
@@ -62,7 +62,7 @@ async fn execute_one_agent<S>(
     ag_ctx: &mut crate::api::core::tool::ToolContext,
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let pre_results = hook_ui
         .run_plain(

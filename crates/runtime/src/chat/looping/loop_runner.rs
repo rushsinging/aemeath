@@ -3,24 +3,26 @@ use crate::api::core::agent::Agent;
 use crate::api::core::message::Message;
 use crate::api::core::tool::{ToolContext, ToolRegistry};
 use crate::api::provider::types::StopReason;
-use crate::tui_loop::compact::auto_compact;
-use crate::tui_loop::finalize::finalize_main_loop;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
-use crate::tui_loop::post_batch::run_post_tool_batch;
-use crate::tui_loop::queue::append_queued_input;
-use crate::tui_loop::stall::StallDetector;
-use crate::tui_loop::task_reminder::TaskReminderState;
-use crate::tui_loop::tools::{execute_tool_round, tool_results_for_api};
-use crate::tui_loop::{QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler, TuiLoopEventSink};
+use crate::chat::looping::compact::auto_compact;
+use crate::chat::looping::finalize::finalize_main_loop;
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
+use crate::chat::looping::post_batch::run_post_tool_batch;
+use crate::chat::looping::queue::append_queued_input;
+use crate::chat::looping::stall::StallDetector;
+use crate::chat::looping::task_reminder::TaskReminderState;
+use crate::chat::looping::tools::{execute_tool_round, tool_results_for_api};
+use crate::chat::looping::{
+    ChatEventSink, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
+};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-pub struct TuiLoopContext<S, Q>
+pub struct ChatLoopContext<S, Q>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
     Q: QueueDrainPort,
 {
     pub sink: S,
@@ -51,12 +53,12 @@ where
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
-pub async fn process_tui_loop<S, Q>(ctx: TuiLoopContext<S, Q>)
+pub async fn process_chat_loop<S, Q>(ctx: ChatLoopContext<S, Q>)
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
     Q: QueueDrainPort,
 {
-    let TuiLoopContext {
+    let ChatLoopContext {
         sink,
         queue,
         client,
@@ -294,7 +296,7 @@ where
                     if append_queued_input(&queue, &sink, &mut messages).await {
                         continue;
                     }
-                    if let Some(text) = crate::tui_loop::reflection::run_reflection(
+                    if let Some(text) = crate::chat::looping::reflection::run_reflection(
                         &memory_config,
                         turn_count,
                         &messages,
