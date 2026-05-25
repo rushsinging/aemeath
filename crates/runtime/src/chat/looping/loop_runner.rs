@@ -97,7 +97,7 @@ where
                 workspace
                     .context_stack
                     .into_iter()
-                    .map(|entry| crate::api::core::worktree::WorkingContext {
+                    .map(|entry| crate::api::core::tool::WorkingContext {
                         path_base: PathBuf::from(entry.path_base),
                         working_root: PathBuf::from(entry.working_root),
                     })

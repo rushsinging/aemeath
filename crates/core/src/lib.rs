@@ -21,4 +21,3 @@ pub mod string_idx;
 pub mod task;
 pub mod token_estimation;
 pub mod tool;
-pub mod worktree;

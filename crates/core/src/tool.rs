@@ -6,7 +6,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use crate::worktree::WorkingContext;
+/// 保存进入 worktree 前的工作上下文快照
+#[derive(Debug, Clone)]
+pub struct WorkingContext {
+    pub path_base: PathBuf,
+    pub working_root: PathBuf,
+}
 
 #[derive(Debug, Clone)]
 pub struct ImageData {
@@ -153,16 +158,6 @@ impl ToolContext {
             Ok(mut path_base) => *path_base = path,
             Err(poisoned) => *poisoned.into_inner() = path,
         }
-    }
-
-    /// 进入指定 worktree：委托 crate::worktree::enter_worktree
-    pub fn enter_worktree(&self, path: PathBuf) -> Result<WorkingContext, String> {
-        crate::worktree::enter_worktree(self, path)
-    }
-
-    /// 退出当前 worktree：委托 crate::worktree::exit_worktree
-    pub fn exit_worktree(&self) -> Result<WorkingContext, String> {
-        crate::worktree::exit_worktree(self)
     }
 }
 
