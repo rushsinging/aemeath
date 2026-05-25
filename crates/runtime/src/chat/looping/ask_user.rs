@@ -1,9 +1,9 @@
 use crate::api::core::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::HookData;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::tools::{send_tool_result, UiToolResult};
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::tools::{send_tool_result, UiToolResult};
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 pub(crate) async fn ask_user<S>(
     sink: &S,
@@ -12,7 +12,7 @@ pub(crate) async fn ask_user<S>(
     non_agent_calls: &[ToolCall],
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let mut ask_user_results = Vec::new();
     let ask_calls: Vec<&ToolCall> = non_agent_calls

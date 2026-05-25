@@ -1,8 +1,8 @@
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{CompactHookData, HookData, HookRunner};
 use crate::api::core::message::Message;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 /// Run auto-compaction if the context is approaching the limit.
 /// Returns true if the messages were modified.
@@ -18,7 +18,7 @@ pub(crate) async fn auto_compact<S>(
     last_api_input_tokens: u64,
 ) -> bool
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     use crate::api::core::compact;
 

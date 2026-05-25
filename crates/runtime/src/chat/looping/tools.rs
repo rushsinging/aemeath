@@ -3,12 +3,12 @@ use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, ToolHookData};
 use crate::api::core::logging::JsonLogger;
 use crate::api::core::tool::{ImageData, ToolRegistry};
-use crate::tui_loop::agent_calls::execute_agent_calls;
-use crate::tui_loop::ask_user::ask_user;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::non_agent::execute_non_agent;
-use crate::tui_loop::permissions::split_approved_calls;
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::agent_calls::execute_agent_calls;
+use crate::chat::looping::ask_user::ask_user;
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::non_agent::execute_non_agent;
+use crate::chat::looping::permissions::split_approved_calls;
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::sync::Arc;
 
 pub(crate) type UiToolResult = (String, String, bool, Vec<ImageData>);
@@ -29,7 +29,7 @@ pub(crate) async fn execute_tool_round<S>(
     interrupted: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
     let denied_results = deny_tool_calls(&denied, sink, hook_ui, hook_runner).await;
@@ -95,7 +95,7 @@ async fn deny_tool_calls<S>(
     hook_runner: &crate::api::core::hook::HookRunner,
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let mut denied_results = Vec::new();
     for call in denied {
@@ -142,7 +142,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
     output: &str,
     is_error: bool,
 ) where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     emit_json_hook_context(
         sink,
@@ -190,7 +190,7 @@ pub(crate) async fn emit_json_hook_context<S>(
         Option<crate::api::core::hook::HookJsonOutput>,
     )>,
 ) where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     for (_entry, _result, json_output) in hook_results {
         if let Some(json) = json_output {
@@ -210,7 +210,7 @@ pub(crate) async fn emit_json_hook_context<S>(
 
 pub(crate) async fn send_tool_result<S>(sink: &S, call: &ToolCall, result: &UiToolResult)
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {

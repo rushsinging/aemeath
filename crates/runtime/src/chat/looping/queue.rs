@@ -1,5 +1,5 @@
 use crate::api::core::message::Message;
-use crate::tui_loop::events::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -12,7 +12,7 @@ pub trait QueueDrainPort: Clone + Send + Sync + 'static {
 pub async fn append_queued_input<Q, S>(queue: &Q, sink: &S, messages: &mut Vec<Message>) -> bool
 where
     Q: QueueDrainPort,
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let Some(queued) = queue.drain_queued_input().await else {
         return false;
@@ -33,7 +33,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui_loop::events::{EventFuture, RuntimeStreamEvent};
+    use crate::chat::looping::events::{EventFuture, RuntimeStreamEvent};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -60,7 +60,7 @@ mod tests {
         events: Arc<Mutex<Vec<RuntimeStreamEvent>>>,
     }
 
-    impl TuiLoopEventSink for TestEventSink {
+    impl ChatEventSink for TestEventSink {
         fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
             Box::pin(async move {
                 self.events.lock().unwrap().push(event);

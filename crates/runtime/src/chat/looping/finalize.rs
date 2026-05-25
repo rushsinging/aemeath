@@ -2,8 +2,8 @@ use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatu
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use crate::api::core::task::{BatchStatus, TaskStore};
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::path::PathBuf;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
@@ -24,7 +24,7 @@ pub(crate) async fn finalize_main_loop<S>(
     task_store: &TaskStore,
 ) -> Option<String>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     log_agent_outcome(outcome, session_id);
 

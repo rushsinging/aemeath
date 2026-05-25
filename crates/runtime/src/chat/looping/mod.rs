@@ -17,8 +17,8 @@ mod stream_handler;
 mod task_reminder;
 mod tools;
 
-pub use events::{EventFuture, RuntimeStreamEvent, TuiLoopEventSink};
+pub use events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
 pub use input_log::logged_input_messages;
-pub use loop_runner::{process_tui_loop, TuiLoopContext};
+pub use loop_runner::{process_chat_loop, ChatLoopContext};
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 pub use stream_handler::RuntimeStreamHandler;

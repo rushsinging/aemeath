@@ -2,8 +2,8 @@ use crate::api::core::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, ToolHookData};
 use crate::api::core::logging::JsonLogger;
-use crate::tui_loop::hook_ui::HookUi;
-use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
+use crate::chat::looping::hook_ui::HookUi;
+use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::sync::Arc;
 
 use super::tools::{
@@ -22,7 +22,7 @@ pub(super) async fn execute_non_agent<S>(
     non_agent_calls: &[ToolCall],
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let other_calls: Vec<&ToolCall> = non_agent_calls
         .iter()
@@ -72,7 +72,7 @@ async fn execute_multiple_non_agent<S>(
     other_calls: &[&ToolCall],
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let total_len = other_calls.len();
     let mut results: Vec<Option<UiToolResult>> = vec![None; total_len];
@@ -172,7 +172,7 @@ async fn execute_one_non_agent<S>(
     call: &ToolCall,
 ) -> Vec<UiToolResult>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let _ = hook_ui
         .run_plain(
@@ -252,7 +252,7 @@ async fn run_task_hooks<S>(
     output: &str,
     is_error: bool,
 ) where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     if !is_error && call.name == "TaskCreate" {
         emit_json_hook_context(

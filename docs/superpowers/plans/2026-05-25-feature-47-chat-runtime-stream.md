@@ -1,10 +1,10 @@
-# TUI Stream Loop Runtime Migration Implementation Plan
+# Feature 47 Chat Runtime Stream Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 `apps/cli/src/tui/app/stream*` 中的后台 LLM turn loop 首轮迁移到 `crates/runtime`，让 TUI 保留渲染、输入与事件 adapter。
+**Goal:** 将 `apps/cli/src/tui/app/stream*` 中的后台 Chat stream loop 首轮迁移到 `crates/runtime`，让 TUI 保留渲染、输入与事件 adapter。
 
-**Architecture:** 首轮采用低风险 adapter 迁移：`UiEvent` 暂时仍定义在 CLI，runtime 通过泛型 event sink/queue drain port 调用 TUI adapter，避免重写渲染和 AskUserQuestion。`crates/runtime::tui_loop` 承载 `SpawnContext`、tool context 构造、LLM stream、tool round、compact、finalize 等 turn 编排；`apps/cli` 只负责 spawn、event forwarding 和 UI state 更新。
+**Architecture:** 首轮采用低风险 adapter 迁移：`UiEvent` 暂时仍定义在 CLI，runtime 通过泛型 event sink/queue drain port 调用 TUI adapter，避免重写渲染和 AskUserQuestion。`runtime::api::chat` 承载 `SpawnContext`、tool context 构造、LLM stream、tool round、compact、finalize 等 turn 编排；`apps/cli` 只负责 spawn、event forwarding 和 UI state 更新。
 
 **Tech Stack:** Rust workspace、Tokio、`runtime::api`、`aemeath_core` message/tool/hook/task/session 类型、现有 TUI `UiEvent` adapter。
 
@@ -12,57 +12,57 @@
 
 ## File Structure
 
-- Create: `crates/runtime/src/tui_loop/mod.rs`
-  - 新 runtime 模块入口，导出 `TuiLoopContext`、`TuiLoopEventSink`、`QueueDrainPort`、`process_tui_loop`。
-- Create: `crates/runtime/src/tui_loop/events.rs`
+- Create: `crates/runtime/src/chat/looping/mod.rs`
+  - 新 runtime 模块入口，导出 `ChatLoopContext`、`ChatEventSink`、`QueueDrainPort`、`process_chat_loop`。
+- Create: `crates/runtime/src/chat/looping/events.rs`
   - 定义 runtime 侧最小事件 trait：发送文本、工具调用、系统消息、usage、done、message sync 等。
-- Create: `crates/runtime/src/tui_loop/queue.rs`
+- Create: `crates/runtime/src/chat/looping/queue.rs`
   - 保存 queue drain 与 append queued input 逻辑，使用 `QueueDrainPort` 而不是 CLI `UiEvent`。
-- Create: `crates/runtime/src/tui_loop/stream_handler.rs`
+- Create: `crates/runtime/src/chat/looping/stream_handler.rs`
   - 从 CLI `TuiStreamHandler` 抽为通用 `RuntimeStreamHandler<S>`，通过 event sink 转发 streaming event。
-- Create: `crates/runtime/src/tui_loop/loop_runner.rs`
+- Create: `crates/runtime/src/chat/looping/loop_runner.rs`
   - 保存从 `process_in_background` 搬来的主循环。
 - Modify: `crates/runtime/src/lib.rs`
-  - 增加 `pub mod tui_loop;`。
+  - 增加 `pub mod chat;`。
 - Modify: `crates/runtime/src/api.rs`
-  - 增加 `pub use crate::tui_loop;`。
+  - 增加 `pub use crate::chat;`。
 - Modify: `apps/cli/src/tui/app/processing.rs`
-  - `SpawnContext` 保留在 CLI 或薄包装 runtime context；`spawn_processing` 调用 `runtime::api::tui_loop::process_tui_loop`。
+  - `SpawnContext` 保留在 CLI 或薄包装 runtime context；`spawn_processing` 调用 `runtime::api::chat::process_chat_loop`。
 - Modify: `apps/cli/src/tui/app/stream.rs`
   - 首轮变薄或移除主循环，只保留 CLI-only adapter re-export；最终不再定义 `process_in_background`。
 - Modify: `apps/cli/src/tui/app/stream/queue.rs`
   - 保留测试可迁移到 runtime；CLI adapter 实现 `QueueDrainPort`。
 - Modify: `docs/feature/active.md`
-  - 更新 #47 当前推进说明，记录 TUI stream loop 首轮迁移状态。
+  - 更新 #47 当前推进说明，记录 Feature #47 Chat runtime stream loop 首轮迁移状态。
 - Modify: `docs/feature/specs/047-ddd-redesign.md`
   - 更新 checkpoint 注释，说明 TUI adapter 仍留 CLI，turn loop 开始下沉 runtime。
 
 ---
 
-### Task 1: 建立 runtime TUI loop 事件与 queue port
+### Task 1: 建立 runtime Chat loop 事件与 queue port
 
 **Files:**
-- Create: `crates/runtime/src/tui_loop/mod.rs`
-- Create: `crates/runtime/src/tui_loop/events.rs`
-- Create: `crates/runtime/src/tui_loop/queue.rs`
+- Create: `crates/runtime/src/chat/looping/mod.rs`
+- Create: `crates/runtime/src/chat/looping/events.rs`
+- Create: `crates/runtime/src/chat/looping/queue.rs`
 - Modify: `crates/runtime/src/lib.rs`
 - Modify: `crates/runtime/src/api.rs`
 
 - [ ] **Step 1: 创建 runtime 模块入口**
 
-Create `crates/runtime/src/tui_loop/mod.rs`:
+Create `crates/runtime/src/chat/looping/mod.rs`:
 
 ```rust
 mod events;
 mod queue;
 
-pub use events::{RuntimeStreamEvent, TuiLoopEventSink};
+pub use events::{RuntimeStreamEvent, ChatEventSink};
 pub use queue::{append_queued_input, QueueDrainPort};
 ```
 
 - [ ] **Step 2: 定义 runtime stream event sink trait**
 
-Create `crates/runtime/src/tui_loop/events.rs`:
+Create `crates/runtime/src/chat/looping/events.rs`:
 
 ```rust
 use crate::api::core::message::Message;
@@ -93,7 +93,7 @@ pub enum RuntimeStreamEvent {
     StopFailureHook { system_message: Option<String>, additional_context: Option<String> },
 }
 
-pub trait TuiLoopEventSink: Clone + Send + Sync + 'static {
+pub trait ChatEventSink: Clone + Send + Sync + 'static {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
     fn try_send_event(&self, event: RuntimeStreamEvent) -> Result<(), String>;
 }
@@ -101,10 +101,10 @@ pub trait TuiLoopEventSink: Clone + Send + Sync + 'static {
 
 - [ ] **Step 3: 定义 queue drain port 与 append 逻辑**
 
-Create `crates/runtime/src/tui_loop/queue.rs`:
+Create `crates/runtime/src/chat/looping/queue.rs`:
 
 ```rust
-use super::{RuntimeStreamEvent, TuiLoopEventSink};
+use super::{RuntimeStreamEvent, ChatEventSink};
 use crate::api::core::message::Message;
 use std::future::Future;
 use std::pin::Pin;
@@ -122,7 +122,7 @@ pub async fn append_queued_input<Q, S>(
 ) -> bool
 where
     Q: QueueDrainPort,
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     let Some(queued) = queue.drain_queued_input().await else {
         return false;
@@ -152,7 +152,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestSink(Arc<Mutex<Vec<RuntimeStreamEvent>>>);
 
-    impl TuiLoopEventSink for TestSink {
+    impl ChatEventSink for TestSink {
         fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
             Box::pin(async move { self.0.lock().unwrap().push(event); })
         }
@@ -214,7 +214,7 @@ pub mod agent_runner;
 pub mod api;
 pub mod bootstrap;
 pub mod chat;
-pub mod tui_loop;
+pub mod chat;
 ```
 
 Modify `crates/runtime/src/api.rs`:
@@ -223,7 +223,7 @@ Modify `crates/runtime/src/api.rs`:
 pub use crate::agent_runner;
 pub use crate::bootstrap;
 pub use crate::chat;
-pub use crate::tui_loop;
+pub use crate::chat;
 pub use aemeath_core as core;
 pub use audit;
 pub use hook;
@@ -241,7 +241,7 @@ Run:
 
 ```bash
 cargo fmt --all -- --check
-cargo test -p runtime tui_loop::queue
+cargo test -p runtime chat/looping::queue
 cargo check -p runtime
 ```
 
@@ -252,21 +252,21 @@ Expected: all pass.
 ### Task 2: 迁移 stream handler 到 runtime
 
 **Files:**
-- Create: `crates/runtime/src/tui_loop/stream_handler.rs`
-- Modify: `crates/runtime/src/tui_loop/mod.rs`
+- Create: `crates/runtime/src/chat/looping/stream_handler.rs`
+- Modify: `crates/runtime/src/chat/looping/mod.rs`
 - Modify: `apps/cli/src/tui/app/stream/handler.rs`
 
 - [ ] **Step 1: 创建 runtime stream handler**
 
-Create `crates/runtime/src/tui_loop/stream_handler.rs`:
+Create `crates/runtime/src/chat/looping/stream_handler.rs`:
 
 ```rust
-use super::{RuntimeStreamEvent, TuiLoopEventSink};
+use super::{RuntimeStreamEvent, ChatEventSink};
 use crate::api::provider::StreamHandler;
 
 pub struct RuntimeStreamHandler<S>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     pub sink: S,
     pub first_text_time: Option<std::time::Instant>,
@@ -276,7 +276,7 @@ where
 
 impl<S> RuntimeStreamHandler<S>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     pub fn new(sink: S) -> Self {
         let now = std::time::Instant::now();
@@ -291,7 +291,7 @@ where
 
 impl<S> StreamHandler for RuntimeStreamHandler<S>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     fn on_text(&mut self, text: &str) {
         if let Err(e) = self.sink.try_send_event(RuntimeStreamEvent::Text(text.to_string())) {
@@ -354,14 +354,14 @@ where
 
 - [ ] **Step 2: 导出 handler**
 
-Modify `crates/runtime/src/tui_loop/mod.rs`:
+Modify `crates/runtime/src/chat/looping/mod.rs`:
 
 ```rust
 mod events;
 mod queue;
 mod stream_handler;
 
-pub use events::{RuntimeStreamEvent, TuiLoopEventSink};
+pub use events::{RuntimeStreamEvent, ChatEventSink};
 pub use queue::{append_queued_input, QueueDrainPort};
 pub use stream_handler::RuntimeStreamHandler;
 ```
@@ -373,7 +373,7 @@ Replace `apps/cli/src/tui/app/stream/handler.rs` with:
 ```rust
 use crate::tui::app::processing::TuiEventSink;
 
-pub(crate) type TuiStreamHandler = ::runtime::api::tui_loop::RuntimeStreamHandler<TuiEventSink>;
+pub(crate) type TuiStreamHandler = ::runtime::api::chat::RuntimeStreamHandler<TuiEventSink>;
 ```
 
 - [ ] **Step 4: 验证 Task 2**
@@ -410,36 +410,36 @@ impl TuiEventSink {
         Self { tx }
     }
 
-    fn map_event(event: ::runtime::api::tui_loop::RuntimeStreamEvent) -> UiEvent {
+    fn map_event(event: ::runtime::api::chat::RuntimeStreamEvent) -> UiEvent {
         match event {
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Text(text) => UiEvent::Text(text),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Thinking(text) => UiEvent::Thinking(text),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::ToolCallStart { name, index } => UiEvent::ToolCallStart { name, index },
-            ::runtime::api::tui_loop::RuntimeStreamEvent::ToolArgumentsDelta { index, name, partial_args } => UiEvent::ToolArgumentsDelta { index, name, partial_args },
-            ::runtime::api::tui_loop::RuntimeStreamEvent::ToolCall { id, name, summary } => UiEvent::ToolCall { id, name, summary },
-            ::runtime::api::tui_loop::RuntimeStreamEvent::ToolResult { id, tool_name, output, is_error, images } => UiEvent::ToolResult { id, tool_name, output, is_error, images },
-            ::runtime::api::tui_loop::RuntimeStreamEvent::SystemMessage(message) => UiEvent::SystemMessage(message),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Error(error) => UiEvent::Error(error),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Usage { input, output, last_input, elapsed_secs } => UiEvent::Usage { input, output, last_input, elapsed_secs },
-            ::runtime::api::tui_loop::RuntimeStreamEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Done => UiEvent::Done,
-            ::runtime::api::tui_loop::RuntimeStreamEvent::DoneWithDuration(duration) => UiEvent::DoneWithDuration(duration),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::Cancelled => UiEvent::Cancelled,
-            ::runtime::api::tui_loop::RuntimeStreamEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
-            ::runtime::api::tui_loop::RuntimeStreamEvent::StopFailureHook { system_message, additional_context } => UiEvent::StopFailureHook { system_message, additional_context },
+            ::runtime::api::chat::RuntimeStreamEvent::Text(text) => UiEvent::Text(text),
+            ::runtime::api::chat::RuntimeStreamEvent::Thinking(text) => UiEvent::Thinking(text),
+            ::runtime::api::chat::RuntimeStreamEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
+            ::runtime::api::chat::RuntimeStreamEvent::ToolCallStart { name, index } => UiEvent::ToolCallStart { name, index },
+            ::runtime::api::chat::RuntimeStreamEvent::ToolArgumentsDelta { index, name, partial_args } => UiEvent::ToolArgumentsDelta { index, name, partial_args },
+            ::runtime::api::chat::RuntimeStreamEvent::ToolCall { id, name, summary } => UiEvent::ToolCall { id, name, summary },
+            ::runtime::api::chat::RuntimeStreamEvent::ToolResult { id, tool_name, output, is_error, images } => UiEvent::ToolResult { id, tool_name, output, is_error, images },
+            ::runtime::api::chat::RuntimeStreamEvent::SystemMessage(message) => UiEvent::SystemMessage(message),
+            ::runtime::api::chat::RuntimeStreamEvent::Error(error) => UiEvent::Error(error),
+            ::runtime::api::chat::RuntimeStreamEvent::Usage { input, output, last_input, elapsed_secs } => UiEvent::Usage { input, output, last_input, elapsed_secs },
+            ::runtime::api::chat::RuntimeStreamEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
+            ::runtime::api::chat::RuntimeStreamEvent::Done => UiEvent::Done,
+            ::runtime::api::chat::RuntimeStreamEvent::DoneWithDuration(duration) => UiEvent::DoneWithDuration(duration),
+            ::runtime::api::chat::RuntimeStreamEvent::Cancelled => UiEvent::Cancelled,
+            ::runtime::api::chat::RuntimeStreamEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
+            ::runtime::api::chat::RuntimeStreamEvent::StopFailureHook { system_message, additional_context } => UiEvent::StopFailureHook { system_message, additional_context },
         }
     }
 }
 
-impl ::runtime::api::tui_loop::TuiLoopEventSink for TuiEventSink {
-    fn send_event<'a>(&'a self, event: ::runtime::api::tui_loop::RuntimeStreamEvent) -> ::runtime::api::tui_loop::EventFuture<'a> {
+impl ::runtime::api::chat::ChatEventSink for TuiEventSink {
+    fn send_event<'a>(&'a self, event: ::runtime::api::chat::RuntimeStreamEvent) -> ::runtime::api::chat::EventFuture<'a> {
         Box::pin(async move {
             let _ = self.tx.send(Self::map_event(event)).await;
         })
     }
 
-    fn try_send_event(&self, event: ::runtime::api::tui_loop::RuntimeStreamEvent) -> Result<(), String> {
+    fn try_send_event(&self, event: ::runtime::api::chat::RuntimeStreamEvent) -> Result<(), String> {
         self.tx.try_send(Self::map_event(event)).map_err(|e| e.to_string())
     }
 }
@@ -455,8 +455,8 @@ impl TuiQueueDrainPort {
     }
 }
 
-impl ::runtime::api::tui_loop::QueueDrainPort for TuiQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> ::runtime::api::tui_loop::QueueFuture<'a> {
+impl ::runtime::api::chat::QueueDrainPort for TuiQueueDrainPort {
+    fn drain_queued_input<'a>(&'a self) -> ::runtime::api::chat::QueueFuture<'a> {
         Box::pin(async move {
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             if self.tx.send(UiEvent::DrainQueuedInput { reply_tx }).await.is_err() {
@@ -480,10 +480,10 @@ cargo fmt --all -- --check
 cargo check -p cli
 ```
 
-Expected: all pass. If `EventFuture` or `QueueFuture` is private, ensure Task 1 exports them from `crates/runtime/src/tui_loop/mod.rs`:
+Expected: all pass. If `EventFuture` or `QueueFuture` is private, ensure Task 1 exports them from `crates/runtime/src/chat/looping/mod.rs`:
 
 ```rust
-pub use events::{EventFuture, RuntimeStreamEvent, TuiLoopEventSink};
+pub use events::{EventFuture, RuntimeStreamEvent, ChatEventSink};
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 ```
 
@@ -492,17 +492,17 @@ pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 ### Task 4: 首轮迁移 process_in_background 到 runtime
 
 **Files:**
-- Create: `crates/runtime/src/tui_loop/loop_runner.rs`
-- Modify: `crates/runtime/src/tui_loop/mod.rs`
+- Create: `crates/runtime/src/chat/looping/loop_runner.rs`
+- Modify: `crates/runtime/src/chat/looping/mod.rs`
 - Modify: `apps/cli/src/tui/app/processing.rs`
 - Modify: `apps/cli/src/tui/app/stream.rs`
 
 - [ ] **Step 1: 创建 runtime context 类型**
 
-Create `crates/runtime/src/tui_loop/loop_runner.rs` with the context struct first:
+Create `crates/runtime/src/chat/looping/loop_runner.rs` with the context struct first:
 
 ```rust
-use super::{append_queued_input, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler, TuiLoopEventSink};
+use super::{append_queued_input, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler, ChatEventSink};
 use crate::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
 use crate::api::core::agent::Agent;
 use crate::api::core::message::Message;
@@ -513,9 +513,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-pub struct TuiLoopContext<S, Q>
+pub struct ChatLoopContext<S, Q>
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
     Q: QueueDrainPort,
 {
     pub sink: S,
@@ -548,15 +548,15 @@ where
 
 - [ ] **Step 2: 搬迁主循环，暂时保留 CLI-only helper 回调**
 
-Continue in `crates/runtime/src/tui_loop/loop_runner.rs` by adding a minimal compile target that constructs `ToolContext` and emits cancellation. Do not move every stream submodule in this step:
+Continue in `crates/runtime/src/chat/looping/loop_runner.rs` by adding a minimal compile target that constructs `ToolContext` and emits cancellation. Do not move every stream submodule in this step:
 
 ```rust
-pub async fn process_tui_loop<S, Q>(ctx: TuiLoopContext<S, Q>)
+pub async fn process_chat_loop<S, Q>(ctx: ChatLoopContext<S, Q>)
 where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
     Q: QueueDrainPort,
 {
-    let TuiLoopContext {
+    let ChatLoopContext {
         sink,
         queue,
         client,
@@ -714,7 +714,7 @@ Important: This step is an intermediate checkpoint only if compile/testing shows
 
 - [ ] **Step 3: 导出 context 与 runner**
 
-Modify `crates/runtime/src/tui_loop/mod.rs`:
+Modify `crates/runtime/src/chat/looping/mod.rs`:
 
 ```rust
 mod events;
@@ -722,8 +722,8 @@ mod loop_runner;
 mod queue;
 mod stream_handler;
 
-pub use events::{EventFuture, RuntimeStreamEvent, TuiLoopEventSink};
-pub use loop_runner::{process_tui_loop, TuiLoopContext};
+pub use events::{EventFuture, RuntimeStreamEvent, ChatEventSink};
+pub use loop_runner::{process_chat_loop, ChatLoopContext};
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 pub use stream_handler::RuntimeStreamHandler;
 ```
@@ -744,8 +744,8 @@ Expected: pass.
 ### Task 5: 完整搬迁 stream helper 并切换 CLI spawn
 
 **Files:**
-- Move/Modify: `apps/cli/src/tui/app/stream/{agent_calls,ask_user,compact,finalize,hook_ui,input_log,llm_log,non_agent,permissions,post_batch,queue,stall,tools}.rs` to `crates/runtime/src/tui_loop/`
-- Modify: `crates/runtime/src/tui_loop/loop_runner.rs`
+- Move/Modify: `apps/cli/src/tui/app/stream/{agent_calls,ask_user,compact,finalize,hook_ui,input_log,llm_log,non_agent,permissions,post_batch,queue,stall,tools}.rs` to `crates/runtime/src/chat/looping/`
+- Modify: `crates/runtime/src/chat/looping/loop_runner.rs`
 - Modify: `apps/cli/src/tui/app/processing.rs`
 - Modify: `apps/cli/src/tui/app/stream.rs`
 
@@ -756,16 +756,16 @@ Use `mv` for each file, then replace imports from `crate::tui::app::stream::*` a
 Run:
 
 ```bash
-mv apps/cli/src/tui/app/stream/compact.rs crates/runtime/src/tui_loop/compact.rs
-mv apps/cli/src/tui/app/stream/finalize.rs crates/runtime/src/tui_loop/finalize.rs
-mv apps/cli/src/tui/app/stream/queue.rs crates/runtime/src/tui_loop/queue_legacy_tests_source.rs
+mv apps/cli/src/tui/app/stream/compact.rs crates/runtime/src/chat/looping/compact.rs
+mv apps/cli/src/tui/app/stream/finalize.rs crates/runtime/src/chat/looping/finalize.rs
+mv apps/cli/src/tui/app/stream/queue.rs crates/runtime/src/chat/looping/queue_legacy_tests_source.rs
 ```
 
-Expected: files are moved. After moving queue tests, manually merge useful Bug #49 tests into `crates/runtime/src/tui_loop/queue.rs`, then delete `queue_legacy_tests_source.rs`.
+Expected: files are moved. After moving queue tests, manually merge useful Bug #49 tests into `crates/runtime/src/chat/looping/queue.rs`, then delete `queue_legacy_tests_source.rs`.
 
 - [ ] **Step 2: Convert helper modules to runtime events**
 
-For every moved helper function that accepted `mpsc::Sender<UiEvent>`, change it to generic `S: TuiLoopEventSink` and send `RuntimeStreamEvent`.
+For every moved helper function that accepted `mpsc::Sender<UiEvent>`, change it to generic `S: ChatEventSink` and send `RuntimeStreamEvent`.
 
 Example conversion for tool result send:
 
@@ -775,7 +775,7 @@ pub(crate) async fn send_tool_result<S>(
     call: &ToolCall,
     result: &UiToolResult,
 ) where
-    S: TuiLoopEventSink,
+    S: ChatEventSink,
 {
     sink.send_event(RuntimeStreamEvent::ToolResult {
         id: result.0.clone(),
@@ -790,7 +790,7 @@ pub(crate) async fn send_tool_result<S>(
 
 - [ ] **Step 3: Replace loop_runner placeholder with original logic**
 
-In `crates/runtime/src/tui_loop/loop_runner.rs`, replace the checkpoint message branch with the original logic from `apps/cli/src/tui/app/stream.rs` lines 171-347:
+In `crates/runtime/src/chat/looping/loop_runner.rs`, replace the checkpoint message branch with the original logic from `apps/cli/src/tui/app/stream.rs` lines 171-347:
 
 ```rust
 // Use migrated auto_compact, task reminder, log_llm_input/output, execute_tool_round,
@@ -808,7 +808,7 @@ pub(super) fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
         let sink = TuiEventSink::new(ctx.tx);
         let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
-        ::runtime::api::tui_loop::process_tui_loop(::runtime::api::tui_loop::TuiLoopContext {
+        ::runtime::api::chat::process_chat_loop(::runtime::api::chat::ChatLoopContext {
             sink,
             queue,
             client: ctx.client,
@@ -852,7 +852,7 @@ Run:
 cargo fmt --all -- --check
 cargo check -p runtime
 cargo check -p cli
-cargo test -p runtime tui_loop
+cargo test -p runtime chat/looping
 cargo test -p cli tui
 ```
 
@@ -871,7 +871,7 @@ Expected: all pass.
 In `docs/feature/active.md`, update #47 line and detail paragraph to include:
 
 ```text
-TUI stream loop 首轮已开始下沉 runtime：后台 processing 入口通过 runtime::api::tui_loop 调用，LLM turn loop、ToolContext 构造、queue drain、stream handler 与 tool batch 编排从 apps/cli/src/tui/app/stream* 迁入 crates/runtime；apps/cli 继续保留 UiEvent、渲染、输入、AskUserQuestion 交互和 event adapter。
+TUI stream loop 首轮已开始下沉 runtime：后台 processing 入口通过 runtime::api::chat 调用，LLM turn loop、ToolContext 构造、queue drain、stream handler 与 tool batch 编排从 apps/cli/src/tui/app/stream* 迁入 crates/runtime；apps/cli 继续保留 UiEvent、渲染、输入、AskUserQuestion 交互和 event adapter。
 ```
 
 - [ ] **Step 2: 更新 spec checkpoint**
@@ -889,7 +889,7 @@ Run:
 ```bash
 cargo fmt --all -- --check
 cargo check
-cargo test -p runtime tui_loop
+cargo test -p runtime chat/looping
 cargo test -p cli tui
 cargo test
 ./build_cli.sh
@@ -915,4 +915,4 @@ git commit -m "refactor: 将 TUI stream loop 迁移到 runtime (refs #47)"
 - Spec coverage: 计划覆盖路线 1 的首轮目标：runtime 接管 TUI 后台 turn loop，TUI 保留渲染、输入和 event adapter。
 - Scope check: 不拆 slash command、不拆 App state、不改 AskUserQuestion UI、不改 session 格式，符合低风险范围。
 - Placeholder scan: 无 TBD/TODO；Task 5 的 helper 模块迁移必须在实施时依据现有代码逐文件转换，不能提交 checkpoint marker。
-- Type consistency: `RuntimeStreamEvent`、`TuiLoopEventSink`、`QueueDrainPort`、`TuiLoopContext` 在前置任务定义并在后续使用。
+- Type consistency: `RuntimeStreamEvent`、`ChatEventSink`、`QueueDrainPort`、`ChatLoopContext` 在前置任务定义并在后续使用。
