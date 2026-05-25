@@ -123,7 +123,7 @@ fn volcengine_thinking_budget_maps_to_reasoning_effort() {
 
 #[test]
 fn openai_provider_config_from_api_driver_sets_fields() {
-    use aemeath_core::provider::ApiDriverKind;
+    use crate::api::ApiDriverKind;
     let openai = OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "source-openai");
     assert_eq!(openai.source_key, "source-openai");
     assert_eq!(openai.api, ApiDriverKind::OpenAI);
@@ -144,7 +144,7 @@ fn openai_provider_config_from_api_driver_sets_fields() {
 #[test]
 fn openai_provider_set_max_tokens_updates_request_body() {
     let config = OpenAIProviderConfig::from_api_driver(
-        aemeath_core::provider::ApiDriverKind::OpenAI,
+        crate::api::ApiDriverKind::OpenAI,
         "openai",
     );
     let provider = OpenAICompatibleProvider::new(
@@ -165,7 +165,7 @@ fn openai_provider_set_max_tokens_updates_request_body() {
 #[test]
 fn openai_provider_set_max_tokens_zero_is_ignored() {
     let config = OpenAIProviderConfig::from_api_driver(
-        aemeath_core::provider::ApiDriverKind::OpenAI,
+        crate::api::ApiDriverKind::OpenAI,
         "openai",
     );
     let provider = OpenAICompatibleProvider::new(
@@ -186,7 +186,7 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
 #[test]
 fn volcengine_provider_uses_max_output_tokens_field() {
     let config = OpenAIProviderConfig::from_api_driver(
-        aemeath_core::provider::ApiDriverKind::Volcengine,
+        crate::api::ApiDriverKind::Volcengine,
         "volcengine",
     );
     let provider = OpenAICompatibleProvider::new(

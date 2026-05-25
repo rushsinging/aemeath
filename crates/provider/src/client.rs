@@ -7,7 +7,7 @@ use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
 use crate::providers::openai_compatible::ReasoningConfig;
 use crate::types::{StreamResponse, SystemBlock};
 use aemeath_core::message::Message;
-use aemeath_core::provider::ApiDriverKind;
+use crate::api::ApiDriverKind;
 use tokio_util::sync::CancellationToken;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
