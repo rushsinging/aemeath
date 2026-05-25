@@ -1,8 +1,8 @@
-use ::runtime::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::run_orchestration::runtime;
 use ::runtime::api::core::config::{Config, MemoryConfig};
 use ::runtime::api::core::hook::HookRunner;
 use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use ::runtime::api::provider::types::SystemBlock;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -75,8 +75,8 @@ async fn build_chat_prompt_bundle_from_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::prompt_build::SystemPromptParts;
     use ::runtime::api::core::config::Config;
+    use ::runtime::api::prompt_build::SystemPromptParts;
     use std::path::Path;
 
     fn prompt_parts() -> SystemPromptParts {

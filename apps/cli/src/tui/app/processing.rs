@@ -202,7 +202,7 @@ pub(crate) struct SpawnContext {
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: ::runtime::api::core::hook::HookRunner,
     pub memory_config: ::runtime::api::core::config::MemoryConfig,
-    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 }
 
 /// Borrowed references to the shared state needed for spawning.
@@ -226,7 +226,8 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub hook_runner: &'a ::runtime::api::core::hook::HookRunner,
     pub memory_config: &'a ::runtime::api::core::config::MemoryConfig,
-    pub json_logger: &'a Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    pub json_logger:
+        &'a Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
 }
 
 /// Spawn the background LLM processing task.

@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 use crate::api::core::config::{paths, MemoryConfig};
 use crate::api::core::hook::HookRunner;
-use crate::api::core::memory::{
-    memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore,
-};
+use crate::api::core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
 
 use super::git_context::{collect_git_context, is_git_repo};
 

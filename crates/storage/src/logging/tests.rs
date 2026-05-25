@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::LoggingConfig;
+use aemeath_core::config::LoggingConfig;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -74,8 +74,11 @@ fn test_log_path_uses_agents_logs_dir() {
             .unwrap()
             .as_nanos()
     ));
-    let previous = std::env::var_os(crate::config::paths::AGENTS_DIR_ENV);
-    std::env::set_var(crate::config::paths::AGENTS_DIR_ENV, &temp_agents_dir);
+    let previous = std::env::var_os(aemeath_core::config::paths::AGENTS_DIR_ENV);
+    std::env::set_var(
+        aemeath_core::config::paths::AGENTS_DIR_ENV,
+        &temp_agents_dir,
+    );
 
     assert_eq!(
         log_path(LogFile::Aemeath),
@@ -83,9 +86,9 @@ fn test_log_path_uses_agents_logs_dir() {
     );
 
     if let Some(previous) = previous {
-        std::env::set_var(crate::config::paths::AGENTS_DIR_ENV, previous);
+        std::env::set_var(aemeath_core::config::paths::AGENTS_DIR_ENV, previous);
     } else {
-        std::env::remove_var(crate::config::paths::AGENTS_DIR_ENV);
+        std::env::remove_var(aemeath_core::config::paths::AGENTS_DIR_ENV);
     }
 }
 

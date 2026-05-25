@@ -1,8 +1,8 @@
 use crate::api::core::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, ToolHookData};
-use crate::api::core::logging::JsonLogger;
 use crate::api::core::tool::{ImageData, ToolRegistry};
+use crate::api::storage::logging::JsonLogger;
 use crate::chat::looping::agent_calls::execute_agent_calls;
 use crate::chat::looping::ask_user::ask_user;
 use crate::chat::looping::hook_ui::HookUi;
@@ -251,7 +251,7 @@ pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
 ) -> crate::api::core::message::Message {
-    crate::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    crate::api::storage::tool_result_storage::persist_oversized_results(session_id, &mut results);
     crate::api::core::message::Message::tool_results_rich(results)
 }
 

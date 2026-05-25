@@ -1,6 +1,6 @@
-use ::runtime::api::image::{is_image_file, process_image_file};
 use crate::render::TerminalRenderer;
 use ::runtime::api::core::message::Message;
+use ::runtime::api::image::{is_image_file, process_image_file};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::Path;

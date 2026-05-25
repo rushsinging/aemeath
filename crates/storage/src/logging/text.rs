@@ -1,4 +1,4 @@
-use crate::config::paths;
+use aemeath_core::config::paths;
 use serde_json::json;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};

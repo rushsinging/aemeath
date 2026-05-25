@@ -5,3 +5,8 @@ edition = "2021"
 
 [dependencies]
 aemeath_core = { package = "core", path = "../core" }
+dirs = "6"
+log = "0.4"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }

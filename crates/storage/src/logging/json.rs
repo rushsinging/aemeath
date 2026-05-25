@@ -1,4 +1,4 @@
-use crate::config::logging::LoggingConfig;
+use aemeath_core::config::logging::LoggingConfig;
 use serde_json::json;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};

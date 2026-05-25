@@ -117,7 +117,7 @@ pub(super) fn append_tool_results(
     mut results: Vec<crate::api::core::agent::ToolResultTuple>,
     session_id: &str,
 ) {
-    crate::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    crate::api::storage::tool_result_storage::persist_oversized_results(session_id, &mut results);
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
         messages.push(Message::tool_results_rich(results));

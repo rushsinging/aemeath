@@ -1,7 +1,7 @@
 use crate::api::core::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::hook::{HookData, ToolHookData};
-use crate::api::core::logging::JsonLogger;
+use crate::api::storage::logging::JsonLogger;
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::sync::Arc;
