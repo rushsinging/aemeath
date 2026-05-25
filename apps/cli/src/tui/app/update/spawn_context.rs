@@ -25,7 +25,7 @@ impl App {
             messages: self.chat.messages.clone(),
             context_size: spawn_refs.context_size,
             cwd: self.session.cwd.clone(),
-            workspace_context: self.workspace_context.clone(),
+            workspace_context: self.cmd_exec.workspace_context.clone(),
             session_id: self.session.session_id.clone(),
             read_files: spawn_refs.read_files.clone(),
             session_reminders: spawn_refs.session_reminders.clone(),

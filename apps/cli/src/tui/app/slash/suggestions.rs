@@ -14,7 +14,7 @@ impl super::super::App {
             .unwrap_or(input.len());
 
         let models: Vec<(String, String)> = self
-            .models_config
+            .cmd_exec.models_config
             .list_models()
             .into_iter()
             .map(|(p, m)| (p, if m.name.is_empty() { m.id } else { m.name }))
@@ -43,11 +43,11 @@ impl super::super::App {
         let ctx = SuggestionContext {
             input,
             cursor_offset,
-            cwd: self.cwd.clone(),
+            cwd: self.session.cwd.clone(),
             models,
             skills,
             commands,
-            sessions: self.cached_sessions.clone(),
+            sessions: self.session.cached_sessions.clone(),
         };
 
         let suggestions = generate_suggestions(&ctx);

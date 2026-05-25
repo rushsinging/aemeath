@@ -6,25 +6,25 @@ use std::sync::Arc;
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
     pub(crate) async fn reset_runtime_state(&mut self) {
-        self.total_input_tokens = 0;
-        self.total_output_tokens = 0;
-        self.total_api_calls = 0;
-        self.last_input_tokens = 0;
-        self.tool_call_active = false;
-        self.is_processing = false;
-        self.active_tool_call_ids.clear();
-        self.input_queue.clear();
+        self.chat.total_input_tokens = 0;
+        self.chat.total_output_tokens = 0;
+        self.chat.total_api_calls = 0;
+        self.chat.last_input_tokens = 0;
+        self.chat.tool_call_active = false;
+        self.chat.is_processing = false;
+        self.chat.active_tool_call_ids.clear();
+        self.input.input_queue.clear();
         self.output_area.reset_runtime_state();
         self.status_bar.reset_runtime_state();
-        self.ask_user_reply_tx = None;
-        self.ask_user_state = None;
-        self.pending_reflection = None;
-        self.turn_count = 0;
-        if let Ok(mut reminders) = self.session_reminders.lock() {
+        self.input.ask_user_reply_tx = None;
+        self.input.ask_user_state = None;
+        self.chat.pending_reflection = None;
+        self.chat.turn_count = 0;
+        if let Ok(mut reminders) = self.cmd_exec.session_reminders.lock() {
             reminders.clear();
         }
         // Clear task store so stale tasks don't leak into new conversations
-        if let Some(ref ts) = self.task_store {
+        if let Some(ref ts) = self.cmd_exec.task_store {
             ts.clear().await;
         }
     }
@@ -72,7 +72,7 @@ impl App {
         messages: Vec<Message>,
     ) -> ::runtime::api::core::session::Session {
         use ::runtime::api::core::session::{now_iso, Session};
-        let task_snapshot = match &self.task_store {
+        let task_snapshot = match &self.cmd_exec.task_store {
             Some(ts) => {
                 let snap = ts.snapshot().await;
                 if snap.tasks.is_empty() {
@@ -84,21 +84,21 @@ impl App {
             None => None,
         };
         Session {
-            id: self.session_id.clone(),
-            cwd: self.cwd.to_string_lossy().to_string(),
+            id: self.session.session_id.clone(),
+            cwd: self.session.cwd.to_string_lossy().to_string(),
             messages,
-            created_at: self.session_created_at.clone().unwrap_or_else(now_iso),
+            created_at: self.session.session_created_at.clone().unwrap_or_else(now_iso),
             updated_at: now_iso(),
             metadata: Default::default(),
             tasks: task_snapshot,
-            workspace: self.workspace_context.clone(),
+            workspace: self.cmd_exec.workspace_context.clone(),
         }
     }
 
     /// Refresh the cached session list for /resume autocomplete
     pub async fn refresh_session_cache(&mut self) {
         let sessions = ::runtime::api::core::session::list_sessions().await;
-        self.cached_sessions = sessions
+        self.session.cached_sessions = sessions
             .iter()
             .take(20)
             .map(|s| {

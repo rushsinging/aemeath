@@ -344,7 +344,7 @@ impl App {
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
                 self.session.cwd = ctx.raw_path_base.clone();
-                self.workspace_context = Some(ctx.workspace.clone());
+                self.cmd_exec.workspace_context = Some(ctx.workspace.clone());
                 self.status_bar
                     .set_context_paths(ctx.path_base, ctx.working_root);
                 if let Some(branch) = ctx.branch {

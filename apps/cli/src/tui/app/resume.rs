@@ -9,11 +9,11 @@ impl App {
         created_at: String,
     ) {
         let msg_count = messages.len();
-        self.session_created_at = Some(created_at);
-        self.session_id = session_id.to_string();
+        self.session.session_created_at = Some(created_at);
+        self.session.session_id = session_id.to_string();
         self.status_bar.set_session_id(session_id);
-        self.messages.clear();
-        self.pending_images.clear();
+        self.chat.messages.clear();
+        self.chat.pending_images.clear();
         let mut msgs = messages;
         ::runtime::api::core::message::sanitize_messages(&mut msgs);
         let trimmed = msg_count - msgs.len();
@@ -33,7 +33,7 @@ impl App {
             };
             self.render_history_message(&msgs[i], subsequent);
         }
-        self.messages = msgs;
+        self.chat.messages = msgs;
         self.output_area.push_system(&format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count

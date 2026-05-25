@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 impl super::App {
     /// Handle paste events when not processing.
     pub(super) fn handle_paste_event(&mut self, text: String, ui_tx: &mpsc::Sender<UiEvent>) {
-        self.just_pasted = true;
+        self.input.just_pasted = true;
         if text.trim().is_empty() {
             // Empty paste — try to read clipboard image
             let output_tx = ui_tx.clone();

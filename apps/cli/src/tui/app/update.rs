@@ -2,6 +2,8 @@ mod ask_user_key;
 mod done;
 mod enter;
 mod key;
+mod key_nav;
+mod key_scroll;
 mod reminder_recap;
 mod spawn_context;
 mod spinner;
@@ -35,13 +37,13 @@ impl App {
         match msg {
             Msg::Key(key) => self.update_key(key, ui_tx, active_cancel, spawn_refs),
             Msg::Mouse(mouse) => {
-                self.handle_mouse_event(mouse, self.output_area_rect);
+                self.handle_mouse_event(mouse, self.layout.output_area_rect);
                 UpdateResult {
                     cmd: Cmd::None,
                     pending_slash: None,
                 }
             }
-            Msg::Paste(text) if !self.is_processing => {
+            Msg::Paste(text) if !self.chat.is_processing => {
                 self.handle_paste_event(text, ui_tx);
                 UpdateResult {
                     cmd: Cmd::None,
@@ -50,8 +52,8 @@ impl App {
             }
             Msg::Paste(text) => {
                 // Paste while in AskUserQuestion free-input mode: insert into input area only
-                if self.ask_user_state.is_some() || self.ask_user_reply_tx.is_some() {
-                    self.just_pasted = true;
+                if self.input.ask_user_state.is_some() || self.input.ask_user_reply_tx.is_some() {
+                    self.input.just_pasted = true;
                     for ch in text.chars() {
                         if ch == '\n' || ch == '\r' {
                             self.input_area.enter(true);
@@ -67,7 +69,7 @@ impl App {
                 // Paste while processing: insert into input area so it can be queued
                 if text.trim().is_empty() {
                     // Empty paste — try clipboard image (same as idle mode)
-                    self.just_pasted = true;
+                    self.input.just_pasted = true;
                     self.output_area.push_system("[reading clipboard image...]");
                     return UpdateResult {
                         cmd: Cmd::ReadClipboardImage,
@@ -76,13 +78,13 @@ impl App {
                 } else if ::runtime::api::image::is_image_file(text.trim()) {
                     self.output_area
                         .push_system(&format!("[loading image: {}...]", text.trim()));
-                    self.just_pasted = true;
+                    self.input.just_pasted = true;
                     return UpdateResult {
                         cmd: Cmd::ProcessImageFile(text.trim().to_string()),
                         pending_slash: None,
                     };
                 } else {
-                    self.just_pasted = true;
+                    self.input.just_pasted = true;
                     for ch in text.chars() {
                         if ch == '\n' || ch == '\r' {
                             self.input_area.enter(true);

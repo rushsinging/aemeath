@@ -1,3 +1,4 @@
+mod cmd_exec;
 mod event;
 mod resize;
 mod resume;
@@ -8,6 +9,7 @@ mod session_lifecycle;
 #[path = "status_path_tests.rs"]
 mod status_path_tests;
 
+use crate::tui::app::cmd_exec::CmdExecutor;
 use crate::tui::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ::runtime::api::core::skill::Skill;
@@ -36,14 +38,8 @@ pub struct App {
     pub layout: UiLayout,
     // 业务数据（非 UI 状态）
     pub skills: std::collections::HashMap<String, Skill>,
-    // 基础设施引用（Phase 4 将移入 CmdExecutor）
-    pub client: Option<Arc<::runtime::api::provider::client::LlmClient>>,
-    pub models_config: ::runtime::api::core::config::ModelsConfig,
-    pub hook_runner: ::runtime::api::core::hook::HookRunner,
-    pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
-    pub task_store: Option<Arc<::runtime::api::core::task::TaskStore>>,
-    pub workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
-    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    // 基础设施引用（Phase 4 移入 CmdExecutor）
+    pub cmd_exec: CmdExecutor,
 }
 
 #[cfg(test)]
@@ -168,19 +164,21 @@ impl App {
             },
             layout: UiLayout::default(),
             skills: std::collections::HashMap::new(),
-            client: None,
-            models_config: ::runtime::api::core::config::ModelsConfig::default(),
-            hook_runner: ::runtime::api::core::hook::HookRunner::empty(
-                std::env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-            ),
-            session_reminders: Arc::new(std::sync::Mutex::new(
-                ::runtime::api::core::memory::SessionReminders::new(),
-            )),
-            task_store: None,
-            workspace_context: None,
-            json_logger: None,
+            cmd_exec: CmdExecutor {
+                client: None,
+                models_config: ::runtime::api::core::config::ModelsConfig::default(),
+                hook_runner: ::runtime::api::core::hook::HookRunner::empty(
+                    std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                ),
+                session_reminders: Arc::new(std::sync::Mutex::new(
+                    ::runtime::api::core::memory::SessionReminders::new(),
+                )),
+                task_store: None,
+                workspace_context: None,
+                json_logger: None,
+            },
         }
     }
 

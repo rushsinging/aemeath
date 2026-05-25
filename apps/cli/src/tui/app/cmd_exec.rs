@@ -1,12 +1,32 @@
-use super::{processing, App, UiEvent};
+use super::{processing, UiEvent};
 use crate::tui::app::msg::Cmd;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use ::runtime::api::core::config::ModelsConfig;
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::core::memory::SessionReminders;
+use ::runtime::api::core::session::WorkspaceContext;
+use ::runtime::api::core::task::TaskStore;
 
-impl App {
+/// 副作用执行器：持有所有 runtime::api 基础设施引用
+/// CLI 只依赖 runtime，不直接依赖 llm / core / provider
+pub struct CmdExecutor {
+    pub client: Option<Arc<::runtime::api::provider::client::LlmClient>>,
+    pub models_config: ModelsConfig,
+    pub hook_runner: HookRunner,
+    pub session_reminders: Arc<std::sync::Mutex<SessionReminders>>,
+    pub task_store: Option<Arc<TaskStore>>,
+    pub workspace_context: Option<WorkspaceContext>,
+    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
+}
+
+impl CmdExecutor {
     /// Execute a single Cmd (recursive for Batch).
     pub(super) async fn exec_one_cmd(
-        app: &mut App,
+        &self,
+        app: &mut super::App,
         active_cancel: &std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
         ui_tx: &mpsc::Sender<UiEvent>,
         cmd: Cmd,
@@ -14,7 +34,7 @@ impl App {
         match cmd {
             Cmd::None => {}
             Cmd::Quit => {
-                app.should_exit = true;
+                app.layout.should_exit = true;
             }
             Cmd::SpawnProcessing(ctx) => {
                 if let Ok(mut guard) = active_cancel.lock() {
@@ -37,7 +57,7 @@ impl App {
                 }
             }
             Cmd::RunHookNotification { message, kind } => {
-                let hook_runner = app.hook_runner.clone();
+                let hook_runner = self.hook_runner.clone();
                 tokio::spawn(async move {
                     let _ = hook_runner.on_notification(&message, &kind).await;
                 });
