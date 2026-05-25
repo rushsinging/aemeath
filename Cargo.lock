@@ -1992,14 +1992,18 @@ dependencies = [
 name = "runtime"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "audit",
  "core",
  "hook",
+ "log",
  "policy",
  "project",
  "prompt",
  "provider",
+ "serde_json",
  "storage",
+ "tokio",
  "tools",
 ]
 

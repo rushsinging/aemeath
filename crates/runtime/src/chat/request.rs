@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ChatLaunchOptions {
+pub struct ChatLaunchOptions {
     pub cwd: PathBuf,
     pub verbose: bool,
     pub markdown: bool,
@@ -12,12 +12,12 @@ pub(crate) struct ChatLaunchOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NoTuiChatLaunch {
+pub struct NoTuiChatLaunch {
     pub options: ChatLaunchOptions,
 }
 
 impl NoTuiChatLaunch {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.options.max_tool_concurrency == 0 {
             return Err("max_tool_concurrency 必须大于 0".to_string());
         }
@@ -26,7 +26,7 @@ impl NoTuiChatLaunch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TuiChatLaunch {
+pub struct TuiChatLaunch {
     pub options: ChatLaunchOptions,
     pub max_agent_concurrency: usize,
     pub session_id: String,
@@ -34,7 +34,7 @@ pub(crate) struct TuiChatLaunch {
 }
 
 impl TuiChatLaunch {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.options.max_tool_concurrency == 0 {
             return Err("max_tool_concurrency 必须大于 0".to_string());
         }

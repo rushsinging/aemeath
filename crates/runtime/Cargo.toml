@@ -13,3 +13,7 @@ prompt = { path = "../prompt" }
 storage = { path = "../storage" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+log = "0.4"

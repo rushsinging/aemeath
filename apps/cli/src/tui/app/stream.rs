@@ -13,7 +13,6 @@ mod queue;
 mod stall;
 mod tools;
 
-use crate::agent_runner::{AgentRunOutcome, AgentRunStatus};
 use crate::tui::app::stream::compact::auto_compact;
 use crate::tui::app::stream::finalize::finalize_main_loop;
 use crate::tui::app::stream::handler::TuiStreamHandler;
@@ -25,6 +24,7 @@ use crate::tui::app::stream::queue::append_queued_input;
 use crate::tui::app::stream::stall::StallDetector;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
 use crate::tui::app::UiEvent;
+use ::runtime::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
 use ::runtime::api::core::agent::Agent;
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::tool::{ToolContext, ToolRegistry};

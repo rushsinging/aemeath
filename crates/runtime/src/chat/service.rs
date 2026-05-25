@@ -1,7 +1,7 @@
 use super::port::{ChatRuntimeContext, ChatRuntimePort, TuiChatOutcome};
 use super::request::{NoTuiChatLaunch, TuiChatLaunch};
 
-pub(crate) struct ChatApplicationService<P> {
+pub struct ChatApplicationService<P> {
     runtime: P,
 }
 
@@ -9,19 +9,19 @@ impl<P> ChatApplicationService<P>
 where
     P: ChatRuntimePort,
 {
-    pub(crate) fn new(runtime: P) -> Self {
+    pub fn new(runtime: P) -> Self {
         Self { runtime }
     }
 
-    pub(crate) fn validate_no_tui_launch(launch: &NoTuiChatLaunch) -> Result<(), String> {
+    pub fn validate_no_tui_launch(launch: &NoTuiChatLaunch) -> Result<(), String> {
         launch.validate()
     }
 
-    pub(crate) fn validate_tui_launch(launch: &TuiChatLaunch) -> Result<(), String> {
+    pub fn validate_tui_launch(launch: &TuiChatLaunch) -> Result<(), String> {
         launch.validate()
     }
 
-    pub(crate) async fn run_no_tui_chat(
+    pub async fn run_no_tui_chat(
         &self,
         launch: NoTuiChatLaunch,
         context: ChatRuntimeContext,
@@ -30,7 +30,7 @@ where
         self.runtime.run_no_tui_chat(launch, context).await
     }
 
-    pub(crate) async fn run_tui_chat(
+    pub async fn run_tui_chat(
         &self,
         launch: TuiChatLaunch,
         context: ChatRuntimeContext,
@@ -43,12 +43,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::chat::request::ChatLaunchOptions;
-    use ::runtime::api::core::config::MemoryConfig;
-    use ::runtime::api::core::hook::HookRunner;
-    use ::runtime::api::core::task::TaskStore;
-    use ::runtime::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
-    use ::runtime::api::provider::client::LlmClient;
+    use crate::api::core::config::MemoryConfig;
+    use crate::api::core::hook::HookRunner;
+    use crate::api::core::task::TaskStore;
+    use crate::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
+    use crate::api::provider::client::LlmClient;
+    use crate::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::path::PathBuf;

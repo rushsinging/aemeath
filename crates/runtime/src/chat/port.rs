@@ -1,17 +1,17 @@
 use super::request::{NoTuiChatLaunch, TuiChatLaunch};
-use ::runtime::api::core::config::MemoryConfig;
-use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::logging::JsonLogger;
-use ::runtime::api::core::skill::Skill;
-use ::runtime::api::core::task::TaskStore;
-use ::runtime::api::core::tool::{AgentRunner, ToolRegistry};
-use ::runtime::api::provider::client::LlmClient;
-use ::runtime::api::provider::types::SystemBlock;
+use crate::api::core::config::MemoryConfig;
+use crate::api::core::hook::HookRunner;
+use crate::api::core::logging::JsonLogger;
+use crate::api::core::skill::Skill;
+use crate::api::core::task::TaskStore;
+use crate::api::core::tool::{AgentRunner, ToolRegistry};
+use crate::api::provider::client::LlmClient;
+use crate::api::provider::types::SystemBlock;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-pub(crate) struct ChatRuntimeContext {
+pub struct ChatRuntimeContext {
     pub client: Arc<LlmClient>,
     pub registry: Arc<ToolRegistry>,
     pub system_blocks: Vec<SystemBlock>,
@@ -27,12 +27,12 @@ pub(crate) struct ChatRuntimeContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TuiChatOutcome {
+pub struct TuiChatOutcome {
     pub session_id: String,
 }
 
 #[async_trait(?Send)]
-pub(crate) trait ChatRuntimePort {
+pub trait ChatRuntimePort {
     async fn run_no_tui_chat(
         &self,
         launch: NoTuiChatLaunch,
