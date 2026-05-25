@@ -61,6 +61,7 @@ fn register_chat_tools(
 ) -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
     ::runtime::api::tools::register_all_tools(&registry, task_store, skills);
+    ::runtime::api::project::register_worktree_tools(&registry);
     Arc::new(registry)
 }
 

@@ -30,7 +30,6 @@ pub mod task_update;
 pub mod tool_search;
 pub mod web_fetch;
 pub mod web_search;
-pub mod worktree;
 
 // Re-export McpTool for dynamic creation
 pub use mcp_tool::McpTool;
@@ -107,10 +106,6 @@ pub fn register_all_tools(
     // Plan mode tools
     registry.register(Box::new(plan_mode::EnterPlanModeTool));
     registry.register(Box::new(plan_mode::ExitPlanModeTool));
-
-    // Worktree tools
-    registry.register(Box::new(worktree::EnterWorktreeTool));
-    registry.register(Box::new(worktree::ExitWorktreeTool));
 }
 
 pub fn register_subagent_tools(
@@ -193,10 +188,6 @@ pub fn register_all_tools_except_agent(
     registry.register(Box::new(sleep::SleepTool));
     registry.register(Box::new(ask_user::AskUserQuestionTool));
     registry.register(Box::new(brief::BriefTool));
-
-    // Worktree tools
-    registry.register(Box::new(worktree::EnterWorktreeTool));
-    registry.register(Box::new(worktree::ExitWorktreeTool));
 }
 
 #[cfg(test)]

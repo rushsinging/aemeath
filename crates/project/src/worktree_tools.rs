@@ -5,7 +5,7 @@
 
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use project::worktree;
+use crate::worktree;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -79,7 +79,7 @@ impl Tool for EnterWorktreeTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        match project::worktree::enter_worktree(ctx, PathBuf::from(&args.path)) {
+        match crate::worktree::enter_worktree(ctx, PathBuf::from(&args.path)) {
             Ok(_snapshot) => {
                 let working_root = ctx.current_working_root();
                 let branch = get_current_branch(&working_root);
@@ -136,10 +136,8 @@ impl Tool for ExitWorktreeTool {
         };
 
         if let Some(path) = args.path {
-            // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match project::worktree::enter_worktree(ctx, PathBuf::from(&path)) {
+            match crate::worktree::enter_worktree(ctx, PathBuf::from(&path)) {
                 Ok(_) => {
-                    // 弹出 enter_worktree 刚压入的快照
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
                     let working_root = ctx.current_working_root();
                     let branch = get_current_branch(&working_root);
@@ -153,8 +151,7 @@ impl Tool for ExitWorktreeTool {
                 Err(e) => ToolResult::error(format!("切换路径失败：{}", e)),
             }
         } else {
-            // 恢复上一上下文
-            match project::worktree::exit_worktree(ctx) {
+            match crate::worktree::exit_worktree(ctx) {
                 Ok(prev) => {
                     let working_root = ctx.current_working_root();
                     let branch = get_current_branch(&working_root);
@@ -203,7 +200,6 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["path"]["type"], "string");
-        // required should be empty
         assert!(schema["required"].as_array().unwrap().is_empty());
     }
 

@@ -1757,7 +1757,10 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "core",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
 ]
@@ -2601,7 +2604,6 @@ dependencies = [
  "glob",
  "log",
  "percent-encoding",
- "project",
  "reqwest",
  "serde",
  "serde_json",
