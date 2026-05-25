@@ -3,20 +3,7 @@ mod runtime;
 mod setup;
 
 use crate::cli::Args;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ChatModeSelection {
-    NoTui,
-    Tui,
-}
-
-pub(super) fn chat_mode_selection(args: &Args) -> ChatModeSelection {
-    if args.no_tui || !args.tui {
-        ChatModeSelection::NoTui
-    } else {
-        ChatModeSelection::Tui
-    }
-}
+use ::runtime::api::bootstrap::ChatModeSelection;
 
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
     matches!(mode, Some("allow_all"))
@@ -48,48 +35,6 @@ pub(crate) async fn run_chat(args: Args) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn args_with_mode(tui: bool, no_tui: bool) -> Args {
-        Args {
-            api_key: None,
-            base_url: None,
-            model: None,
-            cwd: None,
-            max_tokens: None,
-            verbose: false,
-            no_markdown: false,
-            context_size: 128_000,
-            resume: None,
-            allow_all: false,
-            tui,
-            no_tui,
-            max_tool_concurrency: None,
-            max_agent_concurrency: None,
-            no_think: false,
-            reasoning_effort: None,
-        }
-    }
-
-    #[test]
-    fn test_chat_mode_selection_uses_tui_by_default() {
-        let args = args_with_mode(true, false);
-
-        assert_eq!(chat_mode_selection(&args), ChatModeSelection::Tui);
-    }
-
-    #[test]
-    fn test_chat_mode_selection_no_tui_flag_wins() {
-        let args = args_with_mode(true, true);
-
-        assert_eq!(chat_mode_selection(&args), ChatModeSelection::NoTui);
-    }
-
-    #[test]
-    fn test_chat_mode_selection_disabled_tui_uses_no_tui() {
-        let args = args_with_mode(false, false);
-
-        assert_eq!(chat_mode_selection(&args), ChatModeSelection::NoTui);
-    }
 
     #[test]
     fn test_permission_env_override_only_accepts_allow_all() {

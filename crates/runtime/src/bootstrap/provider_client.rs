@@ -1,11 +1,11 @@
 use super::model_runtime::ModelRuntimeSettings;
-use ::runtime::api::core::config::models::ResolvedModel;
-use ::runtime::api::provider::client::{LlmClient, OpenAIProviderConfig};
-use ::runtime::api::provider::providers::openai_compatible::ReasoningConfig;
-use ::runtime::api::provider::ApiDriverKind;
+use crate::api::core::config::models::ResolvedModel;
+use crate::api::provider::client::{LlmClient, OpenAIProviderConfig};
+use crate::api::provider::providers::openai_compatible::ReasoningConfig;
+use crate::api::provider::ApiDriverKind;
 use std::env;
 
-pub(super) fn resolve_api_key(
+pub fn resolve_api_key(
     cli_api_key: Option<String>,
     resolved_model: &ResolvedModel,
     env_value: Option<&dyn Fn(&str) -> Option<String>>,
@@ -17,14 +17,14 @@ pub(super) fn resolve_api_key(
         .or_else(|| non_empty_string(&resolved_model.source_config.api_key))
 }
 
-pub(super) fn resolve_base_url(
+pub fn resolve_base_url(
     cli_base_url: Option<String>,
     resolved_model: &ResolvedModel,
 ) -> Option<String> {
     cli_base_url.or_else(|| non_empty_string(&resolved_model.source_config.base_url))
 }
 
-pub(super) fn build_llm_client(
+pub fn build_llm_client(
     api_type: ApiDriverKind,
     api_key: String,
     base_url: Option<String>,
@@ -117,7 +117,7 @@ fn reasoning_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::config::models::{ModelEntryConfig, ProviderModelsConfig};
+    use crate::api::core::config::models::{ModelEntryConfig, ProviderModelsConfig};
 
     fn resolved_model(
         api: ApiDriverKind,

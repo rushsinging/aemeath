@@ -1,19 +1,19 @@
-use ::runtime::api::core::config::models::ModelEntryConfig;
-use ::runtime::api::core::config::{models::validate_reasoning_effort, Config};
+use crate::api::core::config::models::ModelEntryConfig;
+use crate::api::core::config::{models::validate_reasoning_effort, Config};
 
-pub(super) struct ModelRuntimeSettings {
+pub struct ModelRuntimeSettings {
     pub max_tokens: u32,
     pub thinking_max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_effort: Option<String>,
 }
 
-pub(super) struct ReasoningConfigInput {
+pub struct ReasoningConfigInput {
     pub cli_reasoning_effort: Option<String>,
     pub env_reasoning_effort: Option<String>,
 }
 
-pub(super) fn resolve_model_runtime_settings(
+pub fn resolve_model_runtime_settings(
     cli_max_tokens: Option<u32>,
     model: &ModelEntryConfig,
     config_file: Option<&Config>,
@@ -56,8 +56,8 @@ pub(super) fn resolve_model_runtime_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::config::models::ModelEntryConfig;
-    use ::runtime::api::core::config::{Config, ModelConfig};
+    use crate::api::core::config::models::ModelEntryConfig;
+    use crate::api::core::config::{Config, ModelConfig};
 
     fn model_entry(max_tokens: u32) -> ModelEntryConfig {
         ModelEntryConfig {

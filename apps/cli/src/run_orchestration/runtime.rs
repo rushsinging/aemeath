@@ -1,9 +1,9 @@
-use super::setup::ChatBootstrap;
 use crate::application::chat::{
     ChatApplicationService, ChatLaunchOptions, ChatRuntimeContext, ChatRuntimePort,
     NoTuiChatLaunch, TuiChatLaunch, TuiChatOutcome,
 };
 use crate::{repl, tui};
+use ::runtime::api::bootstrap::ChatBootstrap;
 use ::runtime::api::provider::types::SystemBlock;
 use async_trait::async_trait;
 

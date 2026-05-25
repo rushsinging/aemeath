@@ -1,6 +1,6 @@
-use ::runtime::api::core::config::Config;
+use crate::api::core::config::Config;
 
-pub(super) fn resolve_concurrency_limits(
+pub fn resolve_concurrency_limits(
     cli_max_tool_concurrency: Option<usize>,
     cli_max_agent_concurrency: Option<usize>,
     config_file: Option<&Config>,
@@ -28,7 +28,7 @@ pub(super) fn resolve_concurrency_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::runtime::api::core::config::{AgentsConfig, Config, ToolsConfig};
+    use crate::api::core::config::{AgentsConfig, Config, ToolsConfig};
 
     fn config_with_concurrency(tool: usize, agent: usize) -> Config {
         Config {

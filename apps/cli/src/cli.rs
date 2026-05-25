@@ -154,6 +154,29 @@ impl From<RunArgs> for Args {
     }
 }
 
+impl From<Args> for ::runtime::api::bootstrap::ChatBootstrapArgs {
+    fn from(args: Args) -> Self {
+        Self {
+            api_key: args.api_key,
+            base_url: args.base_url,
+            model: args.model,
+            cwd: args.cwd,
+            max_tokens: args.max_tokens,
+            verbose: args.verbose,
+            no_markdown: args.no_markdown,
+            context_size: args.context_size,
+            resume: args.resume,
+            allow_all: args.allow_all,
+            tui: args.tui,
+            no_tui: args.no_tui,
+            max_tool_concurrency: args.max_tool_concurrency,
+            max_agent_concurrency: args.max_agent_concurrency,
+            no_think: args.no_think,
+            reasoning_effort: args.reasoning_effort,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
