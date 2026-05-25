@@ -159,87 +159,16 @@ impl App {
             }
 
             // --- TEA command execution ---
-            match result.cmd {
-                Cmd::None => {}
-                Cmd::Quit => {
-                    self.layout.should_exit = true;
-                }
-                Cmd::SpawnProcessing(ctx) => {
-                    if let Ok(mut guard) = active_cancel.lock() {
-                        *guard = Some(ctx.cancel.clone());
-                    }
-                    processing::spawn_processing(ctx);
-                }
-                Cmd::SendEvents(events) => {
-                    for ev in events {
-                        let _ = ui_tx.send(ev).await;
+            // Handle &mut App cases first (Quit, SaveSession) to avoid borrow conflicts
+            match &result.cmd {
+                Cmd::Quit => self.layout.should_exit = true,
+                Cmd::SaveSession(msgs) if !msgs.is_empty() => {
+                    let s = self.build_session(msgs.clone()).await;
+                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
+                        log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }
-                Cmd::QueueInput(_) => {
-                    // Handled via pending_slash above
-                }
-                Cmd::SaveSession(msgs) => {
-                    if !msgs.is_empty() {
-                        let s = self.build_session(msgs).await;
-                        if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
-                            log::warn!("failed to auto-save session on sync: {e}");
-                        }
-                    }
-                }
-                Cmd::RunHookNotification { message, kind } => {
-                    let hook_runner = self.cmd_exec.hook_runner.clone();
-                    tokio::spawn(async move {
-                        let _ = hook_runner.on_notification(&message, &kind).await;
-                    });
-                }
-                Cmd::ReadClipboardImage => {
-                    let tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match ::runtime::api::image::read_clipboard_image().await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[clipboard image added ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "No image in clipboard: {e}"
-                                    )))
-                                    .await;
-                            }
-                        }
-                    });
-                }
-                Cmd::ProcessImageFile(path) => {
-                    let tx = ui_tx.clone();
-                    tokio::spawn(async move {
-                        match ::runtime::api::image::process_image_file(&path).await {
-                            Ok(img) => {
-                                let size = img.final_size;
-                                let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "[image loaded ({} bytes). Type message to send.]",
-                                        size
-                                    )))
-                                    .await;
-                            }
-                            Err(e) => {
-                                let _ = tx
-                                    .send(UiEvent::SystemMessage(format!(
-                                        "Failed to load image: {e}"
-                                    )))
-                                    .await;
-                            }
-                        }
-                    });
-                }
+                _ => self.cmd_exec.exec_one_cmd(&active_cancel, &ui_tx, result.cmd).await,
             }
 
             self.input.just_pasted = false;

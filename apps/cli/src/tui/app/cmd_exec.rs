@@ -23,19 +23,17 @@ pub struct CmdExecutor {
 }
 
 impl CmdExecutor {
-    /// Execute a single Cmd (recursive for Batch).
+    /// Execute side-effect commands (no &mut App access).
+    /// Quit and SaveSession are handled by the caller.
     pub(super) async fn exec_one_cmd(
         &self,
-        app: &mut super::App,
         active_cancel: &std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
         ui_tx: &mpsc::Sender<UiEvent>,
         cmd: Cmd,
     ) {
         match cmd {
             Cmd::None => {}
-            Cmd::Quit => {
-                app.layout.should_exit = true;
-            }
+            Cmd::Quit => {} // handled by caller
             Cmd::SpawnProcessing(ctx) => {
                 if let Ok(mut guard) = active_cancel.lock() {
                     *guard = Some(ctx.cancel.clone());
@@ -48,14 +46,7 @@ impl CmdExecutor {
                 }
             }
             Cmd::QueueInput(_) => {}
-            Cmd::SaveSession(msgs) => {
-                if !msgs.is_empty() {
-                    let s = app.build_session(msgs).await;
-                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
-                        log::warn!("failed to auto-save session on sync: {e}");
-                    }
-                }
-            }
+            Cmd::SaveSession(_) => {} // handled by caller
             Cmd::RunHookNotification { message, kind } => {
                 let hook_runner = self.hook_runner.clone();
                 tokio::spawn(async move {
