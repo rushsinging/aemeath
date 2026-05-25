@@ -1,5 +1,5 @@
 use super::App;
-use kernel::message::Message;
+use ::runtime::api::core::message::Message;
 
 impl App {
     pub(super) fn resume_session_messages(
@@ -15,12 +15,12 @@ impl App {
         self.messages.clear();
         self.pending_images.clear();
         let mut msgs = messages;
-        kernel::message::sanitize_messages(&mut msgs);
+        ::runtime::api::core::message::sanitize_messages(&mut msgs);
         let trimmed = msg_count - msgs.len();
         // Check for deeper integrity issues
-        let integrity = kernel::message::check_message_integrity(&msgs);
+        let integrity = ::runtime::api::core::message::check_message_integrity(&msgs);
         let auto_repaired = if integrity.has_issues() {
-            kernel::message::deep_clean_messages(&mut msgs)
+            ::runtime::api::core::message::deep_clean_messages(&mut msgs)
         } else {
             0
         };

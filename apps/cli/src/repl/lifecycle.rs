@@ -1,7 +1,7 @@
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, HookRunner, SessionHookData, StopHookData};
-use kernel::message::Message;
-use kernel::session::{self, Session};
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, HookRunner, SessionHookData, StopHookData};
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::session::{self, Session};
 use std::path::Path;
 
 pub(super) async fn run_session_start_hooks(hook_runner: &HookRunner, user_context: &mut String) {

@@ -4,8 +4,8 @@
 //! user message every N turns. This lets the LLM perceive progress without
 //! actively calling `TaskList`.
 
-use kernel::message::{ContentBlock, Message, Role};
-use kernel::task::{TaskStatus, TaskStore};
+use ::runtime::api::core::message::{ContentBlock, Message, Role};
+use ::runtime::api::core::task::{TaskStatus, TaskStore};
 
 /// How many turns since last TaskCreate/TaskUpdate before injecting a reminder.
 const TURNS_SINCE_WRITE: u64 = 5;
@@ -139,7 +139,7 @@ impl Default for TaskReminderState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::task::TaskStatus;
+    use ::runtime::api::core::task::TaskStatus;
 
     fn reminder_text(message: &Message) -> String {
         message.text_content()

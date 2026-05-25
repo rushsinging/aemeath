@@ -1,6 +1,6 @@
 use crate::tui::app::UiEvent;
-use kernel::config::hooks::{HookEntry, HookEvent};
-use kernel::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
+use ::runtime::api::core::config::hooks::{HookEntry, HookEvent};
+use ::runtime::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
 use tokio::sync::mpsc;
 
 #[derive(Clone)]

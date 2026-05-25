@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use kernel::config::{paths, MemoryConfig};
-use kernel::hook::HookRunner;
-use kernel::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
+use ::runtime::api::core::config::{paths, MemoryConfig};
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::memory::{
+    memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore,
+};
 
 mod git_context;
 use git_context::{collect_git_context, is_git_repo};
@@ -247,7 +249,7 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
 
     let mut agents_md = parts.join("\n\n");
 
-    let warnings = kernel::security::scan_content("AGENTS.md", &agents_md);
+    let warnings = ::runtime::api::core::security::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(
@@ -258,7 +260,7 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
                 w.matched_text
             );
         }
-        if let Some(prefix) = kernel::security::format_warnings(&warnings) {
+        if let Some(prefix) = ::runtime::api::core::security::format_warnings(&warnings) {
             agents_md = format!("{}\n\n{}", prefix, agents_md);
         }
     }

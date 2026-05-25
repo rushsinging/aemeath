@@ -1,5 +1,5 @@
-use kernel::message::Message;
-use kernel::tool::{AgentProgressEvent, ImageData};
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::tool::{AgentProgressEvent, ImageData};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +10,7 @@ pub struct StatusContextUpdate {
     pub kind: crate::tui::status_bar::WorktreeKind,
     pub raw_path_base: PathBuf,
     pub raw_working_root: PathBuf,
-    pub workspace: kernel::session::WorkspaceContext,
+    pub workspace: ::runtime::api::core::session::WorkspaceContext,
 }
 
 /// Events sent from background task to UI
@@ -60,7 +60,7 @@ pub enum AppEvent {
         output: u32,
     },
     ReflectionDone {
-        output: kernel::reflection::ReflectionOutput,
+        output: ::runtime::api::core::reflection::ReflectionOutput,
     },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {

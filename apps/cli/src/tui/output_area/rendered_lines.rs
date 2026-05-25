@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 

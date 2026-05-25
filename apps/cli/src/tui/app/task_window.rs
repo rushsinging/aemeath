@@ -6,7 +6,7 @@
 //!   pending → 按 display_number 升序（稳定序）
 //! 窗口化：超出 max_lines 时截断并显示折叠提示
 
-use kernel::task::{Task, TaskStatus};
+use ::runtime::api::core::task::{Task, TaskStatus};
 use std::collections::HashMap;
 
 /// 构建 task 状态显示行（窗口化，含摘要行）。

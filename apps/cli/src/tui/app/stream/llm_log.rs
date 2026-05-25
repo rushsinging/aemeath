@@ -1,8 +1,8 @@
 use crate::tui::app::stream::input_log::logged_input_messages;
-use kernel::agent::ToolCall;
-use kernel::logging::JsonLogger;
-use kernel::message::Message;
-use provider::types::{StreamResponse, SystemBlock};
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::provider::types::{StreamResponse, SystemBlock};
 use std::sync::Arc;
 
 pub(super) fn log_llm_input(

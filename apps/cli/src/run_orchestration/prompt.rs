@@ -1,11 +1,11 @@
-use kernel::skill::Skill;
+use ::runtime::api::core::skill::Skill;
 
 pub(super) async fn build_static_prompt(
     cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
-    config_file: Option<&kernel::config::Config>,
-    hook_runner: &kernel::hook::HookRunner,
+    config_file: Option<&::runtime::api::core::config::Config>,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     prompt_parts: crate::prompt::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
@@ -13,7 +13,7 @@ pub(super) async fn build_static_prompt(
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
-    let model_guidance = kernel::guidance::resolve_guidance_async(
+    let model_guidance = ::runtime::api::core::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
@@ -22,7 +22,7 @@ pub(super) async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(kernel::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+    prompt.push_str(::runtime::api::core::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
     append_skills(&mut prompt, &skills_guard);
     append_agent_roles(&mut prompt, config_file);
     if !model_guidance.is_empty() {
@@ -54,7 +54,10 @@ fn append_skills(prompt: &mut String, skills_guard: &std::collections::HashMap<S
     ));
 }
 
-fn append_agent_roles(prompt: &mut String, config_file: Option<&kernel::config::Config>) {
+fn append_agent_roles(
+    prompt: &mut String,
+    config_file: Option<&::runtime::api::core::config::Config>,
+) {
     let Some(cfg) = config_file else {
         return;
     };

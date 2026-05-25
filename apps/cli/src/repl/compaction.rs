@@ -9,7 +9,7 @@ pub(super) async fn compact_messages_inner(
     system_prompt_text: &str,
     context_size: usize,
     client: &LlmClient,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     turn_count: usize,
     compact_state: &mut compact::AutoCompactState,
     read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -82,7 +82,7 @@ pub(super) async fn compact_messages_inner(
     }
 }
 
-fn log_post_compact_results(results: Vec<kernel::hook::HookResult>) {
+fn log_post_compact_results(results: Vec<::runtime::api::core::hook::HookResult>) {
     for result in results {
         if let Some(error) = result.error {
             log::warn!("PostCompact hook error: {error}");

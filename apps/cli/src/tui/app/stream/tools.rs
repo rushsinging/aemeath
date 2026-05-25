@@ -4,11 +4,11 @@ use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::stream::non_agent::execute_non_agent;
 use crate::tui::app::stream::permissions::split_approved_calls;
 use crate::tui::app::UiEvent;
-use kernel::agent::{Agent, ToolCall};
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, ToolHookData};
-use kernel::logging::JsonLogger;
-use kernel::tool::{ImageData, ToolRegistry};
+use ::runtime::api::core::agent::{Agent, ToolCall};
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, ToolHookData};
+use ::runtime::api::core::logging::JsonLogger;
+use ::runtime::api::core::tool::{ImageData, ToolRegistry};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -22,7 +22,7 @@ pub(crate) async fn execute_tool_round(
     agent: &Agent<'_>,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -90,7 +90,7 @@ async fn deny_tool_calls(
     denied: &[&ToolCall],
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
 ) -> Vec<UiToolResult> {
     let mut denied_results = Vec::new();
     for call in denied {
@@ -99,7 +99,7 @@ async fn deny_tool_calls(
                 hook_runner,
                 HookEvent::PermissionDenied,
                 Some(&call.name),
-                HookData::Permission(kernel::hook::PermissionHookData {
+                HookData::Permission(::runtime::api::core::hook::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
@@ -132,7 +132,7 @@ async fn deny_tool_calls(
 pub(crate) async fn run_post_tool_hooks(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,
@@ -178,9 +178,9 @@ pub(crate) async fn run_post_tool_hooks(
 pub(crate) async fn emit_json_hook_context(
     tx: &mpsc::Sender<UiEvent>,
     hook_results: Vec<(
-        kernel::config::hooks::HookEntry,
-        kernel::hook::HookResult,
-        Option<kernel::hook::HookJsonOutput>,
+        ::runtime::api::core::config::hooks::HookEntry,
+        ::runtime::api::core::hook::HookResult,
+        Option<::runtime::api::core::hook::HookJsonOutput>,
     )>,
 ) {
     for (_entry, _result, json_output) in hook_results {
@@ -214,8 +214,8 @@ pub(crate) async fn send_tool_result(
 #[cfg(test)]
 mod tests {
     use super::tool_results_for_api;
-    use kernel::compact::MAX_TOOL_RESULT_CHARS;
-    use kernel::message::ContentBlock;
+    use ::runtime::api::core::compact::MAX_TOOL_RESULT_CHARS;
+    use ::runtime::api::core::message::ContentBlock;
 
     #[test]
     fn test_tool_results_for_api_persists_oversized_tui_result() {
@@ -238,9 +238,9 @@ mod tests {
 pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
-) -> kernel::message::Message {
-    kernel::tool_result_storage::persist_oversized_results(session_id, &mut results);
-    kernel::message::Message::tool_results_rich(results)
+) -> ::runtime::api::core::message::Message {
+    ::runtime::api::core::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    ::runtime::api::core::message::Message::tool_results_rich(results)
 }
 
 pub(crate) fn log_tool_result(

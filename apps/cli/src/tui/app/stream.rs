@@ -25,10 +25,10 @@ use crate::tui::app::stream::queue::append_queued_input;
 use crate::tui::app::stream::stall::StallDetector;
 use crate::tui::app::stream::tools::{execute_tool_round, tool_results_for_api};
 use crate::tui::app::UiEvent;
-use kernel::agent::Agent;
-use kernel::message::Message;
-use kernel::tool::{ToolContext, ToolRegistry};
-use provider::types::StopReason;
+use ::runtime::api::core::agent::Agent;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::tool::{ToolContext, ToolRegistry};
+use ::runtime::api::provider::types::StopReason;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,29 +42,29 @@ use crate::task_reminder::TaskReminderState;
 pub async fn process_in_background(
     tx: mpsc::Sender<UiEvent>,
     queue_request_tx: mpsc::Sender<UiEvent>,
-    client: Arc<provider::client::LlmClient>,
+    client: Arc<::runtime::api::provider::client::LlmClient>,
     registry: Arc<ToolRegistry>,
-    system_blocks: Vec<provider::types::SystemBlock>,
+    system_blocks: Vec<::runtime::api::provider::types::SystemBlock>,
     system_prompt_text: String,
     user_context: String,
     mut messages: Vec<Message>,
     context_size: usize,
     cwd: PathBuf,
-    workspace_context: Option<kernel::session::WorkspaceContext>,
+    workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
     session_id: String,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_reminders: Arc<std::sync::Mutex<kernel::memory::SessionReminders>>,
-    agent_runner: Option<Arc<dyn kernel::tool::AgentRunner>>,
+    session_reminders: Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
+    agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     allow_all: bool,
     interrupted: Arc<AtomicBool>,
     cancel: CancellationToken,
-    task_store: Arc<kernel::task::TaskStore>,
+    task_store: Arc<::runtime::api::core::task::TaskStore>,
     max_tool_concurrency: usize,
     max_agent_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
-    hook_runner: kernel::hook::HookRunner,
-    memory_config: kernel::config::MemoryConfig,
-    json_logger: Option<Arc<std::sync::Mutex<kernel::logging::JsonLogger>>>,
+    hook_runner: ::runtime::api::core::hook::HookRunner,
+    memory_config: ::runtime::api::core::config::MemoryConfig,
+    json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
 ) {
     let hook_ui = HookUi::new(tx.clone());
 
@@ -77,7 +77,7 @@ pub async fn process_in_background(
                 workspace
                     .context_stack
                     .into_iter()
-                    .map(|entry| kernel::worktree::WorkingContext {
+                    .map(|entry| ::runtime::api::core::worktree::WorkingContext {
                         path_base: PathBuf::from(entry.path_base),
                         working_root: PathBuf::from(entry.working_root),
                     })
@@ -131,7 +131,8 @@ pub async fn process_in_background(
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
-        let tool_schema_tokens = kernel::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let tool_schema_tokens =
+            ::runtime::api::core::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);

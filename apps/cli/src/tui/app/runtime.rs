@@ -1,6 +1,6 @@
 use super::{task_window, App};
-use kernel::message::Message;
-use kernel::skill::Skill;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::skill::Skill;
 use std::sync::Arc;
 
 impl App {
@@ -44,13 +44,13 @@ impl App {
     /// Update task status display in output area. Also runs lifecycle checks.
     pub(crate) async fn update_task_status(
         &mut self,
-        task_store: &Arc<kernel::task::TaskStore>,
+        task_store: &Arc<::runtime::api::core::task::TaskStore>,
         _is_processing: bool,
     ) {
         let tasks = task_store.list_current_batch().await;
         let active: Vec<_> = tasks
             .iter()
-            .filter(|t| t.status != kernel::task::TaskStatus::Deleted)
+            .filter(|t| t.status != ::runtime::api::core::task::TaskStatus::Deleted)
             .cloned()
             .collect();
 
@@ -59,7 +59,7 @@ impl App {
             self.output_area.set_task_status(Vec::new());
         } else {
             let display_map = task_store.get_batch_display_map().await;
-            let task_list_config = kernel::config::TaskListConfig::default();
+            let task_list_config = ::runtime::api::core::config::TaskListConfig::default();
             let lines =
                 task_window::build_task_window(&active, &display_map, task_list_config.max_lines);
             self.output_area.set_task_status(lines);
@@ -67,8 +67,11 @@ impl App {
     }
 
     /// Build a Session from current state, including task snapshot.
-    pub(crate) async fn build_session(&self, messages: Vec<Message>) -> kernel::session::Session {
-        use kernel::session::{now_iso, Session};
+    pub(crate) async fn build_session(
+        &self,
+        messages: Vec<Message>,
+    ) -> ::runtime::api::core::session::Session {
+        use ::runtime::api::core::session::{now_iso, Session};
         let task_snapshot = match &self.task_store {
             Some(ts) => {
                 let snap = ts.snapshot().await;
@@ -94,7 +97,7 @@ impl App {
 
     /// Refresh the cached session list for /resume autocomplete
     pub async fn refresh_session_cache(&mut self) {
-        let sessions = kernel::session::list_sessions().await;
+        let sessions = ::runtime::api::core::session::list_sessions().await;
         self.cached_sessions = sessions
             .iter()
             .take(20)
@@ -107,6 +110,6 @@ impl App {
 }
 
 /// Build a one-line summary for a session, shown in /resume autocomplete
-fn build_session_summary(session: &kernel::session::Session) -> String {
+fn build_session_summary(session: &::runtime::api::core::session::Session) -> String {
     format!("{} [{}msg]", session.summary(), session.messages.len())
 }

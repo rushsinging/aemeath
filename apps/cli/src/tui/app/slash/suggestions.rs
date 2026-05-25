@@ -1,5 +1,5 @@
 use crate::tui::completion::{generate_suggestions, SuggestionContext};
-use kernel::command::CommandRegistry;
+use ::runtime::api::core::command::CommandRegistry;
 
 impl super::super::App {
     /// Update suggestions based on current input

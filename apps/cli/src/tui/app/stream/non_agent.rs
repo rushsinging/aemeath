@@ -1,9 +1,9 @@
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::UiEvent;
-use kernel::agent::{Agent, ToolCall};
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, ToolHookData};
-use kernel::logging::JsonLogger;
+use ::runtime::api::core::agent::{Agent, ToolCall};
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, ToolHookData};
+use ::runtime::api::core::logging::JsonLogger;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -16,7 +16,7 @@ pub(super) async fn execute_non_agent(
     agent: &Agent<'_>,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -63,7 +63,7 @@ async fn execute_multiple_non_agent(
     agent: &Agent<'_>,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -160,7 +160,7 @@ async fn execute_one_non_agent(
     agent: &Agent<'_>,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -171,7 +171,7 @@ async fn execute_one_non_agent(
             hook_runner,
             HookEvent::PermissionRequest,
             Some(&call.name),
-            HookData::Permission(kernel::hook::PermissionHookData {
+            HookData::Permission(::runtime::api::core::hook::PermissionHookData {
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
@@ -210,7 +210,7 @@ async fn execute_one_non_agent(
     hook_runner.set_project_dir(working_root.display().to_string());
     let _ = tx
         .send(crate::tui::app::status_context_for_workspace(
-            kernel::worktree::workspace_context_from_tool_context(&agent.ctx),
+            ::runtime::api::core::worktree::workspace_context_from_tool_context(&agent.ctx),
         ))
         .await;
     let mut out = Vec::new();
@@ -236,7 +236,7 @@ async fn execute_one_non_agent(
 async fn run_task_hooks(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,

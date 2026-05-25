@@ -106,6 +106,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "audit"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,12 +255,11 @@ dependencies = [
  "futures",
  "indicatif",
  "inventory",
- "kernel",
  "log",
  "once_cell",
- "provider",
  "rand",
  "ratatui",
+ "runtime",
  "rustyline",
  "serde_json",
  "similar",
@@ -261,7 +267,6 @@ dependencies = [
  "termimad",
  "tokio",
  "tokio-util",
- "tool",
  "tui-textarea",
  "unicode-width 0.2.0",
  "uuid",
@@ -325,6 +330,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "980c2afde4af43d6a05c5be738f9eae595cff86dce1f38f88b95058a98c027f3"
 dependencies = [
  "crossterm 0.29.0",
+]
+
+[[package]]
+name = "core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "dirs",
+ "futures",
+ "futures-util",
+ "inventory",
+ "log",
+ "parking_lot",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "unicode-width 0.2.0",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -925,6 +957,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hook"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1310,33 +1349,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kernel"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "dirs",
- "futures",
- "futures-util",
- "inventory",
- "log",
- "parking_lot",
- "rand",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yml",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "unicode-width 0.2.0",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "lazy-regex"
 version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1682,6 +1694,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
+name = "policy"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1734,12 +1753,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "project"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
+name = "prompt"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
 name = "provider"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "core",
  "futures-util",
- "kernel",
  "log",
  "reqwest",
  "reqwest-eventsource",
@@ -1953,6 +1986,21 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "audit",
+ "core",
+ "hook",
+ "policy",
+ "project",
+ "prompt",
+ "provider",
+ "storage",
+ "tools",
 ]
 
 [[package]]
@@ -2264,6 +2312,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "core",
+]
+
+[[package]]
 name = "strict"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2515,14 +2570,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "tool"
+name = "tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64",
  "chrono",
+ "core",
  "glob",
- "kernel",
  "log",
  "percent-encoding",
  "reqwest",

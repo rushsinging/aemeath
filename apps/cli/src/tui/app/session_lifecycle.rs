@@ -1,9 +1,9 @@
 use super::App;
+use ::runtime::api::core::tool::ToolRegistry;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use kernel::tool::ToolRegistry;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::sync::atomic::AtomicBool;
@@ -13,18 +13,18 @@ impl App {
     /// Run the TUI event loop
     pub async fn run(
         &mut self,
-        client: Arc<provider::client::LlmClient>,
+        client: Arc<::runtime::api::provider::client::LlmClient>,
         registry: Arc<ToolRegistry>,
-        system_blocks: Vec<provider::types::SystemBlock>,
+        system_blocks: Vec<::runtime::api::provider::types::SystemBlock>,
         system_prompt_text: String,
         mut user_context: String,
         context_size: usize,
         verbose: bool,
         use_markdown: bool,
-        agent_runner: Option<Arc<dyn kernel::tool::AgentRunner>>,
+        agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
         allow_all: bool,
         resume_id: Option<String>,
-        task_store: Arc<kernel::task::TaskStore>,
+        task_store: Arc<::runtime::api::core::task::TaskStore>,
         max_tool_concurrency: usize,
         max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
@@ -40,7 +40,7 @@ impl App {
 
         // Resume existing session if requested
         if let Some(ref id) = resume_id {
-            match kernel::session::load_session(id).await {
+            match ::runtime::api::core::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
                     self.session_created_at = Some(s.created_at.clone());
@@ -65,13 +65,13 @@ impl App {
                         ts.restore(snapshot).await;
                     }
                     let mut msgs = s.messages;
-                    kernel::message::sanitize_messages(&mut msgs);
+                    ::runtime::api::core::message::sanitize_messages(&mut msgs);
                     let trimmed = msg_count - msgs.len();
                     // Check for deeper integrity issues (orphaned tool results
                     // in the middle, role order violations, etc.)
-                    let integrity = kernel::message::check_message_integrity(&msgs);
+                    let integrity = ::runtime::api::core::message::check_message_integrity(&msgs);
                     let auto_repaired = if integrity.has_issues() {
-                        kernel::message::deep_clean_messages(&mut msgs)
+                        ::runtime::api::core::message::deep_clean_messages(&mut msgs)
                     } else {
                         0
                     };
@@ -120,7 +120,9 @@ impl App {
         for path in &config_paths {
             if path.exists() {
                 if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(config) = serde_json::from_str::<kernel::config::Config>(&content) {
+                    if let Ok(config) =
+                        serde_json::from_str::<::runtime::api::core::config::Config>(&content)
+                    {
                         if !config.models.providers.is_empty() {
                             self.models_config = config.models;
                             break;
@@ -150,8 +152,8 @@ impl App {
         // Run SessionStart hooks: inject additional_context into user_context,
         // and display system_message in the output area.
         {
-            use kernel::config::hooks::HookEvent;
-            use kernel::hook::{HookData, SessionHookData};
+            use ::runtime::api::core::config::hooks::HookEvent;
+            use ::runtime::api::core::hook::{HookData, SessionHookData};
             let hook_results = self
                 .hook_runner
                 .run_hooks_with_json(
@@ -204,7 +206,7 @@ impl App {
         // Auto-save session on exit
         if !self.messages.is_empty() {
             let s = self.build_session(self.messages.clone()).await;
-            if let Err(e) = kernel::session::save_session(&s).await {
+            if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
                 log::warn!("failed to auto-save session: {e}");
             }
         }

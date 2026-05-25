@@ -9,8 +9,7 @@ DETAILS=()
 
 SOURCE_ROOTS=(
   "$ROOT/apps"
-  "$ROOT/contexts"
-  "$ROOT/shared"
+  "$ROOT/crates"
 )
 
 EXISTING_ROOTS=()
@@ -21,7 +20,7 @@ for source_root in "${SOURCE_ROOTS[@]}"; do
 done
 
 if [[ "${#EXISTING_ROOTS[@]}" -eq 0 ]]; then
-  echo "ERROR: expected DDD source roots under apps/, contexts/, or shared/." >&2
+  echo "ERROR: expected DDD source roots under apps/ or crates/." >&2
   exit 2
 fi
 

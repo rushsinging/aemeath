@@ -1,0 +1,15 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aemeath_core = { package = "core", path = "../core" }
+provider = { path = "../provider" }
+tools = { path = "../tools" }
+project = { path = "../project" }
+policy = { path = "../policy" }
+prompt = { path = "../prompt" }
+storage = { path = "../storage" }
+hook = { path = "../hook" }
+audit = { path = "../audit" }

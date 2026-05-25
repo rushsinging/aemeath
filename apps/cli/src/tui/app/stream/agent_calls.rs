@@ -1,10 +1,10 @@
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::stream::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
 use crate::tui::app::UiEvent;
-use kernel::agent::ToolCall;
-use kernel::config::hooks::HookEvent;
-use kernel::hook::{HookData, ToolHookData};
-use kernel::tool::ToolRegistry;
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::{HookData, ToolHookData};
+use ::runtime::api::core::tool::ToolRegistry;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -13,10 +13,10 @@ use tokio::sync::mpsc;
 pub(crate) async fn execute_agent_calls(
     agent_approved: &[&ToolCall],
     registry: &Arc<ToolRegistry>,
-    agent_ctx: &kernel::tool::ToolContext,
+    agent_ctx: &::runtime::api::core::tool::ToolContext,
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     max_agent_concurrency: usize,
     interrupted: &Arc<AtomicBool>,
 ) -> Vec<UiToolResult> {
@@ -55,9 +55,9 @@ async fn execute_one_agent(
     call: ToolCall,
     tx: mpsc::Sender<UiEvent>,
     hook_ui: HookUi,
-    hook_runner: kernel::hook::HookRunner,
+    hook_runner: ::runtime::api::core::hook::HookRunner,
     registry: Arc<ToolRegistry>,
-    ag_ctx: &mut kernel::tool::ToolContext,
+    ag_ctx: &mut ::runtime::api::core::tool::ToolContext,
 ) -> Vec<UiToolResult> {
     let pre_results = hook_ui
         .run_plain(
@@ -83,7 +83,8 @@ async fn execute_one_agent(
         return vec![result];
     }
 
-    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<kernel::tool::AgentProgressEvent>(32);
+    let (prog_tx, mut prog_rx) =
+        tokio::sync::mpsc::channel::<::runtime::api::core::tool::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);
     let call_id = call.id.clone();
     let ui_tx = tx.clone();
@@ -106,7 +107,7 @@ async fn execute_one_agent(
     hook_runner.set_project_dir(working_root.display().to_string());
     let _ = tx
         .send(crate::tui::app::status_context_for_workspace(
-            kernel::worktree::workspace_context_from_tool_context(&ag_ctx),
+            ::runtime::api::core::worktree::workspace_context_from_tool_context(&ag_ctx),
         ))
         .await;
     let results = vec![(

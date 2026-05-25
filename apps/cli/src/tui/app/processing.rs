@@ -1,6 +1,6 @@
 use super::UiEvent;
-use kernel::tool::ToolRegistry;
-use provider::types::SystemBlock;
+use ::runtime::api::core::tool::ToolRegistry;
+use ::runtime::api::provider::types::SystemBlock;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -11,52 +11,53 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
     pub queue_request_tx: mpsc::Sender<UiEvent>,
-    pub client: Arc<provider::client::LlmClient>,
+    pub client: Arc<::runtime::api::provider::client::LlmClient>,
     pub registry: Arc<ToolRegistry>,
     pub system_blocks: Vec<SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
-    pub messages: Vec<kernel::message::Message>,
+    pub messages: Vec<::runtime::api::core::message::Message>,
     pub context_size: usize,
     pub cwd: PathBuf,
-    pub workspace_context: Option<kernel::session::WorkspaceContext>,
+    pub workspace_context: Option<::runtime::api::core::session::WorkspaceContext>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<kernel::memory::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn kernel::tool::AgentRunner>>,
+    pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
+    pub agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: Arc<AtomicBool>,
     pub cancel: CancellationToken,
-    pub task_store: Arc<kernel::task::TaskStore>,
+    pub task_store: Arc<::runtime::api::core::task::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: kernel::hook::HookRunner,
-    pub memory_config: kernel::config::MemoryConfig,
-    pub json_logger: Option<Arc<std::sync::Mutex<kernel::logging::JsonLogger>>>,
+    pub hook_runner: ::runtime::api::core::hook::HookRunner,
+    pub memory_config: ::runtime::api::core::config::MemoryConfig,
+    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
 }
 
 /// Borrowed references to the shared state needed for spawning.
 /// Used in the processing pipeline to avoid passing many individual parameters.
 pub(crate) struct SpawnContextRefs<'a> {
-    pub client: &'a Arc<provider::client::LlmClient>,
+    pub client: &'a Arc<::runtime::api::provider::client::LlmClient>,
     pub registry: &'a Arc<ToolRegistry>,
     pub system_blocks: &'a Vec<SystemBlock>,
     pub system_prompt_text: &'a str,
     pub user_context: &'a str,
     pub context_size: usize,
     pub read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: &'a Arc<std::sync::Mutex<kernel::memory::SessionReminders>>,
-    pub agent_runner: &'a Option<Arc<dyn kernel::tool::AgentRunner>>,
+    pub session_reminders:
+        &'a Arc<std::sync::Mutex<::runtime::api::core::memory::SessionReminders>>,
+    pub agent_runner: &'a Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: &'a Arc<AtomicBool>,
-    pub task_store: &'a Arc<kernel::task::TaskStore>,
+    pub task_store: &'a Arc<::runtime::api::core::task::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
-    pub hook_runner: &'a kernel::hook::HookRunner,
-    pub memory_config: &'a kernel::config::MemoryConfig,
-    pub json_logger: &'a Option<Arc<std::sync::Mutex<kernel::logging::JsonLogger>>>,
+    pub hook_runner: &'a ::runtime::api::core::hook::HookRunner,
+    pub memory_config: &'a ::runtime::api::core::config::MemoryConfig,
+    pub json_logger: &'a Option<Arc<std::sync::Mutex<::runtime::api::core::logging::JsonLogger>>>,
 }
 
 /// Spawn the background LLM processing task.

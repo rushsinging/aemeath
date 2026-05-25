@@ -1,4 +1,4 @@
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
 use crate::tui::safe_text;

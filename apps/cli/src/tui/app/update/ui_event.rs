@@ -214,7 +214,8 @@ impl App {
                 );
             }
             UiEvent::ReflectionDone { output } => {
-                let formatted = kernel::reflection::ReflectionEngine::format_output(&output);
+                let formatted =
+                    ::runtime::api::core::reflection::ReflectionEngine::format_output(&output);
                 self.output_area.push_system(&formatted);
                 if self.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);

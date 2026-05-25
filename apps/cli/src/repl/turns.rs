@@ -1,9 +1,9 @@
 use crate::render::TerminalRenderer;
-use kernel::agent::Agent;
-use kernel::message::Message;
-use kernel::tool::{ToolContext, ToolRegistry};
-use provider::client::LlmClient;
-use provider::types::{StopReason, SystemBlock};
+use ::runtime::api::core::agent::Agent;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::tool::{ToolContext, ToolRegistry};
+use ::runtime::api::provider::client::LlmClient;
+use ::runtime::api::provider::types::{StopReason, SystemBlock};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,17 +37,17 @@ pub(super) async fn run_agent_turns(
     cwd: &Path,
     interrupted: &Arc<AtomicBool>,
     read_files: &Arc<Mutex<HashSet<String>>>,
-    agent_runner: &Option<Arc<dyn kernel::tool::AgentRunner>>,
+    agent_runner: &Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     allow_all: bool,
     max_tool_concurrency: usize,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     session_id: &str,
-    session_reminders: &Arc<Mutex<kernel::memory::SessionReminders>>,
-    task_store: &Arc<kernel::task::TaskStore>,
-    hook_runner: &kernel::hook::HookRunner,
-    memory_config: &kernel::config::MemoryConfig,
-    json_logger: &Option<Arc<Mutex<kernel::logging::JsonLogger>>>,
-    compact_state: &mut kernel::compact::AutoCompactState,
+    session_reminders: &Arc<Mutex<::runtime::api::core::memory::SessionReminders>>,
+    task_store: &Arc<::runtime::api::core::task::TaskStore>,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
+    memory_config: &::runtime::api::core::config::MemoryConfig,
+    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
+    compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
     turn_count: usize,
     verbose: bool,
     markdown: bool,
@@ -206,13 +206,13 @@ fn build_agent<'a>(
     cwd: &Path,
     cancel: &CancellationToken,
     read_files: &Arc<Mutex<HashSet<String>>>,
-    agent_runner: &Option<Arc<dyn kernel::tool::AgentRunner>>,
+    agent_runner: &Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     allow_all: bool,
     max_tool_concurrency: usize,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     session_id: &str,
-    session_reminders: &Arc<Mutex<kernel::memory::SessionReminders>>,
-    memory_config: &kernel::config::MemoryConfig,
+    session_reminders: &Arc<Mutex<::runtime::api::core::memory::SessionReminders>>,
+    memory_config: &::runtime::api::core::config::MemoryConfig,
 ) -> Agent<'a> {
     let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.to_path_buf());
     let ctx = ToolContext {
@@ -237,7 +237,7 @@ fn build_agent<'a>(
 }
 
 async fn run_reflection(
-    memory_config: &kernel::config::MemoryConfig,
+    memory_config: &::runtime::api::core::config::MemoryConfig,
     turn_number: usize,
     messages: &[Message],
     cwd: &Path,
@@ -259,8 +259,8 @@ async fn run_reflection(
 }
 
 async fn build_call_summaries(
-    tool_calls: &[kernel::agent::ToolCall],
-    task_store: &Arc<kernel::task::TaskStore>,
+    tool_calls: &[::runtime::api::core::agent::ToolCall],
+    task_store: &Arc<::runtime::api::core::task::TaskStore>,
 ) -> HashMap<String, (String, String)> {
     let pending_tasks = super::tool_execution::pending_task_lines(task_store).await;
     tool_calls
@@ -280,7 +280,10 @@ async fn build_call_summaries(
         .collect()
 }
 
-fn append_tool_results(messages: &mut Vec<Message>, results: Vec<kernel::agent::ToolResultTuple>) {
+fn append_tool_results(
+    messages: &mut Vec<Message>,
+    results: Vec<::runtime::api::core::agent::ToolResultTuple>,
+) {
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
         messages.push(Message::tool_results_rich(results));
@@ -300,19 +303,24 @@ async fn maybe_compact_after_tools(
     context_size: usize,
     system_prompt_text: &str,
     tool_schema_tokens: usize,
-    compact_state: &mut kernel::compact::AutoCompactState,
+    compact_state: &mut ::runtime::api::core::compact::AutoCompactState,
     client: &LlmClient,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     turn_count: usize,
     read_files: &Arc<Mutex<HashSet<String>>>,
 ) {
     let urgency = if last_api_input_tokens > 0 {
         let new_tokens = messages
             .last()
-            .map(|m| kernel::compact::estimate_messages_tokens(std::slice::from_ref(m)))
+            .map(|m| {
+                ::runtime::api::core::compact::estimate_messages_tokens(std::slice::from_ref(m))
+            })
             .unwrap_or(0) as u64;
-        kernel::compact::compaction_urgency(last_api_input_tokens + new_tokens, context_size)
-    } else if kernel::compact::needs_compaction_full(
+        ::runtime::api::core::compact::compaction_urgency(
+            last_api_input_tokens + new_tokens,
+            context_size,
+        )
+    } else if ::runtime::api::core::compact::needs_compaction_full(
         messages,
         system_prompt_text,
         context_size,
@@ -325,7 +333,7 @@ async fn maybe_compact_after_tools(
 
     if urgency >= 1 && messages.len() > 4 {
         let old_len = messages.len();
-        kernel::compact::microcompact(messages, 6);
+        ::runtime::api::core::compact::microcompact(messages, 6);
         if urgency >= 2 && compact_state.should_attempt() {
             compact_messages_inner(
                 messages,

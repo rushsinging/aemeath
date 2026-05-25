@@ -5,12 +5,12 @@ use super::logging::{
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::{CliAgentRunner, SilentHandler};
-use kernel::agent::Agent;
-use kernel::compact::safe_slice;
-use kernel::message::Message;
-use kernel::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
-use provider::client::LlmClient;
-use provider::types::{StopReason, SystemBlock};
+use ::runtime::api::core::agent::Agent;
+use ::runtime::api::core::compact::safe_slice;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
+use ::runtime::api::provider::client::LlmClient;
+use ::runtime::api::provider::types::{StopReason, SystemBlock};
 use std::sync::Arc;
 
 #[allow(clippy::type_complexity)]
@@ -21,7 +21,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx: &'a ToolContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
-    pub hook_runner: kernel::hook::HookRunner,
+    pub hook_runner: ::runtime::api::core::hook::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
     pub handler: SilentHandler,
@@ -126,7 +126,7 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    kernel::compact::truncate_tool_results(&mut results);
+                    ::runtime::api::core::compact::truncate_tool_results(&mut results);
                     append_tool_results(&mut self.messages, results, &self.session_id);
                     self.compact_if_needed(api_input, turn_number);
                 }
@@ -172,7 +172,7 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
-        let msg_tokens = kernel::compact::estimate_messages_tokens(&self.messages);
+        let msg_tokens = ::runtime::api::core::compact::estimate_messages_tokens(&self.messages);
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -201,7 +201,11 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn progress_api_ok(&self, turn_number: usize, resp: &provider::types::StreamResponse) {
+    fn progress_api_ok(
+        &self,
+        turn_number: usize,
+        resp: &::runtime::api::provider::types::StreamResponse,
+    ) {
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -211,7 +215,11 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, turn_number: usize, resp: &provider::types::StreamResponse) {
+    fn log_output(
+        &self,
+        turn_number: usize,
+        resp: &::runtime::api::provider::types::StreamResponse,
+    ) {
         if let Some(ref jl) = self.runner.json_logger {
             let data = build_json_logger_output_data(
                 resp,
@@ -227,7 +235,11 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn send_text_progress(&self, turn: usize, resp: &provider::types::StreamResponse) {
+    fn send_text_progress(
+        &self,
+        turn: usize,
+        resp: &::runtime::api::provider::types::StreamResponse,
+    ) {
         if let Some(ref tx) = self.progress_tx {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();
@@ -245,7 +257,11 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn log_tool_calls(&self, turn_number: usize, tool_calls: &[kernel::agent::ToolCall]) {
+    fn log_tool_calls(
+        &self,
+        turn_number: usize,
+        tool_calls: &[::runtime::api::core::agent::ToolCall],
+    ) {
         if let Some(ref jl) = self.runner.json_logger {
             for tool_call in tool_calls {
                 let data = build_json_logger_tool_call_data(tool_call);
@@ -261,7 +277,7 @@ impl<'a> SubAgentRun<'a> {
 
     fn build_call_info(
         &self,
-        tool_calls: &[kernel::agent::ToolCall],
+        tool_calls: &[::runtime::api::core::agent::ToolCall],
     ) -> std::collections::HashMap<String, (String, String)> {
         tool_calls
             .iter()

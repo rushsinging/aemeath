@@ -1,5 +1,5 @@
-use kernel::agent::ToolCall;
-use kernel::message::Message;
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::message::Message;
 use serde_json::json;
 
 pub(crate) fn build_json_logger_input_data(
@@ -33,7 +33,7 @@ pub(crate) fn build_json_logger_input_data(
 }
 
 pub(crate) fn build_json_logger_output_data(
-    resp: &provider::types::StreamResponse,
+    resp: &::runtime::api::provider::types::StreamResponse,
     elapsed_secs: f64,
     provider: &str,
 ) -> serde_json::Value {

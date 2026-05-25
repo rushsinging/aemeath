@@ -1,8 +1,8 @@
 use crate::render::TerminalRenderer;
-use kernel::agent::{Agent, ToolCall, ToolResultTuple};
-use kernel::task::{TaskStatus, TaskStore};
-use kernel::tool::ToolRegistry;
-use provider::client::LlmClient;
+use ::runtime::api::core::agent::{Agent, ToolCall, ToolResultTuple};
+use ::runtime::api::core::task::{TaskStatus, TaskStore};
+use ::runtime::api::core::tool::ToolRegistry;
+use ::runtime::api::provider::client::LlmClient;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -36,7 +36,7 @@ pub(super) async fn execute_and_render_tools(
     cancel: &CancellationToken,
     session_id: &str,
     allow_all: bool,
-    json_logger: &Option<Arc<Mutex<kernel::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
 ) -> Vec<ToolResultTuple> {
@@ -50,8 +50,10 @@ pub(super) async fn execute_and_render_tools(
         handle.abort();
     }
 
-    let persisted =
-        kernel::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    let persisted = ::runtime::api::core::tool_result_storage::persist_oversized_results(
+        session_id,
+        &mut results,
+    );
     if persisted > 0 {
         println!("[{persisted} tool result(s) persisted to disk]");
     }
@@ -74,7 +76,7 @@ fn approve_tool_calls<'a>(
             call.input
                 .get("command")
                 .and_then(|v| v.as_str())
-                .map(tool::bash::is_readonly_command)
+                .map(::runtime::api::tools::bash::is_readonly_command)
                 .unwrap_or(false)
         } else {
             registry
@@ -152,7 +154,7 @@ async fn update_todo_progress(store: &TaskStore, last_statuses: &mut HashMap<Str
 }
 
 fn log_tool_results(
-    json_logger: &Option<Arc<Mutex<kernel::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
     results: &[ToolResultTuple],

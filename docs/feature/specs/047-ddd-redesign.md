@@ -525,7 +525,7 @@ core
 2. 当前 `shared/kernel`、`contexts/provider`、`contexts/tool` 是上一轮过渡结构，下一轮迁移应收束到 `crates/core`、`crates/provider`、`crates/tools`，并创建其余目标 crates。
 3. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
 4. 每个 crate 内部再按 COLA 分层组织，例如 `api`、`application`、`domain`、`infrastructure`；但顶层只表达产品/领域语义。
-5. `apps/cli` 只能依赖 `crates/runtime` 和纯技术库；不能直接依赖 supporting domains 或 `core`。
+5. `apps/cli` 只能依赖 `crates/runtime` 和纯技术库；不能直接依赖 supporting domains 或 `core`。（已在首轮实施中通过 Cargo 依赖收束和 architecture guards 固化）
 6. supporting domains 之间依赖必须按 Context Map 方向收敛，禁止 domain 反向依赖 `apps/cli`、TUI 或 REPL。
 7. 实施必须按 checkpoint 保持可编译：每个 checkpoint 至少运行 `cargo check`，最终运行完整验收门禁。
 
@@ -537,7 +537,7 @@ core
 4. 从 `shared/kernel` 拆出 `crates/project`、`crates/policy`、`crates/prompt`、`crates/storage`、`crates/hook`、`crates/audit` 的低耦合类型和端口；剩余稳定共享类型进入 `crates/core`。
 5. 让 `crates/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。
 6. 增加 architecture guard：禁止 `apps/cli` 直接依赖 `core` 和 supporting domain crate；禁止 supporting domain 反向依赖 `runtime` / `apps/cli`。
-7. 移除 `contexts/`、`shared/` 过渡目录，更新 `.agents/aemeath.json` 与 `.agents/hooks/*` 中的旧路径、旧 package 名和架构守卫，再运行完整验收。
+7. 移除 `contexts/`、`shared/` 过渡目录，更新 `.agents/aemeath.json` 与 `.agents/hooks/*` 中的旧路径、旧 package 名和架构守卫，再运行完整验收。（首轮实施已完成，后续继续拆分 support domain 内部职责）
 
 `.agents` 迁移要求：
 

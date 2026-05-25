@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 
 use crate::tui::output_area::types::DEFAULT_WIDTH;
 

@@ -13,18 +13,18 @@ impl App {
     pub(super) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        client: Arc<provider::client::LlmClient>,
-        registry: Arc<kernel::tool::ToolRegistry>,
-        system_blocks: Vec<provider::types::SystemBlock>,
+        client: Arc<::runtime::api::provider::client::LlmClient>,
+        registry: Arc<::runtime::api::core::tool::ToolRegistry>,
+        system_blocks: Vec<::runtime::api::provider::types::SystemBlock>,
         system_prompt_text: String,
         user_context: String,
         context_size: usize,
         _verbose: bool,
         _use_markdown: bool,
-        agent_runner: Option<Arc<dyn kernel::tool::AgentRunner>>,
+        agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
         allow_all: bool,
         interrupted: Arc<AtomicBool>,
-        task_store: Arc<kernel::task::TaskStore>,
+        task_store: Arc<::runtime::api::core::task::TaskStore>,
         max_tool_concurrency: usize,
         max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
@@ -118,7 +118,8 @@ impl App {
                     .await;
                 if let Some(prompt) = review_prompt {
                     self.output_area.push_user_message(&input);
-                    self.messages.push(kernel::message::Message::user(&prompt));
+                    self.messages
+                        .push(::runtime::api::core::message::Message::user(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
                     self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
@@ -180,7 +181,7 @@ impl App {
                 Cmd::SaveSession(msgs) => {
                     if !msgs.is_empty() {
                         let s = self.build_session(msgs).await;
-                        if let Err(e) = kernel::session::save_session(&s).await {
+                        if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
                             log::warn!("failed to auto-save session on sync: {e}");
                         }
                     }

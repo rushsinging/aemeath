@@ -1,5 +1,5 @@
 use crate::tui::output_area::{LineStyle, OutputLine};
-use kernel::message::{Message, Role};
+use ::runtime::api::core::message::{Message, Role};
 
 impl super::App {
     /// Render a saved history message into the output area (used during session resume).
@@ -16,7 +16,7 @@ impl super::App {
                 let mut has_text = false;
 
                 for block in &msg.content {
-                    if let kernel::message::ContentBlock::Text { text } = block {
+                    if let ::runtime::api::core::message::ContentBlock::Text { text } = block {
                         if !text.trim().is_empty() {
                             has_text = true;
                         }
@@ -28,7 +28,9 @@ impl super::App {
                         .content
                         .iter()
                         .filter_map(|block| match block {
-                            kernel::message::ContentBlock::Text { text } => Some(text.as_str()),
+                            ::runtime::api::core::message::ContentBlock::Text { text } => {
+                                Some(text.as_str())
+                            }
                             _ => None,
                         })
                         .collect::<Vec<_>>()
@@ -48,7 +50,7 @@ impl super::App {
                             .content
                             .iter()
                             .filter_map(|block| match block {
-                                kernel::message::ContentBlock::ToolResult {
+                                ::runtime::api::core::message::ContentBlock::ToolResult {
                                     tool_use_id,
                                     content,
                                     is_error,
@@ -63,7 +65,7 @@ impl super::App {
 
                 for (_, block) in msg.content.iter().enumerate() {
                     match block {
-                        kernel::message::ContentBlock::Text { text } => {
+                        ::runtime::api::core::message::ContentBlock::Text { text } => {
                             for text_line in text.lines() {
                                 self.output_area.push_line(OutputLine {
                                     content: text_line.to_string(),
@@ -72,8 +74,11 @@ impl super::App {
                                 });
                             }
                         }
-                        kernel::message::ContentBlock::ToolUse {
-                            id, name, input, ..
+                        ::runtime::api::core::message::ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input,
+                            ..
                         } => {
                             let input_json = input.to_string();
                             // Use the same tool_id as live path so styles match.
@@ -114,7 +119,7 @@ impl super::App {
                                 }
                             }
                         }
-                        kernel::message::ContentBlock::ToolResult { .. } => {
+                        ::runtime::api::core::message::ContentBlock::ToolResult { .. } => {
                             // ToolResult blocks in assistant messages are rendered by
                             // push_tool_result_with_diff above (matched by id).
                         }

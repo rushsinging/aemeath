@@ -2,7 +2,7 @@
 
 use ratatui::text::Line;
 
-use kernel::string_idx::CharIdx;
+use ::runtime::api::core::string_idx::CharIdx;
 
 use super::rendered_lines;
 use super::OutputLine;

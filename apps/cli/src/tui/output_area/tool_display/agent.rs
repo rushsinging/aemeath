@@ -1,4 +1,4 @@
-use kernel::tool::{AgentProgressEvent, AgentProgressKind};
+use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind};
 
 use crate::tui::output_area::{LineStyle, OutputLine, INDENT};
 
@@ -17,7 +17,7 @@ impl super::super::OutputArea {
     fn push_agent_tool_calls(
         &mut self,
         tool_id: &str,
-        calls: &[kernel::tool::AgentToolCallProgress],
+        calls: &[::runtime::api::core::tool::AgentToolCallProgress],
     ) {
         self.finish_streaming();
         let summary = format_agent_tool_calls(calls);

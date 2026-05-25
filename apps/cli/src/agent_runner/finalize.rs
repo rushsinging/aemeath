@@ -1,6 +1,6 @@
-use kernel::hook::HookRunner;
-use kernel::tool::{AgentProgressEvent, AgentProgressKind};
-use provider::client::LlmClient;
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind};
+use ::runtime::api::provider::client::LlmClient;
 use std::time::Duration;
 
 /// Agent 循环退出状态

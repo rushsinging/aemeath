@@ -1,9 +1,9 @@
 use crate::mcp_loader::spawn_mcp_connect;
-use kernel::config::SkillsConfig;
-use kernel::mcp_manager::McpConnectionManager;
-use kernel::skill::Skill;
-use kernel::task::TaskStore;
-use kernel::tool::ToolRegistry;
+use ::runtime::api::core::config::SkillsConfig;
+use ::runtime::api::core::mcp_manager::McpConnectionManager;
+use ::runtime::api::core::skill::Skill;
+use ::runtime::api::core::task::TaskStore;
+use ::runtime::api::core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,7 +40,7 @@ fn load_configured_skills(
     skills_config: Option<&SkillsConfig>,
 ) -> HashMap<String, Skill> {
     let skill_dirs = configured_skill_dirs(skills_config);
-    kernel::skill::load_all_skills(cwd, &skill_dirs)
+    ::runtime::api::core::skill::load_all_skills(cwd, &skill_dirs)
 }
 
 fn configured_skill_dirs(skills_config: Option<&SkillsConfig>) -> Vec<PathBuf> {
@@ -60,14 +60,14 @@ fn register_chat_tools(
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
-    tool::register_all_tools(&registry, task_store, skills);
+    ::runtime::api::tools::register_all_tools(&registry, task_store, skills);
     Arc::new(registry)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::SkillsConfig;
+    use ::runtime::api::core::config::SkillsConfig;
 
     #[test]
     fn test_configured_skill_dirs_uses_config_dirs() {

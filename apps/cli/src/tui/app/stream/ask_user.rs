@@ -1,15 +1,15 @@
 use crate::tui::app::stream::hook_ui::HookUi;
 use crate::tui::app::stream::tools::{send_tool_result, UiToolResult};
 use crate::tui::app::UiEvent;
-use kernel::agent::ToolCall;
-use kernel::config::hooks::HookEvent;
-use kernel::hook::HookData;
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::config::hooks::HookEvent;
+use ::runtime::api::core::hook::HookData;
 use tokio::sync::mpsc;
 
 pub(crate) async fn ask_user(
     tx: &mpsc::Sender<UiEvent>,
     hook_ui: &HookUi,
-    hook_runner: &kernel::hook::HookRunner,
+    hook_runner: &::runtime::api::core::hook::HookRunner,
     non_agent_calls: &[ToolCall],
 ) -> Vec<UiToolResult> {
     let mut ask_user_results = Vec::new();
@@ -23,7 +23,7 @@ pub(crate) async fn ask_user(
                 hook_runner,
                 HookEvent::PermissionRequest,
                 Some(&call.name),
-                HookData::Permission(kernel::hook::PermissionHookData {
+                HookData::Permission(::runtime::api::core::hook::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),

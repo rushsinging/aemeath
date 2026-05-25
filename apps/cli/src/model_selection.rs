@@ -1,4 +1,6 @@
-use kernel::config::{models::ResolvedModel, Config, ConfigManager, ModelEntryConfig};
+use ::runtime::api::core::config::{
+    models::ResolvedModel, Config, ConfigManager, ModelEntryConfig,
+};
 
 /// 处理 `aemeath models` 子命令
 fn format_token_limit_k(tokens: u32) -> String {
@@ -137,7 +139,9 @@ pub(crate) fn select_model_for_run(
 
 #[cfg(test)]
 mod tests {
-    use kernel::config::{Config, ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
+    use ::runtime::api::core::config::{
+        Config, ModelEntryConfig, ModelsConfig, ProviderModelsConfig,
+    };
     use std::collections::HashMap;
 
     fn test_config_for_model_selection() -> Config {

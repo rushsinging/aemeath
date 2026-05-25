@@ -1,6 +1,6 @@
 use crate::image::{is_image_file, process_image_file};
 use crate::render::TerminalRenderer;
-use kernel::message::Message;
+use ::runtime::api::core::message::Message;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::Path;
@@ -27,9 +27,9 @@ pub(super) async fn read_and_prepare_input(
     session_id: &str,
     cwd: &Path,
     pending_images: &PendingImages,
-    resumed_session: Option<&kernel::session::Session>,
+    resumed_session: Option<&::runtime::api::core::session::Session>,
     allow_all: &mut bool,
-    skills: &std::collections::HashMap<String, kernel::skill::Skill>,
+    skills: &std::collections::HashMap<String, ::runtime::api::core::skill::Skill>,
 ) -> InputAction {
     {
         let images = pending_images.lock().unwrap();

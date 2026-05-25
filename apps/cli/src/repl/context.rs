@@ -1,4 +1,4 @@
-use kernel::message::Message;
+use ::runtime::api::core::message::Message;
 
 /// Build the user context message from CLAUDE.md content, wrapped in <system-reminder> tags.
 pub(crate) fn build_user_context_message(claude_md: &str) -> Option<Message> {

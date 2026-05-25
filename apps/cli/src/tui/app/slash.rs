@@ -1,15 +1,49 @@
+mod help;
 mod memory;
 mod reflection;
 mod suggestions;
 
 use crate::tui::app::UiEvent;
-use kernel::command::cmd;
-use kernel::command::{CommandContext, CommandRegistry, CommandResult};
-use kernel::session;
-use kernel::state::AppState;
+use ::runtime::api::core::command::cmd;
+use ::runtime::api::core::command::{CommandContext, CommandRegistry, CommandResult};
+use ::runtime::api::core::session;
+use ::runtime::api::core::state::AppState;
+use help::SLASH_HELP_LINES;
 use std::sync::Arc;
-
 impl super::App {
+    fn open_model_selection_dialog(&mut self) -> Option<String> {
+        let models = self.models_config.list_models();
+        if models.is_empty() {
+            self.output_area
+                .push_system("No models configured. Add models to ~/.aemeath/config.json");
+            return None;
+        }
+        let current = self.current_model_display.clone();
+        let mut options = Vec::new();
+        let mut keys = Vec::new();
+        for (provider_name, model) in &models {
+            let display_name = if model.name.is_empty() {
+                &model.id
+            } else {
+                &model.name
+            };
+            let key = format!("{}/{}", provider_name, display_name);
+            let marker = if key == current { " ←" } else { "" };
+            options.push(format!(
+                "{}/{} ctx:{}k max:{}k{}",
+                provider_name,
+                display_name,
+                model.context_window / 1000,
+                model.max_tokens / 1000,
+                marker,
+            ));
+            keys.push(key);
+        }
+        self.active_dialog = Some(crate::tui::dialog::Dialog::select("Select Model", options));
+        self.dialog_model_keys = keys;
+        None
+    }
+
     /// Handle slash commands with an optional UI event sender for background commands.
     /// Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
     pub(crate) async fn handle_slash_command_with_events(
@@ -21,38 +55,8 @@ impl super::App {
         let cmd = *parts.first().unwrap_or(&"");
         let has_args = parts.len() > 1;
 
-        // /model with no args → open selection dialog
         if cmd == "/model" && !has_args {
-            let models = self.models_config.list_models();
-            if models.is_empty() {
-                self.output_area
-                    .push_system("No models configured. Add models to ~/.aemeath/config.json");
-                return None;
-            }
-            let current = self.current_model_display.clone();
-            let mut options = Vec::new();
-            let mut keys = Vec::new();
-            for (provider_name, model) in &models {
-                let display_name = if model.name.is_empty() {
-                    &model.id
-                } else {
-                    &model.name
-                };
-                let key = format!("{}/{}", provider_name, display_name);
-                let marker = if key == current { " ←" } else { "" };
-                options.push(format!(
-                    "{}/{} ctx:{}k max:{}k{}",
-                    provider_name,
-                    display_name,
-                    model.context_window / 1000,
-                    model.max_tokens / 1000,
-                    marker,
-                ));
-                keys.push(key);
-            }
-            self.active_dialog = Some(crate::tui::dialog::Dialog::select("Select Model", options));
-            self.dialog_model_keys = keys;
-            return None;
+            return self.open_model_selection_dialog();
         }
 
         match cmd {
@@ -68,7 +72,7 @@ impl super::App {
                 self.output_area.push_system("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                use kernel::compact;
+                use ::runtime::api::core::compact;
                 let (compacted, was_compacted) = compact::compact_messages(
                     &mut self.messages,
                     &self.system_prompt_text,
@@ -86,38 +90,9 @@ impl super::App {
                     self.output_area.push_system("[no compaction needed]");
                 }
             }
-            cmd if cmd == format!("/{}", cmd::HELP) => {
-                self.output_area.push_system("Commands:");
-                self.output_area
-                    .push_system("  /help  /exit  /clear  /compact  /usage  /save  /session");
-                self.output_area
-                    .push_system("  /paste  /images  /clear-images  /context  /review  /think");
-                self.output_area.push_system("");
-                self.output_area.push_system("Scrolling:");
-                self.output_area
-                    .push_system("  Mouse wheel     - scroll 3 lines");
-                self.output_area
-                    .push_system("  PageUp/PageDown - scroll 10 lines");
-                self.output_area
-                    .push_system("  Shift+Up/Down   - scroll 1 line");
-                self.output_area
-                    .push_system("  Shift+Home      - scroll to top");
-                self.output_area
-                    .push_system("  Shift+End       - scroll to bottom");
-                self.output_area.push_system("");
-                self.output_area.push_system("Input:");
-                self.output_area
-                    .push_system("  Enter           - send message");
-                self.output_area.push_system("  Alt+Enter       - new line");
-                self.output_area
-                    .push_system("  Tab             - accept suggestion");
-                self.output_area
-                    .push_system("  Ctrl+C          - interrupt / exit");
-                self.output_area
-                    .push_system("  Ctrl+V          - paste image from clipboard");
-            }
+            cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
-                use kernel::cost::format_tokens;
+                use ::runtime::api::core::cost::format_tokens;
                 let total = self.total_input_tokens + self.total_output_tokens;
                 self.output_area.push_system(&format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
@@ -139,7 +114,7 @@ impl super::App {
                 }
             }
             "/context" => {
-                use kernel::compact;
+                use ::runtime::api::core::compact;
                 let estimated = compact::estimate_messages_tokens(&self.messages)
                     + compact::estimate_tokens(&self.system_prompt_text);
                 let pct = estimated * 100 / self.context_size.max(1);
@@ -217,7 +192,7 @@ impl super::App {
                 if let Some(cmd_obj) = registry.find(cmd_name) {
                     // Create minimal context for command execution
                     let state = AppState::default();
-                    let config = kernel::config::Config::default();
+                    let config = ::runtime::api::core::config::Config::default();
                     let mut ctx = CommandContext::new(
                         Arc::new(state),
                         config,
@@ -232,8 +207,10 @@ impl super::App {
                         CommandResult::Error(msg) => self.output_area.push_error(&msg),
                         CommandResult::Action(action) => {
                             match action {
-                                kernel::command::CommandAction::Exit => self.should_exit = true,
-                                kernel::command::CommandAction::Clear => {
+                                ::runtime::api::core::command::CommandAction::Exit => {
+                                    self.should_exit = true
+                                }
+                                ::runtime::api::core::command::CommandAction::Clear => {
                                     self.messages.clear();
                                     self.pending_images.clear();
                                     self.input_area.set_pending_images(0);
@@ -241,8 +218,8 @@ impl super::App {
                                     self.reset_runtime_state().await;
                                     self.output_area.push_system("[cleared]");
                                 }
-                                kernel::command::CommandAction::Compact => {
-                                    use kernel::compact;
+                                ::runtime::api::core::command::CommandAction::Compact => {
+                                    use ::runtime::api::core::compact;
                                     let (compacted, was_compacted) = compact::compact_messages(
                                         &mut self.messages,
                                         &self.system_prompt_text,
@@ -255,7 +232,7 @@ impl super::App {
                                         self.output_area.push_system("[no compaction needed]");
                                     }
                                 }
-                                kernel::command::CommandAction::SwitchModel {
+                                ::runtime::api::core::command::CommandAction::SwitchModel {
                                     provider_name,
                                     model_id,
                                     model_name,
@@ -267,20 +244,21 @@ impl super::App {
                                     reasoning,
                                 } => {
                                     // Determine API driver from config's api field.
-                                    let api_type = kernel::provider::ApiDriverKind::from_str(
-                                        api_type.as_str(),
-                                    )
-                                    .unwrap_or(kernel::provider::ApiDriverKind::OpenAI);
+                                    let api_type =
+                                        ::runtime::api::provider::ApiDriverKind::from_str(
+                                            api_type.as_str(),
+                                        )
+                                        .unwrap_or(::runtime::api::provider::ApiDriverKind::OpenAI);
 
                                     // Build OpenAI chat provider config for Chat Completions drivers.
                                     let openai_config = if matches!(
                                         api_type,
-                                        kernel::provider::ApiDriverKind::Anthropic
+                                        ::runtime::api::provider::ApiDriverKind::Anthropic
                                     ) {
                                         None
                                     } else {
                                         Some(
-                                            provider::client::OpenAIProviderConfig::from_api_driver(
+                                            ::runtime::api::provider::client::OpenAIProviderConfig::from_api_driver(
                                                 api_type,
                                                 &provider_name,
                                             ),
@@ -292,21 +270,22 @@ impl super::App {
                                         .or_else(|| self.client.as_ref().map(|c| c.is_reasoning()))
                                         .unwrap_or(true);
                                     let reasoning_config = Some(
-                                        provider::providers::openai_compatible::ReasoningConfig::Bool(
+                                        ::runtime::api::provider::providers::openai_compatible::ReasoningConfig::Bool(
                                             reasoning,
                                         ),
                                     );
-                                    let new_client = provider::client::LlmClient::from_config(
-                                        api_type,
-                                        api_key,
-                                        Some(base_url),
-                                        model_id.clone(),
-                                        max_tokens,
-                                        0,
-                                        reasoning,
-                                        reasoning_config,
-                                        openai_config,
-                                    );
+                                    let new_client =
+                                        ::runtime::api::provider::client::LlmClient::from_config(
+                                            api_type,
+                                            api_key,
+                                            Some(base_url),
+                                            model_id.clone(),
+                                            max_tokens,
+                                            0,
+                                            reasoning,
+                                            reasoning_config,
+                                            openai_config,
+                                        );
 
                                     self.client = Some(Arc::new(new_client));
                                     if context_window > 0 {
@@ -325,15 +304,19 @@ impl super::App {
                                     self.output_area
                                         .push_system(&format!("[switched to {}]", display));
                                 }
-                                kernel::command::CommandAction::InjectMessage(prompt) => {
+                                ::runtime::api::core::command::CommandAction::InjectMessage(
+                                    prompt,
+                                ) => {
                                     self.output_area.push_system("[reviewing code changes...]");
                                     return Some(prompt);
                                 }
-                                kernel::command::CommandAction::RunSkill(content) => {
+                                ::runtime::api::core::command::CommandAction::RunSkill(content) => {
                                     self.output_area.push_system("[running skill...]");
                                     return Some(content);
                                 }
-                                kernel::command::CommandAction::SetThinking(desired) => {
+                                ::runtime::api::core::command::CommandAction::SetThinking(
+                                    desired,
+                                ) => {
                                     let current = self
                                         .client
                                         .as_ref()
@@ -348,8 +331,12 @@ impl super::App {
                                         .push_system(&format!("[thinking mode: {}]", label));
                                     self.status_bar.set_thinking(new_state);
                                 }
-                                kernel::command::CommandAction::ResumeSession(session_id) => {
-                                    match kernel::session::load_session(&session_id).await {
+                                ::runtime::api::core::command::CommandAction::ResumeSession(
+                                    session_id,
+                                ) => {
+                                    match ::runtime::api::core::session::load_session(&session_id)
+                                        .await
+                                    {
                                         Ok(s) => {
                                             self.resume_session_messages(
                                                 &session_id,
@@ -392,5 +379,10 @@ impl super::App {
             }
         }
         None
+    }
+    fn show_slash_help(&mut self) {
+        for line in SLASH_HELP_LINES {
+            self.output_area.push_system(line);
+        }
     }
 }

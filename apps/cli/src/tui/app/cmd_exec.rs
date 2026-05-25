@@ -31,7 +31,7 @@ impl App {
             Cmd::SaveSession(msgs) => {
                 if !msgs.is_empty() {
                     let s = app.build_session(msgs).await;
-                    if let Err(e) = kernel::session::save_session(&s).await {
+                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
                         log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }

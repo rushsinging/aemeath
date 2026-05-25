@@ -1,7 +1,7 @@
 use crate::render::{TerminalStreamHandler, ThinkingIndicator};
-use kernel::message::Message;
-use provider::client::LlmClient;
-use provider::types::SystemBlock;
+use ::runtime::api::core::message::Message;
+use ::runtime::api::provider::client::LlmClient;
+use ::runtime::api::provider::types::SystemBlock;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -16,9 +16,15 @@ pub(super) async fn stream_next_response(
     cancel: &CancellationToken,
     verbose: bool,
     markdown: bool,
-    json_logger: &Option<Arc<Mutex<kernel::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
     turn_number: usize,
-) -> Result<(provider::types::StreamResponse, std::time::Duration), provider::LlmError> {
+) -> Result<
+    (
+        ::runtime::api::provider::types::StreamResponse,
+        std::time::Duration,
+    ),
+    ::runtime::api::provider::LlmError,
+> {
     let mut messages_for_api = Vec::new();
     if let Some(ctx_msg) = build_user_context_message(user_context) {
         messages_for_api.push(ctx_msg);
@@ -56,12 +62,12 @@ pub(super) async fn stream_next_response(
 }
 
 pub(super) fn log_response(
-    json_logger: &Option<Arc<Mutex<kernel::logging::JsonLogger>>>,
+    json_logger: &Option<Arc<Mutex<::runtime::api::core::logging::JsonLogger>>>,
     client: &LlmClient,
     turn_number: usize,
-    resp: &provider::types::StreamResponse,
+    resp: &::runtime::api::provider::types::StreamResponse,
     elapsed: std::time::Duration,
-    tool_calls: &[kernel::agent::ToolCall],
+    tool_calls: &[::runtime::api::core::agent::ToolCall],
 ) {
     if let Some(jl) = json_logger {
         let blocks: Vec<serde_json::Value> = resp

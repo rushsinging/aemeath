@@ -10,7 +10,7 @@ pub(crate) fn make_task_with_ts(id: &str, subject: &str, status: TaskStatus, ts:
         owner: None,
         blocked_by: Vec::new(),
         blocks: Vec::new(),
-        priority: kernel::task::TaskPriority::Normal,
+        priority: ::runtime::api::core::task::TaskPriority::Normal,
         progress: 0,
         progress_message: None,
         created_at: ts,
@@ -30,7 +30,7 @@ pub(crate) fn make_task(id: &str, subject: &str, status: TaskStatus) -> Task {
 pub(crate) fn make_display_map(tasks: &[Task]) -> std::collections::HashMap<String, usize> {
     let mut ids: Vec<&str> = tasks
         .iter()
-        .filter(|t| t.status != kernel::task::TaskStatus::Deleted)
+        .filter(|t| t.status != ::runtime::api::core::task::TaskStatus::Deleted)
         .map(|t| t.id.as_str())
         .collect();
     ids.sort_by_key(|id| id.parse::<u64>().unwrap_or(u64::MAX));

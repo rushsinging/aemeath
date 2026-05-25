@@ -10,9 +10,9 @@ use super::{chat_mode_selection, ChatModeSelection};
 use crate::cli::Args;
 use crate::logging_setup::init_logging;
 use crate::model_selection::select_model_for_run;
+use ::runtime::api::core::config::models::ResolvedModel;
+use ::runtime::api::core::mcp_manager::McpConnectionManager;
 use concurrency::resolve_concurrency_limits;
-use kernel::config::models::ResolvedModel;
-use kernel::mcp_manager::McpConnectionManager;
 use model_runtime::{resolve_model_runtime_settings, ReasoningConfigInput};
 use permissions::apply_config_permission_mode;
 use prompt_bundle::build_chat_prompt_bundle;
@@ -42,7 +42,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
     // 优先级: CLI args > env vars > 项目 config.json > 全局 config.json > built-in defaults
 
     // 初始化 guidance 目录（首次运行时生成默认 guidance 文件）
-    kernel::guidance::init_guidance_dir();
+    ::runtime::api::core::guidance::init_guidance_dir();
 
     let cwd = args
         .cwd
@@ -50,7 +50,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let config_file = kernel::config::ConfigManager::new(Some(&cwd))
+    let config_file = ::runtime::api::core::config::ConfigManager::new(Some(&cwd))
         .load()
         .await
         .ok();
@@ -60,7 +60,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
         config_file
             .as_ref()
             .map(|c| &c.logging)
-            .unwrap_or(&kernel::config::LoggingConfig::default()),
+            .unwrap_or(&::runtime::api::core::config::LoggingConfig::default()),
     );
 
     apply_config_permission_mode(&mut args, config_file.as_ref());
@@ -116,7 +116,7 @@ pub(super) async fn bootstrap_chat(mut args: Args) -> ChatBootstrap {
 
     let client = std::sync::Arc::new(client);
 
-    let task_store = std::sync::Arc::new(kernel::task::TaskStore::new());
+    let task_store = std::sync::Arc::new(::runtime::api::core::task::TaskStore::new());
     let tooling = build_chat_tooling(
         &cwd,
         config_file.as_ref().map(|config| &config.skills),

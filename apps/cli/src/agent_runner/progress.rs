@@ -1,5 +1,5 @@
-use kernel::agent::ToolCall;
-use kernel::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+use ::runtime::api::core::agent::ToolCall;
+use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 pub(crate) fn build_tool_calls_progress_event(
     sequence: usize,

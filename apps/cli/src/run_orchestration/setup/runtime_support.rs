@@ -1,9 +1,9 @@
 use crate::agent_runner;
 use crate::logging_setup::set_session_id;
-use kernel::config::Config;
-use kernel::hook::HookRunner;
-use kernel::logging::{self, JsonLogger};
-use provider::client::LlmClient;
+use ::runtime::api::core::config::Config;
+use ::runtime::api::core::hook::HookRunner;
+use ::runtime::api::core::logging::{self, JsonLogger};
+use ::runtime::api::provider::client::LlmClient;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +16,8 @@ pub(super) fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> Hoo
 }
 
 pub(super) fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(kernel::session::new_session_id);
+    let session_id =
+        resume_session_id.unwrap_or_else(::runtime::api::core::session::new_session_id);
     set_session_id(session_id.clone());
     log::info!("session started");
     session_id
@@ -80,13 +81,13 @@ pub(super) fn build_agent_runner(
 fn build_llm_client_pool(
     config_file: Option<&Config>,
     client: Arc<LlmClient>,
-    models_config: Arc<kernel::config::ModelsConfig>,
-) -> Option<Arc<provider::LlmClientPool>> {
+    models_config: Arc<::runtime::api::core::config::ModelsConfig>,
+) -> Option<Arc<::runtime::api::provider::LlmClientPool>> {
     if !has_multi_provider_or_agent_roles(config_file, &models_config) {
         return None;
     }
 
-    Some(Arc::new(provider::LlmClientPool::new(
+    Some(Arc::new(::runtime::api::provider::LlmClientPool::new(
         client,
         models_config,
     )))
@@ -94,7 +95,7 @@ fn build_llm_client_pool(
 
 fn has_multi_provider_or_agent_roles(
     config_file: Option<&Config>,
-    models_config: &kernel::config::ModelsConfig,
+    models_config: &::runtime::api::core::config::ModelsConfig,
 ) -> bool {
     models_config.providers.len() > 1
         || !config_file
@@ -121,9 +122,9 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::config::hooks::{HookEntry, HookEvent, HooksConfig};
-    use kernel::config::models::ProviderModelsConfig;
-    use kernel::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
+    use ::runtime::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use ::runtime::api::core::config::models::ProviderModelsConfig;
+    use ::runtime::api::core::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
     use std::collections::HashMap;
 
     fn config_with_logging(role_logs_enabled: bool, logs_dir: Option<&str>) -> Config {

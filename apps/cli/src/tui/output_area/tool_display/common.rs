@@ -1,4 +1,4 @@
-use kernel::tool::AgentToolCallProgress;
+use ::runtime::api::core::tool::AgentToolCallProgress;
 
 use crate::tui::safe_text;
 
