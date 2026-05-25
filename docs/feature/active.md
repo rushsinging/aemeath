@@ -8,17 +8,17 @@
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
-| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 设计中 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；后续已持续拆分 `bootstrap_chat` 的 setup helper：concurrency、permissions、model_runtime、provider_client、prompt_bundle、runtime_support、tooling，并在 runtime_support 中收束 hook/session 初始化，保持 CLI/TUI 行为不变。当前新增 workspace 目录结构设计：目标采用 `apps/`、`contexts/`、`shared/kernel`，contexts 包含 agent-runtime、provider、tool、config、project-context、prompt、session-history、policy、hook、interface、audit，crate 名不加 aemeath 前缀；不恢复 #36 server/agents/proto/infra。`ChatRuntimePort` 的 `?Send` 过渡限制仍建议作为后续独立重构处理。 |
+| 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 待确认 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；后续已持续拆分 `bootstrap_chat` 的 setup helper：concurrency、permissions、model_runtime、provider_client、prompt_bundle、runtime_support、tooling，并在 runtime_support 中收束 hook/session 初始化，保持 CLI/TUI 行为不变。当前已执行首轮 DDD workspace 目录重排：`cli` 迁移到 `apps/cli`，`packages/core` 迁移到 `shared/kernel` 并更名为 `kernel`，`packages/llm` 迁移到 `contexts/provider` 并更名为 `provider`，`packages/tools` 迁移到 `contexts/tool` 并更名为 `tool`；`build_cli.sh` 与 `.agents/hooks/*` 已同步新 package 名和路径。不恢复 #36 server/agents/proto/infra。`ChatRuntimePort` 的 `?Send` 过渡限制仍建议作为后续独立重构处理。 |
 
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
-**状态**：设计中（DDD workspace 目录结构设计已补充，等待 implementation plan）
+**状态**：待确认（DDD workspace 首轮目录与 crate 重排已完成，等待用户确认后归档）
 
 **背景**：Aemeath 已从单一 CLI 演进为包含 TUI、LLM provider、工具系统、hook、skill、memory、task、worktree、权限与会话管理的 AI 编程助手。当前代码仍主要按技术分层和 crate 边界组织，随着功能增加，领域概念之间的边界容易变得模糊，例如 Agent 会话、工具执行、权限评估、上下文压缩、项目配置、skills 与 hooks 之间的职责交叉。用户希望以 DDD（领域驱动设计）的思路重新设计项目，让后续重构先有清晰的领域模型和边界，而不是直接按文件/模块做局部移动。
 
 **设计结论**：核心域为 Agent Runtime；Agent 是配置化实体；Agent Runtime 使用 Session / Chat / Agent Looping / Turn / Task 作为统一语言；Task 属于 Agent Runtime，由 Agent Looping 推进，持久化投影进入 Session History；HTTP/CLI/TUI/SDK 等入口保持薄，通过统一 application service 接入核心域；包或模块边界应逐步靠近 Bounded Context；COLA 作为工程分层参考，要求 Adapter / Application / Domain / Infrastructure / Client 职责分离；Audit 独立；PermissionDecision 与 HookDecision 分离；Skill / Guidance 独立；Memory 不依赖 Skill / Guidance；完整设计见 [spec](specs/047-ddd-redesign.md)。
 
-**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用；随后继续把 `bootstrap_chat` 中的 setup 细节拆成 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`、`tooling` 等 helper，最后在 `runtime_support` 中收束 hook/session 初始化。当前进一步补充 DDD workspace 目标目录结构：`contexts/agent-runtime`、`contexts/provider`、`contexts/tool`、`contexts/config`、`contexts/project-context`、`contexts/prompt`、`contexts/session-history`、`contexts/policy`、`contexts/hook`、`contexts/interface`、`contexts/audit` 与 `shared/kernel`；crate 名与目录名一致，不加 `aemeath-` 前缀。目录重排仍需 implementation plan，且不恢复 #36 分布式结构；`.agents/aemeath.json` 与 `.agents/hooks/*` 需随目录迁移 checkpoint 同步调整，迁移前保持现有 hook 不变。
+**当前推进**：已按 GLM/DeepSeek review 修正 Phase 4 方向：`ChatApplicationService` 现阶段保持薄校验/分发，避免与目标态 application service 编排产生表述矛盾；`ChatLaunchOptions` 只保留共同启动选项，`max_agent_concurrency` 归入 `TuiChatLaunch`。Phase 4 修正版已将 `run_orchestration::run_chat` 的启动准备逻辑收束为 `ChatBootstrap`，并通过纯 helper `ChatModeSelection` / `permission_env_override` 降低入口分支与 env 副作用；随后继续把 `bootstrap_chat` 中的 setup 细节拆成 `concurrency`、`permissions`、`model_runtime`、`provider_client`、`prompt_bundle`、`runtime_support`、`tooling` 等 helper，最后在 `runtime_support` 中收束 hook/session 初始化。当前已执行首轮 DDD workspace 目录重排：`apps/cli` 承载 CLI 入口，`shared/kernel` 承载原 core 共享内核并更名为 `kernel`，`contexts/provider` 承载原 llm provider 防腐层并更名为 `provider`，`contexts/tool` 承载原 tools 工具上下文并更名为 `tool`；`Cargo.toml`、Rust import、`build_cli.sh` 和 `.agents/hooks/*` 已同步新 package 名和新路径。不恢复 #36 分布式结构；其余 context（agent-runtime、config、project-context、prompt、session-history、policy、hook、interface、audit）保留为后续逻辑拆分目标。
 
 **DDD 概念参考**：
 1. Strategic DDD：用统一语言（Ubiquitous Language）和限界上下文（Bounded Context）拆分业务语义边界；不同上下文之间通过 Context Map 明确关系。
@@ -52,10 +52,10 @@
 **涉及路径（后续预计）**：
 - `docs/feature/specs/047-ddd-redesign.md`：完整 DDD 重设计 spec。
 - `docs/superpowers/specs/2026-05-20-multi-agent-ddd-design.md`：既有 DDD 参考。
-- `packages/core/src/`：领域类型、会话、工具、权限、skill、hook、worktree 等候选边界。
-- `packages/tools/src/`：工具执行上下文与基础设施适配器候选边界。
-- `packages/llm/src/`：Model Gateway / Provider Anti-Corruption Layer 候选边界。
-- `cli/src/tui/` 与 `cli/src/repl/`：Interaction/Application Service 边界。
+- `shared/kernel/src/`：领域类型、会话、工具契约、权限、skill、hook、worktree 等候选边界。
+- `contexts/tool/src/`：工具执行上下文与基础设施适配器候选边界。
+- `contexts/provider/src/`：Provider Anti-Corruption Layer 候选边界。
+- `apps/cli/src/tui/` 与 `apps/cli/src/repl/`：Interface/Application Service 边界。
 
 ### #42 权限管控系统：交互式外部授权 + 统一权限评估
 
@@ -84,11 +84,11 @@ Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is ou
 7. Sandbox 仅预留未来设计，本轮不实现；不引入复杂 modifier。
 
 **涉及路径**：
-- `packages/core/src/permission.rs`：权限模式、授权记录、决策模型与 engine。
-- `packages/core/src/tool.rs`：`ToolContext` / session grants / path_base 与权限上下文。
-- `packages/tools/src/path_security.rs`：路径 canonicalize 与 scope 判断。
-- `packages/tools/src/file_read.rs`、`glob_tool.rs`、`grep.rs`、`file_edit.rs`、`file_write.rs`：工具接入统一权限评估。
-- `cli/src/tui/app/stream/permissions.rs`、`tools.rs`：TUI 权限 prompt、用户选择、approved/denied tool call 流程。
+- `shared/kernel/src/permission.rs`：权限模式、授权记录、决策模型与 engine。
+- `shared/kernel/src/tool.rs`：`ToolContext` / session grants / path_base 与权限上下文。
+- `contexts/tool/src/path_security.rs`：路径 canonicalize 与 scope 判断。
+- `contexts/tool/src/file_read.rs`、`glob_tool.rs`、`grep.rs`、`file_edit.rs`、`file_write.rs`：工具接入统一权限评估。
+- `apps/cli/src/tui/app/stream/permissions.rs`、`tools.rs`：TUI 权限 prompt、用户选择、approved/denied tool call 流程。
 
 
 **目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
@@ -114,11 +114,11 @@ Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is ou
 
 **涉及路径（预计）**：
 
-- `packages/core/src/config/manager/mod.rs`：配置文件路径与加载层级调整。
-- `packages/core/src/config/mod.rs`：配置 schema / 默认路径常量调整。
+- `shared/kernel/src/config/manager/mod.rs`：配置文件路径与加载层级调整。
+- `shared/kernel/src/config/mod.rs`：配置 schema / 默认路径常量调整。
 - `apps/cli/src/prompt.rs`：`CLAUDE.md` 读取迁移到 `AGENTS.md`。
-- `packages/core/src/skill/loader.rs`：skill root 调整为 `~/.agents/skills` 与 `{cwd}/.agents/skills`。
-- `packages/core/src/state/settings.rs`：若仍保留 settings 写入，需迁移到新配置根或明确废弃。
+- `shared/kernel/src/skill/loader.rs`：skill root 调整为 `~/.agents/skills` 与 `{cwd}/.agents/skills`。
+- `shared/kernel/src/state/settings.rs`：若仍保留 settings 写入，需迁移到新配置根或明确废弃。
 - `docs/feature/active.md`：实现进度同步更新。
 
 **验收标准**：
