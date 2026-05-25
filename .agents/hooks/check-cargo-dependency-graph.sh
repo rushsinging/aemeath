@@ -16,7 +16,7 @@ business_allow = {
     "policy": {"core"},
     "prompt": {"core"},
     "provider": {"core"},
-    "tools": {"core", "project"},
+    "tools": {"core"},
     "storage": {"core"},
     "hook": {"core"},
     "audit": {"core"},
