@@ -7,8 +7,15 @@ cd "$(dirname "$0")"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"
 
-# Keep incremental build artifacts outside the repository by default.
-TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/aemeath-target}"
+# Keep incremental build artifacts out of each checkout/worktree by default.
+# Use the repository's common git dir so all linked worktrees share one target.
+COMMON_GIT_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [[ -n "$COMMON_GIT_DIR" ]]; then
+    DEFAULT_TARGET_DIR="$COMMON_GIT_DIR/aemeath-target"
+else
+    DEFAULT_TARGET_DIR="$HOME/.cache/aemeath-target"
+fi
+TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
 export CARGO_TARGET_DIR="$TARGET_DIR"
 
 echo ">>> cargo build --release --package cli --target-dir $TARGET_DIR"
