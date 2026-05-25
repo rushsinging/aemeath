@@ -245,25 +245,41 @@ impl App {
                 self.active_tool_call_ids.remove(&id);
                 self.tool_call_active = !self.active_tool_call_ids.is_empty();
                 self.output_area.stop_spinner();
+
+                // Append built-in options when LLM provides ≥ 1 option
+                let llm_option_count = options.len();
+                let mut all_options = options.clone();
+                if llm_option_count > 0 {
+                    all_options.push(
+                        crate::tui::app::BUILTIN_OPTION_ALL.to_string(),
+                    );
+                    all_options.push(
+                        crate::tui::app::BUILTIN_OPTION_CHAT.to_string(),
+                    );
+                }
+
                 let default_ref = default.as_deref();
                 let option_line_start =
                     self.output_area
-                        .push_ask_user(&question, &options, default_ref, multi_select);
+                        .push_ask_user(&question, &all_options, default_ref, multi_select);
 
                 if let Some(start) = option_line_start {
                     let cursor = default
                         .as_ref()
-                        .and_then(|d| options.iter().position(|o| o == d))
+                        .and_then(|d| all_options.iter().position(|o| o == d))
                         .unwrap_or(0);
-                    let option_line_ranges = build_option_line_ranges(start, &options);
+                    let total = all_options.len();
+                    let option_line_ranges = build_option_line_ranges(start, &all_options);
                     self.ask_user_state = Some(crate::tui::app::AskUserState {
                         reply_tx,
-                        options: options.clone(),
+                        options: all_options,
+                        llm_option_count,
                         cursor,
                         multi_select,
-                        selected: vec![false; options.len()],
+                        selected: vec![false; total],
                         option_line_ranges,
                         allow_free_input,
+                        chat_input_active: false,
                     });
                 } else {
                     // 无选项：退回自由输入模式
