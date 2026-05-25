@@ -111,38 +111,35 @@ mod tests {
     #[tokio::test]
     async fn test_drain_queued_input_returns_some_when_queue_has_messages() {
         let (tx, mut rx) = mpsc::channel(4);
-        let drained = tokio::join!(
-            drain_queued_input(&tx),
-            async {
-                match rx.recv().await.unwrap() {
-                    UiEvent::DrainQueuedInput { reply_tx } => {
-                        reply_tx
-                            .send(vec!["hello".to_string(), "world".to_string()])
-                            .unwrap();
-                    }
-                    other => panic!("unexpected event: {other:?}"),
+        let drained = tokio::join!(drain_queued_input(&tx), async {
+            match rx.recv().await.unwrap() {
+                UiEvent::DrainQueuedInput { reply_tx } => {
+                    reply_tx
+                        .send(vec!["hello".to_string(), "world".to_string()])
+                        .unwrap();
                 }
+                other => panic!("unexpected event: {other:?}"),
             }
-        )
+        })
         .0;
-        assert_eq!(drained, Some(vec!["hello".to_string(), "world".to_string()]));
+        assert_eq!(
+            drained,
+            Some(vec!["hello".to_string(), "world".to_string()])
+        );
     }
 
     /// drain_queued_input: 队列为空时返回 None
     #[tokio::test]
     async fn test_drain_queued_input_returns_none_when_queue_empty() {
         let (tx, mut rx) = mpsc::channel(4);
-        let drained = tokio::join!(
-            drain_queued_input(&tx),
-            async {
-                match rx.recv().await.unwrap() {
-                    UiEvent::DrainQueuedInput { reply_tx } => {
-                        reply_tx.send(Vec::new()).unwrap();
-                    }
-                    other => panic!("unexpected event: {other:?}"),
+        let drained = tokio::join!(drain_queued_input(&tx), async {
+            match rx.recv().await.unwrap() {
+                UiEvent::DrainQueuedInput { reply_tx } => {
+                    reply_tx.send(Vec::new()).unwrap();
                 }
+                other => panic!("unexpected event: {other:?}"),
             }
-        )
+        })
         .0;
         assert!(drained.is_none());
     }
@@ -279,7 +276,10 @@ mod tests {
     async fn test_bug49_tool_round_drain_appends_multiple_messages() {
         let (queue_tx, mut queue_rx) = mpsc::channel(8);
         let (sync_tx, mut sync_rx) = mpsc::channel(8);
-        let mut messages = vec![Message::user("do something"), Message::user("using tool...")];
+        let mut messages = vec![
+            Message::user("do something"),
+            Message::user("using tool..."),
+        ];
 
         let appended = tokio::join!(
             append_queued_input(&queue_tx, &sync_tx, &mut messages),
@@ -287,11 +287,13 @@ mod tests {
                 match queue_rx.recv().await.unwrap() {
                     UiEvent::DrainQueuedInput { reply_tx } => {
                         // User queued multiple messages during tool execution
-                        reply_tx.send(vec![
-                            "msg1 during tools".to_string(),
-                            "msg2 during tools".to_string(),
-                            "msg3 during tools".to_string(),
-                        ]).unwrap();
+                        reply_tx
+                            .send(vec![
+                                "msg1 during tools".to_string(),
+                                "msg2 during tools".to_string(),
+                                "msg3 during tools".to_string(),
+                            ])
+                            .unwrap();
                     }
                     other => panic!("unexpected event: {other:?}"),
                 }
