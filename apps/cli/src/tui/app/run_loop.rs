@@ -164,7 +164,7 @@ impl App {
                 Cmd::Quit => self.layout.should_exit = true,
                 Cmd::SaveSession(msgs) if !msgs.is_empty() => {
                     let s = self.build_session(msgs.clone()).await;
-                    if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
+                    if let Err(e) = ::runtime::api::session::save_session(&s).await {
                         log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }

@@ -1,4 +1,4 @@
-use crate::api::core::compact::safe_slice;
+use crate::api::compact::safe_slice;
 use crate::api::core::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
@@ -19,7 +19,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_result_summaries(
         &self,
         turn_number: usize,
-        results: &[crate::api::core::agent::ToolResultTuple],
+        results: &[crate::api::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         for (id, output, is_error, _) in results.iter() {
@@ -46,7 +46,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_tool_results(
         &self,
         turn_number: usize,
-        results: &[crate::api::core::agent::ToolResultTuple],
+        results: &[crate::api::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         if let Some(ref jl) = self.runner.json_logger {
@@ -74,7 +74,7 @@ impl<'a> SubAgentRun<'a> {
 
         if urgency >= 2 {
             let old_len = self.messages.len();
-            let (compacted, was_compacted) = crate::api::core::compact::compact_messages(
+            let (compacted, was_compacted) = crate::api::compact::compact_messages(
                 &self.messages,
                 &self.system,
                 self.ctx_context_size,
@@ -91,7 +91,7 @@ impl<'a> SubAgentRun<'a> {
                 );
             }
         } else if urgency >= 1 {
-            crate::api::core::compact::microcompact(&mut self.messages, 4);
+            crate::api::compact::microcompact(&mut self.messages, 4);
             (self.progress)(Some(turn_number), "Agent microcompacted");
         }
     }
@@ -114,7 +114,7 @@ impl<'a> SubAgentRun<'a> {
 
 pub(super) fn append_tool_results(
     messages: &mut Vec<Message>,
-    mut results: Vec<crate::api::core::agent::ToolResultTuple>,
+    mut results: Vec<crate::api::agent::ToolResultTuple>,
     session_id: &str,
 ) {
     crate::api::storage::tool_result_storage::persist_oversized_results(session_id, &mut results);
@@ -133,7 +133,7 @@ pub(super) fn append_tool_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::compact::MAX_TOOL_RESULT_CHARS;
+    use crate::api::compact::MAX_TOOL_RESULT_CHARS;
     use crate::api::core::message::ContentBlock;
 
     #[test]

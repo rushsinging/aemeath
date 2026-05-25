@@ -1,4 +1,4 @@
-use aemeath_core::skill::{read_skill_content, Skill};
+use share::skill_ops::{read_skill_content, Skill};
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;

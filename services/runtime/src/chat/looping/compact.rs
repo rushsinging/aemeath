@@ -1,5 +1,5 @@
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::hook::{CompactHookData, HookData, HookRunner};
+use crate::api::hook::hook::{CompactHookData, HookData, HookRunner};
 use crate::api::core::message::Message;
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
@@ -20,7 +20,7 @@ pub(crate) async fn auto_compact<S>(
 where
     S: ChatEventSink,
 {
-    use crate::api::core::compact;
+    use crate::api::compact;
 
     // PreCompact hook
     let pre_compact_results = hook_ui

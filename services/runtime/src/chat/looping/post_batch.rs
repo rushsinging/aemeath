@@ -1,5 +1,5 @@
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::hook::{HookData, StopHookData};
+use crate::api::hook::hook::{HookData, StopHookData};
 use crate::api::core::tool::ToolContext;
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
@@ -7,7 +7,7 @@ use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::core::hook::HookRunner,
+    hook_runner: &crate::api::hook::hook::HookRunner,
     ctx: &ToolContext,
     turn_count: usize,
 ) where

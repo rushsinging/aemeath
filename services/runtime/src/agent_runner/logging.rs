@@ -1,4 +1,4 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::message::Message;
 use serde_json::json;
 

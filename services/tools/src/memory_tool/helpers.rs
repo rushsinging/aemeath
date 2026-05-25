@@ -1,4 +1,4 @@
-use aemeath_core::memory::{
+use share::memory_ops::{
     memory_base_dir, parse_category, parse_layer, project_hash_from_path, MemoryCategory,
     MemoryLayer, MemoryStore,
 };

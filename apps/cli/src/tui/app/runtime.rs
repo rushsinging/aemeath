@@ -1,6 +1,6 @@
 use super::{task_window, App};
 use ::runtime::api::core::message::Message;
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::prompt::skill::Skill;
 use std::sync::Arc;
 
 impl App {
@@ -70,8 +70,8 @@ impl App {
     pub(crate) async fn build_session(
         &self,
         messages: Vec<Message>,
-    ) -> ::runtime::api::core::session::Session {
-        use ::runtime::api::core::session::{now_iso, Session};
+    ) -> ::runtime::api::session::Session {
+        use ::runtime::api::session::{now_iso, Session};
         let task_snapshot = match &self.cmd_exec.task_store {
             Some(ts) => {
                 let snap = ts.snapshot().await;
@@ -97,7 +97,7 @@ impl App {
 
     /// Refresh the cached session list for /resume autocomplete
     pub async fn refresh_session_cache(&mut self) {
-        let sessions = ::runtime::api::core::session::list_sessions().await;
+        let sessions = ::runtime::api::session::list_sessions().await;
         self.session.cached_sessions = sessions
             .iter()
             .take(20)
@@ -110,6 +110,6 @@ impl App {
 }
 
 /// Build a one-line summary for a session, shown in /resume autocomplete
-fn build_session_summary(session: &::runtime::api::core::session::Session) -> String {
+fn build_session_summary(session: &::runtime::api::session::Session) -> String {
     format!("{} [{}msg]", session.summary(), session.messages.len())
 }

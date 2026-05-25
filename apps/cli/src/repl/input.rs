@@ -27,9 +27,9 @@ pub(super) async fn read_and_prepare_input(
     session_id: &str,
     cwd: &Path,
     pending_images: &PendingImages,
-    resumed_session: Option<&::runtime::api::core::session::Session>,
+    resumed_session: Option<&::runtime::api::session::Session>,
     allow_all: &mut bool,
-    skills: &std::collections::HashMap<String, ::runtime::api::core::skill::Skill>,
+    skills: &std::collections::HashMap<String, ::runtime::api::prompt::skill::Skill>,
 ) -> InputAction {
     {
         let images = pending_images.lock().unwrap();

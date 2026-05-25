@@ -1,4 +1,4 @@
-use aemeath_core::task::TaskStore;
+use share::task_ops::TaskStore;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -51,13 +51,13 @@ impl Tool for TaskStopTool {
 
         // Check if task can be stopped
         match task.status {
-            aemeath_core::task::TaskStatus::Completed => {
+            share::task_ops::TaskStatus::Completed => {
                 return ToolResult::error(format!(
                     "Task #{} is already completed and cannot be stopped",
                     task_id
                 ));
             }
-            aemeath_core::task::TaskStatus::Deleted => {
+            share::task_ops::TaskStatus::Deleted => {
                 return ToolResult::error(format!("Task #{} is already deleted", task_id));
             }
             _ => {}
@@ -66,7 +66,7 @@ impl Tool for TaskStopTool {
         // Mark task as deleted
         self.store
             .update(task_id, |t| {
-                t.status = aemeath_core::task::TaskStatus::Deleted;
+                t.status = share::task_ops::TaskStatus::Deleted;
             })
             .await;
 

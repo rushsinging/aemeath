@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 aemeath_core = { package = "core", path = "../core" }
 project = { path = "../project" }
+prompt = { path = "../prompt" }

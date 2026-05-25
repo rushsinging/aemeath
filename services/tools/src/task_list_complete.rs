@@ -1,4 +1,4 @@
-use aemeath_core::task::TaskStore;
+use share::task_ops::TaskStore;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -41,7 +41,7 @@ impl Tool for TaskListCompleteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aemeath_core::task::BatchStatus;
+    use share::task_ops::BatchStatus;
 
     fn test_ctx() -> ToolContext {
         ToolContext {

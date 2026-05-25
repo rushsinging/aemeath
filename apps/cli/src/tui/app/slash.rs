@@ -4,10 +4,10 @@ mod reflection;
 mod suggestions;
 
 use crate::tui::app::UiEvent;
-use ::runtime::api::core::command::cmd;
-use ::runtime::api::core::command::{CommandContext, CommandRegistry, CommandResult};
-use ::runtime::api::core::session;
-use ::runtime::api::core::state::AppState;
+use ::runtime::api::command::cmd;
+use ::runtime::api::command::{CommandContext, CommandRegistry, CommandResult};
+use ::runtime::api::session;
+use ::runtime::api::state::AppState;
 use help::SLASH_HELP_LINES;
 use std::sync::Arc;
 impl super::App {
@@ -72,7 +72,7 @@ impl super::App {
                 self.output_area.push_system("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                use ::runtime::api::core::compact;
+                use ::runtime::api::compact;
                 let (compacted, was_compacted) = compact::compact_messages(
                     &mut self.chat.messages,
                     &self.chat.system_prompt_text,
@@ -92,7 +92,7 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
-                use ::runtime::api::core::cost::format_tokens;
+                use ::runtime::api::cost::format_tokens;
                 let total = self.chat.total_input_tokens + self.chat.total_output_tokens;
                 self.output_area.push_system(&format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
@@ -114,7 +114,7 @@ impl super::App {
                 }
             }
             "/context" => {
-                use ::runtime::api::core::compact;
+                use ::runtime::api::compact;
                 let estimated = compact::estimate_messages_tokens(&self.chat.messages)
                     + compact::estimate_tokens(&self.chat.system_prompt_text);
                 let pct = estimated * 100 / self.chat.context_size.max(1);
@@ -208,10 +208,10 @@ impl super::App {
                         CommandResult::Error(msg) => self.output_area.push_error(&msg),
                         CommandResult::Action(action) => {
                             match action {
-                                ::runtime::api::core::command::CommandAction::Exit => {
+                                ::runtime::api::command::CommandAction::Exit => {
                                     self.layout.should_exit = true
                                 }
-                                ::runtime::api::core::command::CommandAction::Clear => {
+                                ::runtime::api::command::CommandAction::Clear => {
                                     self.chat.messages.clear();
                                     self.chat.pending_images.clear();
                                     self.input_area.set_pending_images(0);
@@ -219,8 +219,8 @@ impl super::App {
                                     self.reset_runtime_state().await;
                                     self.output_area.push_system("[cleared]");
                                 }
-                                ::runtime::api::core::command::CommandAction::Compact => {
-                                    use ::runtime::api::core::compact;
+                                ::runtime::api::command::CommandAction::Compact => {
+                                    use ::runtime::api::compact;
                                     let (compacted, was_compacted) = compact::compact_messages(
                                         &mut self.chat.messages,
                                         &self.chat.system_prompt_text,
@@ -233,7 +233,7 @@ impl super::App {
                                         self.output_area.push_system("[no compaction needed]");
                                     }
                                 }
-                                ::runtime::api::core::command::CommandAction::SwitchModel {
+                                ::runtime::api::command::CommandAction::SwitchModel {
                                     provider_name,
                                     model_id,
                                     model_name,
@@ -305,17 +305,17 @@ impl super::App {
                                     self.output_area
                                         .push_system(&format!("[switched to {}]", display));
                                 }
-                                ::runtime::api::core::command::CommandAction::InjectMessage(
+                                ::runtime::api::command::CommandAction::InjectMessage(
                                     prompt,
                                 ) => {
                                     self.output_area.push_system("[reviewing code changes...]");
                                     return Some(prompt);
                                 }
-                                ::runtime::api::core::command::CommandAction::RunSkill(content) => {
+                                ::runtime::api::command::CommandAction::RunSkill(content) => {
                                     self.output_area.push_system("[running skill...]");
                                     return Some(content);
                                 }
-                                ::runtime::api::core::command::CommandAction::SetThinking(
+                                ::runtime::api::command::CommandAction::SetThinking(
                                     desired,
                                 ) => {
                                     let current = self
@@ -332,10 +332,10 @@ impl super::App {
                                         .push_system(&format!("[thinking mode: {}]", label));
                                     self.status_bar.set_thinking(new_state);
                                 }
-                                ::runtime::api::core::command::CommandAction::ResumeSession(
+                                ::runtime::api::command::CommandAction::ResumeSession(
                                     session_id,
                                 ) => {
-                                    match ::runtime::api::core::session::load_session(&session_id)
+                                    match ::runtime::api::session::load_session(&session_id)
                                         .await
                                     {
                                         Ok(s) => {

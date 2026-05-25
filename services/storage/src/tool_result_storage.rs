@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use aemeath_core::compact::MAX_TOOL_RESULT_CHARS;
+const MAX_TOOL_RESULT_CHARS: usize = 50_000;
 
 /// Preview: how many bytes to keep from the beginning.
 const PREVIEW_SIZE_BYTES: usize = 2_000;

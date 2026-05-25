@@ -1,6 +1,6 @@
 //! List resources from connected MCP servers
 
-use aemeath_core::mcp::McpClient;
+use crate::mcp::McpClient;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

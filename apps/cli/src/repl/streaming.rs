@@ -67,7 +67,7 @@ pub(super) fn log_response(
     turn_number: usize,
     resp: &::runtime::api::provider::types::StreamResponse,
     elapsed: std::time::Duration,
-    tool_calls: &[::runtime::api::core::agent::ToolCall],
+    tool_calls: &[::runtime::api::agent::ToolCall],
 ) {
     if let Some(jl) = json_logger {
         let blocks: Vec<serde_json::Value> = resp

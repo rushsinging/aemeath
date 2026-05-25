@@ -1,5 +1,5 @@
 use crate::api::core::message::Message;
-use crate::api::core::session::WorkspaceContext;
+use crate::api::session::WorkspaceContext;
 use crate::api::core::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
 use std::pin::Pin;

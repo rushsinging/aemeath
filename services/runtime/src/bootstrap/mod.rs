@@ -21,7 +21,7 @@ pub use runtime_support::{
 };
 
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::mcp_manager::McpConnectionManager;
+use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 use std::sync::Arc;
 
@@ -61,7 +61,7 @@ impl ChatBootstrapArgs {
     }
 }
 
-pub struct InstructionsLoadedHookRunner<'a>(pub &'a aemeath_core::hook::HookRunner);
+pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
 
 #[async_trait::async_trait(?Send)]
 impl prompt::guidance::resolver::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {

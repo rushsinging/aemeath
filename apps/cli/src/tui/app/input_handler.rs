@@ -1,6 +1,6 @@
 use super::UiEvent;
 use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, PromptHookData};
+use ::runtime::api::hook::hook::{HookData, PromptHookData};
 use ::runtime::api::core::message::Message;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use std::sync::atomic::Ordering;

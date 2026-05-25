@@ -1,5 +1,5 @@
 use ::runtime::api::core::memory::MemoryLayer;
-use ::runtime::api::core::reflection::{ReflectionEngine, ReflectionOutput};
+use ::runtime::api::reflection::{ReflectionEngine, ReflectionOutput};
 use ::runtime::api::provider::types::SystemBlock;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use aemeath_core::session::{WorkspaceContext, WorkspaceStackEntry};
+use aemeath_core::session_types::{WorkspaceContext, WorkspaceStackEntry};
 use aemeath_core::tool::{ToolContext, WorkingContext};
 
 /// 检查两个路径是否属于同一 git 仓库

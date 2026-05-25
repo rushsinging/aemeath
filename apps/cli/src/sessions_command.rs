@@ -6,7 +6,7 @@ pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, lim
     set_session_id("sessions".to_string());
 
     if let Some(id) = delete {
-        match ::runtime::api::core::session::delete_session(&id).await {
+        match ::runtime::api::session::delete_session(&id).await {
             Ok(()) => println!("Session {} deleted.", id),
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -16,7 +16,7 @@ pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, lim
         return;
     }
 
-    let sessions = ::runtime::api::core::session::list_sessions().await;
+    let sessions = ::runtime::api::session::list_sessions().await;
     if sessions.is_empty() {
         println!("No saved sessions.");
         return;

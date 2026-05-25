@@ -1,4 +1,4 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::tool::ToolRegistry;
 
 pub(crate) fn split_approved_calls<'a>(

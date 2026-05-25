@@ -10,7 +10,7 @@ pub(crate) struct ToolContextParts {
     pub(crate) cancel: CancellationToken,
     pub(crate) read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) agent_runner: Option<Arc<dyn crate::api::core::tool::AgentRunner>>,
-    pub(crate) session_reminders: Arc<Mutex<crate::api::core::memory::SessionReminders>>,
+    pub(crate) session_reminders: Arc<Mutex<crate::api::core::tool::SessionReminders>>,
     pub(crate) memory_config: crate::api::core::config::MemoryConfig,
     pub(crate) allow_all: bool,
     pub(crate) max_tool_concurrency: usize,

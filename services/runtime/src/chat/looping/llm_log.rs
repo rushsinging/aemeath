@@ -1,4 +1,4 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::message::Message;
 use crate::api::provider::types::{StreamResponse, SystemBlock};
 use crate::api::storage::logging::JsonLogger;

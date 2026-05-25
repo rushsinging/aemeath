@@ -215,7 +215,7 @@ impl App {
             }
             UiEvent::ReflectionDone { output } => {
                 let formatted =
-                    ::runtime::api::core::reflection::ReflectionEngine::format_output(&output);
+                    ::runtime::api::reflection::ReflectionEngine::format_output(&output);
                 self.output_area.push_system(&formatted);
                 if self.session.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);

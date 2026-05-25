@@ -1,7 +1,7 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
 
 use crate::api::core::memory::MemoryStore;
-use crate::api::core::reflection::ReflectionEngine;
+use crate::api::reflection::ReflectionEngine;
 use std::path::PathBuf;
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
@@ -193,7 +193,7 @@ async fn lightweight_reflection_text_with_base_dir(
     let entries = store
         .list(Some(crate::api::core::memory::MemoryLayer::Project))
         .ok()?;
-    let mut output = crate::api::core::reflection::ReflectionOutput {
+    let mut output = crate::api::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: entries

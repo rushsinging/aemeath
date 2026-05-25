@@ -1,7 +1,7 @@
 use crate::run_orchestration::runtime;
 use ::runtime::api::core::config::{Config, MemoryConfig};
-use ::runtime::api::core::hook::HookRunner;
-use ::runtime::api::core::skill::Skill;
+use ::runtime::api::hook::hook::HookRunner;
+use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use ::runtime::api::provider::types::SystemBlock;
 use std::collections::HashMap;

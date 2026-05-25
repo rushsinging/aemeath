@@ -12,6 +12,8 @@ pub mod glob_tool;
 pub mod grep;
 pub mod list_mcp_resources;
 pub mod lsp;
+pub mod mcp;
+pub mod mcp_manager;
 pub mod mcp_tool; // McpTool is dynamically created, not statically registered
 pub mod memory_tool;
 pub mod path_security;
@@ -35,8 +37,8 @@ pub mod worktree;
 // Re-export McpTool for dynamic creation
 pub use mcp_tool::McpTool;
 
-use aemeath_core::skill::Skill;
-use aemeath_core::task::TaskStore;
+use share::skill_ops::Skill;
+use share::task_ops::TaskStore;
 use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;

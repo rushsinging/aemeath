@@ -5,8 +5,8 @@ use super::logging::{
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::{CliAgentRunner, SilentHandler};
-use crate::api::core::agent::Agent;
-use crate::api::core::compact::safe_slice;
+use crate::api::agent::Agent;
+use crate::api::compact::safe_slice;
 use crate::api::core::message::Message;
 use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
 use crate::api::provider::client::LlmClient;
@@ -21,7 +21,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx: &'a ToolContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
-    pub hook_runner: crate::api::core::hook::HookRunner,
+    pub hook_runner: crate::api::hook::hook::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
     pub handler: SilentHandler,
@@ -126,7 +126,7 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    crate::api::core::compact::truncate_tool_results(&mut results);
+                    crate::api::compact::truncate_tool_results(&mut results);
                     append_tool_results(&mut self.messages, results, &self.session_id);
                     self.compact_if_needed(api_input, turn_number);
                 }
@@ -172,7 +172,7 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
-        let msg_tokens = crate::api::core::compact::estimate_messages_tokens(&self.messages);
+        let msg_tokens = crate::api::compact::estimate_messages_tokens(&self.messages);
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -249,7 +249,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::api::core::agent::ToolCall]) {
+    fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::api::agent::ToolCall]) {
         if let Some(ref jl) = self.runner.json_logger {
             for tool_call in tool_calls {
                 let data = build_json_logger_tool_call_data(tool_call);
@@ -265,7 +265,7 @@ impl<'a> SubAgentRun<'a> {
 
     fn build_call_info(
         &self,
-        tool_calls: &[crate::api::core::agent::ToolCall],
+        tool_calls: &[crate::api::agent::ToolCall],
     ) -> std::collections::HashMap<String, (String, String)> {
         tool_calls
             .iter()

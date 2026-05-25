@@ -1,0 +1,187 @@
+use aemeath_core::message::{ContentBlock, Message};
+use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
+
+/// (tool_use_id, output_text, is_error, images)
+pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);
+
+pub struct Agent<'a> {
+    pub registry: &'a ToolRegistry,
+    pub ctx: ToolContext,
+}
+
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+}
+
+impl<'a> Agent<'a> {
+    pub fn extract_tool_calls(message: &Message) -> Vec<ToolCall> {
+        message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolUse { id, name, input } => Some(ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolResultTuple> {
+        let mut concurrent_calls: Vec<&ToolCall> = Vec::new();
+        let mut sequential_calls: Vec<&ToolCall> = Vec::new();
+
+        for call in tool_calls {
+            match self.registry.get(&call.name) {
+                Some(tool) if tool.is_concurrency_safe() => concurrent_calls.push(call),
+                _ => sequential_calls.push(call),
+            }
+        }
+
+        // Pre-allocate result slots and track original positions
+        // This ensures results are returned in original tool_calls order
+        let total_len = tool_calls.len();
+        let mut results: Vec<Option<ToolResultTuple>> = vec![None; total_len];
+        let mut concurrent_positions: Vec<usize> = Vec::new();
+        let mut sequential_positions: Vec<usize> = Vec::new();
+
+        // Track positions for each call
+        for (i, call) in tool_calls.iter().enumerate() {
+            match self.registry.get(&call.name) {
+                Some(tool) if tool.is_concurrency_safe() => {
+                    concurrent_positions.push(i);
+                }
+                _ => {
+                    sequential_positions.push(i);
+                }
+            }
+        }
+
+        // Execute concurrent-safe tools in parallel using join_all
+        if !concurrent_calls.is_empty() {
+            let semaphore =
+                std::sync::Arc::new(tokio::sync::Semaphore::new(self.ctx.max_tool_concurrency));
+
+            let futures: Vec<_> = concurrent_calls
+                .iter()
+                .zip(concurrent_positions.iter())
+                .filter_map(|(call, &pos)| {
+                    self.registry.get(&call.name).map(|tool| {
+                        let input = call.input.clone();
+                        let ctx = self.ctx.clone();
+                        let id = call.id.clone();
+                        let name = call.name.clone();
+                        let sem = semaphore.clone();
+                        let timeout = tool.timeout_secs();
+
+                        async move {
+                            let _permit = sem.acquire().await.expect("semaphore closed");
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(timeout),
+                                tool.call(input, &ctx),
+                            )
+                            .await
+                            {
+                                Ok(result) => {
+                                    (pos, id, result.output, result.is_error, result.images)
+                                }
+                                Err(_) => (
+                                    pos,
+                                    id,
+                                    format!("Tool {} timed out after {}s", name, timeout),
+                                    true,
+                                    Vec::new(),
+                                ),
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            let concurrent_results = futures::future::join_all(futures).await;
+            for (pos, id, output, is_error, images) in concurrent_results {
+                results[pos] = Some((id, output, is_error, images));
+            }
+        }
+
+        // Execute non-concurrent tools sequentially
+        for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
+            // Check for cancellation between sequential tool calls
+            if self.ctx.cancel.is_cancelled() {
+                results[pos] = Some((
+                    call.id.clone(),
+                    "Cancelled by user".to_string(),
+                    true,
+                    Vec::new(),
+                ));
+                continue;
+            }
+            if let Some(tool) = self.registry.get(&call.name) {
+                let timeout = tool.timeout_secs();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout),
+                    tool.call(call.input.clone(), &self.ctx),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        results[pos] = Some((
+                            call.id.clone(),
+                            result.output,
+                            result.is_error,
+                            result.images,
+                        ));
+                    }
+                    Err(_) => {
+                        results[pos] = Some((
+                            call.id.clone(),
+                            format!("Tool {} timed out after {}s", call.name, timeout),
+                            true,
+                            Vec::new(),
+                        ));
+                    }
+                }
+            } else {
+                results[pos] = Some((
+                    call.id.clone(),
+                    format!("unknown tool: {}", call.name),
+                    true,
+                    Vec::new(),
+                ));
+            }
+        }
+
+        // All slots should be filled by either concurrent or sequential execution.
+        // Use expect with a clear message instead of bare unwrap for debuggability.
+        results
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| {
+                    panic!("agent::execute_tools: result slot {i} was not filled — this is a bug")
+                })
+            })
+            .collect()
+    }
+
+    /// Execute only the given tool calls (subset of all calls)
+    pub async fn execute_tools_filtered(&self, tool_calls: &[&ToolCall]) -> Vec<ToolResultTuple> {
+        let owned: Vec<ToolCall> = tool_calls
+            .iter()
+            .map(|c| ToolCall {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                input: c.input.clone(),
+            })
+            .collect();
+        self.execute_tools(&owned).await
+    }
+}
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;

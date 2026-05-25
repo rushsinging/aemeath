@@ -1,6 +1,6 @@
 use crate::api::agent_runner;
 use crate::api::core::config::Config;
-use crate::api::core::hook::HookRunner;
+use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::storage::logging::{self, JsonLogger};
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner
 }
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(crate::api::core::session::new_session_id);
+    let session_id = resume_session_id.unwrap_or_else(crate::api::session::new_session_id);
     log::info!("session started");
     session_id
 }

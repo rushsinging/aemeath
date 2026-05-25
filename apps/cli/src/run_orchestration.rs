@@ -21,7 +21,7 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
 /// 主聊天逻辑（原 main 主体）
 pub(crate) async fn run_chat(args: Args) {
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
-    ::runtime::api::core::command::commands::init_all();
+    ::runtime::api::command::commands::init_all();
 
     let args = apply_permission_env_override(args);
     let bootstrap = setup::bootstrap_chat(args).await;

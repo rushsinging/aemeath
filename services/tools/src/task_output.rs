@@ -1,4 +1,4 @@
-use aemeath_core::task::TaskStore;
+use share::task_ops::TaskStore;
 use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -63,10 +63,10 @@ impl Tool for TaskOutputTool {
             for task in tasks.iter().take(count) {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
-                    aemeath_core::task::TaskStatus::Pending => "pending",
-                    aemeath_core::task::TaskStatus::InProgress => "in_progress",
-                    aemeath_core::task::TaskStatus::Completed => "completed",
-                    aemeath_core::task::TaskStatus::Deleted => "deleted",
+                    share::task_ops::TaskStatus::Pending => "pending",
+                    share::task_ops::TaskStatus::InProgress => "in_progress",
+                    share::task_ops::TaskStatus::Completed => "completed",
+                    share::task_ops::TaskStatus::Deleted => "deleted",
                 };
 
                 output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
@@ -108,10 +108,10 @@ impl Tool for TaskOutputTool {
                 Some(task) => {
                     let display_id = self.store.format_display_id(&task.id).await;
                     let status = match task.status {
-                        aemeath_core::task::TaskStatus::Pending => "pending",
-                        aemeath_core::task::TaskStatus::InProgress => "in_progress",
-                        aemeath_core::task::TaskStatus::Completed => "completed",
-                        aemeath_core::task::TaskStatus::Deleted => "deleted",
+                        share::task_ops::TaskStatus::Pending => "pending",
+                        share::task_ops::TaskStatus::InProgress => "in_progress",
+                        share::task_ops::TaskStatus::Completed => "completed",
+                        share::task_ops::TaskStatus::Deleted => "deleted",
                     };
 
                     let mut output = String::new();
@@ -155,10 +155,10 @@ impl Tool for TaskOutputTool {
             for task in tasks.iter().take(count) {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
-                    aemeath_core::task::TaskStatus::Pending => "pending",
-                    aemeath_core::task::TaskStatus::InProgress => "in_progress",
-                    aemeath_core::task::TaskStatus::Completed => "completed",
-                    aemeath_core::task::TaskStatus::Deleted => "deleted",
+                    share::task_ops::TaskStatus::Pending => "pending",
+                    share::task_ops::TaskStatus::InProgress => "in_progress",
+                    share::task_ops::TaskStatus::Completed => "completed",
+                    share::task_ops::TaskStatus::Deleted => "deleted",
                 };
 
                 output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));

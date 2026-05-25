@@ -1,5 +1,5 @@
 use crate::api::core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
-use crate::api::core::hook::HookRunner;
+use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::pool::LlmClientPool;
 use crate::api::provider::stream::StreamHandler;

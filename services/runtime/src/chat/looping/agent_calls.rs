@@ -1,6 +1,6 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::hook::{HookData, ToolHookData};
+use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::api::core::tool::ToolRegistry;
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
@@ -15,7 +15,7 @@ pub(crate) async fn execute_agent_calls<S>(
     agent_ctx: &crate::api::core::tool::ToolContext,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::core::hook::HookRunner,
+    hook_runner: &crate::api::hook::hook::HookRunner,
     max_agent_concurrency: usize,
     interrupted: &Arc<AtomicBool>,
 ) -> Vec<UiToolResult>
@@ -57,7 +57,7 @@ async fn execute_one_agent<S>(
     call: ToolCall,
     sink: S,
     hook_ui: HookUi<S>,
-    hook_runner: crate::api::core::hook::HookRunner,
+    hook_runner: crate::api::hook::hook::HookRunner,
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut crate::api::core::tool::ToolContext,
 ) -> Vec<UiToolResult>
