@@ -36,7 +36,7 @@ mod tests {
         app.handle_resize(80, 24);
 
         assert_eq!(
-            app.last_terminal_size,
+            app.layout.last_terminal_size,
             Some(TerminalSize {
                 width: 80,
                 height: 24,
@@ -67,7 +67,7 @@ mod tests {
         assert!(!app.output_area.auto_scroll);
         assert_eq!(app.output_area.term_width, 7);
         assert_eq!(
-            app.last_terminal_size,
+            app.layout.last_terminal_size,
             Some(TerminalSize {
                 width: 80,
                 height: 24,

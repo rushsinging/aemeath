@@ -57,8 +57,8 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath-test"),
             "model".to_string(),
         );
-        let id = app.session_reminders.lock().unwrap().add("任务一").unwrap();
-        app.session_reminders.lock().unwrap().complete(&id).unwrap();
+        let id = app.cmd_exec.session_reminders.lock().unwrap().add("任务一").unwrap();
+        app.cmd_exec.session_reminders.lock().unwrap().complete(&id).unwrap();
         let before = app.output_area.lines.len();
 
         app.push_session_reminder_recap();

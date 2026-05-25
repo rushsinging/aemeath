@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::tui::state::{ChatState, InputState, SessionState, UiLayout};
 
     fn make_memory_config() -> ::runtime::api::core::config::MemoryConfig {
         ::runtime::api::core::config::MemoryConfig::default()
