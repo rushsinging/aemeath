@@ -9,6 +9,52 @@
 | 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。详见 [spec](specs/042-permission-control-system.md) |
 | 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | 待确认 | 未确认 | DDD 架构设计已按讨论结果写入 [spec](specs/047-ddd-redesign.md)，并已纳入 [GLM review](specs/047-ddd-redesign-review-by-glm.md) 与 [DeepSeek review](specs/047-ddd-redesign-review-by-deepseek.md) 的修正意见。Phase 1/2/3 已完成 Chat application 边界清理；Phase 4 修正版收束 `ChatBootstrap` 与 `ChatModeSelection`，把 `run_chat` 启动准备逻辑移入 bootstrap 边界；后续已持续拆分 `bootstrap_chat` 的 setup helper：concurrency、permissions、model_runtime、provider_client、prompt_bundle、runtime_support、tooling，并在 runtime_support 中收束 hook/session 初始化，保持 CLI/TUI 行为不变。当前已执行首轮 DDD workspace 目录重排：`cli` 迁移到 `apps/cli`，`packages/core` 迁移到 `shared/kernel` 并更名为 `kernel`，`packages/llm` 迁移到 `contexts/provider` 并更名为 `provider`，`packages/tools` 迁移到 `contexts/tool` 并更名为 `tool`；`build_cli.sh` 与 `.agents/hooks/*` 已同步新 package 名和路径。不恢复 #36 server/agents/proto/infra。`ChatRuntimePort` 的 `?Send` 过渡限制仍建议作为后续独立重构处理。 |
+| 49 | AskUserQuestion 增加「以上全是」与「chat about this」选项 | 中 | 待实施 | 未确认 | AskUserQuestion options 选择模式新增两个内建选项：「以上全是」一次性选中前面全部 options；「chat about this」进入自定义输入态，把用户的自由文本作为回答返回。两者均不替换原 options，保持现有 free_input 行为兼容 |
+
+### #49 AskUserQuestion 增加「以上全是」与「chat about this」选项
+
+**状态**：待实施
+
+**背景**：当前 AskUserQuestion 选择模式只允许选择 LLM 给出的某一个 option，或在允许 free_input 时手动输入；无法批量同意「以上全是」，也无法在保持原问题上下文的前提下补充自定义说明。当 LLM 给出多个可选项且用户想同时表达「这些都同意 + 我还想补一句」时，只能多轮往返，影响交互效率。
+
+**目标**：在 AskUserQuestion options 末尾追加两个内建选项：
+1. 「以上全是」：用户选中后，回传内容为前面所有 LLM 提供 option 的集合（按显示顺序），让 LLM 知道用户认可全部选项。
+2. 「chat about this」：用户选中后，进入自定义输入态，提交内容为用户输入的自由文本。该选项不要求原问题开启 free_input，是 options 模式下也可用的统一补充入口。
+
+**核心要求**：
+1. 两个内建选项**必须**显示在 LLM 提供的 options 之后，并与原 options 视觉一致，但要让用户清楚这是工具内建项。
+2. 两个内建选项**必须**在 options 数量 ≥ 1 时才出现；options 为空（仅 free_input）时不出现「以上全是」，但「chat about this」可考虑保留以承担补充语义（待 spec 讨论）。
+3. 「以上全是」回传给 LLM 的内容**必须**是结构化的全部选项集合，不能只回传字面字符串「以上全是」，否则 LLM 无法判断到底选了哪些。
+4. 「chat about this」**必须**进入与 free_input 等价的输入态：输入区获得焦点、Enter 提交、Esc 取消回到选择态；不应直接把字面「chat about this」当作回答提交。
+5. 两个内建选项**不得**与 LLM 提供的 option label 冲突；如果发生重名，**必须**有明确的去重或避让策略。
+6. 既有「上下键移动 → Enter 确认」交互**必须**保持；内建选项参与同一 selected index 序列，不能引入第二条选择状态机。
+
+**推荐设计方向**：
+- 在 AskUserQuestion options 渲染层把内建选项作为合成项追加到列表末尾，selected index 仍是单一来源；
+- 内建选项类型化（例如枚举 `BuiltinOption::All` / `BuiltinOption::Chat`），在 Enter 时分支处理：`All` 直接构造全部 option 的回答，`Chat` 切换 UI 到自由输入态再提交；
+- 回答提交层区分「来自 options 的选择」和「来自 chat 自由输入」两种结构，避免 LLM 收到无法解析的混合字符串；
+- 多语言/i18n 文案以中文为主，参考 `[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项` 现有风格，统一文案常量；
+- 与 bug #63（AskUserQuestion options 选择同步）协同：渲染缓存必须随 selected index 变化失效，确保内建选项也能正确高亮。
+
+**涉及路径（预计）**：
+- AskUserQuestion options 渲染与 selected index 状态（TUI options 列表）
+- AskUserQuestion 输入态切换（chat about this 进入 free_input 子态）
+- AskUserQuestion 回答构造与回传（结构化「以上全是」与自定义文本）
+- AskUserQuestion 文案常量与 i18n
+- 既有 free_input 模式与新增 chat about this 的关系澄清
+
+**验收标准**：
+1. 任意 options 模式下，选项列表末尾稳定出现「以上全是」与「chat about this」两项；options 为空场景按 spec 决定是否出现。
+2. 选择「以上全是」后，工具回答能让 LLM 准确还原所有 LLM 提供 option（按显示顺序），不会被误识别为某一个 option。
+3. 选择「chat about this」后，TUI 进入自定义输入态，Enter 提交内容、Esc 返回选项列表；不会把字面文案当作回答。
+4. 内建选项与 bug #63 的修复方向一致，上下键高亮和回车确认始终对应同一项，不出现 TUI 显示与实际回答不一致。
+5. 单元测试覆盖：仅 options、options + free_input、options 为空、内建选项与 LLM option 重名、内建选项被高亮后 Enter 行为。
+
+**明确不做**：
+1. 不引入多选机制；「以上全是」只是一次性全选回答的语义糖，不改变 options 单选模型。
+2. 不为「chat about this」额外引入富文本/Markdown 渲染；输入态仍以单行/多行纯文本为主。
+3. 不在本 feature 中重做 AskUserQuestion 渲染缓存，相关修复归 bug #63 范围。
+4. 不替换或废弃既有 free_input：原 `allow_free_input=true` 行为保持，「chat about this」是 options 模式下的补充入口，不是替代。
 
 ### #47 以 DDD 思路重新设计 Aemeath 架构
 
