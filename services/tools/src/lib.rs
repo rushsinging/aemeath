@@ -38,7 +38,7 @@ pub mod worktree;
 pub use mcp_tool::McpTool;
 
 use share::skill_ops::Skill;
-use aemeath_core::task::TaskStore;
+use share::task_ops::TaskStore;
 use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;

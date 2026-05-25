@@ -1,4 +1,3 @@
-pub mod command;
 pub mod loader;
 
 use serde::{Deserialize, Serialize};

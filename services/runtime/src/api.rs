@@ -1,11 +1,17 @@
+pub use crate::agent;
 pub use crate::agent_runner;
 pub use crate::bootstrap;
 pub use crate::chat;
 pub use crate::chat::looping;
+pub use crate::command;
 pub use crate::compact;
+pub use crate::cost;
 pub use crate::image;
 pub use crate::prompt_build;
+pub use crate::reflection;
 pub use crate::scheduler;
+pub use crate::session;
+pub use crate::state;
 pub use aemeath_core as core;
 pub use audit;
 pub use hook;

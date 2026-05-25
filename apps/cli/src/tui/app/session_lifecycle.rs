@@ -40,7 +40,7 @@ impl App {
 
         // Resume existing session if requested
         if let Some(ref id) = resume_id {
-            match ::runtime::api::core::session::load_session(id).await {
+            match ::runtime::api::session::load_session(id).await {
                 Ok(s) => {
                     let msg_count = s.messages.len();
                     self.session.session_created_at = Some(s.created_at.clone());
@@ -206,7 +206,7 @@ impl App {
         // Auto-save session on exit
         if !self.chat.messages.is_empty() {
             let s = self.build_session(self.chat.messages.clone()).await;
-            if let Err(e) = ::runtime::api::core::session::save_session(&s).await {
+            if let Err(e) = ::runtime::api::session::save_session(&s).await {
                 log::warn!("failed to auto-save session: {e}");
             }
         }

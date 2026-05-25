@@ -1,4 +1,4 @@
-use aemeath_core::memory::{
+use share::memory_ops::{
     format_add_result, format_memory_list, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource,
 };
 use aemeath_core::tool::{ToolContext, ToolResult};

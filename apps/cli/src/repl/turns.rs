@@ -1,5 +1,5 @@
 use crate::render::TerminalRenderer;
-use ::runtime::api::core::agent::Agent;
+use ::runtime::api::agent::Agent;
 use ::runtime::api::core::message::Message;
 use ::runtime::api::core::tool::{ToolContext, ToolRegistry};
 use ::runtime::api::provider::client::LlmClient;
@@ -42,7 +42,7 @@ pub(super) async fn run_agent_turns(
     max_tool_concurrency: usize,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     session_id: &str,
-    session_reminders: &Arc<Mutex<::runtime::api::core::memory::SessionReminders>>,
+    session_reminders: &Arc<Mutex<::runtime::api::core::tool::SessionReminders>>,
     task_store: &Arc<::runtime::api::core::task::TaskStore>,
     hook_runner: &::runtime::api::hook::hook::HookRunner,
     memory_config: &::runtime::api::core::config::MemoryConfig,
@@ -211,7 +211,7 @@ fn build_agent<'a>(
     max_tool_concurrency: usize,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     session_id: &str,
-    session_reminders: &Arc<Mutex<::runtime::api::core::memory::SessionReminders>>,
+    session_reminders: &Arc<Mutex<::runtime::api::core::tool::SessionReminders>>,
     memory_config: &::runtime::api::core::config::MemoryConfig,
 ) -> Agent<'a> {
     let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.to_path_buf());
@@ -259,7 +259,7 @@ async fn run_reflection(
 }
 
 async fn build_call_summaries(
-    tool_calls: &[::runtime::api::core::agent::ToolCall],
+    tool_calls: &[::runtime::api::agent::ToolCall],
     task_store: &Arc<::runtime::api::core::task::TaskStore>,
 ) -> HashMap<String, (String, String)> {
     let pending_tasks = super::tool_execution::pending_task_lines(task_store).await;
@@ -282,7 +282,7 @@ async fn build_call_summaries(
 
 fn append_tool_results(
     messages: &mut Vec<Message>,
-    results: Vec<::runtime::api::core::agent::ToolResultTuple>,
+    results: Vec<::runtime::api::agent::ToolResultTuple>,
 ) {
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {

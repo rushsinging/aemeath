@@ -10,7 +10,7 @@ pub struct StatusContextUpdate {
     pub kind: crate::tui::status_bar::WorktreeKind,
     pub raw_path_base: PathBuf,
     pub raw_working_root: PathBuf,
-    pub workspace: ::runtime::api::core::session::WorkspaceContext,
+    pub workspace: ::runtime::api::session::WorkspaceContext,
 }
 
 /// Events sent from background task to UI
@@ -60,7 +60,7 @@ pub enum AppEvent {
         output: u32,
     },
     ReflectionDone {
-        output: ::runtime::api::core::reflection::ReflectionOutput,
+        output: ::runtime::api::reflection::ReflectionOutput,
     },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {

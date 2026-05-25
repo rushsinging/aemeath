@@ -1,4 +1,4 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::api::core::tool::ToolRegistry;

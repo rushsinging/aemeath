@@ -1,5 +1,5 @@
 use super::helpers::*;
-use aemeath_core::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use aemeath_core::tool::ToolContext;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn test_ctx(cwd: PathBuf) -> ToolContext {
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: None,
         session_reminders: Some(Arc::new(Mutex::new(
-            aemeath_core::memory::SessionReminders::new(),
+            aemeath_core::tool::SessionReminders::new(),
         ))),
         memory_config: aemeath_core::config::MemoryConfig::default(),
         plan_mode: None,

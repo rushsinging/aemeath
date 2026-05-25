@@ -1,5 +1,5 @@
 use crate::render::TerminalRenderer;
-use ::runtime::api::core::agent::{Agent, ToolCall, ToolResultTuple};
+use ::runtime::api::agent::{Agent, ToolCall, ToolResultTuple};
 use ::runtime::api::core::task::{TaskStatus, TaskStore};
 use ::runtime::api::core::tool::ToolRegistry;
 use ::runtime::api::provider::client::LlmClient;

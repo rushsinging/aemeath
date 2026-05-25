@@ -109,7 +109,7 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::status_bar::Worktree
 
 #[cfg(test)]
 pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
-    status_context_for_workspace(::runtime::api::core::session::WorkspaceContext {
+    status_context_for_workspace(::runtime::api::session::WorkspaceContext {
         path_base: path_base.display().to_string(),
         working_root: working_root.display().to_string(),
         context_stack: Vec::new(),
@@ -117,7 +117,7 @@ pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) ->
 }
 
 pub(crate) fn status_context_for_workspace(
-    workspace: ::runtime::api::core::session::WorkspaceContext,
+    workspace: ::runtime::api::session::WorkspaceContext,
 ) -> UiEvent {
     let path_base = PathBuf::from(&workspace.path_base);
     let working_root = PathBuf::from(&workspace.working_root);
@@ -173,7 +173,7 @@ impl App {
                         .unwrap_or_default(),
                 ),
                 session_reminders: Arc::new(std::sync::Mutex::new(
-                    ::runtime::api::core::memory::SessionReminders::new(),
+                    ::runtime::api::core::tool::SessionReminders::new(),
                 )),
                 task_store: None,
                 workspace_context: None,

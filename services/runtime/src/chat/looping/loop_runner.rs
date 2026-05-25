@@ -1,5 +1,5 @@
 use crate::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
-use crate::api::core::agent::Agent;
+use crate::api::agent::Agent;
 use crate::api::core::message::Message;
 use crate::api::core::tool::{ToolContext, ToolRegistry};
 use crate::api::provider::types::StopReason;
@@ -36,10 +36,10 @@ where
     pub messages: Vec<Message>,
     pub context_size: usize,
     pub cwd: PathBuf,
-    pub workspace_context: Option<crate::api::core::session::WorkspaceContext>,
+    pub workspace_context: Option<crate::api::session::WorkspaceContext>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<crate::api::core::memory::SessionReminders>>,
+    pub session_reminders: Arc<std::sync::Mutex<crate::api::core::tool::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn crate::api::core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: Arc<AtomicBool>,

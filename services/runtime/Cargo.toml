@@ -24,3 +24,9 @@ log = "0.4"
 env_logger = "0.11"
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+inventory = { workspace = true }
+parking_lot = "0.12"
+rand = "0.9"
+regex = "1"
+thiserror = { workspace = true }

@@ -1,7 +1,7 @@
 //! 聊天相关纯数据状态
 
 use ::runtime::api::core::message::Message;
-use ::runtime::api::core::reflection::ReflectionOutput;
+use ::runtime::api::reflection::ReflectionOutput;
 
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug)]

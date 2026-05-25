@@ -1,7 +1,7 @@
 use crate::render::TerminalRenderer;
 use ::runtime::api::compact;
 use ::runtime::api::core::message::Message;
-use ::runtime::api::core::session::{self, Session};
+use ::runtime::api::session::{self, Session};
 use ::runtime::api::prompt::skill::Skill;
 use ::runtime::api::core::task::TaskStore;
 use ::runtime::api::core::tool::ToolRegistry;
@@ -80,7 +80,7 @@ pub async fn run_repl(
     let pending_images: PendingImages = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut turn_count = 0usize;
     let session_reminders = Arc::new(std::sync::Mutex::new(
-        ::runtime::api::core::memory::SessionReminders::new(),
+        ::runtime::api::core::tool::SessionReminders::new(),
     ));
 
     loop {

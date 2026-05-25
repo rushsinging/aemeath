@@ -1,4 +1,4 @@
-use crate::api::core::agent::ToolCall;
+use crate::api::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::hook::hook::HookData;
 use crate::chat::looping::hook_ui::HookUi;

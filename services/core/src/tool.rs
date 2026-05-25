@@ -91,6 +91,77 @@ pub trait AgentRunner: Send + Sync {
     async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String;
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SessionReminder {
+    pub id: String,
+    pub content: String,
+    pub done: bool,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SessionReminders {
+    reminders: Vec<SessionReminder>,
+}
+
+impl SessionReminders {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, content: impl Into<String>) -> Result<String, String> {
+        let content = content.into();
+        if content.trim().is_empty() {
+            return Err("reminder 内容不能为空".to_string());
+        }
+
+        let id = uuid::Uuid::now_v7().to_string();
+        self.reminders.push(SessionReminder {
+            id: id.clone(),
+            content,
+            done: false,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0),
+        });
+        Ok(id)
+    }
+
+    pub fn complete(&mut self, id: &str) -> Result<(), String> {
+        let reminder = self
+            .reminders
+            .iter_mut()
+            .find(|reminder| reminder.id == id)
+            .ok_or_else(|| format!("memory not found: {id}"))?;
+        reminder.done = true;
+        Ok(())
+    }
+
+    pub fn list(&self) -> &[SessionReminder] {
+        &self.reminders
+    }
+
+    pub fn clear(&mut self) {
+        self.reminders.clear();
+    }
+
+    pub fn recap_line(&self) -> Option<String> {
+        let active = self
+            .reminders
+            .iter()
+            .filter(|reminder| !reminder.done)
+            .map(|reminder| reminder.content.as_str())
+            .collect::<Vec<_>>();
+
+        if active.is_empty() {
+            None
+        } else {
+            Some(format!("* recap: {}", active.join(" | ")))
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolContext {
     /// Initial workspace root, kept for compatibility with existing callers.
@@ -103,7 +174,7 @@ pub struct ToolContext {
     pub read_files: std::sync::Arc<Mutex<HashSet<String>>>,
     pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
     /// Session-local reminders shared by MemoryTool and UI/REPL.
-    pub session_reminders: Option<Arc<Mutex<crate::memory::SessionReminders>>>,
+    pub session_reminders: Option<Arc<Mutex<SessionReminders>>>,
     /// Memory system configuration used by MemoryTool.
     pub memory_config: crate::config::MemoryConfig,
     /// Whether we're in plan mode (simulated tool execution)

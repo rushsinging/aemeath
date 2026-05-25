@@ -19,7 +19,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_result_summaries(
         &self,
         turn_number: usize,
-        results: &[crate::api::core::agent::ToolResultTuple],
+        results: &[crate::api::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         for (id, output, is_error, _) in results.iter() {
@@ -46,7 +46,7 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_tool_results(
         &self,
         turn_number: usize,
-        results: &[crate::api::core::agent::ToolResultTuple],
+        results: &[crate::api::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         if let Some(ref jl) = self.runner.json_logger {
@@ -114,7 +114,7 @@ impl<'a> SubAgentRun<'a> {
 
 pub(super) fn append_tool_results(
     messages: &mut Vec<Message>,
-    mut results: Vec<crate::api::core::agent::ToolResultTuple>,
+    mut results: Vec<crate::api::agent::ToolResultTuple>,
     session_id: &str,
 ) {
     crate::api::storage::tool_result_storage::persist_oversized_results(session_id, &mut results);

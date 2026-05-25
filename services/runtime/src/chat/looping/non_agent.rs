@@ -1,4 +1,4 @@
-use crate::api::core::agent::{Agent, ToolCall};
+use crate::api::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::api::storage::logging::JsonLogger;

@@ -5,7 +5,7 @@ use super::logging::{
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::{CliAgentRunner, SilentHandler};
-use crate::api::core::agent::Agent;
+use crate::api::agent::Agent;
 use crate::api::compact::safe_slice;
 use crate::api::core::message::Message;
 use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
@@ -249,7 +249,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::api::core::agent::ToolCall]) {
+    fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::api::agent::ToolCall]) {
         if let Some(ref jl) = self.runner.json_logger {
             for tool_call in tool_calls {
                 let data = build_json_logger_tool_call_data(tool_call);
@@ -265,7 +265,7 @@ impl<'a> SubAgentRun<'a> {
 
     fn build_call_info(
         &self,
-        tool_calls: &[crate::api::core::agent::ToolCall],
+        tool_calls: &[crate::api::agent::ToolCall],
     ) -> std::collections::HashMap<String, (String, String)> {
         tool_calls
             .iter()

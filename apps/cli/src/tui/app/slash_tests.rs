@@ -168,7 +168,7 @@ async fn test_auto_reflection_boundary_memory_disabled_does_not_trigger() {
 async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
     let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_provider();
     app.session.memory_config.reflection.interval_turns = 1;
-    app.chat.pending_reflection = Some(::runtime::api::core::reflection::ReflectionOutput {
+    app.chat.pending_reflection = Some(::runtime::api::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: Vec::new(),
