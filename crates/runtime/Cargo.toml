@@ -14,7 +14,10 @@ storage = { path = "../storage" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = "0.3"
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 log = "0.4"
 dirs = "6"
+uuid = { version = "1", features = ["v4"] }

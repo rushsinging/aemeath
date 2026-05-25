@@ -1999,6 +1999,7 @@ dependencies = [
  "audit",
  "core",
  "dirs",
+ "futures",
  "hook",
  "log",
  "policy",
@@ -2008,7 +2009,9 @@ dependencies = [
  "serde_json",
  "storage",
  "tokio",
+ "tokio-util",
  "tools",
+ "uuid",
 ]
 
 [[package]]

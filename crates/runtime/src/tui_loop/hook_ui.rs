@@ -1,16 +1,21 @@
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::config::hooks::{HookEntry, HookEvent};
-use ::runtime::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
-use tokio::sync::mpsc;
+use crate::api::core::config::hooks::{HookEntry, HookEvent};
+use crate::api::core::hook::{HookData, HookJsonOutput, HookResult, HookRunner};
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 
 #[derive(Clone)]
-pub(crate) struct HookUi {
-    tx: mpsc::Sender<UiEvent>,
+pub(crate) struct HookUi<S>
+where
+    S: TuiLoopEventSink,
+{
+    sink: S,
 }
 
-impl HookUi {
-    pub(crate) fn new(tx: mpsc::Sender<UiEvent>) -> Self {
-        Self { tx }
+impl<S> HookUi<S>
+where
+    S: TuiLoopEventSink,
+{
+    pub(crate) fn new(sink: S) -> Self {
+        Self { sink }
     }
 
     pub(crate) async fn run_json(
@@ -31,8 +36,8 @@ impl HookUi {
             .unwrap_or_default();
         let event_name = hook_event_name(event);
         let _ = self
-            .tx
-            .send(UiEvent::HookStart {
+            .sink
+            .send_event(RuntimeStreamEvent::HookStart {
                 event: event_name.to_string(),
                 command,
             })
@@ -42,8 +47,8 @@ impl HookUi {
 
         for (_, result, _) in &hook_results {
             let _ = self
-                .tx
-                .send(UiEvent::HookEnd {
+                .sink
+                .send_event(RuntimeStreamEvent::HookEnd {
                     event: event_name.to_string(),
                     blocked: result.blocked,
                     error: result.error.clone(),

@@ -10,13 +10,10 @@ mod render;
 mod repl;
 mod run_orchestration;
 mod sessions_command;
-mod task_reminder;
 mod tui;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-
-pub(crate) use logging_setup::set_current_turn;
 
 #[tokio::main]
 async fn main() {

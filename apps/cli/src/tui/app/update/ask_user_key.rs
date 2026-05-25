@@ -87,9 +87,7 @@ impl App {
                             .map(|(i, opt)| format!("{}. {}", i + 1, opt))
                             .collect();
                         all_opts.join("\n")
-                    } else if cursor == builtin_chat_idx
-                        && state.options.len() > builtin_chat_idx
-                    {
+                    } else if cursor == builtin_chat_idx && state.options.len() > builtin_chat_idx {
                         // "Chat about this...": switch to chat input sub-mode
                         self.ask_user_state = Some(crate::tui::app::AskUserState {
                             chat_input_active: true,
@@ -194,7 +192,10 @@ impl App {
     }
 
     /// Handle keys in the "Chat about this..." free-text sub-mode.
-    fn update_ask_user_chat_input_key(&mut self, key: crossterm::event::KeyEvent) -> Option<UpdateResult> {
+    fn update_ask_user_chat_input_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<UpdateResult> {
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                 let text = self.input_area.get_text();

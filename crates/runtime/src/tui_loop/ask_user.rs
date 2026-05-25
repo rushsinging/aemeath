@@ -1,17 +1,19 @@
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::stream::tools::{send_tool_result, UiToolResult};
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::agent::ToolCall;
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::HookData;
-use tokio::sync::mpsc;
+use crate::api::core::agent::ToolCall;
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::HookData;
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::tools::{send_tool_result, UiToolResult};
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 
-pub(crate) async fn ask_user(
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+pub(crate) async fn ask_user<S>(
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     non_agent_calls: &[ToolCall],
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let mut ask_user_results = Vec::new();
     let ask_calls: Vec<&ToolCall> = non_agent_calls
         .iter()
@@ -23,7 +25,7 @@ pub(crate) async fn ask_user(
                 hook_runner,
                 HookEvent::PermissionRequest,
                 Some(&call.name),
-                HookData::Permission(::runtime::api::core::hook::PermissionHookData {
+                HookData::Permission(crate::api::core::hook::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),
@@ -61,8 +63,8 @@ pub(crate) async fn ask_user(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<String>();
-        let _ = tx
-            .send(UiEvent::AskUser {
+        let _ = sink
+            .send_event(RuntimeStreamEvent::AskUser {
                 id: call.id.clone(),
                 question,
                 options,
@@ -77,7 +79,7 @@ pub(crate) async fn ask_user(
             _ => default.unwrap_or_default(),
         };
         let result = (call.id.clone(), answer, false, Vec::new());
-        send_tool_result(tx, call, &result).await;
+        send_tool_result(sink, call, &result).await;
         ask_user_results.push(result);
     }
     ask_user_results

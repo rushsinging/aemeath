@@ -1,25 +1,27 @@
-use crate::tui::app::stream::hook_ui::HookUi;
-use crate::tui::app::stream::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
-use crate::tui::app::UiEvent;
-use ::runtime::api::core::agent::ToolCall;
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::hook::{HookData, ToolHookData};
-use ::runtime::api::core::tool::ToolRegistry;
+use crate::api::core::agent::ToolCall;
+use crate::api::core::config::hooks::HookEvent;
+use crate::api::core::hook::{HookData, ToolHookData};
+use crate::api::core::tool::ToolRegistry;
+use crate::tui_loop::hook_ui::HookUi;
+use crate::tui_loop::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
+use crate::tui_loop::{RuntimeStreamEvent, TuiLoopEventSink};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_agent_calls(
+pub(crate) async fn execute_agent_calls<S>(
     agent_approved: &[&ToolCall],
     registry: &Arc<ToolRegistry>,
-    agent_ctx: &::runtime::api::core::tool::ToolContext,
-    tx: &mpsc::Sender<UiEvent>,
-    hook_ui: &HookUi,
-    hook_runner: &::runtime::api::core::hook::HookRunner,
+    agent_ctx: &crate::api::core::tool::ToolContext,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &crate::api::core::hook::HookRunner,
     max_agent_concurrency: usize,
     interrupted: &Arc<AtomicBool>,
-) -> Vec<UiToolResult> {
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let batch_size = max_agent_concurrency.max(1);
     let mut agent_results = Vec::new();
     for batch in agent_approved.chunks(batch_size) {
@@ -34,13 +36,13 @@ pub(crate) async fn execute_agent_calls(
                     name: call.name.clone(),
                     input: call.input.clone(),
                 };
-                let tx = tx.clone();
+                let sink = sink.clone();
                 let hook_ui = hook_ui.clone();
                 let mut ag_ctx = agent_ctx.clone();
                 let hook_runner = hook_runner.clone();
                 let registry_ref = registry.clone();
                 async move {
-                    execute_one_agent(call, tx, hook_ui, hook_runner, registry_ref, &mut ag_ctx)
+                    execute_one_agent(call, sink, hook_ui, hook_runner, registry_ref, &mut ag_ctx)
                         .await
                 }
             })
@@ -51,14 +53,17 @@ pub(crate) async fn execute_agent_calls(
     agent_results
 }
 
-async fn execute_one_agent(
+async fn execute_one_agent<S>(
     call: ToolCall,
-    tx: mpsc::Sender<UiEvent>,
-    hook_ui: HookUi,
-    hook_runner: ::runtime::api::core::hook::HookRunner,
+    sink: S,
+    hook_ui: HookUi<S>,
+    hook_runner: crate::api::core::hook::HookRunner,
     registry: Arc<ToolRegistry>,
-    ag_ctx: &mut ::runtime::api::core::tool::ToolContext,
-) -> Vec<UiToolResult> {
+    ag_ctx: &mut crate::api::core::tool::ToolContext,
+) -> Vec<UiToolResult>
+where
+    S: TuiLoopEventSink,
+{
     let pre_results = hook_ui
         .run_plain(
             &hook_runner,
@@ -79,19 +84,19 @@ async fn execute_one_agent(
             true,
             Vec::new(),
         );
-        send_tool_result(&tx, &call, &result).await;
+        send_tool_result(&sink, &call, &result).await;
         return vec![result];
     }
 
     let (prog_tx, mut prog_rx) =
-        tokio::sync::mpsc::channel::<::runtime::api::core::tool::AgentProgressEvent>(32);
+        tokio::sync::mpsc::channel::<crate::api::core::tool::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);
     let call_id = call.id.clone();
-    let ui_tx = tx.clone();
+    let ui_sink = sink.clone();
     let forward_handle = tokio::spawn(async move {
         while let Some(event) = prog_rx.recv().await {
-            let _ = ui_tx
-                .send(UiEvent::AgentProgress {
+            let _ = ui_sink
+                .send_event(RuntimeStreamEvent::AgentProgress {
                     tool_id: call_id.clone(),
                     event,
                 })
@@ -105,10 +110,13 @@ async fn execute_one_agent(
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
     let working_root = ag_ctx.current_working_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    let _ = tx
-        .send(crate::tui::app::status_context_for_workspace(
-            ::runtime::api::core::worktree::workspace_context_from_tool_context(&ag_ctx),
-        ))
+    let workspace = crate::api::core::worktree::workspace_context_from_tool_context(ag_ctx);
+    let _ = sink
+        .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
+            path_base: workspace.path_base.clone(),
+            working_root: workspace.working_root.clone(),
+            workspace,
+        })
         .await;
     let results = vec![(
         call.id.clone(),
@@ -120,9 +128,9 @@ async fn execute_one_agent(
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
     for (id, output, is_error, images) in &results {
-        run_post_tool_hooks(&tx, &hook_ui, &hook_runner, &call, output, *is_error).await;
+        run_post_tool_hooks(&sink, &hook_ui, &hook_runner, &call, output, *is_error).await;
         send_tool_result(
-            &tx,
+            &sink,
             &call,
             &(id.clone(), output.clone(), *is_error, images.clone()),
         )
