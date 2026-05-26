@@ -1,4 +1,4 @@
-mod cli;
+mod args;
 mod model_selection;
 mod render;
 mod repl;
@@ -7,7 +7,7 @@ mod sessions_command;
 mod tui;
 
 use clap::Parser;
-use cli::{Cli, Commands};
+use args::{Cli, Commands};
 
 #[tokio::main]
 async fn main() {
