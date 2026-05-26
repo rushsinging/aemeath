@@ -9,7 +9,6 @@ use ::runtime::api::session::WorkspaceContext;
 use ::runtime::api::storage::logging::JsonLogger;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 /// 副作用执行器：持有所有 runtime::api 基础设施引用
 /// CLI 只依赖 runtime，不直接依赖 llm / core / provider
@@ -26,19 +25,11 @@ pub struct CmdExecutor {
 impl CmdExecutor {
     /// Execute side-effect commands (no &mut App access).
     /// Quit and SaveCurrentSession are handled by the caller.
-    pub(super) async fn exec_one_cmd(
-        &self,
-        active_cancel: &std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        cmd: Cmd,
-    ) {
+    pub(super) async fn exec_one_cmd(&self, ui_tx: &mpsc::Sender<UiEvent>, cmd: Cmd) {
         match cmd {
             Cmd::None => {}
             Cmd::Quit => {} // handled by caller
             Cmd::SpawnProcessing(ctx) => {
-                if let Ok(mut guard) = active_cancel.lock() {
-                    *guard = Some(ctx.cancel.clone());
-                }
                 processing::spawn_processing(ctx);
             }
             Cmd::SendEvents(events) => {

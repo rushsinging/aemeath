@@ -11,12 +11,6 @@ use std::pin::Pin;
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 pub type QueueFuture<'a> = Pin<Box<dyn Future<Output = Option<Vec<String>>> + Send + 'a>>;
 
-/// TUI 发起的一次 chat 请求。
-#[derive(Debug, Clone)]
-pub struct ChatRequest<Message> {
-    pub messages: Vec<Message>,
-}
-
 /// runtime 返回给 TUI 的 chat handle。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatHandle {

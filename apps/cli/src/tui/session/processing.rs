@@ -1,82 +1,41 @@
 use crate::tui::core::event::{StatusContextUpdate, UiEvent};
-use ::runtime::api::chat::{
-    ChatEventSink, EventFuture, QueueDrainPort, QueueFuture, RuntimeStreamEvent,
-};
-use ::runtime::api::core::tool::ToolRegistry;
-use ::runtime::api::provider::types::SystemBlock;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
-pub(crate) struct TuiEventSink {
-    tx: mpsc::Sender<UiEvent>,
-}
-
-impl TuiEventSink {
-    pub(crate) fn new(tx: mpsc::Sender<UiEvent>) -> Self {
-        Self { tx }
-    }
-}
-
-impl ChatEventSink for TuiEventSink {
-    fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
-        Box::pin(async move {
-            let ui_event = runtime_event_to_ui_event(event);
-            let _ = self.tx.send(ui_event).await;
-        })
-    }
-
-    fn try_send_event(&self, event: RuntimeStreamEvent) {
-        let ui_event = runtime_event_to_ui_event(event);
-        if let Err(e) = self.tx.try_send(ui_event) {
-            log::warn!("UI channel full, dropped runtime stream event: {e}");
-        }
-    }
-}
-
-#[derive(Clone)]
-#[allow(dead_code)]
 pub(crate) struct TuiQueueDrainPort {
     tx: mpsc::Sender<UiEvent>,
 }
 
 impl TuiQueueDrainPort {
-    #[allow(dead_code)]
     pub(crate) fn new(tx: mpsc::Sender<UiEvent>) -> Self {
         Self { tx }
     }
-}
 
-impl QueueDrainPort for TuiQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a> {
-        Box::pin(async move {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            if self
-                .tx
-                .send(UiEvent::DrainQueuedInput { reply_tx })
-                .await
-                .is_err()
-            {
-                return None;
-            }
-            match reply_rx.await {
-                Ok(queued) if !queued.is_empty() => Some(queued),
-                _ => None,
-            }
-        })
+    pub(crate) async fn drain_queued_input(&self) -> Option<Vec<String>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        if self
+            .tx
+            .send(UiEvent::DrainQueuedInput { reply_tx })
+            .await
+            .is_err()
+        {
+            return None;
+        }
+        match reply_rx.await {
+            Ok(queued) if !queued.is_empty() => Some(queued),
+            _ => None,
+        }
     }
 }
 
-fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
+pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
-        RuntimeStreamEvent::Text(text) => UiEvent::Text(text),
-        RuntimeStreamEvent::Thinking(text) => UiEvent::Thinking(text),
-        RuntimeStreamEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
-        RuntimeStreamEvent::ToolCallStart { name, index } => UiEvent::ToolCallStart { name, index },
-        RuntimeStreamEvent::ToolArgumentsDelta {
+        sdk::ChatEvent::Token(text) => UiEvent::Text(text),
+        sdk::ChatEvent::Thinking(text) => UiEvent::Thinking(text),
+        sdk::ChatEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
+        sdk::ChatEvent::ToolCallStart { name, index } => UiEvent::ToolCallStart { name, index },
+        sdk::ChatEvent::ToolArgumentsDelta {
             index,
             name,
             partial_args,
@@ -85,10 +44,8 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             name,
             partial_args,
         },
-        RuntimeStreamEvent::ToolCall { id, name, summary } => {
-            UiEvent::ToolCall { id, name, summary }
-        }
-        RuntimeStreamEvent::ToolResult {
+        sdk::ChatEvent::ToolCall { id, name, summary } => UiEvent::ToolCall { id, name, summary },
+        sdk::ChatEvent::ToolResult {
             id,
             tool_name,
             output,
@@ -99,11 +56,11 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             tool_name,
             output,
             is_error,
-            images,
+            images: images_from_sdk(images),
         },
-        RuntimeStreamEvent::SystemMessage(msg) => UiEvent::SystemMessage(msg),
-        RuntimeStreamEvent::Error(msg) => UiEvent::Error(msg),
-        RuntimeStreamEvent::Usage {
+        sdk::ChatEvent::SystemMessage(msg) => UiEvent::SystemMessage(msg),
+        sdk::ChatEvent::Error(msg) => UiEvent::Error(msg),
+        sdk::ChatEvent::Usage {
             input,
             output,
             last_input,
@@ -114,23 +71,30 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             last_input,
             elapsed_secs,
         },
-        RuntimeStreamEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
-        RuntimeStreamEvent::Done => UiEvent::Done,
-        RuntimeStreamEvent::DoneWithDuration(duration) => UiEvent::DoneWithDuration(duration),
-        RuntimeStreamEvent::Cancelled => UiEvent::Cancelled,
-        RuntimeStreamEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
-        RuntimeStreamEvent::TurnChanged(turn) => {
+        sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(
+            messages
+                .into_iter()
+                .map(crate::tui::message_from_sdk)
+                .collect(),
+        ),
+        sdk::ChatEvent::Done => UiEvent::Done,
+        sdk::ChatEvent::DoneWithDurationMs(ms) => {
+            UiEvent::DoneWithDuration(std::time::Duration::from_millis(ms))
+        }
+        sdk::ChatEvent::Cancelled => UiEvent::Cancelled,
+        sdk::ChatEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
+        sdk::ChatEvent::TurnChanged(turn) => {
             ::runtime::api::bootstrap::set_current_turn(turn);
             UiEvent::SystemMessage(String::new())
         }
-        RuntimeStreamEvent::StopFailureHook {
+        sdk::ChatEvent::StopFailureHook {
             system_message,
             additional_context,
         } => UiEvent::StopFailureHook {
             system_message,
             additional_context,
         },
-        RuntimeStreamEvent::AskUser {
+        sdk::ChatEvent::AskUser {
             id,
             question,
             options,
@@ -147,11 +111,12 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             default,
             reply_tx,
         },
-        RuntimeStreamEvent::AgentProgress { tool_id, event } => {
-            UiEvent::AgentProgress { tool_id, event }
-        }
-        RuntimeStreamEvent::HookStart { event, command } => UiEvent::HookStart { event, command },
-        RuntimeStreamEvent::HookEnd {
+        sdk::ChatEvent::AgentProgress { tool_id, event } => UiEvent::AgentProgress {
+            tool_id,
+            event: agent_progress_from_sdk(event),
+        },
+        sdk::ChatEvent::HookStart { event, command } => UiEvent::HookStart { event, command },
+        sdk::ChatEvent::HookEnd {
             event,
             blocked,
             error,
@@ -160,109 +125,203 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             blocked,
             error,
         },
-        RuntimeStreamEvent::WorkingDirectoryChanged {
+        sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
             working_root,
             workspace,
-        } => UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
-            path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
-            working_root: crate::tui::core::display_status_path(std::path::Path::new(
-                &working_root,
-            )),
-            branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
-            kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
-            raw_path_base: std::path::PathBuf::from(path_base),
-            raw_working_root: std::path::PathBuf::from(working_root),
-            workspace,
-        }),
+        } => {
+            let workspace = serde_json::from_value(workspace).unwrap_or_else(|_| {
+                ::runtime::api::session::WorkspaceContext {
+                    path_base: path_base.clone(),
+                    working_root: working_root.clone(),
+                    context_stack: Vec::new(),
+                }
+            });
+            UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
+                path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
+                working_root: crate::tui::core::display_status_path(std::path::Path::new(
+                    &working_root,
+                )),
+                branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
+                kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
+                raw_path_base: std::path::PathBuf::from(path_base),
+                raw_working_root: std::path::PathBuf::from(working_root),
+                workspace,
+            })
+        }
+        sdk::ChatEvent::Result(result) => UiEvent::Text(result.text),
     }
 }
 
-/// Owned context needed to spawn a background processing task.
+pub(crate) struct SpawnContextRefs {
+    pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+}
+
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
     pub queue_request_tx: mpsc::Sender<UiEvent>,
-    pub client: Arc<::runtime::api::provider::client::LlmClient>,
-    pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<SystemBlock>,
-    pub system_prompt_text: String,
-    pub user_context: String,
-    pub messages: Vec<::runtime::api::core::message::Message>,
-    pub context_size: usize,
-    pub cwd: PathBuf,
-    pub workspace_context: Option<::runtime::api::session::WorkspaceContext>,
-    pub session_id: String,
-    pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::tool::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
-    pub allow_all: bool,
-    pub interrupted: Arc<AtomicBool>,
-    pub cancel: CancellationToken,
-    pub task_store: Arc<::runtime::api::core::task::TaskStore>,
-    pub max_tool_concurrency: usize,
-    pub max_agent_concurrency: usize,
-    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: ::runtime::api::hook::hook::HookRunner,
-    pub memory_config: ::runtime::api::core::config::MemoryConfig,
-    pub json_logger: Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
+    pub agent_client: Arc<dyn sdk::AgentClient>,
+    pub messages: Vec<sdk::ChatMessage>,
 }
 
-/// Borrowed references to the shared state needed for spawning.
-/// Used in the processing pipeline to avoid passing many individual parameters.
-pub(crate) struct SpawnContextRefs<'a> {
-    pub client: &'a Arc<::runtime::api::provider::client::LlmClient>,
-    pub registry: &'a Arc<ToolRegistry>,
-    pub system_blocks: &'a Vec<SystemBlock>,
-    pub system_prompt_text: &'a str,
-    pub user_context: &'a str,
-    pub context_size: usize,
-    pub read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: &'a Arc<std::sync::Mutex<::runtime::api::core::tool::SessionReminders>>,
-    pub agent_runner: &'a Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
-    pub allow_all: bool,
-    pub interrupted: &'a Arc<AtomicBool>,
-    pub task_store: &'a Arc<::runtime::api::core::task::TaskStore>,
-    pub max_tool_concurrency: usize,
-    pub max_agent_concurrency: usize,
-    pub agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
-    pub hook_runner: &'a ::runtime::api::hook::hook::HookRunner,
-    pub memory_config: &'a ::runtime::api::core::config::MemoryConfig,
-    pub json_logger:
-        &'a Option<Arc<std::sync::Mutex<::runtime::api::storage::logging::JsonLogger>>>,
-}
-
-/// Spawn the background LLM processing task.
 pub fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
-        let sink = TuiEventSink::new(ctx.tx);
+        let mut stream = match ctx
+            .agent_client
+            .chat(sdk::ChatRequest {
+                messages: ctx.messages,
+            })
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
+                let _ = ctx.tx.send(UiEvent::Done).await;
+                return;
+            }
+        };
         let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
-        ::runtime::api::chat::process_chat_loop(::runtime::api::chat::ChatLoopContext {
-            sink,
-            queue,
-            client: ctx.client,
-            registry: ctx.registry,
-            system_blocks: ctx.system_blocks,
-            system_prompt_text: ctx.system_prompt_text,
-            user_context: ctx.user_context,
-            messages: ctx.messages,
-            context_size: ctx.context_size,
-            cwd: ctx.cwd,
-            workspace_context: ctx.workspace_context,
-            session_id: ctx.session_id,
-            read_files: ctx.read_files,
-            session_reminders: ctx.session_reminders,
-            agent_runner: ctx.agent_runner,
-            allow_all: ctx.allow_all,
-            interrupted: ctx.interrupted,
-            cancel: ctx.cancel,
-            task_store: ctx.task_store,
-            max_tool_concurrency: ctx.max_tool_concurrency,
-            max_agent_concurrency: ctx.max_agent_concurrency,
-            agent_semaphore: ctx.agent_semaphore,
-            hook_runner: ctx.hook_runner,
-            memory_config: ctx.memory_config,
-            json_logger: ctx.json_logger,
-        })
-        .await;
+        while let Some(event) = stream.recv().await {
+            let ui_event = sdk_event_to_ui_event(event);
+            let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
+            if ctx.tx.send(ui_event).await.is_err() {
+                return;
+            }
+            if is_done {
+                if let Some(queued) = queue.drain_queued_input().await {
+                    let messages = queued
+                        .into_iter()
+                        .map(|text| sdk::ChatMessage {
+                            role: "user".to_string(),
+                            content: serde_json::json!([{ "type": "text", "text": text }]),
+                        })
+                        .collect();
+                    if let Err(e) = ctx.agent_client.sync_current_messages(messages).await {
+                        log::warn!("failed to sync drained queue messages: {e}");
+                    }
+                }
+            }
+        }
     });
+}
+
+fn images_from_sdk(value: serde_json::Value) -> Vec<::runtime::api::core::tool::ImageData> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(::runtime::api::core::tool::ImageData {
+                        base64: item.get("base64")?.as_str()?.to_string(),
+                        media_type: item.get("media_type")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn agent_progress_from_sdk(
+    value: serde_json::Value,
+) -> ::runtime::api::core::tool::AgentProgressEvent {
+    let sequence = value.get("sequence").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let kind = match value
+        .get("kind")
+        .and_then(|kind| kind.get("type"))
+        .and_then(|ty| ty.as_str())
+    {
+        Some("tool_calls") => {
+            let calls = value
+                .get("kind")
+                .and_then(|kind| kind.get("calls"))
+                .and_then(|calls| calls.as_array())
+                .map(|calls| {
+                    calls
+                        .iter()
+                        .map(|call| ::runtime::api::core::tool::AgentToolCallProgress {
+                            id: call
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            name: call
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            input: call
+                                .get("input")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                            summary: call
+                                .get("summary")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            ::runtime::api::core::tool::AgentProgressKind::ToolCalls { calls }
+        }
+        _ => ::runtime::api::core::tool::AgentProgressKind::Message {
+            text: value
+                .get("kind")
+                .and_then(|kind| kind.get("text"))
+                .and_then(|text| text.as_str())
+                .unwrap_or("")
+                .to_string(),
+        },
+    };
+    ::runtime::api::core::tool::AgentProgressEvent { sequence, kind }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sdk_event_to_ui_event_maps_token() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::Token("hello".to_string()));
+
+        match event {
+            UiEvent::Text(text) => assert_eq!(text, "hello"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sdk_event_to_ui_event_maps_messages_sync() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::MessagesSync(vec![sdk::ChatMessage {
+            role: "user".to_string(),
+            content: serde_json::json!([{ "type": "text", "text": "hello" }]),
+        }]));
+
+        match event {
+            UiEvent::MessagesSync(messages) => assert_eq!(messages[0].text_content(), "hello"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sdk_event_to_ui_event_maps_working_directory_changed() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::WorkingDirectoryChanged {
+            path_base: "/tmp".to_string(),
+            working_root: "/tmp".to_string(),
+            workspace: serde_json::json!({
+                "path_base": "/tmp",
+                "working_root": "/tmp",
+                "context_stack": []
+            }),
+        });
+
+        match event {
+            UiEvent::WorkingDirectoryChanged(update) => {
+                assert_eq!(update.raw_path_base, std::path::PathBuf::from("/tmp"));
+                assert_eq!(update.workspace.path_base, "/tmp");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
 }

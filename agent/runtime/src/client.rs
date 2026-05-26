@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext,
-    SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary,
+    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ModelSummary,
+    ProjectContext, SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary,
 };
 use tokio::sync::watch;
 
@@ -52,6 +52,7 @@ pub struct RuntimeHandle {
 
     // ─── SDK 状态 ───
     cancel_token: Arc<AtomicBool>,
+    current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
     current_messages: Arc<Mutex<Vec<crate::api::core::message::Message>>>,
     workspace_context: Arc<Mutex<Option<crate::session::WorkspaceContext>>>,
     change_tx: watch::Sender<ChangeSet>,
@@ -267,6 +268,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        current_cancel: Arc::new(Mutex::new(None)),
         current_messages: Arc::new(Mutex::new(Vec::new())),
         workspace_context: Arc::new(Mutex::new(None)),
         change_tx,
@@ -382,6 +384,214 @@ fn format_task_status_line(
     format!("{} #{} {}{}", icon, display_id, task.subject, owner)
 }
 
+#[derive(Clone)]
+struct SdkChatEventSink {
+    tx: tokio::sync::mpsc::UnboundedSender<ChatEvent>,
+    current_messages: Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    workspace_context: Arc<Mutex<Option<crate::session::WorkspaceContext>>>,
+}
+
+impl crate::chat::ChatEventSink for SdkChatEventSink {
+    fn send_event<'a>(
+        &'a self,
+        event: crate::chat::RuntimeStreamEvent,
+    ) -> crate::chat::EventFuture<'a> {
+        Box::pin(async move {
+            let _ = self.tx.send(runtime_event_to_sdk_event(
+                event,
+                &self.current_messages,
+                &self.workspace_context,
+            ));
+        })
+    }
+
+    fn try_send_event(&self, event: crate::chat::RuntimeStreamEvent) {
+        let _ = self.tx.send(runtime_event_to_sdk_event(
+            event,
+            &self.current_messages,
+            &self.workspace_context,
+        ));
+    }
+}
+
+#[derive(Clone, Default)]
+struct EmptyQueueDrainPort;
+
+impl crate::chat::QueueDrainPort for EmptyQueueDrainPort {
+    fn drain_queued_input<'a>(&'a self) -> crate::chat::QueueFuture<'a> {
+        Box::pin(async { None })
+    }
+}
+
+fn runtime_event_to_sdk_event(
+    event: crate::chat::RuntimeStreamEvent,
+    current_messages: &Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    workspace_context: &Arc<Mutex<Option<crate::session::WorkspaceContext>>>,
+) -> ChatEvent {
+    match event {
+        crate::chat::RuntimeStreamEvent::Text(text) => ChatEvent::Token(text),
+        crate::chat::RuntimeStreamEvent::Thinking(text) => ChatEvent::Thinking(text),
+        crate::chat::RuntimeStreamEvent::TextBlockComplete(text) => {
+            ChatEvent::TextBlockComplete(text)
+        }
+        crate::chat::RuntimeStreamEvent::ToolCallStart { name, index } => {
+            ChatEvent::ToolCallStart { name, index }
+        }
+        crate::chat::RuntimeStreamEvent::ToolArgumentsDelta {
+            index,
+            name,
+            partial_args,
+        } => ChatEvent::ToolArgumentsDelta {
+            index,
+            name,
+            partial_args,
+        },
+        crate::chat::RuntimeStreamEvent::ToolCall { id, name, summary } => {
+            ChatEvent::ToolCall { id, name, summary }
+        }
+        crate::chat::RuntimeStreamEvent::ToolResult {
+            id,
+            tool_name,
+            output,
+            is_error,
+            images,
+        } => ChatEvent::ToolResult {
+            id,
+            tool_name,
+            output,
+            is_error,
+            images: images
+                .into_iter()
+                .map(|image| {
+                    serde_json::json!({
+                        "base64": image.base64,
+                        "media_type": image.media_type,
+                    })
+                })
+                .collect(),
+        },
+        crate::chat::RuntimeStreamEvent::SystemMessage(msg) => ChatEvent::SystemMessage(msg),
+        crate::chat::RuntimeStreamEvent::Error(msg) => ChatEvent::Error(msg),
+        crate::chat::RuntimeStreamEvent::Usage {
+            input,
+            output,
+            last_input,
+            elapsed_secs,
+        } => ChatEvent::Usage {
+            input,
+            output,
+            last_input,
+            elapsed_secs,
+        },
+        crate::chat::RuntimeStreamEvent::MessagesSync(messages) => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::MessagesSync(messages.into_iter().map(message_to_sdk).collect())
+        }
+        crate::chat::RuntimeStreamEvent::Done => ChatEvent::Done,
+        crate::chat::RuntimeStreamEvent::DoneWithDuration(duration) => {
+            ChatEvent::DoneWithDurationMs(duration.as_millis() as u64)
+        }
+        crate::chat::RuntimeStreamEvent::Cancelled => ChatEvent::Cancelled,
+        crate::chat::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
+        crate::chat::RuntimeStreamEvent::TurnChanged(turn) => ChatEvent::TurnChanged(turn),
+        crate::chat::RuntimeStreamEvent::StopFailureHook {
+            system_message,
+            additional_context,
+        } => ChatEvent::StopFailureHook {
+            system_message,
+            additional_context,
+        },
+        crate::chat::RuntimeStreamEvent::AskUser {
+            id,
+            question,
+            options,
+            allow_free_input,
+            multi_select,
+            default,
+            reply_tx,
+        } => ChatEvent::AskUser {
+            id,
+            question,
+            options,
+            allow_free_input,
+            multi_select,
+            default,
+            reply_tx,
+        },
+        crate::chat::RuntimeStreamEvent::AgentProgress { tool_id, event } => {
+            ChatEvent::AgentProgress {
+                tool_id,
+                event: agent_progress_event_to_json(event),
+            }
+        }
+        crate::chat::RuntimeStreamEvent::HookStart { event, command } => {
+            ChatEvent::HookStart { event, command }
+        }
+        crate::chat::RuntimeStreamEvent::HookEnd {
+            event,
+            blocked,
+            error,
+        } => ChatEvent::HookEnd {
+            event,
+            blocked,
+            error,
+        },
+        crate::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
+            path_base,
+            working_root,
+            workspace,
+        } => {
+            if let Ok(mut guard) = workspace_context.lock() {
+                *guard = Some(workspace.clone());
+            }
+            ChatEvent::WorkingDirectoryChanged {
+                path_base,
+                working_root,
+                workspace: serde_json::to_value(workspace).unwrap_or(serde_json::Value::Null),
+            }
+        }
+    }
+}
+
+fn agent_progress_event_to_json(
+    event: crate::api::core::tool::AgentProgressEvent,
+) -> serde_json::Value {
+    let kind = match event.kind {
+        crate::api::core::tool::AgentProgressKind::ToolCalls { calls } => serde_json::json!({
+            "type": "tool_calls",
+            "calls": calls
+                .into_iter()
+                .map(|call| serde_json::json!({
+                    "id": call.id,
+                    "name": call.name,
+                    "input": call.input,
+                    "summary": call.summary,
+                }))
+                .collect::<Vec<_>>()
+        }),
+        crate::api::core::tool::AgentProgressKind::Message { text } => serde_json::json!({
+            "type": "message",
+            "text": text,
+        }),
+    };
+    serde_json::json!({
+        "sequence": event.sequence,
+        "kind": kind,
+    })
+}
+
+fn message_to_sdk(message: crate::api::core::message::Message) -> sdk::ChatMessage {
+    sdk::ChatMessage {
+        role: match message.role {
+            crate::api::core::message::Role::User => "user".to_string(),
+            crate::api::core::message::Role::Assistant => "assistant".to_string(),
+        },
+        content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
+    }
+}
+
 fn message_from_sdk(message: sdk::ChatMessage) -> crate::api::core::message::Message {
     let role = match message.role.as_str() {
         "assistant" => crate::api::core::message::Role::Assistant,
@@ -447,9 +657,63 @@ impl AgentClient for AgentClientImpl {
         self.inner.change_rx.clone()
     }
 
-    async fn chat(&self, _input: ChatInput) -> Result<ChatStream, SdkError> {
-        // TODO: 连接到实际 chat loop
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+    async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {
+        self.inner.cancel_token.store(false, Ordering::Release);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        *self
+            .inner
+            .current_cancel
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 chat 取消锁已损坏".to_string()))? =
+            Some(cancel.clone());
+        let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
+        *self
+            .inner
+            .current_messages
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))? =
+            messages.clone();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = SdkChatEventSink {
+            tx,
+            current_messages: self.inner.current_messages.clone(),
+            workspace_context: self.inner.workspace_context.clone(),
+        };
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            crate::chat::process_chat_loop(crate::chat::ChatLoopContext {
+                sink,
+                queue: EmptyQueueDrainPort,
+                client: inner.context.client.clone(),
+                registry: inner.context.registry.clone(),
+                system_blocks: inner.context.system_blocks.clone(),
+                system_prompt_text: inner.context.system_prompt_text.clone(),
+                user_context: inner.context.user_context.clone(),
+                messages,
+                context_size: inner.context.context_size,
+                cwd: inner.cwd.clone(),
+                workspace_context: inner.workspace_context.lock().ok().and_then(|g| g.clone()),
+                session_id: inner.session_id.clone(),
+                read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
+                session_reminders: Arc::new(Mutex::new(Default::default())),
+                agent_runner: Some(inner.context.agent_runner.clone()),
+                allow_all: inner.context.allow_all,
+                interrupted: inner.cancel_token.clone(),
+                cancel,
+                task_store: inner.context.task_store.clone(),
+                max_tool_concurrency: inner.max_tool_concurrency,
+                max_agent_concurrency: inner.max_agent_concurrency,
+                agent_semaphore: inner.context.agent_semaphore.clone(),
+                hook_runner: inner.context.hook_runner.clone(),
+                memory_config: inner.context.memory_config.clone(),
+                json_logger: inner.context.json_logger.clone(),
+            })
+            .await;
+            if let Ok(mut guard) = inner.current_cancel.lock() {
+                *guard = None;
+            }
+        });
         Ok(ChatStream::new(rx))
     }
 
@@ -504,6 +768,11 @@ impl AgentClient for AgentClientImpl {
 
     fn cancel(&self) {
         self.inner.cancel_token.store(true, Ordering::Release);
+        if let Ok(guard) = self.inner.current_cancel.lock() {
+            if let Some(token) = guard.as_ref() {
+                token.cancel();
+            }
+        }
     }
 
     async fn load_session(&self, _id: &str) -> Result<SessionSnapshot, SdkError> {

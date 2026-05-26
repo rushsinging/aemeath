@@ -16,13 +16,11 @@ pub mod types;
 
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
-pub use chat::{ChatEvent, ChatInput, ChatResult, ChatStream};
+pub use chat::{ChatEvent, ChatInput, ChatRequest, ChatResult, ChatStream};
 pub use client::AgentClient;
 pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
-pub use tui::{
-    ChatEventSink, ChatHandle, ChatRequest, QueueDrainPort, TaskStatusView, TuiLaunchContext,
-};
+pub use tui::{ChatEventSink, ChatHandle, QueueDrainPort, TaskStatusView, TuiLaunchContext};
 pub use types::{CostInfo, PermissionPrompt, StatusInfo, TaskSummary};

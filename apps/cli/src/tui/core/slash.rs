@@ -376,16 +376,19 @@ impl super::App {
         let result = if let Some(agent_client) = &self.agent_client {
             if let Err(e) = agent_client
                 .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
-                .await { log::warn!("failed to sync session messages: {e}"); }
+                .await
+            {
+                log::warn!("failed to sync session messages: {e}");
+            }
             agent_client.save_current_session().await
-        } else { Err(sdk::SdkError::Internal("SDK agent client is unavailable".to_string())) };
+        } else {
+            Err(sdk::SdkError::Internal(
+                "SDK agent client is unavailable".to_string(),
+            ))
+        };
         match result {
-            Ok(()) => self
-                .output_area
-                .push_system(&format!("[session saved: {}]", self.session.session_id)),
-            Err(e) => self
-                .output_area
-                .push_error(&format!("Failed to save session: {e}")),
+            Ok(()) => self.output_area.push_system(&format!("[session saved: {}]", self.session.session_id)),
+            Err(e) => self.output_area.push_error(&format!("Failed to save session: {e}")),
         }
     }
 
