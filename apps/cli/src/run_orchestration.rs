@@ -1,6 +1,4 @@
 use crate::args::Args;
-use ::runtime::api::client::{self, ModelSelector};
-use ::runtime::api::core::config::models::ResolvedModel;
 
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
     matches!(mode, Some("allow_all"))
@@ -13,19 +11,6 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
         args.allow_all = true;
     }
     args
-}
-
-/// CLI 专用的模型选择器。
-struct CliModelSelector;
-
-impl ModelSelector for CliModelSelector {
-    fn select_model(
-        &self,
-        requested: Option<&str>,
-        config: Option<&::runtime::api::core::config::Config>,
-    ) -> Result<ResolvedModel, String> {
-        crate::model_selection::select_model_for_run(requested, config)
-    }
 }
 
 fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
@@ -43,7 +28,7 @@ pub(crate) async fn run_chat(args: Args) {
     ::runtime::api::command::commands::init_all();
 
     let args = apply_permission_env_override(args);
-    let client = client::from_args(args.into(), &CliModelSelector)
+    let client = ::runtime::api::client::from_args(args.into())
         .await
         .unwrap_or_else(|e| {
             eprintln!("Error: {e}");

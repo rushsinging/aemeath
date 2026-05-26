@@ -149,3 +149,29 @@ fn test_provider_ci() {
     assert!(config.provider_ci("Zhipu").is_some());
     assert!(config.provider_ci("unknown").is_none());
 }
+
+#[test]
+fn test_select_for_run_prefers_cli_model() {
+    let config = resolver_config();
+    let resolved = config
+        .select_for_run(Some("LiteLLM/anthropic/claude-opus-4-7"))
+        .unwrap();
+    assert_eq!(resolved.source_key, "LiteLLM");
+    assert_eq!(resolved.model.id, "anthropic/claude-opus-4-7");
+}
+
+#[test]
+fn test_select_for_run_falls_back_to_default_when_none() {
+    let config = resolver_config();
+    let resolved = config.select_for_run(None).unwrap();
+    assert_eq!(resolved.source_key, "Zhipu");
+    assert_eq!(resolved.model.id, "glm-5.1");
+}
+
+#[test]
+fn test_select_for_run_treats_empty_as_none() {
+    let config = resolver_config();
+    let resolved = config.select_for_run(Some("")).unwrap();
+    assert_eq!(resolved.source_key, "Zhipu");
+    assert_eq!(resolved.model.id, "glm-5.1");
+}
