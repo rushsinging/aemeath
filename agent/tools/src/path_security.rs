@@ -82,11 +82,7 @@ pub fn validate_and_normalize_path_from_base(
 
     // Path-aware containment check
     if !allow_outside && !normalized.starts_with(&workspace_abs) {
-        return Err(format!(
-            "Path '{}' escapes workspace '{}'. Only files within the workspace are allowed.",
-            normalized.display(),
-            workspace_abs.display()
-        ));
+        return Err(outside_workspace_error("Path", &normalized, &workspace_abs));
     }
 
     Ok(normalized)
@@ -120,14 +116,23 @@ pub fn validate_search_path_from_base(
         .map_err(|e| format!("Cannot resolve search path '{}': {}", path_str, e))?;
 
     if !resolved.starts_with(&workspace_abs) {
-        return Err(format!(
-            "Search path '{}' is outside the workspace '{}'.",
-            resolved.display(),
-            workspace_abs.display()
+        return Err(outside_workspace_error(
+            "Search path",
+            &resolved,
+            &workspace_abs,
         ));
     }
 
     Ok(resolved)
+}
+
+fn outside_workspace_error(kind: &str, path: &Path, workspace_abs: &Path) -> String {
+    format!(
+        "{kind} '{}' is outside the current workspace '{}'. Prefer relative paths, or use an absolute path under '{}'. Do not retry the same absolute path from another checkout.",
+        path.display(),
+        workspace_abs.display(),
+        workspace_abs.display()
+    )
 }
 
 /// Validate that a tool_use_id is safe to use as a filename.
@@ -163,5 +168,23 @@ mod tests {
 
         assert_eq!(path, worktree.canonicalize().unwrap().join("src/new.rs"));
         assert!(!path.starts_with(workspace.path().join("src")));
+    }
+
+    #[test]
+    fn test_validate_search_path_from_base_rejects_other_checkout_with_recovery_hint() {
+        let workspace = tempdir().unwrap();
+        let other_checkout = tempdir().unwrap();
+
+        let err = validate_search_path_from_base(
+            other_checkout.path().to_str().unwrap(),
+            workspace.path(),
+            workspace.path(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("outside the current workspace"));
+        assert!(err.contains("Prefer relative paths"));
+        assert!(err.contains(&workspace.path().display().to_string()));
+        assert!(err.contains("Do not retry the same absolute path"));
     }
 }

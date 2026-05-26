@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::api::core::config::{paths, MemoryConfig};
-use crate::api::hook::hook::HookRunner;
 use crate::api::core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
+use crate::api::hook::hook::HookRunner;
 
 use super::git_context::{collect_git_context, is_git_repo};
 
@@ -91,8 +91,11 @@ GOOD: TaskListCreate(summary) → TaskCreate(3 tasks) → Agent("do task 1", tas
  - Do not use emojis unless the user explicitly requests it.
 
 # Environment
+ - Current workspace root: {cwd_str}
  - Working directory: {cwd_str}
- - Is a git repository: {is_git}"#
+ - Is a git repository: {is_git}
+ - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace root above.
+ - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace root."#
     )
 }
 
