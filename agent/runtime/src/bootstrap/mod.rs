@@ -6,8 +6,10 @@ pub mod permissions;
 pub mod provider_client;
 pub mod runtime_support;
 
-use std::path::PathBuf;
-
+use crate::api::core::config::models::ResolvedModel;
+use crate::api::core::config::Config;
+use crate::api::tools::mcp_manager::McpConnectionManager;
+use crate::chat::ChatRuntimeContext;
 pub use concurrency::resolve_concurrency_limits;
 pub use logging_setup::{init_logging, init_panic_hook, set_current_turn, set_session_id};
 pub use mcp_loader::{load_mcp_manager, parse_mcp_servers_config, spawn_mcp_connect};
@@ -19,11 +21,6 @@ pub use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 pub use runtime_support::{
     build_agent_runner, build_hook_runner, build_json_logger, start_session,
 };
-
-use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::config::Config;
-use crate::api::tools::mcp_manager::McpConnectionManager;
-use crate::chat::ChatRuntimeContext;
 use std::sync::Arc;
 
 /// 合并 context_size（优先级：CLI > env > config > 默认 128000）。
@@ -51,11 +48,11 @@ pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ChatBootstrapArgs {
+pub struct LegacyChatBootstrapArgs {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
-    pub cwd: Option<PathBuf>,
+    pub cwd: Option<std::path::PathBuf>,
     pub max_tokens: Option<u32>,
     pub verbose: bool,
     pub no_markdown: bool,
@@ -67,6 +64,8 @@ pub struct ChatBootstrapArgs {
     pub no_think: bool,
     pub reasoning_effort: Option<String>,
 }
+
+pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 
 pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
 
@@ -82,7 +81,7 @@ impl prompt::guidance::resolver::InstructionsLoadedHook for InstructionsLoadedHo
 
 pub struct ChatBootstrap {
     pub args: ChatBootstrapArgs,
-    pub cwd: PathBuf,
+    pub cwd: std::path::PathBuf,
     pub resolved_model: ResolvedModel,
     pub session_id: String,
     pub context: ChatRuntimeContext,

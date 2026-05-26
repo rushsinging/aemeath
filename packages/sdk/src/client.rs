@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 
 use crate::{
-    ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SessionSnapshot, TaskSummary,
+    ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext, SessionSnapshot,
+    TaskSummary,
 };
 
 /// Agent Runtime 的统一客户端 trait。
@@ -49,6 +50,9 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 删除指定 session。
     async fn delete_session(&self, id: &str) -> Result<(), super::SdkError>;
+
+    /// 列出可用模型摘要。
+    async fn list_models(&self) -> Result<Vec<ModelSummary>, super::SdkError>;
 
     /// 压缩 session 消息。
     async fn compact(&self) -> Result<(), super::SdkError>;

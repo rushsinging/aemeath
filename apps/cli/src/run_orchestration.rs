@@ -13,15 +13,6 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
     args
 }
 
-fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
-    let display_name = if model_name.is_empty() {
-        model_id
-    } else {
-        model_name
-    };
-    format!("{}/{}", source_key, display_name)
-}
-
 fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
@@ -40,34 +31,29 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
 
-    let ctx = client.context().clone();
-    let session_id = client.session_id().to_string();
-    let cwd = client.cwd().to_path_buf();
-    let model = client.resolved_model();
-    let model_disp = model_display(&model.source_key, &model.model.name, &model.model.id);
-    let max_tool = client.max_tool_concurrency();
-    let max_agent = client.max_agent_concurrency();
+    let launch = client.tui_launch_context();
+    let session_id = launch.session_id.clone();
 
-    let mut app = crate::tui::App::new(session_id.clone(), cwd, model_disp);
-    app.session.memory_config = ctx.memory_config;
-    app.set_skills(ctx.skills_map);
-    app.cmd_exec.hook_runner = ctx.hook_runner;
-    app.cmd_exec.json_logger = ctx.json_logger;
+    let mut app = crate::tui::App::new(launch.session_id.clone(), launch.cwd, launch.model_display);
+    app.session.memory_config = launch.memory_config;
+    app.set_skills(launch.skills_map);
+    app.cmd_exec.hook_runner = launch.hook_runner;
+    app.cmd_exec.json_logger = launch.json_logger;
     app.run(
-        ctx.client,
-        ctx.registry,
-        ctx.system_blocks,
-        ctx.system_prompt_text,
-        ctx.user_context,
-        ctx.context_size,
-        ctx.verbose,
-        Some(ctx.agent_runner),
-        ctx.allow_all,
+        launch.client,
+        launch.registry,
+        launch.system_blocks,
+        launch.system_prompt_text,
+        launch.user_context,
+        launch.context_size,
+        launch.verbose,
+        Some(launch.agent_runner),
+        launch.allow_all,
         initial_resume_id,
-        ctx.task_store,
-        max_tool,
-        max_agent,
-        ctx.agent_semaphore,
+        launch.task_store,
+        launch.max_tool_concurrency,
+        launch.max_agent_concurrency,
+        launch.agent_semaphore,
     )
     .await
     .unwrap_or_else(|e| {
@@ -86,24 +72,6 @@ mod tests {
         assert!(permission_env_override(Some("allow_all")));
         assert!(!permission_env_override(Some("ask")));
         assert!(!permission_env_override(None));
-    }
-
-    #[test]
-    fn test_model_display_uses_name_when_present() {
-        assert_eq!(
-            model_display("zhipu", "GLM-5.1", "glm-5.1"),
-            "zhipu/GLM-5.1"
-        );
-    }
-
-    #[test]
-    fn test_model_display_falls_back_to_id_when_name_empty() {
-        assert_eq!(model_display("openai", "", "gpt-4o"), "openai/gpt-4o");
-    }
-
-    #[test]
-    fn test_model_display_empty_source_still_formats() {
-        assert_eq!(model_display("", "Claude", "claude-3"), "/Claude");
     }
 
     #[test]

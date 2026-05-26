@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SdkError,
-    SessionSnapshot, TaskSummary,
+    AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext,
+    SdkError, SessionSnapshot, SessionSummary, TaskSummary,
 };
 use tokio::sync::watch;
 
@@ -284,6 +284,34 @@ fn load_configured_skills(
     load_all_skills(cwd, &dirs)
 }
 
+fn session_summary_from_runtime(session: crate::session::Session) -> SessionSummary {
+    let preview = session
+        .messages
+        .iter()
+        .find(|m| m.role == crate::api::core::message::Role::User)
+        .map(|m| m.text_content())
+        .and_then(|text| {
+            let first_line = text.lines().next().unwrap_or("").trim();
+            if first_line.is_empty() {
+                None
+            } else {
+                Some(first_line.chars().take(50).collect())
+            }
+        });
+    let summary = session.summary();
+    SessionSummary {
+        id: session.id,
+        title: session.metadata.title,
+        project: session.metadata.project,
+        model: session.metadata.model,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        message_count: session.messages.len(),
+        preview,
+        summary,
+    }
+}
+
 // ─── AgentClient trait 实现 ───
 
 #[async_trait]
@@ -341,12 +369,37 @@ impl AgentClient for AgentClientImpl {
         })
     }
 
-    async fn list_sessions(&self) -> Result<Vec<sdk::session::SessionSummary>, SdkError> {
-        Ok(Vec::new())
+    async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
+        Ok(crate::session::list_sessions()
+            .await
+            .into_iter()
+            .map(session_summary_from_runtime)
+            .collect())
     }
 
-    async fn delete_session(&self, _id: &str) -> Result<(), SdkError> {
-        Ok(())
+    async fn delete_session(&self, id: &str) -> Result<(), SdkError> {
+        crate::session::delete_session(id)
+            .await
+            .map_err(SdkError::Session)
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
+        let config = ConfigManager::new(Some(&self.inner.cwd))
+            .load()
+            .await
+            .map_err(SdkError::Init)?;
+        Ok(config
+            .models
+            .list_models()
+            .into_iter()
+            .map(|(provider, model)| ModelSummary {
+                provider,
+                id: model.id,
+                name: model.name,
+                context_window: model.context_window,
+                max_tokens: model.max_tokens,
+            })
+            .collect())
     }
 
     async fn compact(&self) -> Result<(), SdkError> {
@@ -380,4 +433,43 @@ impl AgentClientImpl {
     pub fn max_agent_concurrency(&self) -> usize {
         self.inner.max_agent_concurrency
     }
+
+    pub fn tui_launch_context(&self) -> crate::tui_launch::TuiLaunchContext {
+        let ctx = self.context().clone();
+        crate::tui_launch::TuiLaunchContext {
+            session_id: self.session_id().to_string(),
+            cwd: self.cwd().to_path_buf(),
+            model_display: model_display(
+                &self.resolved_model().source_key,
+                &self.resolved_model().model.name,
+                &self.resolved_model().model.id,
+            ),
+            client: ctx.client,
+            registry: ctx.registry,
+            system_blocks: ctx.system_blocks,
+            system_prompt_text: ctx.system_prompt_text,
+            user_context: ctx.user_context,
+            context_size: ctx.context_size,
+            verbose: ctx.verbose,
+            agent_runner: ctx.agent_runner,
+            allow_all: ctx.allow_all,
+            task_store: ctx.task_store,
+            max_tool_concurrency: self.max_tool_concurrency(),
+            max_agent_concurrency: self.max_agent_concurrency(),
+            agent_semaphore: ctx.agent_semaphore,
+            memory_config: ctx.memory_config,
+            skills_map: ctx.skills_map,
+            hook_runner: ctx.hook_runner,
+            json_logger: ctx.json_logger,
+        }
+    }
+}
+
+fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
+    let display_name = if model_name.is_empty() {
+        model_id
+    } else {
+        model_name
+    };
+    format!("{}/{}", source_key, display_name)
 }
