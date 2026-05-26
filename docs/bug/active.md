@@ -9,7 +9,38 @@
 | 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
+| 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 活动中 | 未确认 | 2026-05 | 使用 `aemeath --resume <session>` 启动后进入 TUI，预期应加载并显示历史消息以继续会话，但实际 TUI 起始为空白，似乎走到了新会话路径；疑似 `--resume` 参数未传递到 TUI 启动路径，或 session 加载/历史回放在最近重构中被遗漏 |
 ## 专案
+
+### #67 `--resume` 失效：进入 TUI 后未加载历史会话
+
+**状态**：活动中
+
+**症状**：使用 `aemeath --resume <session-id>`（或同等 resume 入口）启动后进入 TUI，预期应自动加载指定 session 的历史消息并显示在 output area 中，便于继续对话；实际 TUI 起始为空白，与新建会话表现一致，历史内容未被加载/回放。
+
+**复现**：
+1. 选择一个已存在的 session（例如通过 `/resume` 列表或 `~/.agents/sessions/` 找到）。
+2. 命令行执行 `aemeath --resume <session-id>` 启动 TUI。
+3. 观察 TUI 进入后 output area 没有历史消息回放；status line / session id 是否反映 resume 也需要核对。
+4. 对比 TUI 内 `/resume` slash 命令的行为是否仍正常加载历史。
+
+**根因假设**：
+1. `--resume` CLI 参数未传递到 TUI bootstrap 路径：移除 REPL 后 CLI → runtime bootstrap 链路里某层把 resume session id 丢弃，TUI 启动时按"新建 session"分支处理。
+2. session 加载逻辑还在，但 TUI 历史回放（把已加载消息转为 output area items）路径在重构中被遗漏或没有被 bootstrap 触发。
+3. session 实际加载成功，但 output area 初始化在历史注入之前完成快照，导致历史消息没有被 push 到渲染队列。
+4. `--resume` 与 TUI 内 `/resume` 走不同代码路径，CLI 入口缺少对应的 session 加载分支。
+
+**修复方向**：
+1. 复现并定位 `--resume` 在当前 CLI / runtime / TUI bootstrap 中的实际处理链路，确认参数传递是否在某层被丢弃。
+2. 检查 TUI 启动后 session 加载与历史消息注入的时序：是否先初始化空 session，再异步加载历史；如果是，应在 TUI runtime 启动阶段同步注入历史消息或在加载完成后显式触发 output area 重放。
+3. 同时核对 TUI 内 `/resume` 命令的实现是否仍能正常加载历史，对比两条路径，复用同一份"加载 session + 注入历史 + 刷新 output area"逻辑。
+4. 补充回归：CLI `--resume` 启动 TUI、TUI 内 `/resume` 切换会话两条路径都能加载并显示历史消息；session 不存在/损坏时应报明确错误，而不是静默退化为新会话。
+
+**涉及路径（预计）**：
+- CLI 入口与 `--resume` 参数解析
+- runtime / Chat bootstrap 中 session 加载与历史注入
+- TUI 启动流程与 output area 历史回放
+- `/resume` slash 命令实现（用于对比）
 
 ### #66 ExitWorktree 带 path 参数报错"已在 worktree 中"
 
