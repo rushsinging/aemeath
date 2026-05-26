@@ -1,4 +1,3 @@
-mod application;
 mod cli;
 mod model_selection;
 mod render;

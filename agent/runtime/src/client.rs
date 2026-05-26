@@ -1,7 +1,7 @@
-//! AgentClient 实现 — RuntimeHandle 的薄代理。
+//! AgentClient 实现 — 封装全部初始化编排。
 //!
-//! AgentClient trait 定义在 `packages/sdk`，此处提供具体实现。
-//! `new()` 在 Phase 1 吞掉 setup.rs 的全部 build_* 逻辑。
+//! `AgentClientImpl::from_args()` 替代了原 CLI 的 `setup.rs`。
+//! 所有 build_* 逻辑在此完成，CLI 只需一行调用。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -11,40 +11,53 @@ use sdk::{
     AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SessionSnapshot,
     SdkError, TaskSummary,
 };
-use tokio::sync::{watch, RwLock};
+use tokio::sync::watch;
 
+use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::task::TaskStore;
+use crate::api::tools::mcp_manager::McpConnectionManager;
+use crate::api::tools as tools_crate;
+use crate::bootstrap::{
+    self, build_agent_runner, build_hook_runner, build_json_logger, init_logging, spawn_mcp_connect,
+    apply_config_permission_mode, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
+    resolve_model_runtime_settings, ReasoningConfigInput,
+};
+use crate::chat::ChatRuntimeContext;
+use crate::bootstrap::{start_session, set_session_id, ChatBootstrapArgs, ChatModeSelection};
+use crate::api::core::config::ConfigManager;
+use crate::api::core::tool::ToolRegistry;
+use crate::api::prompt::skill::{load_all_skills, Skill};
+use crate::api::provider::types::SystemBlock;
+use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
 
 /// AgentClient 的 runtime 实现。
 ///
-/// 持有 `RuntimeHandle`，所有方法都是委托调用。
-/// Phase 0 先提供骨架实现，Phase 1 完善 new() 的初始化编排。
+/// 持有全部运行时状态（LLM client、tool registry、session 等），
+/// CLI 通过 sdk::AgentClient trait 与之交互。
 #[derive(Clone)]
 pub struct AgentClientImpl {
     inner: Arc<RuntimeHandle>,
 }
 
-/// Runtime 内部状态句柄。
-///
-/// 被 AgentClientImpl 持有，封装 session、cost、task 等运行时状态。
+/// Runtime 内部状态。
 pub struct RuntimeHandle {
-    task_store: Arc<TaskStore>,
+    // ─── 业务状态 ───
+    pub context: ChatRuntimeContext,
+    pub cwd: std::path::PathBuf,
+    pub resolved_model: ResolvedModel,
+    pub session_id: String,
+    pub max_tool_concurrency: usize,
+    pub max_agent_concurrency: usize,
+    pub mode_selection: ChatModeSelection,
+    pub _mcp_manager: Arc<McpConnectionManager>,
+
+    // ─── SDK 状态 ───
     cancel_token: Arc<AtomicBool>,
     change_tx: watch::Sender<ChangeSet>,
     change_rx: watch::Receiver<ChangeSet>,
 }
 
 impl RuntimeHandle {
-    pub fn new(task_store: Arc<TaskStore>) -> Self {
-        let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
-        Self {
-            task_store,
-            cancel_token: Arc::new(AtomicBool::new(false)),
-            change_tx,
-            change_rx,
-        }
-    }
-
     pub fn notify_change(&self, set: ChangeSet) {
         let _ = self.change_tx.send(set);
     }
@@ -54,42 +67,259 @@ impl RuntimeHandle {
     }
 }
 
-impl AgentClientImpl {
-    /// 创建 AgentClient 实例。
-    ///
-    /// Phase 1 将在此方法中完成全部初始化编排（替代 setup.rs）。
-    /// Phase 0 先提供最小骨架。
-    pub fn new(task_store: Arc<TaskStore>) -> Self {
-        Self {
-            inner: Arc::new(RuntimeHandle::new(task_store)),
-        }
-    }
+/// 模型选择 trait — CLI 注入具体实现。
+///
+/// 分离关注点：runtime 不知道 CLI 的 model_selection 模块，
+/// CLI 注入闭包即可。
+pub trait ModelSelector: Send + Sync {
+    fn select_model(
+        &self,
+        requested: Option<&str>,
+        config: Option<&crate::api::core::config::Config>,
+    ) -> Result<ResolvedModel, String>;
 }
+
+/// 从 Args 初始化 AgentClient。
+///
+/// 这是从 CLI setup.rs 迁移过来的全部编排逻辑。
+/// CLI 只需 `AgentClientImpl::from_args(args, model_selector).await`。
+pub async fn from_args(
+    mut args: ChatBootstrapArgs,
+    model_selector: &dyn ModelSelector,
+) -> Result<AgentClientImpl, SdkError> {
+    // 1. Guidance 目录初始化
+    crate::api::prompt::guidance::init_guidance_dir();
+
+    // 2. 解析 cwd
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    // 3. 加载配置
+    let config_file = ConfigManager::new(Some(&cwd))
+        .load()
+        .await
+        .ok();
+
+    // 4. 日志初始化
+    init_logging(
+        config_file
+            .as_ref()
+            .map(|c| &c.logging)
+            .unwrap_or(&crate::api::core::config::LoggingConfig::default()),
+    );
+
+    // 5. 权限模式
+    apply_config_permission_mode(&mut args, config_file.as_ref());
+
+    // 6. 模型选择
+    let requested_model = args.model.as_deref();
+    let resolved_model = model_selector
+        .select_model(requested_model, config_file.as_ref())
+        .map_err(|e| SdkError::Init(e))?;
+    let api_type = resolved_model.api;
+
+    // 7. API key
+    let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
+        SdkError::Init(
+            "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
+        )
+    })?;
+
+    // 8. Base URL + model + runtime settings
+    let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
+    let model = resolved_model.model.id.clone();
+    let runtime_settings = resolve_model_runtime_settings(
+        args.max_tokens,
+        &resolved_model.model,
+        config_file.as_ref(),
+        !args.no_think,
+        ReasoningConfigInput {
+            cli_reasoning_effort: args.reasoning_effort.clone(),
+            env_reasoning_effort: std::env::var("AEMEATH_REASONING_EFFORT").ok(),
+        },
+    )
+    .map_err(|e| SdkError::Init(e.to_string()))?;
+
+    log::info!(
+        "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
+        resolved_model.source_key,
+        api_type.as_str(),
+        model,
+        runtime_settings.reasoning,
+        runtime_settings.reasoning_effort,
+        args.no_think
+    );
+
+    // 9. LLM client
+    let client = Arc::new(bootstrap::build_llm_client(
+        api_type,
+        api_key,
+        base_url,
+        model.clone(),
+        &resolved_model,
+        &runtime_settings,
+    ));
+
+    // 10. Tooling
+    let task_store = Arc::new(TaskStore::new());
+    let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
+    if !skills_map.is_empty() {
+        log::info!("[Skills] loaded {} skills", skills_map.len());
+    }
+    let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
+    let registry = {
+        let reg = ToolRegistry::new();
+        tools_crate::register_all_tools(&reg, task_store.clone(), skills.clone());
+        Arc::new(reg)
+    };
+    let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
+
+    // 11. Hook runner
+    let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
+
+    // 12. Session
+    let session_id = start_session(args.resume.clone());
+    set_session_id(session_id.clone());
+
+    // 13. JSON logger
+    let json_logger = build_json_logger(&session_id, config_file.as_ref());
+
+    // 14. Agent runner
+    let agent_runner = build_agent_runner(
+        config_file.as_ref(),
+        client.clone(),
+        hook_runner.clone(),
+        runtime_settings.reasoning,
+        json_logger.clone(),
+    );
+
+    // 15. Prompt bundle
+    let prompt_memory_config = config_file
+        .as_ref()
+        .map(|c| c.memory.clone())
+        .unwrap_or_default();
+    let prompt_context = PromptContext::new(&cwd, Some(client.provider_name()), Some(client.model_name()));
+    let prompt_parts = build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
+
+    let static_prompt = crate::prompt_build_ext::build_static_prompt(
+        &cwd,
+        &model,
+        runtime_settings.reasoning,
+        config_file.as_ref(),
+        &hook_runner,
+        prompt_parts.clone(),
+        &skills,
+    )
+    .await;
+    let system_blocks = vec![
+        SystemBlock::cached(static_prompt),
+        SystemBlock::dynamic(prompt_parts.dynamic_part),
+    ];
+    let system_prompt_text: String = system_blocks
+        .iter()
+        .map(|b| b.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    // 16. Concurrency
+    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
+        args.max_tool_concurrency,
+        args.max_agent_concurrency,
+        config_file.as_ref(),
+    );
+    let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
+    log::info!(
+        "concurrency limits: max_tool={}, max_agent={}",
+        max_tool_concurrency,
+        max_agent_concurrency
+    );
+
+    // 17. 组装 context
+    let memory_config = config_file
+        .as_ref()
+        .map(|c| c.memory.clone())
+        .unwrap_or_default();
+    let mode_selection = args.mode_selection();
+    let context = ChatRuntimeContext {
+        client,
+        registry,
+        system_blocks,
+        system_prompt_text,
+        user_context: prompt_parts.claude_md,
+        agent_runner,
+        task_store,
+        skills_map,
+        hook_runner,
+        memory_config,
+        json_logger,
+        agent_semaphore,
+    };
+
+    // 18. 构建 handle
+    let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
+    let handle = RuntimeHandle {
+        context,
+        cwd,
+        resolved_model,
+        session_id,
+        max_tool_concurrency,
+        max_agent_concurrency,
+        mode_selection,
+        _mcp_manager: mcp_manager,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        change_tx,
+        change_rx,
+    };
+
+    Ok(AgentClientImpl {
+        inner: Arc::new(handle),
+    })
+}
+
+// ─── 内部辅助 ───
+
+fn load_configured_skills(
+    cwd: &std::path::Path,
+    skills_config: Option<&crate::api::core::config::SkillsConfig>,
+) -> std::collections::HashMap<String, Skill> {
+    let dirs = skills_config
+        .map(|c| c.dirs.clone())
+        .unwrap_or_default();
+    load_all_skills(cwd, &dirs)
+}
+
+// ─── AgentClient trait 实现 ───
 
 #[async_trait]
 impl AgentClient for AgentClientImpl {
     fn session_snapshot(&self) -> SessionSnapshot {
-        // Phase 1: 从实际 session 获取
         SessionSnapshot {
-            id: String::new(),
-            message_count: 0,
+            id: self.inner.session_id.clone(),
+            message_count: 0, // TODO: 从实际 session 获取
             total_tokens: 0,
         }
     }
 
     fn cost(&self) -> CostInfo {
-        // Phase 1: 从 cost_tracker 获取
+        // TODO: 从 cost_tracker 获取
         CostInfo::default()
     }
 
     fn task_list(&self) -> Vec<TaskSummary> {
-        // Phase 1: 从 task_store 获取
+        // TODO: 从 task_store 获取
         Vec::new()
     }
 
     fn project(&self) -> ProjectContext {
-        // Phase 1: 从 project context 获取
-        ProjectContext::default()
+        ProjectContext {
+            cwd: self.inner.cwd.to_string_lossy().to_string(),
+            path_base: String::new(), // TODO
+            working_root: String::new(), // TODO
+            git_branch: None,
+        }
     }
 
     fn changes(&self) -> watch::Receiver<ChangeSet> {
@@ -97,7 +327,7 @@ impl AgentClient for AgentClientImpl {
     }
 
     async fn chat(&self, _input: ChatInput) -> Result<ChatStream, SdkError> {
-        // Phase 1: 连接到实际 chat loop
+        // TODO: 连接到实际 chat loop
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(ChatStream::new(rx))
     }
@@ -107,12 +337,10 @@ impl AgentClient for AgentClientImpl {
     }
 
     async fn save_session(&self) -> Result<(), SdkError> {
-        // Phase 1: 实际保存
         Ok(())
     }
 
     async fn load_session(&self, _id: &str) -> Result<SessionSnapshot, SdkError> {
-        // Phase 1: 实际加载
         Ok(SessionSnapshot {
             id: _id.to_string(),
             message_count: 0,
@@ -121,17 +349,46 @@ impl AgentClient for AgentClientImpl {
     }
 
     async fn list_sessions(&self) -> Result<Vec<sdk::session::SessionSummary>, SdkError> {
-        // Phase 1: 实际列表
         Ok(Vec::new())
     }
 
     async fn delete_session(&self, _id: &str) -> Result<(), SdkError> {
-        // Phase 1: 实际删除
         Ok(())
     }
 
     async fn compact(&self) -> Result<(), SdkError> {
-        // Phase 1: 实际压缩
         Ok(())
+    }
+}
+
+// ─── 公共访问器（CLI runtime.rs 需要） ───
+
+impl AgentClientImpl {
+    pub fn mode_selection(&self) -> ChatModeSelection {
+        self.inner.mode_selection
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.inner.session_id
+    }
+
+    pub fn cwd(&self) -> &std::path::Path {
+        &self.inner.cwd
+    }
+
+    pub fn resolved_model(&self) -> &ResolvedModel {
+        &self.inner.resolved_model
+    }
+
+    pub fn context(&self) -> &ChatRuntimeContext {
+        &self.inner.context
+    }
+
+    pub fn max_tool_concurrency(&self) -> usize {
+        self.inner.max_tool_concurrency
+    }
+
+    pub fn max_agent_concurrency(&self) -> usize {
+        self.inner.max_agent_concurrency
     }
 }

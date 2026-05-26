@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct ChatRuntimeContext {
     pub client: Arc<LlmClient>,
     pub registry: Arc<ToolRegistry>,

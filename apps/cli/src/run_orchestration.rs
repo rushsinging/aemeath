@@ -1,9 +1,7 @@
-mod prompt;
-mod runtime;
-mod setup;
-
 use crate::cli::Args;
 use ::runtime::api::bootstrap::ChatModeSelection;
+use ::runtime::api::client::{self, AgentClientImpl, ModelSelector};
+use ::runtime::api::core::config::models::ResolvedModel;
 
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
     matches!(mode, Some("allow_all"))
@@ -18,18 +16,112 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
     args
 }
 
-/// 主聊天逻辑（原 main 主体）
+/// CLI 专用的模型选择器。
+struct CliModelSelector;
+
+impl ModelSelector for CliModelSelector {
+    fn select_model(
+        &self,
+        requested: Option<&str>,
+        config: Option<&::runtime::api::core::config::Config>,
+    ) -> Result<ResolvedModel, String> {
+        crate::model_selection::select_model_for_run(requested, config)
+    }
+}
+
+/// 主聊天逻辑 — 瘦身入口。
 pub(crate) async fn run_chat(args: Args) {
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
     ::runtime::api::command::commands::init_all();
 
     let args = apply_permission_env_override(args);
-    let bootstrap = setup::bootstrap_chat(args).await;
+    let client = client::from_args(args.into(), &CliModelSelector)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        });
 
-    match bootstrap.mode_selection {
-        ChatModeSelection::NoTui => runtime::run_no_tui_from_bootstrap(bootstrap).await,
-        ChatModeSelection::Tui => runtime::run_tui_from_bootstrap(bootstrap).await,
+    match client.mode_selection() {
+        ChatModeSelection::NoTui => run_no_tui(client).await,
+        ChatModeSelection::Tui => run_tui(client).await,
     }
+}
+
+fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
+    let display_name = if model_name.is_empty() {
+        model_id
+    } else {
+        model_name
+    };
+    format!("{}/{}", source_key, display_name)
+}
+
+async fn run_no_tui(client: AgentClientImpl) {
+    let ctx = client.context().clone();
+    let cwd = client.cwd().to_path_buf();
+    let max_tool = client.max_tool_concurrency();
+    crate::repl::run_repl(
+        ctx.client,
+        ctx.registry,
+        ctx.system_blocks,
+        ctx.system_prompt_text,
+        ctx.user_context,
+        cwd,
+        false, // verbose
+        true,  // markdown
+        0,     // context_size
+        None,  // resume
+        Some(ctx.agent_runner),
+        false, // allow_all
+        ctx.task_store,
+        max_tool,
+        ctx.agent_semaphore,
+        ctx.skills_map,
+        ctx.hook_runner,
+        ctx.memory_config,
+        ctx.json_logger,
+    )
+    .await;
+}
+
+async fn run_tui(client: AgentClientImpl) {
+    let ctx = client.context().clone();
+    let session_id = client.session_id().to_string();
+    let cwd = client.cwd().to_path_buf();
+    let model = client.resolved_model();
+    let model_disp = model_display(&model.source_key, &model.model.name, &model.model.id);
+    let max_tool = client.max_tool_concurrency();
+    let max_agent = client.max_agent_concurrency();
+
+    let mut app = crate::tui::App::new(session_id.clone(), cwd, model_disp);
+    app.session.memory_config = ctx.memory_config;
+    app.set_skills(ctx.skills_map);
+    app.cmd_exec.hook_runner = ctx.hook_runner;
+    app.cmd_exec.json_logger = ctx.json_logger;
+    app.run(
+        ctx.client,
+        ctx.registry,
+        ctx.system_blocks,
+        ctx.system_prompt_text,
+        ctx.user_context,
+        0,     // context_size
+        false, // verbose
+        true,  // markdown
+        Some(ctx.agent_runner),
+        false, // allow_all
+        None,  // resume
+        ctx.task_store,
+        max_tool,
+        max_agent,
+        ctx.agent_semaphore,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        log::error!("TUI error: {e}");
+        std::process::exit(1);
+    });
+    println!("aemeath --resume {}", session_id);
 }
 
 #[cfg(test)]
