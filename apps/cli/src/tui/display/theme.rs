@@ -51,3 +51,12 @@ pub const SPINNER_BASE: Color = Color::Rgb(139, 213, 202);
 pub const SPINNER_HIGHLIGHT: Color = Color::Rgb(166, 218, 149);
 /// Spinner 弱化色。
 pub const SPINNER_DIM: Color = Color::Rgb(91, 96, 120);
+
+/// Diff 新增行背景色。
+pub const DIFF_ADD_BG: Color = Color::Rgb(0, 40, 10);
+/// Diff 新增行前景色。
+pub const DIFF_ADD_FG: Color = Color::Rgb(56, 166, 96);
+/// Diff 删除行背景色。
+pub const DIFF_REMOVE_BG: Color = Color::Rgb(60, 20, 30);
+/// Diff 删除行前景色。
+pub const DIFF_REMOVE_FG: Color = Color::Rgb(220, 100, 110);

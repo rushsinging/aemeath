@@ -1,6 +1,4 @@
-use super::*;
 use ::runtime::api::core::task::{Task, TaskStatus};
-use crate::tui::display::task_window::build_task_window;
 
 pub(crate) fn make_task_with_ts(id: &str, subject: &str, status: TaskStatus, ts: u64) -> Task {
     Task {
