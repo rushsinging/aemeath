@@ -11,7 +11,7 @@ import sys
 
 business_allow = {
       "cli": {"runtime"},
-      "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share"},
+      "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk"},
       "share": {"core", "project", "prompt"},
       "project": {"core"},
       "policy": {"core"},
@@ -22,7 +22,8 @@ business_allow = {
       "hook": {"core"},
       "audit": {"core"},
       "core": set(),
-  }
+      "sdk": set(),
+    }
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"]))
 workspace_names = {package["name"] for package in metadata["packages"]}
