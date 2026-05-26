@@ -24,3 +24,18 @@ pub(crate) fn messages_to_sdk(
         })
         .collect()
 }
+
+pub(crate) fn message_from_sdk(
+    message: sdk::ChatMessage,
+) -> ::runtime::api::core::message::Message {
+    let role = match message.role.as_str() {
+        "assistant" => ::runtime::api::core::message::Role::Assistant,
+        _ => ::runtime::api::core::message::Role::User,
+    };
+    let content = serde_json::from_value(message.content).unwrap_or_else(|_| {
+        vec![::runtime::api::core::message::ContentBlock::Text {
+            text: String::new(),
+        }]
+    });
+    ::runtime::api::core::message::Message { role, content }
+}

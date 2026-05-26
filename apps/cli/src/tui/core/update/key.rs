@@ -5,10 +5,7 @@ use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 /// Ctrl+C 在非 processing、非 suggestions 状态下的动作。
 /// 提取为纯函数以便单元测试。
@@ -48,8 +45,7 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
         ui_tx: &mpsc::Sender<UiEvent>,
-        active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        spawn_refs: &SpawnContextRefs<'_>,
+        spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
             return UpdateResult {
@@ -85,11 +81,8 @@ impl App {
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                 if self.chat.is_processing {
-                    spawn_refs.interrupted.store(true, Ordering::Relaxed);
-                    if let Ok(guard) = active_cancel.lock() {
-                        if let Some(token) = guard.as_ref() {
-                            token.cancel();
-                        }
+                    if let Some(agent_client) = &spawn_refs.agent_client {
+                        agent_client.cancel();
                     }
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
@@ -129,11 +122,8 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 // Esc during processing: interrupt current LLM turn + tool calls
-                spawn_refs.interrupted.store(true, Ordering::Relaxed);
-                if let Ok(guard) = active_cancel.lock() {
-                    if let Some(token) = guard.as_ref() {
-                        token.cancel();
-                    }
+                if let Some(agent_client) = &spawn_refs.agent_client {
+                    agent_client.cancel();
                 }
                 self.status_bar.set_warning("Interrupted");
             }
@@ -153,7 +143,7 @@ impl App {
                 if self.input_area.is_showing_suggestions() {
                     self.apply_current_suggestion();
                 } else if !self.input_area.is_empty() {
-                    return self.update_enter(ui_tx, active_cancel, spawn_refs);
+                    return self.update_enter(ui_tx, spawn_refs);
                 }
             }
             _ if handle_scroll_key(self, key, key.modifiers) => {}

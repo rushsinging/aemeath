@@ -1,13 +1,3 @@
-use crate::tui::core::event::UiEvent;
-use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::core::message::Message;
-use ::runtime::api::hook::hook::{HookData, PromptHookData};
-use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
 /// Result of handling a key event.
 #[derive(Default)]
 #[allow(dead_code)]
@@ -21,6 +11,7 @@ pub(super) enum KeyResult {
 }
 
 impl crate::tui::core::App {
+    /*
     /// [DEPRECATED] Logic moved to update.rs. Kept for reference only.
     #[allow(dead_code)]
     pub(super) fn handle_key_event(
@@ -351,4 +342,5 @@ impl crate::tui::core::App {
 
         KeyResult::None
     }
+    */
 }

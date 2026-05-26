@@ -3,18 +3,14 @@ use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use ::runtime::api::core::message::Message;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 impl App {
     /// Handle Enter when not processing
     pub(super) fn update_enter(
         &mut self,
         ui_tx: &mpsc::Sender<UiEvent>,
-        active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        spawn_refs: &SpawnContextRefs<'_>,
+        spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         let input = self.input_area.get_text();
         if input.starts_with('/') {
@@ -45,8 +41,14 @@ impl App {
                 .push(Message::user_with_images(&input, images));
         }
 
-        let spawn_ctx = self.build_spawn_context(ui_tx, active_cancel, spawn_refs);
-        spawn_refs.interrupted.store(false, Ordering::Relaxed);
+        let Some(spawn_ctx) = self.build_spawn_context(ui_tx, spawn_refs) else {
+            self.output_area
+                .push_error("SDK agent client is unavailable");
+            return UpdateResult {
+                cmd: Cmd::None,
+                pending_slash: None,
+            };
+        };
         self.chat.active_tool_call_ids.clear();
         self.chat.tool_call_active = false;
         self.output_area.start_spinner();

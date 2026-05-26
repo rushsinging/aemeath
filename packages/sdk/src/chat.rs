@@ -1,5 +1,7 @@
 //! Chat 输入 / 事件 / 流 / 结果。
 
+use crate::ChatMessage;
+
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]
 pub struct ChatInput {
@@ -8,27 +10,102 @@ pub struct ChatInput {
     pub image_paths: Vec<String>,
 }
 
-/// Chat 事件流中的单个事件。
+/// TUI 发起的一次 Chat 请求。
 #[derive(Debug, Clone)]
+pub struct ChatRequest {
+    pub messages: Vec<ChatMessage>,
+}
+
+/// Chat 事件流中的单个事件。
+#[derive(Debug)]
 pub enum ChatEvent {
     /// LLM 返回的文本 token。
     Token(String),
+    /// LLM reasoning / thinking token。
+    Thinking(String),
+    /// 文本块完成。
+    TextBlockComplete(String),
     /// 工具调用开始。
-    ToolCallStart { id: String, name: String },
-    /// 工具调用增量输出。
-    ToolCallDelta { id: String, delta: String },
-    /// 工具调用结束。
-    ToolCallEnd { id: String },
+    ToolCallStart { name: String, index: usize },
+    /// 工具参数增量。
+    ToolArgumentsDelta {
+        index: usize,
+        name: String,
+        partial_args: String,
+    },
+    /// 工具调用确认。
+    ToolCall {
+        id: String,
+        name: String,
+        summary: String,
+    },
     /// 工具执行结果。
-    ToolResult { id: String, content: String },
-    /// 需要用户确认权限。
-    PermissionRequest(super::PermissionPrompt),
-    /// 状态信息（用于 status line 显示）。
-    Status(super::StatusInfo),
-    /// Chat 完成。
-    Done(ChatResult),
+    ToolResult {
+        id: String,
+        tool_name: String,
+        output: String,
+        is_error: bool,
+        images: serde_json::Value,
+    },
+    /// 系统消息。
+    SystemMessage(String),
     /// Chat 出错。
     Error(String),
+    /// 用量统计。
+    Usage {
+        input: u32,
+        output: u32,
+        last_input: u32,
+        elapsed_secs: f64,
+    },
+    /// runtime 同步当前 messages。
+    MessagesSync(Vec<ChatMessage>),
+    /// Chat 完成。
+    Done,
+    /// Chat 完成并附带耗时毫秒。
+    DoneWithDurationMs(u64),
+    /// Chat 被取消。
+    Cancelled,
+    /// 实时 TPS。
+    LiveTps(f64),
+    /// 当前 turn 变化。
+    TurnChanged(usize),
+    /// StopFailure hook 结果。
+    StopFailureHook {
+        system_message: Option<String>,
+        additional_context: Option<String>,
+    },
+    /// AskUserQuestion 请求。
+    AskUser {
+        id: String,
+        question: String,
+        options: Vec<String>,
+        allow_free_input: bool,
+        multi_select: bool,
+        default: Option<String>,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    /// Agent progress 事件投影。
+    AgentProgress {
+        tool_id: String,
+        event: serde_json::Value,
+    },
+    /// Hook 开始。
+    HookStart { event: String, command: String },
+    /// Hook 结束。
+    HookEnd {
+        event: String,
+        blocked: bool,
+        error: Option<String>,
+    },
+    /// 工作目录变化。
+    WorkingDirectoryChanged {
+        path_base: String,
+        working_root: String,
+        workspace: serde_json::Value,
+    },
+    /// 兼容旧 ChatInput 流结果。
+    Result(ChatResult),
 }
 
 /// Chat 完成结果。
@@ -55,5 +132,53 @@ impl ChatStream {
     /// 接收下一个事件，流结束时返回 None。
     pub async fn recv(&mut self) -> Option<ChatEvent> {
         self.rx.recv().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_chat_stream_recv_returns_sent_event() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(ChatEvent::Token("hello".to_string())).unwrap();
+        drop(tx);
+        let mut stream = ChatStream::new(rx);
+
+        let event = stream.recv().await;
+
+        match event {
+            Some(ChatEvent::Token(text)) => assert_eq!(text, "hello"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chat_stream_recv_returns_none_after_sender_dropped() {
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(_tx);
+        let mut stream = ChatStream::new(rx);
+
+        assert!(stream.recv().await.is_none());
+    }
+
+    #[test]
+    fn test_chat_request_keeps_message_order() {
+        let request = ChatRequest {
+            messages: vec![
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: serde_json::json!([{"type":"text","text":"one"}]),
+                },
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: serde_json::json!([{"type":"text","text":"two"}]),
+                },
+            ],
+        };
+
+        assert_eq!(request.messages[0].role, "user");
+        assert_eq!(request.messages[1].role, "assistant");
     }
 }

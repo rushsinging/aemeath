@@ -14,9 +14,7 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 use super::event::UiEvent;
 use super::msg::{Cmd, Msg};
 use crate::tui::session::processing::SpawnContextRefs;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 /// Return type for update: (commands, whether to continue the loop)
 pub struct UpdateResult {
@@ -31,11 +29,10 @@ impl App {
         &mut self,
         msg: Msg,
         ui_tx: &mpsc::Sender<UiEvent>,
-        active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        spawn_refs: &SpawnContextRefs<'_>,
+        spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         match msg {
-            Msg::Key(key) => self.update_key(key, ui_tx, active_cancel, spawn_refs),
+            Msg::Key(key) => self.update_key(key, ui_tx, spawn_refs),
             Msg::Mouse(mouse) => {
                 self.handle_mouse_event(mouse, self.layout.output_area_rect);
                 UpdateResult {
@@ -112,7 +109,7 @@ impl App {
                     pending_slash: None,
                 }
             }
-            Msg::Ui(ev) => self.update_ui(ev, ui_tx, active_cancel, spawn_refs),
+            Msg::Ui(ev) => self.update_ui(ev, ui_tx, spawn_refs),
         }
     }
 }

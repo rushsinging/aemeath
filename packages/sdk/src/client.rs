@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 
 use crate::{
-    ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext, SessionSnapshot,
-    TaskStatusView, TaskSummary,
+    ChangeSet, ChatInput, ChatRequest, ChatStream, CostInfo, ModelSummary, ProjectContext,
+    SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
 /// Agent Runtime 的统一客户端 trait。
@@ -37,7 +37,23 @@ pub trait AgentClient: Send + Sync + 'static {
     // ─── 写操作 ───
 
     /// 发起一次 Chat。
-    async fn chat(&self, input: ChatInput) -> Result<ChatStream, super::SdkError>;
+    async fn chat(&self, input: ChatRequest) -> Result<ChatStream, super::SdkError>;
+
+    /// 兼容非 TUI 调用方的一次性文本 Chat。
+    async fn chat_text(&self, input: ChatInput) -> Result<ChatStream, super::SdkError> {
+        let content = if input.image_paths.is_empty() {
+            serde_json::json!([{ "type": "text", "text": input.text }])
+        } else {
+            serde_json::json!([{ "type": "text", "text": input.text }])
+        };
+        self.chat(ChatRequest {
+            messages: vec![super::ChatMessage {
+                role: "user".to_string(),
+                content,
+            }],
+        })
+        .await
+    }
 
     /// 更新 runtime 持有的当前 session messages。
     async fn sync_current_messages(

@@ -4,9 +4,7 @@ use super::UpdateResult;
 use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 fn build_option_line_ranges(start: usize, options: &[String]) -> Vec<std::ops::Range<usize>> {
     let mut ranges = Vec::with_capacity(options.len());
@@ -25,8 +23,7 @@ impl App {
         &mut self,
         ev: UiEvent,
         ui_tx: &mpsc::Sender<UiEvent>,
-        _active_cancel: &Arc<std::sync::Mutex<Option<CancellationToken>>>,
-        _spawn_refs: &SpawnContextRefs<'_>,
+        _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         match ev {
             UiEvent::Text(text) => {
