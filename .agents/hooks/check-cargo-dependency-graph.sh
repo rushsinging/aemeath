@@ -11,17 +11,16 @@ import sys
 
 business_allow = {
       "cli": {"runtime"},
-      "runtime": {"core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk"},
-      "share": {"core", "project", "prompt"},
-      "project": {"core"},
-      "policy": {"core"},
-      "prompt": {"core"},
-      "provider": {"core"},
-      "tools": {"core", "share"},
-      "storage": {"core"},
-      "hook": {"core"},
-      "audit": {"core"},
-      "core": set(),
+      "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk"},
+      "share": set(),
+      "project": {"share"},
+      "policy": {"share"},
+      "prompt": {"share"},
+      "provider": {"share"},
+      "tools": {"share"},
+      "storage": {"share"},
+      "hook": {"share"},
+      "audit": {"share"},
       "sdk": set(),
     }
 
