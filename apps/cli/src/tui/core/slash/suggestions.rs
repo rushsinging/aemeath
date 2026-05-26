@@ -14,7 +14,8 @@ impl super::super::App {
             .unwrap_or(input.len());
 
         let models: Vec<(String, String)> = self
-            .cmd_exec.models_config
+            .cmd_exec
+            .models_config
             .list_models()
             .into_iter()
             .map(|(p, m)| (p, if m.name.is_empty() { m.id } else { m.name }))

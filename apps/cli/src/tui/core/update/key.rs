@@ -2,8 +2,8 @@ use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
 use crate::tui::core::msg::Cmd;
-use crate::tui::session::processing::SpawnContextRefs;
 use crate::tui::core::{App, UiEvent};
+use crate::tui::session::processing::SpawnContextRefs;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -244,6 +244,9 @@ mod tests {
         assert_eq!(ctrlc_action(true, Some(just_inside)), CtrlCAction::Quit);
 
         let just_outside = std::time::Instant::now() - std::time::Duration::from_millis(3100);
-        assert_eq!(ctrlc_action(true, Some(just_outside)), CtrlCAction::WarnExit);
+        assert_eq!(
+            ctrlc_action(true, Some(just_outside)),
+            CtrlCAction::WarnExit
+        );
     }
 }

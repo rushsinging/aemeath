@@ -1,7 +1,8 @@
 impl super::super::App {
     pub(super) fn show_memory_reminders(&mut self) {
         let lines = self
-            .cmd_exec.session_reminders
+            .cmd_exec
+            .session_reminders
             .lock()
             .ok()
             .map(|reminders| {

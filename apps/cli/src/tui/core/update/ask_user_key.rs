@@ -60,7 +60,8 @@ impl App {
                             pending_slash: None,
                         });
                     }
-                    self.input.ask_user_state.as_mut().unwrap().selected[idx] = !state.selected[idx];
+                    self.input.ask_user_state.as_mut().unwrap().selected[idx] =
+                        !state.selected[idx];
                     let s = self.input.ask_user_state.as_ref().unwrap();
                     self.output_area.update_ask_user_options(
                         &s.option_line_ranges,
@@ -215,7 +216,11 @@ impl App {
             KeyCode::Esc => {
                 // Return to option list without submitting
                 self.input_area.clear();
-                self.input.ask_user_state.as_mut().unwrap().chat_input_active = false;
+                self.input
+                    .ask_user_state
+                    .as_mut()
+                    .unwrap()
+                    .chat_input_active = false;
             }
             _ => {
                 self.update_ask_user_input_key(key);

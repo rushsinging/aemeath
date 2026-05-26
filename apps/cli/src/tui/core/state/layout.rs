@@ -1,7 +1,7 @@
 //! 布局与对话框状态
 
-use ratatui::layout::Rect;
 use crate::tui::core::state::TerminalSize;
+use ratatui::layout::Rect;
 
 /// UI 布局与对话框相关状态
 pub(crate) struct UiLayout {

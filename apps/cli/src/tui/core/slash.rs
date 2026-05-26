@@ -39,7 +39,10 @@ impl super::App {
             ));
             keys.push(key);
         }
-        self.layout.active_dialog = Some(crate::tui::display::dialog::Dialog::select("Select Model", options));
+        self.layout.active_dialog = Some(crate::tui::display::dialog::Dialog::select(
+            "Select Model",
+            options,
+        ));
         self.layout.dialog_model_keys = keys;
         None
     }
@@ -166,8 +169,10 @@ impl super::App {
                 if self.chat.pending_images.is_empty() {
                     self.output_area.push_system("No pending images.");
                 } else {
-                    self.output_area
-                        .push_system(&format!("Pending images: {}", self.chat.pending_images.len()));
+                    self.output_area.push_system(&format!(
+                        "Pending images: {}",
+                        self.chat.pending_images.len()
+                    ));
                     for (i, img) in self.chat.pending_images.iter().enumerate() {
                         self.output_area.push_system(&format!(
                             "  {}. [image {}] ({} bytes)",
@@ -268,7 +273,9 @@ impl super::App {
 
                                     // Model config takes priority; keep current reasoning only when unset.
                                     let reasoning = reasoning
-                                        .or_else(|| self.cmd_exec.client.as_ref().map(|c| c.is_reasoning()))
+                                        .or_else(|| {
+                                            self.cmd_exec.client.as_ref().map(|c| c.is_reasoning())
+                                        })
                                         .unwrap_or(true);
                                     let reasoning_config = Some(
                                         ::runtime::api::provider::providers::openai_compatible::ReasoningConfig::Bool(
@@ -305,9 +312,7 @@ impl super::App {
                                     self.output_area
                                         .push_system(&format!("[switched to {}]", display));
                                 }
-                                ::runtime::api::command::CommandAction::InjectMessage(
-                                    prompt,
-                                ) => {
+                                ::runtime::api::command::CommandAction::InjectMessage(prompt) => {
                                     self.output_area.push_system("[reviewing code changes...]");
                                     return Some(prompt);
                                 }
@@ -315,11 +320,10 @@ impl super::App {
                                     self.output_area.push_system("[running skill...]");
                                     return Some(content);
                                 }
-                                ::runtime::api::command::CommandAction::SetThinking(
-                                    desired,
-                                ) => {
+                                ::runtime::api::command::CommandAction::SetThinking(desired) => {
                                     let current = self
-                                        .cmd_exec.client
+                                        .cmd_exec
+                                        .client
                                         .as_ref()
                                         .map(|c| c.is_reasoning())
                                         .unwrap_or(true);
@@ -335,9 +339,7 @@ impl super::App {
                                 ::runtime::api::command::CommandAction::ResumeSession(
                                     session_id,
                                 ) => {
-                                    match ::runtime::api::session::load_session(&session_id)
-                                        .await
-                                    {
+                                    match ::runtime::api::session::load_session(&session_id).await {
                                         Ok(s) => {
                                             self.resume_session_messages(
                                                 &session_id,

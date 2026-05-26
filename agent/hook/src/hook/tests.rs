@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod hook_tests {
-    use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use crate::hook::data::*;
     use crate::hook::runner::HookRunner;
+    use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::HashMap;
 
     #[test]

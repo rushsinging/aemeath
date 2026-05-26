@@ -1,5 +1,5 @@
-use crate::tui::core::{display_status_path, display_working_dir, status_context_for_paths};
 use crate::tui::core::event::UiEvent;
+use crate::tui::core::{display_status_path, display_working_dir, status_context_for_paths};
 use crate::tui::display::status_bar::WorktreeKind;
 use std::path::PathBuf;
 

@@ -37,9 +37,9 @@ pub mod worktree;
 // Re-export McpTool for dynamic creation
 pub use mcp_tool::McpTool;
 
+use aemeath_core::tool::ToolRegistry;
 use share::skill_ops::Skill;
 use share::task_ops::TaskStore;
-use aemeath_core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

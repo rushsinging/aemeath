@@ -41,7 +41,8 @@ impl crate::tui::core::App {
                 if point_in_rect(row, col, &output_area) {
                     // 双击检测
                     let now = Instant::now();
-                    let is_double = self.input
+                    let is_double = self
+                        .input
                         .last_click
                         .map(|(t, prev_row, prev_col)| {
                             prev_row == row

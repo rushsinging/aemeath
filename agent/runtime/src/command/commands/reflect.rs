@@ -2,8 +2,8 @@
 
 use super::memory_support::open_memory_store;
 use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
-use aemeath_core::memory::{MemoryEntry, MemoryLayer};
 use crate::reflection::{ReflectionEngine, ReflectionOutput};
+use aemeath_core::memory::{MemoryEntry, MemoryLayer};
 
 inventory::submit! {
     CommandDescriptor::new(|| {

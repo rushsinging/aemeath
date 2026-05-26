@@ -1,8 +1,8 @@
 //! Hook 运行器 — 核心执行引擎
 
-use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use crate::hook::data::{HookData, HookInput};
 use crate::hook::result::{HookJsonOutput, HookResult};
+use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

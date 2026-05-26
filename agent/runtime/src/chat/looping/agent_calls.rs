@@ -1,7 +1,7 @@
 use crate::api::agent::ToolCall;
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::api::core::tool::ToolRegistry;
+use crate::api::hook::hook::{HookData, ToolHookData};
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};

@@ -1,11 +1,7 @@
 use crate::tui::core::App;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-pub(super) fn handle_scroll_key(
-    app: &mut App,
-    key: KeyEvent,
-    modifiers: KeyModifiers,
-) -> bool {
+pub(super) fn handle_scroll_key(app: &mut App, key: KeyEvent, modifiers: KeyModifiers) -> bool {
     match (modifiers, key.code) {
         (KeyModifiers::NONE, KeyCode::PageUp) => app.output_area.scroll_up(10),
         (KeyModifiers::NONE, KeyCode::PageDown) => app.output_area.scroll_down(10),

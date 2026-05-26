@@ -1,9 +1,9 @@
 use super::request::{NoTuiChatLaunch, TuiChatLaunch};
 use crate::api::core::config::MemoryConfig;
-use crate::api::hook::hook::HookRunner;
-use crate::api::prompt::skill::Skill;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{AgentRunner, ToolRegistry};
+use crate::api::hook::hook::HookRunner;
+use crate::api::prompt::skill::Skill;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::types::SystemBlock;
 use crate::api::storage::logging::JsonLogger;
@@ -28,7 +28,6 @@ pub struct ChatRuntimeContext {
     pub allow_all: bool,
     pub context_size: usize,
     pub verbose: bool,
-    pub use_markdown: bool,
     pub resume: Option<String>,
 }
 

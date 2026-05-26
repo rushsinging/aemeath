@@ -35,9 +35,9 @@ pub fn init_all() {
     crate::command::CommandRegistry::initialize();
 }
 
-use aemeath_core::config::Config;
 use crate::cost::CostTracker;
 use crate::state::AppState;
+use aemeath_core::config::Config;
 use aemeath_core::task::TaskStore;
 use std::future::Future;
 use std::pin::Pin;

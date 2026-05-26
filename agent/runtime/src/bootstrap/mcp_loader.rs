@@ -1,7 +1,7 @@
 use crate::api::core::config::paths;
+use crate::api::core::tool::ToolRegistry;
 use crate::api::tools::mcp::McpServerConfig;
 use crate::api::tools::mcp_manager::McpConnectionManager;
-use crate::api::core::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;

@@ -1,7 +1,7 @@
 use crate::tui::core::event::UiEvent;
 use ::runtime::api::core::config::hooks::HookEvent;
-use ::runtime::api::hook::hook::{HookData, PromptHookData};
 use ::runtime::api::core::message::Message;
+use ::runtime::api::hook::hook::{HookData, PromptHookData};
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -49,11 +49,17 @@ impl crate::tui::core::App {
                     }
                 }
                 KeyCode::Enter => {
-                    let selected = self.layout.active_dialog.as_ref().and_then(|d| d.get_selected());
+                    let selected = self
+                        .layout
+                        .active_dialog
+                        .as_ref()
+                        .and_then(|d| d.get_selected());
                     if let Some(idx) = selected {
                         if idx < self.layout.dialog_model_keys.len() {
                             let model_key = self.layout.dialog_model_keys[idx].clone();
-                            self.input.input_queue.push_back(format!("/model {}", model_key));
+                            self.input
+                                .input_queue
+                                .push_back(format!("/model {}", model_key));
                             self.layout.active_dialog = None;
                             self.layout.dialog_model_keys.clear();
                             return KeyResult::DialogModelSwitch;
@@ -289,7 +295,8 @@ impl crate::tui::core::App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self.chat
+        let images: Vec<(String, String)> = self
+            .chat
             .pending_images
             .drain(..)
             .map(|img| (img.base64, img.media_type))
@@ -297,7 +304,8 @@ impl crate::tui::core::App {
         if images.is_empty() {
             self.chat.messages.push(Message::user(&input));
         } else {
-            self.chat.messages
+            self.chat
+                .messages
                 .push(Message::user_with_images(&input, images));
         }
 
@@ -311,33 +319,35 @@ impl crate::tui::core::App {
             *guard = Some(cancel.clone());
         }
 
-        crate::tui::session::processing::spawn_processing(crate::tui::session::processing::SpawnContext {
-            tx: ui_tx.clone(),
-            queue_request_tx: ui_tx.clone(),
-            client: spawn_ctx.client.clone(),
-            registry: spawn_ctx.registry.clone(),
-            system_blocks: spawn_ctx.system_blocks.clone(),
-            system_prompt_text: spawn_ctx.system_prompt_text.to_string(),
-            user_context: spawn_ctx.user_context.to_string(),
-            messages: self.chat.messages.clone(),
-            context_size: spawn_ctx.context_size,
-            cwd: self.session.cwd.clone(),
-            workspace_context: self.cmd_exec.workspace_context.clone(),
-            session_id: self.session.session_id.clone(),
-            read_files: spawn_ctx.read_files.clone(),
-            session_reminders: spawn_ctx.session_reminders.clone(),
-            agent_runner: spawn_ctx.agent_runner.clone(),
-            allow_all: spawn_ctx.allow_all,
-            interrupted: spawn_ctx.interrupted.clone(),
-            cancel,
-            task_store: spawn_ctx.task_store.clone(),
-            max_tool_concurrency: spawn_ctx.max_tool_concurrency,
-            max_agent_concurrency: spawn_ctx.max_agent_concurrency,
-            agent_semaphore: spawn_ctx.agent_semaphore.clone(),
-            hook_runner: spawn_ctx.hook_runner.clone(),
-            memory_config: spawn_ctx.memory_config.clone(),
-            json_logger: spawn_ctx.json_logger.clone(),
-        });
+        crate::tui::session::processing::spawn_processing(
+            crate::tui::session::processing::SpawnContext {
+                tx: ui_tx.clone(),
+                queue_request_tx: ui_tx.clone(),
+                client: spawn_ctx.client.clone(),
+                registry: spawn_ctx.registry.clone(),
+                system_blocks: spawn_ctx.system_blocks.clone(),
+                system_prompt_text: spawn_ctx.system_prompt_text.to_string(),
+                user_context: spawn_ctx.user_context.to_string(),
+                messages: self.chat.messages.clone(),
+                context_size: spawn_ctx.context_size,
+                cwd: self.session.cwd.clone(),
+                workspace_context: self.cmd_exec.workspace_context.clone(),
+                session_id: self.session.session_id.clone(),
+                read_files: spawn_ctx.read_files.clone(),
+                session_reminders: spawn_ctx.session_reminders.clone(),
+                agent_runner: spawn_ctx.agent_runner.clone(),
+                allow_all: spawn_ctx.allow_all,
+                interrupted: spawn_ctx.interrupted.clone(),
+                cancel,
+                task_store: spawn_ctx.task_store.clone(),
+                max_tool_concurrency: spawn_ctx.max_tool_concurrency,
+                max_agent_concurrency: spawn_ctx.max_agent_concurrency,
+                agent_semaphore: spawn_ctx.agent_semaphore.clone(),
+                hook_runner: spawn_ctx.hook_runner.clone(),
+                memory_config: spawn_ctx.memory_config.clone(),
+                json_logger: spawn_ctx.json_logger.clone(),
+            },
+        );
 
         KeyResult::None
     }

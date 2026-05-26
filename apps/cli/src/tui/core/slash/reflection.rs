@@ -1,6 +1,6 @@
 use ::runtime::api::core::memory::MemoryLayer;
-use ::runtime::api::reflection::{ReflectionEngine, ReflectionOutput};
 use ::runtime::api::provider::types::SystemBlock;
+use ::runtime::api::reflection::{ReflectionEngine, ReflectionOutput};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -145,7 +145,10 @@ impl super::super::App {
     pub(crate) fn maybe_auto_reflect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
         self.chat.turn_count += 1;
         let reflection = &self.session.memory_config.reflection;
-        if !self.session.memory_config.enabled || !reflection.enabled || reflection.interval_turns == 0 {
+        if !self.session.memory_config.enabled
+            || !reflection.enabled
+            || reflection.interval_turns == 0
+        {
             return;
         }
         if self.chat.pending_reflection.is_some() {

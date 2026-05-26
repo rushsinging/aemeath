@@ -20,11 +20,17 @@ pub(super) fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Option<UpdateRe
             }
         }
         KeyCode::Enter => {
-            let selected = app.layout.active_dialog.as_ref().and_then(|d| d.get_selected());
+            let selected = app
+                .layout
+                .active_dialog
+                .as_ref()
+                .and_then(|d| d.get_selected());
             if let Some(idx) = selected {
                 if idx < app.layout.dialog_model_keys.len() {
                     let model_key = app.layout.dialog_model_keys[idx].clone();
-                    app.input.input_queue.push_back(format!("/model {}", model_key));
+                    app.input
+                        .input_queue
+                        .push_back(format!("/model {}", model_key));
                     app.layout.active_dialog = None;
                     app.layout.dialog_model_keys.clear();
                     return Some(UpdateResult {

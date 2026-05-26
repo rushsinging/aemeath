@@ -1,6 +1,6 @@
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::hook::hook::{HookData, StopHookData};
 use crate::api::core::tool::ToolContext;
+use crate::api::hook::hook::{HookData, StopHookData};
 use crate::chat::looping::hook_ui::HookUi;
 use crate::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 

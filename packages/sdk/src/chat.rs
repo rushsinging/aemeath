@@ -20,10 +20,7 @@ pub enum ChatEvent {
     /// 工具调用结束。
     ToolCallEnd { id: String },
     /// 工具执行结果。
-    ToolResult {
-        id: String,
-        content: String,
-    },
+    ToolResult { id: String, content: String },
     /// 需要用户确认权限。
     PermissionRequest(super::PermissionPrompt),
     /// 状态信息（用于 status line 显示）。

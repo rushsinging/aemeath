@@ -2,10 +2,10 @@
 //!
 //! 每个便捷方法负责将参数包装为对应的 HookData 并调用 run_hooks 或 run_hooks_with_json。
 
-use aemeath_core::config::hooks::{HookEntry, HookEvent};
 use crate::hook::data::*;
 use crate::hook::result::{HookJsonOutput, HookResult};
 use crate::hook::runner::HookRunner;
+use aemeath_core::config::hooks::{HookEntry, HookEvent};
 
 impl HookRunner {
     /// 便捷方法：运行 PreToolUse hooks，返回是否应阻止

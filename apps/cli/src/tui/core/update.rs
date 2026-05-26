@@ -11,9 +11,9 @@ mod ui_event;
 
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
+use super::event::UiEvent;
 use super::msg::{Cmd, Msg};
 use crate::tui::session::processing::SpawnContextRefs;
-use super::event::UiEvent;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

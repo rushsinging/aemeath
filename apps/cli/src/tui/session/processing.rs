@@ -166,7 +166,9 @@ fn runtime_event_to_ui_event(event: RuntimeStreamEvent) -> UiEvent {
             workspace,
         } => UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
             path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
-            working_root: crate::tui::core::display_status_path(std::path::Path::new(&working_root)),
+            working_root: crate::tui::core::display_status_path(std::path::Path::new(
+                &working_root,
+            )),
             branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
             kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
             raw_path_base: std::path::PathBuf::from(path_base),
@@ -215,8 +217,7 @@ pub(crate) struct SpawnContextRefs<'a> {
     pub user_context: &'a str,
     pub context_size: usize,
     pub read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders:
-        &'a Arc<std::sync::Mutex<::runtime::api::core::tool::SessionReminders>>,
+    pub session_reminders: &'a Arc<std::sync::Mutex<::runtime::api::core::tool::SessionReminders>>,
     pub agent_runner: &'a Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: &'a Arc<AtomicBool>,

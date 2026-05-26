@@ -3,7 +3,8 @@ use crate::tui::core::App;
 impl App {
     pub(super) fn push_session_reminder_recap(&mut self) {
         let line = self
-            .cmd_exec.session_reminders
+            .cmd_exec
+            .session_reminders
             .lock()
             .ok()
             .and_then(|reminders| reminders.recap_line());
@@ -25,7 +26,12 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath-test"),
             "model".to_string(),
         );
-        app.cmd_exec.session_reminders.lock().unwrap().add("任务一").unwrap();
+        app.cmd_exec
+            .session_reminders
+            .lock()
+            .unwrap()
+            .add("任务一")
+            .unwrap();
 
         app.push_session_reminder_recap();
 
@@ -57,8 +63,19 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath-test"),
             "model".to_string(),
         );
-        let id = app.cmd_exec.session_reminders.lock().unwrap().add("任务一").unwrap();
-        app.cmd_exec.session_reminders.lock().unwrap().complete(&id).unwrap();
+        let id = app
+            .cmd_exec
+            .session_reminders
+            .lock()
+            .unwrap()
+            .add("任务一")
+            .unwrap();
+        app.cmd_exec
+            .session_reminders
+            .lock()
+            .unwrap()
+            .complete(&id)
+            .unwrap();
         let before = app.output_area.lines.len();
 
         app.push_session_reminder_recap();

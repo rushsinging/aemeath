@@ -1,5 +1,5 @@
-use crate::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
 use crate::api::agent::Agent;
+use crate::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
 use crate::api::core::message::Message;
 use crate::api::core::tool::{ToolContext, ToolRegistry};
 use crate::api::provider::types::StopReason;
@@ -148,8 +148,7 @@ where
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
-        let tool_schema_tokens =
-            crate::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let tool_schema_tokens = crate::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);

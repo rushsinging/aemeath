@@ -61,7 +61,6 @@ pub(crate) async fn run_chat(args: Args) {
         ctx.user_context,
         ctx.context_size,
         ctx.verbose,
-        ctx.use_markdown,
         Some(ctx.agent_runner),
         ctx.allow_all,
         initial_resume_id,

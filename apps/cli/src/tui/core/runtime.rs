@@ -88,7 +88,11 @@ impl App {
             id: self.session.session_id.clone(),
             cwd: self.session.cwd.to_string_lossy().to_string(),
             messages,
-            created_at: self.session.session_created_at.clone().unwrap_or_else(now_iso),
+            created_at: self
+                .session
+                .session_created_at
+                .clone()
+                .unwrap_or_else(now_iso),
             updated_at: now_iso(),
             metadata: Default::default(),
             tasks: task_snapshot,

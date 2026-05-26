@@ -4,6 +4,6 @@
 //! 避免直接依赖 project crate（门禁不允许 tools→project）。
 
 pub use project::worktree::{
-    enter_worktree, exit_worktree, get_git_common_dir, is_same_git_repo,
-    restore_workspace_context, workspace_context_from_tool_context,
+    enter_worktree, exit_worktree, get_git_common_dir, is_same_git_repo, restore_workspace_context,
+    workspace_context_from_tool_context,
 };

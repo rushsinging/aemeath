@@ -1,6 +1,6 @@
 use super::helpers::*;
-use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use aemeath_core::tool::ToolContext;
+use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

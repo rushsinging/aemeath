@@ -147,11 +147,7 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     assert_eq!(data["output"], "完整输出");
 }
 
-fn test_tool_call(
-    id: &str,
-    name: &str,
-    input: serde_json::Value,
-) -> crate::api::agent::ToolCall {
+fn test_tool_call(id: &str, name: &str, input: serde_json::Value) -> crate::api::agent::ToolCall {
     crate::api::agent::ToolCall {
         id: id.to_string(),
         name: name.to_string(),

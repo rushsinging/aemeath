@@ -20,7 +20,6 @@ impl App {
         mut user_context: String,
         context_size: usize,
         verbose: bool,
-        use_markdown: bool,
         agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
         allow_all: bool,
         resume_id: Option<String>,
@@ -57,7 +56,8 @@ impl App {
                             self.status_bar
                                 .set_git_context(ctx.kind, ctx.branch.unwrap_or_default());
                         }
-                        self.cmd_exec.hook_runner
+                        self.cmd_exec
+                            .hook_runner
                             .set_project_dir(working_root.display().to_string());
                     }
                     // Restore task snapshot if present
@@ -155,7 +155,8 @@ impl App {
             use ::runtime::api::core::config::hooks::HookEvent;
             use ::runtime::api::hook::hook::{HookData, SessionHookData};
             let hook_results = self
-                .cmd_exec.hook_runner
+                .cmd_exec
+                .hook_runner
                 .run_hooks_with_json(
                     HookEvent::SessionStart,
                     None,
@@ -192,7 +193,6 @@ impl App {
                 user_context,
                 context_size,
                 verbose,
-                use_markdown,
                 agent_runner,
                 allow_all,
                 interrupted,

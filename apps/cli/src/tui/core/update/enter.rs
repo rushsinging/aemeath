@@ -1,7 +1,7 @@
 use super::UpdateResult;
 use crate::tui::core::msg::Cmd;
-use crate::tui::session::processing::SpawnContextRefs;
 use crate::tui::core::{App, UiEvent};
+use crate::tui::session::processing::SpawnContextRefs;
 use ::runtime::api::core::message::Message;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -31,7 +31,8 @@ impl App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self.chat
+        let images: Vec<(String, String)> = self
+            .chat
             .pending_images
             .drain(..)
             .map(|img| (img.base64, img.media_type))
@@ -39,7 +40,8 @@ impl App {
         if images.is_empty() {
             self.chat.messages.push(Message::user(&input));
         } else {
-            self.chat.messages
+            self.chat
+                .messages
                 .push(Message::user_with_images(&input, images));
         }
 

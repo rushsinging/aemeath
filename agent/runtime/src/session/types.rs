@@ -1,8 +1,8 @@
 //! 会话核心类型定义
 
+use crate::state;
 use aemeath_core::config::paths;
 use aemeath_core::message::{Message, Role};
-use crate::state;
 use aemeath_core::task::TaskSnapshot;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

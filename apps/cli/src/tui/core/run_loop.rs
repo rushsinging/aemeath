@@ -1,7 +1,7 @@
-use crate::tui::session::processing;
 use super::App;
 use crate::tui::core::event::UiEvent;
 use crate::tui::core::msg::{Cmd, Msg};
+use crate::tui::session::processing;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -22,7 +22,6 @@ impl App {
         user_context: String,
         context_size: usize,
         _verbose: bool,
-        _use_markdown: bool,
         agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
         allow_all: bool,
         interrupted: Arc<AtomicBool>,
@@ -120,7 +119,8 @@ impl App {
                     .await;
                 if let Some(prompt) = review_prompt {
                     self.output_area.push_user_message(&input);
-                    self.chat.messages
+                    self.chat
+                        .messages
                         .push(::runtime::api::core::message::Message::user(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
                     self.output_area.start_spinner();
@@ -170,7 +170,11 @@ impl App {
                         log::warn!("failed to auto-save session on sync: {e}");
                     }
                 }
-                _ => self.cmd_exec.exec_one_cmd(&active_cancel, &ui_tx, result.cmd).await,
+                _ => {
+                    self.cmd_exec
+                        .exec_one_cmd(&active_cancel, &ui_tx, result.cmd)
+                        .await
+                }
             }
 
             self.input.just_pasted = false;

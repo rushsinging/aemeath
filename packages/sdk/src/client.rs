@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 
-use crate::{ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SessionSnapshot, TaskSummary};
+use crate::{
+    ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SessionSnapshot, TaskSummary,
+};
 
 /// Agent Runtime 的统一客户端 trait。
 ///

@@ -50,11 +50,6 @@ pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config
     128_000
 }
 
-/// 合并 use_markdown（优先级：CLI no_markdown 覆盖 > 默认 true）。
-pub fn resolve_use_markdown(cli_no_markdown: bool) -> bool {
-    !cli_no_markdown
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatBootstrapArgs {
     pub api_key: Option<String>,

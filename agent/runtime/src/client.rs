@@ -8,29 +8,27 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SessionSnapshot,
-    SdkError, TaskSummary,
+    AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ProjectContext, SdkError,
+    SessionSnapshot, TaskSummary,
 };
 use tokio::sync::watch;
 
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::task::TaskStore;
-use crate::api::tools::mcp_manager::McpConnectionManager;
-use crate::api::tools as tools_crate;
-use crate::bootstrap::{
-    self, build_agent_runner, build_hook_runner, build_json_logger, init_logging, spawn_mcp_connect,
-    apply_config_permission_mode, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
-    resolve_context_size, resolve_model_runtime_settings, resolve_use_markdown, ReasoningConfigInput,
-};
-use crate::chat::ChatRuntimeContext;
-use crate::bootstrap::{
-    start_session, set_session_id, ChatBootstrapArgs,
-};
 use crate::api::core::config::ConfigManager;
+use crate::api::core::task::TaskStore;
 use crate::api::core::tool::ToolRegistry;
 use crate::api::prompt::skill::{load_all_skills, Skill};
-use crate::api::provider::types::SystemBlock;
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
+use crate::api::provider::types::SystemBlock;
+use crate::api::tools as tools_crate;
+use crate::api::tools::mcp_manager::McpConnectionManager;
+use crate::bootstrap::{
+    self, apply_config_permission_mode, build_agent_runner, build_hook_runner, build_json_logger,
+    init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
+    resolve_context_size, resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
+};
+use crate::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
+use crate::chat::ChatRuntimeContext;
 
 /// AgentClient 的 runtime 实现。
 ///
@@ -71,9 +69,7 @@ impl RuntimeHandle {
 /// 从 Args 初始化 AgentClient。
 ///
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
-pub async fn from_args(
-    mut args: ChatBootstrapArgs,
-) -> Result<AgentClientImpl, SdkError> {
+pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
     crate::api::prompt::guidance::init_guidance_dir();
 
@@ -85,10 +81,7 @@ pub async fn from_args(
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     // 3. 加载配置
-    let config_file = ConfigManager::new(Some(&cwd))
-        .load()
-        .await
-        .ok();
+    let config_file = ConfigManager::new(Some(&cwd)).load().await.ok();
 
     // 4. 日志初始化
     init_logging(
@@ -193,8 +186,13 @@ pub async fn from_args(
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
-    let prompt_context = PromptContext::new(&cwd, Some(client.provider_name()), Some(client.model_name()));
-    let prompt_parts = build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
+    let prompt_context = PromptContext::new(
+        &cwd,
+        Some(client.provider_name()),
+        Some(client.model_name()),
+    );
+    let prompt_parts =
+        build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
 
     let static_prompt = crate::prompt_build_ext::build_static_prompt(
         &cwd,
@@ -229,9 +227,8 @@ pub async fn from_args(
         max_agent_concurrency
     );
 
-    // 17. context_size / verbose / markdown 合并
+    // 17. context_size / verbose 合并
     let context_size = resolve_context_size(args.context_size, config_file.as_ref());
-    let use_markdown = resolve_use_markdown(args.no_markdown);
 
     // 18. 组装 context
     let memory_config = config_file
@@ -254,7 +251,6 @@ pub async fn from_args(
         allow_all: args.allow_all,
         context_size,
         verbose: args.verbose,
-        use_markdown,
         resume: args.resume,
     };
 
@@ -284,9 +280,7 @@ fn load_configured_skills(
     cwd: &std::path::Path,
     skills_config: Option<&crate::api::core::config::SkillsConfig>,
 ) -> std::collections::HashMap<String, Skill> {
-    let dirs = skills_config
-        .map(|c| c.dirs.clone())
-        .unwrap_or_default();
+    let dirs = skills_config.map(|c| c.dirs.clone()).unwrap_or_default();
     load_all_skills(cwd, &dirs)
 }
 
@@ -315,7 +309,7 @@ impl AgentClient for AgentClientImpl {
     fn project(&self) -> ProjectContext {
         ProjectContext {
             cwd: self.inner.cwd.to_string_lossy().to_string(),
-            path_base: String::new(), // TODO
+            path_base: String::new(),    // TODO
             working_root: String::new(), // TODO
             git_branch: None,
         }
@@ -363,7 +357,7 @@ impl AgentClient for AgentClientImpl {
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
 impl AgentClientImpl {
-      pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &str {
         &self.inner.session_id
     }
 

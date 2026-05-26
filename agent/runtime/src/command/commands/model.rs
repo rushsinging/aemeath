@@ -114,9 +114,9 @@ fn find_selection_by_fuzzy_model(models_config: &ModelsConfig, query: &str) -> O
 mod tests {
     use super::*;
     use crate::command::{CommandAction, CommandResult};
-    use aemeath_core::config::{Config, ModelEntryConfig, ProviderModelsConfig};
     use crate::cost::CostTracker;
     use crate::state::AppState;
+    use aemeath_core::config::{Config, ModelEntryConfig, ProviderModelsConfig};
     use std::collections::HashMap;
     use std::sync::Arc;
 

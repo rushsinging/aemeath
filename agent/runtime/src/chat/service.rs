@@ -44,9 +44,9 @@ where
 mod tests {
     use super::*;
     use crate::api::core::config::MemoryConfig;
-    use crate::api::hook::hook::HookRunner;
     use crate::api::core::task::TaskStore;
     use crate::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
+    use crate::api::hook::hook::HookRunner;
     use crate::api::provider::client::LlmClient;
     use crate::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
@@ -158,12 +158,11 @@ mod tests {
             memory_config: MemoryConfig::default(),
             json_logger: None,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-                allow_all: false,
-                context_size: 200_000,
-                verbose: false,
-                use_markdown: true,
-                resume: None,
-            }
+            allow_all: false,
+            context_size: 200_000,
+            verbose: false,
+            resume: None,
+        }
     }
 
     #[test]

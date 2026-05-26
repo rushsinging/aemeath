@@ -9,7 +9,11 @@ impl App {
         }
 
         self.layout.last_terminal_size = Some(size);
-        let visible_height_hint = self.layout.output_area_rect.height.max(height.saturating_sub(7));
+        let visible_height_hint = self
+            .layout
+            .output_area_rect
+            .height
+            .max(height.saturating_sub(7));
         self.output_area.handle_resize(width, visible_height_hint);
         let input_width = self.layout.input_area_rect.width.max(width);
         self.input_area.handle_resize(input_width);

@@ -4,8 +4,8 @@ mod run_orchestration;
 mod sessions_command;
 mod tui;
 
-use clap::Parser;
 use args::{Cli, Commands};
+use clap::Parser;
 
 #[tokio::main]
 async fn main() {
