@@ -136,4 +136,97 @@ mod tests {
 
         assert_eq!(store.active_list().await.unwrap().id, task.batch);
     }
+
+    /// 复现 bug #70：用户反馈 TaskListCreate 首次调用会超时。
+    /// 本测试在工具层直接计时，验证「首次调用」与「后续调用」是否存在数量级差异。
+    /// 若首次也是毫秒级，证明工具实现层并非瓶颈，应到 dispatcher / provider 层继续排查。
+    #[tokio::test]
+    async fn test_task_list_create_first_call_is_fast() {
+        use std::time::Instant;
+
+        let store = Arc::new(TaskStore::new());
+        let tool = TaskListCreateTool {
+            store: store.clone(),
+        };
+
+        let first_start = Instant::now();
+        let first = tool
+            .call(
+                serde_json::json!({"subject": "首次", "summary": "首次请求"}),
+                &test_ctx(),
+            )
+            .await;
+        let first_elapsed = first_start.elapsed();
+
+        assert!(!first.is_error, "首次调用应成功，实际：{}", first.output);
+
+        // 完成首个 batch 全部任务以允许新建第二个 batch
+        store.complete_list().await;
+
+        let second_start = Instant::now();
+        let second = tool
+            .call(
+                serde_json::json!({"subject": "第二次", "summary": "第二次请求"}),
+                &test_ctx(),
+            )
+            .await;
+        let second_elapsed = second_start.elapsed();
+
+        assert!(
+            !second.is_error,
+            "第二次调用应成功，实际：{}",
+            second.output
+        );
+
+        // 工具层首次调用应远低于 dispatcher 层 120s 超时；用 1s 作为宽松阈值。
+        assert!(
+            first_elapsed.as_secs_f64() < 1.0,
+            "首次调用耗时 {:?} 超过 1s，疑似工具层存在阻塞",
+            first_elapsed
+        );
+        assert!(
+            second_elapsed.as_secs_f64() < 1.0,
+            "第二次调用耗时 {:?} 超过 1s",
+            second_elapsed
+        );
+    }
+
+    /// 复现 bug #70 的另一路径：存在 archived batch 时 create_list 会触发
+    /// `drop_archived_batch_tasks`，验证该路径不会死锁/长阻塞。
+    #[tokio::test]
+    async fn test_task_list_create_with_archived_batch_is_fast() {
+        use std::time::Instant;
+
+        let store = Arc::new(TaskStore::new());
+        let tool = TaskListCreateTool {
+            store: store.clone(),
+        };
+
+        // 创建第一个 batch 并归档（直接 complete_list，无需任务）
+        tool.call(
+            serde_json::json!({"subject": "first", "summary": "first"}),
+            &test_ctx(),
+        )
+        .await;
+        store.complete_list().await;
+        // 手动把 batch 标为 Archived 以触发 drop_archived_batch_tasks
+        // （complete_list 已经设为 Archived）
+
+        // 再次创建以触发 drop_archived_batch_tasks
+        let start = Instant::now();
+        let result = tool
+            .call(
+                serde_json::json!({"subject": "second", "summary": "second"}),
+                &test_ctx(),
+            )
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(!result.is_error);
+        assert!(
+            elapsed.as_secs_f64() < 1.0,
+            "带 archived batch 调用耗时 {:?} 超过 1s",
+            elapsed
+        );
+    }
 }
