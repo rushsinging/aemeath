@@ -55,14 +55,6 @@ pub struct RunArgs {
     #[arg(long)]
     pub allow_all: bool,
 
-    /// Use TUI mode (default: true, use --no-tui for legacy REPL)
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    pub tui: bool,
-
-    /// Disable TUI mode and use legacy REPL
-    #[arg(long)]
-    pub no_tui: bool,
-
     /// Maximum number of concurrent tool executions (default: 10)
     #[arg(long, env = "AEMEATH_MAX_TOOL_CONCURRENCY")]
     pub max_tool_concurrency: Option<usize>,
@@ -124,8 +116,6 @@ pub struct Args {
     pub context_size: usize,
     pub resume: Option<String>,
     pub allow_all: bool,
-    pub tui: bool,
-    pub no_tui: bool,
     pub max_tool_concurrency: Option<usize>,
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
@@ -144,8 +134,6 @@ impl From<RunArgs> for Args {
             context_size: r.context_size,
             resume: r.resume,
             allow_all: r.allow_all,
-            tui: r.tui,
-            no_tui: r.no_tui,
             max_tool_concurrency: r.max_tool_concurrency,
             max_agent_concurrency: r.max_agent_concurrency,
             no_think: r.no_think,
@@ -167,8 +155,6 @@ impl From<Args> for ::runtime::api::bootstrap::ChatBootstrapArgs {
             context_size: args.context_size,
             resume: args.resume,
             allow_all: args.allow_all,
-            tui: args.tui,
-            no_tui: args.no_tui,
             max_tool_concurrency: args.max_tool_concurrency,
             max_agent_concurrency: args.max_agent_concurrency,
             no_think: args.no_think,
@@ -203,14 +189,5 @@ mod tests {
             args.model.as_deref(),
             Some("LiteLLM/anthropic/claude-opus-4-7")
         );
-    }
-
-    #[test]
-    fn test_args_from_run_args_respects_tui_flag() {
-        let cli = Cli::try_parse_from(["aemeath", "--tui", "false"]).unwrap();
-        let args = Args::from(cli.run_args);
-
-        assert!(!args.tui);
-        assert!(!args.no_tui);
     }
 }

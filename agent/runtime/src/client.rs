@@ -23,7 +23,9 @@ use crate::bootstrap::{
     resolve_model_runtime_settings, ReasoningConfigInput,
 };
 use crate::chat::ChatRuntimeContext;
-use crate::bootstrap::{start_session, set_session_id, ChatBootstrapArgs, ChatModeSelection};
+use crate::bootstrap::{
+    start_session, set_session_id, ChatBootstrapArgs,
+};
 use crate::api::core::config::ConfigManager;
 use crate::api::core::tool::ToolRegistry;
 use crate::api::prompt::skill::{load_all_skills, Skill};
@@ -48,7 +50,6 @@ pub struct RuntimeHandle {
     pub session_id: String,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
-    pub mode_selection: ChatModeSelection,
     pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── SDK 状态 ───
@@ -242,7 +243,6 @@ pub async fn from_args(
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
-    let mode_selection = args.mode_selection();
     let context = ChatRuntimeContext {
         client,
         registry,
@@ -267,7 +267,6 @@ pub async fn from_args(
         session_id,
         max_tool_concurrency,
         max_agent_concurrency,
-        mode_selection,
         _mcp_manager: mcp_manager,
         cancel_token: Arc::new(AtomicBool::new(false)),
         change_tx,
@@ -364,11 +363,7 @@ impl AgentClient for AgentClientImpl {
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
 impl AgentClientImpl {
-    pub fn mode_selection(&self) -> ChatModeSelection {
-        self.inner.mode_selection
-    }
-
-    pub fn session_id(&self) -> &str {
+      pub fn session_id(&self) -> &str {
         &self.inner.session_id
     }
 

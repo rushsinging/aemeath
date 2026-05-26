@@ -7,6 +7,7 @@ pub mod syntax;
 pub mod task_list;
 pub mod task_window;
 pub mod theme;
+pub(crate) mod theme_compat;
 
 #[cfg(test)]
 mod status_path_tests;

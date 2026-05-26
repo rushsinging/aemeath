@@ -1,7 +1,5 @@
 mod args;
 mod model_selection;
-mod render;
-mod repl;
 mod run_orchestration;
 mod sessions_command;
 mod tui;

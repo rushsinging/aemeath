@@ -25,12 +25,6 @@ use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatModeSelection {
-    NoTui,
-    Tui,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatBootstrapArgs {
     pub api_key: Option<String>,
@@ -43,22 +37,10 @@ pub struct ChatBootstrapArgs {
     pub context_size: usize,
     pub resume: Option<String>,
     pub allow_all: bool,
-    pub tui: bool,
-    pub no_tui: bool,
     pub max_tool_concurrency: Option<usize>,
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
     pub reasoning_effort: Option<String>,
-}
-
-impl ChatBootstrapArgs {
-    pub fn mode_selection(&self) -> ChatModeSelection {
-        if self.no_tui || !self.tui {
-            ChatModeSelection::NoTui
-        } else {
-            ChatModeSelection::Tui
-        }
-    }
 }
 
 pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
@@ -81,6 +63,5 @@ pub struct ChatBootstrap {
     pub context: ChatRuntimeContext,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
-    pub mode_selection: ChatModeSelection,
     pub _mcp_manager: Arc<McpConnectionManager>,
 }

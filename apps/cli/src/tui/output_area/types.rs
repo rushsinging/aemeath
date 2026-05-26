@@ -73,15 +73,15 @@ impl LineStyle {
                 .fg(theme::THINKING)
                 .add_modifier(Modifier::ITALIC),
             LineStyle::DiffAdd => {
-                let (r, g, b) = crate::render::theme::Theme::DIFF_ADD_BG_RGB;
-                let (fr, fg, fb) = crate::render::theme::Theme::DIFF_ADD_FG_RGB;
+                let (r, g, b) = crate::tui::display::theme_compat::Theme::DIFF_ADD_BG_RGB;
+                let (fr, fg, fb) = crate::tui::display::theme_compat::Theme::DIFF_ADD_FG_RGB;
                 Style::default()
                     .bg(Color::Rgb(r, g, b))
                     .fg(Color::Rgb(fr, fg, fb))
             }
             LineStyle::DiffRemove => {
-                let (r, g, b) = crate::render::theme::Theme::DIFF_REMOVE_BG_RGB;
-                let (fr, fg, fb) = crate::render::theme::Theme::DIFF_REMOVE_FG_RGB;
+                let (r, g, b) = crate::tui::display::theme_compat::Theme::DIFF_REMOVE_BG_RGB;
+                let (fr, fg, fb) = crate::tui::display::theme_compat::Theme::DIFF_REMOVE_FG_RGB;
                 Style::default()
                     .bg(Color::Rgb(r, g, b))
                     .fg(Color::Rgb(fr, fg, fb))
