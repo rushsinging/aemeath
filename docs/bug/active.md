@@ -10,7 +10,37 @@
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 活动中 | 未确认 | 2026-05 | 使用 `aemeath --resume <session>` 启动后进入 TUI，预期应加载并显示历史消息以继续会话，但实际 TUI 起始为空白，似乎走到了新会话路径；疑似 `--resume` 参数未传递到 TUI 启动路径，或 session 加载/历史回放在最近重构中被遗漏 |
+| 68 | TUI 丢失 context window 用量显示 | 中 | 活动中 | 未确认 | 2026-05 | 当前 TUI 中不再显示 context window 用量（如已用 tokens / 总上限 / 剩余比例），用户无法感知是否接近上下文压缩阈值；疑似 status line 或底部信息区在最近重构中被精简，token 计数器未渲染或未订阅最新用量数据 |
 ## 专案
+
+### #68 TUI 丢失 context window 用量显示
+
+**状态**：活动中
+
+**症状**：TUI 中此前可见的 context window 用量显示（例如「已用 tokens / 上下文上限 / 剩余比例」之类的指标）目前不再出现，用户无法直观判断当前消息量距离自动压缩阈值还有多远，也难以决定何时手动 `/compact` 或裁剪历史。
+
+**复现**：
+1. 启动 TUI 进入会话，进行若干轮对话累计 tokens。
+2. 观察 status line / 底部信息栏 / 输入区周围，没有 context window 用量指标显示。
+3. 对比早期版本（或保留截图）应有类似 `tokens: X / Y (Z%)` 形式的展示，当前完全缺失。
+
+**根因假设**：
+1. status line 在最近重构（移除 REPL、模型选择下沉等）中被精简，token 用量字段渲染逻辑被一并删除。
+2. token 用量数据仍在估算（如 `token_estimation` 仍工作），但 TUI 渲染层未再订阅或读取该字段。
+3. 用量字段被新的布局（如 model selector、session id 显示）覆盖或挤出可视区域，特定窗口宽度下被截断。
+4. 用量计算路径在重构后未及时更新，导致始终为 0 或 None，渲染层基于「无数据则不显示」的策略整体隐藏。
+
+**修复方向**：
+1. 在 TUI 渲染层定位 context window 用量显示的原实现位置，确认是被删除、被隐藏还是数据源失效。
+2. 复用 `token_estimation` / 现有 token 计数能力，明确「上下文上限」来源（模型 metadata / 配置默认值 / 用户覆盖），保证多 provider 一致显示。
+3. 在 status line 或合适位置稳定显示「已用 / 上限 / 比例」，并在接近压缩阈值时给出视觉提示（颜色或图标）。
+4. 补充回归：不同 provider/model 下进入 TUI 即可看到用量；新会话从 0 起步；执行 `/compact` 后用量同步下降；窗口宽度变化时不被截断丢失。
+
+**涉及路径（预计）**：
+- TUI status line / 底部信息渲染
+- token 用量数据源（`token_estimation`、session token 累计）
+- 模型 metadata 中的 context window 上限读取
+- `/compact` 与用量显示的联动
 
 ### #67 `--resume` 失效：进入 TUI 后未加载历史会话
 
