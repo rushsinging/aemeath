@@ -58,7 +58,7 @@ pub(crate) async fn run_chat(args: Args) {
         false, // verbose
         true,  // markdown
         Some(ctx.agent_runner),
-        false, // allow_all
+        ctx.allow_all,
         None,  // resume
         ctx.task_store,
         max_tool,

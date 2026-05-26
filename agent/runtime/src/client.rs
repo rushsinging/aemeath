@@ -247,6 +247,7 @@ pub async fn from_args(
         memory_config,
         json_logger,
         agent_semaphore,
+        allow_all: args.allow_all,
     };
 
     // 18. 构建 handle

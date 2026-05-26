@@ -25,6 +25,7 @@ pub struct ChatRuntimeContext {
     pub memory_config: MemoryConfig,
     pub json_logger: Option<Arc<Mutex<JsonLogger>>>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub allow_all: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

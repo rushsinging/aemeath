@@ -158,6 +158,7 @@ mod tests {
             memory_config: MemoryConfig::default(),
             json_logger: None,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            allow_all: false,
         }
     }
 
