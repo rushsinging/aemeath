@@ -335,13 +335,13 @@ core
 这要求：
 
 1. 入口层不得承载核心领域逻辑。
-2. `apps/cli` 编译期只依赖 `packages/sdk`（AgentClient trait），不直接依赖 `agent/` 的任何子 crate。运行时通过 AgentClient::new() 获得 true implementation。
+2. `apps/cli` 只通过 `packages/sdk` 的 `AgentClient` 契约与 Runtime 交互；由于当前是单二进制 Rust workspace，CLI 仍需要一个运行时装配 crate 提供真实实现入口，但该依赖只能用于构造 `AgentClient`，不得泄漏到 TUI/业务代码。
 3. `packages/sdk` 定义 AgentClient trait 及公共类型（ChatStream, SessionSummary, ProjectContext 等），由 `agent/runtime` 实现。
 4. `crates/runtime`（或 `agent/runtime`）是 Agent Runtime 核心域和唯一编排者，可以依赖 supporting domain crate。通过 `runtime::api` 暴露事件和 DTO，供 AgentClient 内部使用。
 5. supporting domain crate 不反向依赖 `runtime` 或 `apps/cli`，必要协作通过 runtime 编排或通过 `core` 中稳定共享类型表达。
 6. `core` 只能放最小共享内核，例如 Result、错误、基础 value object、协议无关 DTO；不能承载 Chat、Tool pipeline、配置加载、权限评估或 hook 执行流程。
 7. 技术分层可以存在，但不能压过领域边界。
-8. 依赖方向应保持：Interface → packages/sdk ← agent/runtime → domain context → outbound port → external adapter。
+8. 依赖方向应保持：Interface → packages/sdk contract；composition root → agent/runtime implementation → domain context → outbound port → external adapter。
 9. 禁止 domain context 反向依赖 HTTP、CLI、TUI 等入口层。
 
 目标依赖图：
@@ -349,6 +349,7 @@ core
 ```text
 apps/cli
   → packages/sdk
+  → agent/runtime（composition root only）
 agent/runtime → packages/sdk (implements)
     → crates/project
     → crates/policy
@@ -361,7 +362,7 @@ agent/runtime → packages/sdk (implements)
         → crates/core
 ```
 
-实际 Cargo 依赖应以 architecture guard 固化：`apps/cli/Cargo.toml` 只应声明 `packages/sdk` 依赖，不得声明 supporting domain 和 `core` 依赖。
+实际 Cargo 依赖应以 architecture guard 固化：`apps/cli/Cargo.toml` 只应声明 `packages/sdk`、`agent/runtime`（真实实现装配）和纯技术库依赖，不得声明 supporting domain、`share/core` 或其他业务 crate 依赖。
 
 #### 6.4.1 Cargo 依赖图守卫
 
@@ -371,7 +372,7 @@ agent/runtime → packages/sdk (implements)
 
 | Crate | 允许直接依赖的业务 crate |
 |---|---|
-| `cli` | `sdk` |
+| `cli` | `sdk`, `runtime`（仅 composition root 装配真实实现） |
 | `sdk` | （接口 crate，只含 trait + 公共类型，无依赖） |
 | `runtime` | `sdk`, `core`, `project`, `policy`, `prompt`, `provider`, `tools`, `storage`, `hook`, `audit` |
 | `project` | `core` |
@@ -386,7 +387,7 @@ agent/runtime → packages/sdk (implements)
 
 规则：
 
-1. `apps/cli` 只能直接依赖 `sdk` 和纯技术库，禁止直接依赖 `core`、`runtime` 或任何 supporting domain。
+1. `apps/cli` 只能直接依赖 `sdk`、`runtime` 和纯技术库；`runtime` 依赖仅限 composition root 构造真实 `AgentClient`，禁止 TUI/业务代码直接使用 runtime 内部 API。
 2. `sdk` 是纯接口 crate，只含 trait + 公共类型，无业务依赖。
 3. `runtime` 是唯一编排者，可以依赖所有 supporting domains 和 `core`，并实现 `sdk` 的 AgentClient trait。
 4. supporting domain 默认只能依赖 `core`，不能互相横向依赖；如果确实需要横向依赖，必须先进入 architecture allowlist，并在 spec 中说明原因、方向和替代方案。
@@ -398,7 +399,7 @@ agent/runtime → packages/sdk (implements)
 需要阻断的例子：
 
 ```text
-cli -> runtime      ← 应走 packages/sdk
+cli -> runtime 内部 API      ← TUI/业务代码应走 packages/sdk AgentClient；runtime 只允许在 composition root 装配
 cli -> tools
 cli -> core
 tools -> policy
@@ -427,11 +428,7 @@ use hook::
 use audit::
 ```
 
-`apps/cli` 只能通过：
-
-```text
-use runtime::api::...
-```
+`apps/cli` 只能通过 `sdk::AgentClient` 契约访问运行时能力；过渡期仅允许 `args.rs`、`main.rs`、`run_orchestration.rs` 在 composition root 使用 `runtime::api::bootstrap/client/command` 做装配。
 
 supporting domain 的源码禁止出现：
 
@@ -711,7 +708,7 @@ pub struct RuntimeHandle {
 核心原则：
 
 ```
-CLI 只知道 AgentClient（trait）
+CLI TUI/业务代码只知道 AgentClient（trait）
 AgentClientImpl 只是 RuntimeHandle 的薄代理
 Runtime 拥有全部初始化逻辑和编排能力
 ```
@@ -850,13 +847,13 @@ fn cancel(&self) {
 
 chat() 内部每处理一个 ChatEvent 检查 AtomicBool，无需 AbortHandle。
 
-CLI 编译期只依赖 `packages/sdk`，不直接依赖 `agent/` 的任何子 crate。运行时通过 `AgentClientImpl::new()` 获得 `agent/runtime` 的真实实现。
+CLI 的 TUI/业务代码只依赖 `packages/sdk` 契约，不直接依赖 `agent/` 的任何 supporting crate；单二进制部署下，composition root 仍直接依赖 `agent/runtime` 以获得真实 `AgentClientImpl`。
 
 ### 6.6 CLI 边界重新设计
 
 当前 CLI 承担了大量不该由入口层承担的初始化编排工作。`run_orchestration/` 三文件共 438 行，其中 `setup.rs` (184 行) 手动组装 Runtime 依赖，`runtime.rs` (163 行) 持有散落的 Runtime API 调用，`prompt.rs` (91 行) 在入口层组装 system block。
 
-**CLI 的薄边界**：CLI 只做三件事——解析启动参数、加载配置、启动 TUI/REPL 循环。所有 Runtime 初始化逻辑移入 `AgentClient::new()`，所有 Runtime 调用走 AgentClient 方法。
+**CLI 的薄边界**：CLI 只做三件事——解析启动参数、加载配置、在 composition root 构造 AgentClient 并启动 TUI/REPL 循环。所有 Runtime 初始化逻辑移入 `AgentClientImpl::from_args()`，所有 TUI/业务 Runtime 调用逐步走 AgentClient 方法。
 
 ```
 当前（fat）:                             目标（thin）:
@@ -888,13 +885,14 @@ CLI                                      CLI               AgentClient
 | `prompt.rs` | system block / system_prompt_text 组装 | `new()` 内部调用 |
 | `runtime.rs` | chat(), cancel(), save_session(), compact() | 成为 AgentClient 方法 |
 
-**CLI 残留文件**（after AgentClient::new() 实施后）：
+**CLI 残留边界**（after AgentClient::new() 实施后）：
 
 ```
-apps/cli/src/run_orchestration/
-├── args.rs          ← 参数解析（保留，< 50 行）
-├── run.rs           ← 启动派发：config → AgentClient::new() → TUI/REPL（< 40 行）
-└── (setup.rs, runtime.rs, prompt.rs → 删除)
+apps/cli/src/
+├── args.rs              ← 参数解析 + ChatBootstrapArgs DTO 映射
+├── main.rs              ← panic hook + tokio main
+├── run_orchestration.rs ← composition root：init commands → runtime::client::from_args() → TUI/REPL
+└── tui/**               ← 只应逐步依赖 sdk::AgentClient 契约，不再直接展开 runtime 内部对象
 ```
 
 **TuiApp 构造函数变更**：
@@ -913,8 +911,8 @@ App::run(state, client: AgentClient)
 |----|------|------|
 | 1 | 在 `packages/sdk` 定义 `AgentClient` trait | `cargo check -p sdk` |
 | 2 | 在 `agent/runtime` 实现 `AgentClient::new()`，吞掉 setup.rs 的全部 build_* | `cargo check -p agent/runtime` |
-| 3 | CLI 的 `run_orchestration/run.rs` 改为一行 `AgentClient::new(config, args).await` | `cargo check -p cli` |
-| 4 | 删除 setup.rs、runtime.rs、prompt.rs，TuiApp 改用 AgentClient | `cargo check -p cli`，TUI 跑起来验证 |
+| 3 | CLI 的 `run_orchestration.rs` 改为 composition root：`runtime::api::client::from_args(args.into()).await` 后只把 AgentClient/SDK 投影传入 TUI | `cargo check -p cli` |
+| 4 | 删除 setup.rs、runtime.rs、prompt.rs，TuiApp 逐步改用 AgentClient；直连 runtime 内部对象仅作为过渡债务保留在文档中 | `cargo check -p cli`，TUI 跑起来验证 |
 
 ## 7. COLA 工程分层规范
 
@@ -1091,9 +1089,10 @@ Runtime 重要不变量：
 ## 12. 后续工作
 
 1. **Phase 0**（SDK）：在 `packages/sdk` 中定义 `AgentClient` trait 及公共类型（ChatStream, SessionSummary, ProjectContext），在 `agent/runtime` 中实现。
-2. **Phase 1**（初始化）：将 `setup.rs` 的 build_* 编排委托给 `AgentClient::new()`，CLI 瘦身为单行初始化。将 `runtime.rs`（450 行）的零散 API 调用迁移至 AgentClient。
+2. **Phase 1**（初始化）：将 `setup.rs` 的 build_* 编排委托给 `AgentClientImpl::from_args()`，CLI 瘦身为 composition root。将零散 runtime API 调用逐步迁移至 AgentClient。
 3. **Phase 2**（目录整理）：完成 CLI 目录整理（#50），收拢碎片文件。在 mod.rs 中添加 doc comment 标注模块职责。
-4. **Phase 3**（守卫）：实施架构守卫脚本（包依赖检查），确保 CLI 只依赖 `packages/sdk`，不直接依赖 `agent/runtime` 或任何 supporting domain。
+4. **Phase 3**（守卫）：实施架构守卫脚本（包依赖检查），确保 CLI 只依赖 `packages/sdk`、`agent/runtime`（composition root）和纯技术库，不直接依赖任何 supporting domain 或 share/core。
+5. **Phase 4**（SDK 投影）：在 SDK 中补齐 TUI 需要的只读投影/命令事件，让 `tui/**` 逐步从 `runtime::api::*` 迁移到 `sdk::*`；`runtime` 直连只保留在 `run_orchestration.rs` 装配层。
 5. 用本设计评审现有 crate/module 边界。
 6. 标出现有类型属于哪个 Bounded Context 和哪个聚合。
 7. 后续重构应保持 CLI/TUI 行为可验证，最终通过完整验收门禁。

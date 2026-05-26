@@ -254,6 +254,7 @@ dependencies = [
  "rand",
  "ratatui",
  "runtime",
+ "sdk",
  "serde_json",
  "similar",
  "syntect",
