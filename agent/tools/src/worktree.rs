@@ -46,6 +46,19 @@ fn get_current_branch(dir: &Path) -> String {
         .unwrap_or_else(|| "(unknown)".to_string())
 }
 
+fn format_workspace_context_result(
+    headline: &str,
+    branch: &str,
+    path_base: &Path,
+    working_root: &Path,
+) -> String {
+    format!(
+        "{headline}\n当前分支：{branch}\n当前 path_base：{}\n当前 working_root：{}\n\n后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。\n如果必须使用绝对路径，必须位于当前 working_root 下。\n不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。",
+        path_base.display(),
+        working_root.display()
+    )
+}
+
 #[async_trait]
 impl Tool for EnterWorktreeTool {
     fn name(&self) -> &'static str {
@@ -81,13 +94,14 @@ impl Tool for EnterWorktreeTool {
 
         match worktree_ops::enter_worktree(ctx, PathBuf::from(&args.path)) {
             Ok(_snapshot) => {
+                let path_base = ctx.current_path_base();
                 let working_root = ctx.current_working_root();
                 let branch = get_current_branch(&working_root);
-                ToolResult::success(format!(
-                    "已进入 worktree：{}\n当前分支：{}\n工作根目录：{}",
-                    args.path,
-                    branch,
-                    working_root.display()
+                ToolResult::success(format_workspace_context_result(
+                    &format!("已进入 worktree：{}", args.path),
+                    &branch,
+                    &path_base,
+                    &working_root,
                 ))
             }
             Err(e) => ToolResult::error(format!("进入 worktree 失败：{}", e)),
@@ -140,13 +154,14 @@ impl Tool for ExitWorktreeTool {
             match worktree_ops::enter_worktree(ctx, PathBuf::from(&path)) {
                 Ok(_) => {
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
+                    let path_base = ctx.current_path_base();
                     let working_root = ctx.current_working_root();
                     let branch = get_current_branch(&working_root);
-                    ToolResult::success(format!(
-                        "已切换到：{}\n当前分支：{}\n工作根目录：{}",
-                        path,
-                        branch,
-                        working_root.display()
+                    ToolResult::success(format_workspace_context_result(
+                        &format!("已切换到：{}", path),
+                        &branch,
+                        &path_base,
+                        &working_root,
                     ))
                 }
                 Err(e) => ToolResult::error(format!("切换路径失败：{}", e)),
@@ -155,13 +170,14 @@ impl Tool for ExitWorktreeTool {
             // 恢复上一上下文
             match worktree_ops::exit_worktree(ctx) {
                 Ok(prev) => {
+                    let path_base = ctx.current_path_base();
                     let working_root = ctx.current_working_root();
                     let branch = get_current_branch(&working_root);
-                    ToolResult::success(format!(
-                        "已退出 worktree，恢复到：{}\n当前分支：{}\n工作根目录：{}",
-                        prev.path_base.display(),
-                        branch,
-                        working_root.display()
+                    ToolResult::success(format_workspace_context_result(
+                        &format!("已退出 worktree，恢复到：{}", prev.path_base.display()),
+                        &branch,
+                        &path_base,
+                        &working_root,
                     ))
                 }
                 Err(e) => ToolResult::error(format!("退出 worktree 失败：{}", e)),
@@ -237,5 +253,20 @@ mod tests {
     fn test_exit_worktree_not_concurrency_safe() {
         let tool = ExitWorktreeTool;
         assert!(!tool.is_concurrency_safe());
+    }
+
+    #[test]
+    fn test_format_workspace_context_result_includes_path_base_and_working_root() {
+        let text = format_workspace_context_result(
+            "已进入 worktree：/repo/.worktrees/feature",
+            "feature",
+            Path::new("/repo/.worktrees/feature/subdir"),
+            Path::new("/repo/.worktrees/feature"),
+        );
+
+        assert!(text.contains("当前 path_base：/repo/.worktrees/feature/subdir"));
+        assert!(text.contains("当前 working_root：/repo/.worktrees/feature"));
+        assert!(text.contains("后续 Read/Edit/Write/Glob/Grep/Bash"));
+        assert!(text.contains("不要继续使用进入 worktree 前"));
     }
 }

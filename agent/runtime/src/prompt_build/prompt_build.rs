@@ -91,11 +91,10 @@ GOOD: TaskListCreate(summary) → TaskCreate(3 tasks) → Agent("do task 1", tas
  - Do not use emojis unless the user explicitly requests it.
 
 # Environment
- - Current workspace root: {cwd_str}
  - Working directory: {cwd_str}
  - Is a git repository: {is_git}
- - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace root above.
- - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace root."#
+ - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
+ - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#
     )
 }
 

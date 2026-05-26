@@ -11,7 +11,7 @@
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
-| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：system prompt 只暴露 `Working directory`，未明确当前 workspace root 与 worktree 路径约束，且工具越界报错只说明被拒绝，缺少改用相对路径/当前 workspace 根的纠正提示；修复：环境上下文新增 Current workspace root 与 worktree 路径规则，路径安全错误补充恢复建议 |
+| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 70 | TaskListCreate 第一次调用会超时 | 中 | 修复中 | 待确认 | 2026-05 | 工具层单测瞬时通过（5 tests, finished in 0.00s），证伪「工具实现层瓶颈」假设。根因不在 `task_list_create.rs`，应位于外层路径（最可能：LLM stream → tool_use 投递阶段网络/握手延迟，被 dispatcher 120s timeout 误归到工具自身）。后续应在 agent.rs dispatcher 增加分段计时日志，区分「LLM 投递」与「tool.call 执行」 |
 ## 专案
 
@@ -111,14 +111,15 @@ test result: ok. 5 passed; 0 failed; finished in 0.00s
 4. EnterWorktree/cwd 切换后未同步更新 system reminder 中的 cwd 字段，导致 LLM 看到的 cwd 仍为外层。
 
 **根因（已确认）**：
-1. 静态 system prompt 的 `# Environment` 只给出 `Working directory`，没有以更强语义标注 `Current workspace root`，也没有明确提示工具路径必须在当前 workspace 内、worktree 中优先使用相对路径。
-2. `path_security` 对越界搜索路径仅返回 `Search path ... is outside the workspace ...`，能阻止越界但没有告诉 LLM 应改用相对路径或当前 workspace root，导致模型容易重复同一个旧绝对路径。
-3. 主循环在工具执行后已有 `WorkingDirectoryChanged` 事件同步 TUI 状态；本次问题更主要是 LLM 可见上下文和错误恢复提示不足。
+1. 仅在静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 `EnterWorktree` / `ExitWorktree` 后变成旧值，反而可能误导 LLM。
+2. 当前 workspace 的实时状态源是执行中的 workspace context（`path_base` / `working_root` / context stack），它会被 Enter/ExitWorktree 修改，并被文件/搜索工具用于相对路径解析和安全边界。
+3. 因此 LLM 需要通过 Enter/ExitWorktree 的 tool result 获取最新 `path_base` / `working_root`，而不是依赖 system prompt 或额外 reminder 动态注入。
 
 **修复**：
-1. system prompt 环境段新增 `Current workspace root`，并明确 Read/Edit/Write/Glob/Grep/Bash 路径优先使用相对路径；绝对路径必须位于当前 workspace root 内，禁止复用其他 checkout/main/worktree/历史会话中的绝对路径。
-2. `validate_search_path_from_base` 与文件路径越界错误统一补充恢复建议：优先使用相对路径或当前 workspace root，下次不要重试同一个外部绝对路径。
-3. 新增回归测试覆盖 worktree 相对路径指导和越界路径错误恢复提示。
+1. 静态 system prompt 去掉具体 `Current workspace root`，只保留通用规则：工具路径优先使用相对路径；绝对路径必须位于当前 workspace；不要复用其他 checkout/main/worktree/历史会话中的绝对路径。
+2. `EnterWorktree` / `ExitWorktree` 成功结果统一输出当前 `path_base`、`working_root`、分支和后续路径使用规则，直接在 tool result 中告诉 LLM 最新 workspace context。
+3. `validate_search_path_from_base` 与文件路径越界错误继续补充恢复建议：优先使用相对路径或当前 workspace，下次不要重试同一个外部绝对路径。
+4. 新增回归测试覆盖静态 prompt 不再包含固定 workspace root、以及 worktree tool result 包含 `path_base` / `working_root` 与路径提示。
 
 **修复方向**：
 1. 在系统提示/会话上下文中明确标注当前 workspace 根与 cwd，并与工具 workspace 边界保持一致；EnterWorktree 后必须同步刷新这两个字段。
