@@ -1,4 +1,4 @@
-use crate::tui::theme;
+use crate::tui::display::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

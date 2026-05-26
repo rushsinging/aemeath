@@ -58,7 +58,7 @@ impl LineStyle {
     pub fn to_style(&self) -> ratatui::style::Style {
         use ratatui::style::{Color, Modifier, Style};
 
-        use crate::tui::theme;
+        use crate::tui::display::theme;
 
         match self {
             LineStyle::Normal => Style::default().fg(theme::TEXT),

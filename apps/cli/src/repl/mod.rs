@@ -1,3 +1,5 @@
+//! ⚠️ **Deprecated**: rustyline REPL. Prefer the TUI interface.
+#![deprecated(note = "Prefer TUI interface; REPL is unmaintained")]
 use crate::render::TerminalRenderer;
 use ::runtime::api::compact;
 use ::runtime::api::core::message::Message;

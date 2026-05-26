@@ -1,5 +1,5 @@
 use crate::tui::output_area::{build_diff_lines, LineStyle, OutputLine, INDENT};
-use crate::tui::syntax::extension_from_path;
+use crate::tui::display::syntax::extension_from_path;
 
 use super::lookup_display;
 

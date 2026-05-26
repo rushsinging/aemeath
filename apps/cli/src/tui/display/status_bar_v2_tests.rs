@@ -1,0 +1,232 @@
+use super::*;
+use crate::tui::display::theme;
+
+fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
+    (0..width)
+        .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol().to_string()))
+        .collect::<String>()
+}
+
+#[test]
+fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session() {
+    let mut bar = StatusBar::new();
+    bar.set_success("Ready");
+    bar.set_model("zhipu/glm-5.1");
+    bar.set_tokens(12_400, 1_800, 74_000);
+    bar.set_context_size(200_000);
+    bar.set_tps(42.0);
+    bar.set_session_id("019-session");
+    bar.set_api_calls(7);
+
+    let text = bar.build_full_text();
+
+    assert!(text.contains("Ready"));
+    assert!(text.contains("zhipu/glm-5.1"));
+    assert!(text.contains("in 12k"));
+    assert!(text.contains("out 1.8k"));
+    assert!(text.contains("42 t/s"));
+    assert!(text.contains("ctx 37%"));
+    assert!(text.contains("api 7"));
+    assert!(!text.to_ascii_lowercase().contains("session"));
+    assert!(!text.contains("019-session"));
+    assert!(!text.to_ascii_lowercase().contains("cost"));
+    assert!(!text.contains('$'));
+}
+
+#[test]
+fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath",
+        "~/Nextcloud/work/claudecode/aemeath",
+    );
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(120);
+
+    assert_eq!(
+        row,
+        "~/Nextcloud/work/claudecode/aemeath │ main │ AskMe │ session 019-session-full"
+    );
+    assert!(!row.contains("ctx "));
+    assert!(!row.contains("root "));
+    assert!(!row.contains("Perm:"));
+}
+
+#[test]
+fn test_context_row_shows_root_only_when_different() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath/cli",
+        "~/Nextcloud/work/claudecode/aemeath",
+    );
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(140);
+
+    assert!(row.contains("~/Nextcloud/work/claudecode/aemeath/cli"));
+    assert!(row.contains("root ~/Nextcloud/work/claudecode/aemeath"));
+    assert!(row.contains(" │ main │ AskMe"));
+    assert!(row.contains("session 019-session-full"));
+}
+
+#[test]
+fn test_context_row_worktree_uses_worktree_branch_label() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
+    bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(140);
+
+    assert!(row.contains('~'));
+    assert!(row.contains(".worktrees/redesign-46-status-line-v2"));
+    assert!(row.contains("worktree:redesign/46-status-line-v2"));
+    assert!(row.ends_with("session 019-session-full"));
+}
+
+#[test]
+fn test_context_row_narrow_preserves_path_permission_and_session() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
+    bar.set_permission_mode("AllowAll");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(72);
+
+    assert!(row.starts_with('~') || row.starts_with('/'));
+    assert!(row.contains("AllowAll"));
+    assert!(row.ends_with("session 019-session-full"));
+}
+
+#[test]
+fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath",
+        "~/Nextcloud/work/claudecode/aemeath",
+    );
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
+    let area = Rect::new(0, 0, 120, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
+    assert_eq!(buf.cell((38, 1)).unwrap().style().fg, Some(theme::SUCCESS));
+    assert_eq!(buf.cell((45, 1)).unwrap().style().fg, Some(theme::WARNING));
+    assert_eq!(
+        buf.cell((53, 1)).unwrap().style().fg,
+        Some(theme::TEXT_MUTED)
+    );
+    assert_eq!(buf.cell((0, 1)).unwrap().style().bg, Some(theme::STATUS_BG));
+}
+
+#[test]
+fn test_context_row_narrow_keeps_path_prefix_without_invalid_splice() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
+        "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
+    bar.set_permission_mode("AllowAll");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(72);
+
+    assert!(row.starts_with("~…") || row.starts_with("/…"));
+    assert!(!row.starts_with("~e "));
+    assert!(row.contains("AllowAll"));
+    assert!(row.contains("session 019-session-full"));
+}
+
+#[test]
+fn test_context_row_cjk_path_uses_display_width_budget() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths("~/项目/状态栏/aemeath", "~/项目/状态栏/aemeath");
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    bar.set_session_id("019-session-full");
+
+    let row = bar.context_row_text(40);
+
+    assert!(crate::tui::display::safe_text::str_display_width(&row) <= 40 || row.starts_with('~'));
+    assert!(row.starts_with('~'));
+    assert!(row.contains("AskMe"));
+    assert!(row.contains("session 019-session-full"));
+}
+
+#[test]
+fn test_context_row_without_session_uses_correct_semantic_colors() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths("~/aemeath", "~/aemeath");
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    let area = Rect::new(0, 0, 80, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
+    assert_eq!(buf.cell((12, 1)).unwrap().style().fg, Some(theme::SUCCESS));
+    assert_eq!(buf.cell((19, 1)).unwrap().style().fg, Some(theme::WARNING));
+}
+
+#[test]
+fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths("~/aemeath/cli", "~/aemeath");
+    bar.set_git_context(WorktreeKind::Main, "main");
+    bar.set_permission_mode("AskMe");
+    let area = Rect::new(0, 0, 80, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
+    assert_eq!(
+        buf.cell((17, 1)).unwrap().style().fg,
+        Some(theme::TEXT_MUTED)
+    );
+    assert_eq!(buf.cell((34, 1)).unwrap().style().fg, Some(theme::SUCCESS));
+    assert_eq!(buf.cell((41, 1)).unwrap().style().fg, Some(theme::WARNING));
+}
+
+#[test]
+fn test_status_bar_render_two_rows_v2() {
+    let mut bar = StatusBar::new();
+    bar.set_context_paths(
+        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
+        "/workspace/projects/example/.worktrees/topic-46-status-line",
+    );
+    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
+    bar.set_api_calls(3);
+    let area = Rect::new(0, 0, 120, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf);
+
+    let runtime = row_text(&buf, 0, area.width);
+    let context = row_text(&buf, 1, area.width);
+    assert!(runtime.contains("api 3"));
+    assert!(!runtime.contains("Think:"));
+    assert!(!runtime.contains("Session"));
+    assert!(!context.contains("ctx "));
+    assert!(context.starts_with('/'));
+    assert!(context.contains("worktree:feature/46-status-line"));
+}

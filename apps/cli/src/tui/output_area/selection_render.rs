@@ -2,7 +2,7 @@ use ratatui::{style::Style, text::Line, text::Span};
 
 use ::runtime::api::core::string_idx::CharIdx;
 
-use crate::tui::theme;
+use crate::tui::display::theme;
 
 impl super::OutputArea {
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
