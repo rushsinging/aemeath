@@ -42,6 +42,7 @@ pub(crate) async fn run_chat(args: Args) {
     let model_disp = model_display(&model.source_key, &model.model.name, &model.model.id);
     let max_tool = client.max_tool_concurrency();
     let max_agent = client.max_agent_concurrency();
+    let context_window = model.model.context_window;
 
     let mut app = crate::tui::App::new(session_id.clone(), cwd, model_disp);
     app.session.memory_config = ctx.memory_config;
@@ -54,7 +55,7 @@ pub(crate) async fn run_chat(args: Args) {
         ctx.system_blocks,
         ctx.system_prompt_text,
         ctx.user_context,
-        0,     // context_size
+        context_window,
         false, // verbose
         true,  // markdown
         Some(ctx.agent_runner),
@@ -82,5 +83,26 @@ mod tests {
         assert!(permission_env_override(Some("allow_all")));
         assert!(!permission_env_override(Some("ask")));
         assert!(!permission_env_override(None));
+    }
+
+    #[test]
+    fn test_model_display_uses_name_when_present() {
+        assert_eq!(
+            model_display("zhipu", "GLM-5.1", "glm-5.1"),
+            "zhipu/GLM-5.1"
+        );
+    }
+
+    #[test]
+    fn test_model_display_falls_back_to_id_when_name_empty() {
+        assert_eq!(
+            model_display("openai", "", "gpt-4o"),
+            "openai/gpt-4o"
+        );
+    }
+
+    #[test]
+    fn test_model_display_empty_source_still_formats() {
+        assert_eq!(model_display("", "Claude", "claude-3"), "/Claude");
     }
 }
