@@ -131,6 +131,23 @@ impl ModelsConfig {
         let lc = name.to_lowercase();
         self.providers.iter().find(|(k, _)| k.to_lowercase() == lc)
     }
+
+    /// 统一的模型选择入口：CLI `--model` 参数优先，否则使用配置默认值。
+    ///
+    /// 等价于旧 `select_model_for_run()`，现在由 `Config` 的调用方直接使用：
+    /// ```ignore
+    /// let model = config.models.select_for_run(args.model.as_deref())?;
+    /// ```
+    pub fn select_for_run(
+        &self,
+        requested: Option<&str>,
+    ) -> Result<ResolvedModel, ModelResolveError> {
+        if let Some(selection) = requested.filter(|s| !s.trim().is_empty()) {
+            self.resolve_model_selection(selection)
+        } else {
+            self.resolve_default_model()
+        }
+    }
 }
 
 // === 共享辅助函数 ===

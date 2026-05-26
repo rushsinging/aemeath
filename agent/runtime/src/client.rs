@@ -68,25 +68,11 @@ impl RuntimeHandle {
     }
 }
 
-/// 模型选择 trait — CLI 注入具体实现。
-///
-/// 分离关注点：runtime 不知道 CLI 的 model_selection 模块，
-/// CLI 注入闭包即可。
-pub trait ModelSelector: Send + Sync {
-    fn select_model(
-        &self,
-        requested: Option<&str>,
-        config: Option<&crate::api::core::config::Config>,
-    ) -> Result<ResolvedModel, String>;
-}
-
 /// 从 Args 初始化 AgentClient。
 ///
-/// 这是从 CLI setup.rs 迁移过来的全部编排逻辑。
-/// CLI 只需 `AgentClientImpl::from_args(args, model_selector).await`。
+/// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 pub async fn from_args(
     mut args: ChatBootstrapArgs,
-    model_selector: &dyn ModelSelector,
 ) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
     crate::api::prompt::guidance::init_guidance_dir();
@@ -115,11 +101,16 @@ pub async fn from_args(
     // 5. 权限模式
     apply_config_permission_mode(&mut args, config_file.as_ref());
 
-    // 6. 模型选择
-    let requested_model = args.model.as_deref();
-    let resolved_model = model_selector
-        .select_model(requested_model, config_file.as_ref())
-        .map_err(|e| SdkError::Init(e))?;
+    // 6. 模型选择 — 直接使用 ModelsConfig::select_for_run
+    let config = config_file.as_ref().ok_or_else(|| {
+        SdkError::Init(
+            "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.agents/aemeath.json 配置 models.default".to_string(),
+        )
+    })?;
+    let resolved_model = config
+        .models
+        .select_for_run(args.model.as_deref())
+        .map_err(|e| SdkError::Init(e.to_string()))?;
     let api_type = resolved_model.api;
 
     // 7. API key

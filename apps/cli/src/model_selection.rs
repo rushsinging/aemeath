@@ -1,6 +1,4 @@
-use ::runtime::api::core::config::{
-    models::ResolvedModel, Config, ConfigManager, ModelEntryConfig,
-};
+use ::runtime::api::core::config::{ConfigManager, ModelEntryConfig};
 
 /// 处理 `aemeath models` 子命令
 fn format_token_limit_k(tokens: u32) -> String {
@@ -57,7 +55,6 @@ pub(crate) async fn run_models_command(json: bool) {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&output).unwrap());
             } else {
-                // 表格输出 — 自适应列宽
                 let header = ("PROVIDER", "ID", "NAME", "CTX", "MAX");
                 let rows: Vec<(String, String, String, String, String)> = models
                     .iter()
@@ -118,69 +115,9 @@ pub(crate) async fn run_models_command(json: bool) {
     }
 }
 
-pub(crate) fn select_model_for_run(
-    requested_model: Option<&str>,
-    config_file: Option<&Config>,
-) -> Result<ResolvedModel, String> {
-    let cfg = config_file.ok_or_else(|| {
-        "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.agents/aemeath.json 配置 models.default".to_string()
-    })?;
-
-    if let Some(selection) = requested_model.filter(|s| !s.trim().is_empty()) {
-        cfg.models
-            .resolve_model_selection(selection)
-            .map_err(|e| e.to_string())
-    } else {
-        cfg.models
-            .resolve_default_model()
-            .map_err(|e| e.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use ::runtime::api::core::config::{
-        Config, ModelEntryConfig, ModelsConfig, ProviderModelsConfig,
-    };
-    use std::collections::HashMap;
-
-    fn test_config_for_model_selection() -> Config {
-        let mut providers = HashMap::new();
-        providers.insert(
-            "Zhipu".to_string(),
-            ProviderModelsConfig {
-                api: "zhipu".to_string(),
-                api_key: "zhipu-key".to_string(),
-                base_url: "https://zhipu.example.com".to_string(),
-                models: vec![ModelEntryConfig {
-                    id: "glm-5.1".to_string(),
-                    max_tokens: 128000,
-                    ..Default::default()
-                }],
-            },
-        );
-        providers.insert(
-            "LiteLLM".to_string(),
-            ProviderModelsConfig {
-                api: "litellm".to_string(),
-                api_key: "litellm-key".to_string(),
-                base_url: "https://litellm.example.com".to_string(),
-                models: vec![ModelEntryConfig {
-                    id: "anthropic/claude-opus-4-7".to_string(),
-                    max_tokens: 16000,
-                    ..Default::default()
-                }],
-            },
-        );
-        Config {
-            models: ModelsConfig {
-                default: "Zhipu/glm-5.1".to_string(),
-                providers,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
+    use ::runtime::api::core::config::ModelEntryConfig;
 
     #[test]
     fn test_model_row_display_includes_max_tokens_as_k() {
@@ -213,29 +150,5 @@ mod tests {
         assert_eq!(row.2, "-");
         assert_eq!(row.3, "-");
         assert_eq!(row.4, "-");
-    }
-
-    #[test]
-    fn test_select_model_prefers_cli_model() {
-        let cfg = test_config_for_model_selection();
-        let selected =
-            super::select_model_for_run(Some("LiteLLM/anthropic/claude-opus-4-7"), Some(&cfg))
-                .unwrap();
-        assert_eq!(selected.source_key, "LiteLLM");
-        assert_eq!(selected.model.id, "anthropic/claude-opus-4-7");
-    }
-
-    #[test]
-    fn test_select_model_uses_config_default() {
-        let cfg = test_config_for_model_selection();
-        let selected = super::select_model_for_run(None, Some(&cfg)).unwrap();
-        assert_eq!(selected.source_key, "Zhipu");
-        assert_eq!(selected.model.id, "glm-5.1");
-    }
-
-    #[test]
-    fn test_select_model_without_config_errors() {
-        let err = super::select_model_for_run(None, None).unwrap_err();
-        assert!(err.contains("未指定模型"));
     }
 }
