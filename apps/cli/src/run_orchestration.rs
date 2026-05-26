@@ -47,7 +47,6 @@ pub(crate) async fn run_chat(args: Args) {
     let model_disp = model_display(&model.source_key, &model.model.name, &model.model.id);
     let max_tool = client.max_tool_concurrency();
     let max_agent = client.max_agent_concurrency();
-    let context_window = model.model.context_window;
 
     let mut app = crate::tui::App::new(session_id.clone(), cwd, model_disp);
     app.session.memory_config = ctx.memory_config;
@@ -60,9 +59,9 @@ pub(crate) async fn run_chat(args: Args) {
         ctx.system_blocks,
         ctx.system_prompt_text,
         ctx.user_context,
-        context_window,
-        false, // verbose
-        true,  // markdown
+        ctx.context_size,
+        ctx.verbose,
+        ctx.use_markdown,
         Some(ctx.agent_runner),
         ctx.allow_all,
         initial_resume_id,

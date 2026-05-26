@@ -20,7 +20,7 @@ use crate::api::tools as tools_crate;
 use crate::bootstrap::{
     self, build_agent_runner, build_hook_runner, build_json_logger, init_logging, spawn_mcp_connect,
     apply_config_permission_mode, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
-    resolve_model_runtime_settings, ReasoningConfigInput,
+    resolve_context_size, resolve_model_runtime_settings, resolve_use_markdown, ReasoningConfigInput,
 };
 use crate::chat::ChatRuntimeContext;
 use crate::bootstrap::{
@@ -229,7 +229,11 @@ pub async fn from_args(
         max_agent_concurrency
     );
 
-    // 17. 组装 context
+    // 17. context_size / verbose / markdown 合并
+    let context_size = resolve_context_size(args.context_size, config_file.as_ref());
+    let use_markdown = resolve_use_markdown(args.no_markdown);
+
+    // 18. 组装 context
     let memory_config = config_file
         .as_ref()
         .map(|c| c.memory.clone())
@@ -248,9 +252,13 @@ pub async fn from_args(
         json_logger,
         agent_semaphore,
         allow_all: args.allow_all,
+        context_size,
+        verbose: args.verbose,
+        use_markdown,
+        resume: args.resume,
     };
 
-    // 18. 构建 handle
+    // 19. 构建 handle
     let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
     let handle = RuntimeHandle {
         context,

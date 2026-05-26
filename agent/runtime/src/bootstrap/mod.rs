@@ -21,9 +21,39 @@ pub use runtime_support::{
 };
 
 use crate::api::core::config::models::ResolvedModel;
+use crate::api::core::config::Config;
 use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 use std::sync::Arc;
+
+/// 合并 context_size（优先级：CLI > env > config > 默认 128000）。
+pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config>) -> usize {
+    // CLI 非零 → 用户显式设置了
+    if cli_context_size > 0 {
+        return cli_context_size;
+    }
+    // env AEMEATH_CONTEXT_SIZE
+    if let Ok(env_val) = std::env::var("AEMEATH_CONTEXT_SIZE") {
+        if let Ok(parsed) = env_val.parse::<usize>() {
+            if parsed > 0 {
+                return parsed;
+            }
+        }
+    }
+    // config model.context_size
+    if let Some(config) = config_file {
+        if config.model.context_size > 0 {
+            return config.model.context_size;
+        }
+    }
+    // default
+    128_000
+}
+
+/// 合并 use_markdown（优先级：CLI no_markdown 覆盖 > 默认 true）。
+pub fn resolve_use_markdown(cli_no_markdown: bool) -> bool {
+    !cli_no_markdown
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatBootstrapArgs {

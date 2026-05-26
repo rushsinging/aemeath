@@ -26,6 +26,10 @@ pub struct ChatRuntimeContext {
     pub json_logger: Option<Arc<Mutex<JsonLogger>>>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub allow_all: bool,
+    pub context_size: usize,
+    pub verbose: bool,
+    pub use_markdown: bool,
+    pub resume: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
