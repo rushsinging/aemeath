@@ -21,7 +21,10 @@ for crate in business:
         violations.append(f"apps/cli/Cargo.toml must not declare direct path dependency on {crate}")
 
 if 'runtime = { path = "../../agent/runtime" }' not in text:
-    violations.append("apps/cli/Cargo.toml must depend on runtime via ../../agent/runtime")
+    violations.append("apps/cli/Cargo.toml must depend on runtime via ../../agent/runtime for composition root assembly")
+
+if 'sdk = { path = "../../packages/sdk" }' not in text:
+    violations.append("apps/cli/Cargo.toml must depend on sdk via ../../packages/sdk for AgentClient contract")
 
 if violations:
     print(json.dumps({"decision": "block", "reason": "Thin CLI guard failed:\n" + "\n".join(violations)}, ensure_ascii=False))

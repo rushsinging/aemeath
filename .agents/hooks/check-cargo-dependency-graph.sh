@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 business_allow = {
-      "cli": {"runtime"},
+      "cli": {"runtime", "sdk"},
       "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk"},
       "share": set(),
       "project": {"share"},
