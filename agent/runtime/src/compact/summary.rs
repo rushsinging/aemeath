@@ -6,10 +6,10 @@
 use crate::compact::micro::microcompact;
 use crate::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
 use crate::compact::truncate::safe_slice;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 // 向后兼容的 re-export
-pub use aemeath_core::token_estimation::needs_compaction;
+pub use share::token_estimation::needs_compaction;
 
 /// 发送给 LLM 的压缩提示模板。
 pub const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.

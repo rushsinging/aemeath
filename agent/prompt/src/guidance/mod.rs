@@ -33,7 +33,7 @@ fn global_guidance_dir() -> PathBuf {
     global_agents_dir().join("guidance")
 }
 
-// Re-export public API so external code can use `aemeath_core::guidance::...` unchanged.
+// Re-export public API so external code can use `share::guidance::...` unchanged.
 pub use constants::UNIVERSAL_EXECUTION_DISCIPLINE;
 pub use resolver::{
     load_named_file_async, resolve_guidance, resolve_guidance_async, resolve_model_guidance_async,

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use aemeath_core::session_types::{WorkspaceContext, WorkspaceStackEntry};
-use aemeath_core::tool::{ToolContext, WorkingContext};
+use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
+use share::tool::{ToolContext, WorkingContext};
 
 /// 检查两个路径是否属于同一 git 仓库
 pub fn is_same_git_repo(a: &Path, b: &Path) -> Result<bool, String> {
@@ -189,7 +189,7 @@ pub fn restore_workspace_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aemeath_core::tool::ToolContext;
+    use share::tool::ToolContext;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use tokio_util::sync::CancellationToken;
@@ -205,7 +205,7 @@ mod tests {
             read_files: Arc::new(Mutex::new(HashSet::new())),
             agent_runner: None,
             session_reminders: None,
-            memory_config: aemeath_core::config::MemoryConfig::default(),
+            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: false,
             max_tool_concurrency: 4,

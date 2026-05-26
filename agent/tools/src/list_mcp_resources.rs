@@ -1,10 +1,10 @@
 //! List resources from connected MCP servers
 
 use crate::mcp::McpClient;
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

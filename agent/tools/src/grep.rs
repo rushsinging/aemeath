@@ -1,7 +1,7 @@
 use crate::path_security::validate_search_path_from_base;
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::{Tool, ToolContext, ToolResult};
 use tokio::process::Command;
 
 pub struct GrepTool;

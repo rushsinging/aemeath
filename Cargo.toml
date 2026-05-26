@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "apps/cli",
-    "agent/core",
     "agent/runtime",
     "agent/project",
     "agent/policy",

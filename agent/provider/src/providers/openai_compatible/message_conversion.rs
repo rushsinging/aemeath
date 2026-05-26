@@ -2,7 +2,7 @@
 
 use super::{message_helpers::enforce_openai_tool_pairs, OpenAICompatibleProvider};
 use crate::types::SystemBlock;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
     /// 将 Anthropic 风格的 system 块转换为 OpenAI 风格的 system 消息
@@ -47,7 +47,7 @@ impl OpenAICompatibleProvider {
                         }));
                     }
                     ContentBlock::Image { source } => match source {
-                        aemeath_core::message::ImageSource::Base64 { media_type, data } => {
+                        share::message::ImageSource::Base64 { media_type, data } => {
                             content_parts.push(serde_json::json!({
                                 "type": "image_url",
                                 "image_url": {

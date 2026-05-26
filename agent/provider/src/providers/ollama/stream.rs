@@ -1,7 +1,7 @@
 //! 流式响应解析：解析 Ollama 原生 `/api/chat` NDJSON 流。
 
-use aemeath_core::message::{ContentBlock, Message, Role};
 use futures_util::StreamExt;
+use share::message::{ContentBlock, Message, Role};
 use std::io;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;

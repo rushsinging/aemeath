@@ -3,7 +3,7 @@
 use super::memory_support::open_memory_store;
 use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
 use crate::reflection::{ReflectionEngine, ReflectionOutput};
-use aemeath_core::memory::{MemoryEntry, MemoryLayer};
+use share::memory::{MemoryEntry, MemoryLayer};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -91,7 +91,7 @@ fn build_lightweight_output(memories: &[MemoryEntry]) -> ReflectionOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aemeath_core::memory::{MemoryCategory, MemorySource};
+    use share::memory::{MemoryCategory, MemorySource};
 
     #[test]
     fn test_build_lightweight_output_empty_memory() {

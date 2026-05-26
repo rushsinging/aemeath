@@ -1,5 +1,5 @@
 use super::types::{MemorySuggestion, ReflectionApplyResult, ReflectionOutput, ReflectionResult};
-use aemeath_core::memory::{MemoryEntry, MemoryLayer, MemorySource, MemoryStore};
+use share::memory::{MemoryEntry, MemoryLayer, MemorySource, MemoryStore};
 
 pub fn apply_suggestions(
     suggestions: &[MemorySuggestion],

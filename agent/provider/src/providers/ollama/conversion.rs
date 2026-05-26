@@ -2,7 +2,7 @@
 
 use super::OllamaProvider;
 use crate::types::SystemBlock;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。
 pub(crate) trait OllamaProviderConversion {
@@ -86,7 +86,7 @@ impl OllamaProviderConversion for OllamaProvider {
                         text_parts.push(text.clone());
                     }
                     ContentBlock::Image { source } => match source {
-                        aemeath_core::message::ImageSource::Base64 {
+                        share::message::ImageSource::Base64 {
                             media_type: _,
                             data,
                         } => {

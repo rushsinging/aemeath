@@ -5,7 +5,7 @@
 use crate::hook::data::*;
 use crate::hook::result::{HookJsonOutput, HookResult};
 use crate::hook::runner::HookRunner;
-use aemeath_core::config::hooks::{HookEntry, HookEvent};
+use share::config::hooks::{HookEntry, HookEvent};
 
 impl HookRunner {
     /// 便捷方法：运行 PreToolUse hooks，返回是否应阻止

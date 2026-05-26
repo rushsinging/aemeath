@@ -1,7 +1,7 @@
 //! LLM Provider trait and common types
 
-use aemeath_core::message::Message;
 use async_trait::async_trait;
+use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::types::{StreamResponse, SystemBlock};

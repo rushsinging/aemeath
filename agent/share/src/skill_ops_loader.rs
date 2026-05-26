@@ -1,5 +1,5 @@
-use super::{builtin_commit_skill, parse_skill, Skill};
-use share::config::paths;
+use crate::config::paths;
+use crate::skill_ops::{builtin_commit_skill, parse_skill, Skill};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -203,7 +203,3 @@ pub fn load_all_skills_cached(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<Str
 
     skills
 }
-
-#[cfg(test)]
-#[path = "loader_tests.rs"]
-mod tests;

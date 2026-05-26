@@ -1,7 +1,7 @@
 use crate::agent::{Agent, ToolCall};
-use aemeath_core::tool::{Tool, ToolContext, ToolRegistry, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::{Tool, ToolContext, ToolRegistry, ToolResult};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
@@ -50,7 +50,7 @@ fn test_ctx() -> ToolContext {
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         agent_runner: None,
         session_reminders: None,
-        memory_config: aemeath_core::config::MemoryConfig::default(),
+        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: true,
         max_tool_concurrency: 10,

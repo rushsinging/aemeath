@@ -2,7 +2,7 @@
 
 use crate::hook::data::{HookData, HookInput};
 use crate::hook::result::{HookJsonOutput, HookResult};
-use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ impl HookRunner {
     }
 
     /// 从配置 HashMap 创建（兼容 CLI 层的 config_file 结构）
-    pub fn from_config(config: &aemeath_core::config::Config, project_dir: String) -> Self {
+    pub fn from_config(config: &share::config::Config, project_dir: String) -> Self {
         Self {
             config: config.hooks.clone(),
             project_dir: Arc::new(Mutex::new(project_dir)),

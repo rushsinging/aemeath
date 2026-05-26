@@ -1,5 +1,5 @@
-use aemeath_core::message::{ContentBlock, Message};
-use aemeath_core::tool::{ImageData, ToolContext, ToolRegistry};
+use share::message::{ContentBlock, Message};
+use share::tool::{ImageData, ToolContext, ToolRegistry};
 
 /// (tool_use_id, output_text, is_error, images)
 pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);

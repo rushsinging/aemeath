@@ -1,6 +1,6 @@
-use aemeath_core::message::Message;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use share::message::Message;
 use std::error::Error as StdError;
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;

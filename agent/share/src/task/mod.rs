@@ -6,7 +6,7 @@ pub mod store;
 pub mod types;
 
 // Re-export public types so that external crate paths like
-// `aemeath_core::task::Task`, `TaskStore`, etc. keep working.
+// `share::task::Task`, `TaskStore`, etc. keep working.
 pub use types::{Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus};
 
 use std::collections::HashMap;

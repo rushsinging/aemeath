@@ -1,7 +1,7 @@
 use super::{OpenAICompatibleProvider, ReasoningConfig};
 use crate::client::OpenAIProviderConfig;
 use crate::ApiDriverKind;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 fn provider_with_reasoning() -> OpenAICompatibleProvider {
     OpenAICompatibleProvider::new(

@@ -1,7 +1,7 @@
 use crate::compact::restore::assemble::assemble_compacted;
 use crate::compact::restore::assemble::fix_role_alternation;
 use crate::compact::restore::sanitize_pairs::sanitize_tool_pairs;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 // helper
 fn text_msg(role: Role, text: &str) -> Message {

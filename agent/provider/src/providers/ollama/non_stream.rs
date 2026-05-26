@@ -4,7 +4,7 @@ use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
 use crate::provider::StreamHandler;
 use crate::types::{StreamResponse, SystemBlock};
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 pub(crate) trait OllamaProviderNonStream {
     async fn send_message_non_stream(

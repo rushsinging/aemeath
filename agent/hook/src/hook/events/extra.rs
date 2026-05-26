@@ -1,7 +1,7 @@
 use crate::hook::data::*;
 use crate::hook::result::HookResult;
 use crate::hook::runner::HookRunner;
-use aemeath_core::config::hooks::HookEvent;
+use share::config::hooks::HookEvent;
 
 impl HookRunner {
     // ========== P2 便捷方法 ==========

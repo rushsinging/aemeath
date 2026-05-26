@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aemeath_core = { package = "core", path = "../core" }
 share = { path = "../share" }
 tokio = { workspace = true }
 serde = { workspace = true }

@@ -1,4 +1,4 @@
-use aemeath_core::memory::{MemoryEntry, MemoryLayer, MemoryStore};
+use share::memory::{MemoryEntry, MemoryLayer, MemoryStore};
 
 pub fn memory_summary(entries: &[MemoryEntry]) -> String {
     entries

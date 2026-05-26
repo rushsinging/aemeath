@@ -52,21 +52,21 @@ impl ReflectionEngine {
 
     pub fn apply_suggestions(
         suggestions: &[MemorySuggestion],
-        store: &mut aemeath_core::memory::MemoryStore,
+        store: &mut share::memory::MemoryStore,
     ) -> ReflectionResult<usize> {
         apply::apply_suggestions(suggestions, store)
     }
 
     pub fn apply_output(
         output: &ReflectionOutput,
-        store: &mut aemeath_core::memory::MemoryStore,
+        store: &mut share::memory::MemoryStore,
     ) -> ReflectionResult<ReflectionApplyResult> {
         apply::apply_output(output, store)
     }
 
     pub fn apply_outdated(
         ids: &[String],
-        store: &mut aemeath_core::memory::MemoryStore,
+        store: &mut share::memory::MemoryStore,
     ) -> ReflectionResult<usize> {
         apply::apply_outdated(ids, store)
     }
@@ -75,7 +75,7 @@ impl ReflectionEngine {
         format::format_output(output)
     }
 
-    pub fn memory_summary(entries: &[aemeath_core::memory::MemoryEntry]) -> String {
+    pub fn memory_summary(entries: &[share::memory::MemoryEntry]) -> String {
         store::memory_summary(entries)
     }
 
@@ -84,7 +84,7 @@ impl ReflectionEngine {
     }
 
     pub fn recent_messages_summary(
-        messages: &[aemeath_core::message::Message],
+        messages: &[share::message::Message],
         max_chars: usize,
     ) -> String {
         format::recent_messages_summary(messages, max_chars)

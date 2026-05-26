@@ -6,7 +6,7 @@ use crate::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
     ConfirmAction,
 };
-use aemeath_core::config::PermissionModeConfig;
+use share::config::PermissionModeConfig;
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -96,7 +96,7 @@ fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
     }
 }
 
-fn get_config_value(config: &aemeath_core::config::Config, key: &str) -> String {
+fn get_config_value(config: &share::config::Config, key: &str) -> String {
     match key {
         "model" => config.model.name.clone(),
         "max_tokens" => config.model.max_tokens.to_string(),

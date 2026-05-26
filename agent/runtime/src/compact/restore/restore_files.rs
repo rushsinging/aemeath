@@ -1,6 +1,6 @@
 //! 压缩后文件恢复附件构建
 
-use aemeath_core::token_estimation::estimate_tokens;
+use share::token_estimation::estimate_tokens;
 use std::collections::HashSet;
 
 /// 压缩后恢复的最大最近读取文件数。

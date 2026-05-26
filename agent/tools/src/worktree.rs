@@ -3,10 +3,10 @@
 //! These tools allow the agent to switch between git worktree directories
 //! while maintaining a context stack for nested worktree navigation.
 
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
+use share::tool::{Tool, ToolContext, ToolResult};
 use share::worktree_ops;
 use std::path::{Path, PathBuf};
 

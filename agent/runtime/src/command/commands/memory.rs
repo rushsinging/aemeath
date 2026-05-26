@@ -2,7 +2,7 @@
 
 use super::memory_support::open_memory_store;
 use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
-use aemeath_core::memory::{
+use share::memory::{
     format_add_result, format_memory_list, parse_category, parse_layer, MemoryCategory,
     MemoryEntry, MemoryLayer, MemorySource,
 };

@@ -1,4 +1,4 @@
-use aemeath_core::memory::{memory_base_dir, project_hash, MemoryStore};
+use share::memory::{memory_base_dir, project_hash, MemoryStore};
 
 pub fn open_memory_store(ctx: &crate::command::CommandContext) -> Result<MemoryStore, String> {
     MemoryStore::new(

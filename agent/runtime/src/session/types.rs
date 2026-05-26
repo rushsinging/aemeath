@@ -1,11 +1,11 @@
 //! 会话核心类型定义
 
 use crate::state;
-use aemeath_core::config::paths;
-use aemeath_core::message::{Message, Role};
-use aemeath_core::task::TaskSnapshot;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use share::config::paths;
+use share::message::{Message, Role};
+use share::task::TaskSnapshot;
 use std::path::PathBuf;
 
 /// Validate a session ID — delegates to state::validate_session_id
@@ -30,7 +30,7 @@ pub struct SessionMetadata {
     pub project: Option<String>,
 }
 
-pub use aemeath_core::session_types::{WorkspaceContext, WorkspaceStackEntry};
+pub use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
 
 #[derive(Serialize, Deserialize)]
 pub struct Session {

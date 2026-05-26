@@ -1,7 +1,7 @@
 use super::App;
 use crate::tui::display::task_window;
 use ::runtime::api::core::message::Message;
-use ::runtime::api::prompt::skill::Skill;
+use ::runtime::api::core::skill_ops::Skill;
 use std::sync::Arc;
 
 impl App {

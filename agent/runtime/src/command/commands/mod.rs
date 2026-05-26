@@ -37,8 +37,8 @@ pub fn init_all() {
 
 use crate::cost::CostTracker;
 use crate::state::AppState;
-use aemeath_core::config::Config;
-use aemeath_core::task::TaskStore;
+use share::config::Config;
+use share::task::TaskStore;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -123,7 +123,7 @@ pub struct CommandContext {
     /// Cost tracker
     pub cost_tracker: CostTracker,
     /// Multi-model configuration
-    pub models_config: aemeath_core::config::ModelsConfig,
+    pub models_config: share::config::ModelsConfig,
     /// Current model name (for display)
     pub current_model: String,
     /// Task store for task lifecycle commands
@@ -144,7 +144,7 @@ impl CommandContext {
             session_id,
             verbose: false,
             cost_tracker,
-            models_config: aemeath_core::config::ModelsConfig::default(),
+            models_config: share::config::ModelsConfig::default(),
             current_model: String::new(),
             task_store: None,
         }
