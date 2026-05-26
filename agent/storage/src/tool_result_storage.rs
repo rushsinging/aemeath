@@ -121,7 +121,7 @@ pub fn format_persisted_reference(result: &PersistedResult) -> String {
 /// replacing their output with a reference. Returns the number of results persisted.
 pub fn persist_oversized_results(
     session_id: &str,
-    results: &mut Vec<(String, String, bool, Vec<aemeath_core::tool::ImageData>)>,
+    results: &mut Vec<(String, String, bool, Vec<share::tool::ImageData>)>,
 ) -> usize {
     let mut count = 0;
     for (tool_use_id, output, _is_error, _images) in results.iter_mut() {

@@ -1,5 +1,5 @@
 use super::*;
-use aemeath_core::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Message, Role};
 
 fn make_session(title: Option<&str>, project: Option<&str>, messages: Vec<Message>) -> Session {
     let mut sess = Session::new("test-id".into(), "/tmp".into());

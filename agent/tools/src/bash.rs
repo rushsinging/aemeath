@@ -1,8 +1,8 @@
 mod safety;
 
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
+use share::tool::{Tool, ToolContext, ToolResult};
 
 pub use safety::is_readonly_command;
 use serde_json::Value;
@@ -211,8 +211,8 @@ fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aemeath_core::tool::Tool;
     use serde_json::json;
+    use share::tool::Tool;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
@@ -234,7 +234,7 @@ mod tests {
             read_files: Arc::new(Mutex::new(HashSet::new())),
             agent_runner: None,
             session_reminders: None,
-            memory_config: aemeath_core::config::MemoryConfig::default(),
+            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: true,
             max_tool_concurrency: 4,

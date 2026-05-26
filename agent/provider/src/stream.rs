@@ -1,9 +1,9 @@
 //! Stream parsing utilities for Anthropic API format
 
 use crate::types::*;
-use aemeath_core::message::{ContentBlock, Message, Role};
 use futures_util::StreamExt;
 use reqwest::Response;
+use share::message::{ContentBlock, Message, Role};
 use std::io;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;

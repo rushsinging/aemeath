@@ -1,7 +1,7 @@
 //! Anthropic message conversion and non-streaming fallback helpers
 
-use aemeath_core::message::{ContentBlock, Message, Role};
 use reqwest::header::HeaderMap;
+use share::message::{ContentBlock, Message, Role};
 
 use crate::provider::StreamHandler;
 use crate::types::{CreateMessageRequest, StopReason, StreamResponse, SystemBlock, Usage};

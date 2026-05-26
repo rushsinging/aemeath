@@ -1,5 +1,5 @@
-use aemeath_core::config::logging::LoggingConfig;
 use serde_json::json;
+use share::config::logging::LoggingConfig;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};

@@ -1,5 +1,5 @@
-use aemeath_core::config::paths;
 use serde_json::json;
+use share::config::paths;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;

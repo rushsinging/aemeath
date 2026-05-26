@@ -5,7 +5,7 @@
 //! Feature #25: Task list 跨轮次生命周期策略
 
 use crate::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
-use aemeath_core::task::{BatchStatus, TaskStore};
+use share::task::{BatchStatus, TaskStore};
 use std::sync::Arc;
 
 inventory::submit! {
@@ -163,9 +163,9 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
                     .tasks_in_batch(
                         batch.id,
                         &[
-                            aemeath_core::task::TaskStatus::Pending,
-                            aemeath_core::task::TaskStatus::InProgress,
-                            aemeath_core::task::TaskStatus::Completed,
+                            share::task::TaskStatus::Pending,
+                            share::task::TaskStatus::InProgress,
+                            share::task::TaskStatus::Completed,
                         ],
                     )
                     .await;

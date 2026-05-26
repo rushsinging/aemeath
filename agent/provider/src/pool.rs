@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::api::ApiDriverKind;
-use aemeath_core::config::ModelsConfig;
+use share::config::ModelsConfig;
 
 use crate::client::{LlmClient, OpenAIProviderConfig};
 

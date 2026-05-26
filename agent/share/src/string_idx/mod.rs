@@ -19,7 +19,7 @@
 //! 使用 [`StrSlice`] 扩展 trait 替代裸 `&s[a..b]`：
 //!
 //! ```ignore
-//! use aemeath_core::string_idx::StrSlice;
+//! use share::string_idx::StrSlice;
 //! s.bslice_from(byte_start)
 //! ```
 

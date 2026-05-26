@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySuggestion {
-    pub category: aemeath_core::memory::MemoryCategory,
+    pub category: share::memory::MemoryCategory,
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -33,7 +33,7 @@ pub enum ReflectionError {
     #[error("failed to parse reflection JSON: {0}")]
     Parse(#[from] serde_json::Error),
     #[error(transparent)]
-    Memory(#[from] aemeath_core::memory::MemoryError),
+    Memory(#[from] share::memory::MemoryError),
 }
 
 pub type ReflectionResult<T> = Result<T, ReflectionError>;

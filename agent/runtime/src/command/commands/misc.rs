@@ -6,7 +6,7 @@ use crate::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
     ConfirmAction,
 };
-use aemeath_core::config::PermissionModeConfig;
+use share::config::PermissionModeConfig;
 
 inventory::submit! {
     CommandDescriptor::new(|| {

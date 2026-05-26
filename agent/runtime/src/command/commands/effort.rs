@@ -33,7 +33,7 @@ fn effort_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         );
     }
 
-    if let Err(e) = aemeath_core::config::models::validate_reasoning_effort(&arg) {
+    if let Err(e) = share::config::models::validate_reasoning_effort(&arg) {
         return CommandResult::Error(e);
     }
 

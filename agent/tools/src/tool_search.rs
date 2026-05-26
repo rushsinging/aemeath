@@ -1,6 +1,6 @@
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::{Tool, ToolContext, ToolResult};
 
 /// ToolSearch tool - searches for available tools.
 /// Note: This tool provides a static list of known tools since the registry

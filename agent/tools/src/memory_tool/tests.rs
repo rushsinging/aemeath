@@ -1,6 +1,6 @@
 use super::helpers::*;
-use aemeath_core::tool::ToolContext;
 use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use share::tool::ToolContext;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -15,10 +15,8 @@ fn test_ctx(cwd: PathBuf) -> ToolContext {
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: None,
-        session_reminders: Some(Arc::new(Mutex::new(
-            aemeath_core::tool::SessionReminders::new(),
-        ))),
-        memory_config: aemeath_core::config::MemoryConfig::default(),
+        session_reminders: Some(Arc::new(Mutex::new(share::tool::SessionReminders::new()))),
+        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: false,
         max_tool_concurrency: 10,

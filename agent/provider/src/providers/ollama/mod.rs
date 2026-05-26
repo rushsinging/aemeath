@@ -1,9 +1,9 @@
 //! Ollama provider implementation — 主模块
 //! 本地 Ollama 推理服务优化：更长超时、可选认证、无 stream_options、空响应检测。
 
-use aemeath_core::message::Message;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use share::message::Message;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;

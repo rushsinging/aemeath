@@ -121,7 +121,7 @@ impl StopReason {
 
 #[derive(Debug, Clone)]
 pub struct StreamResponse {
-    pub assistant_message: aemeath_core::message::Message,
+    pub assistant_message: share::message::Message,
     pub usage: Usage,
     pub stop_reason: StopReason,
 }

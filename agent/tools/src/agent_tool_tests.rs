@@ -1,5 +1,5 @@
 use super::*;
-use aemeath_core::tool::{AgentRunner, ToolRegistry};
+use share::tool::{AgentRunner, ToolRegistry};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -24,7 +24,7 @@ impl AgentRunner for StubRunner {
         _ctx: &ToolContext,
         max_turns: Option<u32>,
         _model_spec: Option<&str>,
-        _progress_tx: Option<tokio::sync::mpsc::Sender<aemeath_core::tool::AgentProgressEvent>>,
+        _progress_tx: Option<tokio::sync::mpsc::Sender<share::tool::AgentProgressEvent>>,
     ) -> String {
         *self.captured_max_turns.lock().unwrap() = max_turns;
         *self.captured_system.lock().unwrap() = system.to_string();
@@ -46,7 +46,7 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: Some(runner),
         session_reminders: None,
-        memory_config: aemeath_core::config::MemoryConfig::default(),
+        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
         allow_all: false,
         max_tool_concurrency: 4,

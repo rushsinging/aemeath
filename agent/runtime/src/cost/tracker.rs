@@ -1,6 +1,6 @@
 //! 费用追踪器
 
-use aemeath_core::config::paths;
+use share::config::paths;
 
 use super::pricing::get_pricing;
 use serde::{Deserialize, Serialize};

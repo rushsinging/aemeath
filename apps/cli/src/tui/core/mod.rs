@@ -8,7 +8,7 @@ pub mod state;
 use crate::tui::core::cmd_exec::CmdExecutor;
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use ::runtime::api::prompt::skill::Skill;
+use ::runtime::api::core::skill_ops::Skill;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},

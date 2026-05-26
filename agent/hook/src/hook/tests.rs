@@ -2,7 +2,7 @@
 mod hook_tests {
     use crate::hook::data::*;
     use crate::hook::runner::HookRunner;
-    use aemeath_core::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::HashMap;
 
     #[test]

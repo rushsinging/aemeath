@@ -5,7 +5,7 @@
 use crate::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
 };
-use aemeath_core::config::ModelsConfig;
+use share::config::ModelsConfig;
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -116,7 +116,7 @@ mod tests {
     use crate::command::{CommandAction, CommandResult};
     use crate::cost::CostTracker;
     use crate::state::AppState;
-    use aemeath_core::config::{Config, ModelEntryConfig, ProviderModelsConfig};
+    use share::config::{Config, ModelEntryConfig, ProviderModelsConfig};
     use std::collections::HashMap;
     use std::sync::Arc;
 

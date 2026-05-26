@@ -92,7 +92,7 @@ fn stats_execute(
                 let sessions = crate::session::list_sessions().await;
                 let current_session = sessions.iter().find(|s| s.id == session_id);
                 let token_estimate = if let Some(sess) = current_session {
-                    aemeath_core::token_estimation::estimate_messages_tokens(&sess.messages)
+                    share::token_estimation::estimate_messages_tokens(&sess.messages)
                 } else {
                     0
                 };

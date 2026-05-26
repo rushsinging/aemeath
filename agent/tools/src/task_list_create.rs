@@ -1,7 +1,7 @@
-use aemeath_core::tool::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::task_ops::TaskStore;
+use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
 
 pub struct TaskListCreateTool {
@@ -71,7 +71,7 @@ mod tests {
             ),
             agent_runner: None,
             session_reminders: None,
-            memory_config: aemeath_core::config::MemoryConfig::default(),
+            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
             allow_all: false,
             max_tool_concurrency: 4,

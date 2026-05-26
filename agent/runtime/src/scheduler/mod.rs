@@ -18,7 +18,7 @@ pub mod persistence;
 pub mod types;
 pub use types::*;
 
-use aemeath_core::task::{TaskStatus, TaskStore};
+use share::task::{TaskStatus, TaskStore};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

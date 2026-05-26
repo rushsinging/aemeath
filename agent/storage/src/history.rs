@@ -3,8 +3,8 @@
 //! Provides persistent storage for command history,
 //! similar to shell history files.
 
-use aemeath_core::config::paths;
 use serde::{Deserialize, Serialize};
+use share::config::paths;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

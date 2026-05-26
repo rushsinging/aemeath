@@ -1,5 +1,5 @@
 use super::*;
-use aemeath_core::memory::{MemoryEntry, MemoryStore};
+use share::memory::{MemoryEntry, MemoryStore};
 
 fn temp_store(max_entries: usize) -> (MemoryStore, std::path::PathBuf) {
     let dir =
@@ -69,7 +69,7 @@ fn test_apply_suggestions_adds_llm_project_memory() {
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
-            category: aemeath_core::memory::MemoryCategory::Decision,
+            category: share::memory::MemoryCategory::Decision,
             content: "Reflection 使用真实 LLM 调用".to_string(),
             tags: vec!["reflection".to_string()],
             reason: "用户选择方案 B".to_string(),
@@ -81,12 +81,12 @@ fn test_apply_suggestions_adds_llm_project_memory() {
     let added =
         ReflectionEngine::apply_suggestions(&output.suggested_memories, &mut store).unwrap();
     let memories = store
-        .list(Some(aemeath_core::memory::MemoryLayer::Project))
+        .list(Some(share::memory::MemoryLayer::Project))
         .unwrap();
 
     assert_eq!(added, 1);
     assert_eq!(memories.len(), 1);
-    assert_eq!(memories[0].source, aemeath_core::memory::MemorySource::Llm);
+    assert_eq!(memories[0].source, share::memory::MemorySource::Llm);
     assert_eq!(memories[0].tags, vec!["reflection"]);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -95,17 +95,17 @@ fn test_apply_suggestions_adds_llm_project_memory() {
 fn test_apply_output_marks_outdated_and_adds_suggestions() {
     let (mut store, dir) = temp_store(10);
     let existing = MemoryEntry::new(
-        aemeath_core::memory::MemoryLayer::Project,
-        aemeath_core::memory::MemoryCategory::Fact,
+        share::memory::MemoryLayer::Project,
+        share::memory::MemoryCategory::Fact,
         "旧事实",
-        aemeath_core::memory::MemorySource::User,
+        share::memory::MemorySource::User,
     );
     let existing_id = existing.id.clone();
     store.add(existing).unwrap();
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
-            category: aemeath_core::memory::MemoryCategory::Pattern,
+            category: share::memory::MemoryCategory::Pattern,
             content: "先写测试再实现".to_string(),
             tags: Vec::new(),
             reason: String::new(),
@@ -116,7 +116,7 @@ fn test_apply_output_marks_outdated_and_adds_suggestions() {
 
     let applied = ReflectionEngine::apply_output(&output, &mut store).unwrap();
     let memories = store
-        .list(Some(aemeath_core::memory::MemoryLayer::Project))
+        .list(Some(share::memory::MemoryLayer::Project))
         .unwrap();
     let outdated = memories
         .iter()
@@ -162,7 +162,7 @@ fn test_recent_messages_summary_empty() {
 
 #[test]
 fn test_recent_messages_summary_truncates() {
-    use aemeath_core::message::Message;
+    use share::message::Message;
     let msg = Message::user("hello world");
     let result = ReflectionEngine::recent_messages_summary(&[msg], 2000);
     assert!(result.contains("[User]: hello world"));

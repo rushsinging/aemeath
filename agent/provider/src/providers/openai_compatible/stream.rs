@@ -2,8 +2,8 @@
 
 use crate::provider::StreamHandler;
 use crate::types::StreamResponse;
-use aemeath_core::message::{ContentBlock, Message, Role};
 use futures_util::StreamExt;
+use share::message::{ContentBlock, Message, Role};
 use std::io;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;

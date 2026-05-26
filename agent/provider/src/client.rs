@@ -7,7 +7,7 @@ use crate::api::ApiDriverKind;
 use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
 use crate::providers::openai_compatible::ReasoningConfig;
 use crate::types::{StreamResponse, SystemBlock};
-use aemeath_core::message::Message;
+use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
@@ -49,11 +49,11 @@ fn content_block_counts(messages: &[Message]) -> (usize, usize, usize, usize, us
     for msg in messages {
         for block in &msg.content {
             match block {
-                aemeath_core::message::ContentBlock::Text { .. } => text += 1,
-                aemeath_core::message::ContentBlock::Thinking { .. } => thinking += 1,
-                aemeath_core::message::ContentBlock::ToolUse { .. } => tool_use += 1,
-                aemeath_core::message::ContentBlock::ToolResult { .. } => tool_result += 1,
-                aemeath_core::message::ContentBlock::Image { .. } => image += 1,
+                share::message::ContentBlock::Text { .. } => text += 1,
+                share::message::ContentBlock::Thinking { .. } => thinking += 1,
+                share::message::ContentBlock::ToolUse { .. } => tool_use += 1,
+                share::message::ContentBlock::ToolResult { .. } => tool_result += 1,
+                share::message::ContentBlock::Image { .. } => image += 1,
             }
         }
     }
@@ -272,21 +272,21 @@ impl LlmClient {
         }
         let msg_summary: Vec<serde_json::Value> = messages.iter().enumerate().map(|(i, msg)| {
             let blocks: Vec<serde_json::Value> = msg.content.iter().map(|block| match block {
-                aemeath_core::message::ContentBlock::Text { text } => {
+                share::message::ContentBlock::Text { text } => {
                     serde_json::json!({"type":"text","preview":truncate_preview(text,200)})
                 }
-                aemeath_core::message::ContentBlock::ToolUse { name, input, .. } => {
+                share::message::ContentBlock::ToolUse { name, input, .. } => {
                     let input_str = input.to_string();
                     serde_json::json!({"type":"tool_use","name":name,"input_preview":truncate_preview(&input_str,300)})
                 }
-                aemeath_core::message::ContentBlock::ToolResult { content, is_error, .. } => {
+                share::message::ContentBlock::ToolResult { content, is_error, .. } => {
                     let s = content.to_string();
                     serde_json::json!({"type":"tool_result","is_error":is_error,"preview":truncate_preview(&s,300)})
                 }
-                aemeath_core::message::ContentBlock::Thinking { thinking } => {
+                share::message::ContentBlock::Thinking { thinking } => {
                     serde_json::json!({"type":"thinking","preview":truncate_preview(thinking,200)})
                 }
-                aemeath_core::message::ContentBlock::Image { .. } => {
+                share::message::ContentBlock::Image { .. } => {
                     serde_json::json!({"type":"image","preview":"[image data]"})
                 }
             }).collect();

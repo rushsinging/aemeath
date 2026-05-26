@@ -1,6 +1,6 @@
 use super::*;
-use aemeath_core::config::LoggingConfig;
 use serde_json::json;
+use share::config::LoggingConfig;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -74,11 +74,8 @@ fn test_log_path_uses_agents_logs_dir() {
             .unwrap()
             .as_nanos()
     ));
-    let previous = std::env::var_os(aemeath_core::config::paths::AGENTS_DIR_ENV);
-    std::env::set_var(
-        aemeath_core::config::paths::AGENTS_DIR_ENV,
-        &temp_agents_dir,
-    );
+    let previous = std::env::var_os(share::config::paths::AGENTS_DIR_ENV);
+    std::env::set_var(share::config::paths::AGENTS_DIR_ENV, &temp_agents_dir);
 
     assert_eq!(
         log_path(LogFile::Aemeath),
@@ -86,9 +83,9 @@ fn test_log_path_uses_agents_logs_dir() {
     );
 
     if let Some(previous) = previous {
-        std::env::set_var(aemeath_core::config::paths::AGENTS_DIR_ENV, previous);
+        std::env::set_var(share::config::paths::AGENTS_DIR_ENV, previous);
     } else {
-        std::env::remove_var(aemeath_core::config::paths::AGENTS_DIR_ENV);
+        std::env::remove_var(share::config::paths::AGENTS_DIR_ENV);
     }
 }
 

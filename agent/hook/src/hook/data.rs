@@ -1,7 +1,7 @@
 //! Hook 事件数据模型
 
-use aemeath_core::config::hooks::HookEvent;
 use serde::{Deserialize, Serialize};
+use share::config::hooks::HookEvent;
 
 /// hook 输入数据（通过 stdin 传递给 hook 命令）
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 use super::types::ReflectionOutput;
-use aemeath_core::message::Message;
+use share::message::Message;
 
 pub fn format_output(output: &ReflectionOutput) -> String {
     let mut sections = vec!["Reflection".to_string()];
@@ -41,7 +41,7 @@ pub fn recent_messages_summary(messages: &[Message], max_chars: usize) -> String
             .content
             .iter()
             .filter_map(|block| match block {
-                aemeath_core::message::ContentBlock::Text { text } => Some(text.as_str()),
+                share::message::ContentBlock::Text { text } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -50,8 +50,8 @@ pub fn recent_messages_summary(messages: &[Message], max_chars: usize) -> String
             continue;
         }
         let role = match message.role {
-            aemeath_core::message::Role::User => "User",
-            aemeath_core::message::Role::Assistant => "Assistant",
+            share::message::Role::User => "User",
+            share::message::Role::Assistant => "Assistant",
         };
         lines.push(format!("[{role}]: {text}"));
         let joined = lines.iter().rev().cloned().collect::<Vec<_>>().join("\n");

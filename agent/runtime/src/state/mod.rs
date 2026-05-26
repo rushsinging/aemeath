@@ -5,7 +5,7 @@
 pub mod settings;
 pub use settings::{PermissionMode, Settings};
 
-use aemeath_core::config::paths;
+use share::config::paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;

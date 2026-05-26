@@ -149,12 +149,12 @@ mod mcp_tests {
     fn command_context() -> CommandContext {
         CommandContext {
             state: std::sync::Arc::new(crate::state::AppState::new()),
-            config: aemeath_core::config::Config::default(),
+            config: share::config::Config::default(),
             cwd: "/tmp/project".to_string(),
             session_id: "test".to_string(),
             verbose: false,
             cost_tracker: crate::cost::CostTracker::new(),
-            models_config: aemeath_core::config::ModelsConfig::default(),
+            models_config: share::config::ModelsConfig::default(),
             current_model: String::new(),
             task_store: None,
         }
