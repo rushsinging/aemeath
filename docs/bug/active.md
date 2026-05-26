@@ -11,7 +11,46 @@
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 活动中 | 未确认 | 2026-05 | 使用 `aemeath --resume <session>` 启动后进入 TUI，预期应加载并显示历史消息以继续会话，但实际 TUI 起始为空白，似乎走到了新会话路径；疑似 `--resume` 参数未传递到 TUI 启动路径，或 session 加载/历史回放在最近重构中被遗漏 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
+| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 活动中 | 未确认 | 2026-05 | 在 worktree 中工作时，LLM 调用 Glob/Grep 等工具仍传入主分支绝对路径（如 `/Users/.../aemeath`），被 workspace 边界拒绝：`Search path ... is outside the workspace '/Users/.../.worktrees/bug-67-resume-tui'`；疑似系统提示/上下文中暴露的 cwd 与实际 workspace 不一致，或 LLM 偏好使用记忆中的项目根而非当前 workspace |
 ## 专案
+
+### #69 worktree 中 LLM 仍尝试搜索主分支路径
+
+**状态**：活动中
+
+**症状**：进入 worktree 后，LLM 调用 `Glob` / `Grep` / `Read` 等工具时，仍然传入 main 工作区的绝对路径作为搜索/读取目标，触发 workspace 边界保护错误：
+
+```text
+✗ Glob(docs/bug/active.md)
+  ✗ Search path '/Users/guoyuqi/Nextcloud/work/claudecode/aemeath' is outside the workspace '/Users/guoyuqi/Nextcloud/work/claudecode/aemeath/.worktrees/bug-67-resume-tui'.
+```
+
+工具被正确拦截（安全机制工作正常），但 LLM 反复重试同样的越界路径，迫使用户/agent 自行纠正路径，影响 worktree 工作流效率。
+
+**复现**：
+1. 在 `.worktrees/<branch>` 目录中启动 TUI/runtime。
+2. 触发任意需要文件搜索的工具调用（Glob/Grep/Read 相对或绝对路径）。
+3. 观察 LLM 是否会传入 main 工作区根绝对路径（而不是当前 worktree 路径）。
+4. 若传入主分支路径，工具返回 workspace 越界错误；LLM 通常需要多轮才意识到。
+
+**根因假设**：
+1. 系统提示/上下文中显示的「Working directory」仍是 main 工作区根，而 workspace 边界实际指向 worktree 路径，两者不一致导致 LLM 选错路径基准。
+2. 项目记忆/历史会话中保留了 main 路径作为常用根，LLM 偏向复用而非以当前 cwd 为准。
+3. 工具描述未明示「优先使用相对路径或当前 workspace 根」，LLM 倾向用绝对路径，且绝对路径模板取自项目根。
+4. EnterWorktree/cwd 切换后未同步更新 system reminder 中的 cwd 字段，导致 LLM 看到的 cwd 仍为外层。
+
+**修复方向**：
+1. 在系统提示/会话上下文中明确标注当前 workspace 根与 cwd，并与工具 workspace 边界保持一致；EnterWorktree 后必须同步刷新这两个字段。
+2. 工具描述/指南补充：在 worktree 中应优先使用相对路径，或使用工具提供的 workspace 根变量，不要硬编码项目根绝对路径。
+3. 工具边界报错信息中明确给出当前 workspace 根与建议替换路径，方便 LLM 一次纠正。
+4. 评估在 LLM system context 中加入「禁止跨 workspace 越界搜索」的硬性指令，并补充正反样例。
+
+**涉及路径（预计）**：
+- worktree/cwd 切换后 system reminder/context 中 cwd 字段刷新
+- Glob/Grep/Read 等工具的 workspace 边界判定与报错文案
+- 工具描述/项目指南中关于 worktree 工作路径的提示
+- EnterWorktree/ExitWorktree 上下文栈与 cwd 同步逻辑
+
 
 ### #68 TUI 丢失 context window 用量显示
 
