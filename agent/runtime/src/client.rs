@@ -4,19 +4,19 @@
 //! 所有 build_* 逻辑在此完成，CLI 只需一行调用。
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use sdk::{
     AgentClient, ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext,
-    SdkError, SessionSnapshot, SessionSummary, TaskSummary,
+    SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary,
 };
 use tokio::sync::watch;
 
 use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::config::ConfigManager;
 use crate::api::core::skill_ops::{load_all_skills, Skill};
-use crate::api::core::task::TaskStore;
+use crate::api::core::task::{TaskStatus, TaskStore};
 use crate::api::core::tool::ToolRegistry;
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::api::provider::types::SystemBlock;
@@ -52,6 +52,8 @@ pub struct RuntimeHandle {
 
     // ─── SDK 状态 ───
     cancel_token: Arc<AtomicBool>,
+    current_messages: Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    workspace_context: Arc<Mutex<Option<crate::session::WorkspaceContext>>>,
     change_tx: watch::Sender<ChangeSet>,
     change_rx: watch::Receiver<ChangeSet>,
 }
@@ -265,6 +267,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        current_messages: Arc::new(Mutex::new(Vec::new())),
+        workspace_context: Arc::new(Mutex::new(None)),
         change_tx,
         change_rx,
     };
@@ -312,6 +316,85 @@ fn session_summary_from_runtime(session: crate::session::Session) -> SessionSumm
     }
 }
 
+fn task_status_lines(
+    tasks: &[crate::api::core::task::Task],
+    display_map: &std::collections::HashMap<String, usize>,
+    max_lines: usize,
+) -> Vec<String> {
+    if tasks.is_empty() || max_lines == 0 {
+        return Vec::new();
+    }
+
+    let total = tasks.len();
+    let completed_count = tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Completed)
+        .count();
+    let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed_count, total)];
+
+    let mut completed: Vec<&crate::api::core::task::Task> = Vec::new();
+    let mut in_progress: Vec<&crate::api::core::task::Task> = Vec::new();
+    let mut pending: Vec<&crate::api::core::task::Task> = Vec::new();
+    for task in tasks {
+        match task.status {
+            TaskStatus::Completed => completed.push(task),
+            TaskStatus::InProgress => in_progress.push(task),
+            TaskStatus::Pending => pending.push(task),
+            TaskStatus::Deleted => {}
+        }
+    }
+    completed.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    in_progress.sort_by_key(|t| t.updated_at);
+    pending.sort_by_key(|t| display_map.get(&t.id).copied().unwrap_or(usize::MAX));
+
+    let ordered: Vec<_> = completed
+        .into_iter()
+        .chain(in_progress)
+        .chain(pending)
+        .collect();
+    let shown_count = ordered.len().min(max_lines);
+    let hidden_count = ordered.len() - shown_count;
+    for task in ordered.iter().take(shown_count) {
+        lines.push(format_task_status_line(task, display_map));
+    }
+    if hidden_count > 0 {
+        lines.push(format!("… +{} more", hidden_count));
+    }
+    lines
+}
+
+fn format_task_status_line(
+    task: &crate::api::core::task::Task,
+    display_map: &std::collections::HashMap<String, usize>,
+) -> String {
+    let icon = match task.status {
+        TaskStatus::Completed => "✓",
+        TaskStatus::InProgress => "■",
+        TaskStatus::Pending => "□",
+        TaskStatus::Deleted => "?",
+    };
+    let display_id = display_map.get(&task.id).copied().unwrap_or(0);
+    let owner = task
+        .owner
+        .as_deref()
+        .map(|owner| format!(" (@{})", owner))
+        .unwrap_or_default();
+    format!("{} #{} {}{}", icon, display_id, task.subject, owner)
+}
+
+fn message_from_sdk(message: sdk::ChatMessage) -> crate::api::core::message::Message {
+    let role = match message.role.as_str() {
+        "assistant" => crate::api::core::message::Role::Assistant,
+        _ => crate::api::core::message::Role::User,
+    };
+    let content = serde_json::from_value(message.content).unwrap_or_else(|_| {
+        vec![crate::api::core::message::ContentBlock::Text {
+            text: String::new(),
+        }]
+    });
+    crate::api::core::message::Message { role, content }
+}
+
 // ─── AgentClient trait 实现 ───
 
 #[async_trait]
@@ -334,6 +417,23 @@ impl AgentClient for AgentClientImpl {
         Vec::new()
     }
 
+    async fn task_status(&self) -> Result<TaskStatusView, SdkError> {
+        let tasks = self.inner.context.task_store.list_current_batch().await;
+        let active: Vec<_> = tasks
+            .iter()
+            .filter(|t| t.status != TaskStatus::Deleted)
+            .cloned()
+            .collect();
+        if active.is_empty() {
+            return Ok(TaskStatusView::default());
+        }
+
+        let display_map = self.inner.context.task_store.get_batch_display_map().await;
+        let max_lines = crate::api::core::config::TaskListConfig::default().max_lines;
+        let lines = task_status_lines(&active, &display_map, max_lines);
+        Ok(TaskStatusView { lines })
+    }
+
     fn project(&self) -> ProjectContext {
         ProjectContext {
             cwd: self.inner.cwd.to_string_lossy().to_string(),
@@ -353,12 +453,57 @@ impl AgentClient for AgentClientImpl {
         Ok(ChatStream::new(rx))
     }
 
-    fn cancel(&self) {
-        self.inner.cancel_token.store(true, Ordering::Release);
+    async fn sync_current_messages(&self, messages: Vec<sdk::ChatMessage>) -> Result<(), SdkError> {
+        *self
+            .inner
+            .current_messages
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))? =
+            messages.into_iter().map(message_from_sdk).collect();
+        Ok(())
     }
 
-    async fn save_session(&self) -> Result<(), SdkError> {
-        Ok(())
+    async fn save_current_session(&self) -> Result<(), SdkError> {
+        let messages = self
+            .inner
+            .current_messages
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))?
+            .clone();
+        let task_snapshot = {
+            let snap = self.inner.context.task_store.snapshot().await;
+            if snap.tasks.is_empty() {
+                None
+            } else {
+                Some(snap)
+            }
+        };
+        let workspace = self
+            .inner
+            .workspace_context
+            .lock()
+            .map_err(|_| SdkError::Internal("当前工作区上下文锁已损坏".to_string()))?
+            .clone();
+        let mut session = crate::session::Session::new(
+            self.inner.session_id.clone(),
+            self.inner.cwd.to_string_lossy().to_string(),
+        );
+        session.messages = messages;
+        session.updated_at = crate::session::now_iso();
+        session.metadata.model = Some(model_display(
+            &self.inner.resolved_model.source_key,
+            &self.inner.resolved_model.model.name,
+            &self.inner.resolved_model.model.id,
+        ));
+        session.tasks = task_snapshot;
+        session.workspace = workspace;
+        crate::session::save_session(&session)
+            .await
+            .map_err(SdkError::Session)
+    }
+
+    fn cancel(&self) {
+        self.inner.cancel_token.store(true, Ordering::Release);
     }
 
     async fn load_session(&self, _id: &str) -> Result<SessionSnapshot, SdkError> {

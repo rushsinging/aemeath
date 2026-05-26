@@ -6,7 +6,6 @@ mod suggestions;
 use crate::tui::core::UiEvent;
 use ::runtime::api::command::cmd;
 use ::runtime::api::command::{CommandContext, CommandRegistry, CommandResult};
-use ::runtime::api::session;
 use ::runtime::api::state::AppState;
 use help::SLASH_HELP_LINES;
 use std::sync::Arc;
@@ -105,17 +104,7 @@ impl super::App {
                     format_tokens(total)
                 ));
             }
-            "/save" => {
-                let s = self.build_session(self.chat.messages.clone()).await;
-                match session::save_session(&s).await {
-                    Ok(()) => self
-                        .output_area
-                        .push_system(&format!("[session saved: {}]", self.session.session_id)),
-                    Err(e) => self
-                        .output_area
-                        .push_error(&format!("Failed to save session: {e}")),
-                }
-            }
+            "/save" => self.handle_save_command().await,
             "/context" => {
                 use ::runtime::api::compact;
                 let estimated = compact::estimate_messages_tokens(&self.chat.messages)
@@ -383,6 +372,23 @@ impl super::App {
         }
         None
     }
+    async fn handle_save_command(&mut self) {
+        let result = if let Some(agent_client) = &self.agent_client {
+            if let Err(e) = agent_client
+                .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
+                .await { log::warn!("failed to sync session messages: {e}"); }
+            agent_client.save_current_session().await
+        } else { Err(sdk::SdkError::Internal("SDK agent client is unavailable".to_string())) };
+        match result {
+            Ok(()) => self
+                .output_area
+                .push_system(&format!("[session saved: {}]", self.session.session_id)),
+            Err(e) => self
+                .output_area
+                .push_error(&format!("Failed to save session: {e}")),
+        }
+    }
+
     fn show_slash_help(&mut self) {
         for line in SLASH_HELP_LINES {
             self.output_area.push_system(line);

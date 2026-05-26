@@ -1,6 +1,5 @@
 use super::App;
 use crate::tui::display::task_window;
-use ::runtime::api::core::message::Message;
 use ::runtime::api::core::skill_ops::Skill;
 use std::sync::Arc;
 
@@ -48,6 +47,15 @@ impl App {
         task_store: &Arc<::runtime::api::core::task::TaskStore>,
         _is_processing: bool,
     ) {
+        if let Some(agent_client) = &self.agent_client {
+            match agent_client.task_status().await {
+                Ok(view) => {
+                    self.output_area.set_task_status(view.lines);
+                    return;
+                }
+                Err(e) => log::warn!("failed to fetch SDK task status: {e}"),
+            }
+        }
         let tasks = task_store.list_current_batch().await;
         let active: Vec<_> = tasks
             .iter()
@@ -64,39 +72,6 @@ impl App {
             let lines =
                 task_window::build_task_window(&active, &display_map, task_list_config.max_lines);
             self.output_area.set_task_status(lines);
-        }
-    }
-
-    /// Build a Session from current state, including task snapshot.
-    pub(crate) async fn build_session(
-        &self,
-        messages: Vec<Message>,
-    ) -> ::runtime::api::session::Session {
-        use ::runtime::api::session::{now_iso, Session};
-        let task_snapshot = match &self.cmd_exec.task_store {
-            Some(ts) => {
-                let snap = ts.snapshot().await;
-                if snap.tasks.is_empty() {
-                    None
-                } else {
-                    Some(snap)
-                }
-            }
-            None => None,
-        };
-        Session {
-            id: self.session.session_id.clone(),
-            cwd: self.session.cwd.to_string_lossy().to_string(),
-            messages,
-            created_at: self
-                .session
-                .session_created_at
-                .clone()
-                .unwrap_or_else(now_iso),
-            updated_at: now_iso(),
-            metadata: Default::default(),
-            tasks: task_snapshot,
-            workspace: self.cmd_exec.workspace_context.clone(),
         }
     }
 

@@ -161,13 +161,24 @@ impl App {
             }
 
             // --- TEA command execution ---
-            // Handle &mut App cases first (Quit, SaveSession) to avoid borrow conflicts
+            // Handle &mut App cases first (Quit, SaveCurrentSession) to avoid borrow conflicts
             match &result.cmd {
                 Cmd::Quit => self.layout.should_exit = true,
-                Cmd::SaveSession(msgs) if !msgs.is_empty() => {
-                    let s = self.build_session(msgs.clone()).await;
-                    if let Err(e) = ::runtime::api::session::save_session(&s).await {
-                        log::warn!("failed to auto-save session on sync: {e}");
+                Cmd::SaveCurrentSession if !self.chat.messages.is_empty() => {
+                    if let Some(agent_client) = &self.agent_client {
+                        if let Err(e) = agent_client
+                            .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
+                            .await
+                        {
+                            log::warn!("failed to sync session messages: {e}");
+                        }
+                        if let Err(e) = agent_client.save_current_session().await {
+                            log::warn!("failed to auto-save session on sync: {e}");
+                        }
+                    } else {
+                        log::warn!(
+                            "failed to auto-save session on sync: SDK agent client is unavailable"
+                        );
                     }
                 }
                 _ => {

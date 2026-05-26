@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::{
     ChangeSet, ChatInput, ChatStream, CostInfo, ModelSummary, ProjectContext, SessionSnapshot,
-    TaskSummary,
+    TaskStatusView, TaskSummary,
 };
 
 /// Agent Runtime 的统一客户端 trait。
@@ -23,6 +23,9 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 获取当前任务列表快照。
     fn task_list(&self) -> Vec<TaskSummary>;
 
+    /// 获取 TUI 可展示的任务状态视图。
+    async fn task_status(&self) -> Result<TaskStatusView, super::SdkError>;
+
     /// 获取当前项目上下文（Copy 值类型）。
     fn project(&self) -> ProjectContext;
 
@@ -36,11 +39,24 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 发起一次 Chat。
     async fn chat(&self, input: ChatInput) -> Result<ChatStream, super::SdkError>;
 
-    /// 取消当前进行中的 Chat。
-    fn cancel(&self);
+    /// 更新 runtime 持有的当前 session messages。
+    async fn sync_current_messages(
+        &self,
+        _messages: Vec<super::ChatMessage>,
+    ) -> Result<(), super::SdkError> {
+        Ok(())
+    }
+
+    /// 保存 runtime 当前 session。
+    async fn save_current_session(&self) -> Result<(), super::SdkError>;
 
     /// 保存当前 session。
-    async fn save_session(&self) -> Result<(), super::SdkError>;
+    async fn save_session(&self) -> Result<(), super::SdkError> {
+        self.save_current_session().await
+    }
+
+    /// 取消当前进行中的 Chat。
+    fn cancel(&self);
 
     /// 加载指定 session。
     async fn load_session(&self, id: &str) -> Result<SessionSnapshot, super::SdkError>;

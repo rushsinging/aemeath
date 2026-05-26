@@ -205,9 +205,18 @@ impl App {
 
         // Auto-save session on exit
         if !self.chat.messages.is_empty() {
-            let s = self.build_session(self.chat.messages.clone()).await;
-            if let Err(e) = ::runtime::api::session::save_session(&s).await {
-                log::warn!("failed to auto-save session: {e}");
+            if let Some(agent_client) = &self.agent_client {
+                if let Err(e) = agent_client
+                    .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
+                    .await
+                {
+                    log::warn!("failed to sync session messages: {e}");
+                }
+                if let Err(e) = agent_client.save_current_session().await {
+                    log::warn!("failed to auto-save session: {e}");
+                }
+            } else {
+                log::warn!("failed to auto-save session: SDK agent client is unavailable");
             }
         }
 

@@ -177,7 +177,7 @@ impl App {
             UiEvent::MessagesSync(msgs) => {
                 self.chat.messages = msgs;
                 return UpdateResult {
-                    cmd: Cmd::SaveSession(self.chat.messages.clone()),
+                    cmd: Cmd::SaveCurrentSession,
                     pending_slash: None,
                 };
             }

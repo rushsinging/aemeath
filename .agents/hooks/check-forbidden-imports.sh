@@ -30,6 +30,10 @@ for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
             violations.append(f"{rel}:{lineno}: direct business crate import/path is forbidden: {line.strip()}")
         if rel not in allowed_runtime_api_files and forbidden_runtime_api.search(line) and 'apps/cli/src/tui/' not in str(rel):
             violations.append(f"{rel}:{lineno}: runtime::api is only allowed in CLI composition root/runtime_adapter or transitional tui/**: {line.strip()}")
+        if 'apps/cli/src/tui/' in str(rel) and any(fragment in line for fragment in [
+            '::runtime::api::session::save_session',
+        ]):
+            violations.append(f"{rel}:{lineno}: TUI must use sdk::AgentClient for session save/task status/runtime clients: {line.strip()}")
 
 if violations:
     reason = "CLI must not import supporting business crates directly; use sdk AgentClient or CLI composition root adapter:\n" + "\n".join(violations[:80])
