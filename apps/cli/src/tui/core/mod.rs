@@ -36,6 +36,7 @@ pub struct App {
     pub skills: std::collections::HashMap<String, Skill>,
     // 基础设施引用（Phase 4 移入 CmdExecutor）
     pub cmd_exec: CmdExecutor,
+    pub agent_client: Option<std::sync::Arc<dyn sdk::AgentClient>>,
 }
 
 #[cfg(test)]
@@ -175,6 +176,7 @@ impl App {
                 workspace_context: None,
                 json_logger: None,
             },
+            agent_client: None,
         }
     }
 

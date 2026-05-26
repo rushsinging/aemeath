@@ -2033,6 +2033,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

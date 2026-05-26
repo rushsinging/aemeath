@@ -11,6 +11,7 @@ pub mod error;
 pub mod models;
 pub mod project;
 pub mod session;
+pub mod tui;
 pub mod types;
 
 pub use bootstrap::ChatBootstrapArgs;
@@ -20,5 +21,8 @@ pub use client::AgentClient;
 pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;
-pub use session::{SessionSnapshot, SessionSummary};
+pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
+pub use tui::{
+    ChatEventSink, ChatHandle, ChatRequest, QueueDrainPort, TaskStatusView, TuiLaunchContext,
+};
 pub use types::{CostInfo, PermissionPrompt, StatusInfo, TaskSummary};

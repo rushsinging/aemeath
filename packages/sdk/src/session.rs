@@ -2,6 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// SDK 级 message 投影。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: serde_json::Value,
+}
+
 /// Session 快照（cheap clone）。
 ///
 /// 底层 Vec 消息通过 Arc 共享，clone 开销低。
