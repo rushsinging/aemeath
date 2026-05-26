@@ -12,7 +12,52 @@
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：system prompt 只暴露 `Working directory`，未明确当前 workspace root 与 worktree 路径约束，且工具越界报错只说明被拒绝，缺少改用相对路径/当前 workspace 根的纠正提示；修复：环境上下文新增 Current workspace root 与 worktree 路径规则，路径安全错误补充恢复建议 |
+| 70 | TaskListCreate 第一次调用会超时 | 中 | 活动中 | 待查 | 2026-05 | 用户反馈：会话首次调用 `TaskListCreate` 工具时出现超时；TaskListCreate 实现 (`agent/tools/src/task_list_create.rs`) 是纯内存 `TaskStore::create_list` 调用，无 IO，理论应瞬时返回；可能根因：tool dispatcher 首次调度路径上的初始化阻塞（registry/semaphore/agent runner 首次构造）、ToolContext 首次构造代价、或 LLM 端 stream/tool_use 投递阶段超时被错归到工具自身 |
 ## 专案
+
+### #70 TaskListCreate 第一次调用会超时
+
+**状态**：活动中（待查根因）
+
+**症状**：会话中首次调用 `TaskListCreate` 工具时出现超时（agent 层 `Tool TaskListCreate timed out after 120s` 或调用方观察到响应不返回）。同一会话内随后再次调用 TaskListCreate 表现正常，疑似仅首次触发。
+
+**复现**：
+1. 新启动 aemeath TUI，进入新会话。
+2. 通过 LLM 触发一次需要 task list 的复杂请求，使其调用 `TaskListCreate`。
+3. 观察首次工具调用是否长时间不返回，最终超时。
+4. 同一会话内再次触发 TaskListCreate，对比是否正常。
+
+**初步分析**（基于源码 `agent/tools/src/task_list_create.rs` + `agent/runtime/src/agent.rs`）：
+
+- `TaskListCreateTool::call` 仅做 `TaskStore::create_list(...).await`，纯内存锁操作，无 IO，理论上微秒级返回。
+- runtime 通过 `tokio::time::timeout(tool.timeout_secs(), tool.call(...))` 调度，`timeout_secs()` 默认 120 秒；超时必然在 120s 之后发生。
+- 真正的"首次特别慢"几乎不可能源自工具本身的 await。更可能位于以下路径之一：
+  1. tool dispatcher 首次组装（registry lookup / semaphore 初始化 / ToolContext clone）首次执行命中冷路径；
+  2. LLM provider 端 tool_use 首次投递存在网络/握手延迟，外层观察为「工具不返回」并被 120s timeout 触发，把责任归到 TaskListCreate；
+  3. task_reminder 链路或 prompt_build 首次注入 task batch 信息时阻塞（如读 batch 历史）；
+  4. 同一 session 中存在已被 paused 的 batch，首次 create_list 触发 `drop_archived_batch_tasks` 在锁顺序上死锁/等待。
+
+**复现尝试与测试**：
+
+直接编写单元/异步测试在 `agent/tools/src/task_list_create.rs` 中：
+- 测量空 store 首次 `create_list` 耗时（应 < 10ms）。
+- 测量已有 archived batch 时再 `create_list` 的耗时（验证 drop_archived 路径）。
+- 多次连续调用对比首次与后续耗时是否有显著差异。
+
+若单元测试均瞬时通过，则可确认根因不在工具实现层，应转向 dispatcher / provider / prompt_build 路径排查。
+
+**修复方向**：
+
+1. 优先通过测试隔离工具实现层与外层调度层；若工具层瞬时返回，说明问题不在 `task_list_create.rs`，应在 dispatcher / provider 层加日志/超时计时定位。
+2. 若复现到工具层（例如 archived batch 锁顺序问题），需修正 `create_list` 的锁获取顺序，避免在持有 `current_batch` 锁时调用 `drop_archived_batch_tasks` 再次获取 `batches/tasks` 锁。
+3. 在 agent.rs 工具调度处增加首次工具调用计时与诊断日志，区分「LLM stream → tool_use 投递」与「tool.call 执行」两段耗时。
+4. 给 `TaskListCreate` 这种 O(1) 工具设置更短的 `timeout_secs`（例如 5s），首次超时能更早暴露真实瓶颈。
+
+**涉及路径**：
+- `agent/tools/src/task_list_create.rs`
+- `agent/core/src/task/batch.rs`（`create_list` / `drop_archived_batch_tasks`）
+- `agent/runtime/src/agent.rs`（tool dispatcher / timeout）
+- `agent/runtime/src/chat/looping/task_reminder.rs`（task 工具调度链路）
 
 ### #69 worktree 中 LLM 仍尝试搜索主分支路径
 
