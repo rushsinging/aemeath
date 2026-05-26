@@ -3,6 +3,7 @@ pub mod agent_runner;
 pub mod api;
 pub mod bootstrap;
 pub mod chat;
+pub mod client;
 pub mod command;
 pub mod compact;
 pub mod cost;
