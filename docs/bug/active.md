@@ -10,12 +10,12 @@
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 活动中 | 未确认 | 2026-05 | 使用 `aemeath --resume <session>` 启动后进入 TUI，预期应加载并显示历史消息以继续会话，但实际 TUI 起始为空白，似乎走到了新会话路径；疑似 `--resume` 参数未传递到 TUI 启动路径，或 session 加载/历史回放在最近重构中被遗漏 |
-| 68 | TUI 丢失 context window 用量显示 | 中 | 活动中 | 未确认 | 2026-05 | 当前 TUI 中不再显示 context window 用量（如已用 tokens / 总上限 / 剩余比例），用户无法感知是否接近上下文压缩阈值；疑似 status line 或底部信息区在最近重构中被精简，token 计数器未渲染或未订阅最新用量数据 |
+| 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
 ## 专案
 
 ### #68 TUI 丢失 context window 用量显示
 
-**状态**：活动中
+**状态**：修复中（待确认）
 
 **症状**：TUI 中此前可见的 context window 用量显示（例如「已用 tokens / 上下文上限 / 剩余比例」之类的指标）目前不再出现，用户无法直观判断当前消息量距离自动压缩阈值还有多远，也难以决定何时手动 `/compact` 或裁剪历史。
 
@@ -41,6 +41,23 @@
 - token 用量数据源（`token_estimation`、session token 累计）
 - 模型 metadata 中的 context window 上限读取
 - `/compact` 与用量显示的联动
+
+**根因（已确认）**：
+`apps/cli/src/run_orchestration.rs` 中调用 `app.run()` 时 `context_size` 参数硬编码为 `0`。
+`session_lifecycle.rs:37` 会调用 `self.status_bar.set_context_size(context_size as u64)`，
+而 `status_bar.rs:240` 的渲染条件为 `if self.context_size > 0`，因此 `0` 导致 ctx% 永远不渲染。
+
+**修复**（`apps/cli/src/run_orchestration.rs`）：
+```rust
+// 修复前
+0,     // context_size
+
+// 修复后
+let context_window = model.model.context_window;
+// ...
+context_window,
+```
+`model = client.resolved_model()`，`model.model.context_window` 来自配置文件中 `contextWindow` 字段。
 
 ### #67 `--resume` 失效：进入 TUI 后未加载历史会话
 
