@@ -9,7 +9,7 @@
 | 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
-| 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 活动中 | 未确认 | 2026-05 | 使用 `aemeath --resume <session>` 启动后进入 TUI，预期应加载并显示历史消息以继续会话，但实际 TUI 起始为空白，似乎走到了新会话路径；疑似 `--resume` 参数未传递到 TUI 启动路径，或 session 加载/历史回放在最近重构中被遗漏 |
+| 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
 ## 专案
 
@@ -61,7 +61,7 @@ context_window,
 
 ### #67 `--resume` 失效：进入 TUI 后未加载历史会话
 
-**状态**：活动中
+**状态**：修复中（待确认）
 
 **症状**：使用 `aemeath --resume <session-id>`（或同等 resume 入口）启动后进入 TUI，预期应自动加载指定 session 的历史消息并显示在 output area 中，便于继续对话；实际 TUI 起始为空白，与新建会话表现一致，历史内容未被加载/回放。
 
@@ -76,6 +76,12 @@ context_window,
 2. session 加载逻辑还在，但 TUI 历史回放（把已加载消息转为 output area items）路径在重构中被遗漏或没有被 bootstrap 触发。
 3. session 实际加载成功，但 output area 初始化在历史注入之前完成快照，导致历史消息没有被 push 到渲染队列。
 4. `--resume` 与 TUI 内 `/resume` 走不同代码路径，CLI 入口缺少对应的 session 加载分支。
+
+**根因（已确认）**：
+`apps/cli/src/run_orchestration.rs` 在调用 `runtime::api::client::from_args(args.into())` 时已把 `args.resume` 移入 runtime bootstrap，runtime 因此会复用指定 session id；但随后启动 TUI 的 `app.run(..., resume_id, ...)` 参数仍硬编码为 `None`。`apps/cli/src/tui/session/session_lifecycle.rs` 中历史加载与回放逻辑只在 `resume_id` 为 `Some` 时执行，所以 CLI `--resume` 虽然影响了 session id，却没有触发 TUI 历史加载。
+
+**修复**：
+在 `args` 被 move 给 runtime bootstrap 前保存 `initial_resume_id`，并传给 `app.run()`；新增回归测试 `test_initial_tui_resume_id_uses_cli_resume` 覆盖 CLI resume id 不应在 TUI 启动路径丢失。
 
 **修复方向**：
 1. 复现并定位 `--resume` 在当前 CLI / runtime / TUI bootstrap 中的实际处理链路，确认参数传递是否在某层被丢弃。

@@ -22,12 +22,17 @@ fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
     format!("{}/{}", source_key, display_name)
 }
 
+fn initial_tui_resume_id(args: &Args) -> Option<String> {
+    args.resume.clone()
+}
+
 /// 主聊天逻辑 — 瘦身入口。
 pub(crate) async fn run_chat(args: Args) {
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
     ::runtime::api::command::commands::init_all();
 
     let args = apply_permission_env_override(args);
+    let initial_resume_id = initial_tui_resume_id(&args);
     let client = ::runtime::api::client::from_args(args.into())
         .await
         .unwrap_or_else(|e| {
@@ -60,7 +65,7 @@ pub(crate) async fn run_chat(args: Args) {
         true,  // markdown
         Some(ctx.agent_runner),
         ctx.allow_all,
-        None,  // resume
+        initial_resume_id,
         ctx.task_store,
         max_tool,
         max_agent,
@@ -95,14 +100,33 @@ mod tests {
 
     #[test]
     fn test_model_display_falls_back_to_id_when_name_empty() {
-        assert_eq!(
-            model_display("openai", "", "gpt-4o"),
-            "openai/gpt-4o"
-        );
+        assert_eq!(model_display("openai", "", "gpt-4o"), "openai/gpt-4o");
     }
 
     #[test]
     fn test_model_display_empty_source_still_formats() {
         assert_eq!(model_display("", "Claude", "claude-3"), "/Claude");
+    }
+
+    #[test]
+    fn test_initial_tui_resume_id_uses_cli_resume() {
+        let args = Args {
+            api_key: None,
+            base_url: None,
+            model: None,
+            cwd: None,
+            max_tokens: None,
+            verbose: false,
+            no_markdown: false,
+            context_size: 128_000,
+            resume: Some("session-67".to_string()),
+            allow_all: false,
+            max_tool_concurrency: None,
+            max_agent_concurrency: None,
+            no_think: false,
+            reasoning_effort: None,
+        };
+
+        assert_eq!(initial_tui_resume_id(&args).as_deref(), Some("session-67"));
     }
 }
