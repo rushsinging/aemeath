@@ -11,12 +11,12 @@
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
-| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 活动中 | 未确认 | 2026-05 | 在 worktree 中工作时，LLM 调用 Glob/Grep 等工具仍传入主分支绝对路径（如 `/Users/.../aemeath`），被 workspace 边界拒绝：`Search path ... is outside the workspace '/Users/.../.worktrees/bug-67-resume-tui'`；疑似系统提示/上下文中暴露的 cwd 与实际 workspace 不一致，或 LLM 偏好使用记忆中的项目根而非当前 workspace |
+| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：system prompt 只暴露 `Working directory`，未明确当前 workspace root 与 worktree 路径约束，且工具越界报错只说明被拒绝，缺少改用相对路径/当前 workspace 根的纠正提示；修复：环境上下文新增 Current workspace root 与 worktree 路径规则，路径安全错误补充恢复建议 |
 ## 专案
 
 ### #69 worktree 中 LLM 仍尝试搜索主分支路径
 
-**状态**：活动中
+**状态**：修复中（待确认）
 
 **症状**：进入 worktree 后，LLM 调用 `Glob` / `Grep` / `Read` 等工具时，仍然传入 main 工作区的绝对路径作为搜索/读取目标，触发 workspace 边界保护错误：
 
@@ -38,6 +38,16 @@
 2. 项目记忆/历史会话中保留了 main 路径作为常用根，LLM 偏向复用而非以当前 cwd 为准。
 3. 工具描述未明示「优先使用相对路径或当前 workspace 根」，LLM 倾向用绝对路径，且绝对路径模板取自项目根。
 4. EnterWorktree/cwd 切换后未同步更新 system reminder 中的 cwd 字段，导致 LLM 看到的 cwd 仍为外层。
+
+**根因（已确认）**：
+1. 静态 system prompt 的 `# Environment` 只给出 `Working directory`，没有以更强语义标注 `Current workspace root`，也没有明确提示工具路径必须在当前 workspace 内、worktree 中优先使用相对路径。
+2. `path_security` 对越界搜索路径仅返回 `Search path ... is outside the workspace ...`，能阻止越界但没有告诉 LLM 应改用相对路径或当前 workspace root，导致模型容易重复同一个旧绝对路径。
+3. 主循环在工具执行后已有 `WorkingDirectoryChanged` 事件同步 TUI 状态；本次问题更主要是 LLM 可见上下文和错误恢复提示不足。
+
+**修复**：
+1. system prompt 环境段新增 `Current workspace root`，并明确 Read/Edit/Write/Glob/Grep/Bash 路径优先使用相对路径；绝对路径必须位于当前 workspace root 内，禁止复用其他 checkout/main/worktree/历史会话中的绝对路径。
+2. `validate_search_path_from_base` 与文件路径越界错误统一补充恢复建议：优先使用相对路径或当前 workspace root，下次不要重试同一个外部绝对路径。
+3. 新增回归测试覆盖 worktree 相对路径指导和越界路径错误恢复提示。
 
 **修复方向**：
 1. 在系统提示/会话上下文中明确标注当前 workspace 根与 cwd，并与工具 workspace 边界保持一致；EnterWorktree 后必须同步刷新这两个字段。

@@ -33,6 +33,16 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
 }
 
 #[test]
+fn test_static_prompt_guides_worktree_relative_paths() {
+    let text =
+        static_system_prompt_for_test("/tmp/project/.worktrees/fix-bug-69-worktree-cwd", true);
+
+    assert!(text.contains("Current workspace root"));
+    assert!(text.contains("Prefer relative paths"));
+    assert!(text.contains("Do not reuse absolute paths from another checkout"));
+}
+
+#[test]
 fn test_build_commit_guidance_includes_provider_model_trailer() {
     let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"));
 
