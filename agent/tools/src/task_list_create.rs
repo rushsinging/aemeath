@@ -37,6 +37,10 @@ impl Tool for TaskListCreateTool {
         true
     }
 
+    fn timeout_secs(&self) -> u64 {
+        5
+    }
+
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -228,5 +232,13 @@ mod tests {
             "带 archived batch 调用耗时 {:?} 超过 1s",
             elapsed
         );
+    }
+
+    #[test]
+    fn test_task_list_create_timeout_is_short_for_memory_only_tool() {
+        let store = Arc::new(TaskStore::new());
+        let tool = TaskListCreateTool { store };
+
+        assert_eq!(tool.timeout_secs(), 5);
     }
 }

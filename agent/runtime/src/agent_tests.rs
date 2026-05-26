@@ -255,6 +255,58 @@ async fn test_execute_tools_preserves_original_order() {
 }
 
 #[tokio::test]
+async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() {
+    let registry = ToolRegistry::new();
+    registry.register(Box::new(TimedTool {
+        name: "slow_tool".to_string(),
+        safe: true,
+        start_times: Arc::new(std::sync::Mutex::new(Vec::new())),
+        sleep_ms: 20,
+    }));
+
+    struct ShortTimeoutTool;
+    #[async_trait]
+    impl Tool for ShortTimeoutTool {
+        fn name(&self) -> &str {
+            "short_timeout"
+        }
+        fn description(&self) -> &str {
+            "short timeout test tool"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        fn timeout_secs(&self) -> u64 {
+            0
+        }
+        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            ToolResult::success("too late")
+        }
+    }
+    registry.register(Box::new(ShortTimeoutTool));
+
+    let agent = Agent {
+        registry: &registry,
+        ctx: test_ctx(),
+    };
+
+    let results = agent
+        .execute_tools(&[ToolCall {
+            id: "timeout-1".to_string(),
+            name: "short_timeout".to_string(),
+            input: serde_json::json!({}),
+        }])
+        .await;
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].2);
+    assert!(results[0].1.contains("tool.call execution timed out"));
+    assert!(results[0].1.contains("tool=short_timeout"));
+    assert!(results[0].1.contains("timeout_secs=0"));
+}
+
+#[tokio::test]
 async fn test_execute_tools_mixed_concurrent_and_sequential() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::new();

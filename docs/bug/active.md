@@ -12,12 +12,12 @@
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
-| 70 | TaskListCreate 第一次调用会超时 | 中 | 修复中 | 待确认 | 2026-05 | 工具层单测瞬时通过（5 tests, finished in 0.00s），证伪「工具实现层瓶颈」假设。根因不在 `task_list_create.rs`，应位于外层路径（最可能：LLM stream → tool_use 投递阶段网络/握手延迟，被 dispatcher 120s timeout 误归到工具自身）。后续应在 agent.rs dispatcher 增加分段计时日志，区分「LLM 投递」与「tool.call 执行」 |
+| 70 | TaskListCreate 第一次调用会超时 | 中 | 修复中 | 待确认 | 2026-05 | 工具层已证伪自身瓶颈；修复：agent dispatcher 将超时文案改为明确的 `tool.call execution timed out` 并记录 tool/timeout/elapsed，TaskListCreate 这种纯内存工具 timeout 调整为 5s，避免 120s 空等并区分 tool.call 执行超时与外层 provider/stream 投递延迟 |
 ## 专案
 
 ### #70 TaskListCreate 第一次调用会超时
 
-**状态**：活动中（待查根因）
+**状态**：修复中（待确认）
 
 **症状**：会话中首次调用 `TaskListCreate` 工具时出现超时（agent 层 `Tool TaskListCreate timed out after 120s` 或调用方观察到响应不返回）。同一会话内随后再次调用 TaskListCreate 表现正常，疑似仅首次触发。
 
@@ -68,6 +68,22 @@ test result: ok. 5 passed; 0 failed; finished in 0.00s
 1. **LLM provider tool_use 投递延迟**：会话首次 tool_use 触发模型端 stream 握手/缓冲延迟，dispatcher 在 `tokio::time::timeout(120s, tool.call(...))` 之前的 stream 解析阶段已花掉时间，超时被错归到「TaskListCreate」工具名。
 2. **agent runtime 首次 ToolContext / registry 构造**：首次 dispatch 经过 registry lookup、semaphore 初始化、ToolContext clone 等冷路径，但这部分通常 < 100ms，不足以产生用户感知的"超时"。
 3. **首次 `task_reminder` 注入 / prompt_build 路径**：task batch 列表首次注入 system reminder 时若读路径异常，可能阻塞工具调用前的 prompt 准备。
+
+**修复**：
+
+1. `agent/runtime/src/agent.rs` 增加 `call_tool_with_timeout()`，统一包裹 `tool.call`，超时文案改为：
+
+```text
+tool.call execution timed out: tool=<name>, timeout_secs=<n>, elapsed_ms=<ms>
+```
+
+该文案明确表示超时发生在 `tool.call` 执行段，而不是 LLM provider stream / tool_use 投递段；同时用 `log::warn!` 记录超时，用 `log::debug!` 记录正常 tool.call 执行耗时，便于后续对照外层 stream 日志。
+
+2. `TaskListCreateTool::timeout_secs()` 从默认 120s 改为 5s。该工具已由单测证明是纯内存 O(1) 路径，若真实调用超过 5s，应快速暴露 dispatcher/tool.call 执行段异常，而不是让用户空等 120s。
+
+3. 新增回归：
+   - `agent::tests::test_execute_tools_timeout_message_distinguishes_tool_call_execution`：验证 dispatcher 超时文案包含 `tool.call execution timed out`、`tool=<name>` 与 `timeout_secs=<n>`。
+   - `task_list_create::tests::test_task_list_create_timeout_is_short_for_memory_only_tool`：验证 TaskListCreate 使用短 timeout。
 
 **修复方向**：
 
