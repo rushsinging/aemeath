@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::tui::output_area::SpinnerState;
-use crate::tui::theme;
+use crate::tui::display::theme;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
 const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];

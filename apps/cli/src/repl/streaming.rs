@@ -32,7 +32,7 @@ pub(super) async fn stream_next_response(
     messages_for_api.extend(messages.iter().cloned());
 
     let logged_messages =
-        crate::tui::app::stream::logged_input_messages(&messages_for_api, messages.len());
+        crate::tui::display::stream::logged_input_messages(&messages_for_api, messages.len());
     if let Some(jl) = json_logger {
         let data = serde_json::json!({
             "messages": logged_messages,

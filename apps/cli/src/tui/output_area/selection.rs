@@ -1,7 +1,7 @@
 use ::runtime::api::core::string_idx::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::output_area::markdown;
-use crate::tui::safe_text::{safe_char_slice, safe_str_slice_by_char};
+use crate::tui::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
 
 impl super::OutputArea {
     /// 获取逻辑行总数（包括普通行 + task_status 虚拟行）

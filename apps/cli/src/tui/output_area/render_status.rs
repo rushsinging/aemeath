@@ -2,8 +2,8 @@ use ratatui::{layout::Rect, style::Style, text::Line};
 
 use ::runtime::api::core::string_idx::CharIdx;
 
-use crate::tui::safe_text::clamp_split_index;
-use crate::tui::theme;
+use crate::tui::display::safe_text::clamp_split_index;
+use crate::tui::display::theme;
 
 use super::{LineStyle, OutputArea};
 

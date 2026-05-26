@@ -2,7 +2,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
 
-use crate::tui::theme;
+use crate::tui::display::theme;
 
 mod table;
 #[cfg(test)]

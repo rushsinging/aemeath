@@ -1,18 +1,13 @@
-pub mod app;
-pub mod clipboard;
 pub mod completion;
-pub mod dialog;
-pub mod input_area;
+pub mod core;
+pub mod display;
+pub mod input;
+pub mod key_hints;
 pub mod output_area;
-pub mod render;
-pub mod safe_text;
+pub mod session;
 pub mod widgets;
-pub mod state;
-pub mod status_bar;
-pub mod syntax;
-pub mod theme;
 
-pub use app::App;
-pub use input_area::InputArea;
-pub use output_area::OutputArea;
-pub use status_bar::StatusBar;
+pub use self::core::App;
+pub use self::input::input_area::InputArea;
+pub use self::output_area::OutputArea;
+pub use self::display::status_bar::StatusBar;

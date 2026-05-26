@@ -1,6 +1,6 @@
 use ratatui::{style::Style, text::Line};
 
-use crate::tui::theme;
+use crate::tui::display::theme;
 
 impl super::OutputArea {
     /// 渲染排队消息，保留消息内换行并为后续行补齐缩进

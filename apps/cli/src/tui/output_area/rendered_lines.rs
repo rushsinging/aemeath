@@ -12,7 +12,7 @@ use super::render::wrap_line;
 use super::rendered_cache::RenderedLine;
 use super::types::{LineStyle, SpanPart};
 use super::OutputLine;
-use crate::tui::theme;
+use crate::tui::display::theme;
 
 /// 渲染 [start, end) 范围内的所有行，写入 cache。
 pub(super) fn render_range(
