@@ -1,5 +1,5 @@
 use share::message::{ContentBlock, Message};
-use share::tool::{ImageData, ToolContext, ToolRegistry};
+use share::tool::{ImageData, Tool, ToolContext, ToolRegistry, ToolResult};
 
 /// (tool_use_id, output_text, is_error, images)
 pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);
@@ -13,6 +13,45 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub input: serde_json::Value,
+}
+
+fn tool_call_timeout_message(name: &str, timeout: u64, elapsed: std::time::Duration) -> String {
+    format!(
+        "tool.call execution timed out: tool={name}, timeout_secs={timeout}, elapsed_ms={}",
+        elapsed.as_millis()
+    )
+}
+
+async fn call_tool_with_timeout(
+    tool: std::sync::Arc<dyn Tool>,
+    name: &str,
+    input: serde_json::Value,
+    ctx: &ToolContext,
+) -> Result<ToolResult, String> {
+    let timeout = tool.timeout_secs();
+    let started = std::time::Instant::now();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout),
+        tool.call(input, ctx),
+    )
+    .await
+    {
+        Ok(result) => {
+            log::debug!(
+                "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
+                name,
+                timeout,
+                started.elapsed().as_millis()
+            );
+            Ok(result)
+        }
+        Err(_) => {
+            let elapsed = started.elapsed();
+            let message = tool_call_timeout_message(name, timeout, elapsed);
+            log::warn!("{message}");
+            Err(message)
+        }
+    }
 }
 
 impl<'a> Agent<'a> {
@@ -76,26 +115,14 @@ impl<'a> Agent<'a> {
                         let id = call.id.clone();
                         let name = call.name.clone();
                         let sem = semaphore.clone();
-                        let timeout = tool.timeout_secs();
 
                         async move {
                             let _permit = sem.acquire().await.expect("semaphore closed");
-                            match tokio::time::timeout(
-                                std::time::Duration::from_secs(timeout),
-                                tool.call(input, &ctx),
-                            )
-                            .await
-                            {
+                            match call_tool_with_timeout(tool, &name, input, &ctx).await {
                                 Ok(result) => {
                                     (pos, id, result.output, result.is_error, result.images)
                                 }
-                                Err(_) => (
-                                    pos,
-                                    id,
-                                    format!("Tool {} timed out after {}s", name, timeout),
-                                    true,
-                                    Vec::new(),
-                                ),
+                                Err(message) => (pos, id, message, true, Vec::new()),
                             }
                         }
                     })
@@ -121,12 +148,7 @@ impl<'a> Agent<'a> {
                 continue;
             }
             if let Some(tool) = self.registry.get(&call.name) {
-                let timeout = tool.timeout_secs();
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout),
-                    tool.call(call.input.clone(), &self.ctx),
-                )
-                .await
+                match call_tool_with_timeout(tool, &call.name, call.input.clone(), &self.ctx).await
                 {
                     Ok(result) => {
                         results[pos] = Some((
@@ -136,13 +158,8 @@ impl<'a> Agent<'a> {
                             result.images,
                         ));
                     }
-                    Err(_) => {
-                        results[pos] = Some((
-                            call.id.clone(),
-                            format!("Tool {} timed out after {}s", call.name, timeout),
-                            true,
-                            Vec::new(),
-                        ));
+                    Err(message) => {
+                        results[pos] = Some((call.id.clone(), message, true, Vec::new()));
                     }
                 }
             } else {
