@@ -25,7 +25,6 @@ mod tests {
     fn args_with_allow_all(allow_all: bool) -> ChatBootstrapArgs {
         ChatBootstrapArgs {
             allow_all,
-            tui: true,
             context_size: 128_000,
             ..Default::default()
         }

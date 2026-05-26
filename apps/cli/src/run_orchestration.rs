@@ -1,6 +1,5 @@
 use crate::args::Args;
-use ::runtime::api::bootstrap::ChatModeSelection;
-use ::runtime::api::client::{self, AgentClientImpl, ModelSelector};
+use ::runtime::api::client::{self, ModelSelector};
 use ::runtime::api::core::config::models::ResolvedModel;
 
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
@@ -29,6 +28,15 @@ impl ModelSelector for CliModelSelector {
     }
 }
 
+fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
+    let display_name = if model_name.is_empty() {
+        model_id
+    } else {
+        model_name
+    };
+    format!("{}/{}", source_key, display_name)
+}
+
 /// 主聊天逻辑 — 瘦身入口。
 pub(crate) async fn run_chat(args: Args) {
     // 初始化所有内置命令（自动注册到全局 CommandRegistry）
@@ -42,50 +50,6 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
 
-    match client.mode_selection() {
-        ChatModeSelection::NoTui => run_no_tui(client).await,
-        ChatModeSelection::Tui => run_tui(client).await,
-    }
-}
-
-fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
-    let display_name = if model_name.is_empty() {
-        model_id
-    } else {
-        model_name
-    };
-    format!("{}/{}", source_key, display_name)
-}
-
-async fn run_no_tui(client: AgentClientImpl) {
-    let ctx = client.context().clone();
-    let cwd = client.cwd().to_path_buf();
-    let max_tool = client.max_tool_concurrency();
-    crate::repl::run_repl(
-        ctx.client,
-        ctx.registry,
-        ctx.system_blocks,
-        ctx.system_prompt_text,
-        ctx.user_context,
-        cwd,
-        false, // verbose
-        true,  // markdown
-        0,     // context_size
-        None,  // resume
-        Some(ctx.agent_runner),
-        false, // allow_all
-        ctx.task_store,
-        max_tool,
-        ctx.agent_semaphore,
-        ctx.skills_map,
-        ctx.hook_runner,
-        ctx.memory_config,
-        ctx.json_logger,
-    )
-    .await;
-}
-
-async fn run_tui(client: AgentClientImpl) {
     let ctx = client.context().clone();
     let session_id = client.session_id().to_string();
     let cwd = client.cwd().to_path_buf();
