@@ -35,8 +35,14 @@ fn test_working_directory_changed_carries_full_status_context() {
             assert_eq!(ctx.working_root, "/tmp/aemeath-status-line");
             assert_eq!(ctx.raw_path_base, path_base);
             assert_eq!(ctx.raw_working_root, working_root);
-            assert_eq!(ctx.workspace.path_base, "/tmp/aemeath-status-line/subdir");
-            assert_eq!(ctx.workspace.working_root, "/tmp/aemeath-status-line");
+            assert_eq!(
+                ctx.workspace.path_base,
+                PathBuf::from("/tmp/aemeath-status-line/subdir")
+            );
+            assert_eq!(
+                ctx.workspace.working_root,
+                PathBuf::from("/tmp/aemeath-status-line")
+            );
             assert!(ctx.workspace.context_stack.is_empty());
             assert!(ctx.branch.is_none());
             assert_eq!(ctx.kind, WorktreeKind::Main);

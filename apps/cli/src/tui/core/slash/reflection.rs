@@ -6,6 +6,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tui::core::UiEvent;
 
+fn message_from_sdk(message: &sdk::ChatMessage) -> ::runtime::api::core::message::Message {
+    let role = match message.role.as_str() {
+        "assistant" => ::runtime::api::core::message::Role::Assistant,
+        _ => ::runtime::api::core::message::Role::User,
+    };
+    let content = serde_json::from_value(message.content.clone()).unwrap_or_else(|_| {
+        vec![::runtime::api::core::message::ContentBlock::Text {
+            text: String::new(),
+        }]
+    });
+    ::runtime::api::core::message::Message { role, content }
+}
+
 impl super::super::App {
     pub(crate) async fn handle_reflect_command_with_events(
         &mut self,
@@ -52,7 +65,8 @@ impl super::super::App {
             }
         };
         let project_memory = ReflectionEngine::memory_summary(&memories);
-        let recent_summary = ReflectionEngine::recent_messages_summary(&self.chat.messages, 6000);
+        let runtime_messages: Vec<_> = self.chat.messages.iter().map(message_from_sdk).collect();
+        let recent_summary = ReflectionEngine::recent_messages_summary(&runtime_messages, 6000);
         let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
         let messages = vec![::runtime::api::core::message::Message::user(prompt)];
         let system = vec![SystemBlock::dynamic(

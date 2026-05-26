@@ -1,24 +1,22 @@
-use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind};
+use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
 
 use crate::tui::output_area::{LineStyle, OutputLine, INDENT};
 
 use super::common::format_agent_tool_calls;
 
 impl super::super::OutputArea {
-    pub fn push_agent_progress(&mut self, tool_id: &str, event: AgentProgressEvent) {
+    pub fn push_agent_progress(&mut self, tool_id: &str, event: AgentProgressEventView) {
         match event.kind {
-            AgentProgressKind::ToolCalls { calls } => self.push_agent_tool_calls(tool_id, &calls),
-            AgentProgressKind::Message { text } => {
+            AgentProgressKindView::ToolCalls { calls } => {
+                self.push_agent_tool_calls(tool_id, &calls)
+            }
+            AgentProgressKindView::Message { text } => {
                 self.push_tool_progress(tool_id, &text);
             }
         }
     }
 
-    fn push_agent_tool_calls(
-        &mut self,
-        tool_id: &str,
-        calls: &[::runtime::api::core::tool::AgentToolCallProgress],
-    ) {
+    fn push_agent_tool_calls(&mut self, tool_id: &str, calls: &[AgentToolCallProgressView]) {
         self.finish_streaming();
         let summary = format_agent_tool_calls(calls);
         let content = format!("{INDENT}↳ {summary}");

@@ -2,7 +2,6 @@ use super::UpdateResult;
 use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
-use ::runtime::api::core::message::Message;
 use tokio::sync::mpsc;
 
 impl App {
@@ -27,18 +26,21 @@ impl App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<(String, String)> = self
+        let images: Vec<sdk::ToolResultImage> = self
             .chat
             .pending_images
             .drain(..)
-            .map(|img| (img.base64, img.media_type))
+            .map(|img| sdk::ToolResultImage {
+                base64: img.base64,
+                media_type: img.media_type,
+            })
             .collect();
         if images.is_empty() {
-            self.chat.messages.push(Message::user(&input));
+            self.chat.messages.push(sdk::ChatMessage::user_text(&input));
         } else {
             self.chat
                 .messages
-                .push(Message::user_with_images(&input, images));
+                .push(sdk::ChatMessage::user_with_images(&input, images));
         }
 
         let Some(spawn_ctx) = self.build_spawn_context(ui_tx, spawn_refs) else {

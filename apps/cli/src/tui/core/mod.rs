@@ -106,18 +106,16 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::display::status_bar:
 
 #[cfg(test)]
 pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
-    status_context_for_workspace(::runtime::api::session::WorkspaceContext {
-        path_base: path_base.display().to_string(),
-        working_root: working_root.display().to_string(),
+    status_context_for_workspace(sdk::WorkspaceContextView {
+        path_base: path_base.to_path_buf(),
+        working_root: working_root.to_path_buf(),
         context_stack: Vec::new(),
     })
 }
 
-pub(crate) fn status_context_for_workspace(
-    workspace: ::runtime::api::session::WorkspaceContext,
-) -> UiEvent {
-    let path_base = PathBuf::from(&workspace.path_base);
-    let working_root = PathBuf::from(&workspace.working_root);
+pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
+    let path_base = workspace.path_base.clone();
+    let working_root = workspace.working_root.clone();
     UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
         path_base: display_status_path(&path_base),
         working_root: display_status_path(&working_root),

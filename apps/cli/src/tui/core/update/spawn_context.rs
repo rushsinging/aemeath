@@ -14,7 +14,7 @@ impl App {
             tx: ui_tx.clone(),
             queue_request_tx: ui_tx.clone(),
             agent_client,
-            messages: crate::tui::messages_to_sdk(&self.chat.messages),
+            messages: self.chat.messages.clone(),
         })
     }
 }

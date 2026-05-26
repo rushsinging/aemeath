@@ -1,5 +1,3 @@
-use ::runtime::api::core::message::Message;
-use ::runtime::api::core::tool::{AgentProgressEvent, ImageData};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +8,7 @@ pub struct StatusContextUpdate {
     pub kind: crate::tui::display::status_bar::WorktreeKind,
     pub raw_path_base: PathBuf,
     pub raw_working_root: PathBuf,
-    pub workspace: ::runtime::api::session::WorkspaceContext,
+    pub workspace: sdk::WorkspaceContextView,
 }
 
 /// Events sent from background task to UI
@@ -38,7 +36,7 @@ pub enum AppEvent {
         tool_name: String,
         output: String,
         is_error: bool,
-        images: Vec<ImageData>,
+        images: Vec<sdk::ToolResultImage>,
     },
     Usage {
         input: u32,
@@ -48,7 +46,7 @@ pub enum AppEvent {
     },
     Error(String),
     Cancelled,
-    MessagesSync(Vec<Message>),
+    MessagesSync(Vec<sdk::ChatMessage>),
     Done,
     DoneWithDuration(std::time::Duration),
     LiveTps(f64),
@@ -76,7 +74,7 @@ pub enum AppEvent {
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
         tool_id: String,
-        event: AgentProgressEvent,
+        event: sdk::AgentProgressEventView,
     },
     StopFailureHook {
         system_message: Option<String>,

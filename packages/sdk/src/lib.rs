@@ -16,7 +16,11 @@ pub mod types;
 
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
-pub use chat::{ChatEvent, ChatInput, ChatRequest, ChatResult, ChatStream};
+pub use chat::{
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent, ChatInput,
+    ChatRequest, ChatResult, ChatStream, ToolResultImage, WorkspaceContextView,
+    WorkspaceStackEntryView,
+};
 pub use client::AgentClient;
 pub use error::SdkError;
 pub use models::ModelSummary;

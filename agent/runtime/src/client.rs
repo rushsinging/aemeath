@@ -8,8 +8,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ModelSummary,
-    ProjectContext, SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary,
+    AgentClient, AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView,
+    ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ModelSummary, ProjectContext,
+    SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 use tokio::sync::watch;
 
@@ -462,11 +464,9 @@ fn runtime_event_to_sdk_event(
             is_error,
             images: images
                 .into_iter()
-                .map(|image| {
-                    serde_json::json!({
-                        "base64": image.base64,
-                        "media_type": image.media_type,
-                    })
+                .map(|image| ToolResultImage {
+                    base64: image.base64,
+                    media_type: image.media_type,
                 })
                 .collect(),
         },
@@ -523,7 +523,7 @@ fn runtime_event_to_sdk_event(
         crate::chat::RuntimeStreamEvent::AgentProgress { tool_id, event } => {
             ChatEvent::AgentProgress {
                 tool_id,
-                event: agent_progress_event_to_json(event),
+                event: agent_progress_event_to_sdk(event),
             }
         }
         crate::chat::RuntimeStreamEvent::HookStart { event, command } => {
@@ -549,37 +549,52 @@ fn runtime_event_to_sdk_event(
             ChatEvent::WorkingDirectoryChanged {
                 path_base,
                 working_root,
-                workspace: serde_json::to_value(workspace).unwrap_or(serde_json::Value::Null),
+                workspace: workspace_context_to_sdk(workspace),
             }
         }
     }
 }
 
-fn agent_progress_event_to_json(
+fn agent_progress_event_to_sdk(
     event: crate::api::core::tool::AgentProgressEvent,
-) -> serde_json::Value {
+) -> AgentProgressEventView {
     let kind = match event.kind {
-        crate::api::core::tool::AgentProgressKind::ToolCalls { calls } => serde_json::json!({
-            "type": "tool_calls",
-            "calls": calls
-                .into_iter()
-                .map(|call| serde_json::json!({
-                    "id": call.id,
-                    "name": call.name,
-                    "input": call.input,
-                    "summary": call.summary,
-                }))
-                .collect::<Vec<_>>()
-        }),
-        crate::api::core::tool::AgentProgressKind::Message { text } => serde_json::json!({
-            "type": "message",
-            "text": text,
-        }),
+        crate::api::core::tool::AgentProgressKind::ToolCalls { calls } => {
+            AgentProgressKindView::ToolCalls {
+                calls: calls
+                    .into_iter()
+                    .map(|call| AgentToolCallProgressView {
+                        id: call.id,
+                        name: call.name,
+                        input: call.input,
+                        summary: call.summary,
+                    })
+                    .collect(),
+            }
+        }
+        crate::api::core::tool::AgentProgressKind::Message { text } => {
+            AgentProgressKindView::Message { text }
+        }
     };
-    serde_json::json!({
-        "sequence": event.sequence,
-        "kind": kind,
-    })
+    AgentProgressEventView {
+        sequence: event.sequence,
+        kind,
+    }
+}
+
+fn workspace_context_to_sdk(workspace: crate::session::WorkspaceContext) -> WorkspaceContextView {
+    WorkspaceContextView {
+        path_base: workspace.path_base.into(),
+        working_root: workspace.working_root.into(),
+        context_stack: workspace
+            .context_stack
+            .into_iter()
+            .map(|entry| WorkspaceStackEntryView {
+                path_base: entry.path_base.into(),
+                working_root: entry.working_root.into(),
+            })
+            .collect(),
+    }
 }
 
 fn message_to_sdk(message: crate::api::core::message::Message) -> sdk::ChatMessage {

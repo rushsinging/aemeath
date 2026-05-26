@@ -1,6 +1,7 @@
 //! Chat 输入 / 事件 / 流 / 结果。
 
 use crate::ChatMessage;
+use std::path::PathBuf;
 
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]
@@ -14,6 +15,55 @@ pub struct ChatInput {
 #[derive(Debug, Clone)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
+}
+
+/// 工具结果中的图片载荷。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolResultImage {
+    pub base64: String,
+    pub media_type: String,
+}
+
+/// Sub-agent 工具调用进度。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentToolCallProgressView {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+    pub summary: String,
+}
+
+/// Sub-agent 进度类型。
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentProgressKindView {
+    Message {
+        text: String,
+    },
+    ToolCalls {
+        calls: Vec<AgentToolCallProgressView>,
+    },
+}
+
+/// Sub-agent 进度事件。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentProgressEventView {
+    pub sequence: usize,
+    pub kind: AgentProgressKindView,
+}
+
+/// workspace 栈条目视图。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceStackEntryView {
+    pub path_base: PathBuf,
+    pub working_root: PathBuf,
+}
+
+/// TUI 可展示的 workspace 上下文视图。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceContextView {
+    pub path_base: PathBuf,
+    pub working_root: PathBuf,
+    pub context_stack: Vec<WorkspaceStackEntryView>,
 }
 
 /// Chat 事件流中的单个事件。
@@ -45,7 +95,7 @@ pub enum ChatEvent {
         tool_name: String,
         output: String,
         is_error: bool,
-        images: serde_json::Value,
+        images: Vec<ToolResultImage>,
     },
     /// 系统消息。
     SystemMessage(String),
@@ -88,7 +138,7 @@ pub enum ChatEvent {
     /// Agent progress 事件投影。
     AgentProgress {
         tool_id: String,
-        event: serde_json::Value,
+        event: AgentProgressEventView,
     },
     /// Hook 开始。
     HookStart { event: String, command: String },
@@ -102,7 +152,7 @@ pub enum ChatEvent {
     WorkingDirectoryChanged {
         path_base: String,
         working_root: String,
-        workspace: serde_json::Value,
+        workspace: WorkspaceContextView,
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
@@ -161,6 +211,67 @@ mod tests {
         let mut stream = ChatStream::new(rx);
 
         assert!(stream.recv().await.is_none());
+    }
+
+    #[test]
+    fn test_tool_result_image_keeps_base64_and_media_type() {
+        let image = ToolResultImage {
+            base64: "abc".to_string(),
+            media_type: "image/png".to_string(),
+        };
+
+        assert_eq!(image.base64, "abc");
+        assert_eq!(image.media_type, "image/png");
+    }
+
+    #[test]
+    fn test_agent_progress_view_supports_message_and_tool_calls() {
+        let message = AgentProgressEventView {
+            sequence: 1,
+            kind: AgentProgressKindView::Message {
+                text: "working".to_string(),
+            },
+        };
+        let tools = AgentProgressEventView {
+            sequence: 2,
+            kind: AgentProgressKindView::ToolCalls {
+                calls: vec![AgentToolCallProgressView {
+                    id: "tool-1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path":"a.rs"}),
+                    summary: "a.rs".to_string(),
+                }],
+            },
+        };
+
+        assert_eq!(message.sequence, 1);
+        match message.kind {
+            AgentProgressKindView::Message { text } => assert_eq!(text, "working"),
+            other => panic!("unexpected kind: {other:?}"),
+        }
+        match tools.kind {
+            AgentProgressKindView::ToolCalls { calls } => {
+                assert_eq!(calls[0].name, "Read");
+                assert_eq!(calls[0].summary, "a.rs");
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_workspace_context_view_keeps_paths() {
+        let view = WorkspaceContextView {
+            path_base: "/repo/sub".into(),
+            working_root: "/repo".into(),
+            context_stack: vec![WorkspaceStackEntryView {
+                path_base: "/repo".into(),
+                working_root: "/repo".into(),
+            }],
+        };
+
+        assert_eq!(view.path_base.to_string_lossy(), "/repo/sub");
+        assert_eq!(view.working_root.to_string_lossy(), "/repo");
+        assert_eq!(view.context_stack.len(), 1);
     }
 
     #[test]

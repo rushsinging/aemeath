@@ -95,7 +95,7 @@ impl App {
                     self.output_area.push_user_message(&input);
                     self.chat
                         .messages
-                        .push(::runtime::api::core::message::Message::user(&prompt));
+                        .push(sdk::ChatMessage::user_text(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
                     self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
@@ -116,7 +116,7 @@ impl App {
                 Cmd::SaveCurrentSession if !self.chat.messages.is_empty() => {
                     if let Some(agent_client) = &self.agent_client {
                         if let Err(e) = agent_client
-                            .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
+                            .sync_current_messages(self.chat.messages.clone())
                             .await
                         {
                             log::warn!("failed to sync session messages: {e}");
