@@ -7,16 +7,8 @@ use ratatui::style::Color;
 
 /// Diff 行号 / 高亮颜色常量。
 const LINE_NUM_COLOR: Color = theme::TEXT_DIM;
-const DIFF_ADD_FG: Color = Color::Rgb(
-    crate::tui::display::theme_compat::Theme::DIFF_ADD_FG_RGB.0,
-    crate::tui::display::theme_compat::Theme::DIFF_ADD_FG_RGB.1,
-    crate::tui::display::theme_compat::Theme::DIFF_ADD_FG_RGB.2,
-);
-const DIFF_REMOVE_FG: Color = Color::Rgb(
-    crate::tui::display::theme_compat::Theme::DIFF_REMOVE_FG_RGB.0,
-    crate::tui::display::theme_compat::Theme::DIFF_REMOVE_FG_RGB.1,
-    crate::tui::display::theme_compat::Theme::DIFF_REMOVE_FG_RGB.2,
-);
+const DIFF_ADD_FG: Color = theme::DIFF_ADD_FG;
+const DIFF_REMOVE_FG: Color = theme::DIFF_REMOVE_FG;
 
 /// 对比 old_content 与 new_content，生成带行号和语法高亮的 diff 输出行。
 ///

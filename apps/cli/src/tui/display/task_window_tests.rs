@@ -1,7 +1,6 @@
-use crate::tui::display::task_window_helpers_tests::{make_display_map, make_task, make_task_with_ts};
-use super::*;
+use super::build_task_window;
+use super::helpers_tests::{make_display_map, make_task, make_task_with_ts};
 use ::runtime::api::core::task::{Task, TaskStatus};
-use crate::tui::display::task_window::build_task_window;
 
 #[test]
 fn test_empty() {

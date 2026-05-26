@@ -7,6 +7,7 @@ pub const DEFAULT_WIDTH: usize = 120;
 /// 工具调用详情行的缩进
 pub const INDENT: &str = "  ";
 
+use crate::tui::display::theme;
 use ratatui::style::Color;
 
 /// 带颜色的一段文本，用于行内分段着色（如 diff 语法高亮）
@@ -56,9 +57,7 @@ pub enum LineStyle {
 
 impl LineStyle {
     pub fn to_style(&self) -> ratatui::style::Style {
-        use ratatui::style::{Color, Modifier, Style};
-
-        use crate::tui::display::theme;
+        use ratatui::style::{Modifier, Style};
 
         match self {
             LineStyle::Normal => Style::default().fg(theme::TEXT),
@@ -72,20 +71,12 @@ impl LineStyle {
             LineStyle::Thinking => Style::default()
                 .fg(theme::THINKING)
                 .add_modifier(Modifier::ITALIC),
-            LineStyle::DiffAdd => {
-                let (r, g, b) = crate::tui::display::theme_compat::Theme::DIFF_ADD_BG_RGB;
-                let (fr, fg, fb) = crate::tui::display::theme_compat::Theme::DIFF_ADD_FG_RGB;
-                Style::default()
-                    .bg(Color::Rgb(r, g, b))
-                    .fg(Color::Rgb(fr, fg, fb))
-            }
-            LineStyle::DiffRemove => {
-                let (r, g, b) = crate::tui::display::theme_compat::Theme::DIFF_REMOVE_BG_RGB;
-                let (fr, fg, fb) = crate::tui::display::theme_compat::Theme::DIFF_REMOVE_FG_RGB;
-                Style::default()
-                    .bg(Color::Rgb(r, g, b))
-                    .fg(Color::Rgb(fr, fg, fb))
-            }
+            LineStyle::DiffAdd => Style::default()
+                .bg(theme::DIFF_ADD_BG)
+                .fg(theme::DIFF_ADD_FG),
+            LineStyle::DiffRemove => Style::default()
+                .bg(theme::DIFF_REMOVE_BG)
+                .fg(theme::DIFF_REMOVE_FG),
             LineStyle::AskUser => Style::default()
                 .fg(theme::WARNING)
                 .add_modifier(Modifier::BOLD),
