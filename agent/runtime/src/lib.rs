@@ -9,6 +9,7 @@ pub mod compact;
 pub mod cost;
 pub mod image;
 pub mod prompt_build;
+pub mod prompt_build_ext;
 pub mod reflection;
 pub mod scheduler;
 pub mod session;

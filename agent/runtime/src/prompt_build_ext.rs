@@ -1,21 +1,25 @@
-use ::runtime::api::bootstrap::InstructionsLoadedHookRunner;
-use ::runtime::api::prompt::skill::Skill;
+//! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
-pub(super) async fn build_static_prompt(
-    cwd: &std::path::Path,
+use crate::api::core::config::Config;
+use crate::api::hook::hook::HookRunner;
+use crate::api::prompt::skill::Skill;
+use crate::bootstrap;
+
+pub async fn build_static_prompt(
+    _cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
-    config_file: Option<&::runtime::api::core::config::Config>,
-    hook_runner: &::runtime::api::hook::hook::HookRunner,
-    prompt_parts: ::runtime::api::prompt_build::SystemPromptParts,
+    config_file: Option<&Config>,
+    hook_runner: &HookRunner,
+    prompt_parts: crate::api::prompt_build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
     let skills_guard = skills.lock().await;
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
-    let instructions_hook = InstructionsLoadedHookRunner(hook_runner);
-    let model_guidance = ::runtime::api::prompt::guidance::resolve_guidance_async(
+    let instructions_hook = bootstrap::InstructionsLoadedHookRunner(hook_runner);
+    let model_guidance = crate::api::prompt::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
@@ -24,14 +28,13 @@ pub(super) async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(::runtime::api::prompt::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+    prompt.push_str(crate::api::prompt::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
     append_skills(&mut prompt, &skills_guard);
     append_agent_roles(&mut prompt, config_file);
     if !model_guidance.is_empty() {
         prompt.push_str("\n\n");
         prompt.push_str(&model_guidance);
     }
-    let _ = cwd;
     prompt
 }
 
@@ -56,10 +59,7 @@ fn append_skills(prompt: &mut String, skills_guard: &std::collections::HashMap<S
     ));
 }
 
-fn append_agent_roles(
-    prompt: &mut String,
-    config_file: Option<&::runtime::api::core::config::Config>,
-) {
+fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>) {
     let Some(cfg) = config_file else {
         return;
     };
