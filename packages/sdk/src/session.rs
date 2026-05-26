@@ -20,6 +20,12 @@ pub struct SessionSnapshot {
 pub struct SessionSummary {
     /// Session ID。
     pub id: String,
+    /// 用户自定义标题。
+    pub title: Option<String>,
+    /// 所属项目。
+    pub project: Option<String>,
+    /// 使用模型。
+    pub model: Option<String>,
     /// 创建时间。
     pub created_at: String,
     /// 最后更新时间。
@@ -28,4 +34,6 @@ pub struct SessionSummary {
     pub message_count: usize,
     /// 首条用户消息预览。
     pub preview: Option<String>,
+    /// 展示摘要。
+    pub summary: String,
 }

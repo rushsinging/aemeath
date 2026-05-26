@@ -15,3 +15,4 @@ pub mod scheduler;
 pub mod session;
 pub mod skill_command;
 pub mod state;
+pub mod tui_launch;

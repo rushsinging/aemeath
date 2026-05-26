@@ -142,7 +142,7 @@ impl From<RunArgs> for Args {
     }
 }
 
-impl From<Args> for ::runtime::api::bootstrap::ChatBootstrapArgs {
+impl From<Args> for sdk::ChatBootstrapArgs {
     fn from(args: Args) -> Self {
         Self {
             api_key: args.api_key,

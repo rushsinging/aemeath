@@ -1063,8 +1063,8 @@ Runtime 重要不变量：
 13. Storage 统一承载 session history、memory、cost history 与 task persistence。
 14. Provider 是 provider ACL，不是核心域。
 15. Hook 是生命周期自动化适配，不是权限模型。
-16. CLI/TUI/HTTP/SDK 入口必须保持薄，只作为 inbound adapter 接入 `runtime::api`。
-17. `apps/cli` 严格只直接依赖 `runtime` 和纯技术库，不直接依赖 `core` 或 supporting domains。
+16. CLI/TUI/HTTP/SDK 入口必须保持薄，优先通过 `packages/sdk::AgentClient` 契约接入 Runtime；单二进制 CLI 的 composition root 可保留 `agent/runtime` 装配真实实现。
+17. `apps/cli` 严格只直接依赖 `packages/sdk`、`agent/runtime`（composition root 装配）和纯技术库，不直接依赖 `core/share` 或 supporting domains。
 18. Runtime 是唯一编排者，可以依赖 supporting domains。
 19. Supporting domains 默认只依赖 `core`，横向依赖必须进入 architecture allowlist。
 20. `core` 是最小共享内核，不能成为所有领域概念的混合仓库。
@@ -1092,7 +1092,7 @@ Runtime 重要不变量：
 2. **Phase 1**（初始化）：将 `setup.rs` 的 build_* 编排委托给 `AgentClientImpl::from_args()`，CLI 瘦身为 composition root。将零散 runtime API 调用逐步迁移至 AgentClient。
 3. **Phase 2**（目录整理）：完成 CLI 目录整理（#50），收拢碎片文件。在 mod.rs 中添加 doc comment 标注模块职责。
 4. **Phase 3**（守卫）：实施架构守卫脚本（包依赖检查），确保 CLI 只依赖 `packages/sdk`、`agent/runtime`（composition root）和纯技术库，不直接依赖任何 supporting domain 或 share/core。
-5. **Phase 4**（SDK 投影）：在 SDK 中补齐 TUI 需要的只读投影/命令事件，让 `tui/**` 逐步从 `runtime::api::*` 迁移到 `sdk::*`；`runtime` 直连只保留在 `run_orchestration.rs` 装配层。
+5. **Phase 4**（SDK 投影）：在 SDK 中补齐 TUI 需要的只读投影/命令事件，让 `tui/**` 逐步从 `runtime::api::*` 迁移到 `sdk::*`；`runtime` 直连只保留在 `run_orchestration.rs` / `runtime_adapter.rs` 装配层。当前已完成第一轮投影：`ChatBootstrapArgs`、`ModelSummary`、扩展 `SessionSummary`，`models` / `sessions` 子命令改走 `sdk::AgentClient`，并用 `TuiLaunchContext` 把 TUI 启动所需 runtime 对象集中为过渡投影。
 5. 用本设计评审现有 crate/module 边界。
 6. 标出现有类型属于哪个 Bounded Context 和哪个聚合。
 7. 后续重构应保持 CLI/TUI 行为可验证，最终通过完整验收门禁。

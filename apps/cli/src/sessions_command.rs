@@ -1,12 +1,14 @@
-use ::runtime::api::bootstrap::set_session_id;
+use std::sync::Arc;
 
 /// 处理 `aemeath sessions` 子命令
-pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, limit: usize) {
-    // 初始化 session ID（日志需要）
-    set_session_id("sessions".to_string());
-
+pub(crate) async fn run_sessions_command(
+    client: Arc<dyn sdk::AgentClient>,
+    delete: Option<String>,
+    json: bool,
+    limit: usize,
+) {
     if let Some(id) = delete {
-        match ::runtime::api::session::delete_session(&id).await {
+        match client.delete_session(&id).await {
             Ok(()) => println!("Session {} deleted.", id),
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -16,7 +18,10 @@ pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, lim
         return;
     }
 
-    let sessions = ::runtime::api::session::list_sessions().await;
+    let sessions = client.list_sessions().await.unwrap_or_else(|e| {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    });
     if sessions.is_empty() {
         println!("No saved sessions.");
         return;
@@ -30,10 +35,10 @@ pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, lim
             .map(|s| {
                 serde_json::json!({
                     "id": s.id,
-                    "title": s.metadata.title,
-                    "project": s.metadata.project,
-                    "model": s.metadata.model,
-                    "messages": s.messages.len(),
+                    "title": s.title,
+                    "project": s.project,
+                    "model": s.model,
+                    "messages": s.message_count,
                     "created_at": s.created_at,
                     "updated_at": s.updated_at,
                 })
@@ -45,15 +50,14 @@ pub(crate) async fn run_sessions_command(delete: Option<String>, json: bool, lim
         let rows: Vec<(&str, String, &str, usize, &str)> = display
             .iter()
             .map(|s| {
-                let summary = s.summary();
-                let summary_display: String = summary.chars().take(80).collect();
-                let project = s.metadata.project.as_deref().unwrap_or("-");
+                let summary_display: String = s.summary.chars().take(80).collect();
+                let project = s.project.as_deref().unwrap_or("-");
                 let updated = s.updated_at.get(..16).unwrap_or(&s.updated_at);
                 (
                     s.id.as_str(),
                     summary_display,
                     project,
-                    s.messages.len(),
+                    s.message_count,
                     updated,
                 )
             })
