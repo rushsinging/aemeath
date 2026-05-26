@@ -12,7 +12,7 @@
 | 67 | `--resume` 失效：进入 TUI 后未加载历史会话 | 高 | 修复中 | 待确认 | 2026-05 | 根因：CLI 启动时 runtime bootstrap 已用 `args.resume` 设置 session_id，但 `run_orchestration.rs` 调用 `app.run()` 时仍硬编码传入 `None`，导致 TUI 的 resume 加载分支不执行；修复：在 move args 之前保存初始 resume id，并传给 TUI run，保留既有历史回放逻辑 |
 | 68 | TUI 丢失 context window 用量显示 | 中 | 修复中 | 待确认 | 2026-05 | 根因：`run_orchestration.rs` 启动时硬编码 `context_size = 0`，status bar 因判断 `> 0` 才渲染而不显示；修复：读取 `resolved_model.model.context_window` 传入 TUI |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：system prompt 只暴露 `Working directory`，未明确当前 workspace root 与 worktree 路径约束，且工具越界报错只说明被拒绝，缺少改用相对路径/当前 workspace 根的纠正提示；修复：环境上下文新增 Current workspace root 与 worktree 路径规则，路径安全错误补充恢复建议 |
-| 70 | TaskListCreate 第一次调用会超时 | 中 | 活动中 | 待查 | 2026-05 | 用户反馈：会话首次调用 `TaskListCreate` 工具时出现超时；TaskListCreate 实现 (`agent/tools/src/task_list_create.rs`) 是纯内存 `TaskStore::create_list` 调用，无 IO，理论应瞬时返回；可能根因：tool dispatcher 首次调度路径上的初始化阻塞（registry/semaphore/agent runner 首次构造）、ToolContext 首次构造代价、或 LLM 端 stream/tool_use 投递阶段超时被错归到工具自身 |
+| 70 | TaskListCreate 第一次调用会超时 | 中 | 修复中 | 待确认 | 2026-05 | 工具层单测瞬时通过（5 tests, finished in 0.00s），证伪「工具实现层瓶颈」假设。根因不在 `task_list_create.rs`，应位于外层路径（最可能：LLM stream → tool_use 投递阶段网络/握手延迟，被 dispatcher 120s timeout 误归到工具自身）。后续应在 agent.rs dispatcher 增加分段计时日志，区分「LLM 投递」与「tool.call 执行」 |
 ## 专案
 
 ### #70 TaskListCreate 第一次调用会超时
@@ -44,20 +44,46 @@
 - 测量已有 archived batch 时再 `create_list` 的耗时（验证 drop_archived 路径）。
 - 多次连续调用对比首次与后续耗时是否有显著差异。
 
-若单元测试均瞬时通过，则可确认根因不在工具实现层，应转向 dispatcher / provider / prompt_build 路径排查。
+**测试结果**（`cargo test -p tools task_list_create`）：
+
+```text
+running 5 tests
+test ::tests::test_task_list_create_missing_summary_errors ... ok
+test ::tests::test_task_list_create_success_sets_summary ... ok
+test ::tests::test_task_list_create_allows_task_create_membership_by_batch ... ok
+test ::tests::test_task_list_create_with_archived_batch_is_fast ... ok
+test ::tests::test_task_list_create_first_call_is_fast ... ok
+
+test result: ok. 5 passed; 0 failed; finished in 0.00s
+```
+
+**结论**：
+
+工具实现层（`TaskStore::create_list` + 锁顺序 + drop_archived_batch_tasks）首次与后续调用均瞬时返回（含 1s 上限断言），完全证伪「TaskListCreate 工具自身首次会超时」的假设。`finished in 0.00s` 表明纯内存路径根本不会触发 dispatcher 的 120s timeout。
+
+**根因（修正）**：
+
+问题位于**工具调用栈的外层**，最可能的来源（按概率排序）：
+
+1. **LLM provider tool_use 投递延迟**：会话首次 tool_use 触发模型端 stream 握手/缓冲延迟，dispatcher 在 `tokio::time::timeout(120s, tool.call(...))` 之前的 stream 解析阶段已花掉时间，超时被错归到「TaskListCreate」工具名。
+2. **agent runtime 首次 ToolContext / registry 构造**：首次 dispatch 经过 registry lookup、semaphore 初始化、ToolContext clone 等冷路径，但这部分通常 < 100ms，不足以产生用户感知的"超时"。
+3. **首次 `task_reminder` 注入 / prompt_build 路径**：task batch 列表首次注入 system reminder 时若读路径异常，可能阻塞工具调用前的 prompt 准备。
 
 **修复方向**：
 
-1. 优先通过测试隔离工具实现层与外层调度层；若工具层瞬时返回，说明问题不在 `task_list_create.rs`，应在 dispatcher / provider 层加日志/超时计时定位。
-2. 若复现到工具层（例如 archived batch 锁顺序问题），需修正 `create_list` 的锁获取顺序，避免在持有 `current_batch` 锁时调用 `drop_archived_batch_tasks` 再次获取 `batches/tasks` 锁。
-3. 在 agent.rs 工具调度处增加首次工具调用计时与诊断日志，区分「LLM stream → tool_use 投递」与「tool.call 执行」两段耗时。
-4. 给 `TaskListCreate` 这种 O(1) 工具设置更短的 `timeout_secs`（例如 5s），首次超时能更早暴露真实瓶颈。
+1. 在 `agent/runtime/src/agent.rs` 工具调度处增加分段计时日志：
+   - `t0`：收到 LLM stream tool_use 事件
+   - `t1`：dispatcher 准备好 ToolContext + 即将调用 `tool.call`
+   - `t2`：`tool.call` 返回
+   - 用日志区分「投递耗时 t1-t0」与「执行耗时 t2-t1」，再定位真正的瓶颈段。
+2. 给 `TaskListCreate` 这种 O(1) 工具设置更短的 `timeout_secs`（例如 5s），首次超时能更早暴露真实瓶颈而不是空等 120s。
+3. 若确认是 LLM provider 首次 tool_use 投递延迟，应在 stream 解析层加超时分段，超时消息明确归类为「provider 投递超时」而不是工具名。
+4. 工具层已用测试封箱，本 bug 修复阶段不再调整 `task_list_create.rs` / `batch.rs`，主要工作在 dispatcher / stream 解析层。
 
-**涉及路径**：
-- `agent/tools/src/task_list_create.rs`
-- `agent/core/src/task/batch.rs`（`create_list` / `drop_archived_batch_tasks`）
-- `agent/runtime/src/agent.rs`（tool dispatcher / timeout）
-- `agent/runtime/src/chat/looping/task_reminder.rs`（task 工具调度链路）
+**涉及路径**（修正）：
+- `agent/runtime/src/agent.rs`（tool dispatcher / timeout 分段）
+- `agent/runtime/src/chat/looping/`（LLM stream tool_use 解析与投递）
+- `agent/tools/src/task_list_create.rs`（已补充计时回归测试，作为后续 dispatcher 改造的对照基线）
 
 ### #69 worktree 中 LLM 仍尝试搜索主分支路径
 
