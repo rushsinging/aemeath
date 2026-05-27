@@ -108,6 +108,34 @@ pub struct SkillView {
 }
 
 /// SDK 级 TUI 启动上下文。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteKind {
+    Empty,
+    ImageFile,
+    Text,
+}
+
+pub fn classify_paste(text: &str) -> PasteKind {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return PasteKind::Empty;
+    }
+    if is_image_file_path(trimmed) {
+        return PasteKind::ImageFile;
+    }
+    PasteKind::Text
+}
+
+pub fn is_image_file_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+}
+
 #[derive(Debug, Clone)]
 pub struct TuiLaunchContext {
     pub session_id: String,

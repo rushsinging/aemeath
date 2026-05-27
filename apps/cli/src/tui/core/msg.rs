@@ -38,4 +38,6 @@ pub(crate) enum Cmd {
     ReadClipboardImage,
     /// Process an image file path asynchronously.
     ProcessImageFile(String),
+    /// 记录当前 turn（由 CLI 边界转发给 runtime bootstrap）。
+    SetCurrentTurn(usize),
 }

@@ -110,6 +110,9 @@ impl CmdExecutor {
                     }
                 });
             }
+            Cmd::SetCurrentTurn(turn) => {
+                crate::runtime_adapter::set_current_turn(turn);
+            }
         }
     }
 }

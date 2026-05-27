@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
-use ::runtime::api::core::string_idx::CharIdx;
+use sdk::CharIdx;
 
 use super::display;
 use super::types::OutputLine;

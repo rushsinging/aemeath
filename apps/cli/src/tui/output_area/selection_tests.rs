@@ -1,6 +1,6 @@
 use super::super::{LineStyle, OutputArea, OutputLine};
-use ::runtime::api::core::string_idx::CharIdx;
 use ratatui::{buffer::Buffer, layout::Rect};
+use sdk::CharIdx;
 
 #[test]
 fn test_get_selected_text_clamps_start_col_after_line_shrinks() {

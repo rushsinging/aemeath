@@ -27,8 +27,11 @@ pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
 pub use tui::{
-    ChatEventSink, ChatHandle, ClipboardImageView, MemoryConfigView, QueueDrainPort,
-    ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, SkillView,
-    TaskStatusView, TuiLaunchContext,
+    classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ClipboardImageView,
+    MemoryConfigView, PasteKind, QueueDrainPort, ReflectionConfigView,
+    ReflectionMemorySuggestionView, ReflectionOutputView, SkillView, TaskStatusView,
+    TuiLaunchContext,
 };
-pub use types::{CostInfo, PermissionPrompt, StatusInfo, TaskSummary};
+pub use types::{
+    char_to_byte, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo, StrSlice, TaskSummary,
+};

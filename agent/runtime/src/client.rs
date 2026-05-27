@@ -551,7 +551,7 @@ fn runtime_event_to_sdk_event(
         }
         crate::chat::RuntimeStreamEvent::Cancelled => ChatEvent::Cancelled,
         crate::chat::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
-        crate::chat::RuntimeStreamEvent::TurnChanged(turn) => ChatEvent::TurnChanged(turn),
+        crate::chat::RuntimeStreamEvent::TurnChanged(turn) => ChatEvent::CurrentTurnChanged(turn),
         crate::chat::RuntimeStreamEvent::StopFailureHook {
             system_message,
             additional_context,

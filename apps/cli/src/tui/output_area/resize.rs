@@ -24,7 +24,7 @@ impl super::OutputArea {
 #[cfg(test)]
 pub mod tests {
     use super::super::{LineStyle, OutputArea, OutputLine};
-    use ::runtime::api::core::string_idx::CharIdx;
+    use sdk::CharIdx;
 
     fn output_area_with_clean_cache(term_width: usize) -> OutputArea {
         let mut output = OutputArea::new();

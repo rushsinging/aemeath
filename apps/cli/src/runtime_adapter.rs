@@ -11,3 +11,7 @@ pub(crate) async fn agent_client_from_args(
 ) -> Result<Arc<dyn sdk::AgentClient>, sdk::SdkError> {
     Ok(Arc::new(::runtime::api::client::from_args(args).await?))
 }
+
+pub(crate) fn set_current_turn(turn: usize) {
+    ::runtime::api::bootstrap::set_current_turn(turn);
+}

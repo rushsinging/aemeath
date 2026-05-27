@@ -327,21 +327,14 @@ impl App {
                         .set_spinner_phase(format!("Hook {event} done"));
                 }
             }
+            UiEvent::CurrentTurnChanged(turn) => {
+                return UpdateResult {
+                    cmd: Cmd::SetCurrentTurn(turn),
+                    pending_slash: None,
+                };
+            }
             UiEvent::WorkingDirectoryChanged(ctx) => {
                 self.session.cwd = ctx.raw_path_base.clone();
-                self.cmd_exec.workspace_context = Some(::runtime::api::session::WorkspaceContext {
-                    path_base: ctx.workspace.path_base.display().to_string(),
-                    working_root: ctx.workspace.working_root.display().to_string(),
-                    context_stack: ctx
-                        .workspace
-                        .context_stack
-                        .iter()
-                        .map(|entry| ::runtime::api::session::WorkspaceStackEntry {
-                            path_base: entry.path_base.display().to_string(),
-                            working_root: entry.working_root.display().to_string(),
-                        })
-                        .collect(),
-                });
                 self.status_bar
                     .set_context_paths(ctx.path_base, ctx.working_root);
                 if let Some(branch) = ctx.branch {
