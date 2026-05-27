@@ -15,6 +15,8 @@ impl sdk::AgentClient for BlockingReflectionClient {
             id: "test-session".to_string(),
             message_count: 0,
             total_tokens: 0,
+            messages: vec![],
+            created_at: None,
         }
     }
 
@@ -110,6 +112,52 @@ impl sdk::AgentClient for BlockingReflectionClient {
         _output: sdk::ReflectionOutputView,
     ) -> Result<String, sdk::SdkError> {
         Ok("applied".to_string())
+    }
+
+    async fn execute_command(
+        &self,
+        _name: &str,
+        _args: &str,
+        _ctx: sdk::CommandContext,
+    ) -> Result<sdk::CommandResult, sdk::SdkError> {
+        Ok(sdk::CommandResult::Success("ok".to_string()))
+    }
+
+    async fn estimate_context(
+        &self,
+        _messages: &[sdk::ChatMessage],
+        _system_prompt: &str,
+    ) -> Result<sdk::ContextEstimate, sdk::SdkError> {
+        Ok(sdk::ContextEstimate {
+            estimated_tokens: 0,
+            system_tokens: 0,
+            context_size: 0,
+            usage_percentage: 0.0,
+        })
+    }
+
+    async fn switch_model(
+        &self,
+        _params: sdk::ModelSwitchParams,
+    ) -> Result<sdk::ModelSwitchResult, sdk::SdkError> {
+        Ok(sdk::ModelSwitchResult {
+            display_name: "test/model".to_string(),
+            context_window: 0,
+            reasoning_active: None,
+        })
+    }
+
+    async fn set_thinking(&self, _desired: Option<bool>) -> Result<bool, sdk::SdkError> {
+        Ok(true)
+    }
+
+    async fn compact_messages(
+        &self,
+        messages: Vec<sdk::ChatMessage>,
+        _system_prompt: &str,
+        _context_size: usize,
+    ) -> Result<(Vec<sdk::ChatMessage>, bool), sdk::SdkError> {
+        Ok((messages, false))
     }
 }
 
