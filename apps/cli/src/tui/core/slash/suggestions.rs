@@ -24,7 +24,13 @@ impl super::super::App {
         let skills: Vec<(String, String, Vec<String>)> = self
             .skills
             .values()
-            .map(|s| (s.name.clone(), s.description.clone(), s.aliases.clone()))
+            .map(|s| {
+                (
+                    s.name.clone(),
+                    s.description.clone().unwrap_or_default(),
+                    s.aliases.clone(),
+                )
+            })
             .collect();
 
         // Build command list from CommandRegistry (single source of truth)

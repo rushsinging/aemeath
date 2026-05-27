@@ -8,8 +8,13 @@ impl crate::tui::core::App {
         if text.trim().is_empty() {
             // Empty paste — try to read clipboard image
             let output_tx = ui_tx.clone();
+            let Some(agent_client) = self.agent_client.clone() else {
+                self.output_area
+                    .push_system("[cannot read clipboard image without SDK client]");
+                return;
+            };
             tokio::spawn(async move {
-                match ::runtime::api::image::read_clipboard_image().await {
+                match agent_client.read_clipboard_image().await {
                     Ok(img) => {
                         let size = img.final_size;
                         let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
@@ -28,15 +33,20 @@ impl crate::tui::core::App {
                 }
             });
             self.output_area.push_system("[reading clipboard image...]");
-        } else if ::runtime::api::image::is_image_file(text.trim()) {
+        } else if is_image_path(text.trim()) {
             self.output_area
                 .push_system(&format!("[loading image: {}...]", text.trim()));
             // We can't await here directly since this is a sync method,
             // so we'll handle image file loading via spawn
             let path = text.trim().to_string();
+            let Some(agent_client) = self.agent_client.clone() else {
+                self.output_area
+                    .push_system("[cannot load image without SDK client]");
+                return;
+            };
             let tx = ui_tx.clone();
             tokio::spawn(async move {
-                match ::runtime::api::image::process_image_file(&path).await {
+                match agent_client.process_image_file(path).await {
                     Ok(img) => {
                         let size = img.final_size;
                         let _ = tx.send(UiEvent::ClipboardImage(img)).await;
@@ -65,4 +75,11 @@ impl crate::tui::core::App {
             self.update_suggestions();
         }
     }
+}
+
+fn is_image_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]
+        .iter()
+        .any(|ext| lower.ends_with(ext))
 }

@@ -7,8 +7,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::api::core::config::MemoryConfig;
-use crate::api::core::skill_ops::Skill;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{AgentRunner, ToolRegistry};
 use crate::api::hook::hook::HookRunner;
@@ -34,8 +32,8 @@ pub struct TuiLaunchContext {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub memory_config: MemoryConfig,
-    pub skills_map: std::collections::HashMap<String, Skill>,
+    pub memory_config: sdk::MemoryConfigView,
+    pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
     pub hook_runner: HookRunner,
     pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
 }

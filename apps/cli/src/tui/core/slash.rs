@@ -1,51 +1,40 @@
+mod dialog;
 mod help;
+mod help_display;
 mod memory;
 mod reflection;
+mod save;
 mod suggestions;
 
 use crate::tui::core::UiEvent;
 use ::runtime::api::command::cmd;
 use ::runtime::api::command::{CommandContext, CommandRegistry, CommandResult};
 use ::runtime::api::state::AppState;
-use help::SLASH_HELP_LINES;
 use std::sync::Arc;
-impl super::App {
-    fn open_model_selection_dialog(&mut self) -> Option<String> {
-        let models = self.cmd_exec.models_config.list_models();
-        if models.is_empty() {
-            self.output_area
-                .push_system("No models configured. Add models to ~/.aemeath/config.json");
-            return None;
-        }
-        let current = self.session.current_model_display.clone();
-        let mut options = Vec::new();
-        let mut keys = Vec::new();
-        for (provider_name, model) in &models {
-            let display_name = if model.name.is_empty() {
-                &model.id
-            } else {
-                &model.name
-            };
-            let key = format!("{}/{}", provider_name, display_name);
-            let marker = if key == current { " ←" } else { "" };
-            options.push(format!(
-                "{}/{} ctx:{}k max:{}k{}",
-                provider_name,
-                display_name,
-                model.context_window / 1000,
-                model.max_tokens / 1000,
-                marker,
-            ));
-            keys.push(key);
-        }
-        self.layout.active_dialog = Some(crate::tui::display::dialog::Dialog::select(
-            "Select Model",
-            options,
-        ));
-        self.layout.dialog_model_keys = keys;
-        None
+fn message_to_sdk(message: ::runtime::api::core::message::Message) -> sdk::ChatMessage {
+    sdk::ChatMessage {
+        role: match message.role {
+            ::runtime::api::core::message::Role::User => "user".to_string(),
+            ::runtime::api::core::message::Role::Assistant => "assistant".to_string(),
+        },
+        content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
     }
+}
 
+fn message_from_sdk(message: &sdk::ChatMessage) -> ::runtime::api::core::message::Message {
+    let role = match message.role.as_str() {
+        "assistant" => ::runtime::api::core::message::Role::Assistant,
+        _ => ::runtime::api::core::message::Role::User,
+    };
+    let content = serde_json::from_value(message.content.clone()).unwrap_or_else(|_| {
+        vec![::runtime::api::core::message::ContentBlock::Text {
+            text: String::new(),
+        }]
+    });
+    ::runtime::api::core::message::Message { role, content }
+}
+
+impl super::App {
     /// Handle slash commands with an optional UI event sender for background commands.
     /// Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
     pub(crate) async fn handle_slash_command_with_events(
@@ -75,14 +64,16 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
                 use ::runtime::api::compact;
+                let mut runtime_messages: Vec<_> =
+                    self.chat.messages.iter().map(message_from_sdk).collect();
                 let (compacted, was_compacted) = compact::compact_messages(
-                    &mut self.chat.messages,
+                    &mut runtime_messages,
                     &self.chat.system_prompt_text,
                     self.chat.context_size,
                 );
                 if was_compacted {
                     let old_len = self.chat.messages.len();
-                    self.chat.messages = compacted;
+                    self.chat.messages = compacted.into_iter().map(message_to_sdk).collect();
                     self.output_area.push_system(&format!(
                         "[compacted: {} → {} messages]",
                         old_len,
@@ -107,7 +98,9 @@ impl super::App {
             "/save" => self.handle_save_command().await,
             "/context" => {
                 use ::runtime::api::compact;
-                let estimated = compact::estimate_messages_tokens(&self.chat.messages)
+                let runtime_messages: Vec<_> =
+                    self.chat.messages.iter().map(message_from_sdk).collect();
+                let estimated = compact::estimate_messages_tokens(&runtime_messages)
                     + compact::estimate_tokens(&self.chat.system_prompt_text);
                 let pct = estimated * 100 / self.chat.context_size.max(1);
                 self.output_area.push_system(&format!(
@@ -135,10 +128,16 @@ impl super::App {
             }
             "/paste" => {
                 // block_in_place allows async call from non-async context in tokio runtime
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(::runtime::api::image::read_clipboard_image())
-                });
+                let result = if let Some(agent_client) = self.agent_client.clone() {
+                    tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current()
+                            .block_on(agent_client.read_clipboard_image())
+                    })
+                } else {
+                    Err(sdk::SdkError::Internal(
+                        "missing SDK agent client".to_string(),
+                    ))
+                };
                 match result {
                     Ok(img) => {
                         let size = img.final_size;
@@ -215,13 +214,16 @@ impl super::App {
                                 }
                                 ::runtime::api::command::CommandAction::Compact => {
                                     use ::runtime::api::compact;
+                                    let mut runtime_messages: Vec<_> =
+                                        self.chat.messages.iter().map(message_from_sdk).collect();
                                     let (compacted, was_compacted) = compact::compact_messages(
-                                        &mut self.chat.messages,
+                                        &mut runtime_messages,
                                         &self.chat.system_prompt_text,
                                         self.chat.context_size,
                                     );
                                     if was_compacted {
-                                        self.chat.messages = compacted;
+                                        self.chat.messages =
+                                            compacted.into_iter().map(message_to_sdk).collect();
                                         self.output_area.push_system("[compacted]");
                                     } else {
                                         self.output_area.push_system("[no compaction needed]");
@@ -332,7 +334,10 @@ impl super::App {
                                         Ok(s) => {
                                             self.resume_session_messages(
                                                 &session_id,
-                                                s.messages,
+                                                s.messages
+                                                    .into_iter()
+                                                    .map(message_to_sdk)
+                                                    .collect(),
                                                 s.created_at,
                                             );
                                         }
@@ -371,30 +376,5 @@ impl super::App {
             }
         }
         None
-    }
-    async fn handle_save_command(&mut self) {
-        let result = if let Some(agent_client) = &self.agent_client {
-            if let Err(e) = agent_client
-                .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
-                .await
-            {
-                log::warn!("failed to sync session messages: {e}");
-            }
-            agent_client.save_current_session().await
-        } else {
-            Err(sdk::SdkError::Internal(
-                "SDK agent client is unavailable".to_string(),
-            ))
-        };
-        match result {
-            Ok(()) => self.output_area.push_system(&format!("[session saved: {}]", self.session.session_id)),
-            Err(e) => self.output_area.push_error(&format!("Failed to save session: {e}")),
-        }
-    }
-
-    fn show_slash_help(&mut self) {
-        for line in SLASH_HELP_LINES {
-            self.output_area.push_system(line);
-        }
     }
 }

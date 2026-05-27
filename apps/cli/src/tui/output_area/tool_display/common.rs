@@ -1,4 +1,4 @@
-use ::runtime::api::core::tool::AgentToolCallProgress;
+use sdk::AgentToolCallProgressView;
 
 use crate::tui::display::safe_text;
 
@@ -60,7 +60,7 @@ pub(super) fn format_todowrite_value(input: &serde_json::Value) -> Option<(Strin
     Some((format!("● TodoWrite ({count} items)"), details))
 }
 
-pub(super) fn format_agent_tool_calls(calls: &[AgentToolCallProgress]) -> String {
+pub(super) fn format_agent_tool_calls(calls: &[AgentToolCallProgressView]) -> String {
     let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();
     for call in calls {
         if let Some((_, summaries)) = grouped.iter_mut().find(|(name, _)| *name == call.name) {

@@ -16,11 +16,19 @@ pub mod types;
 
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
-pub use chat::{ChatEvent, ChatInput, ChatRequest, ChatResult, ChatStream};
+pub use chat::{
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent, ChatInput,
+    ChatRequest, ChatResult, ChatStream, ToolResultImage, WorkspaceContextView,
+    WorkspaceStackEntryView,
+};
 pub use client::AgentClient;
 pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
-pub use tui::{ChatEventSink, ChatHandle, QueueDrainPort, TaskStatusView, TuiLaunchContext};
+pub use tui::{
+    ChatEventSink, ChatHandle, ClipboardImageView, MemoryConfigView, QueueDrainPort,
+    ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, SkillView,
+    TaskStatusView, TuiLaunchContext,
+};
 pub use types::{CostInfo, PermissionPrompt, StatusInfo, TaskSummary};

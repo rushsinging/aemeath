@@ -9,6 +9,34 @@ use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+fn status_context_for_runtime_workspace(
+    workspace: ::runtime::api::session::WorkspaceContext,
+) -> crate::tui::core::UiEvent {
+    let workspace = sdk::WorkspaceContextView {
+        path_base: std::path::PathBuf::from(&workspace.path_base),
+        working_root: std::path::PathBuf::from(&workspace.working_root),
+        context_stack: workspace
+            .context_stack
+            .into_iter()
+            .map(|entry| sdk::WorkspaceStackEntryView {
+                path_base: std::path::PathBuf::from(entry.path_base),
+                working_root: std::path::PathBuf::from(entry.working_root),
+            })
+            .collect(),
+    };
+    crate::tui::core::status_context_for_workspace(workspace)
+}
+
+fn message_to_sdk(message: ::runtime::api::core::message::Message) -> sdk::ChatMessage {
+    sdk::ChatMessage {
+        role: match message.role {
+            ::runtime::api::core::message::Role::User => "user".to_string(),
+            ::runtime::api::core::message::Role::Assistant => "assistant".to_string(),
+        },
+        content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
+    }
+}
+
 impl App {
     /// Run the TUI event loop
     pub async fn run(
@@ -49,7 +77,7 @@ impl App {
                         let working_root = std::path::PathBuf::from(&workspace.working_root);
                         self.session.cwd = path_base.clone();
                         if let crate::tui::core::event::UiEvent::WorkingDirectoryChanged(ctx) =
-                            crate::tui::core::status_context_for_workspace(workspace.clone())
+                            status_context_for_runtime_workspace(workspace.clone())
                         {
                             self.status_bar
                                 .set_context_paths(ctx.path_base, ctx.working_root);
@@ -75,6 +103,7 @@ impl App {
                     } else {
                         0
                     };
+                    let msgs: Vec<_> = msgs.into_iter().map(message_to_sdk).collect();
                     for i in 0..msgs.len() {
                         let subsequent = if i + 1 < msgs.len() {
                             Some(&msgs[i + 1])
@@ -207,7 +236,7 @@ impl App {
         if !self.chat.messages.is_empty() {
             if let Some(agent_client) = &self.agent_client {
                 if let Err(e) = agent_client
-                    .sync_current_messages(crate::tui::messages_to_sdk(&self.chat.messages))
+                    .sync_current_messages(self.chat.messages.clone())
                     .await
                 {
                     log::warn!("failed to sync session messages: {e}");

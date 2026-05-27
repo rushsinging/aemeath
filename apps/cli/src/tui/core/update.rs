@@ -1,4 +1,5 @@
 mod ask_user_key;
+mod ask_user_options;
 mod done;
 mod enter;
 mod key;

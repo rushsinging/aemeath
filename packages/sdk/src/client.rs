@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 
 use crate::{
-    ChangeSet, ChatInput, ChatRequest, ChatStream, CostInfo, ModelSummary, ProjectContext,
-    SessionSnapshot, TaskStatusView, TaskSummary,
+    ChangeSet, ChatInput, ChatRequest, ChatStream, ClipboardImageView, CostInfo, ModelSummary,
+    ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
 /// Agent Runtime 的统一客户端 trait。
@@ -88,4 +88,23 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 压缩 session 消息。
     async fn compact(&self) -> Result<(), super::SdkError>;
+
+    /// 读取剪贴板图片，返回 TUI 可渲染视图。
+    async fn read_clipboard_image(&self) -> Result<ClipboardImageView, super::SdkError>;
+
+    /// 处理图片文件，返回 TUI 可渲染视图。
+    async fn process_image_file(&self, path: String)
+        -> Result<ClipboardImageView, super::SdkError>;
+
+    /// 基于当前消息运行 reflection。
+    async fn run_reflection(
+        &self,
+        messages: Vec<super::ChatMessage>,
+    ) -> Result<ReflectionOutputView, super::SdkError>;
+
+    /// 应用 reflection 结果到记忆系统。
+    async fn apply_reflection(
+        &self,
+        output: ReflectionOutputView,
+    ) -> Result<String, super::SdkError>;
 }

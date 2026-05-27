@@ -1,23 +1,20 @@
 //! 聊天相关纯数据状态
 
-use ::runtime::api::core::message::Message;
-use ::runtime::api::reflection::ReflectionOutput;
-
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug)]
 pub(crate) struct ChatState {
-    pub messages: Vec<Message>,
+    pub messages: Vec<sdk::ChatMessage>,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     pub total_api_calls: u64,
     pub last_input_tokens: u64,
-    pub pending_images: Vec<::runtime::api::image::ProcessedImage>,
+    pub pending_images: Vec<sdk::ClipboardImageView>,
     pub system_prompt_text: String,
     pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<String>,
     pub turn_count: usize,
-    pub pending_reflection: Option<ReflectionOutput>,
+    pub pending_reflection: Option<sdk::ReflectionOutputView>,
     pub is_processing: bool,
 }
 

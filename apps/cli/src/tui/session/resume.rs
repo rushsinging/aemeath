@@ -1,11 +1,10 @@
 use crate::tui::core::App;
-use ::runtime::api::core::message::Message;
 
 impl App {
     pub(crate) fn resume_session_messages(
         &mut self,
         session_id: &str,
-        messages: Vec<Message>,
+        messages: Vec<sdk::ChatMessage>,
         created_at: String,
     ) {
         let msg_count = messages.len();
@@ -14,41 +13,18 @@ impl App {
         self.status_bar.set_session_id(session_id);
         self.chat.messages.clear();
         self.chat.pending_images.clear();
-        let mut msgs = messages;
-        ::runtime::api::core::message::sanitize_messages(&mut msgs);
-        let trimmed = msg_count - msgs.len();
-        // Check for deeper integrity issues
-        let integrity = ::runtime::api::core::message::check_message_integrity(&msgs);
-        let auto_repaired = if integrity.has_issues() {
-            ::runtime::api::core::message::deep_clean_messages(&mut msgs)
-        } else {
-            0
-        };
-        // Render history into output_area
-        for i in 0..msgs.len() {
-            let subsequent = if i + 1 < msgs.len() {
-                Some(&msgs[i + 1])
+        for i in 0..messages.len() {
+            let subsequent = if i + 1 < messages.len() {
+                Some(&messages[i + 1])
             } else {
                 None
             };
-            self.render_history_message(&msgs[i], subsequent);
+            self.render_history_message(&messages[i], subsequent);
         }
-        self.chat.messages = msgs;
+        self.chat.messages = messages;
         self.output_area.push_system(&format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
         ));
-        if trimmed > 0 {
-            self.output_area.push_system(&format!(
-                "[trimmed {} incomplete tool-call message(s)]",
-                trimmed
-            ));
-        }
-        if auto_repaired > 0 {
-            self.output_area.push_system(&format!(
-                "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
-                auto_repaired
-            ));
-        }
     }
 }

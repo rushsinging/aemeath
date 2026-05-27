@@ -56,7 +56,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             tool_name,
             output,
             is_error,
-            images: images_from_sdk(images),
+            images,
         },
         sdk::ChatEvent::SystemMessage(msg) => UiEvent::SystemMessage(msg),
         sdk::ChatEvent::Error(msg) => UiEvent::Error(msg),
@@ -71,12 +71,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             last_input,
             elapsed_secs,
         },
-        sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(
-            messages
-                .into_iter()
-                .map(crate::tui::message_from_sdk)
-                .collect(),
-        ),
+        sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
         sdk::ChatEvent::Done => UiEvent::Done,
         sdk::ChatEvent::DoneWithDurationMs(ms) => {
             UiEvent::DoneWithDuration(std::time::Duration::from_millis(ms))
@@ -111,10 +106,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             default,
             reply_tx,
         },
-        sdk::ChatEvent::AgentProgress { tool_id, event } => UiEvent::AgentProgress {
-            tool_id,
-            event: agent_progress_from_sdk(event),
-        },
+        sdk::ChatEvent::AgentProgress { tool_id, event } => {
+            UiEvent::AgentProgress { tool_id, event }
+        }
         sdk::ChatEvent::HookStart { event, command } => UiEvent::HookStart { event, command },
         sdk::ChatEvent::HookEnd {
             event,
@@ -129,26 +123,17 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             path_base,
             working_root,
             workspace,
-        } => {
-            let workspace = serde_json::from_value(workspace).unwrap_or_else(|_| {
-                ::runtime::api::session::WorkspaceContext {
-                    path_base: path_base.clone(),
-                    working_root: working_root.clone(),
-                    context_stack: Vec::new(),
-                }
-            });
-            UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
-                path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
-                working_root: crate::tui::core::display_status_path(std::path::Path::new(
-                    &working_root,
-                )),
-                branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
-                kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
-                raw_path_base: std::path::PathBuf::from(path_base),
-                raw_working_root: std::path::PathBuf::from(working_root),
-                workspace,
-            })
-        }
+        } => UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
+            path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
+            working_root: crate::tui::core::display_status_path(std::path::Path::new(
+                &working_root,
+            )),
+            branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
+            kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
+            raw_path_base: std::path::PathBuf::from(path_base),
+            raw_working_root: std::path::PathBuf::from(working_root),
+            workspace,
+        }),
         sdk::ChatEvent::Result(result) => UiEvent::Text(result.text),
     }
 }
@@ -205,78 +190,6 @@ pub fn spawn_processing(ctx: SpawnContext) {
     });
 }
 
-fn images_from_sdk(value: serde_json::Value) -> Vec<::runtime::api::core::tool::ImageData> {
-    value
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    Some(::runtime::api::core::tool::ImageData {
-                        base64: item.get("base64")?.as_str()?.to_string(),
-                        media_type: item.get("media_type")?.as_str()?.to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn agent_progress_from_sdk(
-    value: serde_json::Value,
-) -> ::runtime::api::core::tool::AgentProgressEvent {
-    let sequence = value.get("sequence").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let kind = match value
-        .get("kind")
-        .and_then(|kind| kind.get("type"))
-        .and_then(|ty| ty.as_str())
-    {
-        Some("tool_calls") => {
-            let calls = value
-                .get("kind")
-                .and_then(|kind| kind.get("calls"))
-                .and_then(|calls| calls.as_array())
-                .map(|calls| {
-                    calls
-                        .iter()
-                        .map(|call| ::runtime::api::core::tool::AgentToolCallProgress {
-                            id: call
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            name: call
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            input: call
-                                .get("input")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                            summary: call
-                                .get("summary")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            ::runtime::api::core::tool::AgentProgressKind::ToolCalls { calls }
-        }
-        _ => ::runtime::api::core::tool::AgentProgressKind::Message {
-            text: value
-                .get("kind")
-                .and_then(|kind| kind.get("text"))
-                .and_then(|text| text.as_str())
-                .unwrap_or("")
-                .to_string(),
-        },
-    };
-    ::runtime::api::core::tool::AgentProgressEvent { sequence, kind }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,17 +222,17 @@ mod tests {
         let event = sdk_event_to_ui_event(sdk::ChatEvent::WorkingDirectoryChanged {
             path_base: "/tmp".to_string(),
             working_root: "/tmp".to_string(),
-            workspace: serde_json::json!({
-                "path_base": "/tmp",
-                "working_root": "/tmp",
-                "context_stack": []
-            }),
+            workspace: sdk::WorkspaceContextView {
+                path_base: "/tmp".into(),
+                working_root: "/tmp".into(),
+                context_stack: Vec::new(),
+            },
         });
 
         match event {
             UiEvent::WorkingDirectoryChanged(update) => {
                 assert_eq!(update.raw_path_base, std::path::PathBuf::from("/tmp"));
-                assert_eq!(update.workspace.path_base, "/tmp");
+                assert_eq!(update.workspace.path_base, std::path::PathBuf::from("/tmp"));
             }
             other => panic!("unexpected event: {other:?}"),
         }

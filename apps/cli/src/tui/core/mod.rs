@@ -8,7 +8,6 @@ pub mod state;
 use crate::tui::core::cmd_exec::CmdExecutor;
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use ::runtime::api::core::skill_ops::Skill;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -33,7 +32,7 @@ pub struct App {
     pub session: SessionState,
     pub layout: UiLayout,
     // 业务数据（非 UI 状态）
-    pub skills: std::collections::HashMap<String, Skill>,
+    pub skills: std::collections::HashMap<String, sdk::SkillView>,
     // 基础设施引用（Phase 4 移入 CmdExecutor）
     pub cmd_exec: CmdExecutor,
     pub agent_client: Option<std::sync::Arc<dyn sdk::AgentClient>>,
@@ -106,18 +105,16 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::display::status_bar:
 
 #[cfg(test)]
 pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
-    status_context_for_workspace(::runtime::api::session::WorkspaceContext {
-        path_base: path_base.display().to_string(),
-        working_root: working_root.display().to_string(),
+    status_context_for_workspace(sdk::WorkspaceContextView {
+        path_base: path_base.to_path_buf(),
+        working_root: working_root.to_path_buf(),
         context_stack: Vec::new(),
     })
 }
 
-pub(crate) fn status_context_for_workspace(
-    workspace: ::runtime::api::session::WorkspaceContext,
-) -> UiEvent {
-    let path_base = PathBuf::from(&workspace.path_base);
-    let working_root = PathBuf::from(&workspace.working_root);
+pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
+    let path_base = workspace.path_base.clone();
+    let working_root = workspace.working_root.clone();
     UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
         path_base: display_status_path(&path_base),
         working_root: display_status_path(&working_root),
@@ -157,7 +154,7 @@ impl App {
                 session_created_at: None,
                 cached_sessions: Vec::new(),
                 current_model_display: model,
-                memory_config: ::runtime::api::core::config::MemoryConfig::default(),
+                memory_config: sdk::MemoryConfigView::default(),
             },
             layout: UiLayout::default(),
             skills: std::collections::HashMap::new(),
@@ -174,7 +171,7 @@ impl App {
                 )),
                 task_store: None,
                 workspace_context: None,
-                json_logger: None,
+                agent_client: None,
             },
             agent_client: None,
         }

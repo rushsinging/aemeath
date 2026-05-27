@@ -40,7 +40,8 @@ pub(crate) async fn run_chat(args: Args) {
     app.session.memory_config = launch.memory_config;
     app.set_skills(launch.skills_map);
     app.cmd_exec.hook_runner = launch.hook_runner;
-    app.cmd_exec.json_logger = launch.json_logger;
+    app.cmd_exec.agent_client =
+        Some(std::sync::Arc::new(client.clone()) as std::sync::Arc<dyn sdk::AgentClient>);
     app.run(
         launch.client,
         launch.registry,

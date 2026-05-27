@@ -1,5 +1,5 @@
 use super::super::OutputArea;
-use ::runtime::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
 
 #[test]
 fn test_push_agent_progress_replaces_tool_calls_for_same_agent() {
@@ -97,24 +97,27 @@ fn test_push_agent_progress_appends_message_events() {
     assert_eq!(matching, vec!["  ↳ plain progress", "  ↳ another progress"]);
 }
 
-fn tool_calls_event(sequence: usize, calls: Vec<AgentToolCallProgress>) -> AgentProgressEvent {
-    AgentProgressEvent {
+fn tool_calls_event(
+    sequence: usize,
+    calls: Vec<AgentToolCallProgressView>,
+) -> AgentProgressEventView {
+    AgentProgressEventView {
         sequence,
-        kind: AgentProgressKind::ToolCalls { calls },
+        kind: AgentProgressKindView::ToolCalls { calls },
     }
 }
 
-fn message_event(sequence: usize, text: &str) -> AgentProgressEvent {
-    AgentProgressEvent {
+fn message_event(sequence: usize, text: &str) -> AgentProgressEventView {
+    AgentProgressEventView {
         sequence,
-        kind: AgentProgressKind::Message {
+        kind: AgentProgressKindView::Message {
             text: text.to_string(),
         },
     }
 }
 
-fn call(id: &str, name: &str, summary: &str) -> AgentToolCallProgress {
-    AgentToolCallProgress {
+fn call(id: &str, name: &str, summary: &str) -> AgentToolCallProgressView {
+    AgentToolCallProgressView {
         id: id.to_string(),
         name: name.to_string(),
         input: serde_json::json!({}),
