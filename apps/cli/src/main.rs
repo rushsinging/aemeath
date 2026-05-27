@@ -1,7 +1,6 @@
 mod args;
-mod model_selection;
 mod chat;
-mod sessions_command;
+mod subcommand;
 mod tui;
 mod panic_hook;
 
@@ -24,7 +23,7 @@ async fn main() {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             });
-            model_selection::run_models_command(client, json).await;
+            subcommand::model_selection::run_models_command(client, json).await;
         }
         Some(Commands::Sessions {
             delete,
@@ -39,7 +38,7 @@ async fn main() {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             });
-            sessions_command::run_sessions_command(client, delete, json, limit).await;
+            subcommand::sessions_command::run_sessions_command(client, delete, json, limit).await;
         }
         Some(Commands::Run { run_args }) => {
             chat::run_chat(run_args.into()).await;
