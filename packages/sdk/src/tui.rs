@@ -25,7 +25,7 @@ pub trait ChatEventSink<Event>: Clone + Send + Sync + 'static {
 }
 
 /// runtime 请求 TUI drain 排队输入的端口。
-pub trait QueueDrainPort: Clone + Send + Sync + 'static {
+pub trait QueueDrainPort: Send + Sync + 'static {
     fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a>;
 }
 

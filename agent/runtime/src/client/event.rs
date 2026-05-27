@@ -36,11 +36,76 @@ impl crate::chat::ChatEventSink for SdkChatEventSink {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct EmptyQueueDrainPort;
+pub(crate) struct RuntimeQueueDrainPort {
+    inner: Option<Arc<dyn sdk::QueueDrainPort>>,
+}
 
-impl crate::chat::QueueDrainPort for EmptyQueueDrainPort {
+impl RuntimeQueueDrainPort {
+    pub(crate) fn new(inner: Option<Arc<dyn sdk::QueueDrainPort>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl crate::chat::QueueDrainPort for RuntimeQueueDrainPort {
     fn drain_queued_input<'a>(&'a self) -> crate::chat::QueueFuture<'a> {
-        Box::pin(async { None })
+        Box::pin(async move {
+            match &self.inner {
+                Some(inner) => inner.drain_queued_input().await,
+                None => None,
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingQueueDrainPort {
+        calls: Arc<AtomicUsize>,
+        queued: Mutex<Option<Vec<String>>>,
+    }
+
+    impl CountingQueueDrainPort {
+        fn new(queued: Option<Vec<String>>) -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+                queued: Mutex::new(queued),
+            }
+        }
+    }
+
+    impl sdk::QueueDrainPort for CountingQueueDrainPort {
+        fn drain_queued_input<'a>(&'a self) -> sdk::QueueFuture<'a> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                self.queued.lock().unwrap().take()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_runtime_queue_drain_port_forwards_to_sdk_queue() {
+        let sdk_queue = Arc::new(CountingQueueDrainPort::new(Some(vec![
+            "queued input".to_string(),
+        ])));
+        let calls = sdk_queue.calls.clone();
+        let queue = RuntimeQueueDrainPort::new(Some(sdk_queue));
+
+        let drained = crate::chat::QueueDrainPort::drain_queued_input(&queue).await;
+
+        assert_eq!(drained, Some(vec!["queued input".to_string()]));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_runtime_queue_drain_port_without_sdk_queue_returns_none() {
+        let queue = RuntimeQueueDrainPort::new(None);
+
+        let drained = crate::chat::QueueDrainPort::drain_queued_input(&queue).await;
+
+        assert_eq!(drained, None);
     }
 }
 

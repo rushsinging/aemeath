@@ -1,6 +1,6 @@
 //! Chat 输入 / 事件 / 流 / 结果。
 
-use crate::ChatMessage;
+use crate::{ChatMessage, QueueDrainPort};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -13,9 +13,10 @@ pub struct ChatInput {
 }
 
 /// TUI 发起的一次 Chat 请求。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
+    pub queue_drain: Option<std::sync::Arc<dyn QueueDrainPort>>,
 }
 
 /// 工具结果中的图片载荷。
@@ -290,9 +291,11 @@ mod tests {
                     content: serde_json::json!([{"type":"text","text":"two"}]),
                 },
             ],
+            queue_drain: None,
         };
 
         assert_eq!(request.messages[0].role, "user");
         assert_eq!(request.messages[1].role, "assistant");
+        assert!(request.queue_drain.is_none());
     }
 }

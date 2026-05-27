@@ -34,7 +34,7 @@ pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ClipboardImageView,
-    MemoryConfigView, PasteKind, QueueDrainPort, ReflectionConfigView,
+    MemoryConfigView, PasteKind, QueueDrainPort, QueueFuture, ReflectionConfigView,
     ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView, SkillView, TaskStatusView,
     TuiLaunchContext,
 };

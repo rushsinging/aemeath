@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use super::event::{EmptyQueueDrainPort, SdkChatEventSink};
+use super::event::{RuntimeQueueDrainPort, SdkChatEventSink};
 use super::mapping::message_from_sdk;
 
 pub(super) async fn chat_impl(
@@ -20,6 +20,7 @@ pub(super) async fn chat_impl(
         .lock()
         .map_err(|_| SdkError::Internal("当前 chat 取消锁已损坏".to_string()))? =
         Some(cancel.clone());
+    let queue_drain = input.queue_drain.clone();
     let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
     *me.inner
         .current_messages
@@ -37,7 +38,7 @@ pub(super) async fn chat_impl(
     tokio::spawn(async move {
         crate::chat::process_chat_loop(crate::chat::ChatLoopContext {
             sink,
-            queue: EmptyQueueDrainPort,
+            queue: RuntimeQueueDrainPort::new(queue_drain),
             client: inner.context.client.clone(),
             registry: inner.context.registry.clone(),
             system_blocks: inner.context.system_blocks.clone(),
