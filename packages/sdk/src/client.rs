@@ -55,6 +55,7 @@ pub trait AgentClient: Send + Sync + 'static {
                 role: "user".to_string(),
                 content,
             }],
+            queue_drain: None,
         })
         .await
     }

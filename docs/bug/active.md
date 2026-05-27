@@ -11,12 +11,12 @@
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 活动中 | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
-| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 活动中 | 未确认 | 2026-05 | 当前 agent 主循环是两层：外层 LLM loop（逐轮 LLM 调用），内层 tool execution loop（并发执行工具）。一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue，导致用户中途发送的新消息被忽略直到循环自然结束 |
+| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 ## 专案
 
 ### #72 agent 双层循环中一轮结束后不自动读取 input queue
 
-**状态**：活动中
+**状态**：修复中（待确认）
 
 **症状**：agent 主循环由双层构成：外层 LLM loop（每次 LLM 调用为一次迭代），内层 tool execution loop（并发执行本轮所有 tool_use）。当一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue（`AgentInput::UserMessage` / 用户通过 TUI 发送的新消息），导致用户中途发送的输入被忽略或延迟到循环自然结束才被处理。
 
@@ -30,6 +30,17 @@
 2. input queue 在 runtime 启动时已建立，但主循环的 tick 入口没有在每轮之间调用 `recv` / `try_recv` 来检查新消息。
 3. input queue 的读取被耦合在某个更内层的位置（如 tool execution 完成后），导致只有特定时机才会消费。
 4. 双层循环结构（LLM loop + tool loop）使得「一轮结束」的定义不够明确：工具执行完到下一次 LLM 调用之间的窗口没有被用于检查 input queue。
+
+**根因（已确认）**：
+1. P13 TUI/Runtime SDK 解耦后，TUI 的排队输入读取端口停留在 CLI 层：`TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done` / `DoneWithDuration` 后兜底 drain，并通过 `sync_current_messages` 写回 session。
+2. `AgentClientImpl::chat` 启动 `process_chat_loop` 时固定传入 `EmptyQueueDrainPort`，导致 runtime chat loop 内既有的 `append_queued_input` 调用（工具轮完成后、最终响应前、取消/API error 等路径）永远只能得到 `None`。
+3. 因此 bug 不在 `process_chat_loop` 的轮间检查缺失，而在 SDK 边界没有把 TUI queue drain 端口传给 runtime loop，轮间检查被空实现短路。
+
+**修复**：
+1. `sdk::ChatRequest` 新增可选 `queue_drain` 端口，非 TUI 调用保持 `None`。
+2. `apps/cli` 发起 chat 时注入 `TuiQueueDrainPort`，并让该端口实现 `sdk::QueueDrainPort`。
+3. `agent/runtime` 新增 `RuntimeQueueDrainPort`，把 SDK queue drain 端口适配为 runtime `chat::QueueDrainPort` 后传入 `process_chat_loop`。
+4. 补充回归测试覆盖 `RuntimeQueueDrainPort` 能转发 SDK queue 读取，以及无 queue 时安全返回 `None`。
 
 **修复方向**：
 1. 在外层 LLM loop 每轮迭代开始前增加 `input_queue.try_recv()` 检查，若有新消息则注入到 messages 列表，重新进入 LLM loop。

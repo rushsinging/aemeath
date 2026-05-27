@@ -29,6 +29,12 @@ impl TuiQueueDrainPort {
     }
 }
 
+impl sdk::QueueDrainPort for TuiQueueDrainPort {
+    fn drain_queued_input<'a>(&'a self) -> sdk::QueueFuture<'a> {
+        Box::pin(async move { self.drain_queued_input().await })
+    }
+}
+
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
         sdk::ChatEvent::Token(text) => UiEvent::Text(text),
@@ -154,12 +160,12 @@ pub fn spawn_processing(ctx: SpawnContext) {
             .agent_client
             .chat(sdk::ChatRequest {
                 messages: ctx.messages,
+                queue_drain: Some(Arc::new(TuiQueueDrainPort::new(ctx.queue_request_tx.clone()))),
             })
             .await
         {
             Ok(stream) => stream,
-            Err(e) => {
-                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
+            Err(e) => {                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
                 let _ = ctx.tx.send(UiEvent::Done).await;
                 return;
             }
