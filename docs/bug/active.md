@@ -11,7 +11,39 @@
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 活动中 | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
+| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 活动中 | 未确认 | 2026-05 | 当前 agent 主循环是两层：外层 LLM loop（逐轮 LLM 调用），内层 tool execution loop（并发执行工具）。一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue，导致用户中途发送的新消息被忽略直到循环自然结束 |
 ## 专案
+
+### #72 agent 双层循环中一轮结束后不自动读取 input queue
+
+**状态**：活动中
+
+**症状**：agent 主循环由双层构成：外层 LLM loop（每次 LLM 调用为一次迭代），内层 tool execution loop（并发执行本轮所有 tool_use）。当一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue（`AgentInput::UserMessage` / 用户通过 TUI 发送的新消息），导致用户中途发送的输入被忽略或延迟到循环自然结束才被处理。
+
+**复现**：
+1. 向 agent 发送一个会触发多轮工具调用的复杂请求（如「分析整个项目结构」）。
+2. 在 agent 执行首轮工具期间，通过 TUI 发送一条新消息（如「停，只分析 src 目录」）。
+3. 观察 agent 是否在当前工具执行完成后立即处理用户新输入，还是继续原有 LLM loop 直到任务自然结束才响应。
+
+**根因假设**：
+1. 外层 LLM loop 的迭代条件只判断「是否收到 LLM 最终响应」和「是否还有 tool_use」，没有在每轮开始前主动 drain input queue。
+2. input queue 在 runtime 启动时已建立，但主循环的 tick 入口没有在每轮之间调用 `recv` / `try_recv` 来检查新消息。
+3. input queue 的读取被耦合在某个更内层的位置（如 tool execution 完成后），导致只有特定时机才会消费。
+4. 双层循环结构（LLM loop + tool loop）使得「一轮结束」的定义不够明确：工具执行完到下一次 LLM 调用之间的窗口没有被用于检查 input queue。
+
+**修复方向**：
+1. 在外层 LLM loop 每轮迭代开始前增加 `input_queue.try_recv()` 检查，若有新消息则注入到 messages 列表，重新进入 LLM loop。
+2. 明确「一轮结束」的定义：LLM 返回无 tool_use 的最终响应 OR 所有 tool_use 执行完成 → 应在此时 drain input queue 一次。
+3. 考虑将 input queue drain 做成一个独立函数（`drain_input_queue()`），在以下时机调用：
+   - 每轮 LLM 调用之前
+   - 所有 tool 执行完成后、下一轮 LLM 调用之前
+   - 外层 loop 的 while 条件判断中
+4. 补充回归：agent 执行多轮工具期间用户可随时插入新消息，agent 应在当前轮结束后立即处理；若 input queue 为空则继续原有逻辑。
+
+**涉及路径（预计）**：
+- `agent/runtime/src/agent.rs`（主循环 tick / LLM loop / tool loop 入口）
+- `agent/runtime/src/chat/`（chat 事件处理与 input queue 建立）
+- `agent/runtime/src/chat/looping/`（循环控制与迭代逻辑）
 
 ### #69 worktree 中 LLM 仍尝试搜索主分支路径
 
