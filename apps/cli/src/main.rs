@@ -1,6 +1,6 @@
 mod args;
 mod model_selection;
-mod run_orchestration;
+mod chat;
 mod sessions_command;
 mod tui;
 
@@ -15,7 +15,7 @@ async fn main() {
 
     match cli.command {
         Some(Commands::Models { json }) => {
-            let client = run_orchestration::agent_client_from_args(
+            let client = chat::agent_client_from_args(
                 sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
             )
             .await
@@ -30,7 +30,7 @@ async fn main() {
             json,
             limit,
         }) => {
-            let client = run_orchestration::agent_client_from_args(
+            let client = chat::agent_client_from_args(
                 sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
             )
             .await
@@ -41,11 +41,11 @@ async fn main() {
             sessions_command::run_sessions_command(client, delete, json, limit).await;
         }
         Some(Commands::Run { run_args }) => {
-            run_orchestration::run_chat(run_args.into()).await;
+            chat::run_chat(run_args.into()).await;
         }
         None => {
             // 无子命令 — 默认调用 run，使用顶层参数
-            run_orchestration::run_chat(cli.run_args.into()).await;
+            chat::run_chat(cli.run_args.into()).await;
         }
     }
 }

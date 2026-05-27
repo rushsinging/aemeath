@@ -15,7 +15,7 @@ business = ["core", "project", "policy", "prompt", "provider", "tools", "storage
 allowed_runtime_api_files = {
     Path("apps/cli/src/main.rs"),
     Path("apps/cli/src/runtime_adapter.rs"),
-    Path("apps/cli/src/run_orchestration.rs"),
+    Path("apps/cli/src/chat.rs"),
 }
 allowed_tui_runtime_api_files = {
     Path("apps/cli/src/tui/core/cmd_exec.rs"),
