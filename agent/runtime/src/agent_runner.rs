@@ -3,7 +3,7 @@ use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::pool::LlmClientPool;
 use crate::api::provider::stream::StreamHandler;
-use crate::api::storage::logging::JsonLogger;
+use ::logging::JsonLogger;
 use std::sync::Arc;
 
 mod finalize;

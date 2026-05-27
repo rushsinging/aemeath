@@ -50,7 +50,7 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: crate::api::hook::hook::HookRunner,
     pub memory_config: crate::api::core::config::MemoryConfig,
-    pub json_logger: Option<Arc<std::sync::Mutex<crate::api::storage::logging::JsonLogger>>>,
+    pub json_logger: Option<Arc<std::sync::Mutex<logging::JsonLogger>>>,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.

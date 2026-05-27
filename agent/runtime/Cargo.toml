@@ -31,3 +31,4 @@ rand = "0.9"
 regex = "1"
 thiserror = { workspace = true }
 sdk = { path = "../../packages/sdk" }
+logging = { path = "../../packages/logging" }

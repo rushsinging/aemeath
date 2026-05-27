@@ -12,7 +12,7 @@ use crate::api::core::tool::{AgentRunner, ToolRegistry};
 use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::types::SystemBlock;
-use crate::api::storage::logging::JsonLogger;
+use logging::JsonLogger;
 
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {

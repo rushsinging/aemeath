@@ -21,5 +21,4 @@ pub use prompt;
 pub use provider;
 pub use share as core;
 pub use storage;
-pub use storage::logging;
 pub use tools;

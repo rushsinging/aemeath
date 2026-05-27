@@ -6,7 +6,7 @@ use crate::api::hook::hook::HookRunner;
 use crate::api::prompt::skill::Skill;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::types::SystemBlock;
-use crate::api::storage::logging::JsonLogger;
+use logging::JsonLogger;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

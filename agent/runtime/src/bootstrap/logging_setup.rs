@@ -1,4 +1,4 @@
-use crate::api::storage::logging::{self, LogFile};
+use logging::{self, LogFile};
 use share::config::paths;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
