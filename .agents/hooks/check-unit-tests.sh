@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
+# Keep hook builds isolated per checkout. Reusing the default/shared target dir
+# across worktrees can leave stale crate metadata and make downstream crates see
+# old public APIs from local path dependencies.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/hook-tests}"
+
 packages=(
   share
   runtime
