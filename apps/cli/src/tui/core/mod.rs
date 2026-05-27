@@ -169,8 +169,6 @@ impl App {
                 session_reminders: Arc::new(std::sync::Mutex::new(
                     ::runtime::api::core::tool::SessionReminders::new(),
                 )),
-                task_store: None,
-                workspace_context: None,
                 agent_client: None,
             },
             agent_client: None,

@@ -17,12 +17,10 @@ impl App {
         self.input.ask_user_state = None;
         self.chat.pending_reflection = None;
         self.chat.turn_count = 0;
-        if let Ok(mut reminders) = self.cmd_exec.session_reminders.lock() {
-            reminders.clear();
-        }
-        // Clear task store so stale tasks don't leak into new conversations
-        if let Some(ref ts) = self.cmd_exec.task_store {
-            ts.clear().await;
+        if let Some(agent_client) = &self.agent_client {
+            if let Err(e) = agent_client.sync_current_messages(Vec::new()).await {
+                log::warn!("failed to reset SDK session messages: {e}");
+            }
         }
     }
 

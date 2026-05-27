@@ -7,6 +7,7 @@ pub mod bootstrap;
 pub mod change_set;
 pub mod chat;
 pub mod client;
+pub mod commands;
 pub mod error;
 pub mod models;
 pub mod project;
@@ -22,6 +23,7 @@ pub use chat::{
     WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
+pub use commands::builtin_commands;
 pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;

@@ -14,20 +14,7 @@ impl App {
     pub(crate) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        _client: Arc<::runtime::api::provider::client::LlmClient>,
-        _registry: Arc<::runtime::api::core::tool::ToolRegistry>,
-        _system_blocks: Vec<::runtime::api::provider::types::SystemBlock>,
-        _system_prompt_text: String,
-        _user_context: String,
-        _context_size: usize,
-        _verbose: bool,
-        _agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
-        _allow_all: bool,
         interrupted: Arc<AtomicBool>,
-        _task_store: Arc<::runtime::api::core::task::TaskStore>,
-        _max_tool_concurrency: usize,
-        _max_agent_concurrency: usize,
-        _agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
         self.chat.is_processing = false;

@@ -1,5 +1,4 @@
 use crate::tui::completion::{generate_suggestions, SuggestionContext};
-use ::runtime::api::command::CommandRegistry;
 
 impl super::super::App {
     /// Update suggestions based on current input
@@ -13,13 +12,18 @@ impl super::super::App {
             .map(|(i, _)| i)
             .unwrap_or(input.len());
 
-        let models: Vec<(String, String)> = self
-            .cmd_exec
-            .models_config
-            .list_models()
+        let models: Vec<(String, String)> = if let Some(agent_client) = &self.agent_client {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(agent_client.list_models())
+                    .unwrap_or_default()
+            })
             .into_iter()
-            .map(|(p, m)| (p, if m.name.is_empty() { m.id } else { m.name }))
-            .collect();
+            .map(|m| (m.provider, if m.name.is_empty() { m.id } else { m.name }))
+            .collect()
+        } else {
+            Vec::new()
+        };
 
         let skills: Vec<(String, String, Vec<String>)> = self
             .skills
@@ -33,19 +37,7 @@ impl super::super::App {
             })
             .collect();
 
-        // Build command list from CommandRegistry (single source of truth)
-        let registry = CommandRegistry::global();
-        let commands: Vec<(String, String, Vec<String>)> = registry
-            .list()
-            .into_iter()
-            .map(|cmd| {
-                (
-                    cmd.name.clone(),
-                    cmd.description.clone(),
-                    cmd.aliases.clone(),
-                )
-            })
-            .collect();
+        let commands = sdk::builtin_commands();
 
         let ctx = SuggestionContext {
             input,

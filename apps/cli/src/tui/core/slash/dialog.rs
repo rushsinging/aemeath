@@ -2,7 +2,15 @@ use crate::tui::display::dialog::Dialog;
 
 impl super::super::App {
     pub(super) fn open_model_selection_dialog(&mut self) -> Option<String> {
-        let models = self.cmd_exec.models_config.list_models();
+        let models = if let Some(agent_client) = &self.agent_client {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(agent_client.list_models())
+                    .unwrap_or_default()
+            })
+        } else {
+            Vec::new()
+        };
         if models.is_empty() {
             self.output_area
                 .push_system("No models configured. Add models to ~/.aemeath/config.json");
@@ -11,7 +19,8 @@ impl super::super::App {
         let current = self.session.current_model_display.clone();
         let mut options = Vec::new();
         let mut keys = Vec::new();
-        for (provider_name, model) in &models {
+        for model in &models {
+            let provider_name = &model.provider;
             let display_name = if model.name.is_empty() {
                 &model.id
             } else {
