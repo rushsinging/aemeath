@@ -33,8 +33,81 @@ pub fn get_git_common_dir(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// 进入指定 worktree：push 当前上下文，然后切换 path_base/working_root
-pub fn enter_worktree(ctx: &ToolContext, path: PathBuf) -> Result<WorkingContext, String> {
+fn derive_branch_name(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("worktree");
+    let sanitized = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '/' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(['-', '/', '.'])
+        .to_string();
+    let sanitized = if sanitized.is_empty() {
+        "worktree".to_string()
+    } else {
+        sanitized
+    };
+    format!("worktree/{sanitized}")
+}
+
+fn create_worktree(
+    ctx: &ToolContext,
+    path: &Path,
+    branch: Option<String>,
+    base: Option<String>,
+) -> Result<(), String> {
+    let repo_root = ctx.current_working_root();
+    let branch = branch
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| derive_branch_name(path));
+    let base = base.unwrap_or_else(|| "main".to_string());
+    if base.trim().is_empty() {
+        return Err("自动创建 worktree 时 base 不能为空".to_string());
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建 worktree 父目录失败 {}: {}", parent.display(), e))?;
+    }
+
+    let output = std::process::Command::new("git")
+        .args(["worktree", "add"])
+        .arg(path)
+        .args(["-b", branch.as_str(), base.as_str()])
+        .current_dir(&repo_root)
+        .output()
+        .map_err(|e| format!("git worktree add 执行失败: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "创建 worktree 失败：git worktree add {} -b {} {}\nstdout: {}\nstderr: {}",
+            path.display(),
+            branch,
+            base,
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
+}
+
+/// 进入指定 worktree：目标不存在时自动创建，push 当前上下文，然后切换 path_base/working_root
+pub fn enter_worktree(
+    ctx: &ToolContext,
+    path: PathBuf,
+    branch: Option<String>,
+    base: Option<String>,
+) -> Result<WorkingContext, String> {
     // 拒绝嵌套：必须先 ExitWorktree 再 EnterWorktree
     {
         let stack = ctx.context_stack.lock().unwrap_or_else(|e| e.into_inner());
@@ -50,6 +123,10 @@ pub fn enter_worktree(ctx: &ToolContext, path: PathBuf) -> Result<WorkingContext
     } else {
         path
     };
+
+    if !path.exists() {
+        create_worktree(ctx, &path, branch, base)?;
+    }
 
     // 校验路径存在且是 git worktree
     let canonical = path
@@ -235,9 +312,36 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_worktree_rejects_nonexistent_path() {
+    fn test_enter_worktree_derives_branch_to_create_missing_path() {
         let ctx = new_test_context();
-        assert!(enter_worktree(&ctx, PathBuf::from("/nonexistent/path")).is_err());
+        let repo_root = ctx.current_working_root();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let worktree_root = std::env::temp_dir().join(format!("aemeath_missing_worktree_{suffix}"));
+        let branch = format!("worktree/aemeath_missing_worktree_{suffix}");
+
+        let result = enter_worktree(&ctx, worktree_root.clone(), None, Some("HEAD".to_string()));
+        let actual_path_base = ctx.current_path_base();
+
+        let _ = exit_worktree(&ctx);
+        let _ = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                worktree_root.to_str().unwrap(),
+            ])
+            .current_dir(&repo_root)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["branch", "-D", branch.as_str()])
+            .current_dir(&repo_root)
+            .output();
+
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        assert!(actual_path_base.ends_with(format!("aemeath_missing_worktree_{suffix}")));
     }
 
     #[test]
@@ -248,9 +352,49 @@ mod tests {
             path_base: PathBuf::from("/tmp/prev"),
             working_root: PathBuf::from("/tmp/prev"),
         });
-        let result = enter_worktree(&ctx, PathBuf::from("/tmp/another"));
+        let result = enter_worktree(&ctx, PathBuf::from("/tmp/another"), None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("先 ExitWorktree"));
+    }
+
+    #[test]
+    fn test_enter_worktree_creates_missing_path_with_branch() {
+        let ctx = new_test_context();
+        let repo_root = ctx.current_working_root();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let worktree_root = std::env::temp_dir().join(format!("aemeath_auto_worktree_{suffix}"));
+        let branch = format!("test/aemeath-auto-worktree-{suffix}");
+
+        let result = enter_worktree(
+            &ctx,
+            worktree_root.clone(),
+            Some(branch.clone()),
+            Some("HEAD".to_string()),
+        );
+
+        let expected_path_base = worktree_root.canonicalize().unwrap();
+        let actual_path_base = ctx.current_path_base();
+
+        let _ = exit_worktree(&ctx);
+        let _ = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                worktree_root.to_str().unwrap(),
+            ])
+            .current_dir(&repo_root)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["branch", "-D", branch.as_str()])
+            .current_dir(&repo_root)
+            .output();
+
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        assert_eq!(actual_path_base, expected_path_base);
     }
 
     #[test]

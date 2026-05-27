@@ -12,7 +12,25 @@
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 活动中 | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
+| 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认执行 `git worktree add` 创建并进入；branch 可选，省略时从 path basename 推导，base 默认 main；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 ## 专案
+
+### #73 EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout
+
+**状态**：修复中（待确认）
+
+**症状**：用户要求“开个 wt”时，LLM 知道需要 worktree，但 `EnterWorktree` 只能进入已存在路径，目标不存在时模型回退到 Bash 手动执行 `git checkout -b` / `git worktree add` 组合，容易先把主工作区切到 feature 分支，后续 worktree 创建因分支已被占用失败。
+
+**根因（已确认）**：
+1. `EnterWorktree` 工具语义只覆盖“进入已有 worktree”，没有覆盖用户自然语言里的“开 worktree”。
+2. 工具描述未明确禁止在主 checkout 中用 `git checkout -b` / `git switch -c` 代替 worktree。
+3. 目标不存在时需要 LLM 自己组合 Bash 命令创建，再调用 `EnterWorktree`，增加误操作和 token 成本。
+
+**修复**：
+1. `EnterWorktree` 目标路径不存在时默认创建 worktree 并进入。
+2. 新增可选 `branch` / `base` 参数；`base` 默认 `main`，`branch` 省略时从 path basename 推导为 `worktree/<name>`。
+3. 工具描述和 schema 明确：开 worktree 必须调用 `EnterWorktree`，禁止在主 checkout 用 checkout/switch 代替。
+4. 补充测试覆盖显式 branch 创建、默认 branch 推导、嵌套进入拒绝和 schema。
 
 ### #72 agent 双层循环中一轮结束后不自动读取 input queue
 

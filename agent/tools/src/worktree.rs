@@ -20,6 +20,12 @@ pub struct ExitWorktreeTool;
 pub struct EnterWorktreeInput {
     /// worktree 根目录路径（绝对或相对路径）
     pub path: String,
+    /// 目标路径不存在时创建的新分支名
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// 目标路径不存在时创建 worktree 的基线，默认 main
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,10 +73,13 @@ impl Tool for EnterWorktreeTool {
 
     fn description(&self) -> &'static str {
         "进入指定的 git worktree 目录，将当前工作上下文压栈保存。\
-         使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree \
-         进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。\
-         注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。\
-         目标路径必须属于当前 git 仓库的 worktree。"
+           如果目标路径不存在，本工具会自动执行 git worktree add 创建 worktree 后再进入；\
+           branch 可选，省略时从 path basename 推导为 worktree/<name>，base 默认 main。\
+           开 worktree 时必须调用本工具，NEVER 在主 checkout 中用 git checkout -b 或 git switch -c 代替 worktree。\
+           使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree \
+           进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。\
+           注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。\
+           已在非 main 分支不代表已在 worktree；应以本工具返回的 path_base/working_root 为准。"
     }
 
     fn input_schema(&self) -> Value {
@@ -79,7 +88,15 @@ impl Tool for EnterWorktreeTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "worktree 根目录路径（绝对或相对路径）"
+                    "description": "worktree 根目录路径（绝对或相对路径）。路径不存在时会自动创建 worktree"
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "目标路径不存在时创建的新分支名。进入已存在 worktree 时可省略；自动创建且省略时从 path basename 推导为 worktree/<name>"
+                },
+                "base": {
+                    "type": "string",
+                    "description": "目标路径不存在时创建 worktree 的基线，默认 main"
                 }
             },
             "required": ["path"]
@@ -92,7 +109,12 @@ impl Tool for EnterWorktreeTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        match worktree_ops::enter_worktree(ctx, PathBuf::from(&args.path)) {
+        match worktree_ops::enter_worktree(
+            ctx,
+            PathBuf::from(&args.path),
+            args.branch.clone(),
+            args.base.clone(),
+        ) {
             Ok(_snapshot) => {
                 let path_base = ctx.current_path_base();
                 let working_root = ctx.current_working_root();
@@ -151,7 +173,7 @@ impl Tool for ExitWorktreeTool {
 
         if let Some(path) = args.path {
             // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match worktree_ops::enter_worktree(ctx, PathBuf::from(&path)) {
+            match worktree_ops::enter_worktree(ctx, PathBuf::from(&path), None, None) {
                 Ok(_) => {
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
                     let path_base = ctx.current_path_base();
@@ -205,6 +227,8 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["path"]["type"], "string");
+        assert_eq!(schema["properties"]["branch"]["type"], "string");
+        assert_eq!(schema["properties"]["base"]["type"], "string");
         assert!(schema["required"]
             .as_array()
             .unwrap()
