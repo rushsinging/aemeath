@@ -53,6 +53,9 @@ pub struct RuntimeHandle {
     pub max_agent_concurrency: usize,
     pub _mcp_manager: Arc<McpConnectionManager>,
 
+    // ─── 可切换的客户端（switch_model 更新此处） ───
+    current_client: std::sync::RwLock<Arc<crate::api::provider::client::LlmClient>>,
+
     // ─── SDK 状态 ───
     cancel_token: Arc<AtomicBool>,
     current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
@@ -262,6 +265,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 19. 构建 handle
     let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
+    let current_client = context.client.clone();
     let handle = RuntimeHandle {
         context,
         cwd,
@@ -270,6 +274,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_tool_concurrency,
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
+        current_client: std::sync::RwLock::new(current_client),
         cancel_token: Arc::new(AtomicBool::new(false)),
         current_cancel: Arc::new(Mutex::new(None)),
         current_messages: Arc::new(Mutex::new(Vec::new())),
@@ -676,6 +681,69 @@ fn message_from_sdk(message: sdk::ChatMessage) -> crate::api::core::message::Mes
     crate::api::core::message::Message { role, content }
 }
 
+/// 将 runtime CommandResult 映射为 SDK 版本。
+fn map_command_result(result: crate::api::command::CommandResult) -> sdk::CommandResult {
+    match result {
+        crate::api::command::CommandResult::Success(msg) => sdk::CommandResult::Success(msg),
+        crate::api::command::CommandResult::Error(msg) => sdk::CommandResult::Error(msg),
+        crate::api::command::CommandResult::Action(action) => {
+            sdk::CommandResult::Action(map_command_action(action))
+        }
+        crate::api::command::CommandResult::Confirm { message, action } => {
+            sdk::CommandResult::Confirm {
+                message,
+                action: map_confirm_action(action),
+            }
+        }
+    }
+}
+
+fn map_command_action(action: crate::api::command::CommandAction) -> sdk::CommandAction {
+    use crate::api::command::CommandAction as Rt;
+    match action {
+        Rt::Exit => sdk::CommandAction::Exit,
+        Rt::Clear => sdk::CommandAction::Clear,
+        Rt::Compact => sdk::CommandAction::Compact,
+        Rt::ResumeSession(id) => sdk::CommandAction::ResumeSession(id),
+        Rt::NewSession => sdk::CommandAction::NewSession,
+        Rt::ChangeMode(mode) => sdk::CommandAction::ChangeMode(mode),
+        Rt::SwitchModel {
+            provider_name,
+            model_id,
+            model_name,
+            base_url,
+            api_key,
+            api_type,
+            max_tokens,
+            context_window,
+            reasoning,
+        } => sdk::CommandAction::SwitchModel {
+            provider_name,
+            model_id,
+            model_name,
+            base_url,
+            api_key,
+            api_type,
+            max_tokens,
+            context_window,
+            reasoning,
+        },
+        Rt::InjectMessage(msg) => sdk::CommandAction::InjectMessage(msg),
+        Rt::RunSkill(content) => sdk::CommandAction::RunSkill(content),
+        Rt::SetThinking(desired) => sdk::CommandAction::SetThinking(desired),
+    }
+}
+
+fn map_confirm_action(action: crate::api::command::ConfirmAction) -> sdk::ConfirmAction {
+    use crate::api::command::ConfirmAction as Rt;
+    match action {
+        Rt::DeleteSession(id) => sdk::ConfirmAction::DeleteSession(id),
+        Rt::ClearAllHistory => sdk::ConfirmAction::ClearAllHistory,
+        Rt::ResetConfig => sdk::ConfirmAction::ResetConfig,
+        Rt::ClearCostHistory => sdk::ConfirmAction::ClearCostHistory,
+    }
+}
+
 // ─── AgentClient trait 实现 ───
 
 #[async_trait]
@@ -685,6 +753,8 @@ impl AgentClient for AgentClientImpl {
             id: self.inner.session_id.clone(),
             message_count: 0, // TODO: 从实际 session 获取
             total_tokens: 0,
+            messages: vec![],
+            created_at: None,
         }
     }
 
@@ -845,12 +915,35 @@ impl AgentClient for AgentClientImpl {
         }
     }
 
-    async fn load_session(&self, _id: &str) -> Result<SessionSnapshot, SdkError> {
-        Ok(SessionSnapshot {
-            id: _id.to_string(),
-            message_count: 0,
-            total_tokens: 0,
-        })
+    async fn load_session(&self, id: &str) -> Result<SessionSnapshot, SdkError> {
+        match crate::api::session::load_session(id).await {
+            Ok(session) => {
+                let messages: Vec<sdk::ChatMessage> = session
+                    .messages
+                    .into_iter()
+                    .map(message_to_sdk)
+                    .collect();
+                let count = messages.len();
+                let total_tokens: u64 = messages
+                    .iter()
+                    .map(|m| {
+                        let text = m.text_content();
+                        // rough char-based estimate
+                        text.len() as u64 / 4
+                    })
+                    .sum();
+                Ok(SessionSnapshot {
+                    id: session.id,
+                    message_count: count,
+                    total_tokens,
+                    messages,
+                    created_at: Some(session.created_at),
+                })
+            }
+            Err(e) => Err(SdkError::Internal(format!(
+                "Failed to load session {id}: {e}"
+            ))),
+        }
     }
 
     async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
@@ -931,6 +1024,175 @@ impl AgentClient for AgentClientImpl {
             "已生成 {count} 条记忆建议；自动写入将在后续 SDK memory 能力中接入"
         ))
     }
+
+    // ─── 命令系统 ───
+
+    async fn execute_command(
+        &self,
+        name: &str,
+        args: &str,
+        sdk_ctx: sdk::CommandContext,
+    ) -> Result<sdk::CommandResult, SdkError> {
+        use crate::api::command::CommandContext as RtCmdCtx;
+        use crate::api::core::config::Config;
+        use crate::api::cost::CostTracker;
+        use crate::state::AppState;
+        use std::sync::Arc;
+
+        // Build runtime command context
+        let state = Arc::new(AppState::default());
+        let config = Config::default();
+        let mut cost_tracker = CostTracker::new();
+        let _ = cost_tracker.load();
+
+        let mut ctx = RtCmdCtx::new(
+            state,
+            config,
+            sdk_ctx.cwd,
+            sdk_ctx.session_id,
+        );
+        ctx.current_model = sdk_ctx.current_model;
+        ctx.models_config = share::config::ModelsConfig::default();
+
+        // Scope: hold registry lock only for lookup, not across await
+        let cmd_name = name.to_string();
+        let args_owned = args.to_string();
+        let result = {
+            let registry = crate::api::command::CommandRegistry::global();
+            registry.find(&cmd_name).map(|_cmd| {
+                // Clone the name for later use in error messages
+                (cmd_name.clone(), args_owned.clone())
+            })
+        };
+        // Registry lock dropped here
+
+        match result {
+            Some(_) => {
+                // Re-acquire for execution (separate lock)
+                let registry = crate::api::command::CommandRegistry::global();
+                if let Some(cmd) = registry.find(&cmd_name) {
+                    // The cmd reference outlives the guard because execute happens
+                    // within the scope. But we can't drop the guard before await.
+                    // Use block_in_place to make this Send-compatible.
+                    let result = tokio::task::block_in_place(|| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(cmd.execute(&args_owned, &mut ctx))
+                    });
+                    return Ok(map_command_result(result));
+                }
+                Ok(sdk::CommandResult::Error(format!("未知命令: /{}", cmd_name)))
+            }
+            None => Ok(sdk::CommandResult::Error(format!("未知命令: /{}", cmd_name))),
+        }
+    }
+
+    async fn estimate_context(
+        &self,
+        messages: &[sdk::ChatMessage],
+        system_prompt: &str,
+    ) -> Result<sdk::ContextEstimate, SdkError> {
+        let runtime_messages: Vec<crate::api::core::message::Message> = messages
+            .iter()
+            .map(|msg| message_from_sdk(msg.clone()))
+            .collect();
+        let estimated =
+            crate::compact::estimate_messages_tokens(&runtime_messages)
+                + crate::compact::estimate_tokens(system_prompt);
+        let context_size = self.inner.context.context_size;
+        let pct = if context_size > 0 {
+            estimated as f64 * 100.0 / context_size as f64
+        } else {
+            0.0
+        };
+        Ok(sdk::ContextEstimate {
+            estimated_tokens: estimated,
+            system_tokens: crate::compact::estimate_tokens(system_prompt),
+            context_size,
+            usage_percentage: pct,
+        })
+    }
+
+    async fn switch_model(
+        &self,
+        params: sdk::ModelSwitchParams,
+    ) -> Result<sdk::ModelSwitchResult, SdkError> {
+        use crate::api::provider::client::OpenAIProviderConfig;
+        use crate::api::provider::providers::openai_compatible::ReasoningConfig;
+        use crate::api::provider::ApiDriverKind;
+
+        let api_type = ApiDriverKind::from_str(&params.api_type)
+            .unwrap_or(ApiDriverKind::OpenAI);
+
+        let openai_config = if matches!(api_type, ApiDriverKind::Anthropic) {
+            None
+        } else {
+            Some(OpenAIProviderConfig::from_api_driver(
+                api_type,
+                &params.provider_name,
+            ))
+        };
+
+        let reasoning = params.reasoning.unwrap_or(true);
+        let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
+
+        let new_client =
+            crate::api::provider::client::LlmClient::from_config(
+                api_type,
+                params.api_key,
+                Some(params.base_url),
+                params.model_id.clone(),
+                params.max_tokens,
+                0,
+                reasoning,
+                reasoning_config,
+                openai_config,
+            );
+
+        let display_name = if params.model_name.is_empty() {
+            &params.model_id
+        } else {
+            &params.model_name
+        };
+        let display = format!("{}/{}", params.provider_name, display_name);
+
+        *self.inner.current_client.write().unwrap() = Arc::new(new_client);
+
+        Ok(sdk::ModelSwitchResult {
+            display_name: display,
+            context_window: params.context_window,
+            reasoning_active: Some(reasoning),
+        })
+    }
+
+    async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, SdkError> {
+        let client = self.inner.current_client.read().unwrap().clone();
+        let current = client.is_reasoning();
+        let new_state = desired.unwrap_or(!current);
+        client.set_reasoning(new_state);
+        Ok(new_state)
+    }
+
+    async fn compact_messages(
+        &self,
+        messages: Vec<sdk::ChatMessage>,
+        system_prompt: &str,
+        context_size: usize,
+    ) -> Result<(Vec<sdk::ChatMessage>, bool), SdkError> {
+        let mut runtime_messages: Vec<crate::api::core::message::Message> = messages
+            .into_iter()
+            .map(|msg| message_from_sdk(msg))
+            .collect();
+        let (compacted, was_compacted) = crate::compact::compact_messages(
+            &mut runtime_messages,
+            system_prompt,
+            context_size,
+        );
+        let sdk_messages: Vec<sdk::ChatMessage> = compacted
+            .into_iter()
+            .map(message_to_sdk)
+            .collect();
+        Ok((sdk_messages, was_compacted))
+    }
 }
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
@@ -969,7 +1231,7 @@ impl AgentClientImpl {
                 &self.resolved_model().model.name,
                 &self.resolved_model().model.id,
             ),
-            client: ctx.client,
+            client: self.inner.current_client.read().unwrap().clone(),
             registry: ctx.registry,
             system_blocks: ctx.system_blocks,
             system_prompt_text: ctx.system_prompt_text,

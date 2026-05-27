@@ -7,6 +7,10 @@ use crate::{
     ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
+use crate::commands::{
+    CommandContext, CommandResult, ContextEstimate, ModelSwitchParams, ModelSwitchResult,
+};
+
 /// Agent Runtime 的统一客户端 trait。
 ///
 /// CLI（薄入口）通过此 trait 与 Runtime 通信，不直接依赖 Runtime 内部类型。
@@ -107,4 +111,39 @@ pub trait AgentClient: Send + Sync + 'static {
         &self,
         output: ReflectionOutputView,
     ) -> Result<String, super::SdkError>;
+
+    // ─── 命令系统 ───
+
+    /// 执行斜杠命令。Runtime 查找 CommandRegistry 并返回结果。
+    /// CLI 根据返回的 CommandAction 执行 TUI 副作用（Exit/Clear 等）。
+    async fn execute_command(
+        &self,
+        name: &str,
+        args: &str,
+        ctx: CommandContext,
+    ) -> Result<CommandResult, super::SdkError>;
+
+    /// 估算当前上下文使用量。
+    async fn estimate_context(
+        &self,
+        messages: &[super::ChatMessage],
+        system_prompt: &str,
+    ) -> Result<ContextEstimate, super::SdkError>;
+
+    /// 切换当前模型（Runtime 负责构建新的 LlmClient）。
+    async fn switch_model(
+        &self,
+        params: ModelSwitchParams,
+    ) -> Result<ModelSwitchResult, super::SdkError>;
+
+    /// 设置推理模式（None = 切换）。
+    async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, super::SdkError>;
+
+    /// 压缩消息列表，返回压缩后的消息和是否发生了压缩。
+    async fn compact_messages(
+        &self,
+        messages: Vec<super::ChatMessage>,
+        system_prompt: &str,
+        context_size: usize,
+    ) -> Result<(Vec<super::ChatMessage>, bool), super::SdkError>;
 }

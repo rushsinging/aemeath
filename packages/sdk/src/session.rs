@@ -67,6 +67,10 @@ pub struct SessionSnapshot {
     pub message_count: usize,
     /// 总 token 使用量。
     pub total_tokens: u64,
+    /// 完整消息列表（仅在 load_session 时填充，snapshot 为 None）。
+    pub messages: Vec<ChatMessage>,
+    /// 创建时间（ISO 8601）。
+    pub created_at: Option<String>,
 }
 
 /// Session 列表中的摘要条目。
