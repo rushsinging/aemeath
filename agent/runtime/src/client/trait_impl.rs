@@ -126,6 +126,9 @@ impl AgentClient for AgentClientImpl {
     fn cancel(&self) {
         super::trait_accessor::cancel_impl(self)
     }
+    fn set_current_turn(&self, turn: usize) {
+        super::trait_accessor::set_current_turn_impl(self, turn)
+    }
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), SdkError> {
         super::trait_accessor::restore_tasks_impl(self, snapshot).await
     }

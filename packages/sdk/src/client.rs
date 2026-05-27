@@ -78,6 +78,9 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 取消当前进行中的 Chat。
     fn cancel(&self);
 
+    /// 设置当前 turn 编号（由 TUI run_loop 在每次新请求时调用）。
+    fn set_current_turn(&self, _turn: usize) {}
+
     /// 加载指定 session。
     async fn load_session(&self, id: &str) -> Result<SessionSnapshot, super::SdkError>;
 

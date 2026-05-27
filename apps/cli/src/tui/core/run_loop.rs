@@ -144,7 +144,9 @@ impl App {
                     }
                 }
                 Cmd::SetCurrentTurn(turn) => {
-                    crate::chat::set_current_turn(turn);
+                    if let Some(ref ac) = self.agent_client {
+                        ac.set_current_turn(turn);
+                    }
                 }
                 Cmd::FetchReminderRecap => {
                     if let Some(ref ac) = self.agent_client {

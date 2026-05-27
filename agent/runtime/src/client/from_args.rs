@@ -27,6 +27,10 @@ use super::{AgentClientImpl, RuntimeHandle};
 ///
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
+    // 0. 早期初始化（panic hook + 命令注册表）
+    crate::bootstrap::logging_setup::init_panic_hook();
+    crate::command::commands::init_all();
+
     // 1. Guidance 目录初始化
     crate::api::prompt::guidance::init_guidance_dir();
 

@@ -70,6 +70,10 @@ pub(super) fn cancel_impl(me: &AgentClientImpl) {
     }
 }
 
+pub(super) fn set_current_turn_impl(_me: &AgentClientImpl, turn: usize) {
+    crate::bootstrap::set_current_turn(turn);
+}
+
 pub(super) async fn restore_tasks_impl(
     me: &AgentClientImpl,
     snapshot: serde_json::Value,

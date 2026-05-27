@@ -22,20 +22,12 @@ pub(crate) async fn agent_client_from_args(
     ))
 }
 
-/// 记录当前 turn（原 runtime_adapter::set_current_turn）。
-pub(crate) fn set_current_turn(turn: usize) {
-    ::runtime::api::bootstrap::set_current_turn(turn);
-}
-
 fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
 /// 主聊天逻辑 — 瘦身入口（CLI 唯一接触 runtime::api 的装配层）。
 pub(crate) async fn run_chat(args: Args) {
-    // 初始化所有内置命令（自动注册到全局 CommandRegistry）
-    ::runtime::api::command::commands::init_all();
-
     let args = apply_permission_env_override(args);
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let client = ::runtime::api::client::from_args(args.into())
