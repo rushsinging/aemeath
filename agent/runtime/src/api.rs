@@ -23,6 +23,9 @@ pub use policy;
 pub use project;
 pub use prompt;
 pub use provider;
-pub use share as core;
+pub mod core {
+    pub use share::*;
+    pub use share::config::ConfigManager;
+}
 pub use storage;
 pub use tools;
