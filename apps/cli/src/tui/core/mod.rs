@@ -8,7 +8,6 @@ pub mod state;
 use crate::tui::core::cmd_exec::CmdExecutor;
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
-use ::runtime::api::core::skill_ops::Skill;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -33,7 +32,7 @@ pub struct App {
     pub session: SessionState,
     pub layout: UiLayout,
     // 业务数据（非 UI 状态）
-    pub skills: std::collections::HashMap<String, Skill>,
+    pub skills: std::collections::HashMap<String, sdk::SkillView>,
     // 基础设施引用（Phase 4 移入 CmdExecutor）
     pub cmd_exec: CmdExecutor,
     pub agent_client: Option<std::sync::Arc<dyn sdk::AgentClient>>,
@@ -155,7 +154,7 @@ impl App {
                 session_created_at: None,
                 cached_sessions: Vec::new(),
                 current_model_display: model,
-                memory_config: ::runtime::api::core::config::MemoryConfig::default(),
+                memory_config: sdk::MemoryConfigView::default(),
             },
             layout: UiLayout::default(),
             skills: std::collections::HashMap::new(),
@@ -172,7 +171,7 @@ impl App {
                 )),
                 task_store: None,
                 workspace_context: None,
-                json_logger: None,
+                agent_client: None,
             },
             agent_client: None,
         }

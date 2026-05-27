@@ -6,7 +6,6 @@ use ::runtime::api::core::task::TaskStore;
 use ::runtime::api::core::tool::SessionReminders;
 use ::runtime::api::hook::hook::HookRunner;
 use ::runtime::api::session::WorkspaceContext;
-use ::runtime::api::storage::logging::JsonLogger;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -19,7 +18,7 @@ pub struct CmdExecutor {
     pub session_reminders: Arc<std::sync::Mutex<SessionReminders>>,
     pub task_store: Option<Arc<TaskStore>>,
     pub workspace_context: Option<WorkspaceContext>,
-    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
+    pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
 }
 
 impl CmdExecutor {
@@ -47,8 +46,18 @@ impl CmdExecutor {
             }
             Cmd::ReadClipboardImage => {
                 let tx = ui_tx.clone();
+                let Some(agent_client) = self.agent_client.clone() else {
+                    tokio::spawn(async move {
+                        let _ = tx
+                            .send(UiEvent::SystemMessage(
+                                "No SDK client available for clipboard image".to_string(),
+                            ))
+                            .await;
+                    });
+                    return;
+                };
                 tokio::spawn(async move {
-                    match ::runtime::api::image::read_clipboard_image().await {
+                    match agent_client.read_clipboard_image().await {
                         Ok(img) => {
                             let size = img.final_size;
                             let _ = tx.send(UiEvent::ClipboardImage(img)).await;
@@ -71,8 +80,18 @@ impl CmdExecutor {
             }
             Cmd::ProcessImageFile(path) => {
                 let tx = ui_tx.clone();
+                let Some(agent_client) = self.agent_client.clone() else {
+                    tokio::spawn(async move {
+                        let _ = tx
+                            .send(UiEvent::SystemMessage(
+                                "No SDK client available for image processing".to_string(),
+                            ))
+                            .await;
+                    });
+                    return;
+                };
                 tokio::spawn(async move {
-                    match ::runtime::api::image::process_image_file(&path).await {
+                    match agent_client.process_image_file(path).await {
                         Ok(img) => {
                             let size = img.final_size;
                             let _ = tx.send(UiEvent::ClipboardImage(img)).await;

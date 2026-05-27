@@ -50,7 +50,7 @@ pub enum AppEvent {
     Done,
     DoneWithDuration(std::time::Duration),
     LiveTps(f64),
-    ClipboardImage(::runtime::api::image::ProcessedImage),
+    ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
     ReflectionStarted,
     ReflectionUsage {
@@ -58,7 +58,7 @@ pub enum AppEvent {
         output: u32,
     },
     ReflectionDone {
-        output: ::runtime::api::reflection::ReflectionOutput,
+        output: sdk::ReflectionOutputView,
     },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {

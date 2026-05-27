@@ -8,13 +8,13 @@ pub(crate) struct ChatState {
     pub total_output_tokens: u64,
     pub total_api_calls: u64,
     pub last_input_tokens: u64,
-    pub pending_images: Vec<::runtime::api::image::ProcessedImage>,
+    pub pending_images: Vec<sdk::ClipboardImageView>,
     pub system_prompt_text: String,
     pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<String>,
     pub turn_count: usize,
-    pub pending_reflection: Option<::runtime::api::reflection::ReflectionOutput>,
+    pub pending_reflection: Option<sdk::ReflectionOutputView>,
     pub is_processing: bool,
 }
 

@@ -1,3 +1,4 @@
+use super::ask_user_options::build_option_line_ranges;
 use super::done::input_queue_preview;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
@@ -5,17 +6,6 @@ use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
-
-fn build_option_line_ranges(start: usize, options: &[String]) -> Vec<std::ops::Range<usize>> {
-    let mut ranges = Vec::with_capacity(options.len());
-    let mut next = start;
-    for option in options {
-        let line_count = option.lines().count().max(1);
-        ranges.push(next..next + line_count);
-        next += line_count;
-    }
-    ranges
-}
 
 impl App {
     /// Handle UI events from background processing
@@ -211,9 +201,7 @@ impl App {
                 );
             }
             UiEvent::ReflectionDone { output } => {
-                let formatted =
-                    ::runtime::api::reflection::ReflectionEngine::format_output(&output);
-                self.output_area.push_system(&formatted);
+                self.output_area.push_system(&output.content);
                 if self.session.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);
                 } else {

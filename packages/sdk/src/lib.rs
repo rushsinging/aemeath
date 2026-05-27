@@ -26,5 +26,9 @@ pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
-pub use tui::{ChatEventSink, ChatHandle, QueueDrainPort, TaskStatusView, TuiLaunchContext};
+pub use tui::{
+    ChatEventSink, ChatHandle, ClipboardImageView, MemoryConfigView, QueueDrainPort,
+    ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, SkillView,
+    TaskStatusView, TuiLaunchContext,
+};
 pub use types::{CostInfo, PermissionPrompt, StatusInfo, TaskSummary};

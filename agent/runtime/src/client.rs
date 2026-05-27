@@ -9,9 +9,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use sdk::{
     AgentClient, AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView,
-    ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ModelSummary, ProjectContext,
-    SdkError, SessionSnapshot, SessionSummary, TaskStatusView, TaskSummary, ToolResultImage,
-    WorkspaceContextView, WorkspaceStackEntryView,
+    ChangeSet, ChatEvent, ChatRequest, ChatStream, ClipboardImageView, CostInfo, MemoryConfigView,
+    ModelSummary, ProjectContext, ReflectionConfigView, ReflectionMemorySuggestionView,
+    ReflectionOutputView, SdkError, SessionSnapshot, SessionSummary, SkillView, TaskStatusView,
+    TaskSummary, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };
 use tokio::sync::watch;
 
@@ -290,6 +291,61 @@ fn load_configured_skills(
 ) -> std::collections::HashMap<String, Skill> {
     let dirs = skills_config.map(|c| c.dirs.clone()).unwrap_or_default();
     load_all_skills(cwd, &dirs)
+}
+
+fn memory_config_to_sdk(config: crate::api::core::config::MemoryConfig) -> MemoryConfigView {
+    MemoryConfigView {
+        enabled: config.enabled,
+        max_entries: config.max_entries,
+        similarity_threshold: config.similarity_threshold as f32,
+        reflection: ReflectionConfigView {
+            enabled: config.reflection.enabled,
+            interval_turns: config.reflection.interval_turns,
+            auto_apply_suggestions: config.reflection.auto_apply_suggestions,
+        },
+    }
+}
+
+fn skill_to_sdk(skill: Skill) -> SkillView {
+    SkillView {
+        name: skill.name,
+        aliases: skill.aliases,
+        description: Some(skill.description),
+        content: skill.content,
+        source: Some(skill.source_path.display().to_string()),
+    }
+}
+
+fn processed_image_to_sdk(image: crate::api::image::ProcessedImage) -> ClipboardImageView {
+    ClipboardImageView {
+        base64: image.base64,
+        media_type: image.media_type,
+        final_size: image.final_size,
+        display_path: None,
+        width: None,
+        height: None,
+    }
+}
+
+fn reflection_output_to_sdk(
+    output: crate::api::reflection::ReflectionOutput,
+    input_tokens: u32,
+    output_tokens: u32,
+) -> ReflectionOutputView {
+    ReflectionOutputView {
+        content: crate::api::reflection::ReflectionEngine::format_output(&output),
+        input_tokens,
+        output_tokens,
+        suggested_memories: output
+            .suggested_memories
+            .into_iter()
+            .map(|memory| ReflectionMemorySuggestionView {
+                content: memory.content,
+                layer: format!("{:?}", memory.category).to_lowercase(),
+            })
+            .collect(),
+        outdated_memories: output.outdated_memories,
+    }
 }
 
 fn session_summary_from_runtime(session: crate::session::Session) -> SessionSummary {
@@ -834,8 +890,49 @@ impl AgentClient for AgentClientImpl {
     async fn compact(&self) -> Result<(), SdkError> {
         Ok(())
     }
-}
 
+    async fn read_clipboard_image(&self) -> Result<ClipboardImageView, SdkError> {
+        crate::api::image::read_clipboard_image()
+            .await
+            .map(processed_image_to_sdk)
+            .map_err(|e| SdkError::Internal(e.to_string()))
+    }
+
+    async fn process_image_file(&self, path: String) -> Result<ClipboardImageView, SdkError> {
+        crate::api::image::process_image_file(&path)
+            .await
+            .map(processed_image_to_sdk)
+            .map_err(|e| SdkError::Internal(e.to_string()))
+    }
+
+    async fn run_reflection(
+        &self,
+        messages: Vec<sdk::ChatMessage>,
+    ) -> Result<ReflectionOutputView, SdkError> {
+        let runtime_messages = messages
+            .into_iter()
+            .map(message_from_sdk)
+            .collect::<Vec<_>>();
+        let recent_summary = crate::api::reflection::ReflectionEngine::recent_messages_summary(
+            &runtime_messages,
+            6000,
+        );
+        let output = crate::api::reflection::ReflectionOutput {
+            deviations: vec![recent_summary],
+            suggested_memories: Vec::new(),
+            outdated_memories: Vec::new(),
+            user_alert: None,
+        };
+        Ok(reflection_output_to_sdk(output, 0, 0))
+    }
+
+    async fn apply_reflection(&self, output: ReflectionOutputView) -> Result<String, SdkError> {
+        let count = output.suggested_memories.len();
+        Ok(format!(
+            "已生成 {count} 条记忆建议；自动写入将在后续 SDK memory 能力中接入"
+        ))
+    }
+}
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
 impl AgentClientImpl {
@@ -886,8 +983,12 @@ impl AgentClientImpl {
             max_tool_concurrency: self.max_tool_concurrency(),
             max_agent_concurrency: self.max_agent_concurrency(),
             agent_semaphore: ctx.agent_semaphore,
-            memory_config: ctx.memory_config,
-            skills_map: ctx.skills_map,
+            memory_config: memory_config_to_sdk(ctx.memory_config),
+            skills_map: ctx
+                .skills_map
+                .into_iter()
+                .map(|(name, skill)| (name, skill_to_sdk(skill)))
+                .collect(),
             hook_runner: ctx.hook_runner,
             json_logger: ctx.json_logger,
         }

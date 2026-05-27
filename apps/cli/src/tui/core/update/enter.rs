@@ -26,15 +26,8 @@ impl App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<sdk::ToolResultImage> = self
-            .chat
-            .pending_images
-            .drain(..)
-            .map(|img| sdk::ToolResultImage {
-                base64: img.base64,
-                media_type: img.media_type,
-            })
-            .collect();
+        let images: Vec<sdk::ToolResultImage> =
+            self.chat.pending_images.drain(..).map(Into::into).collect();
         if images.is_empty() {
             self.chat.messages.push(sdk::ChatMessage::user_text(&input));
         } else {

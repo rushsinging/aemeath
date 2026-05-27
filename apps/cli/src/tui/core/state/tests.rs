@@ -2,8 +2,8 @@
 mod tests {
     use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 
-    fn make_memory_config() -> ::runtime::api::core::config::MemoryConfig {
-        ::runtime::api::core::config::MemoryConfig::default()
+    fn make_memory_config() -> sdk::MemoryConfigView {
+        sdk::MemoryConfigView::default()
     }
 
     // === ChatState ===

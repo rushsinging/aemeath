@@ -1,23 +1,6 @@
-use ::runtime::api::core::memory::MemoryLayer;
-use ::runtime::api::provider::types::SystemBlock;
-use ::runtime::api::reflection::{ReflectionEngine, ReflectionOutput};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use crate::tui::core::UiEvent;
-
-fn message_from_sdk(message: &sdk::ChatMessage) -> ::runtime::api::core::message::Message {
-    let role = match message.role.as_str() {
-        "assistant" => ::runtime::api::core::message::Role::Assistant,
-        _ => ::runtime::api::core::message::Role::User,
-    };
-    let content = serde_json::from_value(message.content.clone()).unwrap_or_else(|_| {
-        vec![::runtime::api::core::message::ContentBlock::Text {
-            text: String::new(),
-        }]
-    });
-    ::runtime::api::core::message::Message { role, content }
-}
 
 impl super::super::App {
     pub(crate) async fn handle_reflect_command_with_events(
@@ -43,37 +26,12 @@ impl super::super::App {
     }
 
     fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>, foreground: bool) {
-        let Some(client) = self.cmd_exec.client.clone() else {
+        let Some(agent_client) = self.agent_client.clone() else {
             self.output_area
-                .push_error("当前没有可用的 LLM client，无法执行 Reflection。");
+                .push_error("当前没有可用的 SDK agent client，无法执行 Reflection。");
             return;
         };
-
-        let store = match self.open_reflection_memory_store() {
-            Ok(store) => store,
-            Err(error) => {
-                self.output_area.push_error(&error);
-                return;
-            }
-        };
-
-        let memories = match store.list(Some(MemoryLayer::Project)) {
-            Ok(memories) => memories,
-            Err(error) => {
-                self.output_area.push_error(&error.to_string());
-                return;
-            }
-        };
-        let project_memory = ReflectionEngine::memory_summary(&memories);
-        let runtime_messages: Vec<_> = self.chat.messages.iter().map(message_from_sdk).collect();
-        let recent_summary = ReflectionEngine::recent_messages_summary(&runtime_messages, 6000);
-        let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
-        let messages = vec![::runtime::api::core::message::Message::user(prompt)];
-        let system = vec![SystemBlock::dynamic(
-            "你是 Aemeath 的 Reflection 子系统。只输出 JSON，不要输出 Markdown 或解释。"
-                .to_string(),
-        )];
-        let cancel = CancellationToken::new();
+        let messages = self.chat.messages.clone();
 
         if foreground {
             self.output_area.push_system("[reflection: calling LLM...]");
@@ -87,59 +45,22 @@ impl super::super::App {
                 if foreground {
                     let _ = tx.send(UiEvent::ReflectionStarted).await;
                 }
-                let raw_output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-                let raw_output_for_callback = raw_output.clone();
-                let response = match client
-                    .stream_message_raw(
-                        &system,
-                        &messages,
-                        &[],
-                        Box::new(move |chunk| {
-                            if let Ok(mut output) = raw_output_for_callback.lock() {
-                                output.push_str(chunk);
-                            }
-                        }),
-                        &cancel,
-                    )
-                    .await
-                {
-                    Ok(response) => response,
+                match agent_client.run_reflection(messages).await {
+                    Ok(output) => {
+                        let _ = tx
+                            .send(UiEvent::ReflectionUsage {
+                                input: output.input_tokens,
+                                output: output.output_tokens,
+                            })
+                            .await;
+                        let _ = tx.send(UiEvent::ReflectionDone { output }).await;
+                    }
                     Err(error) => {
                         let _ = tx
                             .send(UiEvent::Error(format!("Reflection LLM 调用失败: {error}")))
                             .await;
-                        return;
                     }
-                };
-
-                let _ = tx
-                    .send(UiEvent::ReflectionUsage {
-                        input: response.usage.input_tokens,
-                        output: response.usage.output_tokens,
-                    })
-                    .await;
-
-                let text = response.assistant_message.text_content();
-                let text = if text.trim().is_empty() {
-                    raw_output
-                        .lock()
-                        .map(|output| output.clone())
-                        .unwrap_or_default()
-                } else {
-                    text
-                };
-                let output = match ReflectionEngine::parse_output(&text) {
-                    Ok(output) => output,
-                    Err(error) => {
-                        log::warn!("Reflection 输出解析失败: {error}");
-                        let _ = tx
-                            .send(UiEvent::Error(format!("Reflection 输出解析失败: {error}")))
-                            .await;
-                        return;
-                    }
-                };
-
-                let _ = tx.send(UiEvent::ReflectionDone { output }).await;
+                }
             });
         }
     }
@@ -174,42 +95,17 @@ impl super::super::App {
         self.spawn_llm_reflection(Some(ui_tx.clone()), false);
     }
 
-    pub(crate) fn apply_reflection_output(&mut self, output: ReflectionOutput) -> bool {
-        let mut store = match self.open_reflection_memory_store() {
-            Ok(store) => store,
-            Err(error) => {
-                self.output_area.push_error(&error);
-                return false;
-            }
+    pub(crate) fn apply_reflection_output(&mut self, output: sdk::ReflectionOutputView) -> bool {
+        let Some(agent_client) = self.agent_client.clone() else {
+            self.output_area
+                .push_error("当前没有可用的 SDK agent client，无法应用 Reflection。");
+            return false;
         };
-
-        match ReflectionEngine::apply_output(&output, &mut store) {
-            Ok(applied) => {
-                self.output_area.push_system(&format!(
-                    "[reflection applied: 新增/合并 {} 条记忆，标记 {} 条过时记忆]",
-                    applied.suggestions_added, applied.outdated_marked
-                ));
-                true
-            }
-            Err(error) => {
-                self.output_area
-                    .push_error(&format!("应用 Reflection 建议失败: {error}"));
-                false
-            }
-        }
-    }
-
-    fn open_reflection_memory_store(
-        &self,
-    ) -> Result<::runtime::api::core::memory::MemoryStore, String> {
-        let base_dir = ::runtime::api::core::memory::memory_base_dir();
-        let project_hash = ::runtime::api::core::memory::project_hash_from_path(&self.session.cwd);
-        ::runtime::api::core::memory::MemoryStore::new(
-            base_dir,
-            project_hash,
-            self.session.memory_config.max_entries,
-            self.session.memory_config.similarity_threshold,
-        )
-        .map_err(|error| error.to_string())
+        tokio::spawn(async move {
+            let _ = agent_client.apply_reflection(output).await;
+        });
+        self.output_area
+            .push_system("[reflection apply 已提交给 SDK memory 能力]");
+        true
     }
 }
