@@ -11,32 +11,14 @@ import re
 import sys
 
 root = Path.cwd()
-business = ["core", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit"]
+business = ["project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "runtime"]
 allowed_runtime_api_files = {
     Path("apps/cli/src/main.rs"),
     Path("apps/cli/src/runtime_adapter.rs"),
     Path("apps/cli/src/chat.rs"),
 }
-allowed_tui_runtime_api_files = {
-    Path("apps/cli/src/tui/core/cmd_exec.rs"),
-    Path("apps/cli/src/tui/core/mod.rs"),
-    Path("apps/cli/src/tui/core/run_loop.rs"),
-    Path("apps/cli/src/tui/core/runtime.rs"),
-    Path("apps/cli/src/tui/core/slash.rs"),
-    Path("apps/cli/src/tui/core/run_loop.rs"),
-    Path("apps/cli/src/tui/core/update/ui_event.rs"),
-    Path("apps/cli/src/tui/display/task_window.rs"),
-    Path("apps/cli/src/tui/display/task_window_helpers_tests.rs"),
-    Path("apps/cli/src/tui/display/task_window_progress_tests.rs"),
-    Path("apps/cli/src/tui/display/task_window_tests.rs"),
-    Path("apps/cli/src/tui/input/input_handler.rs"),
-    Path("apps/cli/src/tui/core/slash/dialog.rs"),
-    Path("apps/cli/src/tui/core/slash/memory.rs"),
-    Path("apps/cli/src/tui/core/slash/suggestions.rs"),
-    Path("apps/cli/src/tui/display/status_bar.rs"),
-    Path("apps/cli/src/tui/session/session_lifecycle.rs"),
-}
-forbidden_runtime_api = re.compile(r"::runtime::api::")
+allowed_tui_runtime_api_files = set()
+forbidden_runtime_api = re.compile(r"\bruntime::api::")
 pattern = re.compile(r"(?<!:)(?:use\s+|\b)(" + "|".join(map(re.escape, business)) + r")::")
 violations = []
 
@@ -44,6 +26,9 @@ for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
     text = path.read_text()
     rel = path.relative_to(root)
     for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
         if pattern.search(line):
             violations.append(f"{rel}:{lineno}: direct business crate import/path is forbidden: {line.strip()}")
         if rel not in allowed_runtime_api_files and rel not in allowed_tui_runtime_api_files and forbidden_runtime_api.search(line):

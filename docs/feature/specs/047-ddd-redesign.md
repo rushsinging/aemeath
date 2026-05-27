@@ -11,6 +11,7 @@
 | 2026-05-24 | DeepSeek review | 合并 GLM review 与 DeepSeek review 修正意见。 |
 | 2026-05-23 | GLM review | 合并 review-by-glm 的修正意见。 |
 | 2026-05-22 | 初稿 | DDD 架构设计初稿完成。 |
+| 2026-05-27 | P16-P18 实施归档 | P16：core/ 层端口隔离，消除外部 crate 直接引用。P17：share/core 瘦身（63→55 文件），业务逻辑迁入对应 domain。P18：架构守卫固化（8 守卫）+#47 完成归档。 |
 
 ## 1. 设计目标
 

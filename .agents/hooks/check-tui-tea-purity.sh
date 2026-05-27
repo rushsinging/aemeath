@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-TARGET="$ROOT/apps/cli/src/tui/core/update"
+TARGET="$ROOT/apps/cli/src/tui/core"
 FAILED=0
 COUNT=0
 
@@ -11,8 +11,49 @@ if [[ ! -d "$TARGET" ]]; then
   exit 2
 fi
 
+# ---------------------------------------------------------------------------
+# Exemption list: files in tui/core/ that are part of the runtime / command-
+# execution layer and are expected to contain side effects (async ops,
+# block_on, spawns, etc.).
+#
+# The strict TEA purity check applies to update/ and state/ subdirectories
+# as well as pure-data modules (event.rs, msg.rs, resize.rs).
+# ---------------------------------------------------------------------------
+EXEMPT_FILES=(
+  "apps/cli/src/tui/core/mod.rs"
+  "apps/cli/src/tui/core/run_loop.rs"
+  "apps/cli/src/tui/core/runtime.rs"
+  "apps/cli/src/tui/core/slash.rs"
+  "apps/cli/src/tui/core/slash/dialog.rs"
+  "apps/cli/src/tui/core/slash/help.rs"
+  "apps/cli/src/tui/core/slash/help_display.rs"
+  "apps/cli/src/tui/core/slash/memory.rs"
+  "apps/cli/src/tui/core/slash/reflection.rs"
+  "apps/cli/src/tui/core/slash/save.rs"
+  "apps/cli/src/tui/core/slash/suggestions.rs"
+  "apps/cli/src/tui/core/slash_tests.rs"
+  "apps/cli/src/tui/core/util.rs"
+)
+
+is_exempt() {
+  local rel="$1"
+  local f
+  for f in "${EXEMPT_FILES[@]}"; do
+    if [[ "$rel" == "$f" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT/}"
+
+  # Skip files in the exemption list (runtime / command-execution layer)
+  if is_exempt "$rel"; then
+    continue
+  fi
+
   while IFS=: read -r line_no line; do
     if [[ "$line" == *"allow tea_side_effect"* ]]; then
       continue
@@ -29,9 +70,14 @@ while IFS= read -r -d '' file; do
       print "$.:$_" if /clipboard::|arboard::|copypasta::/;
       print "$.:$_" if /read_clipboard_image\s*\(/;
       print "$.:$_" if /process_image_file\s*\(/;
+      # ── New patterns ──────────────────────────────────────────────
+      print "$.:$_" if /\bHandle::block_on\s*\(|\bRuntime::block_on\s*\(/;
+      print "$.:$_" if /block_in_place\b/;
+      print "$.:$_" if /\.await\b/;
     ' "$file"
   )
 done < <(find "$TARGET" -path "$ROOT/.worktrees" -prune -o -name '*.rs' -print0)
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo "TUI update side effects found ($COUNT). Return Cmd variants from update() and execute side effects in app runtime/cmd_exec instead."
   exit 1
