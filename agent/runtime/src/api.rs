@@ -24,8 +24,8 @@ pub use project;
 pub use prompt;
 pub use provider;
 pub mod core {
+    pub use crate::utils::bootstrap::config_manager::ConfigManager;
     pub use share::*;
-    pub use share::config::ConfigManager;
 }
 pub use storage;
 pub use tools;
