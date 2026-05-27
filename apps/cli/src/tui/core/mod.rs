@@ -1,11 +1,9 @@
-mod cmd_exec;
 pub mod event;
 mod resize;
 mod run_loop;
 mod runtime;
 pub mod state;
 
-use crate::tui::core::cmd_exec::CmdExecutor;
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -33,9 +31,9 @@ pub struct App {
     pub layout: UiLayout,
     // 业务数据（非 UI 状态）
     pub skills: std::collections::HashMap<String, sdk::SkillView>,
-    // 基础设施引用（Phase 4 移入 CmdExecutor）
-    pub cmd_exec: CmdExecutor,
-    pub agent_client: Option<std::sync::Arc<dyn sdk::AgentClient>>,
+    /// 本地 session reminders（与 Runtime 独立实例，仅用于同步展示）
+    pub session_reminders: Arc<std::sync::Mutex<::runtime::api::core::tool::SessionReminders>>,
+    pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
 }
 
 #[cfg(test)]
@@ -158,19 +156,9 @@ impl App {
             },
             layout: UiLayout::default(),
             skills: std::collections::HashMap::new(),
-            cmd_exec: CmdExecutor {
-                client: None,
-                models_config: ::runtime::api::core::config::ModelsConfig::default(),
-                hook_runner: ::runtime::api::hook::hook::HookRunner::empty(
-                    std::env::current_dir()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default(),
-                ),
-                session_reminders: Arc::new(std::sync::Mutex::new(
-                    ::runtime::api::core::tool::SessionReminders::new(),
-                )),
-                agent_client: None,
-            },
+            session_reminders: Arc::new(std::sync::Mutex::new(
+                ::runtime::api::core::tool::SessionReminders::new(),
+            )),
             agent_client: None,
         }
     }

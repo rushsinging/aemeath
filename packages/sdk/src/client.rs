@@ -146,4 +146,30 @@ pub trait AgentClient: Send + Sync + 'static {
         system_prompt: &str,
         context_size: usize,
     ) -> Result<(Vec<super::ChatMessage>, bool), super::SdkError>;
+
+    // ─── Hook ───
+
+    /// 触发 hook 通知（消息变更等）。
+    async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), super::SdkError>;
+
+    // ─── Reminder ───
+
+    /// 列出当前 session 的 reminders。
+    async fn list_reminders(&self) -> Result<Vec<super::ReminderView>, super::SdkError>;
+
+    /// 添加 reminder。
+    async fn add_reminder(&self, content: &str) -> Result<String, super::SdkError>;
+
+    /// 完成指定 reminder。
+    async fn complete_reminder(&self, id: &str) -> Result<(), super::SdkError>;
+
+    // ─── Thinking ───
+
+    /// 获取当前推理模式状态。
+    async fn get_thinking(&self) -> Result<bool, super::SdkError>;
+
+    // ─── TaskStore ───
+
+    /// 恢复 TaskStore 快照。
+    async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), super::SdkError>;
 }

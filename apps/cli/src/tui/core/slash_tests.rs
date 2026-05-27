@@ -17,6 +17,9 @@ impl sdk::AgentClient for BlockingReflectionClient {
             total_tokens: 0,
             messages: vec![],
             created_at: None,
+            trimmed: 0,
+            repaired: 0,
+            workspace: None,
         }
     }
 
@@ -158,6 +161,30 @@ impl sdk::AgentClient for BlockingReflectionClient {
         _context_size: usize,
     ) -> Result<(Vec<sdk::ChatMessage>, bool), sdk::SdkError> {
         Ok((messages, false))
+    }
+
+    async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), sdk::SdkError> {
+        Ok(())
+    }
+
+    async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, sdk::SdkError> {
+        Ok(Vec::new())
+    }
+
+    async fn add_reminder(&self, _content: &str) -> Result<String, sdk::SdkError> {
+        Ok("test-id".to_string())
+    }
+
+    async fn complete_reminder(&self, _id: &str) -> Result<(), sdk::SdkError> {
+        Ok(())
+    }
+
+    async fn get_thinking(&self) -> Result<bool, sdk::SdkError> {
+        Ok(false)
+    }
+
+    async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
+        Ok(())
     }
 }
 

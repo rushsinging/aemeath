@@ -63,6 +63,14 @@ pub struct RuntimeHandle {
     workspace_context: Arc<Mutex<Option<crate::session::WorkspaceContext>>>,
     change_tx: watch::Sender<ChangeSet>,
     change_rx: watch::Receiver<ChangeSet>,
+
+    // ─── SDK 业务对象 ───
+    /// HookRunner（clone，供 SDK 通知 hook）
+    hook_runner: Option<crate::api::hook::hook::HookRunner>,
+    /// TaskStore（Arc，供 SDK 恢复任务）
+    task_store: Option<std::sync::Arc<TaskStore>>,
+    /// Session reminders（供 SDK 增删改查）
+    session_reminders: std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
 }
 
 impl RuntimeHandle {
@@ -159,6 +167,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
+    let task_store_before = task_store.clone();
     let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
     if !skills_map.is_empty() {
         log::info!("[Skills] loaded {} skills", skills_map.len());
@@ -173,6 +182,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 11. Hook runner
     let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
+    let hook_runner_before = hook_runner.clone();
 
     // 12. Session
     let session_id = start_session(args.resume.clone());
@@ -281,6 +291,9 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         workspace_context: Arc::new(Mutex::new(None)),
         change_tx,
         change_rx,
+        hook_runner: Some(hook_runner_before.clone()),
+        task_store: Some(task_store_before.clone()),
+        session_reminders: Arc::new(std::sync::RwLock::new(share::memory::SessionReminders::new())),
     };
 
     Ok(AgentClientImpl {
@@ -755,6 +768,9 @@ impl AgentClient for AgentClientImpl {
             total_tokens: 0,
             messages: vec![],
             created_at: None,
+            trimmed: 0,
+            repaired: 0,
+            workspace: None,
         }
     }
 
@@ -938,6 +954,9 @@ impl AgentClient for AgentClientImpl {
                     total_tokens,
                     messages,
                     created_at: Some(session.created_at),
+                    trimmed: 0,
+                    repaired: 0,
+                    workspace: None,
                 })
             }
             Err(e) => Err(SdkError::Internal(format!(
@@ -1193,6 +1212,67 @@ impl AgentClient for AgentClientImpl {
             .collect();
         Ok((sdk_messages, was_compacted))
     }
+
+    // ─── Hook ───
+
+    async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), SdkError> {
+        if let Some(ref runner) = self.inner.hook_runner {
+            let _ = runner.on_notification(message, kind).await;
+        }
+        Ok(())
+    }
+
+    // ─── Reminder ───
+
+    async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, SdkError> {
+        let reminders = self.inner.session_reminders.read().unwrap();
+        Ok(reminders
+            .list()
+            .iter()
+            .map(|r| sdk::ReminderView {
+                id: r.id.clone(),
+                content: r.content.clone(),
+                done: r.done,
+                created_at: r.created_at,
+            })
+            .collect())
+    }
+
+    async fn add_reminder(&self, content: &str) -> Result<String, SdkError> {
+        self.inner
+            .session_reminders
+            .write()
+            .unwrap()
+            .add(content)
+            .map_err(|e| SdkError::Internal(format!("添加 reminder 失败: {e}")))
+    }
+
+    async fn complete_reminder(&self, id: &str) -> Result<(), SdkError> {
+        self.inner
+            .session_reminders
+            .write()
+            .unwrap()
+            .complete(id)
+            .map_err(|e| SdkError::Internal(format!("完成 reminder 失败: {e}")))
+    }
+
+    // ─── Thinking ───
+
+    async fn get_thinking(&self) -> Result<bool, SdkError> {
+        let client = self.inner.current_client.read().unwrap().clone();
+        Ok(client.is_reasoning())
+    }
+
+    // ─── TaskStore ───
+
+    async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), SdkError> {
+        if let Some(ref store) = self.inner.task_store {
+            if let Ok(task_snapshot) = serde_json::from_value(snapshot) {
+                store.restore(task_snapshot).await;
+            }
+        }
+        Ok(())
+    }
 }
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
@@ -1252,6 +1332,9 @@ impl AgentClientImpl {
                 .collect(),
             hook_runner: ctx.hook_runner,
             json_logger: ctx.json_logger,
+            session_reminders: Arc::new(std::sync::Mutex::new(
+                crate::api::core::tool::SessionReminders::new(),
+            )),
         }
     }
 }

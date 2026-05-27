@@ -39,10 +39,7 @@ pub(crate) async fn run_chat(args: Args) {
         Some(std::sync::Arc::new(client.clone()) as std::sync::Arc<dyn sdk::AgentClient>);
     app.session.memory_config = launch.memory_config;
     app.set_skills(launch.skills_map);
-    app.cmd_exec.client = Some(launch.client.clone());
-    app.cmd_exec.hook_runner = launch.hook_runner;
-    app.cmd_exec.agent_client =
-        Some(std::sync::Arc::new(client.clone()) as std::sync::Arc<dyn sdk::AgentClient>);
+    app.session_reminders = launch.session_reminders;
     app.run(
         launch.client,
         launch.registry,

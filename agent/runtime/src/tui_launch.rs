@@ -36,4 +36,6 @@ pub struct TuiLaunchContext {
     pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
     pub hook_runner: HookRunner,
     pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
+    /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
+    pub session_reminders: Arc<std::sync::Mutex<crate::api::core::tool::SessionReminders>>,
 }

@@ -3,7 +3,6 @@ use crate::tui::core::App;
 impl App {
     pub(super) fn push_session_reminder_recap(&mut self) {
         let line = self
-            .cmd_exec
             .session_reminders
             .lock()
             .ok()
@@ -26,8 +25,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath-test"),
             "model".to_string(),
         );
-        app.cmd_exec
-            .session_reminders
+        app.session_reminders
             .lock()
             .unwrap()
             .add("任务一")
@@ -64,14 +62,12 @@ mod tests {
             "model".to_string(),
         );
         let id = app
-            .cmd_exec
             .session_reminders
             .lock()
             .unwrap()
             .add("任务一")
             .unwrap();
-        app.cmd_exec
-            .session_reminders
+        app.session_reminders
             .lock()
             .unwrap()
             .complete(&id)

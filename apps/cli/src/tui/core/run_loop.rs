@@ -40,11 +40,7 @@ impl App {
             // --- TEA event collection: produce a Msg ---
             let msg: Option<Msg> = tokio::select! {
                 biased;
-                // UI events have highest priority
-                ev = ui_rx.recv() => {
-                    ev.map(Msg::Ui)
-                }
-                // Terminal events
+                ev = ui_rx.recv() => { ev.map(Msg::Ui) }
                 ev = event_stream.next() => {
                     match ev {
                         Some(Ok(event)) => match event {
@@ -57,11 +53,7 @@ impl App {
                         _ => None,
                     }
                 }
-                // Fixed ticker for spinner animation. The frame advances only here,
-                // so stream/tool events and redraw frequency cannot speed it up.
-                _ = spinner_ticker.tick() => {
-                    Some(Msg::SpinnerTick)
-                }
+                _ = spinner_ticker.tick() => { Some(Msg::SpinnerTick) }
             };
 
             let Some(msg) = msg else {
@@ -95,28 +87,65 @@ impl App {
                 }
             }
 
-            // --- TEA command execution ---
-            // Handle &mut App cases first (Quit, SaveCurrentSession) to avoid borrow conflicts
-            match &result.cmd {
+            // --- TEA command execution: handle side effects inline via AgentClient ---
+            let cmd = result.cmd;
+            match cmd {
+                Cmd::None => {}
                 Cmd::Quit => self.layout.should_exit = true,
-                Cmd::SaveCurrentSession if !self.chat.messages.is_empty() => {
-                    if let Some(agent_client) = &self.agent_client {
-                        if let Err(e) = agent_client
-                            .sync_current_messages(self.chat.messages.clone())
-                            .await
-                        {
-                            log::warn!("failed to sync session messages: {e}");
+                Cmd::SpawnProcessing(spawn_ctx) => {
+                    processing::spawn_processing(spawn_ctx);
+                }
+                Cmd::SaveCurrentSession => {
+                    if !self.chat.messages.is_empty() {
+                        if let Some(ref ac) = self.agent_client {
+                            if let Err(e) = ac
+                                .sync_current_messages(self.chat.messages.clone())
+                                .await
+                            {
+                                log::warn!("sync failed: {e}");
+                            }
+                            if let Err(e) = ac.save_current_session().await {
+                                log::warn!("save failed: {e}");
+                            }
                         }
-                        if let Err(e) = agent_client.save_current_session().await {
-                            log::warn!("failed to auto-save session on sync: {e}");
-                        }
-                    } else {
-                        log::warn!(
-                            "failed to auto-save session on sync: SDK agent client is unavailable"
-                        );
                     }
                 }
-                _ => self.cmd_exec.exec_one_cmd(&ui_tx, result.cmd).await,
+                Cmd::RunHookNotification { message, kind } => {
+                    if let Some(ref ac) = self.agent_client {
+                        let _ = ac.notify_hook(&message, &kind).await;
+                    }
+                }
+                Cmd::ReadClipboardImage => {
+                    if let Some(ref ac) = self.agent_client {
+                        match ac.read_clipboard_image().await {
+                            Ok(img) => {
+                                self.chat.pending_images.push(img);
+                                self.input_area
+                                    .set_pending_images(self.chat.pending_images.len());
+                            }
+                            Err(e) => {
+                                log::warn!("clipboard read failed: {e}");
+                            }
+                        }
+                    }
+                }
+                Cmd::ProcessImageFile(path) => {
+                    if let Some(ref ac) = self.agent_client {
+                        match ac.process_image_file(path.clone()).await {
+                            Ok(img) => {
+                                self.chat.pending_images.push(img);
+                                self.input_area
+                                    .set_pending_images(self.chat.pending_images.len());
+                            }
+                            Err(e) => {
+                                log::warn!("image process failed: {e}");
+                            }
+                        }
+                    }
+                }
+                Cmd::SetCurrentTurn(turn) => {
+                    crate::runtime_adapter::set_current_turn(turn);
+                }
             }
 
             self.input.just_pasted = false;

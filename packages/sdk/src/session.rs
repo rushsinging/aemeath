@@ -71,6 +71,12 @@ pub struct SessionSnapshot {
     pub messages: Vec<ChatMessage>,
     /// 创建时间（ISO 8601）。
     pub created_at: Option<String>,
+    /// 消息清洗中移除的消息数。
+    pub trimmed: usize,
+    /// 消息清洗中修复的消息数。
+    pub repaired: usize,
+    /// 会话 workspace 上下文（若存在）。
+    pub workspace: Option<crate::WorkspaceContextView>,
 }
 
 /// Session 列表中的摘要条目。

@@ -146,6 +146,34 @@ pub struct TuiLaunchContext {
     pub initial_resume_id: Option<String>,
 }
 
+/// 会话 reminder 视图。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReminderView {
+    pub id: String,
+    pub content: String,
+    pub done: bool,
+    pub created_at: u64,
+}
+
+impl ReminderView {
+    pub fn active(reminders: &[ReminderView]) -> Vec<&ReminderView> {
+        reminders.iter().filter(|r| !r.done).collect()
+    }
+
+    pub fn recap_line(reminders: &[ReminderView]) -> Option<String> {
+        let active: Vec<&str> = reminders
+            .iter()
+            .filter(|r| !r.done)
+            .map(|r| r.content.as_str())
+            .collect();
+        if active.is_empty() {
+            None
+        } else {
+            Some(format!("* recap: {}", active.join(" | ")))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

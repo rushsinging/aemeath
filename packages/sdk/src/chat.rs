@@ -1,6 +1,7 @@
 //! Chat 输入 / 事件 / 流 / 结果。
 
 use crate::ChatMessage;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// 用户发送给 Agent 的一次 Chat 输入。
@@ -52,14 +53,14 @@ pub struct AgentProgressEventView {
 }
 
 /// workspace 栈条目视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceStackEntryView {
     pub path_base: PathBuf,
     pub working_root: PathBuf,
 }
 
 /// TUI 可展示的 workspace 上下文视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceContextView {
     pub path_base: PathBuf,
     pub working_root: PathBuf,

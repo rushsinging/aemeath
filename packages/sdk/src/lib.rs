@@ -35,7 +35,7 @@ pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ClipboardImageView,
     MemoryConfigView, PasteKind, QueueDrainPort, ReflectionConfigView,
-    ReflectionMemorySuggestionView, ReflectionOutputView, SkillView, TaskStatusView,
+    ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView, SkillView, TaskStatusView,
     TuiLaunchContext,
 };
 pub use types::{
