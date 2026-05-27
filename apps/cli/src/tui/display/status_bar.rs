@@ -168,6 +168,32 @@ impl StatusBar {
         };
     }
 
+    /// 一次性初始化 session_id、model、工作目录上下文（替代手动 set_* 调用链）。
+    pub fn init(&mut self, session_id: &str, model: &str, cwd: &std::path::Path) {
+        self.set_session_id(session_id);
+        self.set_model(model);
+        let cwd_display = crate::tui::core::display_status_path(cwd);
+        self.set_context_paths(&cwd_display, &cwd_display);
+        if let Some(branch) = crate::tui::core::git_branch_for(cwd) {
+            self.set_git_context(crate::tui::core::worktree_kind_for(cwd), branch);
+        }
+    }
+
+    /// 绘制状态栏（携 token/api 数据一起渲染）。
+    pub fn draw(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        input_tokens: u64,
+        output_tokens: u64,
+        last_input: u64,
+        api_calls: u64,
+    ) {
+        self.set_tokens(input_tokens, output_tokens, last_input);
+        self.set_api_calls(api_calls);
+        self.render(area, buf);
+    }
+
     /// Set permission mode text for the status context.
     ///
     /// This is reserved for #42 PermissionEngine integration; until then the

@@ -125,18 +125,10 @@ pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView)
 impl App {
     pub fn new(session_id: String, cwd: PathBuf, model: String) -> Self {
         let mut status_bar = StatusBar::new();
-        status_bar.set_session_id(&session_id);
-        status_bar.set_model(&model);
-        let cwd_display = display_status_path(&cwd);
-        status_bar.set_context_paths(cwd_display.clone(), cwd_display);
-        if let Some(branch) = git_branch_for(&cwd) {
-            status_bar.set_git_context(worktree_kind_for(&cwd), branch);
-        }
+        status_bar.init(&session_id, &model, &cwd);
+
         let mut output_area = OutputArea::new();
-        output_area.push_system("Aemeath - AI Agent");
-        output_area.push_system("");
-        output_area.push_system("Type /help for available commands");
-        output_area.push_system("");
+        output_area.init();
 
         Self {
             output_area,
@@ -181,17 +173,7 @@ impl App {
                 return;
             }
 
-            let suggestions_height = if self.input_area.is_showing_suggestions() {
-                let count = self.input_area.get_suggestions().len().min(5) as u16;
-                if count > 0 {
-                    count + 1
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
-
+            let suggestions_height = self.input_area.suggestions_height();
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -211,31 +193,24 @@ impl App {
 
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.output_area.render(chunks[0], buf);
+                self.output_area.draw(chunks[0], buf);
             }))
             .is_err()
             {
                 self.status_bar.set_warning("Render error, try resizing");
             }
-            self.input_area
-                .set_pending_images(self.chat.pending_images.len());
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.input_area.render(chunks[1], buf);
+                self.input_area
+                    .draw(chunks[1], chunks[2], buf, self.chat.pending_images.len());
             }));
-            if suggestions_height > 0 {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.input_area.render_suggestions_in_area(chunks[2], buf);
-                }));
-            }
-            self.status_bar.set_tokens(
+            self.status_bar.draw(
+                chunks[3],
+                buf,
                 self.chat.total_input_tokens,
                 self.chat.total_output_tokens,
                 self.chat.last_input_tokens,
+                self.chat.total_api_calls,
             );
-            self.status_bar.set_api_calls(self.chat.total_api_calls);
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.status_bar.render(chunks[3], buf);
-            }));
             if let Some(ref dialog) = self.layout.active_dialog {
                 dialog.render(size, buf);
             }

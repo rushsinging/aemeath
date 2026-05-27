@@ -20,11 +20,6 @@ impl InputArea {
         self.show_suggestions = false;
     }
 
-    /// Get current suggestions
-    pub fn get_suggestions(&self) -> &[Suggestion] {
-        &self.suggestions
-    }
-
     /// Move selection up in suggestions
     pub fn select_previous(&mut self) -> bool {
         if self.show_suggestions && !self.suggestions.is_empty() {
@@ -69,6 +64,16 @@ impl InputArea {
     /// Check if suggestions are showing
     pub fn is_showing_suggestions(&self) -> bool {
         self.show_suggestions
+    }
+
+    /// 建议区域所需高度（0 表示无需渲染）。
+    pub fn suggestions_height(&self) -> u16 {
+        if self.show_suggestions && !self.suggestions.is_empty() {
+            let count = self.suggestions.len().min(5);
+            count as u16 + 1
+        } else {
+            0
+        }
     }
 
     /// Render the suggestions dropdown in a dedicated area (above status bar)

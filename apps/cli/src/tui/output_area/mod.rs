@@ -2,6 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use sdk::CharIdx;
 
+use ratatui::{buffer::Buffer, layout::Rect};
+
 use crate::tui::output_area::types::DEFAULT_WIDTH;
 
 pub mod content;
@@ -112,5 +114,18 @@ impl OutputArea {
             ask_user_block_start: None,
             rendered_cache: RenderedCache::new(),
         }
+    }
+
+    /// 显示欢迎横幅。
+    pub fn init(&mut self) {
+        self.push_system("Aemeath - AI Agent");
+        self.push_system("");
+        self.push_system("Type /help for available commands");
+        self.push_system("");
+    }
+
+    /// 绘制输出区域。
+    pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
+        self.render(area, buf);
     }
 }
