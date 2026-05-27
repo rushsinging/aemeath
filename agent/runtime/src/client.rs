@@ -18,9 +18,9 @@ use tokio::sync::watch;
 
 use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::config::ConfigManager;
-use crate::api::core::skill_ops::{load_all_skills, Skill};
 use crate::api::core::task::{TaskStatus, TaskStore};
 use crate::api::core::tool::ToolRegistry;
+use crate::api::prompt::skill::{load_all_skills, Skill};
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::api::provider::types::SystemBlock;
 use crate::api::tools as tools_crate;

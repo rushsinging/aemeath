@@ -1,9 +1,9 @@
 use super::request::{NoTuiChatLaunch, TuiChatLaunch};
 use crate::api::core::config::MemoryConfig;
-use crate::api::core::skill_ops::Skill;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{AgentRunner, ToolRegistry};
 use crate::api::hook::hook::HookRunner;
+use crate::api::prompt::skill::Skill;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::types::SystemBlock;
 use crate::api::storage::logging::JsonLogger;
