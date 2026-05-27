@@ -3,7 +3,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
-| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在，需还原为 active 并重新排查；既有修复曾在 EndTurn/无工具调用和工具轮结果同步后 drain queued input，但仍可能存在某些 last turn 路径未消费 input_queue 或消费后未进入下一轮。本轮先在 TUI 收到 Done/DoneWithDuration 时记录 input_queue_len、queued_messages_len、is_processing、tool_call_active、active_tool_call_ids、input_area_empty 和队首预览，便于确认对话结束时队列真实状态 |
+| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 活动中 | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
 | 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
@@ -14,6 +14,18 @@
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 ## 专案
+
+### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
+
+**状态**：修复中（待确认）
+
+**本轮症状**：Stop hook 执行期间，用户提交的新输入能进入 TUI input queue，但 Stop hook 结束后 runtime 直接发送 `DoneWithDuration`，该输入不会被追加进 messages，也不会触发下一轮 LLM。
+
+**根因（已确认）**：最终响应分支在进入 Stop hook 之前已经执行过一次 `append_queued_input`；但 Stop hook 本身可能耗时，用户在 hook 执行期间提交的输入发生在最后一次 drain 之后、`DoneWithDuration` 之前。原实现把 Stop hook 和 Done 发送都封装在 `finalize_main_loop` 内，Stop hook 通过后没有再给主 loop 二次 drain 的机会。
+
+**修复**：Completed 分支改为：Stop hook 通过后先再次调用 `append_queued_input`；如果 drain 到用户输入，则同步 messages 并 `continue` 主 LLM loop；只有二次 drain 为空时才发送 `DoneWithDuration` 并归档已完成 task batch。追加输入被处理完后仍会重新进入最终结束流程并再次触发 Stop hook。
+
+**验证**：新增 `test_process_chat_loop_drains_input_after_stop_hook_before_done`，覆盖 Stop hook 通过后才出现 queued input 时应继续下一轮 LLM；`cargo test -p runtime` 通过。
 
 ### #73 EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout
 
