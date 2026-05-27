@@ -1,4 +1,4 @@
-use ::runtime::api::core::string_idx::CharIdx;
+use sdk::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
 use crate::tui::display::safe_text;

@@ -78,9 +78,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::Cancelled => UiEvent::Cancelled,
         sdk::ChatEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
-        sdk::ChatEvent::TurnChanged(turn) => {
-            ::runtime::api::bootstrap::set_current_turn(turn);
-            UiEvent::SystemMessage(String::new())
+        sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
+            UiEvent::CurrentTurnChanged(turn)
         }
         sdk::ChatEvent::StopFailureHook {
             system_message,

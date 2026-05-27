@@ -1,4 +1,4 @@
-use ::runtime::api::core::string_idx::{char_to_byte, CharIdx, StrSlice};
+use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
 use crate::tui::output_area::markdown;

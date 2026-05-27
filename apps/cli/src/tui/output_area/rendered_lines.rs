@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use ::runtime::api::core::string_idx::CharIdx;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use sdk::CharIdx;
 
 use super::display;
 use super::markdown;

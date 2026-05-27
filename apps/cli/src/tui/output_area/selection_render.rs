@@ -1,6 +1,6 @@
 use ratatui::{style::Style, text::Line, text::Span};
 
-use ::runtime::api::core::string_idx::CharIdx;
+use sdk::CharIdx;
 
 use crate::tui::display::theme;
 

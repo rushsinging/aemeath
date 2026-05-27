@@ -65,29 +65,32 @@ impl App {
                     };
                 }
                 // Paste while processing: insert into input area so it can be queued
-                if text.trim().is_empty() {
-                    // Empty paste — try clipboard image (same as idle mode)
-                    self.input.just_pasted = true;
-                    self.output_area.push_system("[reading clipboard image...]");
-                    return UpdateResult {
-                        cmd: Cmd::ReadClipboardImage,
-                        pending_slash: None,
-                    };
-                } else if ::runtime::api::image::is_image_file(text.trim()) {
-                    self.output_area
-                        .push_system(&format!("[loading image: {}...]", text.trim()));
-                    self.input.just_pasted = true;
-                    return UpdateResult {
-                        cmd: Cmd::ProcessImageFile(text.trim().to_string()),
-                        pending_slash: None,
-                    };
-                } else {
-                    self.input.just_pasted = true;
-                    for ch in text.chars() {
-                        if ch == '\n' || ch == '\r' {
-                            self.input_area.enter(true);
-                        } else {
-                            self.input_area.input(ch);
+                match sdk::classify_paste(&text) {
+                    sdk::PasteKind::Empty => {
+                        self.input.just_pasted = true;
+                        self.output_area.push_system("[reading clipboard image...]");
+                        return UpdateResult {
+                            cmd: Cmd::ReadClipboardImage,
+                            pending_slash: None,
+                        };
+                    }
+                    sdk::PasteKind::ImageFile => {
+                        self.output_area
+                            .push_system(&format!("[loading image: {}...]", text.trim()));
+                        self.input.just_pasted = true;
+                        return UpdateResult {
+                            cmd: Cmd::ProcessImageFile(text.trim().to_string()),
+                            pending_slash: None,
+                        };
+                    }
+                    sdk::PasteKind::Text => {
+                        self.input.just_pasted = true;
+                        for ch in text.chars() {
+                            if ch == '\n' || ch == '\r' {
+                                self.input_area.enter(true);
+                            } else {
+                                self.input_area.input(ch);
+                            }
                         }
                     }
                 }

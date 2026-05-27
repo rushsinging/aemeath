@@ -120,6 +120,8 @@ pub enum ChatEvent {
     LiveTps(f64),
     /// 当前 turn 变化。
     TurnChanged(usize),
+    /// 记录当前 turn 变化的端口事件。
+    CurrentTurnChanged(usize),
     /// StopFailure hook 结果。
     StopFailureHook {
         system_message: Option<String>,
