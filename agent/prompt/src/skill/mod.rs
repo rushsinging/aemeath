@@ -1,13 +1,10 @@
-//! Skill Prompt domain compatibility facade.
+//! Skill Prompt domain.
 //!
-//! Skill 的唯一实现保留在 `share::skill_ops`，避免 Prompt domain 与 share
-//! 维护两套解析、加载和内建 skill 逻辑。Prompt 对外继续暴露 `prompt::skill::*`
-//! 作为领域语义入口。
+//! Canonical implementation resides in share（shared kernel）。
+//! Prompt domain re-exports from share for interface consistency.
 
-pub use share::skill_ops::{
-    builtin_commit_skill, load_all_skills, load_all_skills_cached, load_and_filter_skills,
-    load_skills_from_dir, parse_skill, read_skill_content, Skill,
-};
+pub use share::skill_ops::*;
+pub use share::skill_ops_loader::*;
 
 #[cfg(test)]
 mod tests {
@@ -15,7 +12,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_prompt_skill_reexports_share_skill_parser() {
+    fn test_prompt_skill_uses_prompt_skill_parser() {
         let base = std::env::temp_dir().join("aemeath_prompt_skill_reexport");
         let dir = base.join("cm");
         std::fs::create_dir_all(&dir).unwrap();

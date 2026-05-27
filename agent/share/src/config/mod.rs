@@ -10,7 +10,6 @@
 pub mod hooks;
 pub mod legacy;
 pub mod logging;
-pub mod manager;
 pub mod memory;
 pub mod models;
 pub mod paths;
@@ -24,7 +23,6 @@ pub mod ui;
 pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
 pub use logging::LoggingConfig;
-pub use manager::ConfigManager;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{
     volcengine_coding_plan_config, ModelEntryConfig, ModelsConfig, ProviderModelsConfig,
@@ -114,17 +112,5 @@ mod tests {
         assert!(config.storage.persist_sessions);
         assert!(config.memory.enabled);
         assert_eq!(config.memory.max_entries, 100);
-    }
-
-    #[test]
-    fn test_config_manager_creation() {
-        let _guard = super::paths::TEST_ENV_LOCK.lock().unwrap();
-        let _ = std::env::remove_var(super::paths::AGENTS_DIR_ENV);
-        let mgr = ConfigManager::new(None);
-        assert!(mgr.global_path().to_string_lossy().contains(".agents"));
-        assert!(mgr
-            .global_path()
-            .to_string_lossy()
-            .ends_with("aemeath.json"));
     }
 }

@@ -1,4 +1,4 @@
-use crate::api::core::config::paths;
+use crate::utils::bootstrap::config_paths as paths;
 use crate::api::core::tool::ToolRegistry;
 use crate::api::tools::mcp::McpServerConfig;
 use crate::api::tools::mcp_manager::McpConnectionManager;

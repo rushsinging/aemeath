@@ -31,7 +31,7 @@ pub struct ResolvedModel {
     pub source_key: String,
     pub source_config: ProviderModelsConfig,
     pub model: ModelEntryConfig,
-    pub api: crate::provider::ApiDriverKind,
+    pub api: String,
 }
 
 /// Configuration for a single model source within models config.

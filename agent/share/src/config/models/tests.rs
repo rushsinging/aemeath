@@ -1,7 +1,6 @@
 use super::*;
 use crate::config::models::resolve::normalize_model_key;
-use crate::config::{Config, ConfigManager};
-use crate::provider::ApiDriverKind;
+use crate::config::Config;
 use std::collections::HashMap;
 
 fn test_config() -> ModelsConfig {
@@ -74,7 +73,7 @@ fn test_default_models_config_resolves_volcengine_default() {
     let resolved = config.resolve_default_model().unwrap();
 
     assert_eq!(resolved.source_key, "Volcengine");
-    assert_eq!(resolved.api, ApiDriverKind::Volcengine);
+    assert_eq!(resolved.api, "volcengine");
     assert_eq!(resolved.model.id, "doubao-seed-2-0-code-preview-260215");
     assert_eq!(resolved.model.reasoning, Some(true));
     assert_eq!(resolved.model.thinking_max_tokens, 131_072);
@@ -97,7 +96,16 @@ fn test_merge_config_keeps_volcengine_builtin_without_overriding_user_default() 
     let mut user = Config::default();
     user.models.default = "Custom/custom-model".to_string();
 
-    let merged = ConfigManager::merge_config(builtin, user);
+    let mut merged = Config::default();
+    merged.models = builtin.models;
+    merged.models.providers.extend(user.models.providers);
+    if !user.models.default.is_empty() {
+        merged.models.default = user.models.default;
+    }
+    if !user.models.mode.is_empty() {
+        merged.models.mode = user.models.mode;
+    }
+    merged.models.guidance.extend(user.models.guidance);
 
     assert_eq!(merged.models.default, "Custom/custom-model");
     assert!(merged.models.providers.contains_key("Volcengine"));

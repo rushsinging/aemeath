@@ -4,7 +4,7 @@
 //! Note: This uses estimation algorithms, not actual tokenizers.
 //! For more accurate results, consider integrating tiktoken.
 
-use crate::message::{ContentBlock, Message};
+use share::message::{ContentBlock, Message};
 
 /// Token estimation service
 pub struct TokenEstimation {

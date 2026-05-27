@@ -67,13 +67,13 @@ pub(super) async fn load_session_impl(
             let mut messages = session.messages;
             let trimmed = {
                 let before = messages.len();
-                crate::api::core::message::sanitize_messages(&mut messages);
+                crate::business::chat::message_integrity::sanitize_messages(&mut messages);
                 before.saturating_sub(messages.len())
             };
             let repaired = {
-                let integrity = crate::api::core::message::check_message_integrity(&messages);
+                let integrity = crate::business::chat::message_integrity::check_message_integrity(&messages);
                 if integrity.has_issues() {
-                    crate::api::core::message::deep_clean_messages(&mut messages)
+                    crate::business::chat::message_integrity::deep_clean_messages(&mut messages)
                 } else {
                     0
                 }

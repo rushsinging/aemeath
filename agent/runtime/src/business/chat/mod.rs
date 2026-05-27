@@ -1,4 +1,5 @@
 pub mod looping;
+pub mod message_integrity;
 pub mod reflection;
 pub mod request;
 

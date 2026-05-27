@@ -13,16 +13,13 @@ pub mod autocompact;
 pub mod micro;
 pub mod restore;
 pub mod summary;
+mod token_estimation;
 pub mod truncate;
 
 // ---- 向后兼容的 re-exports ----
 
 // Token 估算函数（原始 compact.rs 中的 re-export）
-pub use share::token_estimation::{
-    autocompact_threshold, compaction_urgency, effective_context_window, estimate_json_tokens,
-    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, needs_compaction,
-    needs_compaction_actual, needs_compaction_full, needs_compaction_with_output,
-};
+pub use token_estimation::*;
 
 // truncate 模块
 pub use truncate::{

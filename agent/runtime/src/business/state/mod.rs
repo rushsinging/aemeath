@@ -5,7 +5,7 @@
 pub mod settings;
 pub use settings::{PermissionMode, Settings};
 
-use share::config::paths;
+use crate::utils::bootstrap::config_paths as paths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;

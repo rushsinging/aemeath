@@ -1,10 +1,9 @@
-use crate::config::paths;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 pub fn memory_base_dir() -> PathBuf {
-    paths::global_memory_dir()
+    PathBuf::from(crate::config::paths::AGENTS_DIR_NAME).join(crate::config::paths::MEMORY_DIR_NAME)
 }
 
 pub fn project_hash(cwd: &str) -> String {
@@ -48,23 +47,6 @@ mod tests {
 
     #[test]
     fn test_memory_base_dir_uses_agents_directory() {
-        let _guard = paths::TEST_ENV_LOCK.lock().unwrap();
-        let temp_agents_dir = std::env::temp_dir().join(format!(
-            "aemeath_memory_dir_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
-        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
-
-        assert_eq!(memory_base_dir(), temp_agents_dir.join("memory"));
-
-        if let Some(previous) = previous {
-            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
-        } else {
-            std::env::remove_var(paths::AGENTS_DIR_ENV);
-        }
+        assert_eq!(memory_base_dir(), PathBuf::from(".agents/memory"));
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! 包含 sanitize_messages, check_message_integrity, deep_clean_messages。
 
-use crate::message::types::*;
+use share::message::{IntegrityCheck, IntegrityIssue, Message, Role};
 use std::collections::HashSet;
 
 /// 计算消息列表中待完成的 tool_use_id 集合。

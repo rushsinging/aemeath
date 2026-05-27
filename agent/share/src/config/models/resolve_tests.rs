@@ -48,7 +48,7 @@ fn test_resolve_model_selection_zhipu() {
     let resolved = config.resolve_model_selection("zhipu/glm-5.1").unwrap();
     assert_eq!(resolved.source_key, "Zhipu");
     assert_eq!(resolved.model.id, "glm-5.1");
-    assert_eq!(resolved.api, ApiDriverKind::Zhipu);
+    assert_eq!(resolved.api, "zhipu");
     assert_eq!(resolved.source_config.api, "zhipu");
 }
 
@@ -60,7 +60,7 @@ fn test_resolve_model_selection_litellm_model_id_with_slash() {
         .unwrap();
     assert_eq!(resolved.source_key, "LiteLLM");
     assert_eq!(resolved.model.id, "anthropic/claude-opus-4-7");
-    assert_eq!(resolved.api, ApiDriverKind::LiteLLM);
+    assert_eq!(resolved.api, "litellm");
 }
 
 #[test]
@@ -85,20 +85,14 @@ fn test_resolve_model_selection_unknown_model_lists_available() {
 }
 
 #[test]
-fn test_resolve_model_selection_rejects_openai_compatible_api() {
+fn test_resolve_model_selection_preserves_api_string() {
     let mut config = resolver_config();
     let source = config.providers.get_mut("Zhipu").unwrap();
     source.api = "openai-compatible".to_string();
 
-    let err = config.resolve_model_selection("Zhipu/glm-5.1").unwrap_err();
+    let resolved = config.resolve_model_selection("Zhipu/glm-5.1").unwrap();
 
-    assert_eq!(
-        err,
-        ModelResolveError::UnknownApi {
-            source: "Zhipu".to_string(),
-            api: "openai-compatible".to_string(),
-        }
-    );
+    assert_eq!(resolved.api, "openai-compatible");
 }
 
 #[test]

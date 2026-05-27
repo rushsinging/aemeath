@@ -10,9 +10,10 @@ pub fn resolve_api_key(
     resolved_model: &ResolvedModel,
     env_value: Option<&dyn Fn(&str) -> Option<String>>,
 ) -> Option<String> {
+    let api_type = ApiDriverKind::from_str(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
     cli_api_key
         .or_else(|| env_or_runtime("AEMEATH_API_KEY", env_value))
-        .or_else(|| provider_api_key_from_env(resolved_model.api, env_value))
+        .or_else(|| provider_api_key_from_env(api_type, env_value))
         .or_else(|| env_or_runtime("LLM_API_KEY", env_value))
         .or_else(|| non_empty_string(&resolved_model.source_config.api_key))
 }
@@ -143,7 +144,7 @@ mod tests {
                 reasoning: None,
                 reasoning_effort: None,
             },
-            api,
+            api: api.as_str().to_string(),
         }
     }
 

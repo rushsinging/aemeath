@@ -2,7 +2,6 @@
 
 use crate::config::models::error::ModelResolveError;
 use crate::config::models::types::*;
-use crate::provider::ApiDriverKind;
 
 impl ModelsConfig {
     pub fn resolve_model_selection(
@@ -38,7 +37,7 @@ impl ModelsConfig {
                 available_models: available_model_labels(source_config),
             })?;
 
-        let api = resolve_api_driver(&source_key, source_config)?;
+        let api = source_config.api.clone();
 
         Ok(ResolvedModel {
             source_key: source_key.clone(),
@@ -65,7 +64,7 @@ impl ModelsConfig {
         let first = candidates.next();
         if let Some((source_key, source_config, model)) = first {
             if candidates.next().is_none() && source_config.models.len() == 1 {
-                let api = resolve_api_driver(source_key, source_config)?;
+                let api = source_config.api.clone();
                 return Ok(ResolvedModel {
                     source_key: source_key.clone(),
                     source_config: source_config.clone(),
@@ -184,19 +183,6 @@ fn available_model_labels(source_config: &ProviderModelsConfig) -> Vec<String> {
         .iter()
         .map(|m| m.display_label())
         .collect()
-}
-
-/// 解析 API driver 类型
-fn resolve_api_driver(
-    source_key: &str,
-    source_config: &ProviderModelsConfig,
-) -> Result<ApiDriverKind, ModelResolveError> {
-    ApiDriverKind::from_str(source_config.api.as_str()).ok_or_else(|| {
-        ModelResolveError::UnknownApi {
-            source: source_key.to_string(),
-            api: source_config.api.clone(),
-        }
-    })
 }
 
 /// Normalize a model key for fuzzy matching — keep alphanumerics and

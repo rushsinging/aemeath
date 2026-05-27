@@ -1,5 +1,5 @@
+use crate::utils::bootstrap::config_paths as paths;
 use logging::{self, LogFile};
-use share::config::paths;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 

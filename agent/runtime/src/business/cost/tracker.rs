@@ -1,6 +1,6 @@
 //! 费用追踪器
 
-use share::config::paths;
+use crate::utils::bootstrap::config_paths as paths;
 
 use super::pricing::get_pricing;
 use serde::{Deserialize, Serialize};

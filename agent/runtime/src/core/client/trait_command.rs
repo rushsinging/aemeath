@@ -3,7 +3,7 @@ use std::sync::Arc;
 use sdk::{ClipboardImageView, ModelSummary, ReflectionOutputView, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::api::core::config::ConfigManager;
+use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::core::port::{HookNotificationPort, ProviderInfoPort};
 use crate::utils::adapter::{HookRunnerAdapter, LlmClientAdapter};
 

@@ -9,7 +9,7 @@ use crate::business::compact::truncate::safe_slice;
 use share::message::{ContentBlock, Message, Role};
 
 // 向后兼容的 re-export
-pub use share::token_estimation::needs_compaction;
+pub use crate::business::compact::needs_compaction;
 
 /// 发送给 LLM 的压缩提示模板。
 pub const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.

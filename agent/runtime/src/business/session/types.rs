@@ -3,7 +3,7 @@
 use crate::business::state;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use share::config::paths;
+use crate::utils::bootstrap::config_paths as paths;
 use share::message::{Message, Role};
 use share::task::TaskSnapshot;
 use std::path::PathBuf;

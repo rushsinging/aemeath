@@ -2,6 +2,7 @@ use crate::api::agent_runner;
 use crate::api::core::config::Config;
 use crate::api::hook::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
+use crate::utils::bootstrap::config_paths;
 use logging::JsonLogger;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -109,7 +110,7 @@ fn resolve_role_logs_dir(config_file: Option<&Config>) -> PathBuf {
     config_file
         .and_then(|config| config.logging.logs_dir.as_ref())
         .map(|dir| expand_tilde_path(dir))
-        .unwrap_or_else(|| share::config::paths::global_logs_dir().join("logs"))
+        .unwrap_or_else(|| config_paths::global_logs_dir().join("logs"))
 }
 
 fn expand_tilde_path(path: &str) -> PathBuf {
@@ -207,7 +208,7 @@ mod tests {
 
         assert_eq!(
             result,
-            share::config::paths::global_logs_dir().join("logs")
+            config_paths::global_logs_dir().join("logs")
         );
     }
 
