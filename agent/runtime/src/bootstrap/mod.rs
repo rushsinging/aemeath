@@ -11,7 +11,7 @@ use crate::api::core::config::Config;
 use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 pub use concurrency::resolve_concurrency_limits;
-pub use logging_setup::{init_logging, init_panic_hook, set_current_turn, set_session_id};
+pub use logging_setup::{init_logging, set_current_turn, set_session_id};
 pub use mcp_loader::{load_mcp_manager, parse_mcp_servers_config, spawn_mcp_connect};
 pub use model_runtime::{
     resolve_model_runtime_settings, ModelRuntimeSettings, ReasoningConfigInput,

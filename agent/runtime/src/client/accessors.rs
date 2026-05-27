@@ -3,14 +3,11 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-use sdk::{
-    AgentClient, ChangeSet, CostInfo, ProjectContext, SdkError, SessionSnapshot, TaskStatusView,
-};
+use sdk::ChangeSet;
 use tokio::sync::watch;
 
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::task::{TaskStatus, TaskStore};
+use crate::api::core::task::TaskStore;
 use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::chat::ChatRuntimeContext;
 

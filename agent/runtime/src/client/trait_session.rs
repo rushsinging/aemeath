@@ -1,8 +1,5 @@
 //! session 相关方法实际逻辑。
 
-use std::sync::Arc;
-use std::sync::Mutex;
-
 use sdk::{SdkError, SessionSnapshot, SessionSummary};
 
 use super::accessors::AgentClientImpl;
@@ -62,7 +59,7 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
 }
 
 pub(super) async fn load_session_impl(
-    me: &AgentClientImpl,
+    _me: &AgentClientImpl,
     id: &str,
 ) -> Result<SessionSnapshot, SdkError> {
     match crate::api::session::load_session(id).await {
@@ -112,7 +109,7 @@ pub(super) async fn load_session_impl(
 }
 
 pub(super) async fn list_sessions_impl(
-    me: &AgentClientImpl,
+    _me: &AgentClientImpl,
 ) -> Result<Vec<SessionSummary>, SdkError> {
     Ok(crate::session::list_sessions()
         .await
@@ -121,7 +118,7 @@ pub(super) async fn list_sessions_impl(
         .collect())
 }
 
-pub(super) async fn delete_session_impl(me: &AgentClientImpl, id: &str) -> Result<(), SdkError> {
+pub(super) async fn delete_session_impl(_me: &AgentClientImpl, id: &str) -> Result<(), SdkError> {
     crate::session::delete_session(id)
         .await
         .map_err(SdkError::Session)

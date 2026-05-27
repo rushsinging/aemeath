@@ -1,10 +1,9 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use sdk::{ChangeSet, SdkError};
 use tokio::sync::watch;
 
-use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::config::ConfigManager;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::ToolRegistry;
@@ -12,7 +11,6 @@ use crate::api::prompt::skill::{load_all_skills, Skill};
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::api::provider::types::SystemBlock;
 use crate::api::tools as tools_crate;
-use crate::api::tools::mcp_manager::McpConnectionManager;
 use crate::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, build_json_logger,
     init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,

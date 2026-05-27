@@ -1,6 +1,6 @@
 use sdk::{
     ClipboardImageView, MemoryConfigView, ReflectionConfigView, ReflectionMemorySuggestionView,
-    ReflectionOutputView, SessionSummary, SkillView, TaskStatusView, WorkspaceContextView,
+    ReflectionOutputView, SessionSummary, SkillView, WorkspaceContextView,
     WorkspaceStackEntryView,
 };
 

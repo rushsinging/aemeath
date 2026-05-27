@@ -55,37 +55,3 @@ pub fn init_logging(logging_config: &crate::api::core::config::LoggingConfig) {
     });
     builder.init();
 }
-
-pub fn init_panic_hook() {
-    std::panic::set_hook(Box::new(move |info| {
-        let payload = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "unknown panic".to_string());
-
-        let location = info
-            .location()
-            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
-            .unwrap_or_else(|| "unknown location".to_string());
-        let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
-        let backtrace = format!("{:?}", std::backtrace::Backtrace::capture());
-        let msg = format!("{} at {}", payload, location);
-        let extra = serde_json::json!({
-            "location": location,
-            "backtrace": backtrace,
-        });
-
-        let _ = logging::append_json_line_with_turn(
-            LogFile::Panic,
-            session,
-            current_turn_for_log(),
-            "ERROR",
-            "panic",
-            &msg,
-            extra,
-        );
-        eprintln!("[PANIC] {}", msg);
-    }));
-}

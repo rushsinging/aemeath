@@ -3,13 +3,14 @@ mod model_selection;
 mod chat;
 mod sessions_command;
 mod tui;
+mod panic_hook;
 
 use args::{Args, Cli, Commands};
 use clap::Parser;
 
 #[tokio::main]
 async fn main() {
-    ::runtime::api::bootstrap::init_panic_hook();
+    panic_hook::init_panic_hook();
 
     let cli = Cli::parse();
 
