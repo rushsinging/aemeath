@@ -1,10 +1,12 @@
 use crate::api::agent::Agent;
-use crate::api::agent_runner::{AgentRunOutcome, AgentRunStatus};
+use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::api::core::message::Message;
 use crate::api::core::tool::{ToolContext, ToolRegistry};
 use crate::api::provider::types::StopReason;
 use crate::business::chat::looping::compact::auto_compact;
-use crate::business::chat::looping::finalize::finalize_main_loop;
+use crate::business::chat::looping::finalize::{
+    finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
+};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
@@ -306,19 +308,20 @@ where
                         sink.send_event(RuntimeStreamEvent::SystemMessage(text))
                             .await;
                     }
-                    if let Some(outcome) = finalize_main_loop(
-                        &AgentRunOutcome {
-                            status: AgentRunStatus::Completed,
-                            turns: turn_count,
-                            duration: turn_start.elapsed(),
-                            role: None,
-                            model: client.model_name().to_string(),
-                        },
+                    let outcome = AgentRunOutcome {
+                        status: AgentRunStatus::Completed,
+                        turns: turn_count,
+                        duration: turn_start.elapsed(),
+                        role: None,
+                        model: client.model_name().to_string(),
+                    };
+                    log_agent_outcome(&outcome, &session_id);
+                    if let Some(outcome) = run_stop_hook_before_finish(
+                        &outcome,
                         &sink,
                         &hook_ui,
                         &hook_runner,
                         &session_id,
-                        &task_store,
                     )
                     .await
                     {
@@ -329,6 +332,10 @@ where
                             .await;
                         continue;
                     }
+                    if append_queued_input(&queue, &sink, &mut messages).await {
+                        continue;
+                    }
+                    finish_completed_loop(&outcome, &sink, &task_store).await;
                     break;
                 }
                 {
@@ -395,5 +402,224 @@ where
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use crate::api::hook::hook::HookRunner;
+    use crate::api::provider::provider::{LlmProvider, StreamHandler};
+    use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
+    use async_trait::async_trait;
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::atomic::AtomicBool;
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Clone)]
+    struct SequenceQueueDrainPort {
+        responses: Arc<Mutex<VecDeque<Option<Vec<String>>>>>,
+    }
+
+    impl SequenceQueueDrainPort {
+        fn new(responses: Vec<Option<Vec<String>>>) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(VecDeque::from(responses))),
+            }
+        }
+    }
+
+    impl QueueDrainPort for SequenceQueueDrainPort {
+        fn drain_queued_input<'a>(&'a self) -> crate::business::chat::looping::QueueFuture<'a> {
+            Box::pin(async move { self.responses.lock().unwrap().pop_front().flatten() })
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingSink {
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ChatEventSink for RecordingSink {
+        fn send_event<'a>(
+            &'a self,
+            event: RuntimeStreamEvent,
+        ) -> crate::business::chat::looping::EventFuture<'a> {
+            Box::pin(async move {
+                self.record(event);
+            })
+        }
+
+        fn try_send_event(&self, event: RuntimeStreamEvent) {
+            self.record(event);
+        }
+    }
+
+    impl RecordingSink {
+        fn record(&self, event: RuntimeStreamEvent) {
+            let name = match event {
+                RuntimeStreamEvent::MessagesSync(messages) => format!(
+                    "MessagesSync:{}",
+                    messages
+                        .last()
+                        .map(|message| message.text_content())
+                        .unwrap_or_default()
+                ),
+                RuntimeStreamEvent::DoneWithDuration(_) => "DoneWithDuration".to_string(),
+                RuntimeStreamEvent::HookStart { event, .. } => format!("HookStart:{event}"),
+                RuntimeStreamEvent::HookEnd { event, .. } => format!("HookEnd:{event}"),
+                RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
+                RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
+                RuntimeStreamEvent::Text(text) => format!("Text:{text}"),
+                RuntimeStreamEvent::Done => "Done".to_string(),
+                RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
+                RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
+                RuntimeStreamEvent::Cancelled => "Cancelled".to_string(),
+                RuntimeStreamEvent::Thinking(_) => "Thinking".to_string(),
+                RuntimeStreamEvent::TextBlockComplete(_) => "TextBlockComplete".to_string(),
+                RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
+                RuntimeStreamEvent::ToolArgumentsDelta { .. } => "ToolArgumentsDelta".to_string(),
+                RuntimeStreamEvent::ToolCall { .. } => "ToolCall".to_string(),
+                RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
+                RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
+                RuntimeStreamEvent::StopFailureHook { .. } => "StopFailureHook".to_string(),
+                RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
+                RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
+                RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
+                    "WorkingDirectoryChanged".to_string()
+                }
+            };
+            self.events.lock().unwrap().push(name);
+        }
+
+        fn events(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    struct TwoTurnProvider;
+
+    #[async_trait]
+    impl LlmProvider for TwoTurnProvider {
+        async fn stream_message(
+            &self,
+            _system: &[SystemBlock],
+            messages: &[Message],
+            _tool_schemas: &[serde_json::Value],
+            handler: &mut dyn StreamHandler,
+            _cancel: &CancellationToken,
+        ) -> Result<StreamResponse, crate::api::provider::LlmError> {
+            let text = if messages
+                .iter()
+                .any(|message| message.text_content() == "stop-hook input")
+            {
+                "handled queued input"
+            } else {
+                "initial final response"
+            };
+            handler.on_text(text);
+            Ok(StreamResponse {
+                assistant_message: Message {
+                    role: crate::api::core::message::Role::Assistant,
+                    content: vec![crate::api::core::message::ContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                },
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+                stop_reason: StopReason::EndTurn,
+            })
+        }
+
+        fn model_name(&self) -> &str {
+            "test-model"
+        }
+
+        fn provider_name(&self) -> &str {
+            "test-provider"
+        }
+
+        fn set_reasoning(&self, _enabled: bool) {}
+
+        fn is_reasoning(&self) -> bool {
+            false
+        }
+    }
+
+    fn test_hook_runner() -> HookRunner {
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::Stop,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "true".to_string(),
+                timeout: 5,
+            }],
+        );
+        HookRunner::new(HooksConfig { events }, ".".to_string())
+    }
+
+    #[tokio::test]
+    async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
+        let sink = RecordingSink::default();
+        let queue = SequenceQueueDrainPort::new(vec![
+            None,
+            Some(vec!["stop-hook input".to_string()]),
+            None,
+            None,
+        ]);
+
+        process_chat_loop(ChatLoopContext {
+            sink: sink.clone(),
+            queue,
+            client: Arc::new(crate::api::provider::client::LlmClient::from_provider(
+                Arc::new(TwoTurnProvider),
+            )),
+            registry: Arc::new(ToolRegistry::new()),
+            system_blocks: Vec::new(),
+            system_prompt_text: String::new(),
+            user_context: String::new(),
+            messages: vec![Message::user("hello")],
+            context_size: 200_000,
+            cwd: std::env::current_dir().unwrap(),
+            workspace_context: None,
+            session_id: "test-session".to_string(),
+            read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            session_reminders: Arc::new(std::sync::Mutex::new(
+                crate::api::core::tool::SessionReminders::new(),
+            )),
+            agent_runner: None,
+            allow_all: false,
+            interrupted: Arc::new(AtomicBool::new(false)),
+            cancel: CancellationToken::new(),
+            task_store: Arc::new(crate::api::core::task::TaskStore::new()),
+            max_tool_concurrency: 1,
+            max_agent_concurrency: 1,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+            hook_runner: test_hook_runner(),
+            memory_config: crate::api::core::config::MemoryConfig::default(),
+            json_logger: None,
+        })
+        .await;
+
+        let events = sink.events();
+        let queued_sync = events
+            .iter()
+            .position(|event| event == "MessagesSync:stop-hook input")
+            .expect("queued input should be synced after Stop hook");
+        let done = events
+            .iter()
+            .position(|event| event == "DoneWithDuration")
+            .expect("loop should eventually finish");
+        let handled_text = events
+            .iter()
+            .position(|event| event == "Text:handled queued input")
+            .expect("queued input should trigger another LLM turn");
+
+        assert!(queued_sync < handled_text);
+        assert!(handled_text < done);
     }
 }

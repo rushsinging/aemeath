@@ -21,7 +21,7 @@ pub(crate) async fn finalize_main_loop<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     session_id: &str,
-    task_store: &TaskStore,
+    _task_store: &TaskStore,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -30,39 +30,7 @@ where
 
     match &outcome.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            let stop_results = hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::Stop,
-                    None,
-                    HookData::Stop(StopHookData {
-                        turns: outcome.turns,
-                    }),
-                )
-                .await;
-            if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
-                let _ = sink
-                    .send_event(RuntimeStreamEvent::SystemMessage(feedback.clone()))
-                    .await;
-                return Some(feedback);
-            }
-
-            let _ = sink
-                .send_event(RuntimeStreamEvent::DoneWithDuration(outcome.duration))
-                .await;
-
-            if let Some(active) = task_store.active_list().await {
-                if task_store.is_batch_completed(active.id).await {
-                    task_store
-                        .set_batch_status(active.id, BatchStatus::Archived)
-                        .await;
-                    log::info!(
-                        "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
-                        active.id
-                    );
-                }
-            }
-            None
+            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id).await
         }
         AgentRunStatus::Cancelled => {
             let _ = sink.send_event(RuntimeStreamEvent::Done).await;
@@ -92,6 +60,59 @@ where
                 .await;
             let _ = sink.send_event(RuntimeStreamEvent::Done).await;
             None
+        }
+    }
+}
+
+pub(crate) async fn run_stop_hook_before_finish<S>(
+    outcome: &AgentRunOutcome,
+    sink: &S,
+    hook_ui: &HookUi<S>,
+    hook_runner: &HookRunner,
+    session_id: &str,
+) -> Option<String>
+where
+    S: ChatEventSink,
+{
+    let stop_results = hook_ui
+        .run_json(
+            hook_runner,
+            HookEvent::Stop,
+            None,
+            HookData::Stop(StopHookData {
+                turns: outcome.turns,
+            }),
+        )
+        .await;
+    if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
+        let _ = sink
+            .send_event(RuntimeStreamEvent::SystemMessage(feedback.clone()))
+            .await;
+        return Some(feedback);
+    }
+    None
+}
+
+pub(crate) async fn finish_completed_loop<S>(
+    outcome: &AgentRunOutcome,
+    sink: &S,
+    task_store: &TaskStore,
+) where
+    S: ChatEventSink,
+{
+    let _ = sink
+        .send_event(RuntimeStreamEvent::DoneWithDuration(outcome.duration))
+        .await;
+
+    if let Some(active) = task_store.active_list().await {
+        if task_store.is_batch_completed(active.id).await {
+            task_store
+                .set_batch_status(active.id, BatchStatus::Archived)
+                .await;
+            log::info!(
+                "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
+                active.id
+            );
         }
     }
 }
