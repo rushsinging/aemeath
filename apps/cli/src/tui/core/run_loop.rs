@@ -146,6 +146,18 @@ impl App {
                 Cmd::SetCurrentTurn(turn) => {
                     crate::run_orchestration::set_current_turn(turn);
                 }
+                Cmd::FetchReminderRecap => {
+                    if let Some(ref ac) = self.agent_client {
+                        match ac.list_reminders().await {
+                            Ok(reminders) => {
+                                if let Some(line) = sdk::ReminderView::recap_line(&reminders) {
+                                    let _ = ui_tx.send(super::event::UiEvent::ReminderRecap(line));
+                                }
+                            }
+                            Err(e) => log::warn!("fetch reminder recap failed: {e}"),
+                        }
+                    }
+                }
             }
 
             self.input.just_pasted = false;

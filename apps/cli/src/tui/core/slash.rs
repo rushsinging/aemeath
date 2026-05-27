@@ -1,7 +1,6 @@
 mod dialog;
 mod help;
 mod help_display;
-mod memory;
 mod reflection;
 mod save;
 mod suggestions;
@@ -131,7 +130,21 @@ impl super::App {
                     Some("remind" | "reminder" | "reminders")
                 ) =>
             {
-                self.show_memory_reminders();
+                if let Some(ref ac) = self.agent_client {
+                    match ac.list_reminders().await {
+                        Ok(reminders) => {
+                            if let Some(tx) = &ui_tx {
+                                let _ = tx
+                                    .send(UiEvent::MemoryList(reminders))
+                                    .await;
+                            }
+                        }
+                        Err(e) => {
+                            self.output_area
+                                .push_error(&format!("获取 reminders 失败: {e}"));
+                        }
+                    }
+                }
             }
             "/paste" => {
                 let result = if let Some(agent_client) = self.agent_client.clone() {

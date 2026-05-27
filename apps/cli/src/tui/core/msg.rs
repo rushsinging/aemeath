@@ -36,4 +36,6 @@ pub(crate) enum Cmd {
     ProcessImageFile(String),
     /// 记录当前 turn（由 CLI 边界转发给 runtime bootstrap）。
     SetCurrentTurn(usize),
+    /// 异步获取 session reminders 并推送 recap 行。
+    FetchReminderRecap,
 }

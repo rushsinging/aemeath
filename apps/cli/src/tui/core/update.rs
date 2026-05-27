@@ -5,7 +5,6 @@ mod enter;
 mod key;
 mod key_nav;
 mod key_scroll;
-mod reminder_recap;
 mod spawn_context;
 mod spinner;
 mod ui_event;

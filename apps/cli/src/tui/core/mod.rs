@@ -1,11 +1,9 @@
 pub mod event;
-mod reminder;
 mod resize;
 mod run_loop;
 mod runtime;
 pub mod state;
 
-use crate::tui::core::reminder::SessionReminders;
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -33,8 +31,6 @@ pub struct App {
     pub layout: UiLayout,
     // 业务数据（非 UI 状态）
     pub skills: std::collections::HashMap<String, sdk::SkillView>,
-    /// 本地 session reminders（与 Runtime 独立实例，仅用于同步展示）
-    pub session_reminders: Arc<std::sync::Mutex<SessionReminders>>,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
 }
 
@@ -158,7 +154,6 @@ impl App {
             },
             layout: UiLayout::default(),
             skills: std::collections::HashMap::new(),
-            session_reminders: Arc::new(std::sync::Mutex::new(SessionReminders::new())),
             agent_client: None,
         }
     }

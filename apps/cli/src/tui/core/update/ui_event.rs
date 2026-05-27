@@ -15,6 +15,7 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
+        let mut cmd_override = Cmd::None;
         match ev {
             UiEvent::Text(text) => {
                 if self.chat.tool_call_active {
@@ -183,6 +184,21 @@ impl App {
                     },
                     pending_slash: None,
                 };
+            }
+            UiEvent::ReminderRecap(line) => {
+                self.output_area.push_system(&line);
+            }
+            UiEvent::MemoryList(reminders) => {
+                if reminders.is_empty() {
+                    self.output_area.push_system("当前没有 session reminder。");
+                } else {
+                    self.output_area.push_system("Session Reminders:");
+                    for r in &reminders {
+                        let marker = if r.done { "✓" } else { "□" };
+                        self.output_area
+                            .push_system(&format!("{marker} {} {}", r.id, r.content));
+                    }
+                }
             }
             UiEvent::ReflectionStarted => {
                 self.output_area.start_spinner();
@@ -359,7 +375,8 @@ impl App {
                     self.input_area.is_empty(),
                     input_queue_preview(&self.input.input_queue)
                 );
-                self.handle_done(ui_tx, None);
+                let cmd = self.handle_done(ui_tx, None);
+                cmd_override = cmd;
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -377,12 +394,12 @@ impl App {
                     self.input_area.is_empty(),
                     input_queue_preview(&self.input.input_queue)
                 );
-                self.handle_done(ui_tx, Some(elapsed));
+                cmd_override = self.handle_done(ui_tx, Some(elapsed));
             }
         }
 
         UpdateResult {
-            cmd: Cmd::None,
+            cmd: cmd_override,
             pending_slash: None,
         }
     }

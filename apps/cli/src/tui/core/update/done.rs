@@ -1,4 +1,5 @@
 use crate::tui::core::{App, UiEvent};
+use crate::tui::core::msg::Cmd;
 use tokio::sync::mpsc;
 
 pub(super) fn input_queue_preview(queue: &std::collections::VecDeque<String>) -> String {
@@ -20,7 +21,7 @@ impl App {
         &mut self,
         ui_tx: &mpsc::Sender<UiEvent>,
         elapsed: Option<std::time::Duration>,
-    ) {
+    ) -> Cmd {
         if let Some(dur) = elapsed {
             self.output_area.push_done(dur);
         }
@@ -30,7 +31,12 @@ impl App {
         self.chat.active_tool_call_ids.clear();
         self.chat.is_processing = false;
         self.status_bar.set_success("Ready");
-        self.push_session_reminder_recap();
         self.maybe_auto_reflect(ui_tx);
+        // 异步获取 reminders 并推送 recap 行
+        if self.agent_client.is_some() {
+            Cmd::FetchReminderRecap
+        } else {
+            Cmd::None
+        }
     }
 }

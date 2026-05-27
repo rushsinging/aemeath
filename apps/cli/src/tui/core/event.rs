@@ -52,6 +52,10 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
+    /// session reminder recap 行（每轮结束后由 run_loop 异步获取并回传）。
+    ReminderRecap(String),
+    /// /memory 命令的 reminder 列表回传。
+    MemoryList(Vec<sdk::ReminderView>),
     ReflectionStarted,
     ReflectionUsage {
         input: u32,
