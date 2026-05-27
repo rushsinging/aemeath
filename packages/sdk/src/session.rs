@@ -77,6 +77,8 @@ pub struct SessionSnapshot {
     pub repaired: usize,
     /// 会话 workspace 上下文（若存在）。
     pub workspace: Option<crate::WorkspaceContextView>,
+    /// 任务快照（Session 恢复时用于重建任务状态）。
+    pub tasks: Option<serde_json::Value>,
 }
 
 /// Session 列表中的摘要条目。

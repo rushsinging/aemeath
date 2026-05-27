@@ -1,7 +1,6 @@
 mod args;
 mod model_selection;
 mod run_orchestration;
-mod runtime_adapter;
 mod sessions_command;
 mod tui;
 
@@ -16,12 +15,14 @@ async fn main() {
 
     match cli.command {
         Some(Commands::Models { json }) => {
-            let client = runtime_adapter::agent_client_from_args(Args::from(cli.run_args).into())
-                .await
-                .unwrap_or_else(|e| {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                });
+            let client = run_orchestration::agent_client_from_args(
+                sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            });
             model_selection::run_models_command(client, json).await;
         }
         Some(Commands::Sessions {
@@ -29,12 +30,14 @@ async fn main() {
             json,
             limit,
         }) => {
-            let client = runtime_adapter::agent_client_from_args(Args::from(cli.run_args).into())
-                .await
-                .unwrap_or_else(|e| {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                });
+            let client = run_orchestration::agent_client_from_args(
+                sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            });
             sessions_command::run_sessions_command(client, delete, json, limit).await;
         }
         Some(Commands::Run { run_args }) => {

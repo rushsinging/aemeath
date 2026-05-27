@@ -144,7 +144,7 @@ impl App {
                     }
                 }
                 Cmd::SetCurrentTurn(turn) => {
-                    crate::runtime_adapter::set_current_turn(turn);
+                    crate::run_orchestration::set_current_turn(turn);
                 }
             }
 

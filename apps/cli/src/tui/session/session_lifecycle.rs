@@ -1,5 +1,4 @@
 use crate::tui::core::App;
-use ::runtime::api::core::tool::ToolRegistry;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -9,94 +8,37 @@ use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-fn status_context_for_runtime_workspace(
-    workspace: ::runtime::api::session::WorkspaceContext,
-) -> crate::tui::core::UiEvent {
-    let workspace = sdk::WorkspaceContextView {
-        path_base: std::path::PathBuf::from(&workspace.path_base),
-        working_root: std::path::PathBuf::from(&workspace.working_root),
-        context_stack: workspace
-            .context_stack
-            .into_iter()
-            .map(|entry| sdk::WorkspaceStackEntryView {
-                path_base: std::path::PathBuf::from(entry.path_base),
-                working_root: std::path::PathBuf::from(entry.working_root),
-            })
-            .collect(),
-    };
-    crate::tui::core::status_context_for_workspace(workspace)
-}
-
-fn message_to_sdk(message: ::runtime::api::core::message::Message) -> sdk::ChatMessage {
-    sdk::ChatMessage {
-        role: match message.role {
-            ::runtime::api::core::message::Role::User => "user".to_string(),
-            ::runtime::api::core::message::Role::Assistant => "assistant".to_string(),
-        },
-        content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
-    }
-}
-
 impl App {
-    /// Run the TUI event loop
+    /// Run the TUI event loop.
+    /// `agent_client` 是唯一的 runtime 注入点；`resume_id` 由 CLI 启动参数决定。
     pub async fn run(
         &mut self,
-        client: Arc<::runtime::api::provider::client::LlmClient>,
-        _registry: Arc<ToolRegistry>,
-        _system_blocks: Vec<::runtime::api::provider::types::SystemBlock>,
-        _system_prompt_text: String,
-        _user_context: String,
-        context_size: usize,
-        _verbose: bool,
-        _agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
-        allow_all: bool,
+        agent_client: Arc<dyn sdk::AgentClient>,
         resume_id: Option<String>,
-        task_store: Arc<::runtime::api::core::task::TaskStore>,
-        _max_tool_concurrency: usize,
-        _max_agent_concurrency: usize,
-        _agent_semaphore: Arc<tokio::sync::Semaphore>,
     ) -> io::Result<()> {
-        self.status_bar
-            .set_permission_mode(if allow_all { "AllowAll" } else { "AskMe" });
-        self.chat.context_size = context_size;
-        self.status_bar.set_context_size(context_size as u64);
-        self.status_bar.set_thinking(client.is_reasoning());
-
         // Resume existing session if requested
         if let Some(ref id) = resume_id {
-            match ::runtime::api::session::load_session(id).await {
+            match agent_client.load_session(id).await {
                 Ok(s) => {
-                    let msg_count = s.messages.len();
-                    self.session.session_created_at = Some(s.created_at.clone());
-                    if let Some(workspace) = &s.workspace {
-                        let path_base = std::path::PathBuf::from(&workspace.path_base);
-                        let _working_root = std::path::PathBuf::from(&workspace.working_root);
-                        self.session.cwd = path_base.clone();
-                        if let crate::tui::core::event::UiEvent::WorkingDirectoryChanged(ctx) =
-                            status_context_for_runtime_workspace(workspace.clone())
-                        {
+                    let msg_count = s.message_count;
+                    self.session.session_created_at = s.created_at.clone();
+                    // 恢复 workspace 上下文
+                    if let Some(ref ws) = s.workspace {
+                        self.session.cwd = ws.path_base.clone();
+                        let ev = crate::tui::core::status_context_for_workspace(ws.clone());
+                        if let crate::tui::core::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
                             self.status_bar
                                 .set_context_paths(ctx.path_base, ctx.working_root);
                             self.status_bar
                                 .set_git_context(ctx.kind, ctx.branch.unwrap_or_default());
                         }
                     }
-                    // Restore task snapshot if present
-                    if let Some(snapshot) = s.tasks {
-                        task_store.restore(snapshot).await;
+                    // 恢复任务状态
+                    if let Some(tasks) = &s.tasks {
+                        let _ = agent_client.restore_tasks(tasks.clone()).await;
                     }
-                    let mut msgs = s.messages;
-                    ::runtime::api::core::message::sanitize_messages(&mut msgs);
-                    let trimmed = msg_count - msgs.len();
-                    // Check for deeper integrity issues (orphaned tool results
-                    // in the middle, role order violations, etc.)
-                    let integrity = ::runtime::api::core::message::check_message_integrity(&msgs);
-                    let auto_repaired = if integrity.has_issues() {
-                        ::runtime::api::core::message::deep_clean_messages(&mut msgs)
-                    } else {
-                        0
-                    };
-                    let msgs: Vec<_> = msgs.into_iter().map(message_to_sdk).collect();
+                    // 渲染已恢复的消息（已由 runtime 完成清洗）
+                    let msgs = s.messages;
                     for i in 0..msgs.len() {
                         let subsequent = if i + 1 < msgs.len() {
                             Some(&msgs[i + 1])
@@ -110,16 +52,16 @@ impl App {
                         "[resumed session {} ({} messages)]",
                         id, msg_count
                     ));
-                    if trimmed > 0 {
+                    if s.trimmed > 0 {
                         self.output_area.push_system(&format!(
                             "[trimmed {} incomplete tool-call message(s)]",
-                            trimmed
+                            s.trimmed
                         ));
                     }
-                    if auto_repaired > 0 {
+                    if s.repaired > 0 {
                         self.output_area.push_system(&format!(
                             "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
-                            auto_repaired
+                            s.repaired
                         ));
                     }
                 }
@@ -152,22 +94,17 @@ impl App {
 
         // Auto-save session on exit
         if !self.chat.messages.is_empty() {
-            if let Some(agent_client) = &self.agent_client {
-                if let Err(e) = agent_client
-                    .sync_current_messages(self.chat.messages.clone())
-                    .await
-                {
-                    log::warn!("failed to sync session messages: {e}");
-                }
-                if let Err(e) = agent_client.save_current_session().await {
-                    log::warn!("failed to auto-save session: {e}");
-                }
-            } else {
-                log::warn!("failed to auto-save session: SDK agent client is unavailable");
+            if let Err(e) = agent_client
+                .sync_current_messages(self.chat.messages.clone())
+                .await
+            {
+                log::warn!("failed to sync session messages: {e}");
+            }
+            if let Err(e) = agent_client.save_current_session().await {
+                log::warn!("failed to auto-save session: {e}");
             }
         }
 
-        // Run SessionEnd hooks: display system_message in the output area
         disable_raw_mode()?;
         execute!(
             terminal.backend_mut(),

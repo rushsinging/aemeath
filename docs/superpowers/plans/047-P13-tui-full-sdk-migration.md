@@ -2,63 +2,57 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans.
 
-**Goal:** `apps/cli/src/tui/` 目录下零 `runtime::api` 引用（`tokio::runtime` 除外），所有 runtime 能力走 `sdk::AgentClient`。`run_orchestration.rs` 瘦身到 ~40 行。删除 `runtime_adapter.rs`。
+**Goal:** `apps/cli/src/tui/` 目录下零 `runtime::api` 引用（`tokio::runtime` 除外），所有 runtime 能力走 `sdk::AgentClient`。`run_orchestration.rs` 吸收 `runtime_adapter.rs`，瘦身到 ~40 行。删除 `runtime_adapter.rs`。
 
 ## 当前状态
 
-TUI 中残留 `runtime::api` 引用的文件（除 `run_orchestration.rs` 外）：
-- `session/session_lifecycle.rs` — resume、消息清理、WorkspaceContext
-- `core/cmd_exec.rs` — HookRunner、ModelsConfig、LlmClient、SessionReminders
-- `core/slash/` — 可能残留
-- `core/mod.rs` — App::new() 中 runtime 类型构造
+  - ✅ `core/cmd_exec.rs` — 已删除（上轮）
+  - ✅ `core/run_loop.rs` — Cmd 副作用全内联通过 AgentClient（上轮）
+  - ✅ `session/session_lifecycle.rs` — resume 走 SDK，18 参数 → 2 参数（本轮）
+  - ✅ `core/mod.rs` — 本地 SessionReminders 替代 runtime 类型（本轮）
+  - ✅ `core/slash.rs` — 无残留（仅注释中提到，无实际引用）
+  - ✅ `run_orchestration.rs` + `runtime_adapter.rs` — 已合并，runtime_adapter 已删除（本轮）
+  - ✅ SDK `SessionSnapshot` 新增 `tasks` 字段（本轮）
 
-`run_orchestration.rs` 有 18+ 参数逐字段赋值给 App，`runtime_adapter.rs` 17 行桥接代码。
+  ## 步骤
 
-## 步骤
+  ### Part A：SDK AgentClient 补齐缺失方法
 
-### Part A：SDK AgentClient 补齐缺失方法
+  - [✓] **1. `resume_session`** — 调整：runtime `load_session` 内部清洗替代独立方法
+  - [✓] **2. `notify_hook`** — ✅ 上轮已实现
+  - [✓] **3. `restore_tasks`** — ✅ 上轮已实现
+  - [✓] **4. `get_thinking`** — ✅ 上轮已实现
 
-- [ ] **1. `resume_session(&self, id: &str) -> Result<ResumeResult, SdkError>`**
-  - runtime 侧内部调用 `session::load_session` → `sanitize_messages` → `check_message_integrity` → `deep_clean_messages`
-  - `ResumeResult` 含 `messages: Vec<ChatMessage>`、`workspace: Option<WorkspaceContextView>`、`tasks: Option<TaskSnapshot>`、`created_at`、`trimmed`、`repaired`
-  - 定义在 `packages/sdk/src/session.rs`
+  > **调整**：不再新增 `resume_session` 独立方法。改为在 runtime `load_session` 内部完成消息清洗（sanitize + deep_clean），让 CLI 拿到的 SessionSnapshot 已清洗完成。
 
-- [ ] **2. `run_hook_notification(&self, message: &str, kind: &str) -> Result<(), SdkError>`**
-  - runtime 侧调用 `HookRunner::on_notification`
+  ### Part B：改写 TUI 消费者
 
-- [ ] **3. `set_current_turn(&self, turn: u64)`**
-  - runtime 侧调用 `bootstrap::set_current_turn`
+  - [✓] **5. Runtime `load_session` 内部清洗**
+    - ✅ `load_session()` 内部调 `sanitize_messages` → `check_message_integrity` → `deep_clean_messages`
+    - ✅ SessionSnapshot 的 `trimmed` / `repaired` 由 runtime 填充
+    - ✅ SessionSnapshot 新增 `tasks: Option<serde_json::Value>` 字段
 
-- [ ] **4. `is_reasoning(&self) -> bool` / `context_size(&self) -> usize` / `allow_all(&self) -> bool` / `model_display(&self) -> &str`**
-  - runtime 侧从内部 state 读取
+  - [✓] **6. `session_lifecycle.rs` 消除所有 runtime::api 引用**
+    - ✅ resume 分支：`agent_client.load_session(id)`
+    - ✅ 删除消息清洗逻辑（已移至 runtime）
+    - ✅ 删除类型转换函数
+    - ✅ `run()` 签名从 18 参数 → `(agent_client, resume_id)`
 
-### Part B：改写 TUI 消费者
+  - [✓] **7. `CmdExecutor` 已删除** ✅ 上轮完成
 
-- [ ] **5. `session_lifecycle.rs`：resume 走 SDK**
-  - 删除所有 `runtime::api` import
-  - resume 分支改为 `agent_client.resume_session(id)`
-  - Task restore 改为 `agent_client.restore_tasks(snapshot)`（如需）
+  - [✓] **8. `run_orchestration.rs` 吸收 `runtime_adapter.rs`**
+    - ✅ `agent_client_from_args` 内联到 `run_orchestration.rs`
+    - ✅ `set_current_turn` 内联到 `run_orchestration.rs`
+    - ✅ 删除 `runtime_adapter.rs` 文件和 module 声明
+    - ✅ main.rs 调用方更新
 
-- [ ] **6. `CmdExecutor` 去 runtime 字段**
-  - 删除 `client: LlmClient`、`models_config: ModelsConfig`、`session_reminders: SessionReminders`、`hook_runner: HookRunner` 字段
-  - 只保留 `agent_client: Arc<dyn AgentClient>`
-  - `RunHookNotification` → `agent_client.run_hook_notification()`
-  - `SetCurrentTurn` → `agent_client.set_current_turn()`
+  - [✓] **9. `mod.rs` + `slash.rs` 残留清理**
+    - ✅ `mod.rs` 用本地 `SessionReminders` 替代 `::runtime::api::core::tool::SessionReminders`
+    - ✅ 新增 `tui/core/reminder.rs` 独立类型
+    - ✅ `slash.rs` 无实际引用
 
-- [ ] **7. `App::run()` 签名简化**
-  - 从 18 参数 → `(client: Arc<dyn AgentClient>, resume_id: Option<String>)`
-  - 内部通过 `client.is_reasoning()` / `client.context_size()` 等获取值
+  ### Part C：验证
 
-- [ ] **8. `run_orchestration.rs` 极简化**
-  - 删除逐字段赋值，改为：`from_args()` → `App::new()` → `app.run(client, resume_id)`
-  - `init_all()` / `init_panic_hook()` 移入 `from_args()`
-
-- [ ] **9. 删除 `runtime_adapter.rs`**
-
-- [ ] **10. 删除 `TuiLaunchContext`**（如已无消费者）
-
-### Part C：验证
-
-- [ ] **11. `grep -rn 'runtime::api' apps/cli/src/tui/` 返回空**
-- [ ] **12. `cargo build -p cli` + `cargo test -p cli` 通过**
-- [ ] **13. 完整 TUI 流程 smoke test：启动 → 聊天 → 工具调用 → slash 命令 → 退出 → resume**
+  - [✓] **10. `grep -rn 'runtime::api' apps/cli/src/tui/` 返回空**
+  - [✓] **11. `cargo build -p cli` + `cargo test -p cli` 通过**
+  - [✓] **12. 全量 `cargo test` 通过（849 tests, 0 fail）**

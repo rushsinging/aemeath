@@ -20,6 +20,7 @@ impl sdk::AgentClient for BlockingReflectionClient {
             trimmed: 0,
             repaired: 0,
             workspace: None,
+            tasks: None,
         }
     }
 

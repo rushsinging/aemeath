@@ -771,6 +771,7 @@ impl AgentClient for AgentClientImpl {
             trimmed: 0,
             repaired: 0,
             workspace: None,
+            tasks: None,
         }
     }
 
@@ -934,17 +935,30 @@ impl AgentClient for AgentClientImpl {
     async fn load_session(&self, id: &str) -> Result<SessionSnapshot, SdkError> {
         match crate::api::session::load_session(id).await {
             Ok(session) => {
-                let messages: Vec<sdk::ChatMessage> = session
-                    .messages
+                let mut messages = session.messages;
+                let trimmed = {
+                    let before = messages.len();
+                    crate::api::core::message::sanitize_messages(&mut messages);
+                    before.saturating_sub(messages.len())
+                };
+                let repaired = {
+                    let integrity =
+                        crate::api::core::message::check_message_integrity(&messages);
+                    if integrity.has_issues() {
+                        crate::api::core::message::deep_clean_messages(&mut messages)
+                    } else {
+                        0
+                    }
+                };
+                let sdk_messages: Vec<sdk::ChatMessage> = messages
                     .into_iter()
                     .map(message_to_sdk)
                     .collect();
-                let count = messages.len();
-                let total_tokens: u64 = messages
+                let count = sdk_messages.len();
+                let total_tokens: u64 = sdk_messages
                     .iter()
                     .map(|m| {
                         let text = m.text_content();
-                        // rough char-based estimate
                         text.len() as u64 / 4
                     })
                     .sum();
@@ -952,11 +966,14 @@ impl AgentClient for AgentClientImpl {
                     id: session.id,
                     message_count: count,
                     total_tokens,
-                    messages,
+                    messages: sdk_messages,
                     created_at: Some(session.created_at),
-                    trimmed: 0,
-                    repaired: 0,
+                    trimmed,
+                    repaired,
                     workspace: None,
+                    tasks: session
+                        .tasks
+                        .map(|t| serde_json::to_value(t).unwrap_or_default()),
                 })
             }
             Err(e) => Err(SdkError::Internal(format!(
