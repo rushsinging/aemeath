@@ -18,14 +18,12 @@ pub struct ExitWorktreeTool;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EnterWorktreeInput {
-    /// worktree 根目录路径（绝对或相对路径）
-    pub path: String,
-    /// 目标路径不存在时创建的新分支名
+    /// worktree 根目录路径（绝对或相对路径）；省略时从 branch 推导
+    #[serde(default)]
+    pub path: Option<String>,
+    /// 目标路径不存在时创建的新分支名；path 省略时必填
     #[serde(default)]
     pub branch: Option<String>,
-    /// 目标路径不存在时创建 worktree 的基线，默认 main
-    #[serde(default)]
-    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,9 +70,9 @@ impl Tool for EnterWorktreeTool {
     }
 
     fn description(&self) -> &'static str {
-        "进入指定的 git worktree 目录，将当前工作上下文压栈保存。\
-           如果目标路径不存在，本工具会自动执行 git worktree add 创建 worktree 后再进入；\
-           branch 可选，省略时从 path basename 推导为 worktree/<name>，base 默认 main。\
+        "进入或创建 git worktree 目录，将当前工作上下文压栈保存。\
+           path 可选：省略时从 branch 推导为 .worktrees/<安全分支名>，其中路径分隔符和敏感字符会替换为 -。\
+           如果目标路径不存在，本工具会自动基于 main 执行 git worktree add 创建 worktree 后再进入。\
            开 worktree 时必须调用本工具，NEVER 在主 checkout 中用 git checkout -b 或 git switch -c 代替 worktree。\
            使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree \
            进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。\
@@ -88,18 +86,14 @@ impl Tool for EnterWorktreeTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "worktree 根目录路径（绝对或相对路径）。路径不存在时会自动创建 worktree"
+                    "description": "可选：worktree 根目录路径（绝对或相对路径）。省略时从 branch 推导为 .worktrees/<安全分支名>"
                 },
                 "branch": {
                     "type": "string",
-                    "description": "目标路径不存在时创建的新分支名。进入已存在 worktree 时可省略；自动创建且省略时从 path basename 推导为 worktree/<name>"
-                },
-                "base": {
-                    "type": "string",
-                    "description": "目标路径不存在时创建 worktree 的基线，默认 main"
+                    "description": "可选：目标路径不存在时创建的新分支名；path 省略时必须提供。创建时固定基于 main"
                 }
             },
-            "required": ["path"]
+            "required": []
         })
     }
 
@@ -109,18 +103,24 @@ impl Tool for EnterWorktreeTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
+        let display_target = args.path.clone().unwrap_or_else(|| {
+            args.branch
+                .clone()
+                .map(|branch| format!("branch {branch}"))
+                .unwrap_or_else(|| "未指定目标".to_string())
+        });
+
         match worktree_ops::enter_worktree(
             ctx,
-            PathBuf::from(&args.path),
+            args.path.as_ref().map(PathBuf::from),
             args.branch.clone(),
-            args.base.clone(),
         ) {
             Ok(_snapshot) => {
                 let path_base = ctx.current_path_base();
                 let working_root = ctx.current_working_root();
                 let branch = get_current_branch(&working_root);
                 ToolResult::success(format_workspace_context_result(
-                    &format!("已进入 worktree：{}", args.path),
+                    &format!("已进入 worktree：{}", display_target),
                     &branch,
                     &path_base,
                     &working_root,
@@ -173,7 +173,7 @@ impl Tool for ExitWorktreeTool {
 
         if let Some(path) = args.path {
             // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match worktree_ops::enter_worktree(ctx, PathBuf::from(&path), None, None) {
+            match worktree_ops::enter_worktree(ctx, Some(PathBuf::from(&path)), None) {
                 Ok(_) => {
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
                     let path_base = ctx.current_path_base();
@@ -228,11 +228,8 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["path"]["type"], "string");
         assert_eq!(schema["properties"]["branch"]["type"], "string");
-        assert_eq!(schema["properties"]["base"]["type"], "string");
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&Value::String("path".to_string())));
+        assert!(schema["properties"].get("base").is_none());
+        assert!(schema["required"].as_array().unwrap().is_empty());
     }
 
     #[test]
