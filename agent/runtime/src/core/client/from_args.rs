@@ -18,6 +18,8 @@ use crate::utils::bootstrap::{
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use crate::core::port::ChatRuntimeContext;
+use crate::core::port::ProviderInfoPort;
+use crate::utils::adapter::LlmClientAdapter;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -146,10 +148,11 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
+    let client_adapter = LlmClientAdapter::new(client.clone());
     let prompt_context = PromptContext::new(
         &cwd,
-        Some(client.provider_name()),
-        Some(client.model_name()),
+        Some(client_adapter.provider_name()),
+        Some(client_adapter.model_name()),
     );
     let prompt_parts =
         build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;

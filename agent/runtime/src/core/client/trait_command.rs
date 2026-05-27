@@ -4,6 +4,8 @@ use sdk::{ClipboardImageView, ModelSummary, ReflectionOutputView, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::api::core::config::ConfigManager;
+use crate::core::port::{HookNotificationPort, ProviderInfoPort};
+use crate::utils::adapter::{HookRunnerAdapter, LlmClientAdapter};
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -143,9 +145,10 @@ pub(super) async fn switch_model_impl(
 
 pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool>) -> Result<bool> {
     let client = me.inner.current_client.read().unwrap().clone();
-    let current = client.is_reasoning();
+    let adapter = LlmClientAdapter::new(client);
+    let current = adapter.is_reasoning();
     let new_state = desired.unwrap_or(!current);
-    client.set_reasoning(new_state);
+    adapter.set_reasoning(new_state);
     Ok(new_state)
 }
 
@@ -174,7 +177,8 @@ pub(super) async fn notify_hook_impl(
     kind: &str,
 ) -> Result<()> {
     if let Some(ref runner) = me.inner.hook_runner {
-        let _ = runner.on_notification(message, kind).await;
+        let adapter = HookRunnerAdapter::new(runner.clone());
+        adapter.on_notification(message, kind).await;
     }
     Ok(())
 }
@@ -282,5 +286,6 @@ pub(super) async fn complete_reminder_impl(me: &AgentClientImpl, id: &str) -> Re
 
 pub(super) async fn get_thinking_impl(me: &AgentClientImpl) -> Result<bool> {
     let client = me.inner.current_client.read().unwrap().clone();
-    Ok(client.is_reasoning())
+    let adapter = LlmClientAdapter::new(client);
+    Ok(adapter.is_reasoning())
 }
