@@ -1,11 +1,14 @@
+//! 结构化 JSON 日志写入器（input/output/tool 三文件）。
+//!
+//! JsonLogger 通过 `new()` 接受 `logs_dir`, `max_bytes`, `max_backups`，
+//! 不再依赖 `share::config::logging::LoggingConfig`。
+
 use serde_json::json;
-use share::config::logging::LoggingConfig;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::rotation::rotate_if_needed;
-use super::rotation::timestamp_rfc3339;
+use super::rotation::{rotate_if_needed, timestamp_rfc3339};
 
 pub struct JsonLogger {
     input: BufWriter<File>,
@@ -15,23 +18,29 @@ pub struct JsonLogger {
     output_path: PathBuf,
     tool_path: PathBuf,
     session_id: String,
-    config: LoggingConfig,
+    max_bytes: u64,
+    max_backups: usize,
 }
 
 impl JsonLogger {
     /// 创建 JsonLogger，自动创建日志目录并打开三个文件。
     ///
     /// 如果目录不存在则创建。文件以 append + create 模式打开。
-    pub fn new(session_id: &str, logs_dir: &Path, config: &LoggingConfig) -> io::Result<Self> {
+    pub fn new(
+        session_id: &str,
+        logs_dir: &Path,
+        max_bytes: u64,
+        max_backups: usize,
+    ) -> io::Result<Self> {
         fs::create_dir_all(logs_dir)?;
 
         let input_path = logs_dir.join("input.log");
         let output_path = logs_dir.join("output.log");
         let tool_path = logs_dir.join("tool.log");
 
-        rotate_if_needed(&input_path, config.max_bytes, config.max_backups)?;
-        rotate_if_needed(&output_path, config.max_bytes, config.max_backups)?;
-        rotate_if_needed(&tool_path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(&input_path, max_bytes, max_backups)?;
+        rotate_if_needed(&output_path, max_bytes, max_backups)?;
+        rotate_if_needed(&tool_path, max_bytes, max_backups)?;
 
         let input = BufWriter::new(
             OpenOptions::new()
@@ -60,7 +69,8 @@ impl JsonLogger {
             output_path,
             tool_path,
             session_id: session_id.to_string(),
-            config: config.clone(),
+            max_bytes,
+            max_backups,
         })
     }
 
@@ -82,7 +92,8 @@ impl JsonLogger {
             model,
             data,
             &self.session_id,
-            &self.config,
+            self.max_bytes,
+            self.max_backups,
         )
     }
 
@@ -104,7 +115,8 @@ impl JsonLogger {
             model,
             data,
             &self.session_id,
-            &self.config,
+            self.max_bytes,
+            self.max_backups,
         )
     }
 
@@ -126,7 +138,8 @@ impl JsonLogger {
             model,
             data,
             &self.session_id,
-            &self.config,
+            self.max_bytes,
+            self.max_backups,
         )
     }
 
@@ -148,7 +161,8 @@ impl JsonLogger {
             model,
             data,
             &self.session_id,
-            &self.config,
+            self.max_bytes,
+            self.max_backups,
         )
     }
 }
@@ -163,9 +177,10 @@ fn write_role_entry(
     model: &str,
     data: serde_json::Value,
     session_id: &str,
-    config: &LoggingConfig,
+    max_bytes: u64,
+    max_backups: usize,
 ) -> io::Result<()> {
-    check_rotate(writer, path, config)?;
+    check_rotate(writer, path, max_bytes, max_backups)?;
 
     let entry = json!({
         "ts": timestamp_rfc3339(),
@@ -188,14 +203,15 @@ fn write_role_entry(
 fn check_rotate(
     writer: &mut BufWriter<File>,
     path: &Path,
-    config: &LoggingConfig,
+    max_bytes: u64,
+    max_backups: usize,
 ) -> io::Result<()> {
     let need_rotate = fs::metadata(path)
-        .map(|m| m.len() >= config.max_bytes)
+        .map(|m| m.len() >= max_bytes)
         .unwrap_or(false);
     if need_rotate {
         writer.flush()?;
-        rotate_if_needed(path, config.max_bytes, config.max_backups)?;
+        rotate_if_needed(path, max_bytes, max_backups)?;
         *writer = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
     }
     Ok(())

@@ -1,8 +1,12 @@
+//! 纯文本 + JSON 行日志写入。
+//!
+//! 所有写文件函数通过 `base_dir: &Path` 参数传入日志根目录，
+//! 不再硬编码全局路径。
+
 use serde_json::json;
-use share::config::paths;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::rotation::{prepare_log_path, timestamp_rfc3339};
 
@@ -29,27 +33,23 @@ impl LogFile {
     }
 }
 
-pub fn log_dir() -> PathBuf {
-    paths::global_logs_dir()
+pub fn log_path(base_dir: &Path, log_file: LogFile) -> PathBuf {
+    base_dir.join(log_file.file_name())
 }
 
-pub fn log_path(log_file: LogFile) -> PathBuf {
-    log_dir().join(log_file.file_name())
-}
-
-pub fn prepare_log_file(log_file: LogFile) -> io::Result<PathBuf> {
-    let path = log_path(log_file);
+pub fn prepare_log_file(base_dir: &Path, log_file: LogFile) -> io::Result<PathBuf> {
+    let path = log_path(base_dir, log_file);
     prepare_log_path(&path)?;
     Ok(path)
 }
 
-pub fn open_append(log_file: LogFile) -> io::Result<File> {
-    let path = prepare_log_file(log_file)?;
+pub fn open_append(base_dir: &Path, log_file: LogFile) -> io::Result<File> {
+    let path = prepare_log_file(base_dir, log_file)?;
     OpenOptions::new().create(true).append(true).open(path)
 }
 
-pub fn append_line(log_file: LogFile, line: &str) -> io::Result<()> {
-    let mut file = open_append(log_file)?;
+pub fn append_line(base_dir: &Path, log_file: LogFile, line: &str) -> io::Result<()> {
+    let mut file = open_append(base_dir, log_file)?;
     writeln!(file, "{}", line)
 }
 
@@ -79,16 +79,18 @@ pub fn format_text_line_with_turn(
 }
 
 pub fn append_text_line(
+    base_dir: &Path,
     log_file: LogFile,
     session_id: &str,
     level: &str,
     module: &str,
     message: &str,
 ) -> io::Result<()> {
-    append_text_line_with_turn(log_file, session_id, None, level, module, message)
+    append_text_line_with_turn(base_dir, log_file, session_id, None, level, module, message)
 }
 
 pub fn append_text_line_with_turn(
+    base_dir: &Path,
     log_file: LogFile,
     session_id: &str,
     turn: Option<usize>,
@@ -97,12 +99,14 @@ pub fn append_text_line_with_turn(
     message: &str,
 ) -> io::Result<()> {
     append_line(
+        base_dir,
         log_file,
         &format_text_line_with_turn(session_id, turn, level, module, message),
     )
 }
 
 pub fn append_json_line(
+    base_dir: &Path,
     log_file: LogFile,
     session_id: &str,
     level: &str,
@@ -110,10 +114,11 @@ pub fn append_json_line(
     message: &str,
     extra: serde_json::Value,
 ) -> io::Result<()> {
-    append_json_line_with_turn(log_file, session_id, None, level, module, message, extra)
+    append_json_line_with_turn(base_dir, log_file, session_id, None, level, module, message, extra)
 }
 
 pub fn append_json_line_with_turn(
+    base_dir: &Path,
     log_file: LogFile,
     session_id: &str,
     turn: Option<usize>,
@@ -131,5 +136,5 @@ pub fn append_json_line_with_turn(
         "message": message,
         "extra": extra,
     });
-    append_line(log_file, &value.to_string())
+    append_line(base_dir, log_file, &value.to_string())
 }

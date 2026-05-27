@@ -1,3 +1,6 @@
+//! 日志轮转与清理工具。
+//! 无外部依赖，仅使用 std 和 chrono。
+
 use chrono::{DateTime, Local};
 use std::fs::{self};
 use std::io;

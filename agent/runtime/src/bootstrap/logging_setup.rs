@@ -1,4 +1,5 @@
 use crate::api::storage::logging::{self, LogFile};
+use share::config::paths;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
@@ -34,7 +35,7 @@ pub fn init_logging(logging_config: &crate::api::core::config::LoggingConfig) {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if !use_stderr {
-        if let Ok(file) = logging::open_append(LogFile::Aemeath) {
+        if let Ok(file) = logging::open_append(&paths::global_logs_dir(), LogFile::Aemeath) {
             builder.target(env_logger::Target::Pipe(Box::new(file)));
         }
     }
