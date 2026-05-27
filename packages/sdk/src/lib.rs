@@ -33,5 +33,6 @@ pub use tui::{
     TuiLaunchContext,
 };
 pub use types::{
-    char_to_byte, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo, StrSlice, TaskSummary,
+    char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
+    StrSlice, TaskState, TaskSummary,
 };

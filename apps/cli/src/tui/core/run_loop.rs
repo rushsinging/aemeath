@@ -24,7 +24,7 @@ impl App {
         _agent_runner: Option<Arc<dyn ::runtime::api::core::tool::AgentRunner>>,
         _allow_all: bool,
         interrupted: Arc<AtomicBool>,
-        task_store: Arc<::runtime::api::core::task::TaskStore>,
+        _task_store: Arc<::runtime::api::core::task::TaskStore>,
         _max_tool_concurrency: usize,
         _max_agent_concurrency: usize,
         _agent_semaphore: Arc<tokio::sync::Semaphore>,
@@ -38,8 +38,7 @@ impl App {
 
         loop {
             // Update task status lines
-            self.update_task_status(&task_store, self.chat.is_processing)
-                .await;
+            self.update_task_status(self.chat.is_processing).await;
 
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();

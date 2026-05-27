@@ -1,6 +1,4 @@
 use super::App;
-use crate::tui::display::task_window;
-use std::sync::Arc;
 
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
@@ -41,54 +39,30 @@ impl App {
     }
 
     /// Update task status display in output area. Also runs lifecycle checks.
-    pub(crate) async fn update_task_status(
-        &mut self,
-        task_store: &Arc<::runtime::api::core::task::TaskStore>,
-        _is_processing: bool,
-    ) {
-        if let Some(agent_client) = &self.agent_client {
-            match agent_client.task_status().await {
-                Ok(view) => {
-                    self.output_area.set_task_status(view.lines);
-                    return;
-                }
-                Err(e) => log::warn!("failed to fetch SDK task status: {e}"),
-            }
-        }
-        let tasks = task_store.list_current_batch().await;
-        let active: Vec<_> = tasks
-            .iter()
-            .filter(|t| t.status != ::runtime::api::core::task::TaskStatus::Deleted)
-            .cloned()
-            .collect();
-
-        if active.is_empty() {
-            // Check lifecycle: if previous batch was completed and auto-cleared
+    pub(crate) async fn update_task_status(&mut self, _is_processing: bool) {
+        let Some(agent_client) = &self.agent_client else {
             self.output_area.set_task_status(Vec::new());
-        } else {
-            let display_map = task_store.get_batch_display_map().await;
-            let task_list_config = ::runtime::api::core::config::TaskListConfig::default();
-            let lines =
-                task_window::build_task_window(&active, &display_map, task_list_config.max_lines);
-            self.output_area.set_task_status(lines);
+            return;
+        };
+        match agent_client.task_status().await {
+            Ok(view) => self.output_area.set_task_status(view.lines),
+            Err(e) => log::warn!("failed to fetch SDK task status: {e}"),
         }
     }
 
     /// Refresh the cached session list for /resume autocomplete
     pub async fn refresh_session_cache(&mut self) {
-        let sessions = ::runtime::api::session::list_sessions().await;
-        self.session.cached_sessions = sessions
-            .iter()
-            .take(20)
-            .map(|s| {
-                let summary = build_session_summary(s);
-                (s.id.clone(), summary)
-            })
-            .collect();
+        if let Some(agent_client) = &self.agent_client {
+            if let Ok(sessions) = agent_client.list_sessions().await {
+                self.session.cached_sessions = sessions
+                    .iter()
+                    .take(20)
+                    .map(|s| {
+                        let summary = format!("{} [{}msg]", s.summary, s.message_count);
+                        (s.id.clone(), summary)
+                    })
+                    .collect();
+            }
+        }
     }
-}
-
-/// Build a one-line summary for a session, shown in /resume autocomplete
-fn build_session_summary(session: &::runtime::api::session::Session) -> String {
-    format!("{} [{}msg]", session.summary(), session.messages.len())
 }

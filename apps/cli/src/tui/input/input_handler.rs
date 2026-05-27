@@ -194,13 +194,24 @@ impl crate::tui::core::App {
             {
                 self.input.just_pasted = true;
                 let tx = ui_tx.clone();
+                let Some(agent_client) = self.agent_client.clone() else {
+                    let tx = ui_tx.clone();
+                    tokio::spawn(async move {
+                        tx.send(UiEvent::SystemMessage(
+                            "No SDK client available for clipboard image".to_string(),
+                        ))
+                        .await
+                        .ok();
+                    });
+                    return KeyResult::None;
+                };
                 tokio::spawn(async move {
                     tx.send(UiEvent::SystemMessage(
                         "[reading clipboard image...]".to_string(),
                     ))
                     .await
                     .ok();
-                    match ::runtime::api::image::read_clipboard_image().await {
+                    match agent_client.read_clipboard_image().await {
                         Ok(img) => {
                             let size = img.final_size;
                             tx.send(UiEvent::ClipboardImage(img)).await.ok();
