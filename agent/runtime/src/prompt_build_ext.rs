@@ -1,8 +1,8 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::api::core::config::Config;
-use crate::api::core::skill_ops::Skill;
 use crate::api::hook::hook::HookRunner;
+use crate::api::prompt::skill::Skill;
 use crate::bootstrap;
 
 pub async fn build_static_prompt(
