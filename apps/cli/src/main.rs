@@ -9,6 +9,8 @@ use clap::Parser;
 
 #[tokio::main]
 async fn main() {
+    ::runtime::api::bootstrap::init_panic_hook();
+
     let cli = Cli::parse();
 
     match cli.command {
