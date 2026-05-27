@@ -10,6 +10,7 @@
 | 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 活动中 | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
 | 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
+| 71 | TUI 渲染缓存越界 panic：`index out of bounds: the len is 10000 but the index is 10000` | 高 | 活动中 | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用了陈旧的 `render_start`/`render_end` 作为渲染区间端点，未随 `lines` 长度变化 clamp 到当前 `total` |
 ## 专案
 
 ### #69 worktree 中 LLM 仍尝试搜索主分支路径
@@ -60,6 +61,41 @@
 - 工具描述/项目指南中关于 worktree 工作路径的提示
 - EnterWorktree/ExitWorktree 上下文栈与 cwd 同步逻辑
 
+
+### #71 TUI 渲染缓存越界 panic（len 10000 / index 10000）
+
+**状态**：活动中
+
+**症状**：长会话中 TUI 直接崩溃，panic 信息：
+
+```text
+[PANIC] index out of bounds: the len is 10000 but the index is 10000 at apps/cli/src/tui/output_area/rendered_lines.rs:98:21
+```
+
+`rendered_lines.rs:98` 是 `collect_table_ranges` 外层循环 `while i < end { let line = &lines[i]; ... }`。`lines.len() == 10000`（等于 `MAX_LINES`），而 `i == 10000`，说明传入的 `end` 大于 `lines.len()`。
+
+**影响**：输出区累计行数达到上限（`output_area/types.rs: MAX_LINES = 10000`）后，任意触发渲染（滚动、流式追加、resize）都可能 panic，整个 TUI 进程崩溃退出。崩溃发生在正常 agent loop 收尾之前，**Stop hook（架构守卫 / 单测 / build）也因此来不及执行**，表现为"stop hook 没有生效"。
+
+**根因（假设）**：
+1. 输出区内容是上限 10000 行的 `VecDeque`（`content.rs`：超过 `MAX_LINES` 时从头部 pop）。
+2. `RenderedLineCache`（`rendered_cache.rs`）以行下标缓存渲染结果，并维护 `render_start` / `render_end` 渲染区间。
+3. `ensure_rendered` 的 dirty 分支用 `block_start` / `block_end`（均 ≤ `total`）调用 `render_range`，是安全的；但**增量分支**直接用 `self.render_start` / `self.render_end` 作为 `render_range` 的区间端点。当 `lines` 长度因到达上限或裁剪发生变化、而 `render_start` / `render_end` 仍是旧值（> 当前 `total`）时，`render_range` 收到 `end > lines.len()`，在 `collect_table_ranges` 处越界。
+4. `content_changed` 只 `truncate` 了 `cache`，没有同步 clamp `render_start` / `render_end`。
+
+**复现方向**：
+1. 制造超过 10000 行的输出（长会话或大量工具结果），使 `VecDeque` 持续从头部裁剪。
+2. 在裁剪发生后触发滚动 / resize / 流式追加，观察是否 panic。
+
+**修复方向**：
+1. `ensure_rendered` 在使用 `render_start` / `render_end` 作为渲染端点前，统一 clamp 到当前 `lines.len()`（`total`）。
+2. `content_changed` / `truncate` 时同步收缩 `render_start` / `render_end`，避免端点滞留旧值。
+3. 在 `render_range` / `collect_table_ranges` 入口对 `end` 做 `end.min(lines.len())` 防御，杜绝越界 panic。
+4. 补充回归：构造 `lines.len()` 缩小但 `render_start`/`render_end` 仍为旧值的缓存状态，断言 `ensure_rendered` 不 panic。
+
+**涉及路径**：
+- `apps/cli/src/tui/output_area/rendered_lines.rs`（`render_range` / `collect_table_ranges` 越界点）
+- `apps/cli/src/tui/output_area/rendered_cache.rs`（`ensure_rendered` 增量分支、`content_changed` 端点同步）
+- `apps/cli/src/tui/output_area/content.rs`、`types.rs`（`MAX_LINES` 裁剪逻辑）
 
 ### #66 ExitWorktree 带 path 参数报错"已在 worktree 中"
 
