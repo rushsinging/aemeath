@@ -11,7 +11,7 @@ import sys
 
 business_allow = {
       "cli": {"runtime", "sdk"},
-      "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk"},
+      "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},
       "share": set(),
       "project": {"share"},
       "policy": {"share"},
@@ -22,6 +22,7 @@ business_allow = {
       "hook": {"share"},
       "audit": {"share"},
       "sdk": set(),
+      "logging": set(),
     }
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"]))
