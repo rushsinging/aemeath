@@ -4,7 +4,6 @@ mod status_bar_format;
 mod status_bar_selection;
 
 use crate::tui::display::theme;
-use ::runtime::api::cost::format_tokens;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -225,12 +224,12 @@ impl StatusBar {
         }
         segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
         segments.push((
-            format!(" in {} ", format_tokens(self.input_tokens)),
+            format!(" in {} ", sdk::format_tokens(self.input_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
         segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
         segments.push((
-            format!(" out {} ", format_tokens(self.output_tokens)),
+            format!(" out {} ", sdk::format_tokens(self.output_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
         if self.tps > 0.0 {

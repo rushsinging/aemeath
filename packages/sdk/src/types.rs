@@ -144,6 +144,15 @@ pub struct StatusInfo {
     pub progress: Option<u8>,
 }
 
+/// 任务状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskState {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+}
+
 /// 任务摘要。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
@@ -151,8 +160,48 @@ pub struct TaskSummary {
     pub id: String,
     /// 任务标题。
     pub subject: String,
-    /// 任务状态。
+    /// 任务状态（兼容展示字符串）。
     pub status: String,
+    /// 类型化任务状态。
+    pub state: TaskState,
     /// 优先级。
     pub priority: String,
+    /// 负责人。
+    pub owner: Option<String>,
+    /// 更新时间戳。
+    pub updated_at: u64,
+}
+
+impl TaskSummary {
+    pub fn pending(id: impl Into<String>, subject: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            subject: subject.into(),
+            status: "pending".to_string(),
+            state: TaskState::Pending,
+            priority: "normal".to_string(),
+            owner: None,
+            updated_at: 0,
+        }
+    }
+}
+
+pub fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        let m = tokens as f64 / 1_000_000.0;
+        if m >= 10.0 || m.fract() < 0.05 {
+            format!("{m:.0}m")
+        } else {
+            format!("{m:.1}m")
+        }
+    } else if tokens >= 1_000 {
+        let k = tokens as f64 / 1_000.0;
+        if k >= 10.0 || k.fract() < 0.05 {
+            format!("{k:.0}k")
+        } else {
+            format!("{k:.1}k")
+        }
+    } else {
+        tokens.to_string()
+    }
 }

@@ -6,7 +6,9 @@
 //!   pending → 按 display_number 升序（稳定序）
 //! 窗口化：超出 max_lines 时截断并显示折叠提示
 
-use ::runtime::api::core::task::{Task, TaskStatus};
+#[cfg(test)]
+use sdk::{TaskState, TaskSummary};
+#[cfg(test)]
 use std::collections::HashMap;
 
 /// 构建 task 状态显示行（窗口化，含摘要行）。
@@ -20,8 +22,9 @@ use std::collections::HashMap;
 /// 3. 最多显示 `max_lines` 条 task 行
 /// 4. 超出部分折叠提示 `… +N more`
 /// 5. 空输入返回空 Vec
+#[cfg(test)]
 pub fn build_task_window(
-    tasks: &[Task],
+    tasks: &[TaskSummary],
     display_map: &HashMap<String, usize>,
     max_lines: usize,
 ) -> Vec<String> {
@@ -32,22 +35,22 @@ pub fn build_task_window(
     let total = tasks.len();
     let completed_count = tasks
         .iter()
-        .filter(|t| t.status == TaskStatus::Completed)
+        .filter(|t| t.state == TaskState::Completed)
         .count();
 
     let summary = format!("━━ Tasks: {}/{} ━━", completed_count, total);
     let mut lines = vec![summary];
 
-    let mut completed: Vec<&Task> = Vec::new();
-    let mut in_progress: Vec<&Task> = Vec::new();
-    let mut pending: Vec<&Task> = Vec::new();
+    let mut completed: Vec<&TaskSummary> = Vec::new();
+    let mut in_progress: Vec<&TaskSummary> = Vec::new();
+    let mut pending: Vec<&TaskSummary> = Vec::new();
 
     for t in tasks {
-        match t.status {
-            TaskStatus::Completed => completed.push(t),
-            TaskStatus::InProgress => in_progress.push(t),
-            TaskStatus::Pending => pending.push(t),
-            _ => {}
+        match t.state {
+            TaskState::Completed => completed.push(t),
+            TaskState::InProgress => in_progress.push(t),
+            TaskState::Pending => pending.push(t),
+            TaskState::Deleted => {}
         }
     }
 
@@ -58,7 +61,7 @@ pub fn build_task_window(
     // pending: 按 display_number 稳定序
     sort_by_display_number(&mut pending, display_map);
 
-    let ordered: Vec<&Task> = completed
+    let ordered: Vec<&TaskSummary> = completed
         .into_iter()
         .chain(in_progress.into_iter())
         .chain(pending.into_iter())
@@ -78,16 +81,18 @@ pub fn build_task_window(
     lines
 }
 
-fn sort_by_display_number(tasks: &mut [&Task], display_map: &HashMap<String, usize>) {
+#[cfg(test)]
+fn sort_by_display_number(tasks: &mut [&TaskSummary], display_map: &HashMap<String, usize>) {
     tasks.sort_by_key(|t| display_map.get(&t.id).copied().unwrap_or(usize::MAX));
 }
 
-fn format_task_line(t: &Task, display_map: &HashMap<String, usize>) -> String {
-    let icon = match t.status {
-        TaskStatus::Completed => "✓",
-        TaskStatus::InProgress => "■",
-        TaskStatus::Pending => "□",
-        _ => "?",
+#[cfg(test)]
+fn format_task_line(t: &TaskSummary, display_map: &HashMap<String, usize>) -> String {
+    let icon = match t.state {
+        TaskState::Completed => "✓",
+        TaskState::InProgress => "■",
+        TaskState::Pending => "□",
+        TaskState::Deleted => "?",
     };
     let display_id = display_map.get(&t.id).copied().unwrap_or(0);
     let owner = t
