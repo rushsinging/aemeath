@@ -46,7 +46,7 @@ Verification:
 - Create: `cli/src/application/chat.rs`
 - Modify: `cli/src/main.rs`
 
-- [ ] **Step 1: Create `cli/src/application/mod.rs`**
+- [x] **Step 1: Create `cli/src/application/mod.rs`**
 
 Create file with exactly:
 
@@ -54,7 +54,7 @@ Create file with exactly:
 pub(crate) mod chat;
 ```
 
-- [ ] **Step 2: Create failing tests in `cli/src/application/chat.rs`**
+- [x] **Step 2: Create failing tests in `cli/src/application/chat.rs`**
 
 Create file with exactly:
 
@@ -169,7 +169,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Register module in `cli/src/main.rs`**
+- [x] **Step 3: Register module in `cli/src/main.rs`**
 
 Change the top module list from:
 
@@ -186,7 +186,7 @@ mod application;
 mod cli;
 ```
 
-- [ ] **Step 4: Run targeted test**
+- [x] **Step 4: Run targeted test**
 
 Run:
 
@@ -196,7 +196,7 @@ cargo test -p aemeath-cli application::chat
 
 Expected: PASS. The output must include four passing tests from `application::chat`.
 
-- [ ] **Step 5: Run format check**
+- [x] **Step 5: Run format check**
 
 Run:
 
@@ -214,7 +214,7 @@ Expected: PASS with no diff.
 - Modify: `cli/src/application/chat.rs`
 - Modify: `cli/src/run_orchestration/runtime.rs`
 
-- [ ] **Step 1: Extend imports in `cli/src/application/chat.rs`**
+- [x] **Step 1: Extend imports in `cli/src/application/chat.rs`**
 
 Replace:
 
@@ -238,7 +238,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 ```
 
-- [ ] **Step 2: Add no-TUI dependency bundle and service method**
+- [x] **Step 2: Add no-TUI dependency bundle and service method**
 
 Append this code before `#[cfg(test)] mod tests`:
 
@@ -291,7 +291,7 @@ impl ChatApplicationService {
 }
 ```
 
-- [ ] **Step 3: Update `cli/src/run_orchestration/runtime.rs` imports**
+- [x] **Step 3: Update `cli/src/run_orchestration/runtime.rs` imports**
 
 Replace:
 
@@ -306,7 +306,7 @@ use crate::application::chat::{ChatApplicationService, ChatLaunchMode, ChatLaunc
 use crate::tui;
 ```
 
-- [ ] **Step 4: Replace `run_no_tui` body**
+- [x] **Step 4: Replace `run_no_tui` body**
 
 Replace the body of `run_no_tui` with:
 
@@ -346,7 +346,7 @@ Replace the body of `run_no_tui` with:
 }
 ```
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run:
 
@@ -356,7 +356,7 @@ cargo test -p aemeath-cli application::chat
 
 Expected: PASS.
 
-- [ ] **Step 6: Run compile check**
+- [x] **Step 6: Run compile check**
 
 Run:
 
@@ -374,7 +374,7 @@ Expected: PASS.
 - Modify: `cli/src/application/chat.rs`
 - Modify: `cli/src/run_orchestration/runtime.rs`
 
-- [ ] **Step 1: Add TUI dependency bundle and service method**
+- [x] **Step 1: Add TUI dependency bundle and service method**
 
 Append this code before `#[cfg(test)] mod tests` in `cli/src/application/chat.rs`:
 
@@ -438,7 +438,7 @@ impl ChatApplicationService {
 }
 ```
 
-- [ ] **Step 2: Update runtime imports**
+- [x] **Step 2: Update runtime imports**
 
 Replace the import from Task 2:
 
@@ -456,7 +456,7 @@ use crate::application::chat::{
 };
 ```
 
-- [ ] **Step 3: Replace `run_tui` body**
+- [x] **Step 3: Replace `run_tui` body**
 
 Replace the body of `run_tui` with:
 
@@ -500,7 +500,7 @@ Replace the body of `run_tui` with:
 }
 ```
 
-- [ ] **Step 4: Run targeted tests**
+- [x] **Step 4: Run targeted tests**
 
 Run:
 
@@ -510,7 +510,7 @@ cargo test -p aemeath-cli application::chat
 
 Expected: PASS.
 
-- [ ] **Step 5: Run compile check**
+- [x] **Step 5: Run compile check**
 
 Run:
 
@@ -527,7 +527,7 @@ Expected: PASS.
 **Files:**
 - Modify: `docs/feature/active.md`
 
-- [ ] **Step 1: Update #47 row in `docs/feature/active.md`**
+- [x] **Step 1: Update #47 row in `docs/feature/active.md`**
 
 Change the #47 row status text to include Phase 1 implementation. The row should keep the existing design summary and add this sentence at the end of the Notes column:
 
@@ -535,7 +535,7 @@ Change the #47 row status text to include Phase 1 implementation. The row should
 Phase 1 开始落地 COLA application service 薄入口边界：CLI no-TUI 与 TUI 主入口最外层将通过 ChatApplicationService 分发到现有 runtime，不重写 agent loop。
 ```
 
-- [ ] **Step 2: Run full format and tests**
+- [x] **Step 2: Run full format and tests**
 
 Run:
 
@@ -547,7 +547,7 @@ cargo test
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run Stop hook command 1**
+- [x] **Step 3: Run Stop hook command 1**
 
 Run:
 
@@ -557,7 +557,7 @@ Run:
 
 Expected: PASS. This mirrors `.agents/aemeath.json` Stop hook line 6.
 
-- [ ] **Step 4: Run Stop hook command 2**
+- [x] **Step 4: Run Stop hook command 2**
 
 Run:
 
@@ -567,7 +567,7 @@ Run:
 
 Expected: PASS. This mirrors `.agents/aemeath.json` Stop hook line 11.
 
-- [ ] **Step 5: Run Stop hook command 3**
+- [x] **Step 5: Run Stop hook command 3**
 
 Run:
 
@@ -577,7 +577,7 @@ Run:
 
 Expected: PASS. This mirrors `.agents/aemeath.json` Stop hook line 16.
 
-- [ ] **Step 6: Inspect git status**
+- [x] **Step 6: Inspect git status**
 
 Run:
 

@@ -47,13 +47,13 @@ services/
 
 **Steps:**
 
-- [ ] **Step 1: git mv crates services**
+- [x] **Step 1: git mv crates services**
 
 ```bash
 git mv crates services
 ```
 
-- [ ] **Step 2: 更新根 Cargo.toml workspace members**
+- [x] **Step 2: 更新根 Cargo.toml workspace members**
 
 ```toml
 members = [
@@ -73,7 +73,7 @@ members = [
 
 注意：各子 crate 的 `Cargo.toml` 中 `path = "../xxx"` 引用不需要改，因为目录结构不变，只是父目录名变了。
 
-- [ ] **Step 3: 搜索并更新所有引用 `crates/` 的文件**
+- [x] **Step 3: 搜索并更新所有引用 `crates/` 的文件**
 
 涉及文件：
 - `.agents/hooks/check-architecture-guards.sh`（如果有 crates 路径引用）
@@ -85,7 +85,7 @@ members = [
 grep -rn 'crates/' --include='*.sh' --include='*.md' --include='*.toml' --include='*.json' .
 ```
 
-- [ ] **Step 4: 验证编译**
+- [x] **Step 4: 验证编译**
 
 ```bash
 cargo build
@@ -97,7 +97,7 @@ cargo build
 
 **Steps:**
 
-- [ ] **Step 1: 创建 services/share/Cargo.toml**
+- [x] **Step 1: 创建 services/share/Cargo.toml**
 
 ```toml
 [package]
@@ -111,7 +111,7 @@ project = { path = "../project" }
 async-trait = { workspace = true }
 ```
 
-- [ ] **Step 2: 创建 services/share/src/lib.rs**
+- [x] **Step 2: 创建 services/share/src/lib.rs**
 
 ```rust
 //! 跨 service 公共抽象层
@@ -125,7 +125,7 @@ pub mod worktree_ops;
 pub use worktree_ops::WorktreeOps;
 ```
 
-- [ ] **Step 3: 创建 services/share/src/worktree_ops.rs**
+- [x] **Step 3: 创建 services/share/src/worktree_ops.rs**
 
 定义 worktree 操作 trait：
 
@@ -182,7 +182,7 @@ pub use project::worktree::{
 };
 ```
 
-- [ ] **Step 4: 更新根 Cargo.toml 添加 share**
+- [x] **Step 4: 更新根 Cargo.toml 添加 share**
 
 ```toml
 members = [
@@ -191,7 +191,7 @@ members = [
 ]
 ```
 
-- [ ] **Step 5: 验证编译**
+- [x] **Step 5: 验证编译**
 
 ```bash
 cargo build -p share
@@ -203,7 +203,7 @@ cargo build -p share
 
 **Steps:**
 
-- [ ] **Step 1: 更新 tools/Cargo.toml**
+- [x] **Step 1: 更新 tools/Cargo.toml**
 
 移除 `project` 依赖，添加 `share` 依赖：
 
@@ -213,7 +213,7 @@ aemeath_core = { package = "core", path = "../core" }
 share = { path = "../share" }
 ```
 
-- [ ] **Step 2: 更新 tools/src/worktree.rs**
+- [x] **Step 2: 更新 tools/src/worktree.rs**
 
 将 `project::worktree::` 改为 `share::worktree_ops::`：
 
@@ -225,7 +225,7 @@ use share::worktree_ops::{enter_worktree, exit_worktree};
 - `project::worktree::enter_worktree(ctx, path)` → `enter_worktree(ctx, path)`
 - `project::worktree::exit_worktree(ctx)` → `exit_worktree(ctx)`
 
-- [ ] **Step 3: 验证编译**
+- [x] **Step 3: 验证编译**
 
 ```bash
 cargo build -p tools && cargo build -p runtime && cargo build -p cli
@@ -237,7 +237,7 @@ cargo build -p tools && cargo build -p runtime && cargo build -p cli
 
 **Steps:**
 
-- [ ] **Step 1: 更新 check-cargo-dependency-graph.sh**
+- [x] **Step 1: 更新 check-cargo-dependency-graph.sh**
 
 ```python
 business_allow = {
@@ -261,7 +261,7 @@ business_allow = {
 - 新增 `share`: 可依赖 `{core, project}`
 - `runtime`: 新增 `share`
 
-- [ ] **Step 2: 运行门禁验证**
+- [x] **Step 2: 运行门禁验证**
 
 ```bash
 bash .agents/hooks/check-cargo-dependency-graph.sh
@@ -272,7 +272,7 @@ bash .agents/hooks/check-architecture-guards.sh
 
 ## Task 5: 完整验证 + 文档 + 提交
 
-- [ ] **Step 1: 完整编译**
+- [x] **Step 1: 完整编译**
 
 ```bash
 cargo build
@@ -283,11 +283,11 @@ cargo test -p project
 cargo test -p runtime
 ```
 
-- [ ] **Step 2: 更新 docs/feature/active.md**
+- [x] **Step 2: 更新 docs/feature/active.md**
 
-- [ ] **Step 3: 更新 P10 plan 进展**
+- [x] **Step 3: 更新 P10 plan 进展**
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add -A
@@ -301,7 +301,7 @@ git commit -m "refactor: crates→services + share 包 (refs #47)
 Co-Authored-By: Aemeath (Zhipu/glm-5.1) <github:rushsinging/aemeath>"
 ```
 
-- [ ] **Step 5: 合并回 main 并验证**
+- [x] **Step 5: 合并回 main 并验证**
 
 ---
 

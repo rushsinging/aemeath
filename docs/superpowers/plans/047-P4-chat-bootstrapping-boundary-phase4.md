@@ -99,7 +99,7 @@ pub(super) struct ChatBootstrap {
 - Read: `cli/src/run_orchestration/runtime.rs`
 - Read: `cli/src/run_orchestration/prompt.rs`
 
-- [ ] **Step 1: Verify branch and workspace**
+- [x] **Step 1: Verify branch and workspace**
 
 Run:
 
@@ -113,7 +113,7 @@ Expected:
 - Working tree is clean before implementation, except this plan/doc update if already committed separately.
 - `cargo check -p aemeath-cli` passes before changes.
 
-- [ ] **Step 2: Confirm no behavior expansion**
+- [x] **Step 2: Confirm no behavior expansion**
 
 Read the listed files and confirm:
 - This phase only changes `run_orchestration` structure and docs.
@@ -126,7 +126,7 @@ Read the listed files and confirm:
 **Files:**
 - Modify: `cli/src/run_orchestration.rs`
 
-- [ ] **Step 1: Introduce `ChatModeSelection`**
+- [x] **Step 1: Introduce `ChatModeSelection`**
 
 Add a small enum near the top of `run_orchestration.rs`:
 
@@ -150,7 +150,7 @@ fn chat_mode_selection(args: &Args) -> ChatModeSelection {
 }
 ```
 
-- [ ] **Step 2: Extract env permission override**
+- [x] **Step 2: Extract env permission override**
 
 Move the existing `AEMEATH_PERMISSION_MODE=allow_all` logic into:
 
@@ -168,7 +168,7 @@ fn apply_permission_env_override(args: &mut Args) {
 
 Do not change env var name or precedence.
 
-- [ ] **Step 3: Add tests for pure helpers**
+- [x] **Step 3: Add tests for pure helpers**
 
 Add tests at the end of `run_orchestration.rs` or a new sibling test module if needed:
 
@@ -186,7 +186,7 @@ If environment mutation is awkward in parallel tests, use a private helper that 
 - Modify: `cli/src/run_orchestration/setup.rs`
 - Modify: `cli/src/run_orchestration.rs`
 
-- [ ] **Step 1: Define `ChatBootstrap`**
+- [x] **Step 1: Define `ChatBootstrap`**
 
 In `setup.rs`, add a `pub(super) struct ChatBootstrap` that contains all shared runtime dispatch outputs currently produced in `run_chat`:
 
@@ -210,7 +210,7 @@ In `setup.rs`, add a `pub(super) struct ChatBootstrap` that contains all shared 
 
 Use existing types directly. Do not introduce duplicate DTOs for model/config unless type visibility forces it.
 
-- [ ] **Step 2: Move preparation code into `bootstrap_chat`**
+- [x] **Step 2: Move preparation code into `bootstrap_chat`**
 
 Create:
 
@@ -241,7 +241,7 @@ Move the existing preparation logic from `run_chat` into this function, preservi
 
 Important: `_mcp_manager` currently lives only inside `run_chat`. If moving into `bootstrap_chat`, ensure the manager is kept alive for the same duration as before. If its type is hard to store, return it inside `ChatBootstrap` with a field name like `_mcp_manager`, or document why its current lifetime is preserved.
 
-- [ ] **Step 3: Keep exits unchanged**
+- [x] **Step 3: Keep exits unchanged**
 
 Any existing `eprintln!` + `std::process::exit(1)` behavior for model/API key validation must remain identical. Do not convert these to `Result` in this phase.
 
@@ -253,7 +253,7 @@ Any existing `eprintln!` + `std::process::exit(1)` behavior for model/API key va
 - Modify: `cli/src/run_orchestration.rs`
 - Modify: `cli/src/run_orchestration/runtime.rs`
 
-- [ ] **Step 1: Simplify `run_chat`**
+- [x] **Step 1: Simplify `run_chat`**
 
 After Task 3, `run_chat` should only:
 
@@ -263,7 +263,7 @@ After Task 3, `run_chat` should only:
 4. match `bootstrap.mode_selection`,
 5. call runtime dispatch.
 
-- [ ] **Step 2: Add bootstrap dispatch helpers**
+- [x] **Step 2: Add bootstrap dispatch helpers**
 
 Prefer adding in `runtime.rs`:
 
@@ -276,7 +276,7 @@ These helpers should construct `ChatLaunchOptions`, `NoTuiChatLaunch` / `TuiChat
 
 After these helpers exist, consider making the old `run_no_tui` / `run_tui` private helper functions or removing them if they become simple duplicates.
 
-- [ ] **Step 3: Preserve TUI model display**
+- [x] **Step 3: Preserve TUI model display**
 
 TUI dispatch must continue using:
 
@@ -297,7 +297,7 @@ Do not change display format.
 **Files:**
 - Modify: `docs/feature/active.md`
 
-- [ ] **Step 1: Update table row #47**
+- [x] **Step 1: Update table row #47**
 
 Change #47 description to mention:
 
@@ -305,7 +305,7 @@ Change #47 description to mention:
 - Phase 4 plan focuses on Chat bootstrapping boundary objectification.
 - This remains behavior-preserving DDD/COLA refactor, not distributed server work.
 
-- [ ] **Step 2: Update #47 detail section**
+- [x] **Step 2: Update #47 detail section**
 
 Append a short “当前推进” paragraph under #47 detail section:
 
@@ -319,20 +319,20 @@ Do not archive #47.
 
 ### Task 6: Verify
 
-- [ ] **Step 1: Format**
+- [x] **Step 1: Format**
 
 ```bash
 cargo fmt --all -- --check
 ```
 
-- [ ] **Step 2: Focused tests**
+- [x] **Step 2: Focused tests**
 
 ```bash
 cargo test -p aemeath-cli run_orchestration
 cargo test -p aemeath-cli application::chat
 ```
 
-- [ ] **Step 3: Build/check**
+- [x] **Step 3: Build/check**
 
 ```bash
 cargo check -p aemeath-cli
@@ -344,11 +344,11 @@ If this phase changes only docs/plan and not code, still run `cargo check -p aem
 
 ### Task 7: Commit, merge, and clean up
 
-- [ ] **Step 1: Inspect commit style**
+- [x] **Step 1: Inspect commit style**
 
 Before committing, invoke the built-in `commit` skill and sample recent commit messages, including Co-Authored-By examples if present.
 
-- [ ] **Step 2: Commit on feature branch**
+- [x] **Step 2: Commit on feature branch**
 
 Suggested title:
 
@@ -358,7 +358,7 @@ docs: plan #47 chat bootstrapping boundary phase4
 
 Include `refs #47` in the commit body or title, consistent with repository style.
 
-- [ ] **Step 3: Merge to main**
+- [x] **Step 3: Merge to main**
 
 From main worktree:
 
@@ -367,7 +367,7 @@ git merge --no-ff feature/47-ddd-redesign-plan
 cargo check -p aemeath-cli
 ```
 
-- [ ] **Step 4: Clean worktree**
+- [x] **Step 4: Clean worktree**
 
 Remove the completed worktree after main validation passes.
 

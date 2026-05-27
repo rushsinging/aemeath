@@ -75,7 +75,7 @@
 - Modify: `agent/runtime/src/client.rs`
 - Modify: `apps/cli/src/tui/session/processing.rs`
 
-- [ ] **Step 1: 在 SDK 写 DTO 与 ChatEvent 字段变更测试**
+- [x] **Step 1: 在 SDK 写 DTO 与 ChatEvent 字段变更测试**
 
 Edit `packages/sdk/src/chat.rs` tests，加入：
 
@@ -142,7 +142,7 @@ Edit `packages/sdk/src/chat.rs` tests，加入：
     }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run:
 
@@ -152,7 +152,7 @@ cargo test -p sdk chat -- --nocapture
 
 Expected: FAIL，错误包含 `cannot find struct, variant or union type 'ToolResultImage'` 或对应 DTO 未定义。
 
-- [ ] **Step 3: 新增 SDK DTO 并替换 ChatEvent 字段**
+- [x] **Step 3: 新增 SDK DTO 并替换 ChatEvent 字段**
 
 Edit `packages/sdk/src/chat.rs` near imports:
 
@@ -237,7 +237,7 @@ Change `ChatEvent` variants:
       },
 ```
 
-- [ ] **Step 4: re-export DTO**
+- [x] **Step 4: re-export DTO**
 
 Edit `packages/sdk/src/lib.rs` export line:
 
@@ -249,7 +249,7 @@ pub use chat::{
 };
 ```
 
-- [ ] **Step 5: runtime 转换函数改为强类型**
+- [x] **Step 5: runtime 转换函数改为强类型**
 
 Edit `agent/runtime/src/client.rs` imports:
 
@@ -353,7 +353,7 @@ fn workspace_context_to_sdk(workspace: crate::session::WorkspaceContext) -> Work
 }
 ```
 
-- [ ] **Step 6: TUI processing 删除 JSON 反序列化**
+- [x] **Step 6: TUI processing 删除 JSON 反序列化**
 
 Edit `apps/cli/src/tui/session/processing.rs`:
 
@@ -400,7 +400,7 @@ Replace WorkingDirectoryChanged branch with:
 
 Delete functions `images_from_sdk()` and `agent_progress_from_sdk()` entirely.
 
-- [ ] **Step 7: 更新 TUI event 类型以编译到下一批**
+- [x] **Step 7: 更新 TUI event 类型以编译到下一批**
 
 Edit `apps/cli/src/tui/core/event.rs` imports:
 
@@ -426,7 +426,7 @@ Change fields:
           event: sdk::AgentProgressEventView,
 ```
 
-- [ ] **Step 8: 运行阶段验证**
+- [x] **Step 8: 运行阶段验证**
 
 Run:
 
@@ -441,7 +441,7 @@ cargo test -p cli tui::session::processing -- --nocapture
 
 Expected: all PASS.
 
-- [ ] **Step 9: 提交阶段 1**
+- [x] **Step 9: 提交阶段 1**
 
 Run:
 
@@ -466,7 +466,7 @@ git commit -m "refactor: 强类型化 SDK chat 事件 DTO (refs #47)" -m "- 为�
 - Modify: `apps/cli/src/tui/session/resume.rs`
 - Modify: `apps/cli/src/tui/core/slash.rs`
 
-- [ ] **Step 1: 为 ChatMessage 增加 helper 测试**
+- [x] **Step 1: 为 ChatMessage 增加 helper 测试**
 
 Edit `packages/sdk/src/session.rs` tests，加入：
 
@@ -512,7 +512,7 @@ Ensure tests import image DTO:
 use crate::ToolResultImage;
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run:
 
@@ -522,7 +522,7 @@ cargo test -p sdk session -- --nocapture
 
 Expected: FAIL，错误包含 `no function or associated item named 'user_text'`。
 
-- [ ] **Step 3: 实现 ChatMessage helper**
+- [x] **Step 3: 实现 ChatMessage helper**
 
 Edit `packages/sdk/src/session.rs` add impl:
 
@@ -575,7 +575,7 @@ impl ChatMessage {
 }
 ```
 
-- [ ] **Step 4: ChatState 改用 SDK DTO**
+- [x] **Step 4: ChatState 改用 SDK DTO**
 
 Edit `apps/cli/src/tui/core/state/chat.rs`:
 
@@ -623,7 +623,7 @@ impl Default for ChatState {
 
 This references `ReflectionOutputView`; execute Task 4 Step 1-4 first when applying Task 2, then return to this step. Do not introduce a temporary `serde_json::Value` placeholder for `pending_reflection` because the final boundary forbids JSON stand-ins for TUI-owned runtime views.
 
-- [ ] **Step 5: 删除 `tui/mod.rs` runtime conversion helper**
+- [x] **Step 5: 删除 `tui/mod.rs` runtime conversion helper**
 
 Edit `apps/cli/src/tui/mod.rs` to remove `messages_to_sdk()` and `message_from_sdk()` completely. The file should only export modules and TUI public types:
 
@@ -641,7 +641,7 @@ pub use self::input::input_area::InputArea;
 pub use self::output_area::OutputArea;
 ```
 
-- [ ] **Step 6: update_enter 使用 SDK message helper**
+- [x] **Step 6: update_enter 使用 SDK message helper**
 
 Edit `apps/cli/src/tui/core/update/enter.rs` remove runtime import and replace message push logic:
 
@@ -656,7 +656,7 @@ Edit `apps/cli/src/tui/core/update/enter.rs` remove runtime import and replace m
           }
 ```
 
-- [ ] **Step 7: spawn context 不再转换 messages**
+- [x] **Step 7: spawn context 不再转换 messages**
 
 Edit `apps/cli/src/tui/core/update/spawn_context.rs` so `messages` uses clone directly:
 
@@ -664,7 +664,7 @@ Edit `apps/cli/src/tui/core/update/spawn_context.rs` so `messages` uses clone di
             messages: self.chat.messages.clone(),
 ```
 
-- [ ] **Step 8: MessagesSync 直接写 SDK messages**
+- [x] **Step 8: MessagesSync 直接写 SDK messages**
 
 Edit `apps/cli/src/tui/core/update/ui_event.rs` `MessagesSync` branch remains:
 
@@ -680,7 +680,7 @@ Edit `apps/cli/src/tui/core/update/ui_event.rs` `MessagesSync` branch remains:
 
 No runtime conversion should appear.
 
-- [ ] **Step 9: 保存 session 直接 sync SDK messages**
+- [x] **Step 9: 保存 session 直接 sync SDK messages**
 
 Edit `apps/cli/src/tui/core/run_loop.rs`, `apps/cli/src/tui/session/session_lifecycle.rs`, `apps/cli/src/tui/core/slash.rs` replacing:
 
@@ -694,7 +694,7 @@ with:
 .sync_current_messages(self.chat.messages.clone())
 ```
 
-- [ ] **Step 10: pending slash prompt 使用 SDK message**
+- [x] **Step 10: pending slash prompt 使用 SDK message**
 
 Edit `apps/cli/src/tui/core/run_loop.rs` replace runtime message push:
 
@@ -702,7 +702,7 @@ Edit `apps/cli/src/tui/core/run_loop.rs` replace runtime message push:
                       self.chat.messages.push(sdk::ChatMessage::user_text(&prompt));
 ```
 
-- [ ] **Step 11: resume 接收 SDK messages**
+- [x] **Step 11: resume 接收 SDK messages**
 
 Edit `apps/cli/src/tui/session/resume.rs` signature:
 
@@ -729,7 +729,7 @@ Remove sanitize/deep_clean logic from TUI; runtime adapter must pass already-cle
           self.chat.messages = messages;
 ```
 
-- [ ] **Step 12: run resume path converts before TUI or uses SDK session API**
+- [x] **Step 12: run resume path converts before TUI or uses SDK session API**
 
 Edit `apps/cli/src/tui/session/session_lifecycle.rs` resume block to avoid runtime types in TUI. Implement the new SDK method `load_tui_session()` from Task 5 before wiring this block. TUI calls `agent_client.load_tui_session(id).await` and consumes only SDK DTO:
 
@@ -765,7 +765,7 @@ Edit `apps/cli/src/tui/session/session_lifecycle.rs` resume block to avoid runti
               }
 ```
 
-- [ ] **Step 13: render_history_message 改为 SDK message**
+- [x] **Step 13: render_history_message 改为 SDK message**
 
 Search for `fn render_history_message` and change parameter types to:
 
@@ -776,7 +776,7 @@ subsequent: Option<&sdk::ChatMessage>,
 
 Use `message.role.as_str()` and `message.text_content()` instead of runtime role/content helpers.
 
-- [ ] **Step 14: 运行阶段验证**
+- [x] **Step 14: 运行阶段验证**
 
 Run:
 
@@ -790,7 +790,7 @@ cargo test -p cli tui::session::processing -- --nocapture
 
 Expected: all PASS.
 
-- [ ] **Step 15: 提交阶段 2**
+- [x] **Step 15: 提交阶段 2**
 
 Run:
 
@@ -808,7 +808,7 @@ git commit -m "refactor: TUI chat state 改用 SDK message DTO (refs #47)" -m "-
 - Modify: `apps/cli/src/tui/output_area/tool_display/common.rs`
 - Modify: `apps/cli/src/tui/output_area/tool_display_agent_tests.rs`
 
-- [ ] **Step 1: 修改测试使用 SDK DTO**
+- [x] **Step 1: 修改测试使用 SDK DTO**
 
 Edit `apps/cli/src/tui/output_area/tool_display_agent_tests.rs` imports:
 
@@ -846,7 +846,7 @@ fn call(id: &str, name: &str, summary: &str) -> AgentToolCallProgressView {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run:
 
@@ -856,7 +856,7 @@ cargo test -p cli tui::output_area::tool_display_agent_tests -- --nocapture
 
 Expected: FAIL，函数参数仍期待 runtime `AgentProgressEvent`。
 
-- [ ] **Step 3: 修改 output_area agent 显示类型**
+- [x] **Step 3: 修改 output_area agent 显示类型**
 
 Edit `apps/cli/src/tui/output_area/tool_display/agent.rs`:
 
@@ -905,7 +905,7 @@ impl super::super::OutputArea {
 
 Keep the existing `push_tool_progress()` and `tool_insert_position()` bodies unchanged.
 
-- [ ] **Step 4: 修改 common formatter 类型**
+- [x] **Step 4: 修改 common formatter 类型**
 
 Edit `apps/cli/src/tui/output_area/tool_display/common.rs` import and function signature:
 
@@ -917,7 +917,7 @@ use sdk::AgentToolCallProgressView;
 pub(super) fn format_agent_tool_calls(calls: &[AgentToolCallProgressView]) -> String {
 ```
 
-- [ ] **Step 5: 运行阶段验证**
+- [x] **Step 5: 运行阶段验证**
 
 Run:
 
@@ -929,7 +929,7 @@ cargo test -p cli tui::output_area::tool_display_agent_tests -- --nocapture
 
 Expected: all PASS.
 
-- [ ] **Step 6: 提交阶段 3**
+- [x] **Step 6: 提交阶段 3**
 
 Run:
 
@@ -956,7 +956,7 @@ git commit -m "refactor: TUI agent progress 使用 SDK DTO (refs #47)"
 - Modify: `apps/cli/src/tui/core/runtime.rs`
 - Modify: `apps/cli/src/tui/completion/*.rs`
 
-- [ ] **Step 1: SDK TUI DTO 测试**
+- [x] **Step 1: SDK TUI DTO 测试**
 
 Edit `packages/sdk/src/tui.rs` add tests:
 
@@ -1011,7 +1011,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run:
 
@@ -1021,7 +1021,7 @@ cargo test -p sdk tui -- --nocapture
 
 Expected: FAIL，DTO 未定义。
 
-- [ ] **Step 3: 新增 SDK TUI DTO**
+- [x] **Step 3: 新增 SDK TUI DTO**
 
 Edit `packages/sdk/src/tui.rs` after `TaskStatusView`:
 
@@ -1112,7 +1112,7 @@ pub struct TuiLaunchContext {
 }
 ```
 
-- [ ] **Step 4: re-export TUI DTO**
+- [x] **Step 4: re-export TUI DTO**
 
 Edit `packages/sdk/src/lib.rs`:
 
@@ -1124,7 +1124,7 @@ pub use tui::{
 };
 ```
 
-- [ ] **Step 5: runtime 增加 DTO 转换函数**
+- [x] **Step 5: runtime 增加 DTO 转换函数**
 
 Edit `agent/runtime/src/client.rs` imports to include:
 
@@ -1194,7 +1194,7 @@ fn reflection_output_to_sdk(
 
 If actual `ProcessedImage` or reflection field names differ, inspect their definitions and adjust exactly, then update this plan section in the same commit.
 
-- [ ] **Step 6: TUI event/state 使用新 DTO**
+- [x] **Step 6: TUI event/state 使用新 DTO**
 
 Edit `apps/cli/src/tui/core/event.rs`:
 
@@ -1221,7 +1221,7 @@ pub(crate) struct SessionState {
 }
 ```
 
-- [ ] **Step 7: clipboard/image 读取移出 TUI runtime import**
+- [x] **Step 7: clipboard/image 读取移出 TUI runtime import**
 
 Add these methods to `sdk::AgentClient`:
 
@@ -1247,7 +1247,7 @@ Minimal TUI compile target:
 
 - Store `pending_images: Vec<sdk::ClipboardImageView>` so `/images` can display `final_size`, `media_type`, and `display_path` without re-reading image content. Convert to `ToolResultImage` in `update_enter` with `map(Into::into)`.
 
-- [ ] **Step 8: reflection 下沉到 SDK/AgentClient**
+- [x] **Step 8: reflection 下沉到 SDK/AgentClient**
 
 Add trait methods to `sdk::AgentClient`:
 
@@ -1263,7 +1263,7 @@ Runtime implementation owns `ReflectionEngine` and memory store. TUI `reflection
 - sends `UiEvent::ReflectionDone { output }`
 - `/reflect apply` calls `agent_client.apply_reflection(output).await` and prints returned summary
 
-- [ ] **Step 9: skill view 替换 runtime Skill**
+- [x] **Step 9: skill view 替换 runtime Skill**
 
 Edit `apps/cli/src/tui/core/mod.rs`:
 
@@ -1287,7 +1287,7 @@ pub(crate) fn find_skill_by_alias(&self, alias: &str) -> Option<&sdk::SkillView>
 
 Update completion modules to read `sdk::SkillView` fields.
 
-- [ ] **Step 10: 运行阶段验证**
+- [x] **Step 10: 运行阶段验证**
 
 Run:
 
@@ -1302,7 +1302,7 @@ cargo test -p cli tui::core::slash_tests -- --nocapture
 
 Expected: all PASS.
 
-- [ ] **Step 11: 提交阶段 4**
+- [x] **Step 11: 提交阶段 4**
 
 Run:
 
@@ -1326,7 +1326,7 @@ git commit -m "refactor: TUI reflection image skill 改用 SDK view (refs #47)" 
 - Modify: `apps/cli/src/tui/core/slash.rs`
 - Modify: `apps/cli/src/tui/core/cmd_exec.rs`
 
-- [ ] **Step 1: SDK 增加 TUI session/load/compact/context 能力**
+- [x] **Step 1: SDK 增加 TUI session/load/compact/context 能力**
 
 Add to `packages/sdk/src/session.rs`:
 
@@ -1376,7 +1376,7 @@ fn context_usage(
 ) -> super::session::ContextUsageView;
 ```
 
-- [ ] **Step 2: runtime 实现这些 SDK 能力**
+- [x] **Step 2: runtime 实现这些 SDK 能力**
 
 In `agent/runtime/src/client.rs` implement:
 
@@ -1384,7 +1384,7 @@ In `agent/runtime/src/client.rs` implement:
 - `compact_current_messages()` converts SDK messages to runtime messages, calls `compact::compact_messages`, converts back to SDK.
 - `context_usage()` converts SDK messages to runtime messages and uses `compact::estimate_messages_tokens` / `estimate_tokens`.
 
-- [ ] **Step 3: TUI run/run_loop 删除 runtime 参数**
+- [x] **Step 3: TUI run/run_loop 删除 runtime 参数**
 
 Change `App::run` signature in `apps/cli/src/tui/session/session_lifecycle.rs` to accept only SDK-facing setup values:
 
@@ -1416,7 +1416,7 @@ pub(crate) async fn run_loop(
 ) -> io::Result<()>
 ```
 
-- [ ] **Step 4: CmdExecutor 删除 runtime 基础设施字段**
+- [x] **Step 4: CmdExecutor 删除 runtime 基础设施字段**
 
 Edit `apps/cli/src/tui/core/cmd_exec.rs`:
 
@@ -1428,7 +1428,7 @@ pub struct CmdExecutor {
 
 If hook notification is not exposed via SDK yet, use `agent_client` directly in `App` for notification or keep hook runner outside `apps/cli/src/tui/**` by moving command execution to `apps/cli/src/runtime_adapter.rs`.
 
-- [ ] **Step 5: slash runtime 依赖替换为 SDK calls**
+- [x] **Step 5: slash runtime 依赖替换为 SDK calls**
 
 In `apps/cli/src/tui/core/slash.rs`:
 
@@ -1440,7 +1440,7 @@ In `apps/cli/src/tui/core/slash.rs`:
 
 Do not leave `::runtime` in this file.
 
-- [ ] **Step 6: refresh session cache via SDK**
+- [x] **Step 6: refresh session cache via SDK**
 
 Edit `apps/cli/src/tui/core/runtime.rs`:
 
@@ -1469,7 +1469,7 @@ pub async fn refresh_session_cache(&mut self) {
 }
 ```
 
-- [ ] **Step 7: 运行阶段验证**
+- [x] **Step 7: 运行阶段验证**
 
 Run:
 
@@ -1495,7 +1495,7 @@ cargo test -p cli tui::session::processing -- --nocapture
 
 Expected: Python scanner prints nothing; all Rust commands PASS.
 
-- [ ] **Step 8: 提交阶段 5**
+- [x] **Step 8: 提交阶段 5**
 
 Run:
 
@@ -1513,7 +1513,7 @@ git commit -m "refactor: 收口 TUI 启动与 slash runtime 边界 (refs #47)" -
 - Modify: `docs/feature/active.md`
 - Modify: `docs/feature/specs/047-tui-sdk-dto-boundary-design.md`
 
-- [ ] **Step 1: 更新 architecture guard**
+- [x] **Step 1: 更新 architecture guard**
 
 Edit `.agents/hooks/check-forbidden-imports.sh` in the Python violation scan, add before existing specific TUI checks:
 
@@ -1526,7 +1526,7 @@ Edit `.agents/hooks/check-forbidden-imports.sh` in the Python violation scan, ad
               violations.append(f"{rel}:{lineno}: TUI must depend on sdk DTO/AgentClient, not runtime internals: {line.strip()}")
 ```
 
-- [ ] **Step 2: 运行守卫确认通过**
+- [x] **Step 2: 运行守卫确认通过**
 
 Run:
 
@@ -1536,7 +1536,7 @@ AEMEATH_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh
 
 Expected: PASS，没有 TUI runtime import violation。
 
-- [ ] **Step 3: 更新 #47 active 文档**
+- [x] **Step 3: 更新 #47 active 文档**
 
 Edit `docs/feature/active.md` #47 detail paragraph to include:
 
@@ -1544,7 +1544,7 @@ Edit `docs/feature/active.md` #47 detail paragraph to include:
 P12 TUI SDK DTO 边界迁移已完成：`sdk::ChatEvent` 的 images / agent progress / workspace 已改为强类型 SDK DTO；`apps/cli/src/tui/**` 的 chat/message/image/reflection/skill/session resume/slash 边界不再直接承接 runtime 类型；runtime domain ⇄ SDK DTO 转换集中在 `agent/runtime::AgentClientImpl` 与 CLI composition root。架构守卫已新增 TUI 禁止 `::runtime` / `runtime::api` 规则。
 ```
 
-- [ ] **Step 4: 完整验证**
+- [x] **Step 4: 完整验证**
 
 Run:
 
@@ -1563,7 +1563,7 @@ AEMEATH_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh
 
 Expected: all PASS.
 
-- [ ] **Step 5: 提交阶段 6**
+- [x] **Step 5: 提交阶段 6**
 
 Run:
 
@@ -1572,7 +1572,7 @@ git add .agents/hooks/check-forbidden-imports.sh docs/feature/active.md docs/fea
 git commit -m "chore: 加固 TUI SDK DTO 边界守卫 (refs #47)" -m "- 禁止 apps/cli/src/tui 重新引入 runtime 类型" -m "- 更新 #47 DTO 边界迁移状态"
 ```
 
-- [ ] **Step 6: 合并回 main 并在 main 验证**
+- [x] **Step 6: 合并回 main 并在 main 验证**
 
 Run:
 
@@ -1588,7 +1588,7 @@ AEMEATH_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh
 
 Expected: merge succeeds; checks PASS.
 
-- [ ] **Step 7: 清理 worktree/branch**
+- [x] **Step 7: 清理 worktree/branch**
 
 Run from main workspace:
 

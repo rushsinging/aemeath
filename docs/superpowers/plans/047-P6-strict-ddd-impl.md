@@ -24,12 +24,12 @@
 - Create: `crates/hook/Cargo.toml`, `crates/hook/src/lib.rs`, `crates/hook/src/api.rs`
 - Create: `crates/audit/Cargo.toml`, `crates/audit/src/lib.rs`, `crates/audit/src/api.rs`
 
-- [ ] **Step 1: Create skeleton directories**
+- [x] **Step 1: Create skeleton directories**
 
 Run: `mkdir -p crates/runtime/src crates/project/src crates/policy/src crates/prompt/src crates/storage/src crates/hook/src crates/audit/src`
 Expected: directories exist.
 
-- [ ] **Step 2: Add runtime package**
+- [x] **Step 2: Add runtime package**
 
 Create `crates/runtime/Cargo.toml`:
 
@@ -51,7 +51,7 @@ hook = { path = "../hook" }
 audit = { path = "../audit" }
 ```
 
-- [ ] **Step 3: Add runtime facade source**
+- [x] **Step 3: Add runtime facade source**
 
 Create `crates/runtime/src/lib.rs`:
 
@@ -73,15 +73,15 @@ pub use storage;
 pub use tools;
 ```
 
-- [ ] **Step 4: Add support skeleton packages**
+- [x] **Step 4: Add support skeleton packages**
 
 For each support crate (`project`, `policy`, `prompt`, `storage`, `hook`, `audit`), create `Cargo.toml` with only `core` path dependency, `src/lib.rs` with `pub mod api;`, and `src/api.rs` with a small marker type such as `ProjectApiMarker`.
 
-- [ ] **Step 5: Update workspace members temporarily**
+- [x] **Step 5: Update workspace members temporarily**
 
 Add target crates to root `Cargo.toml` members while still keeping existing `shared/kernel`, `contexts/provider`, and `contexts/tool` until the next task moves them.
 
-- [ ] **Step 6: Verify target skeletons build**
+- [x] **Step 6: Verify target skeletons build**
 
 Run: `cargo check -p runtime`
 Expected: pass.
@@ -97,25 +97,25 @@ Expected: pass.
 - Modify: `crates/provider/Cargo.toml`
 - Modify: `crates/tools/Cargo.toml`
 
-- [ ] **Step 1: Move directories**
+- [x] **Step 1: Move directories**
 
 Run: `mv shared/kernel crates/core && mv contexts/provider crates/provider && mv contexts/tool crates/tools && rmdir shared contexts`
 Expected: old transition directories removed.
 
-- [ ] **Step 2: Rename packages**
+- [x] **Step 2: Rename packages**
 
 Set package names:
 - `crates/core/Cargo.toml`: `name = "core"`
 - `crates/provider/Cargo.toml`: `name = "provider"`
 - `crates/tools/Cargo.toml`: `name = "tools"`
 
-- [ ] **Step 3: Update support dependencies**
+- [x] **Step 3: Update support dependencies**
 
 Set dependencies:
 - `crates/provider/Cargo.toml`: `core = { path = "../core" }`
 - `crates/tools/Cargo.toml`: `core = { path = "../core" }`
 
-- [ ] **Step 4: Update workspace members**
+- [x] **Step 4: Update workspace members**
 
 Root `Cargo.toml` members should be exactly:
 
@@ -135,11 +135,11 @@ members = [
 ]
 ```
 
-- [ ] **Step 5: Replace old crate names in provider/tools source**
+- [x] **Step 5: Replace old crate names in provider/tools source**
 
 Replace `kernel::` with `core::` in `crates/provider/src` and `crates/tools/src`.
 
-- [ ] **Step 6: Verify moved crates**
+- [x] **Step 6: Verify moved crates**
 
 Run: `cargo check -p core && cargo check -p provider && cargo check -p tools && cargo check -p runtime`
 Expected: all pass.
@@ -150,7 +150,7 @@ Expected: all pass.
 - Modify: `apps/cli/Cargo.toml`
 - Modify: all Rust files under `apps/cli/src`
 
-- [ ] **Step 1: Change CLI path dependencies**
+- [x] **Step 1: Change CLI path dependencies**
 
 Replace `kernel`, `provider`, `tool` dependencies with:
 
@@ -160,7 +160,7 @@ runtime = { path = "../../crates/runtime" }
 
 Keep only technical dependencies such as tokio, clap, ratatui, crossterm, serde_json, logging, rendering, and terminal libraries.
 
-- [ ] **Step 2: Replace direct business crate references**
+- [x] **Step 2: Replace direct business crate references**
 
 In `apps/cli/src/**/*.rs`, replace:
 - `kernel::` → `runtime::api::core::`
@@ -170,12 +170,12 @@ In `apps/cli/src/**/*.rs`, replace:
 - `use provider` → `use runtime::api::provider`
 - `use tool` → `use runtime::api::tools`
 
-- [ ] **Step 3: Verify CLI no longer has direct business dependencies**
+- [x] **Step 3: Verify CLI no longer has direct business dependencies**
 
 Run a cargo metadata script to assert `cli` direct workspace dependencies are only `runtime`.
 Expected: script prints `cli -> runtime` only.
 
-- [ ] **Step 4: Verify compile**
+- [x] **Step 4: Verify compile**
 
 Run: `cargo check -p cli`
 Expected: pass.
@@ -191,7 +191,7 @@ Expected: pass.
 - Modify: `.agents/hooks/check-rust-file-lines.sh`
 - Modify: `.agents/hooks/check-unit-tests.sh`
 
-- [ ] **Step 1: Add dependency graph guard**
+- [x] **Step 1: Add dependency graph guard**
 
 Create a shell script that invokes Python and `cargo metadata --no-deps --format-version 1`, then enforces this allowlist:
 
@@ -211,31 +211,31 @@ BUSINESS_ALLOW = {
 }
 ```
 
-- [ ] **Step 2: Add forbidden import guard**
+- [x] **Step 2: Add forbidden import guard**
 
 Guard `apps/cli/src/**/*.rs` against `use core::`, `use project::`, `use policy::`, `use prompt::`, `use provider::`, `use tools::`, `use storage::`, `use hook::`, `use audit::`, and any `<crate>::` direct path outside `runtime::api` for business crates.
 
-- [ ] **Step 3: Add thin entry guard**
+- [x] **Step 3: Add thin entry guard**
 
 Guard `apps/cli/Cargo.toml` against path dependencies to business crates other than `runtime`.
 
-- [ ] **Step 4: Add core upstream guard**
+- [x] **Step 4: Add core upstream guard**
 
 Guard `crates/core/Cargo.toml` against path dependencies to any workspace business crate.
 
-- [ ] **Step 5: Wire guard aggregator**
+- [x] **Step 5: Wire guard aggregator**
 
 Update `.agents/hooks/check-architecture-guards.sh` to execute all four new guard scripts plus existing guards.
 
-- [ ] **Step 6: Update file-line and unit-test hooks**
+- [x] **Step 6: Update file-line and unit-test hooks**
 
 Update line scanning roots to `apps/` and `crates/`. Update unit test packages to `core`, `runtime`, `project`, `policy`, `prompt`, `provider`, `tools`, `storage`, `hook`, `audit`, and `cli`.
 
-- [ ] **Step 7: Verify guards fail on a temporary violation**
+- [x] **Step 7: Verify guards fail on a temporary violation**
 
 Temporarily add a forbidden dependency/import, run corresponding guard, confirm failure, then revert the temporary violation.
 
-- [ ] **Step 8: Verify guards pass cleanly**
+- [x] **Step 8: Verify guards pass cleanly**
 
 Run: `.agents/hooks/check-architecture-guards.sh`
 Expected: pass.
@@ -247,15 +247,15 @@ Expected: pass.
 - Modify: `docs/feature/specs/047-ddd-redesign.md`
 - Modify: `build_cli.sh`
 
-- [ ] **Step 1: Update build script package**
+- [x] **Step 1: Update build script package**
 
 Ensure `build_cli.sh` still uses `cargo build --release --package cli`.
 
-- [ ] **Step 2: Update feature docs**
+- [x] **Step 2: Update feature docs**
 
 Record that strict scheme B implementation has migrated to `apps/` + `crates/`, added runtime facade, and added architecture guards.
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run:
 - `cargo fmt --all -- --check`
@@ -268,7 +268,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Commit message:
 
@@ -276,6 +276,6 @@ Commit message:
 refactor: 落地严格 DDD workspace 结构 (refs #47)
 ```
 
-- [ ] **Step 5: Merge to main and verify**
+- [x] **Step 5: Merge to main and verify**
 
 Exit worktree, merge branch into `main`, rerun full verification on `main`, then remove the worktree.

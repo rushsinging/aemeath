@@ -46,7 +46,7 @@ Verification:
 - Modify: `cli/src/application/chat/request.rs`
 - Modify: `cli/src/application/chat/mod.rs`
 
-- [ ] **Step 1: Read current files**
+- [x] **Step 1: Read current files**
 
 Run:
 
@@ -57,7 +57,7 @@ git status --short --branch
 
 Expected: branch is `feature/47-chat-runtime-context-phase3` and working tree has only planned docs changes if this plan has already been written.
 
-- [ ] **Step 2: Replace `cli/src/application/chat/request.rs`**
+- [x] **Step 2: Replace `cli/src/application/chat/request.rs`**
 
 Replace the entire file with:
 
@@ -210,7 +210,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Update `cli/src/application/chat/mod.rs` re-export**
+- [x] **Step 3: Update `cli/src/application/chat/mod.rs` re-export**
 
 Replace the request re-export line with:
 
@@ -220,7 +220,7 @@ pub(crate) use request::{ChatLaunchOptions, NoTuiChatLaunch, TuiChatLaunch};
 
 Leave port/service re-exports unchanged for now. The build is expected to fail until Task 2 updates port/service.
 
-- [ ] **Step 4: Run targeted test and expect compile failure**
+- [x] **Step 4: Run targeted test and expect compile failure**
 
 Run:
 
@@ -238,7 +238,7 @@ Expected: FAIL because port/service/runtime still reference `ChatLaunchRequest` 
 - Modify: `cli/src/application/chat/port.rs`
 - Modify: `cli/src/application/chat/mod.rs`
 
-- [ ] **Step 1: Replace `cli/src/application/chat/port.rs`**
+- [x] **Step 1: Replace `cli/src/application/chat/port.rs`**
 
 Replace the entire file with:
 
@@ -292,7 +292,7 @@ pub(crate) trait ChatRuntimePort {
 }
 ```
 
-- [ ] **Step 2: Update `cli/src/application/chat/mod.rs` port re-export**
+- [x] **Step 2: Update `cli/src/application/chat/mod.rs` port re-export**
 
 Replace the port re-export block with:
 
@@ -300,7 +300,7 @@ Replace the port re-export block with:
 pub(crate) use port::{ChatRuntimeContext, ChatRuntimePort, TuiChatOutcome};
 ```
 
-- [ ] **Step 3: Run targeted test and expect compile failure**
+- [x] **Step 3: Run targeted test and expect compile failure**
 
 Run:
 
@@ -317,7 +317,7 @@ Expected: FAIL because service/runtime still reference old dependency bundle nam
 **Files:**
 - Modify: `cli/src/application/chat/service.rs`
 
-- [ ] **Step 1: Replace `cli/src/application/chat/service.rs`**
+- [x] **Step 1: Replace `cli/src/application/chat/service.rs`**
 
 Replace the entire file with:
 
@@ -440,7 +440,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run targeted test and expect compile failure from runtime**
+- [x] **Step 2: Run targeted test and expect compile failure from runtime**
 
 Run:
 
@@ -457,7 +457,7 @@ Expected: FAIL because `cli/src/run_orchestration/runtime.rs` still constructs o
 **Files:**
 - Modify: `cli/src/run_orchestration/runtime.rs`
 
-- [ ] **Step 1: Update imports in `runtime.rs`**
+- [x] **Step 1: Update imports in `runtime.rs`**
 
 Replace the existing `crate::application::chat` import block with:
 
@@ -470,7 +470,7 @@ use crate::application::chat::{
 
 Keep `use crate::{repl, tui};` and `use async_trait::async_trait;`.
 
-- [ ] **Step 2: Update `NoTuiChatRuntimeAdapter` method signature and body names**
+- [x] **Step 2: Update `NoTuiChatRuntimeAdapter` method signature and body names**
 
 Replace the `run_no_tui_chat` method in `impl ChatRuntimePort for NoTuiChatRuntimeAdapter` with:
 
@@ -518,7 +518,7 @@ Replace the unsupported TUI method signature with:
     }
 ```
 
-- [ ] **Step 3: Update `TuiChatRuntimeAdapter` method signatures and body names**
+- [x] **Step 3: Update `TuiChatRuntimeAdapter` method signatures and body names**
 
 Replace the unsupported no-TUI method with:
 
@@ -573,7 +573,7 @@ Replace the TUI method with:
     }
 ```
 
-- [ ] **Step 4: Replace no-TUI DTO construction in `run_no_tui`**
+- [x] **Step 4: Replace no-TUI DTO construction in `run_no_tui`**
 
 Replace old `ChatLaunchRequest` and `NoTuiChatDependencies` construction with:
 
@@ -610,7 +610,7 @@ Replace old `ChatLaunchRequest` and `NoTuiChatDependencies` construction with:
 
 Keep the existing error handling block after this line unchanged.
 
-- [ ] **Step 5: Replace TUI DTO construction in `run_tui`**
+- [x] **Step 5: Replace TUI DTO construction in `run_tui`**
 
 Replace old `ChatLaunchRequest` and `TuiChatDependencies` construction with:
 
@@ -652,7 +652,7 @@ Then fix the context construction: because `ChatRuntimeContext` does not contain
 
 Keep the existing success/error handling after this line, using `outcome.session_id`.
 
-- [ ] **Step 6: Run targeted tests and build**
+- [x] **Step 6: Run targeted tests and build**
 
 Run:
 
@@ -670,7 +670,7 @@ Expected: both PASS.
 **Files:**
 - Modify: `docs/feature/active.md`
 
-- [ ] **Step 1: Update #47 row in `docs/feature/active.md`**
+- [x] **Step 1: Update #47 row in `docs/feature/active.md`**
 
 In the #47 row, replace the Phase 3 design sentence with:
 
@@ -678,7 +678,7 @@ In the #47 row, replace the Phase 3 design sentence with:
 Phase 3 继续整理 Chat 启动参数边界：已引入 ChatRuntimeContext、ChatLaunchOptions、NoTuiChatLaunch、TuiChatLaunch，拆分共享运行依赖、共同启动选项和入口模式专属字段，降低 application port 重复参数。
 ```
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -690,7 +690,7 @@ cargo test
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run Stop hook command 1**
+- [x] **Step 3: Run Stop hook command 1**
 
 Run:
 
@@ -700,7 +700,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Stop hook command 2**
+- [x] **Step 4: Run Stop hook command 2**
 
 Run:
 
@@ -710,7 +710,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Run Stop hook command 3**
+- [x] **Step 5: Run Stop hook command 3**
 
 Run:
 
@@ -720,7 +720,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Inspect git status**
+- [x] **Step 6: Inspect git status**
 
 Run:
 

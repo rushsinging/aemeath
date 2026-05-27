@@ -18,17 +18,17 @@
 - Move: `packages/llm/` → `contexts/provider/`
 - Move: `packages/tools/` → `contexts/tool/`
 
-- [ ] **Step 1: Create target directories**
+- [x] **Step 1: Create target directories**
 
 Run: `mkdir -p apps contexts shared`
 Expected: directories exist.
 
-- [ ] **Step 2: Move current crates**
+- [x] **Step 2: Move current crates**
 
 Run: `mv cli apps/cli && mv packages/core shared/kernel && mv packages/llm contexts/provider && mv packages/tools contexts/tool && rmdir packages`
 Expected: old `packages/` is removed and target crate directories exist.
 
-- [ ] **Step 3: Verify moved Cargo manifests**
+- [x] **Step 3: Verify moved Cargo manifests**
 
 Run: `test -f apps/cli/Cargo.toml && test -f shared/kernel/Cargo.toml && test -f contexts/provider/Cargo.toml && test -f contexts/tool/Cargo.toml`
 Expected: command exits 0.
@@ -42,11 +42,11 @@ Expected: command exits 0.
 - Modify: `contexts/provider/Cargo.toml`
 - Modify: `contexts/tool/Cargo.toml`
 
-- [ ] **Step 1: Update workspace members**
+- [x] **Step 1: Update workspace members**
 
 Set root members to `apps/cli`, `shared/kernel`, `contexts/provider`, `contexts/tool`.
 
-- [ ] **Step 2: Rename package names**
+- [x] **Step 2: Rename package names**
 
 Set package names:
 - `apps/cli/Cargo.toml`: `cli`
@@ -54,14 +54,14 @@ Set package names:
 - `contexts/provider/Cargo.toml`: `provider`
 - `contexts/tool/Cargo.toml`: `tool`
 
-- [ ] **Step 3: Update path dependencies**
+- [x] **Step 3: Update path dependencies**
 
 Update dependencies:
 - `apps/cli`: `kernel = { path = "../../shared/kernel" }`, `provider = { path = "../../contexts/provider" }`, `tool = { path = "../../contexts/tool" }`
 - `contexts/provider`: `kernel = { path = "../../shared/kernel" }`
 - `contexts/tool`: `kernel = { path = "../../shared/kernel" }`
 
-- [ ] **Step 4: Verify Cargo metadata**
+- [x] **Step 4: Verify Cargo metadata**
 
 Run: `cargo metadata --no-deps --format-version 1`
 Expected: package names include `cli`, `kernel`, `provider`, `tool`.
@@ -71,19 +71,19 @@ Expected: package names include `cli`, `kernel`, `provider`, `tool`.
 **Files:**
 - Modify: all Rust files under `apps/cli/src`, `contexts/provider/src`, `contexts/tool/src`
 
-- [ ] **Step 1: Replace old crate paths**
+- [x] **Step 1: Replace old crate paths**
 
 Replace:
 - `aemeath_core` → `kernel`
 - `aemeath_llm` → `provider`
 - `aemeath_tools` → `tool`
 
-- [ ] **Step 2: Run formatter**
+- [x] **Step 2: Run formatter**
 
 Run: `cargo fmt --all -- --check`
 Expected: pass or report formatting changes needed.
 
-- [ ] **Step 3: Run compile check**
+- [x] **Step 3: Run compile check**
 
 Run: `cargo check`
 Expected: pass.
@@ -98,11 +98,11 @@ Expected: pass.
 - Modify: `.agents/hooks/check-tui-tea-purity.sh`
 - Modify: `.agents/hooks/check-unsafe-text-ops.sh`
 
-- [ ] **Step 1: Update build script package**
+- [x] **Step 1: Update build script package**
 
 Change release build package from `aemeath-cli` to `cli`.
 
-- [ ] **Step 2: Update unit test hook package names**
+- [x] **Step 2: Update unit test hook package names**
 
 Use commands:
 - `cargo test -p kernel --lib`
@@ -110,11 +110,11 @@ Use commands:
 - `cargo test -p tool --lib`
 - `cargo test -p cli --bin aemeath`
 
-- [ ] **Step 3: Update architecture guard paths**
+- [x] **Step 3: Update architecture guard paths**
 
 Change TUI paths from `cli/src/tui` to `apps/cli/src/tui`; restrict line-limit scan to `apps/`, `contexts/`, and `shared/`.
 
-- [ ] **Step 4: Keep Stop hook order stable**
+- [x] **Step 4: Keep Stop hook order stable**
 
 Leave `.agents/aemeath.json` Stop hook command order unchanged unless a path must change.
 
@@ -124,11 +124,11 @@ Leave `.agents/aemeath.json` Stop hook command order unchanged unless a path mus
 - Modify: `docs/feature/active.md`
 - Modify: `docs/feature/specs/047-ddd-redesign.md`
 
-- [ ] **Step 1: Record implementation progress**
+- [x] **Step 1: Record implementation progress**
 
 Update #47 active entry to note the current checkpoint moved actual crates to `apps/`, `contexts/`, and `shared/kernel`.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 - `cargo fmt --all -- --check`
@@ -141,6 +141,6 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 Commit message: `refactor: 调整 DDD workspace 目录结构 (refs #47)`.

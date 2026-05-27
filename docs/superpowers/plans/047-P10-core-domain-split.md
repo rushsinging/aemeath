@@ -155,6 +155,6 @@ chrono = "0.4"
 - [x] **Batch 1**: provider api.rs 模式 + security → policy + 死代码清理（已完成，在 worktree feature/47-split-core-provider 中）
 - [x] **Batch 2**: Storage domain (logging, history, tool_result_storage) — 已完成，logging/history/tool_result_storage 从 core 迁入 crates/storage
 - [x] **Batch 3**: Project domain (worktree) — 已完成，worktree 从 core 迁入 services/project，WorkingContext 留在 core::tool 避免循环依赖；P11 新增 services/share 解决 tools→project 跨 service 依赖
-- [ ] **Batch 4**: Tools domain (tool, mcp)
-- [ ] **Batch 5**: Runtime domain (agent, compact, reflection, scheduler, task, command)
-- [ ] **Batch 6**: Remaining (hook, skill, cost, session, memory, state)
+- [x] **Batch 4**: Tools domain (tool, mcp)
+- [x] **Batch 5**: Runtime domain (agent, compact, reflection, scheduler, task, command)
+- [x] **Batch 6**: Remaining (hook, skill, cost, session, memory, state)

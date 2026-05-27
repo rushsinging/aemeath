@@ -48,7 +48,7 @@
 - Modify: `crates/runtime/src/lib.rs`
 - Modify: `crates/runtime/src/api.rs`
 
-- [ ] **Step 1: 创建 runtime 模块入口**
+- [x] **Step 1: 创建 runtime 模块入口**
 
 Create `crates/runtime/src/chat/looping/mod.rs`:
 
@@ -60,7 +60,7 @@ pub use events::{RuntimeStreamEvent, ChatEventSink};
 pub use queue::{append_queued_input, QueueDrainPort};
 ```
 
-- [ ] **Step 2: 定义 runtime stream event sink trait**
+- [x] **Step 2: 定义 runtime stream event sink trait**
 
 Create `crates/runtime/src/chat/looping/events.rs`:
 
@@ -99,7 +99,7 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 }
 ```
 
-- [ ] **Step 3: 定义 queue drain port 与 append 逻辑**
+- [x] **Step 3: 定义 queue drain port 与 append 逻辑**
 
 Create `crates/runtime/src/chat/looping/queue.rs`:
 
@@ -205,7 +205,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: 导出 runtime 模块**
+- [x] **Step 4: 导出 runtime 模块**
 
 Modify `crates/runtime/src/lib.rs`:
 
@@ -235,7 +235,7 @@ pub use storage;
 pub use tools;
 ```
 
-- [ ] **Step 5: 验证 Task 1**
+- [x] **Step 5: 验证 Task 1**
 
 Run:
 
@@ -256,7 +256,7 @@ Expected: all pass.
 - Modify: `crates/runtime/src/chat/looping/mod.rs`
 - Modify: `apps/cli/src/tui/app/stream/handler.rs`
 
-- [ ] **Step 1: 创建 runtime stream handler**
+- [x] **Step 1: 创建 runtime stream handler**
 
 Create `crates/runtime/src/chat/looping/stream_handler.rs`:
 
@@ -352,7 +352,7 @@ where
 }
 ```
 
-- [ ] **Step 2: 导出 handler**
+- [x] **Step 2: 导出 handler**
 
 Modify `crates/runtime/src/chat/looping/mod.rs`:
 
@@ -366,7 +366,7 @@ pub use queue::{append_queued_input, QueueDrainPort};
 pub use stream_handler::RuntimeStreamHandler;
 ```
 
-- [ ] **Step 3: CLI handler 改为 runtime handler 类型别名**
+- [x] **Step 3: CLI handler 改为 runtime handler 类型别名**
 
 Replace `apps/cli/src/tui/app/stream/handler.rs` with:
 
@@ -376,7 +376,7 @@ use crate::tui::app::processing::TuiEventSink;
 pub(crate) type TuiStreamHandler = ::runtime::api::chat::RuntimeStreamHandler<TuiEventSink>;
 ```
 
-- [ ] **Step 4: 验证 Task 2**
+- [x] **Step 4: 验证 Task 2**
 
 Run:
 
@@ -395,7 +395,7 @@ Expected: all pass.
 **Files:**
 - Modify: `apps/cli/src/tui/app/processing.rs`
 
-- [ ] **Step 1: 在 processing.rs 添加 adapter 类型**
+- [x] **Step 1: 在 processing.rs 添加 adapter 类型**
 
 Modify `apps/cli/src/tui/app/processing.rs` by adding after imports:
 
@@ -471,7 +471,7 @@ impl ::runtime::api::chat::QueueDrainPort for TuiQueueDrainPort {
 }
 ```
 
-- [ ] **Step 2: 验证 adapter 编译**
+- [x] **Step 2: 验证 adapter 编译**
 
 Run:
 
@@ -497,7 +497,7 @@ pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 - Modify: `apps/cli/src/tui/app/processing.rs`
 - Modify: `apps/cli/src/tui/app/stream.rs`
 
-- [ ] **Step 1: 创建 runtime context 类型**
+- [x] **Step 1: 创建 runtime context 类型**
 
 Create `crates/runtime/src/chat/looping/loop_runner.rs` with the context struct first:
 
@@ -546,7 +546,7 @@ where
 }
 ```
 
-- [ ] **Step 2: 搬迁主循环，暂时保留 CLI-only helper 回调**
+- [x] **Step 2: 搬迁主循环，暂时保留 CLI-only helper 回调**
 
 Continue in `crates/runtime/src/chat/looping/loop_runner.rs` by adding a minimal compile target that constructs `ToolContext` and emits cancellation. Do not move every stream submodule in this step:
 
@@ -712,7 +712,7 @@ where
 
 Important: This step is an intermediate checkpoint only if compile/testing shows no user-visible path regression. If this minimal loop changes tool execution behavior, do not commit; instead move all existing helper modules in Task 5 before enabling `spawn_processing` to call runtime.
 
-- [ ] **Step 3: 导出 context 与 runner**
+- [x] **Step 3: 导出 context 与 runner**
 
 Modify `crates/runtime/src/chat/looping/mod.rs`:
 
@@ -728,7 +728,7 @@ pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
 pub use stream_handler::RuntimeStreamHandler;
 ```
 
-- [ ] **Step 4: 暂不切换 CLI，先验证 runtime 编译**
+- [x] **Step 4: 暂不切换 CLI，先验证 runtime 编译**
 
 Run:
 
@@ -749,7 +749,7 @@ Expected: pass.
 - Modify: `apps/cli/src/tui/app/processing.rs`
 - Modify: `apps/cli/src/tui/app/stream.rs`
 
-- [ ] **Step 1: Move helper modules one by one**
+- [x] **Step 1: Move helper modules one by one**
 
 Use `mv` for each file, then replace imports from `crate::tui::app::stream::*` and `crate::tui::app::UiEvent` with runtime event sink equivalents.
 
@@ -763,7 +763,7 @@ mv apps/cli/src/tui/app/stream/queue.rs crates/runtime/src/chat/looping/queue_le
 
 Expected: files are moved. After moving queue tests, manually merge useful Bug #49 tests into `crates/runtime/src/chat/looping/queue.rs`, then delete `queue_legacy_tests_source.rs`.
 
-- [ ] **Step 2: Convert helper modules to runtime events**
+- [x] **Step 2: Convert helper modules to runtime events**
 
 For every moved helper function that accepted `mpsc::Sender<UiEvent>`, change it to generic `S: ChatEventSink` and send `RuntimeStreamEvent`.
 
@@ -788,7 +788,7 @@ pub(crate) async fn send_tool_result<S>(
 }
 ```
 
-- [ ] **Step 3: Replace loop_runner placeholder with original logic**
+- [x] **Step 3: Replace loop_runner placeholder with original logic**
 
 In `crates/runtime/src/chat/looping/loop_runner.rs`, replace the checkpoint message branch with the original logic from `apps/cli/src/tui/app/stream.rs` lines 171-347:
 
@@ -799,7 +799,7 @@ In `crates/runtime/src/chat/looping/loop_runner.rs`, replace the checkpoint mess
 
 Concrete rule: no behavior marker message such as `runtime migration checkpoint` may remain after this task.
 
-- [ ] **Step 4: Switch CLI spawn_processing to runtime**
+- [x] **Step 4: Switch CLI spawn_processing to runtime**
 
 Modify `apps/cli/src/tui/app/processing.rs` `spawn_processing` body:
 
@@ -840,11 +840,11 @@ pub(super) fn spawn_processing(ctx: SpawnContext) {
 }
 ```
 
-- [ ] **Step 5: Remove old CLI stream main loop**
+- [x] **Step 5: Remove old CLI stream main loop**
 
 Modify `apps/cli/src/tui/app/stream.rs` to only keep modules still required by CLI tests or delete the file if no longer referenced. If deleted, update `apps/cli/src/tui/app/mod.rs` module declarations accordingly.
 
-- [ ] **Step 6: Verify Task 5**
+- [x] **Step 6: Verify Task 5**
 
 Run:
 
@@ -866,7 +866,7 @@ Expected: all pass.
 - Modify: `docs/feature/active.md`
 - Modify: `docs/feature/specs/047-ddd-redesign.md`
 
-- [ ] **Step 1: 更新 active.md #47 当前推进**
+- [x] **Step 1: 更新 active.md #47 当前推进**
 
 In `docs/feature/active.md`, update #47 line and detail paragraph to include:
 
@@ -874,7 +874,7 @@ In `docs/feature/active.md`, update #47 line and detail paragraph to include:
 TUI stream loop 首轮已开始下沉 runtime：后台 processing 入口通过 runtime::api::chat 调用，LLM turn loop、ToolContext 构造、queue drain、stream handler 与 tool batch 编排从 apps/cli/src/tui/app/stream* 迁入 crates/runtime；apps/cli 继续保留 UiEvent、渲染、输入、AskUserQuestion 交互和 event adapter。
 ```
 
-- [ ] **Step 2: 更新 spec checkpoint**
+- [x] **Step 2: 更新 spec checkpoint**
 
 In `docs/feature/specs/047-ddd-redesign.md` around checkpoint 5, include:
 
@@ -882,7 +882,7 @@ In `docs/feature/specs/047-ddd-redesign.md` around checkpoint 5, include:
 TUI stream loop 首轮迁移后，runtime 开始接管 TUI 后台 turn loop；TUI adapter 仍保留 UiEvent、渲染、输入队列 UI 和 AskUserQuestion 交互，不在本 checkpoint 重写 projection event。
 ```
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 Run:
 
@@ -899,7 +899,7 @@ cargo test
 
 Expected: all pass.
 
-- [ ] **Step 4: Commit implementation**
+- [x] **Step 4: Commit implementation**
 
 Before committing, invoke the `commit` skill and follow repository commit style. Suggested title:
 

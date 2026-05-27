@@ -35,13 +35,13 @@
 - Modify: `apps/cli/src/main.rs`
 - Modify: `apps/cli/src/run_orchestration/setup/tooling.rs`
 
-- [ ] **Step 1: 复制 mcp_loader.rs 到 runtime/bootstrap/**
+- [x] **Step 1: 复制 mcp_loader.rs 到 runtime/bootstrap/**
 
 ```bash
 cp apps/cli/src/mcp_loader.rs crates/runtime/src/bootstrap/mcp_loader.rs
 ```
 
-- [ ] **Step 2: 修改 runtime 侧 mcp_loader.rs 的 import 路径**
+- [x] **Step 2: 修改 runtime 侧 mcp_loader.rs 的 import 路径**
 
 `::runtime::api::core::` → `crate::api::core::`，共 4 处：
 
@@ -59,7 +59,7 @@ use crate::api::core::tool::ToolRegistry;
 use crate::api::core::mcp::McpServerConfig;
 ```
 
-- [ ] **Step 3: 在 runtime bootstrap/mod.rs 注册模块并 re-export**
+- [x] **Step 3: 在 runtime bootstrap/mod.rs 注册模块并 re-export**
 
 在 `crates/runtime/src/bootstrap/mod.rs` 顶部添加 `pub mod mcp_loader;`，在 re-export 区添加：
 
@@ -67,7 +67,7 @@ use crate::api::core::mcp::McpServerConfig;
 pub use mcp_loader::{load_mcp_manager, parse_mcp_servers_config, spawn_mcp_connect};
 ```
 
-- [ ] **Step 4: 删除 CLI 侧 mcp_loader.rs 并从 main.rs 移除 mod 声明**
+- [x] **Step 4: 删除 CLI 侧 mcp_loader.rs 并从 main.rs 移除 mod 声明**
 
 ```bash
 rm apps/cli/src/mcp_loader.rs
@@ -75,7 +75,7 @@ rm apps/cli/src/mcp_loader.rs
 
 从 `apps/cli/src/main.rs` 移除 `mod mcp_loader;`。
 
-- [ ] **Step 5: 更新 CLI 引用**
+- [x] **Step 5: 更新 CLI 引用**
 
 `apps/cli/src/run_orchestration/setup/tooling.rs`:
 
@@ -85,7 +85,7 @@ rm apps/cli/src/mcp_loader.rs
 use ::runtime::api::bootstrap::spawn_mcp_connect;
 ```
 
-- [ ] **Step 6: 验证编译**
+- [x] **Step 6: 验证编译**
 
 ```bash
 cargo build -p runtime && cargo build -p cli
@@ -109,7 +109,7 @@ Expected: 编译成功。
 
 注意：runtime 已有 `crates/prompt/` crate（Guidance），但 `crates/runtime/src/prompt/` 目前只是 re-export。本 Task 在 runtime 内部新建 `prompt/` 子目录放 prompt 构建逻辑，不与 `crates/prompt/` crate 冲突。
 
-- [ ] **Step 1: 创建 runtime prompt 目录并复制文件**
+- [x] **Step 1: 创建 runtime prompt 目录并复制文件**
 
 ```bash
 mkdir -p crates/runtime/src/prompt
@@ -118,7 +118,7 @@ cp apps/cli/src/prompt/git_context.rs crates/runtime/src/prompt/git_context.rs
 cp apps/cli/src/prompt_tests.rs crates/runtime/src/prompt/prompt_build_tests.rs
 ```
 
-- [ ] **Step 2: 修改 prompt_build.rs 的 import 路径**
+- [x] **Step 2: 修改 prompt_build.rs 的 import 路径**
 
 ```rust
 // crates/runtime/src/prompt/prompt_build.rs
@@ -148,11 +148,11 @@ if let Some(prefix) = crate::api::core::security::format_warnings(&warnings) {
 mod prompt_build_tests;
 ```
 
-- [ ] **Step 3: 修改 prompt_build_tests.rs 的 import 路径**
+- [x] **Step 3: 修改 prompt_build_tests.rs 的 import 路径**
 
 所有 `::runtime::api::` → `crate::api::`。
 
-- [ ] **Step 4: 创建 prompt/mod.rs**
+- [x] **Step 4: 创建 prompt/mod.rs**
 
 ```rust
 // crates/runtime/src/prompt/mod.rs
@@ -181,7 +181,7 @@ use crate::api::core::memory::{
 use super::git_context::{collect_git_context, is_git_repo};
 ```
 
-- [ ] **Step 5: 在 runtime/lib.rs 注册 prompt 模块**
+- [x] **Step 5: 在 runtime/lib.rs 注册 prompt 模块**
 
 `crates/runtime/src/lib.rs` 添加 `pub mod prompt;`。
 
@@ -219,14 +219,14 @@ use super::git_context::{collect_git_context, is_git_repo};
 
 移除内部的 `mod git_context;`。
 
-- [ ] **Step 6: 在 runtime/api.rs 添加 re-export**
+- [x] **Step 6: 在 runtime/api.rs 添加 re-export**
 
 ```rust
 // crates/runtime/src/api.rs 末尾追加
 pub use crate::prompt_build;
 ```
 
-- [ ] **Step 7: 删除 CLI 侧文件并更新 main.rs**
+- [x] **Step 7: 删除 CLI 侧文件并更新 main.rs**
 
 ```bash
 rm apps/cli/src/prompt.rs apps/cli/src/prompt/git_context.rs apps/cli/src/prompt_tests.rs
@@ -235,7 +235,7 @@ rmdir apps/cli/src/prompt
 
 从 `apps/cli/src/main.rs` 移除 `mod prompt;`。
 
-- [ ] **Step 8: 更新 CLI 引用**
+- [x] **Step 8: 更新 CLI 引用**
 
 `apps/cli/src/run_orchestration/setup/prompt_bundle.rs`:
 
@@ -265,7 +265,7 @@ use ::runtime::api::prompt_build::SystemPromptParts;
 prompt_parts: ::runtime::api::prompt_build::SystemPromptParts,
 ```
 
-- [ ] **Step 9: 验证编译**
+- [x] **Step 9: 验证编译**
 
 ```bash
 cargo build -p runtime && cargo build -p cli
@@ -281,13 +281,13 @@ cargo build -p runtime && cargo build -p cli
 - Modify: `apps/cli/src/main.rs`
 - Modify: `apps/cli/src/repl/turns.rs`
 
-- [ ] **Step 1: 复制文件**
+- [x] **Step 1: 复制文件**
 
 ```bash
 cp apps/cli/src/reflection.rs crates/runtime/src/chat/reflection.rs
 ```
 
-- [ ] **Step 2: 修改 runtime 侧 import 路径**
+- [x] **Step 2: 修改 runtime 侧 import 路径**
 
 所有 `::runtime::api::` → `crate::api::`：
 
@@ -314,11 +314,11 @@ use crate::api::core::reflection::ReflectionOutput;
 
 测试中同理改为 `crate::api::`。
 
-- [ ] **Step 3: 在 chat/mod.rs 注册模块**
+- [x] **Step 3: 在 chat/mod.rs 注册模块**
 
 读取 `crates/runtime/src/chat/mod.rs` 并添加 `pub mod reflection;`。
 
-- [ ] **Step 4: 删除 CLI 侧并更新 main.rs**
+- [x] **Step 4: 删除 CLI 侧并更新 main.rs**
 
 ```bash
 rm apps/cli/src/reflection.rs
@@ -326,7 +326,7 @@ rm apps/cli/src/reflection.rs
 
 从 `apps/cli/src/main.rs` 移除 `mod reflection;`。
 
-- [ ] **Step 5: 更新 CLI 引用**
+- [x] **Step 5: 更新 CLI 引用**
 
 `apps/cli/src/repl/turns.rs`:
 
@@ -336,7 +336,7 @@ rm apps/cli/src/reflection.rs
 ::runtime::api::chat::reflection::run_reflection(...)
 ```
 
-- [ ] **Step 6: 验证编译**
+- [x] **Step 6: 验证编译**
 
 ```bash
 cargo build -p runtime && cargo build -p cli
@@ -365,7 +365,7 @@ cargo build -p runtime && cargo build -p cli
 - Modify: `apps/cli/src/repl/mod.rs`
 - Modify: `apps/cli/src/repl/input.rs`
 
-- [ ] **Step 1: 添加 base64 依赖到 runtime**
+- [x] **Step 1: 添加 base64 依赖到 runtime**
 
 在 `crates/runtime/Cargo.toml` 的 `[dependencies]` 中添加：
 
@@ -373,7 +373,7 @@ cargo build -p runtime && cargo build -p cli
 base64 = "0.22"
 ```
 
-- [ ] **Step 2: 创建 runtime/image 目录并复制文件**
+- [x] **Step 2: 创建 runtime/image 目录并复制文件**
 
 ```bash
 mkdir -p crates/runtime/src/image
@@ -381,7 +381,7 @@ cp apps/cli/src/image.rs crates/runtime/src/image/mod.rs
 cp apps/cli/src/image/clipboard.rs crates/runtime/src/image/clipboard.rs
 ```
 
-- [ ] **Step 3: 修复 Linux IMAGE_MAX_HEIGHT 未定义问题**
+- [x] **Step 3: 修复 Linux IMAGE_MAX_HEIGHT 未定义问题**
 
 在 `crates/runtime/src/image/mod.rs` 常量区添加：
 
@@ -389,19 +389,19 @@ cp apps/cli/src/image/clipboard.rs crates/runtime/src/image/clipboard.rs
 pub const IMAGE_MAX_HEIGHT: u32 = 2000;
 ```
 
-- [ ] **Step 4: 在 runtime/lib.rs 注册 image 模块**
+- [x] **Step 4: 在 runtime/lib.rs 注册 image 模块**
 
 ```rust
 pub mod image;
 ```
 
-- [ ] **Step 5: 在 runtime/api.rs 添加 re-export**
+- [x] **Step 5: 在 runtime/api.rs 添加 re-export**
 
 ```rust
 pub use crate::image;
 ```
 
-- [ ] **Step 6: 删除 CLI 侧文件并更新 main.rs**
+- [x] **Step 6: 删除 CLI 侧文件并更新 main.rs**
 
 ```bash
 rm apps/cli/src/image.rs apps/cli/src/image/clipboard.rs
@@ -410,7 +410,7 @@ rmdir apps/cli/src/image
 
 从 `apps/cli/src/main.rs` 移除 `mod image;`。
 
-- [ ] **Step 7: 批量更新 CLI 引用**
+- [x] **Step 7: 批量更新 CLI 引用**
 
 所有 `crate::image::` → `::runtime::api::image::`，涉及文件列表：
 
@@ -427,7 +427,7 @@ rmdir apps/cli/src/image
 - `repl/mod.rs`：1 处类型引用
 - `repl/input.rs`：1 处 use
 
-- [ ] **Step 8: 验证编译**
+- [x] **Step 8: 验证编译**
 
 ```bash
 cargo build -p runtime && cargo build -p cli
@@ -446,7 +446,7 @@ cargo build -p runtime && cargo build -p cli
 - Modify: `apps/cli/src/run_orchestration/setup.rs`
 - Modify: `apps/cli/src/tui/app/processing.rs`
 
-- [ ] **Step 1: 添加 env_logger 依赖到 runtime**
+- [x] **Step 1: 添加 env_logger 依赖到 runtime**
 
 在 `crates/runtime/Cargo.toml` 的 `[dependencies]` 中添加：
 
@@ -454,13 +454,13 @@ cargo build -p runtime && cargo build -p cli
 env_logger = "0.11"
 ```
 
-- [ ] **Step 2: 复制文件到 runtime/bootstrap/**
+- [x] **Step 2: 复制文件到 runtime/bootstrap/**
 
 ```bash
 cp apps/cli/src/logging_setup.rs crates/runtime/src/bootstrap/logging_setup.rs
 ```
 
-- [ ] **Step 3: 修改 runtime 侧 import 路径**
+- [x] **Step 3: 修改 runtime 侧 import 路径**
 
 ```rust
 // crates/runtime/src/bootstrap/logging_setup.rs
@@ -473,7 +473,7 @@ use crate::api::core::logging::{self, LogFile};
 pub fn init_logging(logging_config: &crate::api::core::config::LoggingConfig) {
 ```
 
-- [ ] **Step 4: 将 pub(crate) 改为 pub**
+- [x] **Step 4: 将 pub(crate) 改为 pub**
 
 原 CLI 中函数是 `pub(crate)`，迁入 runtime 后需要改为 `pub` 以便 CLI 调用：
 
@@ -484,14 +484,14 @@ pub fn init_logging(...) { ... }
 pub fn init_panic_hook() { ... }
 ```
 
-- [ ] **Step 5: 在 bootstrap/mod.rs 注册模块并 re-export**
+- [x] **Step 5: 在 bootstrap/mod.rs 注册模块并 re-export**
 
 ```rust
 pub mod logging_setup;
 pub use logging_setup::{init_logging, init_panic_hook, set_current_turn, set_session_id};
 ```
 
-- [ ] **Step 6: 删除 CLI 侧并更新 main.rs**
+- [x] **Step 6: 删除 CLI 侧并更新 main.rs**
 
 ```bash
 rm apps/cli/src/logging_setup.rs
@@ -499,7 +499,7 @@ rm apps/cli/src/logging_setup.rs
 
 从 `apps/cli/src/main.rs` 移除 `mod logging_setup;`。
 
-- [ ] **Step 7: 更新 CLI 引用**
+- [x] **Step 7: 更新 CLI 引用**
 
 `apps/cli/src/main.rs`：
 
@@ -537,7 +537,7 @@ use ::runtime::api::bootstrap::init_logging;
 ::runtime::api::bootstrap::set_current_turn(turn);
 ```
 
-- [ ] **Step 8: 验证编译**
+- [x] **Step 8: 验证编译**
 
 ```bash
 cargo build -p runtime && cargo build -p cli
@@ -547,31 +547,31 @@ cargo build -p runtime && cargo build -p cli
 
 ## Task 6: 完整编译验证 + 更新文档 + 提交
 
-- [ ] **Step 1: 完整 workspace 编译**
+- [x] **Step 1: 完整 workspace 编译**
 
 ```bash
 cargo build
 cargo clippy --workspace -- -D warnings
 ```
 
-- [ ] **Step 2: 运行 runtime 和 cli 测试**
+- [x] **Step 2: 运行 runtime 和 cli 测试**
 
 ```bash
 cargo test -p runtime
 cargo test -p cli
 ```
 
-- [ ] **Step 3: 更新 docs/feature/active.md #47 条目**
+- [x] **Step 3: 更新 docs/feature/active.md #47 条目**
 
 在 #47 "当前推进" 段落末尾追加：
 
 > CLI 侧非 UI 模块已完成拆分：`reflection`、`mcp_loader`、`prompt`（prompt_build）、`image`、`logging_setup` 已迁入 `crates/runtime`，CLI 只保留纯 UI/入口层（TUI、REPL、render、CLI 参数解析、run_orchestration 薄壳）。后续从 `core` 继续拆分 support domain。
 
-- [ ] **Step 4: 更新 docs/feature/specs/047-ddd-redesign.md**
+- [x] **Step 4: 更新 docs/feature/specs/047-ddd-redesign.md**
 
 在 checkpoint 进展部分追加 P9 拆分记录。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add -A
@@ -588,7 +588,7 @@ CLI 侧只保留纯 UI/入口层：TUI、REPL、render、CLI 参数解析、run_
 Co-Authored-By: Aemeath (Zhipu/glm-5.1) <github:rushsinging/aemeath>"
 ```
 
-- [ ] **Step 6: 合并回 main 并验证**
+- [x] **Step 6: 合并回 main 并验证**
 
 ```bash
 git checkout main

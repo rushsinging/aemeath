@@ -54,7 +54,7 @@ Verification:
 - Create: `cli/src/application/chat/request.rs`
 - Modify/Delete: `cli/src/application/chat.rs`
 
-- [ ] **Step 1: Read current source**
+- [x] **Step 1: Read current source**
 
 Run:
 
@@ -65,7 +65,7 @@ git status --short --branch
 
 Expected: branch is `feature/47-chat-runtime-port-phase2` and working tree has no unrelated user changes.
 
-- [ ] **Step 2: Create `cli/src/application/chat/mod.rs`**
+- [x] **Step 2: Create `cli/src/application/chat/mod.rs`**
 
 Create file with exactly:
 
@@ -75,7 +75,7 @@ pub(crate) mod request;
 pub(crate) use request::{ChatLaunchMode, ChatLaunchRequest};
 ```
 
-- [ ] **Step 3: Move request code and tests to `cli/src/application/chat/request.rs`**
+- [x] **Step 3: Move request code and tests to `cli/src/application/chat/request.rs`**
 
 Create file with exactly:
 
@@ -198,11 +198,11 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Temporarily leave old `cli/src/application/chat.rs` empty-deleted**
+- [x] **Step 4: Temporarily leave old `cli/src/application/chat.rs` empty-deleted**
 
 Delete `cli/src/application/chat.rs`. The module is now resolved through `cli/src/application/chat/mod.rs`.
 
-- [ ] **Step 5: Run targeted test and expect compile errors from missing service types**
+- [x] **Step 5: Run targeted test and expect compile errors from missing service types**
 
 Run:
 
@@ -222,7 +222,7 @@ Expected: FAIL because `ChatApplicationService`, `NoTuiChatDependencies`, and `T
 - Modify: `cli/src/application/chat/mod.rs`
 - Modify: `cli/Cargo.toml`
 
-- [ ] **Step 1: Add async-trait dependency to `cli/Cargo.toml`**
+- [x] **Step 1: Add async-trait dependency to `cli/Cargo.toml`**
 
 In `[dependencies]`, add:
 
@@ -230,7 +230,7 @@ In `[dependencies]`, add:
 async-trait = { workspace = true }
 ```
 
-- [ ] **Step 2: Update `cli/src/application/chat/mod.rs`**
+- [x] **Step 2: Update `cli/src/application/chat/mod.rs`**
 
 Replace contents with exactly:
 
@@ -244,7 +244,7 @@ pub(crate) use request::{ChatLaunchMode, ChatLaunchRequest};
 pub(crate) use service::ChatApplicationService;
 ```
 
-- [ ] **Step 3: Create `cli/src/application/chat/port.rs`**
+- [x] **Step 3: Create `cli/src/application/chat/port.rs`**
 
 Create file with exactly:
 
@@ -314,7 +314,7 @@ pub(crate) trait ChatRuntimePort {
 }
 ```
 
-- [ ] **Step 4: Create `cli/src/application/chat/service.rs`**
+- [x] **Step 4: Create `cli/src/application/chat/service.rs`**
 
 Create file with exactly:
 
@@ -424,7 +424,7 @@ mod tests {
 
 Note: This task intentionally only unit-tests validation because constructing real dependency bundles is expensive. Runtime dispatch is validated by compile-time wiring in Task 3 and full tests.
 
-- [ ] **Step 5: Run targeted test**
+- [x] **Step 5: Run targeted test**
 
 Run:
 
@@ -441,7 +441,7 @@ Expected: FAIL because `runtime.rs` still calls old static `ChatApplicationServi
 **Files:**
 - Modify: `cli/src/run_orchestration/runtime.rs`
 
-- [ ] **Step 1: Update imports in `runtime.rs`**
+- [x] **Step 1: Update imports in `runtime.rs`**
 
 Replace the existing `crate::application::chat` import with:
 
@@ -459,7 +459,7 @@ Also add direct imports for the existing adapters:
 use crate::{repl, tui};
 ```
 
-- [ ] **Step 2: Add adapter structs near the top of `runtime.rs` after imports**
+- [x] **Step 2: Add adapter structs near the top of `runtime.rs` after imports**
 
 Add exactly:
 
@@ -561,7 +561,7 @@ impl ChatRuntimePort for TuiChatRuntimeAdapter {
 }
 ```
 
-- [ ] **Step 3: Update `run_no_tui` service call**
+- [x] **Step 3: Update `run_no_tui` service call**
 
 Replace:
 
@@ -576,7 +576,7 @@ let service = ChatApplicationService::new(NoTuiChatRuntimeAdapter);
 if let Err(e) = service.run_no_tui_chat(request, dependencies).await {
 ```
 
-- [ ] **Step 4: Update `run_tui` service call**
+- [x] **Step 4: Update `run_tui` service call**
 
 Replace:
 
@@ -593,7 +593,7 @@ match service.run_tui_chat(request, dependencies).await {
     Ok(outcome) => println!("aemeath --resume {}", outcome.session_id),
 ```
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run:
 
@@ -603,7 +603,7 @@ cargo test -p aemeath-cli application::chat
 
 Expected: PASS.
 
-- [ ] **Step 6: Run build**
+- [x] **Step 6: Run build**
 
 Run:
 
@@ -620,7 +620,7 @@ Expected: PASS.
 **Files:**
 - Modify: `docs/feature/active.md`
 
-- [ ] **Step 1: Update #47 row in `docs/feature/active.md`**
+- [x] **Step 1: Update #47 row in `docs/feature/active.md`**
 
 Find the #47 row and append this sentence to the Notes column:
 
@@ -628,7 +628,7 @@ Find the #47 row and append this sentence to the Notes column:
 Phase 2 继续推进薄入口：ChatApplicationService 改为依赖 ChatRuntimePort，CLI no-TUI/TUI 通过 runtime adapter 实现 port，application service 不再直接调用 repl/tui。
 ```
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -640,7 +640,7 @@ cargo test
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run Stop hook command 1**
+- [x] **Step 3: Run Stop hook command 1**
 
 Run:
 
@@ -650,7 +650,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Stop hook command 2**
+- [x] **Step 4: Run Stop hook command 2**
 
 Run:
 
@@ -660,7 +660,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Run Stop hook command 3**
+- [x] **Step 5: Run Stop hook command 3**
 
 Run:
 
@@ -670,7 +670,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Inspect git status**
+- [x] **Step 6: Inspect git status**
 
 Run:
 

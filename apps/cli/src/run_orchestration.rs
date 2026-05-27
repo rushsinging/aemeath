@@ -23,7 +23,7 @@ pub(crate) async fn run_chat(args: Args) {
     ::runtime::api::command::commands::init_all();
 
     let args = apply_permission_env_override(args);
-    let initial_resume_id = initial_tui_resume_id(&args);
+    let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let client = ::runtime::api::client::from_args(args.into())
         .await
         .unwrap_or_else(|e| {
