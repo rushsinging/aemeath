@@ -7,7 +7,7 @@ pub const DEFAULT_WIDTH: usize = 120;
 /// 工具调用详情行的缩进
 pub const INDENT: &str = "  ";
 
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::style::Color;
 
 /// 带颜色的一段文本，用于行内分段着色（如 diff 语法高亮）

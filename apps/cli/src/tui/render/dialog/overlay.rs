@@ -2,7 +2,7 @@
 //!
 //! Provides a modal selection dialog for the TUI.
 
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},

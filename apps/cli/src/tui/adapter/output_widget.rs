@@ -33,6 +33,7 @@ fn clamp_scroll_state(output_area: &mut OutputArea) {
     }
     output_area
         .rendered_cache
+        .line_cache
         .content_changed(output_area.lines.len());
 }
 

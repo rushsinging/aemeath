@@ -14,11 +14,11 @@
 | 51 | UI Domain DDD 设计 —— 将 apps/cli 提升为核心域 | 中 | ✅ 已合并 | 已确认 | 已并入 #47。经讨论回归支撑域（薄入口），AgentClient SDK 保留并纳入 #47 §6.5。 |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
-| 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 未开始 | 未确认 | feature #53 TUI Model/View 迁移的遗留收口。新 Model/View 骨架（model/、view_assembler/、view_model/、view_state/、effect/、update/）已建立，但 spec `2026-05-27-tui-model-view-architecture.md` 目标结构里的 `render/`、`adapter/`、`app/` 三层尚未落地，渲染仍散在 legacy `output_area/`+`display/`+`input/` widget，adapter 散在 `update/*_mapper.rs`+`core/*_adapter.rs`，legacy `core/update/`+`core/state/` 与新 `update/`+`model/` 并存。目标：建立统一 `render/`、`adapter/`，将 `app/` 收薄，清理 legacy 重复，落地剩余架构 guard。 |
+| 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移的遗留收口。本轮已建立 `render/`、`adapter/`、`app/`，迁移 mapper、widget adapter、effect executor、status/theme/dialog/render cache/view_model render，并补齐 `view_state/cache.rs`；legacy core/state 等深层重复仍保留为兼容 facade，后续可继续拆。 |
 
 ### #55 TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core
 
-**状态**：未开始
+**状态**：待确认
 
 **背景**：feature #53（TUI Model/View 迁移）的遗留收口。按 `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md` 的目标模块结构审计 `apps/cli/src/tui/`，新 Model/View 骨架已建立且依赖方向大体正确，但仍有以下偏差未落地（#53 状态"待确认"，legacy shell 作为兼容 facade 保留）。
 
@@ -42,6 +42,8 @@
 5. 补齐 `effect/executor.rs`、`view_state/cache.rs`。
 6. 决定 `model/session/` 去留。
 7. 落地 spec §834 起的剩余架构 guard（render isolation / viewassembler boundary / adapter guard / output line legacy guard / effect boundary）。
+
+**本轮进展（feature/55）**：已建立顶层 `render/`、`adapter/`、`app/`；将 `update/*_mapper.rs` 迁入 `adapter/`，将 `core/*_adapter.rs` 迁入 `adapter/*_widget.rs`，将 `core/effect_runtime.rs` 迁入 `effect/executor.rs`；将 status/theme/dialog/render cache/output view model 渲染相关模块迁入 `render/`；新增 `view_state/cache.rs`，并让主绘制路径通过 `AppViewState.cache` 持有 output render cache。legacy `output_area`/`display` 保留必要兼容 facade，`core/update`/`core/state` 暂未深拆，避免本轮过度重构。
 
 **关联**：feature #53（TUI Model/View 迁移）；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 

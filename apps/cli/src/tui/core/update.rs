@@ -13,18 +13,18 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::core::output_adapter::replace_lines_from_view_model;
-use crate::tui::core::status_adapter::{
+use crate::tui::adapter::agent_event::map_agent_event;
+use crate::tui::adapter::output_widget::replace_lines_from_view_model;
+use crate::tui::adapter::status_widget::{
     apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
 };
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
+use crate::tui::render::output_view_model::output_view_model_lines;
 use crate::tui::session::processing::SpawnContext;
 use crate::tui::session::processing::SpawnContextRefs;
-use crate::tui::update::agent_event_mapper::map_agent_event;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
-use crate::tui::view_model::render::output_view_model_lines;
 use tokio::sync::mpsc;
 
 /// Return type for update: effects plus optional slash command continuation.

@@ -1,5 +1,5 @@
 use crate::tui::completion::Suggestion;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

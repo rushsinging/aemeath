@@ -1,7 +1,7 @@
 //! 布局与对话框状态
 
 use crate::tui::core::state::TerminalSize;
-use crate::tui::display::dialog::Dialog;
+use crate::tui::render::dialog::Dialog;
 use ratatui::layout::Rect;
 
 /// UI 布局与对话框相关状态

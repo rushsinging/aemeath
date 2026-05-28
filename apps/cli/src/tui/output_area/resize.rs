@@ -3,7 +3,7 @@ impl super::OutputArea {
         let new_term_width = (width as usize).saturating_sub(2);
         if new_term_width != self.term_width {
             self.term_width = new_term_width;
-            self.rendered_cache.invalidate();
+            self.rendered_cache.line_cache.invalidate();
         }
 
         let visible_height = visible_height_hint as usize;
@@ -29,7 +29,10 @@ pub mod tests {
     fn output_area_with_clean_cache(term_width: usize) -> OutputArea {
         let mut output = OutputArea::new();
         output.term_width = term_width;
-        output.rendered_cache.mark_clean_for_test(term_width);
+        output
+            .rendered_cache
+            .line_cache
+            .mark_clean_for_test(term_width);
         output
     }
 
@@ -50,7 +53,7 @@ pub mod tests {
         output.handle_resize(100, 20);
 
         assert_eq!(output.term_width, 98);
-        assert!(output.rendered_cache.is_dirty());
+        assert!(output.rendered_cache.line_cache.is_dirty());
     }
 
     #[test]
@@ -60,7 +63,7 @@ pub mod tests {
         output.handle_resize(80, 20);
 
         assert_eq!(output.term_width, 78);
-        assert!(!output.rendered_cache.is_dirty());
+        assert!(!output.rendered_cache.line_cache.is_dirty());
     }
 
     #[test]

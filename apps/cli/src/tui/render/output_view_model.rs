@@ -1,6 +1,6 @@
-use crate::tui::display::theme;
 use crate::tui::output_area::tool_display::{format_tool_call, lookup_display};
 use crate::tui::output_area::INDENT;
+use crate::tui::render::theme;
 use crate::tui::view_model::{
     OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
 };

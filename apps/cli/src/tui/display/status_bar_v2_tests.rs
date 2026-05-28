@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 
 fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
     (0..width)

@@ -3,7 +3,7 @@ use ratatui::{layout::Rect, style::Style, text::Line};
 use sdk::CharIdx;
 
 use crate::tui::display::safe_text::clamp_split_index;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 
 use super::{LineStyle, OutputArea};
 

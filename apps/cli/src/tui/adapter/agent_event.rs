@@ -142,8 +142,8 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
         working_root: Some(update.working_root.clone()),
         branch: update.branch.clone(),
         kind: match update.kind {
-            crate::tui::display::status_bar::WorktreeKind::Main => WorktreeKind::MainCheckout,
-            crate::tui::display::status_bar::WorktreeKind::Worktree => WorktreeKind::LinkedWorktree,
+            crate::tui::render::status::WorktreeKind::Main => WorktreeKind::MainCheckout,
+            crate::tui::render::status::WorktreeKind::Worktree => WorktreeKind::LinkedWorktree,
         },
     })
 }

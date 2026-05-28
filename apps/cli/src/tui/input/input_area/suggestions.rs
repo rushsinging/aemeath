@@ -1,7 +1,7 @@
 use super::InputArea;
 use crate::tui::completion::{Suggestion, SuggestionType};
 use crate::tui::display::safe_text::truncate_unicode_width;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthChar;
 

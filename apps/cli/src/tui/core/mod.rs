@@ -1,12 +1,8 @@
-mod effect_runtime;
 pub mod event;
-mod input_adapter;
-mod output_adapter;
 mod resize;
 mod run_loop;
 mod runtime;
 pub mod state;
-mod status_adapter;
 
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::model::root::TuiModel;
@@ -83,7 +79,7 @@ pub(crate) fn git_branch_for(path: &Path) -> Option<String> {
     }
 }
 
-pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::display::status_bar::WorktreeKind {
+pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::render::status::WorktreeKind {
     let is_worktree = Command::new("git")
         .args(["rev-parse", "--git-dir", "--git-common-dir"])
         .current_dir(path)
@@ -101,9 +97,9 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::display::status_bar:
         .unwrap_or(false);
 
     if is_worktree {
-        crate::tui::display::status_bar::WorktreeKind::Worktree
+        crate::tui::render::status::WorktreeKind::Worktree
     } else {
-        crate::tui::display::status_bar::WorktreeKind::Main
+        crate::tui::render::status::WorktreeKind::Main
     }
 }
 
@@ -208,7 +204,8 @@ impl App {
 
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.output_area.draw(chunks[0], buf);
+                self.output_area
+                    .render_with_cache(chunks[0], buf, &mut self.view_state.cache);
             }))
             .is_err()
             {

@@ -133,7 +133,9 @@ impl super::OutputArea {
             self.queued_line_count += 1;
         }
 
-        self.rendered_cache.content_changed(self.lines.len());
+        self.rendered_cache
+            .line_cache
+            .content_changed(self.lines.len());
 
         // 调整滚动偏移
         if !self.auto_scroll {
