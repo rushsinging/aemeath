@@ -42,7 +42,9 @@ impl super::App {
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.chat.messages.clear();
                 self.chat.clear_pending_images();
-                self.input_area.set_pending_images(0);
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
+                );
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.output_area.push_system("[conversation cleared]");
@@ -148,7 +150,11 @@ impl super::App {
                     Ok(img) => {
                         let size = img.final_size;
                         let count = self.chat.add_pending_image(img);
-                        self.input_area.set_pending_images(count);
+                        self.handle_input_intent(
+                            crate::tui::model::input::intent::InputIntent::SetAttachmentCount(
+                                count,
+                            ),
+                        );
                         self.output_area
                             .push_system(&format!("[clipboard image added ({} bytes)]", size));
                     }
@@ -178,7 +184,9 @@ impl super::App {
             }
             "/clear-images" => {
                 self.chat.clear_pending_images();
-                self.input_area.set_pending_images(0);
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
+                );
                 self.output_area.push_system("[pending images cleared]");
             }
             // Try to execute via AgentClient (delegates to CommandRegistry in runtime)
@@ -254,7 +262,9 @@ impl super::App {
             sdk::CommandAction::Clear => {
                 self.chat.messages.clear();
                 self.chat.clear_pending_images();
-                self.input_area.set_pending_images(0);
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
+                );
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.output_area.push_system("[cleared]");

@@ -6,11 +6,21 @@ pub struct InputDocument {
 }
 
 impl InputDocument {
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     pub fn insert_text(&mut self, text: &str) {
         let cursor = self.cursor.min(self.buffer.len());
         let cursor = clamp_to_char_boundary(&self.buffer, cursor);
         self.buffer.insert_str(cursor, text);
         self.cursor = cursor + text.len();
+        self.selection = None;
+    }
+
+    pub fn replace_text(&mut self, text: String) {
+        self.buffer = text;
+        self.cursor = self.buffer.len();
         self.selection = None;
     }
 
@@ -76,6 +86,26 @@ impl InputDocument {
         let old_cursor = self.cursor;
         self.move_left();
         self.buffer.drain(self.cursor..old_cursor);
+        self.selection = None;
+    }
+
+    pub fn delete_word_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let end = clamp_to_char_boundary(&self.buffer, self.cursor);
+        let prefix = &self.buffer[..end];
+        let trimmed_end = prefix.trim_end_matches(char::is_whitespace).len();
+        let mut start = trimmed_end;
+        for (idx, ch) in prefix[..trimmed_end].char_indices().rev() {
+            if ch.is_whitespace() {
+                start = idx + ch.len_utf8();
+                break;
+            }
+            start = idx;
+        }
+        self.buffer.drain(start..end);
+        self.cursor = start;
         self.selection = None;
     }
 

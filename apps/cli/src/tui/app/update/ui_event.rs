@@ -136,7 +136,9 @@ impl App {
             }
             UiEvent::ClipboardImage(img) => {
                 let count = self.chat.add_pending_image(img);
-                self.input_area.set_pending_images(count);
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
+                );
             }
             UiEvent::SystemMessage(msg) => {
                 // Hook notification deferred to Cmd; state update stays here
@@ -315,8 +317,7 @@ impl App {
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
-                    self.input_area.is_empty(),
-                    self.input.queue_preview()
+                    self.model.input.document.is_empty(),                    self.input.queue_preview()
                 );
                 if let Some(effect) = self.handle_done(ui_tx, None) {
                     effects.push(effect);
@@ -335,8 +336,7 @@ impl App {
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
-                    self.input_area.is_empty(),
-                    self.input.queue_preview()
+                    self.model.input.document.is_empty(),                    self.input.queue_preview()
                 );
                 if let Some(effect) = self.handle_done(ui_tx, Some(elapsed)) {
                     effects.push(effect);

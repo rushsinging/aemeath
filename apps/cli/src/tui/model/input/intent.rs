@@ -1,4 +1,3 @@
-use super::attachment::InputAttachment;
 use super::completion_item::CompletionItem;
 use super::mode::InputMode;
 
@@ -6,12 +5,15 @@ use super::mode::InputMode;
 pub enum InputIntent {
     InsertChar(char),
     InsertText(String),
+    ReplaceText(String),
     MoveCursor(usize),
     MoveCursorLeft,
     MoveCursorRight,
     MoveCursorHome,
     MoveCursorEnd,
+    InsertNewline,
     DeleteBackward,
+    DeleteWordBeforeCursor,
     DeleteForward,
     MoveHistoryPrevious,
     MoveHistoryNext,
@@ -22,8 +24,8 @@ pub enum InputIntent {
     SelectCompletionNext,
     SelectCompletionPrevious,
     AcceptCompletion,
-    AttachImage(InputAttachment),
-    ClearAttachments,
+    AcceptCompletionValue(String),
+    SetAttachmentCount(usize),
     SetMode(InputMode),
     Submit,
     Clear,

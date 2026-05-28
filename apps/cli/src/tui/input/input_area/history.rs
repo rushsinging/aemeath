@@ -3,7 +3,7 @@ use super::InputArea;
 impl InputArea {
     /// Add a message to history in tests.
     #[cfg(test)]
-    pub fn add_history(&mut self, text: &str) {
+    pub(crate) fn add_history(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -18,7 +18,8 @@ impl InputArea {
     }
 
     /// Navigate up in history (older messages)
-    pub fn history_up(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn history_up(&mut self) {
         if self.history.is_empty() {
             return;
         }
@@ -39,7 +40,8 @@ impl InputArea {
     }
 
     /// Navigate down in history (newer messages)
-    pub fn history_down(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn history_down(&mut self) {
         if self.history.is_empty() || self.history_index.is_none() {
             return;
         }
@@ -59,7 +61,8 @@ impl InputArea {
     }
 
     /// Reset history navigation
-    pub fn reset_history_nav(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn reset_history_nav(&mut self) {
         self.history_index = None;
         self.saved_input.clear();
     }

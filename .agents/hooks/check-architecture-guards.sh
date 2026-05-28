@@ -19,6 +19,7 @@ HOOKS_DIR="$ROOT/.agents/hooks"
 "$HOOKS_DIR/check-tui-tea-purity.sh"
 "$HOOKS_DIR/check-tui-effect-boundary.sh"
 "$HOOKS_DIR/check-tui-model-view-boundaries.sh"
+"$HOOKS_DIR/check-tui-input-single-source.sh"
 "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
 "$HOOKS_DIR/check-unsafe-text-ops.sh"
 

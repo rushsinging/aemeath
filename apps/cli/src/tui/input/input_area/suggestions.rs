@@ -5,23 +5,25 @@ use crate::tui::render::theme;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthChar;
 
+#[cfg_attr(test, allow(dead_code))]
 impl InputArea {
     /// Set suggestions for autocomplete
-    pub fn set_suggestions(&mut self, suggestions: Vec<Suggestion>) {
+    pub(crate) fn set_suggestions(&mut self, suggestions: Vec<Suggestion>) {
         self.selected_suggestion = if suggestions.is_empty() { -1 } else { 0 };
         self.show_suggestions = !suggestions.is_empty();
         self.suggestions = suggestions;
     }
 
     /// Clear suggestions
-    pub fn clear_suggestions(&mut self) {
+    pub(crate) fn clear_suggestions(&mut self) {
         self.suggestions.clear();
         self.selected_suggestion = -1;
         self.show_suggestions = false;
     }
 
     /// Move selection up in suggestions
-    pub fn select_previous(&mut self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn select_previous(&mut self) -> bool {
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion > 0 {
                 self.selected_suggestion -= 1;
@@ -35,7 +37,8 @@ impl InputArea {
     }
 
     /// Move selection down in suggestions
-    pub fn select_next(&mut self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn select_next(&mut self) -> bool {
         if self.show_suggestions && !self.suggestions.is_empty() {
             if self.selected_suggestion < self.suggestions.len() as i32 - 1 {
                 self.selected_suggestion += 1;
@@ -49,7 +52,8 @@ impl InputArea {
     }
 
     /// Accept current suggestion
-    pub fn accept_suggestion(&mut self) -> Option<Suggestion> {
+    #[cfg(test)]
+    pub(crate) fn accept_suggestion(&mut self) -> Option<Suggestion> {
         if self.show_suggestions && self.selected_suggestion >= 0 {
             let idx = self.selected_suggestion as usize;
             if idx < self.suggestions.len() {
@@ -59,6 +63,14 @@ impl InputArea {
             }
         }
         None
+    }
+
+    pub fn selected_suggestion(&self) -> Option<&Suggestion> {
+        if self.show_suggestions && self.selected_suggestion >= 0 {
+            self.suggestions.get(self.selected_suggestion as usize)
+        } else {
+            None
+        }
     }
 
     /// Check if suggestions are showing

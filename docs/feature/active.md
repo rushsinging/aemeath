@@ -15,11 +15,11 @@
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
-| 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 未开始 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。当前 legacy core/util.rs、core/update.rs、core/update/key.rs、core/update/ask_user_key.rs（及 input/mouse_handler.rs、paste_handler.rs）仍直接改 widget 后手动 sync，漂移持续产生 #79（Ctrl+A/E/方向键、上下翻历史、Ctrl+W）及 #75/#77 同族 bug。落地两层保障：①静态 guard check-tui-input-single-source.sh（禁 adapter 外对 input_area 调可变方法，仿 tea-purity 的豁免+逃逸，随迁移清零）接入 check-architecture-guards.sh；②迁移后将 InputArea 可变方法收紧为 pub(in crate::tui::...)，越界即编译失败。依赖 #55 把输入路径收口到 InputModel/adapter。 |
+| 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 
 ### #56 输入单一真相约束：禁止直接改 input_area 并加架构 guard
 
-**状态**：未开始
+**状态**：待确认
 
 **背景**：用户 2026-05-28 指出 `input_area` 所有直接修改（text 或 cursor）后未同步 `model.input.document`，突破了架构约束。约定先等 feature #55 输入路径收口后再做，故独立成 feature 跟踪。
 
@@ -34,6 +34,15 @@
 2. **类型级**：迁移后将 `InputArea` 可变方法可见性收紧为 `pub(in crate::tui::...)`，只对 adapter 模块可见，越界即编译失败。
 
 **依赖**：feature #55（先把键盘输入收口为 InputIntent→InputModel→InputChange→adapter→widget，否则 guard 会被大量 legacy 违规挡住）。
+
+**本轮完成（feature/56）**：
+- 键盘输入、AskUserQuestion 自由输入、粘贴、补全确认、图片 pending count 更新均改为走 `InputIntent` → `InputModel::apply` → `adapter/input_widget.rs`，不再由 app/update 直接修改 `input_area` 后手动 sync。
+- `InputModel` 补齐 `ReplaceText`、`InsertNewline`、`DeleteWordBeforeCursor`、`AcceptCompletionValue`、`SetAttachmentCount` 等 intent；`InputDocument` 补齐 replace/delete-word/is-empty 等纯逻辑。
+- `app/update`、`app/util`、`app/slash/suggestions` 改读 `model.input.document` 作为 text/cursor 业务真相；`input_area` 仅作为 widget/view，由 adapter 应用变化。
+- 新增 `.agents/hooks/check-tui-input-single-source.sh` 并接入 `check-architecture-guards.sh`，禁止 adapter/input_area 外直接改 `input_area` text/cursor，禁止 model 外直接改 `model.input.document`，禁止 app/update 读 `input_area` text/cursor 作为业务真相。
+- `InputArea` 的 text/cursor 可变方法收紧为内部或测试可见，外部越界调用将触发编译或 guard 失败。
+
+**验证**：`cargo check -p cli`、`cargo test -p cli`、`.agents/hooks/check-architecture-guards.sh`。
 
 **关联**：bug #79、#75、#77；feature #53、#55；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 

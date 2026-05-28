@@ -76,7 +76,9 @@ impl App {
 
     fn accept_pending_clipboard_image(&mut self, img: sdk::ClipboardImageView) {
         let count = self.chat.add_pending_image(img);
-        self.input_area.set_pending_images(count);
+        self.handle_input_intent(
+            crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
+        );
     }
 
     fn set_current_turn_effect(&mut self, turn: usize) {
