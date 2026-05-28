@@ -9,13 +9,13 @@ use sdk::CharIdx;
 use super::display;
 use super::markdown;
 use super::render::wrap_line;
-use super::rendered_cache::RenderedLine;
 use super::types::{LineStyle, SpanPart};
 use super::OutputLine;
-use crate::tui::display::theme;
+use crate::tui::render::output::RenderedLine;
+use crate::tui::render::theme;
 
 /// 渲染 [start, end) 范围内的所有行，写入 cache。
-pub(super) fn render_range(
+pub(crate) fn render_range(
     lines: &[OutputLine],
     start: usize,
     end: usize,
@@ -390,7 +390,7 @@ fn slice_spans_impl(
     result
 }
 
-pub(super) fn is_markdown_style(style: LineStyle) -> bool {
+pub(crate) fn is_markdown_style(style: LineStyle) -> bool {
     matches!(
         style,
         LineStyle::Assistant | LineStyle::Thinking | LineStyle::System

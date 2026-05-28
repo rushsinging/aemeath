@@ -5,7 +5,7 @@ pub struct StatusContextUpdate {
     pub path_base: String,
     pub working_root: String,
     pub branch: Option<String>,
-    pub kind: crate::tui::display::status_bar::WorktreeKind,
+    pub kind: crate::tui::render::status::WorktreeKind,
     pub raw_path_base: PathBuf,
     pub raw_working_root: PathBuf,
     pub workspace: sdk::WorkspaceContextView,

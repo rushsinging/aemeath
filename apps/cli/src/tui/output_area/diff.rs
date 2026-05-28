@@ -2,7 +2,7 @@ use similar::{ChangeTag, TextDiff};
 
 use super::types::{LineStyle, OutputLine, SpanPart, INDENT};
 use crate::tui::display::syntax::{self, language_by_extension};
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::style::Color;
 
 /// Diff 行号 / 高亮颜色常量。

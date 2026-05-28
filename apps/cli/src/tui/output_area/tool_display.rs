@@ -138,7 +138,9 @@ impl super::OutputArea {
                 break;
             }
         }
-        self.rendered_cache.content_changed(self.lines.len());
+        self.rendered_cache
+            .line_cache
+            .content_changed(self.lines.len());
     }
 
     /// 更新 Agent 工具调用的进度显示（原地替换 pending 占位行）
@@ -181,7 +183,9 @@ impl super::OutputArea {
             for (i, dl) in detail_lines.into_iter().enumerate() {
                 self.lines.insert(pos + 1 + i, dl);
             }
-            self.rendered_cache.content_changed(self.lines.len());
+            self.rendered_cache
+                .line_cache
+                .content_changed(self.lines.len());
             return;
         }
 

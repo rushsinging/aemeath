@@ -4,8 +4,8 @@ use ratatui::text::Line;
 
 use sdk::CharIdx;
 
-use super::rendered_lines;
-use super::OutputLine;
+use crate::tui::output_area::rendered_lines;
+use crate::tui::output_area::OutputLine;
 
 /// 单行的渲染结果
 #[derive(Clone, Debug)]
@@ -19,12 +19,19 @@ pub struct RenderedLine {
 }
 
 /// 渲染缓存
+#[derive(Debug)]
 pub struct RenderedCache {
     cache: Vec<Option<RenderedLine>>,
     render_start: usize,
     render_end: usize,
     cached_width: usize,
     dirty: bool,
+}
+
+impl Default for RenderedCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RenderedCache {
@@ -167,7 +174,9 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
     let start_line = &lines[start];
     if rendered_lines::is_markdown_style(start_line.style) {
         let trimmed = start_line.content.trim();
-        if super::markdown::is_table_row(trimmed) || super::markdown::is_table_separator(trimmed) {
+        if crate::tui::output_area::markdown::is_table_row(trimmed)
+            || crate::tui::output_area::markdown::is_table_separator(trimmed)
+        {
             let mut scan = start;
             while scan > 0 {
                 scan -= 1;
@@ -175,7 +184,8 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
                 let is_md = rendered_lines::is_markdown_style(prev.style);
                 let t = prev.content.trim();
                 if is_md
-                    && (super::markdown::is_table_row(t) || super::markdown::is_table_separator(t))
+                    && (crate::tui::output_area::markdown::is_table_row(t)
+                        || crate::tui::output_area::markdown::is_table_separator(t))
                 {
                     s = scan;
                 } else {
@@ -218,15 +228,15 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
         let end_line = &lines[end.min(total) - 1];
         if rendered_lines::is_markdown_style(end_line.style) {
             let trimmed = end_line.content.trim();
-            if super::markdown::is_table_row(trimmed)
-                || super::markdown::is_table_separator(trimmed)
+            if crate::tui::output_area::markdown::is_table_row(trimmed)
+                || crate::tui::output_area::markdown::is_table_separator(trimmed)
             {
                 for (i, next) in lines.iter().enumerate().take(total).skip(end) {
                     let is_md = rendered_lines::is_markdown_style(next.style);
                     let t = next.content.trim();
                     if is_md
-                        && (super::markdown::is_table_row(t)
-                            || super::markdown::is_table_separator(t))
+                        && (crate::tui::output_area::markdown::is_table_row(t)
+                            || crate::tui::output_area::markdown::is_table_separator(t))
                     {
                         e = i + 1;
                     } else {
@@ -242,9 +252,8 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::super::types::LineStyle;
     use super::*;
-
+    use crate::tui::output_area::types::LineStyle;
     fn md_line(content: &str) -> OutputLine {
         OutputLine {
             content: content.to_string(),

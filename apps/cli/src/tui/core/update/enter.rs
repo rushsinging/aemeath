@@ -1,5 +1,5 @@
 use super::UpdateResult;
-use crate::tui::core::input_adapter::apply_input_changes_to_widget;
+use crate::tui::adapter::input_widget::apply_input_changes_to_widget;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::session::processing::SpawnContextRefs;

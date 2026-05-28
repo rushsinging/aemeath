@@ -2,7 +2,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 
 use super::inline_markdown_spans;
 

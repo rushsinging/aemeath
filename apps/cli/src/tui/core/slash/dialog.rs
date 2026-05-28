@@ -1,4 +1,4 @@
-use crate::tui::display::dialog::Dialog;
+use crate::tui::render::dialog::Dialog;
 
 impl super::super::App {
     pub(super) fn open_model_selection_dialog(&mut self) -> Option<String> {

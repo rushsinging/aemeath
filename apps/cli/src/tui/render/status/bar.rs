@@ -1,9 +1,9 @@
-#[path = "status_bar_format.rs"]
+#[path = "../../display/status_bar_format.rs"]
 mod status_bar_format;
-#[path = "status_bar_selection.rs"]
+#[path = "../../display/status_bar_selection.rs"]
 mod status_bar_selection;
 
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -364,8 +364,8 @@ impl StatusBar {
 }
 
 #[cfg(test)]
-#[path = "status_bar_tests.rs"]
+#[path = "../../display/status_bar_tests.rs"]
 mod tests;
 #[cfg(test)]
-#[path = "status_bar_v2_tests.rs"]
+#[path = "../../display/status_bar_v2_tests.rs"]
 mod v2_tests;

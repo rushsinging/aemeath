@@ -1,15 +1,15 @@
-use super::agent_event_mapper::{map_agent_event, AgentEventMapping};
-use super::effect_result_mapper::{map_effect_result, EffectResultMapping};
-use super::input_mapper::{route_submission, ConversationAvailability, SubmissionRoute};
-use super::key_event_mapper::map_key_event;
-use super::msg::TuiMsg;
-use super::resize_mapper::{apply_resize, map_resize};
+use crate::tui::adapter::agent_event::{map_agent_event, AgentEventMapping};
+use crate::tui::adapter::effect_result::{map_effect_result, EffectResultMapping};
+use crate::tui::adapter::input::{route_submission, ConversationAvailability, SubmissionRoute};
+use crate::tui::adapter::key_event::map_key_event;
+use crate::tui::adapter::resize::{apply_resize, map_resize};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::change::ConversationChange;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::input::change::InputChange;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::root::TuiModel;
+use crate::tui::update::msg::TuiMsg;
 use crate::tui::view_state::{AppViewState, ViewModelDirty};
 
 #[derive(Debug, Default, PartialEq)]

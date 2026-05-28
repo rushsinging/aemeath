@@ -1,7 +1,7 @@
-use crate::tui::display::status_bar::WorktreeKind as StatusWorktreeKind;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
+use crate::tui::render::status::WorktreeKind as StatusWorktreeKind;
 use crate::tui::StatusBar;
 
 pub(crate) fn apply_runtime_status_to_widget(

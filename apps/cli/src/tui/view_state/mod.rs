@@ -1,21 +1,24 @@
 #![allow(dead_code)]
 
 pub mod animation;
+pub mod cache;
 pub mod input;
 pub mod layout;
 pub mod output;
 
 pub use animation::AnimationViewState;
+pub use cache::ViewRenderCache;
 pub use input::InputViewState;
 pub use layout::LayoutViewState;
 pub use output::OutputViewState;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default)]
 pub struct AppViewState {
     pub output: OutputViewState,
     pub input: InputViewState,
     pub layout: LayoutViewState,
     pub animation: AnimationViewState,
+    pub cache: ViewRenderCache,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

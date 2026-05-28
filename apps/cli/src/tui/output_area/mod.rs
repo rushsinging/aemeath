@@ -15,7 +15,6 @@ pub mod render;
 pub mod render_blocks;
 pub mod render_spans;
 pub mod render_status;
-pub mod rendered_cache;
 pub mod rendered_lines;
 mod resize;
 pub mod scroll;
@@ -35,7 +34,7 @@ mod render_blocks_tests;
 pub use diff::build_diff_lines;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
-use rendered_cache::RenderedCache;
+use crate::tui::view_state::cache::OutputRenderCacheState;
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
@@ -75,7 +74,7 @@ pub struct OutputArea {
     /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
     pub ask_user_block_start: Option<usize>,
     /// 渲染缓存（滑动窗口）
-    pub(crate) rendered_cache: RenderedCache,
+    pub(crate) rendered_cache: OutputRenderCacheState,
 }
 
 impl Default for OutputArea {
@@ -112,7 +111,7 @@ impl OutputArea {
             task_status_lines: Vec::new(),
             queued_messages: Vec::new(),
             ask_user_block_start: None,
-            rendered_cache: RenderedCache::new(),
+            rendered_cache: OutputRenderCacheState::default(),
         }
     }
 
@@ -125,6 +124,7 @@ impl OutputArea {
     }
 
     /// 绘制输出区域。
+    #[allow(dead_code)]
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
         self.render(area, buf);
     }

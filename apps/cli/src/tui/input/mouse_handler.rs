@@ -1,4 +1,4 @@
-use crate::tui::display::status_bar::StatusBarRow;
+use crate::tui::render::status::StatusBarRow;
 use crossterm::event::{MouseEvent, MouseEventKind};
 use std::time::Instant;
 

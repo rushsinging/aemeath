@@ -1,7 +1,7 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
-use crate::tui::core::input_adapter::apply_input_changes_to_widget;
+use crate::tui::adapter::input_widget::apply_input_changes_to_widget;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::input::intent::InputIntent;

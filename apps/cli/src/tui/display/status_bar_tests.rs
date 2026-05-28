@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 
 #[cfg(test)]
 pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {

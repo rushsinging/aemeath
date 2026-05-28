@@ -9,10 +9,16 @@ use sdk::CharIdx;
 use super::display;
 use super::types::OutputLine;
 use super::OutputArea;
+use crate::tui::view_state::cache::ViewRenderCache;
 
 impl OutputArea {
     /// 渲染输出区域
-    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+    pub fn render_with_cache(
+        &mut self,
+        area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+        cache: &mut ViewRenderCache,
+    ) {
         if area.height == 0 {
             return;
         }
@@ -20,7 +26,7 @@ impl OutputArea {
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
             self.term_width = new_width;
-            self.rendered_cache.invalidate();
+            cache.output.line_cache.invalidate();
         }
 
         let spinner_line = self.build_spinner_line();
@@ -53,7 +59,9 @@ impl OutputArea {
         // 从渲染缓存获取渲染结果
         // VecDeque 不支持 &[T]，转为 Vec 传给缓存层
         let lines_vec: Vec<OutputLine> = self.lines.iter().cloned().collect();
-        self.rendered_cache
+        cache
+            .output
+            .line_cache
             .ensure_rendered(&lines_vec, start, end, self.term_width);
 
         // 构建显示行：按 \n 拆分 rendered.line，使 display_lines 与 screen_map 一一对应
@@ -63,7 +71,7 @@ impl OutputArea {
         let has_selection = self.has_real_selection();
 
         for i in start..end {
-            if let Some(ref rendered) = self.rendered_cache.get(i) {
+            if let Some(ref rendered) = cache.output.line_cache.get(i) {
                 if let Some(text) = &rendered.rendered_text {
                     rendered_content.insert(i, text.clone());
                 }
@@ -126,6 +134,16 @@ impl OutputArea {
             self.scroll_offset,
         );
         self.last_line_count = total_lines;
+    }
+
+    /// Legacy render entry point. New code should pass `AppViewState.cache`
+    /// through `render_with_cache` so render cache lives in view_state.
+    #[allow(dead_code)]
+    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        let mut view_cache = ViewRenderCache::default();
+        view_cache.output.line_cache = std::mem::take(&mut self.rendered_cache.line_cache);
+        self.render_with_cache(area, buf, &mut view_cache);
+        self.rendered_cache.line_cache = view_cache.output.line_cache;
     }
 }
 

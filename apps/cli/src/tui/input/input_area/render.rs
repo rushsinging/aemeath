@@ -1,6 +1,6 @@
 use super::InputArea;
 use crate::tui::display::safe_text::str_display_width;
-use crate::tui::display::theme;
+use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
