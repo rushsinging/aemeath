@@ -41,6 +41,7 @@ mod tests {
         ToolCall {
             id: format!("{name}-id"),
             name: name.to_string(),
+            index: 0,
             input,
         }
     }

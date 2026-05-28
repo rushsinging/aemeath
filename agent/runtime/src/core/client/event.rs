@@ -132,9 +132,17 @@ pub(crate) fn runtime_event_to_sdk_event(
             name,
             partial_args,
         },
-        crate::business::chat::RuntimeStreamEvent::ToolCall { id, name, summary } => {
-            ChatEvent::ToolCall { id, name, summary }
-        }
+        crate::business::chat::RuntimeStreamEvent::ToolCall {
+            id,
+            name,
+            index,
+            summary,
+        } => ChatEvent::ToolCall {
+            id,
+            name,
+            index,
+            summary,
+        },
         crate::business::chat::RuntimeStreamEvent::ToolResult {
             id,
             tool_name,

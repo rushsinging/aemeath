@@ -151,6 +151,7 @@ fn test_tool_call(id: &str, name: &str, input: serde_json::Value) -> crate::api:
     crate::api::agent::ToolCall {
         id: id.to_string(),
         name: name.to_string(),
+        index: 0,
         input,
     }
 }

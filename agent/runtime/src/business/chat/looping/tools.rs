@@ -40,6 +40,7 @@ where
             .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
+                index: Some(call.index),
                 summary: call.input.to_string(),
             })
             .await;
@@ -52,6 +53,7 @@ where
         .map(|c| ToolCall {
             id: c.id.clone(),
             name: c.name.clone(),
+            index: c.index,
             input: c.input.clone(),
         })
         .collect();
@@ -116,6 +118,7 @@ where
             .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
+                index: Some(call.index),
                 summary: call.input.to_string(),
             })
             .await;

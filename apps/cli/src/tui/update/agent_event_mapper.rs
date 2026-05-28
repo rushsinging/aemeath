@@ -40,14 +40,17 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             index: *index,
             partial_args: partial_args.clone(),
         }),
-        UiEvent::ToolCall { id, name, summary } => {
-            conversation(ConversationIntent::ObserveToolCall {
-                id: id.clone(),
-                name: name.clone(),
-                index: 0,
-                summary: summary.clone(),
-            })
-        }
+        UiEvent::ToolCall {
+            id,
+            name,
+            index,
+            summary,
+        } => conversation(ConversationIntent::ObserveToolCall {
+            id: id.clone(),
+            name: name.clone(),
+            index: index.unwrap_or(0),
+            summary: summary.clone(),
+        }),
         UiEvent::ToolResult {
             id,
             tool_name,

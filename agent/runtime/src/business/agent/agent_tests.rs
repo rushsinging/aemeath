@@ -89,11 +89,13 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
         ToolCall {
             id: "a".to_string(),
             name: "parallel_a".to_string(),
+            index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "b".to_string(),
             name: "parallel_b".to_string(),
+            index: 1,
             input: serde_json::json!({}),
         },
     ];
@@ -148,11 +150,13 @@ async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
         ToolCall {
             id: "a".to_string(),
             name: "seq_a".to_string(),
+            index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "b".to_string(),
             name: "seq_b".to_string(),
+            index: 1,
             input: serde_json::json!({}),
         },
     ];
@@ -231,16 +235,19 @@ async fn test_execute_tools_preserves_original_order() {
         ToolCall {
             id: "1".to_string(),
             name: "tool_c".to_string(),
+            index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "2".to_string(),
             name: "tool_a".to_string(),
+            index: 1,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "3".to_string(),
             name: "tool_b".to_string(),
+            index: 2,
             input: serde_json::json!({}),
         },
     ];
@@ -295,6 +302,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
         .execute_tools(&[ToolCall {
             id: "timeout-1".to_string(),
             name: "short_timeout".to_string(),
+            index: 0,
             input: serde_json::json!({}),
         }])
         .await;
@@ -333,16 +341,19 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
         ToolCall {
             id: "p1".to_string(),
             name: "parallel".to_string(),
+            index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "s1".to_string(),
             name: "sequential".to_string(),
+            index: 1,
             input: serde_json::json!({}),
         },
         ToolCall {
             id: "p2".to_string(),
             name: "parallel".to_string(),
+            index: 2,
             input: serde_json::json!({}),
         },
     ];
