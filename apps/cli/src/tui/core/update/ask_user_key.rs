@@ -218,6 +218,10 @@ impl App {
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
             self.input_area.enter(true);
+            // 同步模型状态：enter 直接修改 textarea 未走模型（同 #77/#78/#79）
+            let text = self.input_area.get_text();
+            self.model.input.document.clear();
+            self.model.input.document.insert_text(&text);
             return;
         }
         match (key.modifiers, key.code) {
@@ -239,5 +243,10 @@ impl App {
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
             _ => {}
         }
+        // 同步模型状态：AskUserQuestion chat-input 模式下直接操作 textarea，
+        // 所有 input/backspace/delete_word 均未走模型（同 #77/#78/#79）。
+        let text = self.input_area.get_text();
+        self.model.input.document.clear();
+        self.model.input.document.insert_text(&text);
     }
 }
