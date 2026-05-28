@@ -13,7 +13,7 @@
 | 50 | CLI TUI 目录整理：收拢碎片、统一模块层级 | 中 | ✅ 已合并 | 已确认 | 已并入 #47。物理目录结构为 UI Domain 的 4 个 Context 提供物理基础。 |
 | 51 | UI Domain DDD 设计 —— 将 apps/cli 提升为核心域 | 中 | ✅ 已合并 | 已确认 | 已并入 #47。经讨论回归支撑域（薄入口），AgentClient SDK 保留并纳入 #47 §6.5。 |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
-| 75 | TUI Model/View 架构迁移 | 高 | 实施中 | 未确认 | 按 `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md` 与 M1-M5 plan 分阶段迁移：M1 已建立 `view_model` / `view_state` / `view_assembler` 边界骨架，并扩展 TEA purity guard 覆盖新增纯目录；后续继续迁移 Conversation/ToolCall、InputModel、Runtime/Diagnostic 与 Effect 收敛。 |
+| 75 | TUI Model/View 架构迁移 | 高 | 实施中 | 未确认 | 按 `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md` 与 M1-M5 plan 分阶段迁移：M1 已建立 `view_model` / `view_state` / `view_assembler` 边界骨架，并扩展 TEA purity guard 覆盖新增纯目录；M2 已新增 `ConversationModel` / `ToolCall` 领域状态，建立 tool lifecycle 的 index→id 关联、orphan result 检测、OutputViewAssembler tool block 映射，并修复 render 不再覆盖完成态工具图标；后续继续迁移 InputModel、Runtime/Diagnostic 与 Effect 收敛。 |
 
 ### #49 AskUserQuestion 增加「以上全是」与「chat about this」选项
 

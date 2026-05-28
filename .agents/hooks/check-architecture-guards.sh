@@ -17,6 +17,7 @@ HOOKS_DIR="$ROOT/.agents/hooks"
 "$HOOKS_DIR/check-forbidden-imports.sh"
 "$HOOKS_DIR/check-rust-file-lines.sh"
 "$HOOKS_DIR/check-tui-tea-purity.sh"
+"$HOOKS_DIR/check-tui-output-legacy-guards.sh"
 "$HOOKS_DIR/check-unsafe-text-ops.sh"
 
 echo "All architecture guards passed."

@@ -2,6 +2,7 @@ pub mod completion;
 pub mod core;
 pub mod display;
 pub mod input;
+pub mod model;
 pub mod output_area;
 pub mod session;
 pub mod view_assembler;

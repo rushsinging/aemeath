@@ -115,13 +115,19 @@ impl OutputArea {
                     continue;
                 }
                 if let Some(cell) = buf.cell_mut((area.x, area.y + screen_y as u16)) {
-                    cell.set_char('●');
+                    set_running_tool_dot(cell, line.style);
                     let mut style = cell.style();
                     style.fg = Some(color);
                     cell.set_style(style);
                 }
             }
         }
+    }
+}
+
+fn set_running_tool_dot(cell: &mut ratatui::buffer::Cell, style: LineStyle) {
+    if matches!(style, LineStyle::ToolCallRunning) {
+        cell.set_symbol("●");
     }
 }
 
@@ -145,6 +151,26 @@ mod tests {
 
     use super::*;
     use crate::tui::output_area::types::SpinnerState;
+
+    #[test]
+    fn test_color_tool_call_dots_preserves_success_icon() {
+        let mut output = OutputArea::new();
+        output.lines.push_back(crate::tui::output_area::OutputLine {
+            content: "✓ Read".to_string(),
+            style: LineStyle::ToolCallSuccess,
+            ..Default::default()
+        });
+        output
+            .screen_line_map
+            .push((0, CharIdx::ZERO, CharIdx::new(6)));
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        buf.cell_mut((0, 0)).unwrap().set_char('✓');
+
+        output.color_tool_call_dots(area, &mut buf, 0, 1);
+
+        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "✓");
+    }
 
     #[test]
     fn test_render_maps_task_status_lines_for_selection() {
