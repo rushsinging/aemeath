@@ -16,6 +16,33 @@
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 未开始 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。当前 legacy core/util.rs、core/update.rs、core/update/key.rs、core/update/ask_user_key.rs（及 input/mouse_handler.rs、paste_handler.rs）仍直接改 widget 后手动 sync，漂移持续产生 #79（Ctrl+A/E/方向键、上下翻历史、Ctrl+W）及 #75/#77 同族 bug。落地两层保障：①静态 guard check-tui-input-single-source.sh（禁 adapter 外对 input_area 调可变方法，仿 tea-purity 的豁免+逃逸，随迁移清零）接入 check-architecture-guards.sh；②迁移后将 InputArea 可变方法收紧为 pub(in crate::tui::...)，越界即编译失败。依赖 #55 把输入路径收口到 InputModel/adapter。 |
+| 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 未开始 | 未确认 | #55 后对照 spec 目标结构仍多出 6 个顶层目录：core/（仅弃用说明的空 shim，可删）、output_area/、input/、display/（render/ 驱动的 ratatui widget，spec 想并入 render/{output,input,status,dialog,theme}）、completion/、session/（spec 未规划的服务模块，需定归属）。目标：删 core/ shim；将 widget 目录物理并入 render/ 或明确为 widget 子层；为 completion/session 定位（render/service 层）；收口后顶层目录与 spec 目标对齐。属 #55 声明延后的"深层重复后续可继续拆"。 |
+
+### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
+
+**状态**：未开始
+
+**背景**：feature #55 完成三层(render/adapter/app)落地与 core/state·core/update·model/session 清理后，对照架构 spec `2026-05-27-tui-model-view-architecture.md` 的目标目录，`apps/cli/src/tui/` 仍多出 6 个顶层目录。#55 文档已把这部分声明为"深层重复后续可继续拆"，本 feature 专门收尾。
+
+**spec 目标 9 个目录均已存在**：`app/ update/ model/ view_assembler/ view_model/ view_state/ render/ effect/ adapter/`。
+
+**多出的 6 个顶层目录（2026-05-29 核实）**：
+1. `core/` — 仅含一句弃用说明的空 `mod.rs`，无 re-export。**纯遗留，可直接删**（确认无 `crate::tui::core` 引用后移除）。
+2. `output_area/`（~1973 行）— 输出区 ratatui widget（markdown/tool_display/rendered_lines/cache）。spec 归属 `render/output/`。
+3. `input/`（~1355 行）— 输入 widget（InputArea + mouse/paste/clipboard handler）。spec 归属 `render/input` + widget；注意与 `model/input/` 区分。
+4. `display/`（~1282 行）— status_bar/theme/safe_text/task_window/syntax/dialog。spec 归属 `render/{status,dialog,theme}`；`safe_text` 无 spec 归属，需定（可入 render 或 util）。
+5. `completion/`（~628 行）— 补全数据源（files/commands/models/sessions/parser）。spec tui 树未规划，需定为 service 层或并入相关模块。
+6. `session/`（~408 行）— 会话生命周期（processing/resume/session_lifecycle）。spec 未规划，最接近 effect executor / runtime model，需定归属。
+
+**目标**：
+1. 删除 `core/` 空 shim（确认无引用）。
+2. 将 `output_area/`、`input/`、`display/` 物理并入 `render/`（或明确标注为 render 的 widget 子层），消除"中间态"。
+3. 为 `completion/`、`session/` 定位（render/service 层或并入相关 model/effect）。
+4. 收口后顶层目录与 spec 目标结构对齐；同步收紧相关架构 guard。
+
+**性质**：低优先级、纯结构整理，不改业务行为；可分目录小步迁移，每步保证编译/测试通过。
+
+**关联**：feature #53、#55；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 
 ### #56 输入单一真相约束：禁止直接改 input_area 并加架构 guard
 
