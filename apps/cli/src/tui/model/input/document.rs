@@ -19,6 +19,18 @@ impl InputDocument {
         self.selection = None;
     }
 
+    /// 用字符索引（char index）设置光标，自动转为字节位置
+    /// textarea 的光标列号是字符索引，模型需要字节位置
+    pub fn set_cursor_col(&mut self, col: usize) {
+        let byte_pos = self
+            .buffer
+            .char_indices()
+            .nth(col)
+            .map(|(idx, _)| idx)
+            .unwrap_or(self.buffer.len());
+        self.move_cursor(byte_pos);
+    }
+
     pub fn move_left(&mut self) {
         if self.cursor == 0 {
             return;
@@ -287,5 +299,62 @@ mod tests {
         // 继续输入
         doc.insert_text("继续输入");
         assert_eq!(doc.buffer, "中文内容\n继续输入");
+    }
+
+    // 回归测试：光标移动未同步模型 cursor — InsertChar 以旧位置插入
+    //
+    // 场景：Ctrl+A/E/Left/Right/End 移动 textarea 光标，但模型 cursor 未更新。
+    // 后续 InsertChar 以模型旧光标位置插入，造成错位。
+    // 这在 CJK 文本中尤为明显（字符索引 ≠ 字节位置）。
+    //
+    // 修复：set_cursor_col 将 textarea 的字符索引光标转换为模型字节位置
+
+    #[test]
+    fn test_set_cursor_col_sets_correct_byte_position() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("abc你好def");
+        assert_eq!(doc.buffer, "abc你好def");
+        assert_eq!(doc.cursor, "abc你好def".len());
+
+        // textarea 光标移到字符索引 3（'你' 的位置）
+        doc.set_cursor_col(3);
+        // 字节位置：'a'(1) + 'b'(1) + 'c'(1) = 3
+        assert_eq!(doc.cursor, 3);
+
+        // textarea 光标移到字符索引 4（'好' 的位置）
+        doc.set_cursor_col(4);
+        // 字节位置：3 + '你'(3) = 6
+        assert_eq!(doc.cursor, 6);
+    }
+
+    #[test]
+    fn test_insert_at_synced_cursor_after_move() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("abc你好def");
+        assert_eq!(doc.cursor, "abc你好def".len());
+
+        // 模拟光标移动到 start (Ctrl+A)
+        doc.set_cursor_col(0);
+        assert_eq!(doc.cursor, 0);
+
+        // 在行首插入
+        doc.insert_text(">>");
+        assert_eq!(doc.buffer, ">>abc你好def");
+        assert_eq!(doc.cursor, ">>".len());
+    }
+
+    #[test]
+    fn test_insert_at_cjk_boundary_after_cursor_sync() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("你好世界");
+
+        // 光标移到字符索引 2 (在 '你好' 之后，'世界' 之前)
+        doc.set_cursor_col(2);
+        assert_eq!(doc.cursor, "你好".len());
+
+        // 插入
+        doc.insert_text("的");
+        assert_eq!(doc.buffer, "你好的世界");
+        assert_eq!(doc.cursor, "你好的".len());
     }
 }

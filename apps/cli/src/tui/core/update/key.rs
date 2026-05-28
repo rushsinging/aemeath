@@ -173,10 +173,14 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Left) => {
                 self.input_area.move_left();
                 self.input_area.clear_suggestions();
+                // 光标仅在 textarea 内移动，模型 cursor 未更新。
+                // 后续 InsertChar 以模型旧光标插入，表现错位。
+                self.model.input.document.set_cursor_col(self.input_area.cursor_position().1);
             }
             (KeyModifiers::NONE, KeyCode::Right) => {
                 self.input_area.move_right();
                 self.input_area.clear_suggestions();
+                self.model.input.document.set_cursor_col(self.input_area.cursor_position().1);
             }
             (KeyModifiers::NONE, KeyCode::Up) => {
                 self.input_area.move_up();
@@ -192,8 +196,14 @@ impl App {
                 self.model.input.document.clear();
                 self.model.input.document.insert_text(&text);
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
+            (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+                self.input_area.move_home();
+                self.model.input.document.set_cursor_col(self.input_area.cursor_position().1);
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                self.input_area.move_end();
+                self.model.input.document.set_cursor_col(self.input_area.cursor_position().1);
+            }
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
                 self.input_area.delete_word();
                 // delete_word 修改 textarea 文本，需要同步模型
@@ -208,7 +218,10 @@ impl App {
                 self.output_area.push_system("[reading clipboard image...]");
                 return UpdateResult::one(Effect::ReadClipboardImage);
             }
-            (KeyModifiers::NONE, KeyCode::End) => self.input_area.move_end(),
+            (KeyModifiers::NONE, KeyCode::End) => {
+                self.input_area.move_end();
+                self.model.input.document.set_cursor_col(self.input_area.cursor_position().1);
+            }
             _ => {}
         }
 
