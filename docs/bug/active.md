@@ -16,38 +16,6 @@
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：TUI Model/View 迁移后，真实生产路径会从 `ConversationModel` 组装 `OutputViewModel` 并替换 `OutputArea`，但 ViewModel renderer 没有复用 `ToolDisplay`，只把 `ToolCall.result_summary` 原样输出成一行，导致 thinking 后 Grep 多行结果仍像扁平原始文本；同时全量替换前未完整清理/钳制渲染缓存与滚动状态。修复：ToolCall ViewModel 渲染复用 `ToolDisplay` 生成 Grep 头/参数/结果截断/summary；已嵌入 ToolCall 的 ToolResult 不再额外生成 DiagnosticNotice；替换 OutputArea 时清理 selection/screen map/rendered cache 并 clamp scroll/cache。 |
-| 77 | input area @/ / 补全后按空格会回退删除字符 | 中 | 修复中 | 未确认 | 2026-05 | apply_current_suggestion 直接调用 input_area.set_text() 修改 textarea 但未同步模型（self.model.input.document），模型仍存补全前旧文本。下次按键（如空格）触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本+空格覆盖 textarea 中已补全的正确内容。修复：补全确认后执行 model.input.document.clear() + insert_text() 同步模型。关联 #75（同一次 TextChanged→set_text 覆盖路径）|
-## 专案
-
-### #77 input area @ 补全后按空格会回退删除约 2 个字符
-
-**状态**：活动中
-
-**症状**：在 TUI input area 用 `@` 触发补全（文件路径等候选列表），选定某个补全项后，紧接着按空格键，光标会向前回退并删除大约 2 个字符（疑似删掉补全文本尾部）。
-
-**复现**：
-1. 在 input area 输入 `@` 触发补全候选。
-2. 选定一个补全项（Tab / Enter 确认）。
-3. 紧接着按一次空格。
-4. 观察光标回退并删除约 2 个字符。
-
-**根因假设**：
-1. 补全确认时执行文本替换（把 `@xxx` 替换为补全结果）后，光标字节位置或替换区间端点计算有误，使光标停在补全文本内部而非末尾。
-2. 随后按空格插入时，基于错误的光标/区间端点，覆盖或回删了补全文本尾部的字符。
-3. 补全 commit 与 input buffer / 光标推进之间的偏移换算不一致，可能与字节-字符索引换算同族（关联 #75 CJK 光标字节位置）。
-4. "约 2 个字符"提示可能与多字节字符（一个 CJK = 多字节）或补全后追加的分隔符长度有关。
-
-**修复方向**：
-1. 定位 `@` 补全确认的文本替换与光标定位逻辑，确认 commit 后光标准确落在补全文本末尾。
-2. 检查补全确认后下一次按键（空格）的插入位置/区间计算，确保不覆盖已确认文本。
-3. 按调试原则先加日志：记录补全 commit 前后的 buffer 内容、光标位置、替换区间，以及空格插入时的位置计算。
-4. 补充回归：`@` 补全确认后按空格，断言 buffer 末尾为补全文本 + 空格、无字符被删除。
-
-**涉及路径（预计）**：
-- input area 补全（`@` 候选确认）与文本替换/光标定位逻辑
-- input buffer 插入 / 光标推进（关联 #75 字节-字符索引换算）
-- 关联 #75（CJK 光标字节位置）
-
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
 **状态**：修复中（待确认）
@@ -115,34 +83,6 @@
 - `apps/cli/src/tui/` input area 字符输入 / 光标推进逻辑
 - `agent/share/src/string_idx`（CharIdx 等统一字符索引）相关插入计算
 - 关联 #48、#33（CJK 字符处理）
-
-### #77 @/ / 补全后按空格回退删除字符
-
-**状态**：修复中（待确认）
-
-**症状**：在 input area 用 `@` 或 `/` 触发补全并 Tab/Enter 确认后，紧接着按空格或输入其他字符，光标回退且补全文本尾部字符被删除——表现为"回退删除约 2 个字符"。`@` 和 `/` 两种补全都受影响。
-
-**根因（已确认）**：`update_key` 在 Tab/Enter 时调用 `apply_current_suggestion`，该函数直接调用 `self.input_area.set_text()` + `self.input_area.move_end()` 修改 textarea widget，但**未同步** `self.model.input.document`。模型仍保存补全前的旧文本。
-
-下次按键（如空格）走 `model.input.apply(InsertChar)` → `TextChanged` → `apply_input_changes_to_widget` → `input_area.set_text()`，用**模型中的旧文本 + 新字符**整体覆盖 textarea 中已补全的正确内容，造成"回退删除"。
-
-**修复**：在 `apply_current_suggestion` 末尾添加模型同步：
-```rust
-let text = self.input_area.get_text();
-self.model.input.document.clear();
-self.model.input.document.insert_text(&text);
-```
-
-**涉及文件**：
-- `apps/cli/src/tui/core/util.rs` — 修复点：`apply_current_suggestion` 末尾添加模型同步
-- `apps/cli/src/tui/model/input/document.rs` — 新增 3 个回归测试
-
-**测试**：`cargo test -p cli` 321 passed（含 3 个新增回归测试）：
-- `test_stale_model_overwrites_textarea_after_completion` — 验证未同步时旧文本覆盖
-- `test_synced_model_after_completion_preserves_text` — 验证同步后空格正确追加（ASCII）
-- `test_synced_model_after_cjk_completion_preserves_text` — 验证同步后空格正确追加（CJK）
-
-**关联**：同一次 TextChanged→set_text 覆盖路径也曾在 #75 的旧 input_bridge 中触发中文输入顺序错乱
 
 ### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 
