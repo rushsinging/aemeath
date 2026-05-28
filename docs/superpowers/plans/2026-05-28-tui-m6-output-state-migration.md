@@ -13,7 +13,7 @@ M1-M5 已建立 `model` / `view_model` / `view_state` / `view_assembler` / `upda
 - #65：工具结果 fenced code block 后续内容继续显示为 code 颜色。
 - #71：TUI 渲染缓存越界 panic。
 - #74：`/reflect` 后续文本颜色全部变暗。
-- #75：TUI Model/View 架构迁移。
+- #53：TUI Model/View 架构迁移。
 
 ## 目标
 

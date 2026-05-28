@@ -15,7 +15,7 @@ M7 目标是让 `InputModel + InputViewState` 成为唯一事实源，`input_are
 
 - #49：last turn 输入残留在 queue 区域。
 - #72：agent 双层循环中一轮结束后不自动读取 input queue。
-- #75：TUI Model/View 架构迁移。
+- #53：TUI Model/View 架构迁移。
 
 ## 目标
 

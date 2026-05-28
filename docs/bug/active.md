@@ -14,7 +14,77 @@
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 活动中 | 未确认 | 2026-05 | `/reflect` 完成后，`ReflectionDone` 通过 `output_area.push_system(&output.content)` 以 `LineStyle::System`（暗灰蓝）推送整段 reflection 输出（内含 `[User]:`/`[Assistant]:` 会话转录与 markdown），其后续普通/assistant 文本也呈现 System 暗色；疑似与 #65 同族——markdown fence/样式状态或渲染缓存 style 跨 block 泄漏，或 reflection 后未复位为 Assistant 样式 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
+| 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 活动中 | 未确认 | 2026-05 | 根因：mirror_input_area_to_model 将 tui_textarea 的光标字符索引（col）直接作为 InputDocument 的字节位置使用。CJK 字符看占 3 字节，字符索引 1 ≠ 字节位置 3，col=1 落在多字节字符中间被 clamp_to_char_boundary 修正到 0，导致下一个字符插入到已有字符之前（位置 0），造成顺序颠倒。曾在 input_bridge.rs 用 textarea_cursor_to_byte_pos 修复，但该文件已随 TUI 迁移（feature #53 删除 dual_track/input_bridge/runtime_bridge facade）被删除，修复随之丢失，当前 HEAD 无此修复。需在新 InputModel 输入路径重做并重新验证是否仍复现。关联 #48/#33（CJK 字符列处理） |
+| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 活动中 | 未确认 | 2026-05 | DeepSeek-V4-Pro 等 reasoning 模型输出 thinking 块后，紧随的 Grep 工具结果在 TUI 中渲染为扁平原始行（每行带完整绝对路径 `…/active.md:N:内容`，无 `● Grep` 工具头/缩进），且混入上一次 Read 输出的 `24/25/26` 行号碎片；同时问题出现时滚动条失效无法滚动。疑似 thinking 块未正确闭合/复位渲染状态，导致后续 tool result 走了旁路渲染并破坏滚动状态；与 #65/#74 渲染缓存 block state 跨块泄漏可能同族 |
 ## 专案
+
+### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
+
+**状态**：活动中
+
+**症状**：使用 reasoning 模型（截图为 DeepSeek-V4-Pro）时，模型输出 thinking 块后紧随的 Grep 工具结果在 TUI 中显示异常：
+
+1. Grep 结果渲染成**扁平的原始文本行**，每行带完整绝对路径前缀（`/Users/.../docs/bug/active.md:N:内容`），没有正常的 `● Grep` 工具调用头和缩进，可读性差。
+2. 输出区上方混入上一次 Read 工具输出的 `24` / `25` / `26` 行号碎片，未被正确清理/分隔。
+3. **问题出现时滚动条失效**，无法滚动查看输出区。
+
+**复现**：
+1. 使用 reasoning 模型（如 DeepSeek-V4-Pro），触发一次包含 thinking 块的回复。
+2. thinking 块后让模型执行 Grep（或其他工具）。
+3. 观察 Grep 结果是否渲染为扁平原始行、是否混入前序输出碎片、滚动条是否失效。
+
+**根因假设**：
+1. thinking / reasoning 块输出后渲染状态未正确闭合或复位，后续 tool result 走了旁路渲染路径，丢失统一的工具调用格式（头/缩进/路径折叠）。
+2. 渲染缓存 block state 跨 block 泄漏（与 #65、#74 同族），thinking 块破坏了缓存的行区间/样式状态。
+3. 滚动条失效疑似与渲染缓存行数/区间状态被打乱有关，滚动偏移或 viewport 计算依赖的行索引失效（可能关联 #71 渲染缓存越界）。
+4. 前序 Read 输出的行号碎片残留，说明输出区 block 分隔/清理在 thinking 块介入后未正确执行。
+
+**修复方向**：
+1. 确认 thinking / reasoning 块结束后渲染状态、block state、样式正确复位，后续 tool result 走统一渲染路径。
+2. 排查滚动条/viewport 计算在渲染缓存被 thinking 块打乱后是否仍能正确取得总行数与可视区间。
+3. 按调试原则先加日志：记录 thinking 块进入/退出、后续 tool result 渲染分支、输出区行数与滚动状态，定位旁路渲染与滚动失效触发点。
+4. 补充回归：thinking 块后紧随 Grep 工具结果应走正常工具渲染格式，且滚动状态可用、无前序输出碎片残留。
+
+**涉及路径（预计）**：
+- `apps/cli/src/tui/output_area/`（tool result 渲染、渲染缓存 block state、滚动/viewport 计算）
+- thinking / reasoning 块渲染与状态复位逻辑
+- 关联 #65（fenced code block 样式泄漏）、#74（System 色泄漏）、#71（渲染缓存越界）
+
+### #75 中文输入法下 input area 输入顺序错乱（查看 → 看查）
+
+**状态**：活动中（曾修复，但修复随 TUI 迁移丢失，需重做）
+
+> ⚠️ **修复丢失说明**：下方"修复"记录的 `textarea_cursor_to_byte_pos` 实现位于 `apps/cli/src/tui/core/input_bridge.rs`，该文件已随 feature #53（TUI Model/View 迁移，删除 dual_track/input_bridge/runtime_bridge facade）被删除，修复随之丢失。**当前 HEAD 代码不含此修复**。键盘输入现已改走 InputModel 路径，需在新路径重新应用同一字符索引→字节位置转换逻辑，并重新验证 bug 是否仍复现。修复代码仍保留在 `stash@{0}` 中可供参考。
+
+**根因（已确认）**：`mirror_input_area_to_model` (旧 apps/cli/src/tui/core/input_bridge.rs:14，已删除) 将 tui_textarea 的 `cursor_position()` 返回的光标列号（col，字符索引）直接作为 `InputDocument::move_cursor()` 的字节位置使用。对 CJK 多字节字符（如"看"占 3 字节），字符索引 1 ≠ 字节位置 3。col=1 落在多字节字符中间，被 `clamp_to_char_boundary` 修正到 0，导致下一个字符插入到现有字符之前（位置 0），造成顺序颠倒。
+
+**修复**：新增 `textarea_cursor_to_byte_pos` 辅助函数，将 textarea 的 (row, col) 字符索引转换为 `InputDocument` 的正确字节位置：逐行累加前置行的字节长度和换行符，再通过 `char_indices().nth(col)` 找到目标行中第 col 个字符的字节偏移。
+
+**涉及文件**：`apps/cli/src/tui/core/input_bridge.rs`（mirror 函数 + 新增辅助函数）。
+
+**验证**：`cargo test -p cli` 322 测试全通过，新增 11 个测试覆盖：ASCII 光标、CJK 单字光标、CJK 双字顺序保留、中西混排、多行、边界条件。
+
+**症状**：启用中文输入法（IME）时，在 TUI input area 输入异常。输入“查看”后，input 中实际显示为“看查”，即字符顺序被颠倒；输入查看时看到的是颠倒后的结果。
+
+**复现**：
+1. 在 TUI input area 切换到中文输入法。
+2. 输入一个由多个汉字组成的词（如“查看”）。
+3. 观察 input 中显示的字符顺序与输入顺序相反（显示为“看查”）。
+
+**根因假设**：
+1. IME 组合输入（composition / 预编辑串）一次性 commit 多个 CJK 字符时，input buffer 的插入逻辑可能逐字符插入在同一光标位置之前，导致后插入的字符排在前面，整体顺序被颠倒。
+2. 终端在中文输入法下可能将一次 commit 拆成多个字符事件按序送达，input area 的字符插入 / 光标推进处理未正确累加偏移，新字符插到了已插入字符之前。
+3. 与 CJK 宽字符的字节 / 字符列处理相关（关联 #48 selection-offset-cjk、#33 CJK 拖选高亮），插入位置按列或按字节计算时对多字节字符处理有误。
+
+**修复方向**：
+1. 定位 input area 接收键盘 / 字符事件并写入 buffer 的路径，确认一次 commit 多字符时是否按正确顺序、正确光标偏移插入。
+2. 添加日志记录每个进入 input buffer 的字符事件（原始字节 / 字符、当前光标位置、插入后 buffer 内容），按调试原则先观测再修复。
+3. 补充回归：模拟连续输入多个 CJK 字符（如“查看”），断言 buffer 内容与光标位置与输入顺序一致。
+
+**涉及路径（预计）**：
+- `apps/cli/src/tui/` input area 字符输入 / 光标推进逻辑
+- `agent/share/src/string_idx`（CharIdx 等统一字符索引）相关插入计算
+- 关联 #48、#33（CJK 字符处理）
 
 ### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 

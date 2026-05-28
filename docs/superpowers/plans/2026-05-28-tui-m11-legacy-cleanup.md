@@ -11,7 +11,7 @@ M6-M10 完成后，TUI 的事实状态、update reducer、Effect 边界应已基
 3. **MUST** `output_area`、`input_area`、`status_bar` 都退化为 render/widget adapter。
 4. **MUST** 删除 production path 中的 legacy `Cmd` adapter。
 5. **MUST** 补齐架构守卫，防止 update/render/model/effect 边界回退。
-6. **MUST** 更新 #75 feature 状态和相关 bug 追踪条目。
+6. **MUST** 更新 #53 feature 状态和相关 bug 追踪条目。
 
 ## 非目标
 
@@ -88,7 +88,7 @@ pub struct App {
 处理方式：
 
 - 删除已无引用类型。
-- 对暂时保留的兼容类型标记 `legacy` 并加 TODO 指向 issue #75。
+- 对暂时保留的兼容类型标记 `legacy` 并加 TODO 指向 issue #53。
 - 不允许新代码引用 legacy state。
 
 ### output_area
@@ -250,7 +250,7 @@ status_bar.set_
 
 更新：
 
-- `docs/feature/active.md` #75 状态为待确认。
+- `docs/feature/active.md` #53 状态为待确认。
 - 若 #62/#65/#71/#74 在迁移中被修复，更新对应 bug active 条目为待确认并记录修复提交。
 - 如未修复，明确剩余风险。
 
@@ -276,7 +276,7 @@ cargo check -p cli
 3. **MUST** `core/update` 不再直接修改 output/input/status widget business state。
 4. **MUST** output/input/status widget 只消费 ViewModel/ViewState 或低层 event。
 5. **MUST** 架构守卫能阻止 model/update/render/effect 边界绕过。
-6. **MUST** #75 feature 文档更新到待确认或说明剩余项。
+6. **MUST** #53 feature 文档更新到待确认或说明剩余项。
 7. **MUST** 通过最终验证命令。
 
 ## 风险与回滚

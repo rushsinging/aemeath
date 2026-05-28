@@ -17,7 +17,7 @@ M8 目标是让 runtime/session/status 的事实状态归位，为后续 M9 redu
 - #49：last turn input queue。
 - #69：worktree 中 LLM 仍尝试搜索主分支路径。
 - #72：agent loop queue drain。
-- #75：TUI Model/View 架构迁移。
+- #53：TUI Model/View 架构迁移。
 
 ## 目标
 
