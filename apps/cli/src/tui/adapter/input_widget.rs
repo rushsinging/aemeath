@@ -1,6 +1,6 @@
 use crate::tui::model::input::change::InputChange;
+use crate::tui::model::input::completion::Suggestion;
 use crate::tui::model::input::completion_item::CompletionItem;
-use crate::tui::render::completion::Suggestion;
 use crate::tui::{InputArea, StatusBar};
 
 pub(crate) fn apply_input_changes_to_widget(
@@ -50,7 +50,7 @@ fn suggestion_from_completion_item(item: &CompletionItem) -> Suggestion {
         _id: item.label.clone(),
         display_text: item.label.clone(),
         _description: None,
-        suggestion_type: crate::tui::render::completion::SuggestionType::Command,
+        suggestion_type: crate::tui::model::input::completion::SuggestionType::Command,
     }
 }
 
@@ -78,7 +78,7 @@ mod tests {
             _id: "cmd".to_string(),
             display_text: "/help".to_string(),
             _description: None,
-            suggestion_type: crate::tui::render::completion::SuggestionType::Command,
+            suggestion_type: crate::tui::model::input::completion::SuggestionType::Command,
         };
 
         let item = completion_item_from_suggestion(&suggestion);

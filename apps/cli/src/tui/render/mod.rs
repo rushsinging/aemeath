@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-pub mod completion;
 pub mod dialog;
 pub mod display;
 pub mod input;

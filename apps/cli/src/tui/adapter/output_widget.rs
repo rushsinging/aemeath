@@ -107,7 +107,8 @@ mod tests {
         output_area.scroll_offset = 5;
 
         // 替换为 100 行内容
-        let lines: Vec<Line<'static>> = (0..100).map(|i| Line::raw(format!("line {}", i))).collect();
+        let lines: Vec<Line<'static>> =
+            (0..100).map(|i| Line::raw(format!("line {}", i))).collect();
         replace_lines_from_view_model(&mut output_area, lines);
 
         // scroll_offset 应保持 5（相对于可见区域顶端），而非被 push_line 累加到 105
@@ -123,7 +124,8 @@ mod tests {
         output_area.auto_scroll = true;
         output_area.scroll_offset = 0;
 
-        let lines: Vec<Line<'static>> = (0..100).map(|i| Line::raw(format!("line {}", i))).collect();
+        let lines: Vec<Line<'static>> =
+            (0..100).map(|i| Line::raw(format!("line {}", i))).collect();
         replace_lines_from_view_model(&mut output_area, lines);
 
         assert_eq!(output_area.scroll_offset, 0);

@@ -1,4 +1,4 @@
-use crate::tui::render::completion::Suggestion;
+use crate::tui::model::input::completion::Suggestion;
 use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,

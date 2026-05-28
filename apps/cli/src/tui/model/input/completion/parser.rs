@@ -1,7 +1,6 @@
 //! 输入解析与补全 token 提取
 
 use super::types::TriggerType;
-use crate::tui::render::display::safe_text;
 
 /// 提取光标位置处的补全 token
 /// 如果找到触发器，返回 (token, 起始位置, 触发类型)
@@ -71,8 +70,8 @@ pub fn extract_completion_token(
     // 检查 /model 子命令补全（例如 /model l -> /model list）
     if input.starts_with("/model") && cursor_offset > 6 {
         // 检查是否还没有空格（正在输入命令）
-        if input.len() > 6 && !safe_text::safe_char_at(input, 6).is_some_and(|c| c.is_whitespace())
-        {
+        let char_at_six = input.get(6..).and_then(|s| s.chars().next());
+        if !char_at_six.is_some_and(|c| c.is_whitespace()) {
             // 仍在输入 "/model..." 命令
         } else {
             // "/model " 后可能有子命令

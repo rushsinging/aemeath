@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::types::{Suggestion, SuggestionType};
+use crate::tui::model::input::completion::types::{Suggestion, SuggestionType};
 
 /// 根据部分路径生成文件/目录建议
 pub fn generate_file_suggestions(partial: &str, cwd: &PathBuf) -> Vec<Suggestion> {

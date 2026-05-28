@@ -18,9 +18,9 @@ use crate::tui::adapter::output_widget::replace_lines_from_view_model;
 use crate::tui::adapter::status_widget::{
     apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
 };
-use crate::tui::app::session::processing::SpawnContext;
-use crate::tui::app::session::processing::SpawnContextRefs;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
+use crate::tui::effect::session::processing::SpawnContext;
+use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::render::output_view_model::output_view_model_lines;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
