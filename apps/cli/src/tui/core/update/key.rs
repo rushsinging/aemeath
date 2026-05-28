@@ -68,6 +68,12 @@ impl App {
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
             self.input_area.enter(true);
+            // 同步模型状态：enter 直接修改 textarea 未走模型（同 #77/#78），
+            // 下次按键将触发 model.insert → TextChanged → set_text，
+            // 用旧文本覆盖 textarea 中的换行后内容。
+            let text = self.input_area.get_text();
+            self.model.input.document.clear();
+            self.model.input.document.insert_text(&text);
             return UpdateResult::none();
         }
 

@@ -244,4 +244,48 @@ mod tests {
         doc.insert_text(" ");
         assert_eq!(doc.buffer, "前置你好世界 ");
     }
+
+    // 回归测试：Bug #79 — Option+Enter 换行后继续输入回到上一行
+    //
+    // 场景：用户 Option+Enter 在 textarea 中插入换行，但 textarea.enter(true)
+    // 直接修改了 textarea 未同步模型。模型仍是单行旧文本 — 继续输入时
+    // model.insert → TextChanged → set_text 用旧文本覆盖 textarea，换行丢失。
+    //
+    // 修复：enter(true) 后执行 clear + insert_text 同步模型。
+
+    /// 换行后模型同步 → 继续输入 → 保持在第二行
+    #[test]
+    fn test_synced_model_after_newline_preserves_text() {
+        let mut doc = InputDocument::default();
+        // 用户在第一行输入
+        doc.insert_text("第一行文字");
+        assert_eq!(doc.buffer, "第一行文字");
+
+        // 用户 Option+Enter 换行 → textarea = "第一行文字\n"
+        // 修复：换行后同步模型
+        doc.clear();
+        doc.insert_text("第一行文字\n");
+        assert_eq!(doc.buffer, "第一行文字\n");
+
+        // 用户在第二行继续输入
+        doc.insert_text("第二行");
+        assert_eq!(doc.buffer, "第一行文字\n第二行");
+    }
+
+    /// Cjk 换行后模型同步 → 继续输入 → 正确
+    #[test]
+    fn test_synced_model_after_newline_cjk_preserves_text() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("中文内容");
+        assert_eq!(doc.buffer, "中文内容");
+
+        // Option+Enter 换行
+        doc.clear();
+        doc.insert_text("中文内容\n");
+        assert_eq!(doc.buffer, "中文内容\n");
+
+        // 继续输入
+        doc.insert_text("继续输入");
+        assert_eq!(doc.buffer, "中文内容\n继续输入");
+    }
 }
