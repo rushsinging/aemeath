@@ -1,4 +1,4 @@
-use crate::tui::model::input::InputSubmission;
+use crate::tui::model::input::submission::InputSubmission;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConversationAvailability {
@@ -32,7 +32,7 @@ pub fn route_submission(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::input::InputSubmission;
+    use crate::tui::model::input::submission::InputSubmission;
 
     #[test]
     fn test_route_submission_starts_chat_when_idle() {

@@ -1,4 +1,4 @@
-use crate::tui::model::input::InputModel;
+use crate::tui::model::input::model::InputModel;
 use crate::tui::view_model::InputAreaViewModel;
 
 pub struct InputViewAssembler;
@@ -29,7 +29,8 @@ impl InputViewAssembler {
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::input::{InputIntent, InputModel};
+    use crate::tui::model::input::intent::InputIntent;
+    use crate::tui::model::input::model::InputModel;
 
     use super::InputViewAssembler;
 

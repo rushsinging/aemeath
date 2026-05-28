@@ -1,4 +1,5 @@
-use crate::tui::model::conversation::{ConversationModel, ToolCallStatus};
+use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::output_area::{LineStyle, OutputArea};
 use crate::tui::view_model::{
     OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
@@ -94,7 +95,8 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::conversation::{ConversationIntent, ConversationModel};
+    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::model::ConversationModel;
     use crate::tui::output_area::{LineStyle, OutputArea};
     use crate::tui::view_model::{OutputBlockView, ToolSemanticStatus};
 
