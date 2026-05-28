@@ -1,4 +1,6 @@
 use crate::tui::display::theme;
+use crate::tui::output_area::tool_display::{format_tool_call, lookup_display};
+use crate::tui::output_area::INDENT;
 use crate::tui::view_model::{
     OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
 };
@@ -46,29 +48,89 @@ fn text_lines(prefix: &str, text: &TextBlockView) -> Vec<Line<'static>> {
 }
 
 fn tool_lines(tool: &ToolCallBlockView) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled(
-        format!("{} {}", tool.icon, tool.title),
-        style(tool.style),
-    ))];
-    if let Some(summary) = &tool.summary {
+    let raw_summary = tool.summary.as_deref().unwrap_or_default();
+    let (mut header, details) = format_tool_call(&tool.title, raw_summary);
+    header = header.replacen('●', tool.icon.as_str(), 1);
+    let mut lines = vec![Line::from(Span::styled(header, style(tool.style)))];
+
+    for detail in details {
         lines.push(Line::from(Span::styled(
-            format!("  │ {summary}"),
+            format!("{INDENT}{detail}"),
             style(SemanticStyle::Muted),
         )));
     }
-    if let Some(args) = &tool.args_preview {
+
+    if let Some(activity) = &tool.activity_summary {
         lines.push(Line::from(Span::styled(
-            format!("  │ {args}"),
+            format!("{INDENT}{activity}"),
             style(SemanticStyle::Muted),
         )));
     }
+
     if let Some(result) = &tool.result_summary {
+        push_tool_result_lines(tool, result, &mut lines);
+    }
+    lines
+}
+
+fn push_tool_result_lines(tool: &ToolCallBlockView, result: &str, lines: &mut Vec<Line<'static>>) {
+    let Some(display) = lookup_display(&tool.title) else {
         lines.push(Line::from(Span::styled(
-            format!("  └ {result}"),
+            format!("{INDENT}{result}"),
+            style(tool.style),
+        )));
+        return;
+    };
+    let max_lines = display.result_max_lines();
+    if max_lines > 0 {
+        let result_style = style(map_result_style(display.result_style(), tool.style));
+        let total = result.lines().count();
+        for line in result.lines().take(max_lines) {
+            lines.push(Line::from(Span::styled(
+                format!("{INDENT}{line}"),
+                result_style,
+            )));
+        }
+        if total > max_lines {
+            lines.push(Line::from(Span::styled(
+                format!("{INDENT}... ({} lines omitted)", total - max_lines),
+                result_style,
+            )));
+        }
+    }
+
+    for summary in display.format_result_summary(
+        result,
+        matches!(
+            tool.semantic_status,
+            crate::tui::view_model::ToolSemanticStatus::Error
+        ),
+    ) {
+        lines.push(Line::from(Span::styled(
+            format!("{INDENT}{summary}"),
             style(tool.style),
         )));
     }
-    lines
+}
+
+fn map_result_style(
+    line_style: crate::tui::output_area::LineStyle,
+    fallback: SemanticStyle,
+) -> SemanticStyle {
+    match line_style {
+        crate::tui::output_area::LineStyle::Error
+        | crate::tui::output_area::LineStyle::ToolCallError => SemanticStyle::Error,
+        crate::tui::output_area::LineStyle::ToolCallSuccess => SemanticStyle::Success,
+        crate::tui::output_area::LineStyle::ToolCallRunning => SemanticStyle::Running,
+        crate::tui::output_area::LineStyle::System
+        | crate::tui::output_area::LineStyle::Thinking => SemanticStyle::Muted,
+        crate::tui::output_area::LineStyle::Assistant
+        | crate::tui::output_area::LineStyle::Normal
+        | crate::tui::output_area::LineStyle::DiffAdd
+        | crate::tui::output_area::LineStyle::DiffRemove
+        | crate::tui::output_area::LineStyle::AskUser
+        | crate::tui::output_area::LineStyle::User => fallback,
+    }
 }
 
 fn style(style: SemanticStyle) -> ratatui::style::Style {
@@ -135,5 +197,52 @@ mod tests {
         let lines = output_view_model_lines(&vm);
 
         assert!(lines[0].spans.is_empty() || lines[0].spans[0].content.is_empty());
+    }
+
+    #[test]
+    fn test_output_view_model_lines_renders_grep_tool_result_with_tool_format() {
+        let vm = OutputViewModel {
+            blocks: vec![OutputBlockView::ToolCall(ToolCallBlockView {
+                key: "tool".to_string(),
+                chat_id: Some("chat-1".to_string()),
+                turn_id: Some("turn-1".to_string()),
+                tool_call_id: Some("grep-1".to_string()),
+                title: "Grep".to_string(),
+                icon: "✓".to_string(),
+                semantic_status: crate::tui::view_model::ToolSemanticStatus::Success,
+                style: SemanticStyle::Success,
+                args_preview: Some("bug 76".to_string()),
+                summary: Some(r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string()),
+                activity_summary: None,
+                result_summary: Some(
+                    "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
+                ),
+                collapsible: true,
+                collapsed: false,
+            })],
+            version: 1,
+            follow_tail_hint: true,
+        };
+
+        let rendered = output_view_model_lines(&vm)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered[0], "✓ Grep /76/");
+        assert_eq!(rendered[1], "  in docs/bug/active.md");
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  ... (1 lines omitted)"));
+        assert!(rendered.iter().any(|line| line == "  ✓ Grep completed"));
     }
 }
