@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use similar::{ChangeTag, TextDiff};
 
 use super::types::{LineStyle, OutputLine, SpanPart, INDENT};

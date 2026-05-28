@@ -16,15 +16,14 @@ impl App {
     ) -> UpdateResult {
         let mut effects = Vec::new();
         match ev {
-            UiEvent::Text(text) => {
+            UiEvent::Text(_text) => {
                 if self.chat.tool_call_active {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
                     self.chat.clear_tool_activity();
                 }
                 self.output_area.set_spinner_phase("Generating...");
-                self.output_area.append_assistant_text(&text);
             }
-            UiEvent::Thinking(text) => {
+            UiEvent::Thinking(_text) => {
                 if self.chat.tool_call_active {
                     log::debug!(
                         "[SPINNER] Thinking: tool_call_active was true, resetting to false"
@@ -32,19 +31,14 @@ impl App {
                     self.chat.clear_tool_activity();
                 }
                 self.output_area.set_spinner_phase("Thinking...");
-                self.output_area.append_thinking_text(&text);
             }
-            UiEvent::TextBlockComplete(_text) => {
-                self.output_area.finish_streaming();
-                self.output_area.push_system("");
-            }
+            UiEvent::TextBlockComplete(_text) => {}
             UiEvent::ToolCallStart { name, index } => {
                 log::debug!(
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
                     self.chat.tool_call_active
                 );
                 self.chat.start_tool_activity();
-                self.output_area.push_tool_call_start(&name, index);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.output_area.start_spinner();
@@ -53,25 +47,21 @@ impl App {
                 }
             }
             UiEvent::ToolArgumentsDelta {
-                index,
-                name,
-                partial_args,
-            } => {
-                self.output_area
-                    .update_tool_call_pending(&name, index, &partial_args);
-            }
+                index: _,
+                name: _,
+                partial_args: _,
+            } => {}
             UiEvent::ToolCall {
                 id,
                 name,
                 index: _,
-                summary,
+                summary: _,
             } => {
                 log::debug!(
                     "[SPINNER] ToolCall({name}): tool_call_active={}",
                     self.chat.tool_call_active
                 );
                 self.chat.register_tool_call(id.clone());
-                self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
                 self.output_area
                     .set_spinner_phase(format!("Calling {name}..."));
@@ -79,22 +69,10 @@ impl App {
             UiEvent::ToolResult {
                 id,
                 tool_name,
-                output,
-                is_error,
-                images,
+                output: _,
+                is_error: _,
+                images: _,
             } => {
-                let image_note = if images.is_empty() {
-                    String::new()
-                } else {
-                    format!("  │  [{} image(s) attached]\n", images.len())
-                };
-                self.output_area.push_tool_result_with_diff(
-                    &id,
-                    &tool_name,
-                    &output,
-                    is_error,
-                    &image_note,
-                );
                 let had_active_id = self.chat.has_active_tool_call(&id);
                 let remaining = self.chat.finish_tool_call(&id);
                 log::debug!(

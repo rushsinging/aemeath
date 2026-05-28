@@ -16,20 +16,25 @@ pub(crate) fn output_view_model_lines(view_model: &OutputViewModel) -> Vec<Line<
 
 fn block_lines(block: &OutputBlockView) -> Vec<Line<'static>> {
     match block {
-        OutputBlockView::UserMessage(text) => text_lines("You: ", text),
-        OutputBlockView::AssistantMessage(text) => text_lines("", text),
+        OutputBlockView::UserMessage(text) => text_lines("> ", "  ", text),
+        OutputBlockView::AssistantMessage(text) => text_lines("", "", text),
+        OutputBlockView::ThinkingMessage(text) => text_lines("💭 ", "💭 ", text),
         OutputBlockView::DiagnosticNotice(text) | OutputBlockView::SystemNotice(text) => {
-            text_lines("", text)
+            text_lines("", "", text)
         }
         OutputBlockView::ToolCall(tool) => tool_lines(tool),
         OutputBlockView::Separator => vec![Line::raw("")],
     }
 }
 
-fn text_lines(prefix: &str, text: &TextBlockView) -> Vec<Line<'static>> {
+fn text_lines(
+    first_line_prefix: &str,
+    continuation_prefix: &str,
+    text: &TextBlockView,
+) -> Vec<Line<'static>> {
     if text.text.is_empty() {
         return vec![Line::from(Span::styled(
-            prefix.to_string(),
+            first_line_prefix.to_string(),
             style(text.style),
         ))];
     }
@@ -38,9 +43,9 @@ fn text_lines(prefix: &str, text: &TextBlockView) -> Vec<Line<'static>> {
         .enumerate()
         .map(|(index, line)| {
             let rendered = if index == 0 {
-                format!("{prefix}{line}")
+                format!("{first_line_prefix}{line}")
             } else {
-                line.to_string()
+                format!("{continuation_prefix}{line}")
             };
             Line::from(Span::styled(rendered, style(text.style)))
         })
@@ -165,7 +170,7 @@ mod tests {
 
         let lines = output_view_model_lines(&vm);
 
-        assert_eq!(lines[0].spans[0].content.as_ref(), "You: hello");
+        assert_eq!(lines[0].spans[0].content.as_ref(), "> hello");
     }
 
     #[test]

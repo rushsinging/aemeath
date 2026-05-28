@@ -283,6 +283,8 @@ mod tests {
             .map(|line| line.content.clone())
             .collect::<Vec<_>>();
 
+        assert_eq!(rendered[0], "> search bug 76");
+        assert!(rendered.iter().any(|line| line == "💭 thinking"));
         assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
         assert!(rendered
             .iter()
@@ -293,6 +295,7 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "  ... (1 lines omitted)"));
+        assert!(!rendered.iter().any(|line| line.starts_with("You:")));
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));

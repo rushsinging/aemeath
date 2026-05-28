@@ -27,12 +27,12 @@ impl App {
             };
         }
 
-        self.output_area.push_user_message(&input);
         self.model
             .conversation
             .apply(ConversationIntent::StartChat {
                 submission: input.clone(),
             });
+        self.refresh_output_widget_from_model();
 
         let images: Vec<sdk::ToolResultImage> = self
             .chat

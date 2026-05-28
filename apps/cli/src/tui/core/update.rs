@@ -181,7 +181,7 @@ impl App {
         result
     }
 
-    fn refresh_output_widget_from_model(&mut self) {
+    pub(crate) fn refresh_output_widget_from_model(&mut self) {
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
