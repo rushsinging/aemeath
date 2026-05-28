@@ -17,6 +17,7 @@
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致；真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，index 丢失会进一步导致工具块绑定失败。修复：历史输出统一从 ConversationModel 渲染，格式参照 resume（用户 `> ...`、thinking `💭 ...`、tool call 复用 ToolDisplay），runtime/sdk/CLI 透传 ToolCall index；resume 也改为加载模型后通过 ViewModel 渲染，符合新架构。 |
 | 78 | input area 粘贴后按空格清空粘贴内容 | 中 | 修复中 | 未确认 | 2026-05 | 同 #77 根因：handle_paste_event 和 processing 模式 paste 均直接调用 input_area.input(ch) 修改 textarea，未走模型。后续空格触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本覆盖 textarea 中的粘贴内容。修复：两处 paste 循环后添加 model.input.document.clear() + insert_text() 同步 |
+| 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 修复中 | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
 **状态**：修复中（待确认）
@@ -1064,3 +1065,18 @@ Tool Bash timed out after 120s
 **关联**：
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
+
+### #80 滚动条不跟随最新内容
+
+**状态**：修复中
+
+**症状**：LLM streaming 输出时，滚动条不自动滚到最底部跟随最新内容。用户按 Shift+Home/PageUp 后即使按 Shift+End 回到最底，后续新内容仍然不跟随。
+
+**根因**：`refresh_output_widget_from_model` 在每次 agent event（包括每字符 streaming text）触发 `replace_lines_from_view_model`，后者清空所有行后逐行 `push_line` 重建。`push_line` 在 `auto_scroll=false` 时每行 `scroll_offset += 1`。streaming 过程中若用户曾向上滚动（即使已用 Shift+End 回到底部），全量重建导致 `scroll_offset` 被累加到异常大值（N 行 × 原有偏移 → N + offset），`clamp_scroll_state` 将其 cap 到 `max_offset` 而非 0，`auto_scroll` 因此永远无法恢复为 `true`。
+
+**修复**：`replace_lines_from_view_model` 全量重建期间临时设置 `auto_scroll = true`，防止 `push_line` 逐行递增 `scroll_offset`。重建完成后恢复原 `auto_scroll` 值，`clamp_scroll_state` 正确 clamp。
+
+**涉及文件**：
+- `apps/cli/src/tui/adapter/output_widget.rs`（`replace_lines_from_view_model`、`clamp_scroll_state`）
+- `apps/cli/src/tui/output_area/scroll.rs`（`scroll_up`/`scroll_down`）
+- `apps/cli/src/tui/app/update.rs`（`refresh_output_widget_from_model`）
