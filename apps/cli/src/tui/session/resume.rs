@@ -9,10 +9,10 @@ impl App {
     ) {
         let msg_count = messages.len();
         self.session.session_created_at = Some(created_at);
-        self.session.session_id = session_id.to_string();
+        self.session.rename_session(session_id);
         self.status_bar.set_session_id(session_id);
         self.chat.messages.clear();
-        self.chat.pending_images.clear();
+        self.chat.clear_pending_images();
         for i in 0..messages.len() {
             let subsequent = if i + 1 < messages.len() {
                 Some(&messages[i + 1])

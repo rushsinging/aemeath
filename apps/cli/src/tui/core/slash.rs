@@ -37,11 +37,11 @@ impl super::App {
 
         match cmd {
             cmd if cmd == format!("/{}", cmd::EXIT) || cmd == format!("/{}", cmd::QUIT) => {
-                self.layout.should_exit = true
+                self.layout.request_exit()
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.chat.messages.clear();
-                self.chat.pending_images.clear();
+                self.chat.clear_pending_images();
                 self.input_area.set_pending_images(0);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
@@ -147,9 +147,8 @@ impl super::App {
                 match result {
                     Ok(img) => {
                         let size = img.final_size;
-                        self.chat.pending_images.push(img);
-                        self.input_area
-                            .set_pending_images(self.chat.pending_images.len());
+                        let count = self.chat.add_pending_image(img);
+                        self.input_area.set_pending_images(count);
                         self.output_area
                             .push_system(&format!("[clipboard image added ({} bytes)]", size));
                     }
@@ -160,14 +159,14 @@ impl super::App {
                 }
             }
             "/images" => {
-                if self.chat.pending_images.is_empty() {
+                if self.chat.pending_image_count() == 0 {
                     self.output_area.push_system("No pending images.");
                 } else {
                     self.output_area.push_system(&format!(
                         "Pending images: {}",
-                        self.chat.pending_images.len()
+                        self.chat.pending_image_count()
                     ));
-                    for (i, img) in self.chat.pending_images.iter().enumerate() {
+                    for (i, img) in self.chat.pending_images().iter().enumerate() {
                         self.output_area.push_system(&format!(
                             "  {}. [image {}] ({} bytes)",
                             i + 1,
@@ -178,7 +177,7 @@ impl super::App {
                 }
             }
             "/clear-images" => {
-                self.chat.pending_images.clear();
+                self.chat.clear_pending_images();
                 self.input_area.set_pending_images(0);
                 self.output_area.push_system("[pending images cleared]");
             }
@@ -190,7 +189,7 @@ impl super::App {
                 if let Some(ref ac) = self.agent_client {
                     let ctx = sdk::CommandContext {
                         cwd: self.session.cwd.to_string_lossy().to_string(),
-                        session_id: self.session.session_id.clone(),
+                        session_id: self.session.session_id().to_string(),
                         models: vec![], // model list not needed for base commands
                         current_model: self.session.current_model_display.clone(),
                     };
@@ -213,8 +212,7 @@ impl super::App {
                         Err(_) => {
                             // Fallback to skill alias lookup
                             if let Some(skill) = self.find_skill_by_alias(cmd_name) {
-                                let args =
-                                    parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
                                 let mut content = skill.content.clone();
                                 if !args.is_empty() {
                                     content = format!("{content}\n\nArguments: {args}");
@@ -250,12 +248,12 @@ impl super::App {
     async fn handle_command_action(&mut self, action: sdk::CommandAction) -> Option<String> {
         match action {
             sdk::CommandAction::Exit => {
-                self.layout.should_exit = true;
+                self.layout.request_exit();
                 None
             }
             sdk::CommandAction::Clear => {
                 self.chat.messages.clear();
-                self.chat.pending_images.clear();
+                self.chat.clear_pending_images();
                 self.input_area.set_pending_images(0);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
@@ -318,16 +316,13 @@ impl super::App {
                                 self.status_bar
                                     .set_context_size(result.context_window as u64);
                             }
-                            self.session
-                                .current_model_display = result.display_name.clone();
+                            self.session.current_model_display = result.display_name.clone();
                             self.status_bar.set_model(&result.display_name);
                             if let Some(ra) = result.reasoning_active {
                                 self.status_bar.set_thinking(ra);
                             }
-                            self.output_area.push_system(&format!(
-                                "[switched to {}]",
-                                result.display_name
-                            ));
+                            self.output_area
+                                .push_system(&format!("[switched to {}]", result.display_name));
                         }
                         Err(e) => {
                             self.output_area
@@ -339,11 +334,11 @@ impl super::App {
             }
             sdk::CommandAction::InjectMessage(prompt) => {
                 self.output_area.push_system("[reviewing code changes...]");
-                return Some(prompt);
+                Some(prompt)
             }
             sdk::CommandAction::RunSkill(content) => {
                 self.output_area.push_system("[running skill...]");
-                return Some(content);
+                Some(content)
             }
             sdk::CommandAction::SetThinking(desired) => {
                 if let Some(ref ac) = self.agent_client {

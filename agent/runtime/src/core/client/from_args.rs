@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChangeSet, SdkError};
 use tokio::sync::watch;
 
-use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::ToolRegistry;
 use crate::api::prompt::skill::{load_all_skills, Skill};
@@ -12,15 +11,16 @@ use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
 use crate::api::provider::types::SystemBlock;
 use crate::api::provider::ApiDriverKind;
 use crate::api::tools as tools_crate;
+use crate::core::port::ChatRuntimeContext;
+use crate::core::port::ProviderInfoPort;
+use crate::utils::adapter::LlmClientAdapter;
+use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::utils::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, build_json_logger,
     init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
     resolve_context_size, resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
-use crate::core::port::ChatRuntimeContext;
-use crate::core::port::ProviderInfoPort;
-use crate::utils::adapter::LlmClientAdapter;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -65,7 +65,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .models
         .select_for_run(args.model.as_deref())
         .map_err(|e| SdkError::Init(e.to_string()))?;
-    let api_type = ApiDriverKind::from_str(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
+    let api_type = ApiDriverKind::parse(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
     // 7. API key
     let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
         SdkError::Init(

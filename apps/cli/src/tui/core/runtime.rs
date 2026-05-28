@@ -3,20 +3,12 @@ use super::App;
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
     pub(crate) async fn reset_runtime_state(&mut self) {
-        self.chat.total_input_tokens = 0;
-        self.chat.total_output_tokens = 0;
-        self.chat.total_api_calls = 0;
-        self.chat.last_input_tokens = 0;
-        self.chat.tool_call_active = false;
-        self.chat.is_processing = false;
-        self.chat.active_tool_call_ids.clear();
-        self.input.input_queue.clear();
+        self.chat.reset_runtime_state();
+        self.input.clear_queue();
         self.output_area.reset_runtime_state();
         self.status_bar.reset_runtime_state();
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
-        self.chat.pending_reflection = None;
-        self.chat.turn_count = 0;
         if let Some(agent_client) = &self.agent_client {
             if let Err(e) = agent_client.sync_current_messages(Vec::new()).await {
                 log::warn!("failed to reset SDK session messages: {e}");
@@ -52,14 +44,16 @@ impl App {
     pub async fn refresh_session_cache(&mut self) {
         if let Some(agent_client) = &self.agent_client {
             if let Ok(sessions) = agent_client.list_sessions().await {
-                self.session.cached_sessions = sessions
-                    .iter()
-                    .take(20)
-                    .map(|s| {
-                        let summary = format!("{} [{}msg]", s.summary, s.message_count);
-                        (s.id.clone(), summary)
-                    })
-                    .collect();
+                self.session.cache_sessions(
+                    sessions
+                        .iter()
+                        .take(20)
+                        .map(|s| {
+                            let summary = format!("{} [{}msg]", s.summary, s.message_count);
+                            (s.id.clone(), summary)
+                        })
+                        .collect(),
+                );
             }
         }
     }

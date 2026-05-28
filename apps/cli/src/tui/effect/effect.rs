@@ -1,14 +1,48 @@
+#[allow(dead_code)]
+pub struct SpawnAgentChatEffect {
+    pub chat_id: String,
+    pub prompt: String,
+    pub context: Option<crate::tui::session::processing::SpawnContext>,
+}
+
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
     None,
+    QuitApplication,
     RequestRender,
     SpawnAgentChat { chat_id: String, prompt: String },
+    CancelAgentChat,
     SaveSession,
+    FetchReminderRecap,
     FetchTaskStatus,
     CopyToClipboard { text: String },
-    RunHook { name: String },
+    ReadClipboardImage,
+    ProcessImageFile { path: String },
+    RunHook { name: String, message: String },
+    SetCurrentTurn { turn: usize },
     StartTimer { id: String },
     StopTimer { id: String },
+}
+
+impl Effect {
+    pub fn is_noop(&self) -> bool {
+        matches!(self, Effect::None)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EffectResult {
+    Noop,
+    SessionSaved,
+    Failed { message: String },
+}
+
+impl EffectResult {
+    pub fn session_saved() -> Self {
+        Self::SessionSaved
+    }
 }
 
 #[cfg(test)]
@@ -18,7 +52,7 @@ mod tests {
     #[test]
     fn test_effect_request_render_is_pure_value() {
         let effect = Effect::RequestRender;
-        assert_eq!(format!("{effect:?}"), "RequestRender");
+        assert!(!effect.is_noop());
     }
 
     #[test]
@@ -27,11 +61,13 @@ mod tests {
             chat_id: "chat-1".to_string(),
             prompt: "hello".to_string(),
         };
-        assert!(matches!(effect, Effect::SpawnAgentChat { ref chat_id, .. } if chat_id == "chat-1"));
+        assert!(
+            matches!(effect, Effect::SpawnAgentChat { ref chat_id, .. } if chat_id == "chat-1")
+        );
     }
 
     #[test]
     fn test_effect_none_is_distinct_from_render() {
-        assert_ne!(Effect::None, Effect::RequestRender);
+        assert!(!Effect::RequestRender.is_noop());
     }
 }

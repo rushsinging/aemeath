@@ -64,7 +64,7 @@ impl Tool for TaskListTool {
         let priority_filter = input
             .get("priority")
             .and_then(|v| v.as_str())
-            .and_then(|p| TaskPriority::from_str(p));
+            .and_then(TaskPriority::parse);
 
         let session_filter = input.get("sessionId").and_then(|v| v.as_str());
 
@@ -72,19 +72,13 @@ impl Tool for TaskListTool {
         let mut tasks = self.store.list().await;
 
         if let Some(status) = status_filter {
-            tasks = tasks.into_iter().filter(|t| t.status == status).collect();
+            tasks.retain(|t| t.status == status);
         }
         if let Some(priority) = priority_filter {
-            tasks = tasks
-                .into_iter()
-                .filter(|t| t.priority == priority)
-                .collect();
+            tasks.retain(|t| t.priority == priority);
         }
         if let Some(session_id) = session_filter {
-            tasks = tasks
-                .into_iter()
-                .filter(|t| t.session_id.as_ref() == Some(&session_id.to_string()))
-                .collect();
+            tasks.retain(|t| t.session_id.as_deref() == Some(session_id));
         }
 
         if tasks.is_empty() {

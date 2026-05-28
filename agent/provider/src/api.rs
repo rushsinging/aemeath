@@ -6,8 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 /// API driver kind. Every model source in config.json maps to one of these via its `api` field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ApiDriverKind {
+    #[default]
     Anthropic,
     OpenAI,
     Zhipu,
@@ -15,15 +16,9 @@ pub enum ApiDriverKind {
     Volcengine,
 }
 
-impl Default for ApiDriverKind {
-    fn default() -> Self {
-        ApiDriverKind::Anthropic
-    }
-}
-
 impl ApiDriverKind {
     /// Parse from a config string.
-    pub fn from_str(s: &str) -> Option<ApiDriverKind> {
+    pub fn parse(s: &str) -> Option<ApiDriverKind> {
         match s {
             "anthropic" => Some(ApiDriverKind::Anthropic),
             "openai" => Some(ApiDriverKind::OpenAI),
@@ -51,21 +46,18 @@ mod tests {
 
     #[test]
     fn test_from_str_openai() {
-        assert_eq!(
-            ApiDriverKind::from_str("openai"),
-            Some(ApiDriverKind::OpenAI)
-        );
+        assert_eq!(ApiDriverKind::parse("openai"), Some(ApiDriverKind::OpenAI));
     }
 
     #[test]
     fn test_from_str_zhipu() {
-        assert_eq!(ApiDriverKind::from_str("zhipu"), Some(ApiDriverKind::Zhipu));
+        assert_eq!(ApiDriverKind::parse("zhipu"), Some(ApiDriverKind::Zhipu));
     }
 
     #[test]
     fn test_from_str_litellm() {
         assert_eq!(
-            ApiDriverKind::from_str("litellm"),
+            ApiDriverKind::parse("litellm"),
             Some(ApiDriverKind::LiteLLM)
         );
     }
@@ -73,15 +65,15 @@ mod tests {
     #[test]
     fn test_from_str_volcengine() {
         assert_eq!(
-            ApiDriverKind::from_str("volcengine"),
+            ApiDriverKind::parse("volcengine"),
             Some(ApiDriverKind::Volcengine)
         );
     }
 
     #[test]
     fn test_from_str_rejects_openai_compatible() {
-        assert_eq!(ApiDriverKind::from_str("openai-compatible"), None);
-        assert_eq!(ApiDriverKind::from_str("openai-completions"), None);
+        assert_eq!(ApiDriverKind::parse("openai-compatible"), None);
+        assert_eq!(ApiDriverKind::parse("openai-completions"), None);
     }
 
     #[test]

@@ -42,4 +42,3 @@ impl ClaudeSettingsAdapter for ClaudeSettingsConfig {
 #[cfg(test)]
 #[path = "claude_settings_adapter_tests.rs"]
 mod tests;
-

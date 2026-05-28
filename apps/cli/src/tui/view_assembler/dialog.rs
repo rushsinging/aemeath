@@ -1,7 +1,5 @@
 use crate::tui::model::diagnostic::model::DiagnosticModel;
-use crate::tui::view_model::{
-    DialogActionViewModel, DialogKind, DialogViewModel, StatusSeverity,
-};
+use crate::tui::view_model::{DialogActionViewModel, DialogKind, DialogViewModel, StatusSeverity};
 
 pub struct DialogViewAssembler;
 

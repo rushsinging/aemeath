@@ -1,5 +1,6 @@
 use super::change::RuntimeChange;
 use super::intent::RuntimeIntent;
+use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
 use super::workspace::WorkspaceState;
@@ -10,16 +11,40 @@ pub struct RuntimeModel {
     pub model_id: Option<String>,
     pub workspace: WorkspaceState,
     pub usage: UsageSummary,
+    pub live_tps: Option<f64>,
     pub task_status: TaskStatusSnapshot,
+    pub processing_jobs: Vec<ProcessingJob>,
 }
 
 impl RuntimeModel {
     pub fn apply(&mut self, intent: RuntimeIntent) -> Vec<RuntimeChange> {
         match intent {
+            RuntimeIntent::SetProviderModel { provider, model_id } => {
+                self.provider = provider.clone();
+                self.model_id = model_id.clone();
+                vec![RuntimeChange::ProviderModelChanged { provider, model_id }]
+            }
             RuntimeIntent::UpdateWorkspace { cwd, worktree } => {
                 self.workspace.cwd = Some(cwd.clone());
                 self.workspace.worktree = worktree.clone();
                 vec![RuntimeChange::WorkspaceChanged { cwd, worktree }]
+            }
+            RuntimeIntent::WorkspaceSnapshotReceived {
+                path_base,
+                working_root,
+                branch,
+                kind,
+            } => {
+                self.workspace.path_base = path_base.clone();
+                self.workspace.working_root = working_root.clone();
+                self.workspace.branch = branch.clone();
+                self.workspace.kind = kind;
+                vec![RuntimeChange::WorkspaceSnapshotChanged {
+                    path_base,
+                    working_root,
+                    branch,
+                    kind,
+                }]
             }
             RuntimeIntent::RecordUsage {
                 input_tokens,
@@ -34,6 +59,10 @@ impl RuntimeModel {
                     output_tokens: self.usage.output_tokens,
                     cost_usd: self.usage.cost_usd,
                 }]
+            }
+            RuntimeIntent::RecordLiveTps { tps } => {
+                self.live_tps = Some(tps);
+                vec![RuntimeChange::LiveTpsChanged { tps }]
             }
             RuntimeIntent::UpdateTaskStatus {
                 total,
@@ -50,6 +79,24 @@ impl RuntimeModel {
                     completed,
                     in_progress,
                 }]
+            }
+            RuntimeIntent::StartProcessingJob { id, chat_id } => {
+                self.processing_jobs.push(ProcessingJob {
+                    id: id.clone(),
+                    chat_id,
+                    status: ProcessingStatus::Running,
+                });
+                vec![RuntimeChange::ProcessingJobChanged { id }]
+            }
+            RuntimeIntent::FinishProcessingJob { id, success } => {
+                if let Some(job) = self.processing_jobs.iter_mut().find(|job| job.id == id) {
+                    job.status = if success {
+                        ProcessingStatus::Finished
+                    } else {
+                        ProcessingStatus::Failed
+                    };
+                }
+                vec![RuntimeChange::ProcessingJobChanged { id }]
             }
         }
     }

@@ -14,7 +14,7 @@ fn md_line(content: &str) -> OutputLine {
 
 #[test]
 fn test_scan_code_blocks_fence_in_viewport() {
-    let all = vec![
+    let all = [
         md_line("hello"),
         md_line("```rust"),
         md_line("fn main() {}"),
@@ -32,7 +32,7 @@ fn test_scan_code_blocks_fence_in_viewport() {
 
 #[test]
 fn test_scan_code_blocks_open_fence_scrolled_out() {
-    let all = vec![
+    let all = [
         md_line("```rust"),
         md_line("fn foo()"),
         md_line("```"),
@@ -60,7 +60,7 @@ fn test_scan_code_blocks_open_fence_scrolled_out() {
 
 #[test]
 fn test_scan_code_blocks_all_outside_viewport() {
-    let all = vec![
+    let all = [
         md_line("```"),
         md_line("code"),
         md_line("```"),
@@ -73,7 +73,7 @@ fn test_scan_code_blocks_all_outside_viewport() {
 
 #[test]
 fn test_scan_code_blocks_inline_code_not_fence() {
-    let all = vec![md_line("use `code` here")];
+    let all = [md_line("use `code` here")];
     let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().collect();
     let info = scan_code_blocks(all.iter(), &vis);
     assert!(info.code_block_lines.is_empty());
@@ -83,7 +83,7 @@ fn test_scan_code_blocks_inline_code_not_fence() {
 
 #[test]
 fn test_scan_table_blocks_in_viewport() {
-    let all = vec![
+    let all = [
         md_line("| a | b |"),
         md_line("|---|---|"),
         md_line("| 1 | 2 |"),
@@ -97,7 +97,7 @@ fn test_scan_table_blocks_in_viewport() {
 
 #[test]
 fn test_scan_table_blocks_header_scrolled_out() {
-    let all = vec![
+    let all = [
         md_line("before"),
         md_line("| Name | Age |"),
         md_line("|------|-----|"),
@@ -120,7 +120,7 @@ fn test_scan_table_blocks_header_scrolled_out() {
 
 #[test]
 fn test_scan_table_blocks_no_separator_at_all() {
-    let all = vec![md_line("| a | b |"), md_line("| c | d |")];
+    let all = [md_line("| a | b |"), md_line("| c | d |")];
     let vis: Vec<(usize, &OutputLine)> = all.iter().enumerate().collect();
     let result = scan_table_blocks(all.iter(), &vis);
     assert!(

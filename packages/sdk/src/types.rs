@@ -18,7 +18,7 @@ impl CharIdx {
         CharIdx(s.chars().count())
     }
 
-    pub fn add(self, n: usize) -> Self {
+    pub fn advance(self, n: usize) -> Self {
         CharIdx(self.0 + n)
     }
 
@@ -38,6 +38,14 @@ impl CharIdx {
 
     pub fn as_usize(self) -> usize {
         self.0
+    }
+}
+
+impl ops::Add<usize> for CharIdx {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        CharIdx(self.0 + rhs)
     }
 }
 

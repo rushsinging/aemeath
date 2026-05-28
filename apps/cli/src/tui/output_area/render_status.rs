@@ -88,7 +88,7 @@ impl OutputArea {
         spinner_frame_idx: u64,
         total_rendered: usize,
     ) {
-        let blink_on = (spinner_frame_idx / 10) % 2 == 0;
+        let blink_on = (spinner_frame_idx / 10).is_multiple_of(2);
         for (si, &(li, _, _)) in self.screen_line_map.iter().enumerate() {
             if li >= self.lines.len() {
                 continue;

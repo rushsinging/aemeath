@@ -71,8 +71,7 @@ pub fn extract_completion_token(
     // 检查 /model 子命令补全（例如 /model l -> /model list）
     if input.starts_with("/model") && cursor_offset > 6 {
         // 检查是否还没有空格（正在输入命令）
-        if input.len() > 6
-            && !safe_text::safe_char_at(input, 6).map_or(false, |c| c.is_whitespace())
+        if input.len() > 6 && !safe_text::safe_char_at(input, 6).is_some_and(|c| c.is_whitespace())
         {
             // 仍在输入 "/model..." 命令
         } else {

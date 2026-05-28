@@ -43,7 +43,7 @@ pub(crate) async fn parse_openai_stream(
                 source = cause.source();
                 depth += 1;
             }
-            io::Error::new(io::ErrorKind::Other, msg)
+            io::Error::other(msg)
         })
     });
     let reader = StreamReader::new(byte_stream);
@@ -84,10 +84,10 @@ pub(crate) async fn parse_openai_stream(
         handler.on_raw_line(&line);
 
         // 解析 SSE 格式
-        let data = if line.starts_with("data: ") {
-            &line[6..]
-        } else if line.starts_with("data:") {
-            &line[5..]
+        let data = if let Some(stripped) = line.strip_prefix("data: ") {
+            stripped
+        } else if let Some(stripped) = line.strip_prefix("data:") {
+            stripped
         } else {
             continue;
         };

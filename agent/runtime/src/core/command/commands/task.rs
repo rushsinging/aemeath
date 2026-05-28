@@ -4,7 +4,9 @@
 //!
 //! Feature #25: Task list 跨轮次生命周期策略
 
-use crate::core::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
+use crate::core::command::{
+    Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 use share::task::{BatchStatus, TaskStore};
 use std::sync::Arc;
 

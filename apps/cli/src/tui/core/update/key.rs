@@ -1,8 +1,8 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
-use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
+use crate::tui::effect::effect::Effect;
 use crate::tui::session::processing::SpawnContextRefs;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
@@ -48,17 +48,11 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
-            return UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            };
+            return UpdateResult::none();
         }
 
-        if self.layout.active_dialog.is_some() {
-            return handle_dialog_key(self, key).unwrap_or(UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            });
+        if self.layout.has_active_dialog() {
+            return handle_dialog_key(self, key).unwrap_or_else(UpdateResult::none);
         }
 
         if let Some(result) = self.update_ask_user_key(key) {
@@ -72,10 +66,7 @@ impl App {
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
             self.input_area.enter(true);
-            return UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            };
+            return UpdateResult::none();
         }
 
         match (key.modifiers, key.code) {
@@ -93,17 +84,14 @@ impl App {
                             self.input_area.clear();
                             self.status_bar
                                 .set_warning("Input cleared (Ctrl+C again to exit)");
-                            self.layout.last_ctrlc = Some(std::time::Instant::now());
+                            self.layout.mark_ctrlc_now();
                         }
                         CtrlCAction::WarnExit => {
-                            self.layout.last_ctrlc = Some(std::time::Instant::now());
+                            self.layout.mark_ctrlc_now();
                             self.status_bar.set_warning("Press Ctrl+C again to exit");
                         }
                         CtrlCAction::Quit => {
-                            return UpdateResult {
-                                cmd: Cmd::Quit,
-                                pending_slash: None,
-                            };
+                            return UpdateResult::one(Effect::QuitApplication);
                         }
                     }
                 }
@@ -132,9 +120,8 @@ impl App {
                     let input = self.input_area.get_text();
                     self.input_area.add_history(&input);
                     self.input_area.clear();
-                    self.input.input_queue.push_back(input.clone());
+                    let n = self.input.push_queue(input.clone());
                     self.output_area.queued_messages.push(input);
-                    let n = self.input.input_queue.len();
                     self.status_bar
                         .set_warning(&format!("{n} message(s) queued"));
                 }
@@ -182,19 +169,13 @@ impl App {
             {
                 self.input.just_pasted = true;
                 self.output_area.push_system("[reading clipboard image...]");
-                return UpdateResult {
-                    cmd: Cmd::ReadClipboardImage,
-                    pending_slash: None,
-                };
+                return UpdateResult::one(Effect::ReadClipboardImage);
             }
             (KeyModifiers::NONE, KeyCode::End) => self.input_area.move_end(),
             _ => {}
         }
 
-        UpdateResult {
-            cmd: Cmd::None,
-            pending_slash: None,
-        }
+        UpdateResult::none()
     }
 }
 

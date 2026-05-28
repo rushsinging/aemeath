@@ -2,7 +2,9 @@
 //!
 //! Registered via `inventory::submit!` for compile-time collection.
 
-use crate::core::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
+use crate::core::command::{
+    Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -46,7 +48,7 @@ fn help_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
                 for cmd in commands {
                     output.push_str(&format!("  /{} - {}\n", cmd.name, cmd.description));
                 }
-                output.push_str("\n");
+                output.push('\n');
             }
         }
         output.push_str("Use /help <command> for detailed usage.\n");

@@ -85,9 +85,7 @@ impl RenderedCache {
         let raw_start = display_start.saturating_sub(expand);
         let raw_end = (display_end + expand).min(total);
 
-        let (rs, re) = if self.dirty {
-            (raw_start, raw_end)
-        } else if raw_start < self.render_start || raw_end > self.render_end {
+        let (rs, re) = if self.dirty || raw_start < self.render_start || raw_end > self.render_end {
             (raw_start, raw_end)
         } else {
             return;
@@ -202,8 +200,7 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
     }
 
     if in_code {
-        for i in end..total {
-            let line = &lines[i];
+        for (i, line) in lines.iter().enumerate().take(total).skip(end) {
             let is_md = rendered_lines::is_markdown_style(line.style);
             if is_md && line.content.trim().starts_with("```") {
                 e = i + 1;
@@ -222,8 +219,7 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
             if super::markdown::is_table_row(trimmed)
                 || super::markdown::is_table_separator(trimmed)
             {
-                for i in end..total {
-                    let next = &lines[i];
+                for (i, next) in lines.iter().enumerate().take(total).skip(end) {
                     let is_md = rendered_lines::is_markdown_style(next.style);
                     let t = next.content.trim();
                     if is_md

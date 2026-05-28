@@ -1,7 +1,9 @@
 //! Memory command — manage persistent memory entries.
 
 use super::memory_support::open_memory_store;
-use crate::core::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
+use crate::core::command::{
+    Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 use share::memory::{
     format_add_result, format_memory_list, parse_category, parse_layer, MemoryCategory,
     MemoryEntry, MemoryLayer, MemorySource,

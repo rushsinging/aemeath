@@ -34,7 +34,7 @@ pub fn highlight_line(
     syntax_ref: Option<&syntect::parsing::SyntaxReference>,
 ) -> Option<Vec<SpanPart>> {
     let syntax = syntax_ref?;
-    let mut highlighter = HighlightLines::new(syntax, &*THEME);
+    let mut highlighter = HighlightLines::new(syntax, &THEME);
     let ranges = highlighter.highlight_line(line, &SYNTAX_SET).ok()?;
 
     Some(

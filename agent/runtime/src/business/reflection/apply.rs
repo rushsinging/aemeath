@@ -9,7 +9,7 @@ pub fn apply_suggestions(
     for suggestion in suggestions {
         let mut entry = MemoryEntry::new(
             MemoryLayer::Project,
-            suggestion.category.clone(),
+            suggestion.category,
             suggestion.content.clone(),
             MemorySource::Llm,
         );

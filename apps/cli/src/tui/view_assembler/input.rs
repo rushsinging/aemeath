@@ -19,7 +19,11 @@ impl InputViewAssembler {
         InputAreaViewModel {
             text: model.document.buffer.clone(),
             cursor: model.document.cursor,
-            placeholder: model.document.buffer.is_empty().then(|| "输入消息...".to_string()),
+            placeholder: model
+                .document
+                .buffer
+                .is_empty()
+                .then(|| "输入消息...".to_string()),
             mode_label: None,
             queued_hint: (queued_count > 0).then(|| format!("已排队 {queued_count} 条")),
             disabled_reason: None,

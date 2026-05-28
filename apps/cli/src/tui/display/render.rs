@@ -19,14 +19,13 @@ impl crate::tui::core::App {
                 let mut has_text = false;
 
                 for block in msg.content.as_array().into_iter().flatten() {
-                    if block.get("type").and_then(|value| value.as_str()) == Some("text") {
-                        if block
+                    if block.get("type").and_then(|value| value.as_str()) == Some("text")
+                        && block
                             .get("text")
                             .and_then(|text| text.as_str())
                             .is_some_and(|text| !text.trim().is_empty())
-                        {
-                            has_text = true;
-                        }
+                    {
+                        has_text = true;
                     }
                 }
 
@@ -119,7 +118,7 @@ impl crate::tui::core::App {
                                     name_str,
                                     &result_str,
                                     *is_error,
-                                    &"",
+                                    "",
                                 );
                             } else {
                                 // No paired result — mark as completed but without result content.

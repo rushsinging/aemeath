@@ -1,5 +1,5 @@
-use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::api::provider::StreamHandler;
+use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
 pub struct RuntimeStreamHandler<S: ChatEventSink> {

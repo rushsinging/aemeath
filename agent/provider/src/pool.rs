@@ -117,7 +117,7 @@ impl LlmClientPool {
             })?;
 
         // Resolve ApiDriverKind from config (the `api` field)
-        let api = ApiDriverKind::from_str(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
+        let api = ApiDriverKind::parse(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
 
         // Build OpenAI provider config for OpenAI-compatible providers
         let openai_config = if !matches!(api, ApiDriverKind::Anthropic) {
@@ -163,17 +163,17 @@ impl LlmClientPool {
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
-        Ok(LlmClient::from_config(
+        Ok(LlmClient::from_config(crate::client::LlmConfigOptions {
             api,
             api_key,
             base_url,
-            model_entry.id,
+            model: model_entry.id,
             max_tokens,
             thinking_max_tokens,
             reasoning,
-            None,
+            reasoning_config: None,
             openai_config,
-        ))
+        }))
     }
 
     /// Get the default client.

@@ -2,7 +2,7 @@
 
 use crate::api::core::memory::MemoryStore;
 use crate::api::reflection::ReflectionEngine;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
 ///
@@ -12,7 +12,7 @@ pub async fn run_reflection(
     config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
     messages: &[crate::api::core::message::Message],
-    cwd: &PathBuf,
+    cwd: &Path,
     client: &crate::api::provider::client::LlmClient,
     system_prompt_text: &str,
 ) -> Option<String> {
@@ -32,7 +32,7 @@ async fn run_reflection_with_base_dir(
     config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
     messages: &[crate::api::core::message::Message],
-    cwd: &PathBuf,
+    cwd: &Path,
     client: &crate::api::provider::client::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
@@ -40,7 +40,7 @@ async fn run_reflection_with_base_dir(
     if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
         return None;
     }
-    if turn_count % config.reflection.interval_turns != 0 {
+    if !turn_count.is_multiple_of(config.reflection.interval_turns) {
         return None;
     }
 
@@ -173,13 +173,13 @@ async fn lightweight_reflection_text_with_base_dir(
     config: &crate::api::core::config::MemoryConfig,
     turn_count: usize,
     messages: &[crate::api::core::message::Message],
-    cwd: &PathBuf,
+    cwd: &Path,
     base_dir: PathBuf,
 ) -> Option<String> {
     if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
         return None;
     }
-    if turn_count % config.reflection.interval_turns != 0 {
+    if !turn_count.is_multiple_of(config.reflection.interval_turns) {
         return None;
     }
 

@@ -63,8 +63,8 @@ pub fn build_task_window(
 
     let ordered: Vec<&TaskSummary> = completed
         .into_iter()
-        .chain(in_progress.into_iter())
-        .chain(pending.into_iter())
+        .chain(in_progress)
+        .chain(pending)
         .collect();
 
     let shown_count = ordered.len().min(max_lines);

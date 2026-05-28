@@ -166,7 +166,10 @@ mod tests {
             global_cost_history_path(),
             PathBuf::from(".agents/cost_history.json")
         );
-        assert_eq!(global_settings_path(), PathBuf::from(".agents/settings.json"));
+        assert_eq!(
+            global_settings_path(),
+            PathBuf::from(".agents/settings.json")
+        );
     }
 
     #[test]

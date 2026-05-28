@@ -4,7 +4,7 @@ use crate::api::agent::Agent;
 use crate::api::core::message::Message;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{
-    AgentProgressEvent, AgentProgressKind, AgentRunner, ToolContext, ToolRegistry,
+    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner, ToolContext, ToolRegistry,
 };
 use crate::api::provider::types::SystemBlock;
 use async_trait::async_trait;
@@ -12,17 +12,13 @@ use std::sync::{Arc, Mutex};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
-    async fn run_agent(
-        &self,
-        prompt: &str,
-        system: &str,
-        _tool_schemas: &[serde_json::Value],
-        _registry: &ToolRegistry,
-        ctx: &ToolContext,
-        max_turns_override: Option<u32>,
-        model_spec: Option<&str>,
-        progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
-    ) -> String {
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
+        let prompt = request.prompt;
+        let system = request.system;
+        let ctx = request.ctx;
+        let max_turns_override = request.max_turns;
+        let model_spec = request.model_spec;
+        let progress_tx = request.progress_tx;
         // Resolve role and model
         let role = self.resolve_role(model_spec);
         let resolved_spec = self.resolve_model_spec(model_spec);
@@ -54,8 +50,7 @@ impl AgentRunner for CliAgentRunner {
                 };
                 self.models_config.find_model(&query)
             })
-            .map(|(_, _, entry)| entry.reasoning)
-            .flatten();
+            .and_then(|(_, _, entry)| entry.reasoning);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
         log::info!(

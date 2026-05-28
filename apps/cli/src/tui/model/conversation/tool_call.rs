@@ -83,7 +83,10 @@ mod tests {
         let changes = call.bind(ToolCallId::new("tool-1"), "Read file".to_string());
         assert_eq!(call.id.as_ref().map(AsRef::as_ref), Some("tool-1"));
         assert_eq!(call.status, ToolCallStatus::Running);
-        assert_eq!(changes, vec![ToolCallChange::Bound, ToolCallChange::Running]);
+        assert_eq!(
+            changes,
+            vec![ToolCallChange::Bound, ToolCallChange::Running]
+        );
     }
 
     #[test]

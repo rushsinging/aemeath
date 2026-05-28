@@ -1,56 +1,39 @@
 use super::UpdateResult;
-use crate::tui::core::msg::Cmd;
 use crate::tui::core::App;
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub(super) fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Option<UpdateResult> {
-    if app.layout.active_dialog.is_none() {
+    if !app.layout.has_active_dialog() {
         return None;
     }
 
     match key.code {
         KeyCode::Up => {
-            if let Some(ref mut d) = app.layout.active_dialog {
+            if let Some(d) = app.layout.active_dialog_mut() {
                 d.select_prev();
             }
         }
         KeyCode::Down => {
-            if let Some(ref mut d) = app.layout.active_dialog {
+            if let Some(d) = app.layout.active_dialog_mut() {
                 d.select_next();
             }
         }
         KeyCode::Enter => {
-            let selected = app
-                .layout
-                .active_dialog
-                .as_ref()
-                .and_then(|d| d.get_selected());
-            if let Some(idx) = selected {
-                if idx < app.layout.dialog_model_keys.len() {
-                    let model_key = app.layout.dialog_model_keys[idx].clone();
-                    app.input
-                        .input_queue
-                        .push_back(format!("/model {}", model_key));
-                    app.layout.active_dialog = None;
-                    app.layout.dialog_model_keys.clear();
-                    return Some(UpdateResult {
-                        cmd: Cmd::None,
-                        pending_slash: Some(format!("/model {}", model_key)),
-                    });
-                }
+            if let Some(model_key) = app.layout.selected_model_key() {
+                let command = format!("/model {}", model_key);
+                app.input.push_queue(command.clone());
+                app.layout.clear_dialog();
+                return Some(UpdateResult {
+                    effects: Vec::new(),
+                    spawn_effect: None,
+                    pending_slash: Some(command),
+                });
             }
-            app.layout.active_dialog = None;
-            app.layout.dialog_model_keys.clear();
+            app.layout.clear_dialog();
         }
-        KeyCode::Esc => {
-            app.layout.active_dialog = None;
-            app.layout.dialog_model_keys.clear();
-        }
+        KeyCode::Esc => app.layout.clear_dialog(),
         _ => return None,
     }
 
-    Some(UpdateResult {
-        cmd: Cmd::None,
-        pending_slash: None,
-    })
+    Some(UpdateResult::none())
 }

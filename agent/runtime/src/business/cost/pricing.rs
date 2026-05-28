@@ -186,18 +186,14 @@ pub fn format_tokens<N: Into<u64>>(n: N) -> String {
     let n = n.into();
     if n >= 1_000_000 {
         let m = n as f64 / 1_000_000.0;
-        if m >= 10.0 {
-            format!("{:.0}m", m)
-        } else if m.fract() < 0.05 {
+        if m >= 10.0 || m.fract() < 0.05 {
             format!("{:.0}m", m)
         } else {
             format!("{:.1}m", m)
         }
     } else if n >= 1000 {
         let k = n as f64 / 1000.0;
-        if k >= 10.0 {
-            format!("{:.0}k", k)
-        } else if k.fract() < 0.05 {
+        if k >= 10.0 || k.fract() < 0.05 {
             format!("{:.0}k", k)
         } else {
             format!("{:.1}k", k)

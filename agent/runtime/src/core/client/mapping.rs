@@ -1,7 +1,6 @@
 use sdk::{
     ClipboardImageView, MemoryConfigView, ReflectionConfigView, ReflectionMemorySuggestionView,
-    ReflectionOutputView, SessionSummary, SkillView, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ReflectionOutputView, SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
 use crate::api::core::task::TaskStatus;
@@ -66,7 +65,9 @@ pub(crate) fn reflection_output_to_sdk(
     }
 }
 
-pub(crate) fn session_summary_from_runtime(session: crate::business::session::Session) -> SessionSummary {
+pub(crate) fn session_summary_from_runtime(
+    session: crate::business::session::Session,
+) -> SessionSummary {
     let preview = session
         .messages
         .iter()

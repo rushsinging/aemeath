@@ -67,7 +67,7 @@ pub fn col_to_char(s: &str, c: ColIdx) -> CharIdx {
     use unicode_width::UnicodeWidthChar;
     let mut width = 0usize;
     for (ch_idx, ch) in s.chars().enumerate() {
-        let ch_w = ch.width().unwrap_or(1) as usize;
+        let ch_w = ch.width().unwrap_or(1);
         if width + ch_w > c.0 {
             return CharIdx::new(ch_idx);
         }
@@ -84,7 +84,7 @@ pub fn char_to_col(s: &str, c: CharIdx) -> ColIdx {
         if ch_idx >= c.0 {
             break;
         }
-        col += ch.width().unwrap_or(1) as usize;
+        col += ch.width().unwrap_or(1);
     }
     ColIdx::new(col)
 }

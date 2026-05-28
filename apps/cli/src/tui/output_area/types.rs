@@ -56,7 +56,7 @@ pub enum LineStyle {
 }
 
 impl LineStyle {
-    pub fn to_style(&self) -> ratatui::style::Style {
+    pub fn to_style(self) -> ratatui::style::Style {
         use ratatui::style::{Modifier, Style};
 
         match self {

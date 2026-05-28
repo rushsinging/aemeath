@@ -3,7 +3,7 @@
 //! Guidance files are loaded from `~/.agents/guidance/` directory:
 //!   - `_default.md`          — injected for ALL models
 //!   - `{prefix}.md`          — matched by model-id prefix (longest match wins)
-//!                               e.g. `glm.md` matches `glm-5.1`, `deepseek.md` matches `deepseek-chat`
+//!     e.g. `glm.md` matches `glm-5.1`, `deepseek.md` matches `deepseek-chat`
 //!   - `_reasoning.md`        — appended when reasoning/thinking is enabled
 //!
 //! Prefix matching is case-insensitive: `glm.md` matches `GLM-5.1`.

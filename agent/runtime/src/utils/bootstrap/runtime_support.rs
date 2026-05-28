@@ -206,10 +206,7 @@ mod tests {
     fn test_resolve_role_logs_dir_uses_default_logs_dir_without_config() {
         let result = resolve_role_logs_dir(None);
 
-        assert_eq!(
-            result,
-            config_paths::global_logs_dir().join("logs")
-        );
+        assert_eq!(result, config_paths::global_logs_dir().join("logs"));
     }
 
     #[test]

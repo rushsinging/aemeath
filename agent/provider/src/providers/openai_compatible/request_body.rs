@@ -145,7 +145,7 @@ impl LlmProvider for OpenAICompatibleProvider {
 
             if attempt > 0 {
                 let delay =
-                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt as u32)).min(30_000));
+                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt)).min(30_000));
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {

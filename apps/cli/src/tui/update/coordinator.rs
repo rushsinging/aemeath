@@ -5,6 +5,10 @@ pub fn effects_for_input_change(change: &InputChange) -> Vec<Effect> {
     match change {
         InputChange::TextChanged { .. }
         | InputChange::CursorMoved { .. }
+        | InputChange::CompletionChanged { .. }
+        | InputChange::HistorySelected { .. }
+        | InputChange::AttachmentChanged { .. }
+        | InputChange::ModeChanged { .. }
         | InputChange::Submitted { .. }
         | InputChange::Cleared => vec![Effect::RequestRender],
     }

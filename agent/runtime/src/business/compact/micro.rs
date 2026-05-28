@@ -6,7 +6,7 @@ use share::message::{ContentBlock, Message};
 
 /// 微压缩：清除旧工具结果以节省 token。
 /// 仅保留最近 `keep_recent` 条消息的工具结果内容不变。
-pub fn microcompact(messages: &mut Vec<Message>, keep_recent: usize) {
+pub fn microcompact(messages: &mut [Message], keep_recent: usize) {
     if messages.len() <= keep_recent {
         return;
     }

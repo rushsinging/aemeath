@@ -1,8 +1,8 @@
 mod args;
 mod chat;
+mod panic_hook;
 mod subcommand;
 mod tui;
-mod panic_hook;
 
 use args::{Args, Cli, Commands};
 use clap::Parser;
@@ -15,9 +15,9 @@ async fn main() {
 
     match cli.command {
         Some(Commands::Models { json }) => {
-            let client = chat::agent_client_from_args(
-                sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
-            )
+            let client = chat::agent_client_from_args(sdk::ChatBootstrapArgs::from(Args::from(
+                cli.run_args,
+            )))
             .await
             .unwrap_or_else(|e| {
                 eprintln!("Error: {e}");
@@ -30,9 +30,9 @@ async fn main() {
             json,
             limit,
         }) => {
-            let client = chat::agent_client_from_args(
-                sdk::ChatBootstrapArgs::from(Args::from(cli.run_args)),
-            )
+            let client = chat::agent_client_from_args(sdk::ChatBootstrapArgs::from(Args::from(
+                cli.run_args,
+            )))
             .await
             .unwrap_or_else(|e| {
                 eprintln!("Error: {e}");

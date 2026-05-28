@@ -86,12 +86,14 @@ impl JsonLogger {
         write_role_entry(
             &mut self.input,
             &path,
-            "input",
-            turn,
-            role,
-            model,
-            data,
-            &self.session_id,
+            RoleEntryParams {
+                event_type: "input",
+                turn,
+                role,
+                model,
+                data,
+                session_id: &self.session_id,
+            },
             self.max_bytes,
             self.max_backups,
         )
@@ -109,12 +111,14 @@ impl JsonLogger {
         write_role_entry(
             &mut self.output,
             &path,
-            "output",
-            turn,
-            role,
-            model,
-            data,
-            &self.session_id,
+            RoleEntryParams {
+                event_type: "output",
+                turn,
+                role,
+                model,
+                data,
+                session_id: &self.session_id,
+            },
             self.max_bytes,
             self.max_backups,
         )
@@ -132,12 +136,14 @@ impl JsonLogger {
         write_role_entry(
             &mut self.tool,
             &path,
-            "tool_call",
-            turn,
-            role,
-            model,
-            data,
-            &self.session_id,
+            RoleEntryParams {
+                event_type: "tool_call",
+                turn,
+                role,
+                model,
+                data,
+                session_id: &self.session_id,
+            },
             self.max_bytes,
             self.max_backups,
         )
@@ -155,28 +161,34 @@ impl JsonLogger {
         write_role_entry(
             &mut self.tool,
             &path,
-            "tool_result",
-            turn,
-            role,
-            model,
-            data,
-            &self.session_id,
+            RoleEntryParams {
+                event_type: "tool_result",
+                turn,
+                role,
+                model,
+                data,
+                session_id: &self.session_id,
+            },
             self.max_bytes,
             self.max_backups,
         )
     }
 }
 
+struct RoleEntryParams<'a> {
+    event_type: &'a str,
+    turn: usize,
+    role: &'a str,
+    model: &'a str,
+    data: serde_json::Value,
+    session_id: &'a str,
+}
+
 /// 内部统一写入函数
 fn write_role_entry(
     writer: &mut BufWriter<File>,
     path: &Path,
-    event_type: &str,
-    turn: usize,
-    role: &str,
-    model: &str,
-    data: serde_json::Value,
-    session_id: &str,
+    params: RoleEntryParams<'_>,
     max_bytes: u64,
     max_backups: usize,
 ) -> io::Result<()> {
@@ -184,12 +196,12 @@ fn write_role_entry(
 
     let entry = json!({
         "ts": timestamp_rfc3339(),
-        "session": session_id,
-        "turn": turn,
-        "role": role,
-        "model": model,
-        "type": event_type,
-        "data": data,
+        "session": params.session_id,
+        "turn": params.turn,
+        "role": params.role,
+        "model": params.model,
+        "type": params.event_type,
+        "data": params.data,
     });
     writeln!(
         writer,

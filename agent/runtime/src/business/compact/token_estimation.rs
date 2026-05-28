@@ -35,7 +35,7 @@ impl TokenEstimation {
     /// Set bytes per token ratio based on model
     /// Some models use different ratios (e.g., 3.5 for efficient models)
     pub fn with_model_ratio(mut self, bytes_per_token: f64) -> Self {
-        self.bytes_per_token = bytes_per_token.max(2.0).min(6.0);
+        self.bytes_per_token = bytes_per_token.clamp(2.0, 6.0);
         self
     }
 
@@ -183,7 +183,7 @@ pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
     // CJK: ~2 tokens per character; Other: ~N bytes per token (varies by model)
     // Apply conservative safety margin
     let cjk_tokens = cjk_chars * 2;
-    let ratio = bytes_per_token.max(2.0).min(6.0);
+    let ratio = bytes_per_token.clamp(2.0, 6.0);
     let other_tokens = (other_bytes as f64 / ratio).ceil() as usize;
     let safety_margin = 4.0 / 3.0; // 1.33x safety margin
     ((cjk_tokens + other_tokens) as f64 * safety_margin).ceil() as usize
@@ -205,13 +205,13 @@ fn is_cjk_char(ch: char) -> bool {
 
 /// Estimate tokens for JSON content (more dense, ~2 chars per token)
 pub fn estimate_json_tokens(text: &str) -> usize {
-    let base = (text.len() + 1) / 2;
+    let base = text.len().div_ceil(2);
     base * 4 / 3
 }
 
 /// Estimate total tokens in a message list
 pub fn estimate_messages_tokens(messages: &[Message]) -> usize {
-    messages.iter().map(|m| estimate_message_tokens(m)).sum()
+    messages.iter().map(estimate_message_tokens).sum()
 }
 
 /// Estimate tokens for a single message

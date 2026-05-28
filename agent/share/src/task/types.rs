@@ -24,13 +24,21 @@ impl TaskPriority {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
+        s.parse().ok()
+    }
+}
+
+impl std::str::FromStr for TaskPriority {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "low" => Some(TaskPriority::Low),
-            "normal" | "medium" => Some(TaskPriority::Normal),
-            "high" => Some(TaskPriority::High),
-            "urgent" | "critical" => Some(TaskPriority::Urgent),
-            _ => None,
+            "low" => Ok(TaskPriority::Low),
+            "normal" | "medium" => Ok(TaskPriority::Normal),
+            "high" => Ok(TaskPriority::High),
+            "urgent" | "critical" => Ok(TaskPriority::Urgent),
+            _ => Err(()),
         }
     }
 }
@@ -181,21 +189,16 @@ impl Task {
 }
 
 /// Batch status for lifecycle management.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchStatus {
     /// Active batch — currently being worked on
+    #[default]
     Active,
     /// Paused batch — interrupted by user, can be resumed
     Paused,
     /// Archived batch — completed or discarded
     Archived,
-}
-
-impl Default for BatchStatus {
-    fn default() -> Self {
-        Self::Active
-    }
 }
 
 /// Represents a batch (group of tasks from one turn).

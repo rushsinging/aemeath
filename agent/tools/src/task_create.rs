@@ -79,7 +79,7 @@ impl Tool for TaskCreateTool {
         let priority = input
             .get("priority")
             .and_then(|v| v.as_str())
-            .and_then(|p| TaskPriority::from_str(p))
+            .and_then(TaskPriority::parse)
             .unwrap_or_default();
 
         // Create task with priority

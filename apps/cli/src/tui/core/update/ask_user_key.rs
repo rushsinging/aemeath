@@ -1,5 +1,4 @@
 use super::UpdateResult;
-use crate::tui::core::msg::Cmd;
 use crate::tui::core::App;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -55,10 +54,7 @@ impl App {
                     let idx = state.cursor;
                     // Prevent toggling built-in options
                     if idx >= state.llm_option_count {
-                        return Some(UpdateResult {
-                            cmd: Cmd::None,
-                            pending_slash: None,
-                        });
+                        return Some(UpdateResult::none());
                     }
                     self.input.ask_user_state.as_mut().unwrap().selected[idx] =
                         !state.selected[idx];
@@ -95,10 +91,7 @@ impl App {
                             ..state
                         });
                         self.input_area.clear();
-                        return Some(UpdateResult {
-                            cmd: Cmd::None,
-                            pending_slash: None,
-                        });
+                        return Some(UpdateResult::none());
                     } else if multi_select {
                         // Multi-select: return selected items, comma-separated
                         let selected: Vec<&str> = state
@@ -145,10 +138,7 @@ impl App {
                     self.update_ask_user_input_key(key);
                 }
             }
-            return Some(UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            });
+            return Some(UpdateResult::none());
         }
 
         // AskUserQuestion 自由输入模式（无选项列表，等待 reply_tx）
@@ -165,10 +155,7 @@ impl App {
                             self.output_area.set_spinner_phase("Generating...");
                         }
                     }
-                    return Some(UpdateResult {
-                        cmd: Cmd::None,
-                        pending_slash: None,
-                    });
+                    return Some(UpdateResult::none());
                 }
                 KeyCode::Esc => {
                     if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
@@ -177,18 +164,12 @@ impl App {
                         let _ = reply_tx.send(String::new());
                         self.output_area.set_spinner_phase("Generating...");
                     }
-                    return Some(UpdateResult {
-                        cmd: Cmd::None,
-                        pending_slash: None,
-                    });
+                    return Some(UpdateResult::none());
                 }
                 // 其他按键传递给 input_area
                 _ => {
                     self.update_ask_user_input_key(key);
-                    return Some(UpdateResult {
-                        cmd: Cmd::None,
-                        pending_slash: None,
-                    });
+                    return Some(UpdateResult::none());
                 }
             }
         }
@@ -226,10 +207,7 @@ impl App {
                 self.update_ask_user_input_key(key);
             }
         }
-        Some(UpdateResult {
-            cmd: Cmd::None,
-            pending_slash: None,
-        })
+        Some(UpdateResult::none())
     }
 
     pub(super) fn update_ask_user_input_key(&mut self, key: crossterm::event::KeyEvent) {

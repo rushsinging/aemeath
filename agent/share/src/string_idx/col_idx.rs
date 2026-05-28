@@ -22,7 +22,7 @@ impl ColIdx {
     }
 
     /// 前进 `n` 列。
-    pub fn add(self, n: usize) -> Self {
+    pub fn advance(self, n: usize) -> Self {
         ColIdx(self.0 + n)
     }
 
@@ -34,6 +34,14 @@ impl ColIdx {
     /// 取出裸 `usize`。
     pub fn as_usize(self) -> usize {
         self.0
+    }
+}
+
+impl ops::Add<usize> for ColIdx {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        ColIdx(self.0 + rhs)
     }
 }
 
@@ -76,7 +84,7 @@ mod tests {
     #[test]
     fn test_col_idx_add() {
         let c = ColIdx::new(10);
-        assert_eq!(c.add(5).as_usize(), 15);
+        assert_eq!(c.advance(5).as_usize(), 15);
     }
 
     #[test]

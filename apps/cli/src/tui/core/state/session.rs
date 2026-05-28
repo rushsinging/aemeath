@@ -12,3 +12,21 @@ pub(crate) struct SessionState {
     pub current_model_display: String,
     pub memory_config: sdk::MemoryConfigView,
 }
+
+impl SessionState {
+    pub(crate) fn cache_sessions(&mut self, sessions: Vec<(String, String)>) {
+        self.cached_sessions = sessions;
+    }
+
+    pub(crate) fn rename_session(&mut self, session_id: &str) {
+        self.session_id = session_id.to_string();
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub(crate) fn cached_sessions(&self) -> &[(String, String)] {
+        &self.cached_sessions
+    }
+}

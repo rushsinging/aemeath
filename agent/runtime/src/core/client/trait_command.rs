@@ -3,9 +3,9 @@ use std::sync::Arc;
 use sdk::{ClipboardImageView, ModelSummary, ReflectionOutputView, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::core::port::{HookNotificationPort, ProviderInfoPort};
 use crate::utils::adapter::{HookRunnerAdapter, LlmClientAdapter};
+use crate::utils::bootstrap::config_manager::ConfigManager;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -101,7 +101,7 @@ pub(super) async fn switch_model_impl(
     use crate::api::provider::providers::openai_compatible::ReasoningConfig;
     use crate::api::provider::ApiDriverKind;
 
-    let api_type = ApiDriverKind::from_str(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
+    let api_type = ApiDriverKind::parse(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
 
     let openai_config = if matches!(api_type, ApiDriverKind::Anthropic) {
         None
@@ -116,15 +116,17 @@ pub(super) async fn switch_model_impl(
     let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
 
     let new_client = crate::api::provider::client::LlmClient::from_config(
-        api_type,
-        params.api_key,
-        Some(params.base_url),
-        params.model_id.clone(),
-        params.max_tokens,
-        0,
-        reasoning,
-        reasoning_config,
-        openai_config,
+        crate::api::provider::client::LlmConfigOptions {
+            api: api_type,
+            api_key: params.api_key,
+            base_url: Some(params.base_url),
+            model: params.model_id.clone(),
+            max_tokens: params.max_tokens,
+            thinking_max_tokens: 0,
+            reasoning,
+            reasoning_config,
+            openai_config,
+        },
     );
 
     let display_name = if params.model_name.is_empty() {
@@ -158,12 +160,12 @@ pub(super) async fn compact_messages_impl(
     system_prompt: &str,
     context_size: usize,
 ) -> Result<(Vec<sdk::ChatMessage>, bool)> {
-    let mut runtime_messages: Vec<crate::api::core::message::Message> = messages
+    let runtime_messages: Vec<crate::api::core::message::Message> = messages
         .into_iter()
         .map(super::mapping::message_from_sdk)
         .collect();
     let (compacted, was_compacted) =
-        crate::business::compact::compact_messages(&mut runtime_messages, system_prompt, context_size);
+        crate::business::compact::compact_messages(&runtime_messages, system_prompt, context_size);
     let sdk_messages: Vec<sdk::ChatMessage> = compacted
         .into_iter()
         .map(super::mapping::message_to_sdk)

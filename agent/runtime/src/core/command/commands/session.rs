@@ -129,7 +129,7 @@ fn session_execute(
 ) -> Pin<Box<dyn Future<Output = CommandResult> + Send>> {
     let session_id = ctx.session_id.clone();
     Box::pin(async move {
-        let parts: Vec<&str> = args.trim().split_whitespace().collect();
+        let parts: Vec<&str> = args.split_whitespace().collect();
         if parts.is_empty() {
             return CommandResult::Success(format!("Current session: {}", session_id));
         }
@@ -209,16 +209,20 @@ fn session_execute(
                     return CommandResult::Error("Usage: /session import <file>".to_string());
                 }
                 match tokio::fs::read_to_string(parts[1]).await {
-                    Ok(json) => match serde_json::from_str::<crate::business::session::Session>(&json) {
-                        Ok(s) => match crate::business::session::save_session(&s).await {
-                            Ok(_) => CommandResult::Success(format!(
-                                "Imported session {} from {}",
-                                s.id, parts[1]
-                            )),
-                            Err(e) => CommandResult::Error(format!("Failed to import: {}", e)),
-                        },
-                        Err(e) => CommandResult::Error(format!("Failed to parse session: {}", e)),
-                    },
+                    Ok(json) => {
+                        match serde_json::from_str::<crate::business::session::Session>(&json) {
+                            Ok(s) => match crate::business::session::save_session(&s).await {
+                                Ok(_) => CommandResult::Success(format!(
+                                    "Imported session {} from {}",
+                                    s.id, parts[1]
+                                )),
+                                Err(e) => CommandResult::Error(format!("Failed to import: {}", e)),
+                            },
+                            Err(e) => {
+                                CommandResult::Error(format!("Failed to parse session: {}", e))
+                            }
+                        }
+                    }
                     Err(e) => CommandResult::Error(format!("Failed to read file: {}", e)),
                 }
             }

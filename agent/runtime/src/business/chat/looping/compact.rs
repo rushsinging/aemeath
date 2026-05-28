@@ -6,6 +6,7 @@ use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 
 /// Run auto-compaction if the context is approaching the limit.
 /// Returns true if the messages were modified.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn auto_compact<S>(
     sink: &S,
     hook_ui: &HookUi<S>,

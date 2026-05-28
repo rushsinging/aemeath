@@ -28,7 +28,7 @@ pub fn generate_model_suggestions(partial: &str, models: &[(String, String)]) ->
 
 /// 为 /model 命令生成子命令建议
 pub fn generate_model_subcommand_suggestions(partial: &str) -> Vec<Suggestion> {
-    let subcommands = vec![("list", "List available models from config")];
+    let subcommands = [("list", "List available models from config")];
 
     let partial_lower = partial.to_lowercase();
 
@@ -37,7 +37,7 @@ pub fn generate_model_subcommand_suggestions(partial: &str) -> Vec<Suggestion> {
         .filter(|(name, _desc)| name.to_lowercase().starts_with(&partial_lower))
         .map(|(name, desc)| Suggestion {
             _id: format!("model-subcmd-{}", name),
-            display_text: format!("list"),
+            display_text: "list".to_string(),
             _description: Some(desc.to_string()),
             suggestion_type: SuggestionType::Command,
         })

@@ -93,7 +93,7 @@ pub fn render_table_block(
                 continue;
             };
             data_row_idx += 1;
-            let is_header = separator_idx.map_or(true, |si| i < si);
+            let is_header = separator_idx.is_none_or(|si| i < si);
             let style = if is_header { header_style } else { base_style };
             let row = wrapped_row_spans(cells, &col_widths, style, border_style);
             result.extend(row);

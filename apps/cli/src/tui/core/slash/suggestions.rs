@@ -46,7 +46,7 @@ impl super::super::App {
             models,
             skills,
             commands,
-            sessions: self.session.cached_sessions.clone(),
+            sessions: self.session.cached_sessions().to_vec(),
         };
 
         let suggestions = generate_suggestions(&ctx);

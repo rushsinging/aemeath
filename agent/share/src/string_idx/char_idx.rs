@@ -22,7 +22,7 @@ impl CharIdx {
     }
 
     /// 前进 `n` 个字符（不校验边界）。
-    pub fn add(self, n: usize) -> Self {
+    pub fn advance(self, n: usize) -> Self {
         CharIdx(self.0 + n)
     }
 
@@ -45,6 +45,14 @@ impl CharIdx {
     /// 取出裸 `usize`。
     pub fn as_usize(self) -> usize {
         self.0
+    }
+}
+
+impl ops::Add<usize> for CharIdx {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        CharIdx(self.0 + rhs)
     }
 }
 
@@ -87,7 +95,7 @@ mod tests {
     #[test]
     fn test_char_idx_add() {
         let c = CharIdx::new(3);
-        assert_eq!(c.add(5).as_usize(), 8);
+        assert_eq!(c.advance(5).as_usize(), 8);
     }
 
     #[test]

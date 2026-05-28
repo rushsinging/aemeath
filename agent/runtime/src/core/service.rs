@@ -45,7 +45,7 @@ mod tests {
     use super::*;
     use crate::api::core::config::MemoryConfig;
     use crate::api::core::task::TaskStore;
-    use crate::api::core::tool::{AgentProgressEvent, AgentRunner, ToolContext, ToolRegistry};
+    use crate::api::core::tool::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
     use crate::api::hook::hook::HookRunner;
     use crate::api::provider::client::LlmClient;
     use crate::business::chat::request::ChatLaunchOptions;
@@ -65,17 +65,7 @@ mod tests {
 
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _tool_schemas: &[serde_json::Value],
-            _registry: &ToolRegistry,
-            _ctx: &ToolContext,
-            _max_turns: Option<u32>,
-            _model_spec: Option<&str>,
-            _progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
-        ) -> String {
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
             String::new()
         }
 

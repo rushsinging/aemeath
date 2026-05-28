@@ -59,7 +59,8 @@ impl ConfigManager {
     pub fn new(project_dir: Option<&Path>) -> Self {
         let global_path = paths::global_config_path();
         let project_path = project_dir.map(share_paths::project_config_path);
-        let claude_project_settings_path = project_dir.map(share_paths::project_claude_settings_path);
+        let claude_project_settings_path =
+            project_dir.map(share_paths::project_claude_settings_path);
 
         Self {
             config: RwLock::new(Config::default()),
@@ -81,7 +82,9 @@ impl ConfigManager {
             match tokio::fs::read_to_string(&self.global_path).await {
                 Ok(content) => match serde_json::from_str::<Config>(&content) {
                     Ok(global_config) => config = Self::merge_config(config, global_config),
-                    Err(err) => log::warn!("解析全局配置失败 {}: {err}", self.global_path.display()),
+                    Err(err) => {
+                        log::warn!("解析全局配置失败 {}: {err}", self.global_path.display())
+                    }
                 },
                 Err(err) => log::warn!("读取全局配置失败 {}: {err}", self.global_path.display()),
             }
@@ -91,16 +94,17 @@ impl ConfigManager {
         if let Some(claude_path) = &self.claude_project_settings_path {
             if claude_path.exists() {
                 match tokio::fs::read_to_string(claude_path).await {
-                    Ok(content) => match serde_json::from_str::<hooks::ClaudeSettingsConfig>(&content)
-                    {
-                        Ok(claude_config) => {
-                            config = Self::merge_config(config, claude_config.into_config())
+                    Ok(content) => {
+                        match serde_json::from_str::<hooks::ClaudeSettingsConfig>(&content) {
+                            Ok(claude_config) => {
+                                config = Self::merge_config(config, claude_config.into_config())
+                            }
+                            Err(err) => log::warn!(
+                                "解析 Claude Code 项目设置失败 {}: {err}",
+                                claude_path.display()
+                            ),
                         }
-                        Err(err) => log::warn!(
-                            "解析 Claude Code 项目设置失败 {}: {err}",
-                            claude_path.display()
-                        ),
-                    },
+                    }
                     Err(err) => log::warn!(
                         "读取 Claude Code 项目设置失败 {}: {err}",
                         claude_path.display()
@@ -115,7 +119,9 @@ impl ConfigManager {
                 match tokio::fs::read_to_string(project_path).await {
                     Ok(content) => match serde_json::from_str::<Config>(&content) {
                         Ok(project_config) => config = Self::merge_config(config, project_config),
-                        Err(err) => log::warn!("解析项目配置失败 {}: {err}", project_path.display()),
+                        Err(err) => {
+                            log::warn!("解析项目配置失败 {}: {err}", project_path.display())
+                        }
                     },
                     Err(err) => log::warn!("读取项目配置失败 {}: {err}", project_path.display()),
                 }
@@ -235,7 +241,9 @@ impl ConfigManager {
         if let Ok(mode) = std::env::var("AEMEATH_PERMISSION_MODE") {
             match mode.to_lowercase().as_str() {
                 "ask" => config.permissions.mode = PermissionModeConfig::Ask,
-                "auto_read" | "autoread" => config.permissions.mode = PermissionModeConfig::AutoRead,
+                "auto_read" | "autoread" => {
+                    config.permissions.mode = PermissionModeConfig::AutoRead
+                }
                 "allow_all" | "auto_all" | "autoall" => {
                     config.permissions.mode = PermissionModeConfig::AllowAll
                 }
@@ -354,7 +362,8 @@ impl ConfigManager {
                     base.tools.disabled
                 },
                 settings: Self::merge_maps(base.tools.settings, overlay.tools.settings),
-                max_concurrency: if overlay.tools.max_concurrency != default_tools_config().max_concurrency
+                max_concurrency: if overlay.tools.max_concurrency
+                    != default_tools_config().max_concurrency
                 {
                     overlay.tools.max_concurrency
                 } else {
@@ -417,7 +426,8 @@ impl ConfigManager {
                     } else {
                         base.ui.task_lifecycle.interrupt_default_action
                     },
-                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns != 0
+                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns
+                        != 0
                     {
                         overlay.ui.task_lifecycle.stale_remind_after_turns
                     } else {
@@ -486,7 +496,8 @@ impl ConfigManager {
                 } else {
                     base.logging.max_bytes
                 },
-                max_backups: if overlay.logging.max_backups != default_logging_config().max_backups {
+                max_backups: if overlay.logging.max_backups != default_logging_config().max_backups
+                {
                     overlay.logging.max_backups
                 } else {
                     base.logging.max_backups

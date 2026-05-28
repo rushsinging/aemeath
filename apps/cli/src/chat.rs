@@ -47,8 +47,11 @@ pub(crate) async fn run_chat(args: Args) {
     app.set_skills(launch.skills_map);
 
     // 在 run() 之前设置启动上下文（替代 18 参数注入）
-    app.status_bar
-        .set_permission_mode(if launch.allow_all { "AllowAll" } else { "AskMe" });
+    app.status_bar.set_permission_mode(if launch.allow_all {
+        "AllowAll"
+    } else {
+        "AskMe"
+    });
     app.chat.context_size = launch.context_size;
     app.status_bar.set_context_size(launch.context_size as u64);
     app.status_bar.set_thinking(launch.client.is_reasoning());

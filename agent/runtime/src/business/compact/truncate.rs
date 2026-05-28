@@ -81,9 +81,7 @@ pub fn apply_tool_result_budget(message: &mut Message) {
 }
 
 /// 对 (id, output, is_error, images) 元组列表中的工具结果进行截断。
-pub fn truncate_tool_results(
-    results: &mut Vec<(String, String, bool, Vec<share::tool::ImageData>)>,
-) {
+pub fn truncate_tool_results(results: &mut [(String, String, bool, Vec<share::tool::ImageData>)]) {
     for (_id, output, _is_error, _images) in results.iter_mut() {
         if output.len() > MAX_TOOL_RESULT_CHARS {
             *output = truncate_tool_result(output);

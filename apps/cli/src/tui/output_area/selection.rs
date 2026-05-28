@@ -47,8 +47,8 @@ impl super::OutputArea {
                     line.bslice_from(byte_start),
                     rel_col,
                 );
-                self.selection_start = Some((logic_idx, char_start.add(char_col.as_usize())));
-                self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
+                self.selection_start = Some((logic_idx, char_start.advance(char_col.as_usize())));
+                self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
             }
         }
         self.is_selecting = true;
@@ -70,7 +70,7 @@ impl super::OutputArea {
                     line.bslice_from(byte_start),
                     rel_col,
                 );
-                self.selection_end = Some((logic_idx, char_start.add(char_col.as_usize())));
+                self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
             }
         } else {
             // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
@@ -104,7 +104,7 @@ impl super::OutputArea {
             line.bslice_from(byte_start),
             rel_col,
         );
-        let abs_char_idx = char_start.add(char_col.as_usize());
+        let abs_char_idx = char_start.advance(char_col.as_usize());
 
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {

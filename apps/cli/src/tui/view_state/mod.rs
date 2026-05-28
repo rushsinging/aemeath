@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod animation;
 pub mod input;
 pub mod layout;
@@ -6,7 +8,7 @@ pub mod output;
 pub use animation::AnimationViewState;
 pub use input::InputViewState;
 pub use layout::LayoutViewState;
-pub use output::{OutputViewState, SelectedTextRange};
+pub use output::OutputViewState;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AppViewState {

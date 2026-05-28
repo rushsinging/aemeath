@@ -35,9 +35,7 @@ pub async fn parse_stream(
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
 
-    let byte_stream = response
-        .bytes_stream()
-        .map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+    let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
     let mut lines = reader.lines();
 
@@ -81,10 +79,10 @@ pub async fn parse_stream(
         handler.on_raw_line(&line);
 
         // 兼容 "data: {...}" (Anthropic) 和 "data:{...}" (DashScope)
-        let data = if line.starts_with("data: ") {
-            &line[6..]
-        } else if line.starts_with("data:") {
-            &line[5..]
+        let data = if let Some(stripped) = line.strip_prefix("data: ") {
+            stripped
+        } else if let Some(stripped) = line.strip_prefix("data:") {
+            stripped
         } else {
             continue;
         };
@@ -164,7 +162,7 @@ pub async fn parse_stream(
                 usage: delta_usage,
             } => {
                 if let Some(reason) = delta.stop_reason {
-                    stop_reason = StopReason::from_str(&reason);
+                    stop_reason = StopReason::parse(&reason);
                 }
                 if let Some(du) = delta_usage {
                     usage.output_tokens = du.output_tokens;

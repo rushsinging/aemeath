@@ -4,7 +4,6 @@
 //! Prompt domain re-exports from share for interface consistency.
 
 pub use share::skill_ops::*;
-pub use share::skill_ops_loader::*;
 
 #[cfg(test)]
 mod tests {

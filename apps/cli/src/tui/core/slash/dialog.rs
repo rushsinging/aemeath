@@ -38,8 +38,8 @@ impl super::super::App {
             ));
             keys.push(key);
         }
-        self.layout.active_dialog = Some(Dialog::select("Select Model", options));
-        self.layout.dialog_model_keys = keys;
+        self.layout
+            .open_model_dialog(Dialog::select("Select Model", options), keys);
         None
     }
 }

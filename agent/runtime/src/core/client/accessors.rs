@@ -54,13 +54,13 @@ pub struct RuntimeHandle {
         std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
 }
 
-impl RuntimeHandle {
+impl AgentClientImpl {
     pub fn notify_change(&self, set: ChangeSet) {
-        let _ = self.change_tx.send(set);
+        let _ = self.inner.change_tx.send(set);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancel_token.load(Ordering::Acquire)
+        self.inner.cancel_token.load(Ordering::Acquire)
     }
 }
 

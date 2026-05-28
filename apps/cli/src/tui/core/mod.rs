@@ -156,7 +156,7 @@ impl App {
             if std::time::Instant::now().duration_since(last).as_secs_f64()
                 >= update::CTRL_C_TIMEOUT_SECS
             {
-                self.layout.last_ctrlc = None;
+                self.layout.clear_ctrlc();
                 self.status_bar.set_success("Ready");
             }
         }
@@ -201,28 +201,27 @@ impl App {
             }
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.input_area
-                    .draw(chunks[1], chunks[2], buf, self.chat.pending_images.len());
+                    .draw(chunks[1], chunks[2], buf, self.chat.pending_image_count());
             }));
+            let usage = self.chat.usage_snapshot();
             self.status_bar.draw(
                 chunks[3],
                 buf,
-                self.chat.total_input_tokens,
-                self.chat.total_output_tokens,
-                self.chat.last_input_tokens,
-                self.chat.total_api_calls,
+                usage.total_input_tokens,
+                usage.total_output_tokens,
+                usage.last_input_tokens,
+                usage.total_api_calls,
             );
-            if let Some(ref dialog) = self.layout.active_dialog {
+            if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }
         })?;
-        self.layout.output_area_rect = output_rect;
-        self.layout.input_area_rect = input_rect;
-        self.layout.status_bar_rect = status_rect;
+        self.layout
+            .update_areas(output_rect, input_rect, status_rect);
         Ok(())
     }
 }
 
-pub mod msg;
 pub mod slash;
 #[cfg(test)]
 mod slash_tests;

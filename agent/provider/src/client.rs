@@ -98,6 +98,29 @@ impl OpenAIProviderConfig {
     }
 }
 
+pub struct LlmProviderOptions {
+    pub api: ApiDriverKind,
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+    pub max_tokens: u32,
+    pub thinking_max_tokens: u32,
+    pub reasoning: bool,
+    pub reasoning_config: Option<ReasoningConfig>,
+}
+
+pub struct LlmConfigOptions {
+    pub api: ApiDriverKind,
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub model: String,
+    pub max_tokens: u32,
+    pub thinking_max_tokens: u32,
+    pub reasoning: bool,
+    pub reasoning_config: Option<ReasoningConfig>,
+    pub openai_config: Option<OpenAIProviderConfig>,
+}
+
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
 }
@@ -110,49 +133,41 @@ impl LlmClient {
 
 impl LlmClient {
     pub fn new(api_key: String) -> Self {
-        Self::with_provider(
-            ApiDriverKind::Anthropic,
+        Self::with_provider(LlmProviderOptions {
+            api: ApiDriverKind::Anthropic,
             api_key,
-            None,
-            None,
-            200000,
-            0,
-            false,
-            None,
-        )
+            base_url: None,
+            model: None,
+            max_tokens: 200000,
+            thinking_max_tokens: 0,
+            reasoning: false,
+            reasoning_config: None,
+        })
     }
 
-    pub fn with_provider(
-        api: ApiDriverKind,
-        api_key: String,
-        base_url: Option<String>,
-        model: Option<String>,
-        max_tokens: u32,
-        thinking_max_tokens: u32,
-        reasoning: bool,
-        reasoning_config: Option<ReasoningConfig>,
-    ) -> Self {
-        let provider_impl: Arc<dyn LlmProvider> = match api {
+    pub fn with_provider(options: LlmProviderOptions) -> Self {
+        let provider_impl: Arc<dyn LlmProvider> = match options.api {
             ApiDriverKind::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
-                api_key,
-                base_url,
-                model,
-                max_tokens,
-                thinking_max_tokens,
+                options.api_key,
+                options.base_url,
+                options.model,
+                options.max_tokens,
+                options.thinking_max_tokens,
             )),
             ApiDriverKind::OpenAI
             | ApiDriverKind::Zhipu
             | ApiDriverKind::LiteLLM
             | ApiDriverKind::Volcengine => {
-                let config = OpenAIProviderConfig::from_api_driver(api, api.as_str());
+                let config =
+                    OpenAIProviderConfig::from_api_driver(options.api, options.api.as_str());
                 Arc::new(crate::providers::OpenAICompatibleProvider::new(
                     config,
-                    api_key,
-                    base_url,
-                    model,
-                    max_tokens,
-                    reasoning,
-                    reasoning_config,
+                    options.api_key,
+                    options.base_url,
+                    options.model,
+                    options.max_tokens,
+                    options.reasoning,
+                    options.reasoning_config,
                 ))
             }
         };
@@ -185,38 +200,28 @@ impl LlmClient {
         }
     }
 
-    pub fn from_config(
-        api: ApiDriverKind,
-        api_key: String,
-        base_url: Option<String>,
-        model: String,
-        max_tokens: u32,
-        thinking_max_tokens: u32,
-        reasoning: bool,
-        reasoning_config: Option<ReasoningConfig>,
-        openai_config: Option<OpenAIProviderConfig>,
-    ) -> Self {
-        if let Some(config) = openai_config {
+    pub fn from_config(options: LlmConfigOptions) -> Self {
+        if let Some(config) = options.openai_config {
             Self::with_openai_config(
                 config,
-                api_key,
-                base_url,
-                Some(model),
-                max_tokens,
-                reasoning,
-                reasoning_config,
+                options.api_key,
+                options.base_url,
+                Some(options.model),
+                options.max_tokens,
+                options.reasoning,
+                options.reasoning_config,
             )
         } else {
-            Self::with_provider(
-                api,
-                api_key,
-                base_url,
-                Some(model),
-                max_tokens,
-                thinking_max_tokens,
-                reasoning,
-                reasoning_config,
-            )
+            Self::with_provider(LlmProviderOptions {
+                api: options.api,
+                api_key: options.api_key,
+                base_url: options.base_url,
+                model: Some(options.model),
+                max_tokens: options.max_tokens,
+                thinking_max_tokens: options.thinking_max_tokens,
+                reasoning: options.reasoning,
+                reasoning_config: options.reasoning_config,
+            })
         }
     }
 

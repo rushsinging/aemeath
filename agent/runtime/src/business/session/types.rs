@@ -1,9 +1,9 @@
 //! 会话核心类型定义
 
 use crate::business::state;
+use crate::utils::bootstrap::config_paths as paths;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use crate::utils::bootstrap::config_paths as paths;
 use share::message::{Message, Role};
 use share::task::TaskSnapshot;
 use std::path::PathBuf;

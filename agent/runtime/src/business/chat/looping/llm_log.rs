@@ -1,8 +1,8 @@
 use crate::api::agent::ToolCall;
 use crate::api::core::message::Message;
 use crate::api::provider::types::{StreamResponse, SystemBlock};
-use logging::JsonLogger;
 use crate::business::chat::looping::input_log::logged_input_messages;
+use logging::JsonLogger;
 use std::sync::Arc;
 
 pub(super) fn log_llm_input(

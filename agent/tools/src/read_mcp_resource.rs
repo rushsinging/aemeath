@@ -139,7 +139,7 @@ impl Tool for ReadMcpResourceTool {
                             let content_uri = content
                                 .get("uri")
                                 .and_then(|u| u.as_str())
-                                .unwrap_or(&uri)
+                                .unwrap_or(uri)
                                 .to_string();
                             let mime_type = content
                                 .get("mimeType")

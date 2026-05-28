@@ -25,8 +25,8 @@ pub use chat::{
 pub use client::AgentClient;
 pub use commands::builtin_commands;
 pub use commands::{
-    CommandAction, CommandContext, CommandResult, ConfirmAction, ContextEstimate, ModelSwitchParams,
-    ModelSwitchResult,
+    CommandAction, CommandContext, CommandResult, ConfirmAction, ContextEstimate,
+    ModelSwitchParams, ModelSwitchResult,
 };
 pub use error::SdkError;
 pub use models::ModelSummary;

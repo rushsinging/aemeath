@@ -70,10 +70,6 @@ impl Tool for ConfigTool {
                 if key.is_none() {
                     return ToolResult::error("Key is required for 'get' action");
                 }
-                let key = key;
-
-                // 这里应该实际读取配置，但由于 Config 可能不在 context 中
-                // 返回提示信息
                 let key = key.unwrap_or("unknown");
                 ToolResult::success(format!(
                     "Config '{}' - Use environment variables or config file to set this value.",

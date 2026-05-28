@@ -71,7 +71,8 @@ pub(super) async fn load_session_impl(
                 before.saturating_sub(messages.len())
             };
             let repaired = {
-                let integrity = crate::business::chat::message_integrity::check_message_integrity(&messages);
+                let integrity =
+                    crate::business::chat::message_integrity::check_message_integrity(&messages);
                 if integrity.has_issues() {
                     crate::business::chat::message_integrity::deep_clean_messages(&mut messages)
                 } else {

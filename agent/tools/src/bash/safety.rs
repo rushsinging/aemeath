@@ -14,9 +14,7 @@ pub fn is_suspicious_dev_write(cmd: &str) -> bool {
         };
         // Look backwards to check this is a `>` or `>>` redirection target
         let before = &rest[..pos];
-        let is_redirect = before
-            .trim_end_matches(|c: char| c == ' ' || c == '\t')
-            .ends_with('>');
+        let is_redirect = before.trim_end_matches([' ', '\t']).ends_with('>');
         if is_redirect {
             // Check the specific device path
             let after = &rest[pos..];
@@ -24,8 +22,7 @@ pub fn is_suspicious_dev_write(cmd: &str) -> bool {
                 .find(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == ')')
                 .unwrap_or(after.len());
             let dev_path = &after[..end];
-            let is_safe =
-                SAFE_DEVS.iter().any(|s| dev_path == *s) || dev_path.starts_with("/dev/fd/");
+            let is_safe = SAFE_DEVS.contains(&dev_path) || dev_path.starts_with("/dev/fd/");
             if !is_safe {
                 return true;
             }
@@ -173,7 +170,7 @@ pub fn check_shell_injection(command: &str) -> Option<&'static str> {
     // Check command chains for dangerous patterns
     // Split by && and ||, but preserve the operators for checking
     let segments: Vec<&str> = cmd
-        .split(|c| c == '&' || c == '|' || c == ';')
+        .split(['&', '|', ';'])
         .filter(|s| !s.trim().is_empty())
         .collect();
 

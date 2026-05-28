@@ -109,7 +109,7 @@ pub enum StopReason {
 }
 
 impl StopReason {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "end_turn" => Self::EndTurn,
             "tool_use" => Self::ToolUse,

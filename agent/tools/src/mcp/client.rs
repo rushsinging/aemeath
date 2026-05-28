@@ -40,7 +40,7 @@ pub struct StdioTransport {
 pub enum McpClient {
     Stdio {
         name: String,
-        transport: StdioTransport,
+        transport: Box<StdioTransport>,
         next_id: Arc<AtomicU64>,
     },
     Sse {
@@ -98,11 +98,11 @@ impl McpClient {
 
         let client = Self::Stdio {
             name: name.to_string(),
-            transport: StdioTransport {
+            transport: Box::new(StdioTransport {
                 child,
                 stdin: Mutex::new(stdin),
                 stdout: Mutex::new(BufReader::new(stdout)),
-            },
+            }),
             next_id: Arc::new(AtomicU64::new(1)),
         };
 

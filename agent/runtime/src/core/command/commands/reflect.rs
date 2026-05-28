@@ -1,8 +1,10 @@
 //! Reflect command — inspect memory and produce a lightweight reflection report.
 
 use super::memory_support::open_memory_store;
-use crate::core::command::{Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult};
 use crate::business::reflection::{ReflectionEngine, ReflectionOutput};
+use crate::core::command::{
+    Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
+};
 use share::memory::{MemoryEntry, MemoryLayer};
 
 inventory::submit! {

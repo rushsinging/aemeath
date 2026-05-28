@@ -89,7 +89,11 @@ impl super::super::App {
         if self.chat.pending_reflection.is_some() {
             return;
         }
-        if self.chat.turn_count % reflection.interval_turns != 0 {
+        if !self
+            .chat
+            .turn_count
+            .is_multiple_of(reflection.interval_turns)
+        {
             return;
         }
         self.spawn_llm_reflection(Some(ui_tx.clone()), false);

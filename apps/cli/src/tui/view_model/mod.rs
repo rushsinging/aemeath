@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod dialog;
 pub mod input;
 pub mod output;
@@ -14,9 +16,7 @@ pub use style::SemanticStyle;
 
 #[cfg(test)]
 mod tests {
-    use super::output::{
-        OutputBlockView, OutputViewModel, ToolCallBlockView, ToolSemanticStatus,
-    };
+    use super::output::{OutputBlockView, OutputViewModel, ToolCallBlockView, ToolSemanticStatus};
     use super::style::SemanticStyle;
 
     #[test]

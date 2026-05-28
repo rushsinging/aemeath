@@ -111,7 +111,7 @@ impl Tool for TaskUpdateTool {
 
                 // Priority update
                 if let Some(priority) = input.get("priority").and_then(|v| v.as_str()) {
-                    if let Some(p) = TaskPriority::from_str(priority) {
+                    if let Some(p) = TaskPriority::parse(priority) {
                         task.priority = p;
                     }
                 }

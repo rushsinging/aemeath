@@ -30,9 +30,7 @@ pub(crate) async fn parse_ollama_stream(
     };
     let mut stop_reason = crate::types::StopReason::EndTurn;
 
-    let byte_stream = response
-        .bytes_stream()
-        .map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+    let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
     let mut lines = reader.lines();
 

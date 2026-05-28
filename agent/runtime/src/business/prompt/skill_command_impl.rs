@@ -57,9 +57,11 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
         let cwd = std::env::current_dir().unwrap_or_default();
         let skills = crate::api::prompt::skill::load_all_skills(&cwd, &[]);
         // Look up by name or alias
-        let skill = skills
-            .get(name)
-            .or_else(|| skills.values().find(|s| s.aliases.iter().any(|a| a == name)));
+        let skill = skills.get(name).or_else(|| {
+            skills
+                .values()
+                .find(|s| s.aliases.iter().any(|a| a == name))
+        });
         match skill {
             Some(s) => {
                 let content = s.content.clone();

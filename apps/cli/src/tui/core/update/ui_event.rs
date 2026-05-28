@@ -1,9 +1,8 @@
 use super::ask_user_options::build_option_line_ranges;
-use super::done::input_queue_preview;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
-use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
+use crate::tui::effect::effect::Effect;
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
 
@@ -15,13 +14,12 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let mut cmd_override = Cmd::None;
+        let mut effects = Vec::new();
         match ev {
             UiEvent::Text(text) => {
                 if self.chat.tool_call_active {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
-                    self.chat.tool_call_active = false;
-                    self.chat.active_tool_call_ids.clear();
+                    self.chat.clear_tool_activity();
                 }
                 self.output_area.set_spinner_phase("Generating...");
                 self.output_area.append_assistant_text(&text);
@@ -31,8 +29,7 @@ impl App {
                     log::debug!(
                         "[SPINNER] Thinking: tool_call_active was true, resetting to false"
                     );
-                    self.chat.tool_call_active = false;
-                    self.chat.active_tool_call_ids.clear();
+                    self.chat.clear_tool_activity();
                 }
                 self.output_area.set_spinner_phase("Thinking...");
                 self.output_area.append_thinking_text(&text);
@@ -46,7 +43,7 @@ impl App {
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
                     self.chat.tool_call_active
                 );
-                self.chat.tool_call_active = true;
+                self.chat.start_tool_activity();
                 self.output_area.push_tool_call_start(&name, index);
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
@@ -68,8 +65,7 @@ impl App {
                     "[SPINNER] ToolCall({name}): tool_call_active={}",
                     self.chat.tool_call_active
                 );
-                self.chat.tool_call_active = true;
-                self.chat.active_tool_call_ids.insert(id.clone());
+                self.chat.register_tool_call(id.clone());
                 self.output_area.push_tool_call(&id, &name, &summary);
                 self.output_area.start_spinner();
                 self.output_area
@@ -94,19 +90,17 @@ impl App {
                     is_error,
                     &image_note,
                 );
-                let had_active_id = self.chat.active_tool_call_ids.remove(&id);
-                let remaining = self.chat.active_tool_call_ids.len();
+                let had_active_id = self.chat.has_active_tool_call(&id);
+                let remaining = self.chat.finish_tool_call(&id);
                 log::debug!(
                     "[BUG#24] ToolResult({tool_name}): removed_id={had_active_id}, remaining_active_tools={remaining}"
                 );
                 if remaining == 0 {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
-                    self.chat.tool_call_active = false;
                     self.output_area.start_spinner();
                     self.output_area.set_spinner_phase("Thinking...");
                 } else {
-                    self.chat.tool_call_active = true;
                     self.output_area.start_spinner();
                     self.output_area
                         .set_spinner_phase(format!("Calling tools... ({remaining} running)"));
@@ -118,10 +112,8 @@ impl App {
                 last_input,
                 elapsed_secs,
             } => {
-                self.chat.total_input_tokens += input as u64;
-                self.chat.total_output_tokens += output as u64;
-                self.chat.total_api_calls += 1;
-                self.chat.last_input_tokens = last_input as u64;
+                self.chat
+                    .record_usage(input as u64, output as u64, last_input as u64);
                 let tps = if elapsed_secs > 0.0 {
                     output as f64 / elapsed_secs
                 } else {
@@ -144,46 +136,32 @@ impl App {
                 );
                 self.output_area.push_error(&msg);
                 self.output_area.stop_spinner();
-                self.chat.tool_call_active = false;
-                self.chat.active_tool_call_ids.clear();
-                self.chat.is_processing = false;
-                return UpdateResult {
-                    cmd: Cmd::RunHookNotification {
-                        message: msg,
-                        kind: "error".to_string(),
-                    },
-                    pending_slash: None,
-                };
+                self.chat.stop_processing();
+                return UpdateResult::one(Effect::RunHook {
+                    message: msg,
+                    name: "error".to_string(),
+                });
             }
             UiEvent::Cancelled => {
                 self.output_area.push_cancelled();
                 self.output_area.stop_spinner();
-                self.chat.tool_call_active = false;
-                self.chat.active_tool_call_ids.clear();
-                self.chat.is_processing = false;
+                self.chat.stop_processing();
             }
             UiEvent::MessagesSync(msgs) => {
                 self.chat.messages = msgs;
-                return UpdateResult {
-                    cmd: Cmd::SaveCurrentSession,
-                    pending_slash: None,
-                };
+                return UpdateResult::one(Effect::SaveSession);
             }
             UiEvent::ClipboardImage(img) => {
-                self.chat.pending_images.push(img);
-                self.input_area
-                    .set_pending_images(self.chat.pending_images.len());
+                let count = self.chat.add_pending_image(img);
+                self.input_area.set_pending_images(count);
             }
             UiEvent::SystemMessage(msg) => {
                 // Hook notification deferred to Cmd; state update stays here
                 self.output_area.push_system(&msg);
-                return UpdateResult {
-                    cmd: Cmd::RunHookNotification {
-                        message: msg,
-                        kind: "system_message".to_string(),
-                    },
-                    pending_slash: None,
-                };
+                return UpdateResult::one(Effect::RunHook {
+                    message: msg,
+                    name: "system_message".to_string(),
+                });
             }
             UiEvent::ReminderRecap(line) => {
                 self.handle_reminder_recap(&line);
@@ -194,13 +172,11 @@ impl App {
             UiEvent::ReflectionStarted => {
                 self.output_area.start_spinner();
                 self.output_area.set_spinner_phase("Reflecting...");
-                self.chat.is_processing = true;
+                self.chat.start_processing();
             }
             UiEvent::ReflectionUsage { input, output } => {
-                self.chat.total_api_calls += 1;
-                self.chat.last_input_tokens = input as u64;
-                self.chat.total_input_tokens += input as u64;
-                self.chat.total_output_tokens += output as u64;
+                self.chat
+                    .record_usage(input as u64, output as u64, input as u64);
                 self.status_bar.set_tokens(
                     self.chat.total_input_tokens,
                     self.chat.total_output_tokens,
@@ -222,7 +198,7 @@ impl App {
                     }
                 }
                 self.output_area.stop_spinner();
-                self.chat.is_processing = false;
+                self.chat.stop_processing();
                 self.status_bar.set_success("Ready");
             }
             UiEvent::AskUser {
@@ -234,8 +210,7 @@ impl App {
                 default,
                 reply_tx,
             } => {
-                self.chat.active_tool_call_ids.remove(&id);
-                self.chat.tool_call_active = !self.chat.active_tool_call_ids.is_empty();
+                self.chat.finish_tool_call(&id);
                 self.output_area.stop_spinner();
 
                 // Append built-in options when LLM provides ≥ 1 option
@@ -290,17 +265,14 @@ impl App {
                         .push_system(&format!("[Additional Context] {ctx}"));
                 }
                 if let Some(msg) = system_message {
-                    return UpdateResult {
-                        cmd: Cmd::RunHookNotification {
-                            message: msg,
-                            kind: "system_message".to_string(),
-                        },
-                        pending_slash: None,
-                    };
+                    return UpdateResult::one(Effect::RunHook {
+                        message: msg,
+                        name: "system_message".to_string(),
+                    });
                 }
             }
             UiEvent::DrainQueuedInput { reply_tx } => {
-                let queued: Vec<String> = self.input.input_queue.drain(..).collect();
+                let queued = self.input.drain_queue();
                 if !queued.is_empty() {
                     let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
                     for msg in &flushed {
@@ -335,10 +307,7 @@ impl App {
                 }
             }
             UiEvent::CurrentTurnChanged(turn) => {
-                return UpdateResult {
-                    cmd: Cmd::SetCurrentTurn(turn),
-                    pending_slash: None,
-                };
+                return UpdateResult::one(Effect::SetCurrentTurn { turn });
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
                 self.session.cwd = ctx.raw_path_base.clone();
@@ -358,16 +327,17 @@ impl App {
                 log::info!(
                     "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
-                    self.input.input_queue.len(),
+                    self.input.queue_len(),
                     self.output_area.queued_messages.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
                     self.input_area.is_empty(),
-                    input_queue_preview(&self.input.input_queue)
+                    self.input.queue_preview()
                 );
-                let cmd = self.handle_done(ui_tx, None);
-                cmd_override = cmd;
+                if let Some(effect) = self.handle_done(ui_tx, None) {
+                    effects.push(effect);
+                }
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -377,20 +347,23 @@ impl App {
                 log::info!(
                     "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
-                    self.input.input_queue.len(),
+                    self.input.queue_len(),
                     self.output_area.queued_messages.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
                     self.input_area.is_empty(),
-                    input_queue_preview(&self.input.input_queue)
+                    self.input.queue_preview()
                 );
-                cmd_override = self.handle_done(ui_tx, Some(elapsed));
+                if let Some(effect) = self.handle_done(ui_tx, Some(elapsed)) {
+                    effects.push(effect);
+                }
             }
         }
 
         UpdateResult {
-            cmd: cmd_override,
+            effects,
+            spawn_effect: None,
             pending_slash: None,
         }
     }

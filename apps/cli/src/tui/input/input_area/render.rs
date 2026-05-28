@@ -63,7 +63,7 @@ impl InputArea {
                 inner_area,
                 buf,
                 row,
-                &line_text,
+                line_text,
                 col_from,
                 col_to,
                 selection_style,

@@ -1,5 +1,5 @@
 use super::*;
-use share::tool::{AgentRunner, ToolRegistry};
+use share::tool::{AgentRunRequest, AgentRunner};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -15,21 +15,11 @@ struct StubRunner {
 
 #[async_trait::async_trait]
 impl AgentRunner for StubRunner {
-    async fn run_agent(
-        &self,
-        prompt: &str,
-        system: &str,
-        _tool_schemas: &[serde_json::Value],
-        _registry: &ToolRegistry,
-        _ctx: &ToolContext,
-        max_turns: Option<u32>,
-        _model_spec: Option<&str>,
-        _progress_tx: Option<tokio::sync::mpsc::Sender<share::tool::AgentProgressEvent>>,
-    ) -> String {
-        *self.captured_max_turns.lock().unwrap() = max_turns;
-        *self.captured_system.lock().unwrap() = system.to_string();
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
+        *self.captured_max_turns.lock().unwrap() = request.max_turns;
+        *self.captured_system.lock().unwrap() = request.system.to_string();
         *self.run_count.lock().unwrap() += 1;
-        prompt.to_string()
+        request.prompt.to_string()
     }
 
     async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolContext) -> String {

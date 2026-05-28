@@ -114,27 +114,42 @@ pub fn append_json_line(
     message: &str,
     extra: serde_json::Value,
 ) -> io::Result<()> {
-    append_json_line_with_turn(base_dir, log_file, session_id, None, level, module, message, extra)
+    append_json_line_with_turn(
+        base_dir,
+        log_file,
+        JsonLine {
+            session_id,
+            turn: None,
+            level,
+            module,
+            message,
+            extra,
+        },
+    )
+}
+
+pub struct JsonLine<'a> {
+    pub session_id: &'a str,
+    pub turn: Option<usize>,
+    pub level: &'a str,
+    pub module: &'a str,
+    pub message: &'a str,
+    pub extra: serde_json::Value,
 }
 
 pub fn append_json_line_with_turn(
     base_dir: &Path,
     log_file: LogFile,
-    session_id: &str,
-    turn: Option<usize>,
-    level: &str,
-    module: &str,
-    message: &str,
-    extra: serde_json::Value,
+    line: JsonLine<'_>,
 ) -> io::Result<()> {
     let value = json!({
         "timestamp": timestamp_rfc3339(),
-        "session_id": session_id,
-        "turn": turn,
-        "level": level,
-        "module": module,
-        "message": message,
-        "extra": extra,
+        "session_id": line.session_id,
+        "turn": line.turn,
+        "level": line.level,
+        "module": line.module,
+        "message": line.message,
+        "extra": line.extra,
     });
     append_line(base_dir, log_file, &value.to_string())
 }

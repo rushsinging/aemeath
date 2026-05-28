@@ -45,11 +45,7 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 兼容非 TUI 调用方的一次性文本 Chat。
     async fn chat_text(&self, input: ChatInput) -> Result<ChatStream, super::SdkError> {
-        let content = if input.image_paths.is_empty() {
-            serde_json::json!([{ "type": "text", "text": input.text }])
-        } else {
-            serde_json::json!([{ "type": "text", "text": input.text }])
-        };
+        let content = serde_json::json!([{ "type": "text", "text": input.text }]);
         self.chat(ChatRequest {
             messages: vec![super::ChatMessage {
                 role: "user".to_string(),

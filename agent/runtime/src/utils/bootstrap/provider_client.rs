@@ -1,16 +1,18 @@
 use super::model_runtime::ModelRuntimeSettings;
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::provider::client::{LlmClient, OpenAIProviderConfig};
+use crate::api::provider::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
 use crate::api::provider::providers::openai_compatible::ReasoningConfig;
 use crate::api::provider::ApiDriverKind;
 use std::env;
 
+type EnvReader<'a> = Option<&'a dyn Fn(&str) -> Option<String>>;
+
 pub fn resolve_api_key(
     cli_api_key: Option<String>,
     resolved_model: &ResolvedModel,
-    env_value: Option<&dyn Fn(&str) -> Option<String>>,
+    env_value: EnvReader<'_>,
 ) -> Option<String> {
-    let api_type = ApiDriverKind::from_str(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
+    let api_type = ApiDriverKind::parse(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
     cli_api_key
         .or_else(|| env_or_runtime("AEMEATH_API_KEY", env_value))
         .or_else(|| provider_api_key_from_env(api_type, env_value))
@@ -34,17 +36,17 @@ pub fn build_llm_client(
     runtime_settings: &ModelRuntimeSettings,
 ) -> LlmClient {
     let reasoning_effort = runtime_settings.reasoning_effort.clone();
-    let client = LlmClient::from_config(
-        api_type,
+    let client = LlmClient::from_config(LlmConfigOptions {
+        api: api_type,
         api_key,
         base_url,
         model,
-        runtime_settings.max_tokens,
-        runtime_settings.thinking_max_tokens,
-        runtime_settings.reasoning,
-        reasoning_config(&runtime_settings, resolved_model.model.reasoning),
-        openai_config(api_type, &resolved_model.source_key),
-    );
+        max_tokens: runtime_settings.max_tokens,
+        thinking_max_tokens: runtime_settings.thinking_max_tokens,
+        reasoning: runtime_settings.reasoning,
+        reasoning_config: reasoning_config(runtime_settings, resolved_model.model.reasoning),
+        openai_config: openai_config(api_type, &resolved_model.source_key),
+    });
 
     if let Some(effort) = reasoning_effort {
         client.set_reasoning_effort(Some(effort));
@@ -53,10 +55,7 @@ pub fn build_llm_client(
     client
 }
 
-fn provider_api_key_from_env(
-    api_type: ApiDriverKind,
-    env_value: Option<&dyn Fn(&str) -> Option<String>>,
-) -> Option<String> {
+fn provider_api_key_from_env(api_type: ApiDriverKind, env_value: EnvReader<'_>) -> Option<String> {
     provider_api_key_env_name(api_type).and_then(|name| env_or_runtime(name, env_value))
 }
 
@@ -69,10 +68,7 @@ fn provider_api_key_env_name(api_type: ApiDriverKind) -> Option<&'static str> {
     }
 }
 
-fn env_or_runtime(
-    name: &str,
-    env_value: Option<&dyn Fn(&str) -> Option<String>>,
-) -> Option<String> {
+fn env_or_runtime(name: &str, env_value: EnvReader<'_>) -> Option<String> {
     if let Some(read_env) = env_value {
         return read_env(name);
     }

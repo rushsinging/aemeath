@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::api::core::config::{paths, MemoryConfig};
 use crate::api::core::memory::{memory_base_dir, project_hash_from_path, MemoryEntry, MemoryStore};
@@ -25,9 +25,9 @@ pub struct PromptContext {
 }
 
 impl PromptContext {
-    pub fn new(cwd: &PathBuf, provider_name: Option<&str>, model_name: Option<&str>) -> Self {
+    pub fn new(cwd: &Path, provider_name: Option<&str>, model_name: Option<&str>) -> Self {
         Self {
-            cwd: cwd.clone(),
+            cwd: cwd.to_path_buf(),
             provider_name: provider_name.map(str::to_string),
             model_name: model_name.map(str::to_string),
         }
@@ -219,7 +219,7 @@ pub fn current_date() -> String {
     format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
 }
 
-pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
+pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     let global_path = paths::global_agents_md_path();
@@ -267,7 +267,7 @@ pub async fn load_agents_md(cwd: &PathBuf, hook_runner: &HookRunner) -> String {
     agents_md
 }
 
-fn project_instruction_paths(cwd: &PathBuf) -> [PathBuf; 2] {
+fn project_instruction_paths(cwd: &Path) -> [PathBuf; 2] {
     [
         paths::old_project_claude_md_path(cwd),
         paths::project_agents_md_path(cwd),
@@ -293,13 +293,13 @@ fn memory_context_options_from_config(config: &MemoryConfig) -> MemoryContextOpt
     }
 }
 
-pub async fn collect_memory_context(cwd: &PathBuf, config: &MemoryConfig) -> Option<String> {
+pub async fn collect_memory_context(cwd: &Path, config: &MemoryConfig) -> Option<String> {
     let options = memory_context_options_from_config(config);
     collect_memory_context_with_options(cwd, options).await
 }
 
 #[cfg(test)]
-async fn collect_memory_context_with_limit(cwd: &PathBuf, limit: usize) -> Option<String> {
+async fn collect_memory_context_with_limit(cwd: &Path, limit: usize) -> Option<String> {
     let options = MemoryContextOptions {
         max_entries: 100,
         max_inject_count: limit,
@@ -309,7 +309,7 @@ async fn collect_memory_context_with_limit(cwd: &PathBuf, limit: usize) -> Optio
 }
 
 async fn collect_memory_context_with_options(
-    cwd: &PathBuf,
+    cwd: &Path,
     options: MemoryContextOptions,
 ) -> Option<String> {
     if options.max_inject_count == 0 {

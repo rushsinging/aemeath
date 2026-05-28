@@ -327,9 +327,9 @@ fn glob_match(pattern: &str, target: &str) -> bool {
 
 /// Expand `~` to home directory.
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with("~/") {
+    if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
-            return format!("{}/{}", home.display(), &path[2..]);
+            return format!("{}/{}", home.display(), stripped);
         }
     }
     path.to_string()

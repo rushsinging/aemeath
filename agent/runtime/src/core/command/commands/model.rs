@@ -113,9 +113,9 @@ fn find_selection_by_fuzzy_model(models_config: &ModelsConfig, query: &str) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::command::{CommandAction, CommandResult};
     use crate::business::cost::CostTracker;
     use crate::business::state::AppState;
+    use crate::core::command::{CommandAction, CommandResult};
     use share::config::{Config, ModelEntryConfig, ProviderModelsConfig};
     use std::collections::HashMap;
     use std::sync::Arc;

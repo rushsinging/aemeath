@@ -1,5 +1,4 @@
 use super::UpdateResult;
-use crate::tui::core::msg::Cmd;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
@@ -15,9 +14,10 @@ impl App {
         if input.starts_with('/') {
             self.input_area.add_history(&input);
             self.input_area.clear();
-            self.input.input_queue.push_back(input.clone());
+            self.input.push_queue(input.clone());
             return UpdateResult {
-                cmd: Cmd::None,
+                effects: Vec::new(),
+                spawn_effect: None,
                 pending_slash: Some(input),
             };
         }
@@ -26,8 +26,12 @@ impl App {
         self.input_area.add_history(&input);
         self.input_area.clear();
 
-        let images: Vec<sdk::ToolResultImage> =
-            self.chat.pending_images.drain(..).map(Into::into).collect();
+        let images: Vec<sdk::ToolResultImage> = self
+            .chat
+            .drain_pending_images()
+            .into_iter()
+            .map(Into::into)
+            .collect();
         if images.is_empty() {
             self.chat.messages.push(sdk::ChatMessage::user_text(&input));
         } else {
@@ -39,20 +43,13 @@ impl App {
         let Some(spawn_ctx) = self.build_spawn_context(ui_tx, spawn_refs) else {
             self.output_area
                 .push_error("SDK agent client is unavailable");
-            return UpdateResult {
-                cmd: Cmd::None,
-                pending_slash: None,
-            };
+            return UpdateResult::none();
         };
-        self.chat.active_tool_call_ids.clear();
-        self.chat.tool_call_active = false;
+        self.chat.clear_tool_activity();
         self.output_area.start_spinner();
         self.output_area.set_spinner_phase("Thinking...");
-        self.chat.is_processing = true;
+        self.chat.start_processing();
 
-        UpdateResult {
-            cmd: Cmd::SpawnProcessing(spawn_ctx),
-            pending_slash: None,
-        }
+        UpdateResult::spawn_processing(spawn_ctx)
     }
 }

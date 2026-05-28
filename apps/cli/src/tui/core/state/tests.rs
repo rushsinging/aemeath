@@ -1,9 +1,21 @@
+#[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
     use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 
     fn make_memory_config() -> sdk::MemoryConfigView {
         sdk::MemoryConfigView::default()
+    }
+
+    fn make_clipboard_image(size: usize) -> sdk::ClipboardImageView {
+        sdk::ClipboardImageView {
+            base64: "img".to_string(),
+            media_type: "image/png".to_string(),
+            final_size: size,
+            display_path: None,
+            width: None,
+            height: None,
+        }
     }
 
     // === ChatState ===
@@ -24,6 +36,35 @@ mod tests {
     fn test_chat_state_default_context_size() {
         let state = ChatState::default();
         assert_eq!(state.context_size, 200_000);
+    }
+
+    #[test]
+    fn test_chat_state_pending_images_add_and_count() {
+        let mut state = ChatState::default();
+        let count = state.add_pending_image(make_clipboard_image(12));
+        assert_eq!(count, 1);
+        assert_eq!(state.pending_image_count(), 1);
+        assert_eq!(state.pending_images()[0].final_size, 12);
+    }
+
+    #[test]
+    fn test_chat_state_pending_images_drain_clears() {
+        let mut state = ChatState::default();
+        state.add_pending_image(make_clipboard_image(7));
+        let drained = state.drain_pending_images();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(state.pending_image_count(), 0);
+    }
+
+    #[test]
+    fn test_chat_state_usage_snapshot_after_record_usage() {
+        let mut state = ChatState::default();
+        state.record_usage(10, 4, 7);
+        let usage = state.usage_snapshot();
+        assert_eq!(usage.total_input_tokens, 10);
+        assert_eq!(usage.total_output_tokens, 4);
+        assert_eq!(usage.last_input_tokens, 7);
+        assert_eq!(usage.total_api_calls, 1);
     }
 
     // === InputState ===
@@ -62,7 +103,38 @@ mod tests {
             current_model_display: "".into(),
             memory_config: make_memory_config(),
         };
-        assert!(state.cached_sessions.is_empty());
+        assert!(state.cached_sessions().is_empty());
+    }
+
+    #[test]
+    fn test_session_state_cache_sessions_replaces_entries() {
+        let mut state = SessionState {
+            session_id: "sess-1".into(),
+            cwd: std::path::PathBuf::from("/tmp"),
+            session_created_at: None,
+            cached_sessions: vec![],
+            current_model_display: "".into(),
+            memory_config: make_memory_config(),
+        };
+        state.cache_sessions(vec![("s2".to_string(), "summary".to_string())]);
+        assert_eq!(
+            state.cached_sessions(),
+            &[("s2".to_string(), "summary".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_session_state_rename_session_updates_id() {
+        let mut state = SessionState {
+            session_id: "sess-1".into(),
+            cwd: std::path::PathBuf::from("/tmp"),
+            session_created_at: None,
+            cached_sessions: vec![],
+            current_model_display: "".into(),
+            memory_config: make_memory_config(),
+        };
+        state.rename_session("sess-2");
+        assert_eq!(state.session_id(), "sess-2");
     }
 
     // === UiLayout ===
@@ -84,5 +156,33 @@ mod tests {
     fn test_ui_layout_default_no_ctrlc() {
         let layout = UiLayout::default();
         assert!(layout.last_ctrlc.is_none());
+    }
+
+    #[test]
+    fn test_ui_layout_request_exit_marks_exit() {
+        let mut layout = UiLayout::default();
+        layout.request_exit();
+        assert!(layout.should_exit);
+    }
+
+    #[test]
+    fn test_ui_layout_ctrlc_mark_and_clear() {
+        let mut layout = UiLayout::default();
+        layout.mark_ctrlc_now();
+        assert!(layout.last_ctrlc.is_some());
+        layout.clear_ctrlc();
+        assert!(layout.last_ctrlc.is_none());
+    }
+
+    #[test]
+    fn test_ui_layout_update_areas_replaces_rects() {
+        let mut layout = UiLayout::default();
+        let output = ratatui::layout::Rect::new(1, 2, 3, 4);
+        let input = ratatui::layout::Rect::new(5, 6, 7, 8);
+        let status = ratatui::layout::Rect::new(9, 10, 11, 12);
+        layout.update_areas(output, input, status);
+        assert_eq!(layout.output_area_rect, output);
+        assert_eq!(layout.input_area_rect, input);
+        assert_eq!(layout.status_bar_rect, status);
     }
 }

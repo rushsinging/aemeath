@@ -188,6 +188,6 @@ pub(crate) async fn send_message_non_stream(
             content: content_blocks,
         },
         usage,
-        stop_reason: StopReason::from_str(stop_reason_str),
+        stop_reason: StopReason::parse(stop_reason_str),
     })
 }

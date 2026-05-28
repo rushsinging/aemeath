@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_runtime_queue_drain_port_forwards_to_sdk_queue() {
         let sdk_queue = Arc::new(CountingQueueDrainPort::new(Some(vec![
-            "queued input".to_string(),
+            "queued input".to_string()
         ])));
         let calls = sdk_queue.calls.clone();
         let queue = RuntimeQueueDrainPort::new(Some(sdk_queue));
@@ -154,7 +154,9 @@ pub(crate) fn runtime_event_to_sdk_event(
                 })
                 .collect(),
         },
-        crate::business::chat::RuntimeStreamEvent::SystemMessage(msg) => ChatEvent::SystemMessage(msg),
+        crate::business::chat::RuntimeStreamEvent::SystemMessage(msg) => {
+            ChatEvent::SystemMessage(msg)
+        }
         crate::business::chat::RuntimeStreamEvent::Error(msg) => ChatEvent::Error(msg),
         crate::business::chat::RuntimeStreamEvent::Usage {
             input,
@@ -184,7 +186,9 @@ pub(crate) fn runtime_event_to_sdk_event(
         }
         crate::business::chat::RuntimeStreamEvent::Cancelled => ChatEvent::Cancelled,
         crate::business::chat::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
-        crate::business::chat::RuntimeStreamEvent::TurnChanged(turn) => ChatEvent::CurrentTurnChanged(turn),
+        crate::business::chat::RuntimeStreamEvent::TurnChanged(turn) => {
+            ChatEvent::CurrentTurnChanged(turn)
+        }
         crate::business::chat::RuntimeStreamEvent::StopFailureHook {
             system_message,
             additional_context,

@@ -203,4 +203,3 @@ fn test_tool_result_ids() {
     ]);
     assert_eq!(msg.tool_result_ids(), vec!["r1", "r2"]);
 }
-

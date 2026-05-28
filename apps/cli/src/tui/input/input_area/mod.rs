@@ -103,7 +103,13 @@ impl InputArea {
     }
 
     /// 绘制输入区域 + 建议下拉（由外部决定areas布局）。
-    pub fn draw(&mut self, area: Rect, suggestions_area: Rect, buf: &mut Buffer, pending_images: usize) {
+    pub fn draw(
+        &mut self,
+        area: Rect,
+        suggestions_area: Rect,
+        buf: &mut Buffer,
+        pending_images: usize,
+    ) {
         self.set_pending_images(pending_images);
         self.render(area, buf);
         if suggestions_area.height > 0 {

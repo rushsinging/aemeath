@@ -68,7 +68,7 @@ pub(crate) async fn finalize_sub_agent(
     for (_, _, json_output) in &hook_results {
         if let Some(ref output) = json_output {
             if let Some(ref sys_msg) = output.system_message {
-                if let Some(ref tx) = progress_tx {
+                if let Some(tx) = progress_tx {
                     let _ = tx.try_send(AgentProgressEvent {
                         sequence: outcome.turns,
                         kind: AgentProgressKind::Message {

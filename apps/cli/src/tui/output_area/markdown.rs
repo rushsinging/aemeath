@@ -324,8 +324,8 @@ fn advance_chars(chars: &mut std::iter::Peekable<std::str::Chars>, n: usize) {
 /// 右侧 flanking：后面是 None(行尾)/空白/标点。
 /// `_` 只在左 flanking 时才作为开标记触发。
 fn is_flanking(prev: Option<char>, next: Option<char>) -> bool {
-    let left_ok = prev.map_or(true, |c| !c.is_alphanumeric());
-    let right_ok = next.map_or(false, |c| !c.is_whitespace() && !is_punctuation(c));
+    let left_ok = prev.is_none_or(|c| !c.is_alphanumeric());
+    let right_ok = next.is_some_and(|c| !c.is_whitespace() && !is_punctuation(c));
     left_ok && right_ok
 }
 

@@ -175,16 +175,16 @@ Instructions:- Complete the task described in the user message
         );
 
         let result = runner
-            .run_agent(
+            .run_agent(share::tool::AgentRunRequest {
                 prompt,
-                &system,
-                &[],
-                &share::tool::ToolRegistry::new(),
+                system: &system,
+                tool_schemas: &[],
+                registry: &share::tool::ToolRegistry::new(),
                 ctx,
                 max_turns,
                 model_spec,
-                ctx.progress_tx.clone(),
-            )
+                progress_tx: ctx.progress_tx.clone(),
+            })
             .await;
 
         // Prepend scope warnings to the result so the caller (and the user

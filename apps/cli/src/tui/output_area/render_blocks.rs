@@ -24,11 +24,12 @@ where
     let start_idx = visible.first().map(|(i, _)| *i).unwrap_or(0);
     let mut in_code_block = false;
     for line in all_lines.take(start_idx) {
-        let is_md = matches!(
-            line.style,
-            LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
-        );
-        if is_md && line.content.trim().starts_with("```") {
+        let is_md = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking);
+        if !is_md {
+            in_code_block = false;
+            continue;
+        }
+        if line.content.trim().starts_with("```") {
             in_code_block = !in_code_block;
         }
     }
@@ -38,11 +39,12 @@ where
     let mut code_lang_label = HashMap::new();
 
     for &(i, line) in visible {
-        let is_markdown_style = matches!(
-            line.style,
-            LineStyle::Assistant | LineStyle::Thinking | LineStyle::System
-        );
-        if is_markdown_style && line.content.trim().starts_with("```") {
+        let is_markdown_style = matches!(line.style, LineStyle::Assistant | LineStyle::Thinking);
+        if !is_markdown_style {
+            in_code_block = false;
+            continue;
+        }
+        if line.content.trim().starts_with("```") {
             if !in_code_block {
                 let lang = line
                     .content
@@ -102,13 +104,11 @@ where
             if markdown::is_table_separator(trimmed) {
                 pending_has_sep = true;
             }
-        } else {
-            if let Some(s) = pending_block_start.take() {
-                if pending_has_sep {
-                    crossed_blocks.push(s..i);
-                }
-                pending_has_sep = false;
+        } else if let Some(s) = pending_block_start.take() {
+            if pending_has_sep {
+                crossed_blocks.push(s..i);
             }
+            pending_has_sep = false;
         }
     }
     // 处理末尾未关闭的块（可能延伸到可见区域）
@@ -167,8 +167,8 @@ where
             let has_separator = (block_start..block_end)
                 .any(|j| markdown::is_table_separator(visible[j].1.content.trim()));
             if has_separator {
-                for j in block_start..block_end {
-                    table_block_lines.insert(visible[j].0);
+                for &(line_idx, _) in visible.iter().take(block_end).skip(block_start) {
+                    table_block_lines.insert(line_idx);
                 }
             }
             i = block_end;

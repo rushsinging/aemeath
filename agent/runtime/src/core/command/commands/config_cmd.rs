@@ -45,7 +45,7 @@ inventory::submit! {
 }
 
 fn config_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
-    let parts: Vec<&str> = args.trim().split_whitespace().collect();
+    let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
         let output = format!(
             "Current Configuration:\n\n\
