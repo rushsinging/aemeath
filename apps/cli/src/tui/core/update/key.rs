@@ -178,8 +178,20 @@ impl App {
                 self.input_area.move_right();
                 self.input_area.clear_suggestions();
             }
-            (KeyModifiers::NONE, KeyCode::Up) => self.input_area.move_up(),
-            (KeyModifiers::NONE, KeyCode::Down) => self.input_area.move_down(),
+            (KeyModifiers::NONE, KeyCode::Up) => {
+                self.input_area.move_up();
+                // move_up 可能触发历史翻看，会改变 textarea 文本，
+                // 需要同步模型（同 #77/#78/#79 系列）
+                let text = self.input_area.get_text();
+                self.model.input.document.clear();
+                self.model.input.document.insert_text(&text);
+            }
+            (KeyModifiers::NONE, KeyCode::Down) => {
+                self.input_area.move_down();
+                let text = self.input_area.get_text();
+                self.model.input.document.clear();
+                self.model.input.document.insert_text(&text);
+            }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
