@@ -1,6 +1,6 @@
 //! 分段着色行渲染辅助函数（用于测试 slice_spans）。
 
-use crate::tui::output_area::SpanPart;
+use crate::tui::render::output_area::SpanPart;
 use ratatui::style::Color;
 
 /// 按字符偏移和长度从 SpanPart 列表中切出子片段，用于换行渲染。
@@ -46,7 +46,7 @@ pub fn slice_spans(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::output_area::SpanPart;
+    use crate::tui::render::output_area::SpanPart;
 
     #[test]
     fn test_slice_spans_single_span_full() {

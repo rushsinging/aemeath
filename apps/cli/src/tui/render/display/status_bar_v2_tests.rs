@@ -165,7 +165,10 @@ fn test_context_row_cjk_path_uses_display_width_budget() {
 
     let row = bar.context_row_text(40);
 
-    assert!(crate::tui::display::safe_text::str_display_width(&row) <= 40 || row.starts_with('~'));
+    assert!(
+        crate::tui::render::display::safe_text::str_display_width(&row) <= 40
+            || row.starts_with('~')
+    );
     assert!(row.starts_with('~'));
     assert!(row.contains("AskMe"));
     assert!(row.contains("session 019-session-full"));

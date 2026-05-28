@@ -15,6 +15,9 @@ COUNT=0
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT/}"
   case "$rel" in
+    apps/cli/src/tui/render/display/safe_text.rs)
+        continue
+        ;;
     apps/cli/src/tui/display/safe_text.rs)
         continue
         ;;

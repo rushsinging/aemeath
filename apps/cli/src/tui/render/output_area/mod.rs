@@ -4,7 +4,7 @@ use sdk::CharIdx;
 
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use crate::tui::output_area::types::DEFAULT_WIDTH;
+use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
 pub mod content;
 pub mod display;

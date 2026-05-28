@@ -1,4 +1,4 @@
-use crate::tui::output_area::LineStyle;
+use crate::tui::render::output_area::LineStyle;
 
 use super::common::{bool_arg, str_arg, truncate_ellipsis};
 use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};

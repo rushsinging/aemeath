@@ -1,10 +1,10 @@
 use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
 
-use crate::tui::output_area::{LineStyle, OutputLine, INDENT};
+use crate::tui::render::output_area::{LineStyle, OutputLine, INDENT};
 
 use super::common::format_agent_tool_calls;
 
-impl crate::tui::output_area::OutputArea {
+impl crate::tui::render::output_area::OutputArea {
     pub fn push_agent_progress(&mut self, tool_id: &str, event: AgentProgressEventView) {
         match event.kind {
             AgentProgressKindView::ToolCalls { calls } => {

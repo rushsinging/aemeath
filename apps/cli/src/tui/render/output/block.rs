@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use ratatui::text::Span;
 
-use crate::tui::output_area::{LineStyle, OutputLine};
 use crate::tui::render::output::markdown;
+use crate::tui::render::output_area::{LineStyle, OutputLine};
 
 #[allow(dead_code)]
 pub(super) struct CodeBlockInfo {

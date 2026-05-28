@@ -3,7 +3,7 @@
 impl super::App {
     /// Copy text to clipboard with status bar feedback.
     pub fn copy_to_clipboard(&mut self, text: &str) {
-        match crate::tui::input::clipboard::copy_text(text) {
+        match crate::tui::render::input::clipboard::copy_text(text) {
             Ok(()) => self.status_bar.set_success("已复制选中内容"),
             Err(err) => {
                 log::warn!("复制选中内容失败: {err}");
@@ -21,8 +21,8 @@ impl super::App {
 
     /// Accept the currently highlighted suggestion
     pub fn apply_current_suggestion(&mut self) {
-        use crate::tui::completion::extract_completion_token;
-        use crate::tui::completion::SuggestionType;
+        use crate::tui::render::completion::extract_completion_token;
+        use crate::tui::render::completion::SuggestionType;
 
         if let Some(suggestion) = self.input_area.accept_suggestion() {
             let current = self.input_area.get_text();
@@ -59,7 +59,7 @@ impl super::App {
                         match trigger_type {
                             // @ 补全：token 已经包含 @，但 display_text 不含 @，
                             // 所以需要保留 @ 前缀，只替换 @ 后面的路径部分
-                            crate::tui::completion::TriggerType::AtSymbol => {
+                            crate::tui::render::completion::TriggerType::AtSymbol => {
                                 // start_pos 是 @ 的位置
                                 let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
@@ -67,22 +67,22 @@ impl super::App {
                                 format!("{}@{}{}", before, replacement, after)
                             }
                             // / 命令补全：start_pos 是 / 的位置，display_text 包含 /
-                            crate::tui::completion::TriggerType::SlashCommand => {
+                            crate::tui::render::completion::TriggerType::SlashCommand => {
                                 let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
                                 let after = current.get(after_end..).unwrap_or("");
                                 format!("{}{}{}", before, replacement, after)
                             }
                             // /model 或 /model 子命令补全：起始位置是参数开始处
-                            crate::tui::completion::TriggerType::ModelArg
-                            | crate::tui::completion::TriggerType::ModelSubCommand => {
+                            crate::tui::render::completion::TriggerType::ModelArg
+                            | crate::tui::render::completion::TriggerType::ModelSubCommand => {
                                 let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
                                 let after = current.get(after_end..).unwrap_or("");
                                 format!("{}{}{}", before, replacement, after)
                             }
                             // /resume 参数补全：起始位置是参数开始处
-                            crate::tui::completion::TriggerType::ResumeArg => {
+                            crate::tui::render::completion::TriggerType::ResumeArg => {
                                 let before = current.get(..start_pos).unwrap_or("");
                                 let after_end = find_token_end(&current, cursor_offset);
                                 let after = current.get(after_end..).unwrap_or("");

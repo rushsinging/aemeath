@@ -6,7 +6,7 @@ use ratatui::{
 
 use sdk::CharIdx;
 
-use super::display;
+use super::display::wrap_line;
 use super::types::OutputLine;
 use super::OutputArea;
 use crate::tui::view_state::cache::ViewRenderCache;
@@ -200,8 +200,8 @@ fn render_scrollbar(
 }
 
 /// 供 rendered_cache.rs 使用
-pub fn wrap_line(content: &str, max_width: usize) -> Vec<String> {
-    display::wrap_line(content, max_width)
+pub fn wrap_output_line(content: &str, max_width: usize) -> Vec<String> {
+    wrap_line(content, max_width)
 }
 
 /// 将含 \n 的 Line 拆分为不含 \n 的多个子 Line。

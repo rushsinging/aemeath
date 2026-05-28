@@ -1,7 +1,7 @@
 use sdk::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
-use crate::tui::display::safe_text;
+use crate::tui::render::display::safe_text;
 
 /// Truncate a string to fit within `max_width` Unicode display columns,
 /// appending "..." if truncated.

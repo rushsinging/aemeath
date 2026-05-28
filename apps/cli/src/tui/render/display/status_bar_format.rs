@@ -1,4 +1,4 @@
-use crate::tui::display::safe_text::str_display_width;
+use crate::tui::render::display::safe_text::str_display_width;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorktreeKind {

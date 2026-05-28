@@ -6,12 +6,12 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::CharIdx;
 
-use crate::tui::output_area::display;
-use crate::tui::output_area::render::wrap_line;
-use crate::tui::output_area::types::{LineStyle, SpanPart};
-use crate::tui::output_area::OutputLine;
 use crate::tui::render::output::markdown;
 use crate::tui::render::output::RenderedLine;
+use crate::tui::render::output_area::display;
+use crate::tui::render::output_area::render::wrap_output_line;
+use crate::tui::render::output_area::types::{LineStyle, SpanPart};
+use crate::tui::render::output_area::OutputLine;
 use crate::tui::render::theme;
 
 /// 渲染 [start, end) 范围内的所有行，写入 cache。
@@ -276,7 +276,7 @@ fn render_plain_line(
     );
     let sanitized = display::sanitize_for_display(content);
     let char_offsets = display::compute_char_offsets(&sanitized, term_width);
-    let wrapped = wrap_line(content, term_width);
+    let wrapped = wrap_output_line(content, term_width);
 
     let mut screen_entries = Vec::new();
     for (chunk_idx, _) in wrapped.iter().enumerate() {
@@ -315,7 +315,7 @@ fn render_span_line(
     let full_text: String = span_parts.iter().map(|s| s.text.as_str()).collect();
     let sanitized = display::sanitize_for_display(&full_text);
     let char_offsets = display::compute_char_offsets(&sanitized, term_width);
-    let wrapped = wrap_line(&full_text, term_width);
+    let wrapped = wrap_output_line(&full_text, term_width);
 
     let mut screen_entries = Vec::new();
     for (chunk_idx, _) in wrapped.iter().enumerate() {

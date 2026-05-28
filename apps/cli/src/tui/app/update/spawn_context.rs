@@ -1,5 +1,5 @@
+use crate::tui::app::session::processing::{SpawnContext, SpawnContextRefs};
 use crate::tui::app::{App, UiEvent};
-use crate::tui::session::processing::{SpawnContext, SpawnContextRefs};
 use tokio::sync::mpsc;
 
 impl App {

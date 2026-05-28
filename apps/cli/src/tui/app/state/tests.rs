@@ -1,9 +1,9 @@
 #[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
+    use crate::tui::app::session::processing::SpawnContextRefs;
     use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
     use crate::tui::app::{App, UiEvent};
-    use crate::tui::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
 
     fn make_memory_config() -> sdk::MemoryConfigView {

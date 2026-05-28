@@ -1,5 +1,5 @@
 use super::InputArea;
-use crate::tui::display::safe_text::{col_to_char_idx, safe_char_slice};
+use crate::tui::render::display::safe_text::{col_to_char_idx, safe_char_slice};
 use ratatui::layout::Rect;
 
 impl InputArea {

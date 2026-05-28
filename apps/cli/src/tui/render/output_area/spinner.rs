@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::tui::output_area::SpinnerState;
+use crate::tui::render::output_area::SpinnerState;
 use crate::tui::render::theme;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect

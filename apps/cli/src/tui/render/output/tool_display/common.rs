@@ -1,6 +1,6 @@
 use sdk::AgentToolCallProgressView;
 
-use crate::tui::display::safe_text;
+use crate::tui::render::display::safe_text;
 
 pub(super) fn str_arg<'a>(input: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
     input

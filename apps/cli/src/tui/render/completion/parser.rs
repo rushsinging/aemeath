@@ -1,7 +1,7 @@
 //! 输入解析与补全 token 提取
 
 use super::types::TriggerType;
-use crate::tui::display::safe_text;
+use crate::tui::render::display::safe_text;
 
 /// 提取光标位置处的补全 token
 /// 如果找到触发器，返回 (token, 起始位置, 触发类型)

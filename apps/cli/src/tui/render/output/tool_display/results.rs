@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use crate::tui::output_area::{build_diff_lines, LineStyle, OutputLine, INDENT};
+use crate::tui::render::output_area::{build_diff_lines, LineStyle, OutputLine, INDENT};
 use crate::tui::render::syntax::extension_from_path;
 
 use super::lookup_display;
 
-impl crate::tui::output_area::OutputArea {
+impl crate::tui::render::output_area::OutputArea {
     pub fn push_tool_result_with_diff(
         &mut self,
         tool_id: &str,
@@ -227,8 +227,8 @@ fn append_image_note(
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::output_area::LineStyle;
-    use crate::tui::output_area::OutputArea;
+    use crate::tui::render::output_area::LineStyle;
+    use crate::tui::render::output_area::OutputArea;
 
     #[test]
     fn test_push_tool_result_marks_matching_pending_placeholder() {

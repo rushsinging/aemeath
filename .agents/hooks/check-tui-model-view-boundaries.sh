@@ -65,13 +65,13 @@ if [ -d "$ROOT/apps/cli/src/tui/model/session" ]; then
   fail=1
 fi
 
-if [ -f "$ROOT/apps/cli/src/tui/output_area/markdown.rs" ] \
-  || [ -f "$ROOT/apps/cli/src/tui/output_area/rendered_lines.rs" ] \
-  || [ -f "$ROOT/apps/cli/src/tui/output_area/render_blocks.rs" ] \
-  || [ -f "$ROOT/apps/cli/src/tui/output_area/render_spans.rs" ] \
-  || [ -f "$ROOT/apps/cli/src/tui/output_area/render_status.rs" ] \
-  || [ -f "$ROOT/apps/cli/src/tui/output_area/diff.rs" ] \
-  || [ -d "$ROOT/apps/cli/src/tui/output_area/tool_display" ]; then
+if [ -f "$ROOT/apps/cli/src/tui/render/output_area/markdown.rs" ] \
+  || [ -f "$ROOT/apps/cli/src/tui/render/output_area/rendered_lines.rs" ] \
+  || [ -f "$ROOT/apps/cli/src/tui/render/output_area/render_blocks.rs" ] \
+  || [ -f "$ROOT/apps/cli/src/tui/render/output_area/render_spans.rs" ] \
+  || [ -f "$ROOT/apps/cli/src/tui/render/output_area/render_status.rs" ] \
+  || [ -f "$ROOT/apps/cli/src/tui/render/output_area/diff.rs" ] \
+  || [ -d "$ROOT/apps/cli/src/tui/render/output_area/tool_display" ]; then
   echo "[architecture] output render implementation must live under tui/render/output after feature #55" >&2
   fail=1
 fi
