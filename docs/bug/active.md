@@ -15,7 +15,7 @@
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 活动中 | 未确认 | 2026-05 | `/reflect` 完成后，`ReflectionDone` 通过 `output_area.push_system(&output.content)` 以 `LineStyle::System`（暗灰蓝）推送整段 reflection 输出（内含 `[User]:`/`[Assistant]:` 会话转录与 markdown），其后续普通/assistant 文本也呈现 System 暗色；疑似与 #65 同族——markdown fence/样式状态或渲染缓存 style 跨 block 泄漏，或 reflection 后未复位为 Assistant 样式 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
-| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：TUI Model/View 迁移后，真实生产路径会从 `ConversationModel` 组装 `OutputViewModel` 并替换 `OutputArea`，但 ViewModel renderer 没有复用 `ToolDisplay`，只把 `ToolCall.result_summary` 原样输出成一行，导致 thinking 后 Grep 多行结果仍像扁平原始文本；同时全量替换前未完整清理/钳制渲染缓存与滚动状态。修复：ToolCall ViewModel 渲染复用 `ToolDisplay` 生成 Grep 头/参数/结果截断/summary；已嵌入 ToolCall 的 ToolResult 不再额外生成 DiagnosticNotice；替换 OutputArea 时清理 selection/screen map/rendered cache 并 clamp scroll/cache。 |
+| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：真实 TUI Enter 路径只写 legacy chat/output 并启动后台处理，没有对 `TuiModel.conversation` 执行 `StartChat`，导致后续 thinking/Grep 的 `ToolCall`/`ToolResult` 因 `active_chat_id` 为空被 ConversationModel 忽略；因此此前 ViewModel/ToolDisplay 修复没有进入真实输出路径。修复：Enter 提交时同步执行 `ConversationIntent::StartChat`；补充端到端回归，模拟真实 update_enter 后 thinking→Grep 事件，验证 OutputArea 实际行包含工具头、参数、截断结果且无裸路径扁平行。 |
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
 **状态**：修复中（待确认）
@@ -32,16 +32,18 @@
 3. 观察 Grep 结果是否渲染为扁平原始行、是否混入前序输出碎片、滚动条是否失效。
 
 **根因（已确认）**：
-1. TUI Model/View 迁移后真实生产路径是 `ConversationModel -> OutputViewModel -> OutputArea`，但 `view_model::render::tool_lines` 没有复用原 `ToolDisplay`，只输出 `✓ Grep` 和原始 `ToolCall.result_summary`，因此 Grep 结果多行仍表现为扁平原始路径行，缺少 `●/✓ Grep /pattern/`、`in path`、截断和 summary。
-2. `ToolResult` 同时嵌入 `ToolCall.result_summary` 并作为独立 block 存在，若 assembler 不去重，会额外生成 `DiagnosticNotice`，进一步放大扁平文本重复。
-3. ViewModel 全量替换 `OutputArea` 时若不清理 `screen_line_map` / selection / rendered cache 并 clamp `scroll_offset`，旧渲染窗口会残留，表现为滚动条失效或前序碎片混入。
+1. 真实 TUI Enter 路径只写 legacy chat/output 并启动后台处理，没有对 `TuiModel.conversation` 执行 `StartChat`，导致后续 thinking/Grep 的 `ToolCall`/`ToolResult` 因 `active_chat_id` 为空被 `ConversationModel` 忽略；因此此前 ViewModel/ToolDisplay 修复没有进入真实输出路径。
+2. TUI Model/View 迁移后真实生产路径是 `ConversationModel -> OutputViewModel -> OutputArea`，若 model conversation 未启动，`refresh_output_widget_from_model()` 无法生成工具块，只能保留/回退到旧 OutputArea 行。
+3. `ToolResult` 同时嵌入 `ToolCall.result_summary` 并作为独立 block 存在，若 assembler 不去重，会额外生成 `DiagnosticNotice`，进一步放大扁平文本重复。
+4. ViewModel 全量替换 `OutputArea` 时若不清理 `screen_line_map` / selection / rendered cache 并 clamp `scroll_offset`，旧渲染窗口会残留，表现为滚动条失效或前序碎片混入。
 
 **修复**：
-1. ✅ `OutputViewAssembler` 跳过已嵌入 `ToolCall` 的 `ToolResult`，避免重复 DiagnosticNotice。
-2. ✅ `view_model::render::tool_lines` 复用 `ToolDisplay` / `format_tool_call` / `result_max_lines` / `format_result_summary`，让 Grep 在 ViewModel 路径下也渲染为工具块格式。
-3. ✅ `output_adapter` 在替换 lines 时清理 selection、screen map、rendered text cache，并 clamp `scroll_offset` / rendered cache window。
-4. ✅ 补充回归：thinking 后 Grep 仍保留 ToolCall 块；Grep ViewModel 渲染包含工具头、参数、结果截断和 summary；stale scroll offset 会被 clamp。
-5. 待用户用 DeepSeek-V4-Pro 实机确认。
+1. ✅ Enter 提交时同步执行 `ConversationIntent::StartChat`，确保后续 thinking/Grep 事件进入真实 ConversationModel 对话上下文。
+2. ✅ `OutputViewAssembler` 跳过已嵌入 `ToolCall` 的 `ToolResult`，避免重复 DiagnosticNotice。
+3. ✅ `view_model::render::tool_lines` 复用 `ToolDisplay` / `format_tool_call` / `result_max_lines` / `format_result_summary`，让 Grep 在 ViewModel 路径下也渲染为工具块格式。
+4. ✅ `output_adapter` 在替换 lines 时清理 selection、screen map、rendered text cache，并 clamp `scroll_offset` / rendered cache window。
+5. ✅ 补充端到端回归：模拟真实 update_enter 后 thinking→Grep 事件，验证 OutputArea 实际行包含工具头、参数、截断结果且无裸路径扁平行；同时验证 Enter 后 model conversation 已启动。
+6. 待用户用 DeepSeek-V4-Pro 实机确认。
 
 **涉及路径（预计）**：
 - `apps/cli/src/tui/output_area/`（tool result 渲染、渲染缓存 block state、滚动/viewport 计算）

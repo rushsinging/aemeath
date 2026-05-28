@@ -2,7 +2,9 @@
 #[cfg(test)]
 mod tests {
     use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
-    use crate::tui::core::App;
+    use crate::tui::core::{App, UiEvent};
+    use crate::tui::session::processing::SpawnContextRefs;
+    use crate::tui::update::msg::TuiMsg;
 
     fn make_memory_config() -> sdk::MemoryConfigView {
         sdk::MemoryConfigView::default()
@@ -228,5 +230,104 @@ mod tests {
         app.chat.messages.push(sdk::ChatMessage::user_text("late"));
 
         assert_eq!(app.model.session.message_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_update_enter_starts_model_conversation_for_tool_rendering() {
+        let mut app = App::new(
+            "sess-e2e".to_string(),
+            std::path::PathBuf::from("/tmp/aemeath"),
+            "gpt-test".to_string(),
+        );
+        app.model
+            .input
+            .apply(crate::tui::model::input::intent::InputIntent::InsertText(
+                "search bug 76".to_string(),
+            ));
+        app.input_area.set_text("search bug 76");
+        let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(8);
+        let spawn_refs = SpawnContextRefs { agent_client: None };
+
+        let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
+
+        assert!(app.model.conversation.active_chat_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_thinking_then_grep_renders_tool_block_in_output_area() {
+        let mut app = App::new(
+            "sess-grep".to_string(),
+            std::path::PathBuf::from("/tmp/aemeath"),
+            "gpt-test".to_string(),
+        );
+        app.model
+            .input
+            .apply(crate::tui::model::input::intent::InputIntent::InsertText(
+                "search bug 76".to_string(),
+            ));
+        app.input_area.set_text("search bug 76");
+        app.output_area.last_visible_height = 3;
+        app.output_area.scroll_offset = 99;
+        let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(8);
+        let spawn_refs = SpawnContextRefs { agent_client: None };
+
+        let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
+        for event in grep_after_thinking_events() {
+            let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
+        }
+
+        let rendered = app
+            .output_area
+            .lines
+            .iter()
+            .map(|line| line.content.clone())
+            .collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  in docs/bug/active.md"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "  ... (1 lines omitted)"));
+        assert!(!rendered
+            .iter()
+            .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
+        assert!(app.output_area.scroll_offset <= app.output_area.lines.len());
+    }
+
+    fn enter_key() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent {
+            code: crossterm::event::KeyCode::Enter,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        }
+    }
+
+    fn grep_after_thinking_events() -> Vec<UiEvent> {
+        vec![
+            UiEvent::Thinking("thinking".to_string()),
+            UiEvent::TextBlockComplete("thinking".to_string()),
+            UiEvent::ToolCallStart {
+                name: "Grep".to_string(),
+                index: 0,
+            },
+            UiEvent::ToolCall {
+                id: "grep-1".to_string(),
+                name: "Grep".to_string(),
+                summary: r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string(),
+            },
+            UiEvent::ToolResult {
+                id: "grep-1".to_string(),
+                tool_name: "Grep".to_string(),
+                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
+                is_error: false,
+                images: Vec::new(),
+            },
+        ]
     }
 }

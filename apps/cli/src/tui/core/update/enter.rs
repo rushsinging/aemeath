@@ -1,6 +1,7 @@
 use super::UpdateResult;
 use crate::tui::core::input_adapter::apply_input_changes_to_widget;
 use crate::tui::core::{App, UiEvent};
+use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
 
@@ -27,6 +28,11 @@ impl App {
         }
 
         self.output_area.push_user_message(&input);
+        self.model
+            .conversation
+            .apply(ConversationIntent::StartChat {
+                submission: input.clone(),
+            });
 
         let images: Vec<sdk::ToolResultImage> = self
             .chat
