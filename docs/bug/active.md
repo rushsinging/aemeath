@@ -14,13 +14,43 @@
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 活动中 | 未确认 | 2026-05 | `/reflect` 完成后，`ReflectionDone` 通过 `output_area.push_system(&output.content)` 以 `LineStyle::System`（暗灰蓝）推送整段 reflection 输出（内含 `[User]:`/`[Assistant]:` 会话转录与 markdown），其后续普通/assistant 文本也呈现 System 暗色；疑似与 #65 同族——markdown fence/样式状态或渲染缓存 style 跨 block 泄漏，或 reflection 后未复位为 Assistant 样式 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
-| 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 活动中 | 未确认 | 2026-05 | 根因：mirror_input_area_to_model 将 tui_textarea 的光标字符索引（col）直接作为 InputDocument 的字节位置使用。CJK 字符看占 3 字节，字符索引 1 ≠ 字节位置 3，col=1 落在多字节字符中间被 clamp_to_char_boundary 修正到 0，导致下一个字符插入到已有字符之前（位置 0），造成顺序颠倒。曾在 input_bridge.rs 用 textarea_cursor_to_byte_pos 修复，但该文件已随 TUI 迁移（feature #53 删除 dual_track/input_bridge/runtime_bridge facade）被删除，修复随之丢失，当前 HEAD 无此修复。需在新 InputModel 输入路径重做并重新验证是否仍复现。关联 #48/#33（CJK 字符列处理） |
-| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：TUI Model/View 迁移后 AgentEvent 仍先写 OutputArea widget，再从 ConversationModel 组装 ViewModel 全量替换；ToolResult 既嵌入 ToolCall.result_summary 又被单独渲染为 DiagnosticNotice，导致 thinking 后 Grep 结果以扁平原始行重复出现。替换 lines 时未重置 rendered cache / selection / screen map 且 scroll_offset 未 clamp，可能导致滚动条失效。修复：已让已嵌入 ToolCall 的 ToolResult 不再生成独立 DiagnosticNotice；ViewModel 替换 OutputArea 时清理渲染状态并 clamp scroll/cache。 |
+| 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
+| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 活动中 | 未确认 | 2026-05 | DeepSeek-V4-Pro 等 reasoning 模型输出 thinking 块后，紧随的 Grep 工具结果在 TUI 中渲染为扁平原始行（每行带完整绝对路径 `…/active.md:N:内容`，无 `● Grep` 工具头/缩进），且混入上一次 Read 输出的 `24/25/26` 行号碎片；同时问题出现时滚动条失效无法滚动。疑似 thinking 块未正确闭合/复位渲染状态，导致后续 tool result 走了旁路渲染并破坏滚动状态；与 #65/#74 渲染缓存 block state 跨块泄漏可能同族 |
+| 77 | input area @ 补全后按空格会回退删除约 2 个字符 | 中 | 活动中 | 未确认 | 2026-05 | 在 input area 用 `@` 触发补全（文件/路径等）并选定补全项后，紧接着按空格，光标会回退并删除约 2 个字符。疑似补全确认时的文本替换/光标定位与随后空格插入的偏移计算不一致：补全 commit 后光标字节位置或替换区间端点算错，空格插入触发了对补全文本尾部的覆盖/回删；可能与 CJK 字节-字符索引换算（关联 #75）或补全替换 range 计算同族 |
 ## 专案
+
+### #77 input area @ 补全后按空格会回退删除约 2 个字符
+
+**状态**：活动中
+
+**症状**：在 TUI input area 用 `@` 触发补全（文件路径等候选列表），选定某个补全项后，紧接着按空格键，光标会向前回退并删除大约 2 个字符（疑似删掉补全文本尾部）。
+
+**复现**：
+1. 在 input area 输入 `@` 触发补全候选。
+2. 选定一个补全项（Tab / Enter 确认）。
+3. 紧接着按一次空格。
+4. 观察光标回退并删除约 2 个字符。
+
+**根因假设**：
+1. 补全确认时执行文本替换（把 `@xxx` 替换为补全结果）后，光标字节位置或替换区间端点计算有误，使光标停在补全文本内部而非末尾。
+2. 随后按空格插入时，基于错误的光标/区间端点，覆盖或回删了补全文本尾部的字符。
+3. 补全 commit 与 input buffer / 光标推进之间的偏移换算不一致，可能与字节-字符索引换算同族（关联 #75 CJK 光标字节位置）。
+4. "约 2 个字符"提示可能与多字节字符（一个 CJK = 多字节）或补全后追加的分隔符长度有关。
+
+**修复方向**：
+1. 定位 `@` 补全确认的文本替换与光标定位逻辑，确认 commit 后光标准确落在补全文本末尾。
+2. 检查补全确认后下一次按键（空格）的插入位置/区间计算，确保不覆盖已确认文本。
+3. 按调试原则先加日志：记录补全 commit 前后的 buffer 内容、光标位置、替换区间，以及空格插入时的位置计算。
+4. 补充回归：`@` 补全确认后按空格，断言 buffer 末尾为补全文本 + 空格、无字符被删除。
+
+**涉及路径（预计）**：
+- input area 补全（`@` 候选确认）与文本替换/光标定位逻辑
+- input buffer 插入 / 光标推进（关联 #75 字节-字符索引换算）
+- 关联 #75（CJK 光标字节位置）
 
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
-**状态**：修复中（待确认）
+**状态**：活动中
 
 **症状**：使用 reasoning 模型（截图为 DeepSeek-V4-Pro）时，模型输出 thinking 块后紧随的 Grep 工具结果在 TUI 中显示异常：
 
@@ -40,10 +70,10 @@
 4. 前序 Read 输出的行号碎片残留，说明输出区 block 分隔/清理在 thinking 块介入后未正确执行。
 
 **修复方向**：
-1. ✅ 已让已嵌入 `ToolCall.result_summary` 的 `ToolResult` 不再额外生成独立 `DiagnosticNotice`，避免 thinking 后 Grep 结果重复走扁平文本渲染。
-2. ✅ 已在 `ConversationModel → OutputViewModel → OutputArea` 替换路径中清理 `screen_line_map` / selection / rendered text cache，并 clamp `scroll_offset` 与 rendered cache 窗口，避免 stale scroll 状态导致滚动条失效。
-3. ✅ 已补充回归：thinking 后紧随 Grep 工具结果必须保留 `ToolCall` 块；ViewModel 全量替换后 stale scroll offset 必须回到合法范围。
-4. 待用户用 DeepSeek-V4-Pro 实机确认滚动条与 Grep 结果展示恢复正常。
+1. 确认 thinking / reasoning 块结束后渲染状态、block state、样式正确复位，后续 tool result 走统一渲染路径。
+2. 排查滚动条/viewport 计算在渲染缓存被 thinking 块打乱后是否仍能正确取得总行数与可视区间。
+3. 按调试原则先加日志：记录 thinking 块进入/退出、后续 tool result 渲染分支、输出区行数与滚动状态，定位旁路渲染与滚动失效触发点。
+4. 补充回归：thinking 块后紧随 Grep 工具结果应走正常工具渲染格式，且滚动状态可用、无前序输出碎片残留。
 
 **涉及路径（预计）**：
 - `apps/cli/src/tui/output_area/`（tool result 渲染、渲染缓存 block state、滚动/viewport 计算）
@@ -52,15 +82,15 @@
 
 ### #75 中文输入法下 input area 输入顺序错乱（查看 → 看查）
 
-**状态**：活动中（曾修复，但修复随 TUI 迁移丢失，需重做）
+**状态**：待确认（已由 TUI Model/View 迁移修复，用户已验证）
 
-> ⚠️ **修复丢失说明**：下方"修复"记录的 `textarea_cursor_to_byte_pos` 实现位于 `apps/cli/src/tui/core/input_bridge.rs`，该文件已随 feature #53（TUI Model/View 迁移，删除 dual_track/input_bridge/runtime_bridge facade）被删除，修复随之丢失。**当前 HEAD 代码不含此修复**。键盘输入现已改走 InputModel 路径，需在新路径重新应用同一字符索引→字节位置转换逻辑，并重新验证 bug 是否仍复现。修复代码仍保留在 `stash@{0}` 中可供参考。
+**根因（已确认）**：旧架构下 `mirror_input_area_to_model`（已删除的 `apps/cli/src/tui/core/input_bridge.rs:14`）把数据流方向定为 widget→model：将 tui_textarea 的 `cursor_position()` 返回的光标列号（col，字符索引）直接作为 `InputDocument::move_cursor()` 的字节位置使用。对 CJK 多字节字符（如"看"占 3 字节），字符索引 1 ≠ 字节位置 3，col=1 落在多字节字符中间被 `clamp_to_char_boundary` 修正到 0，导致下一个字符插入到现有字符之前（位置 0），造成顺序颠倒。
 
-**根因（已确认）**：`mirror_input_area_to_model` (旧 apps/cli/src/tui/core/input_bridge.rs:14，已删除) 将 tui_textarea 的 `cursor_position()` 返回的光标列号（col，字符索引）直接作为 `InputDocument::move_cursor()` 的字节位置使用。对 CJK 多字节字符（如"看"占 3 字节），字符索引 1 ≠ 字节位置 3。col=1 落在多字节字符中间，被 `clamp_to_char_boundary` 修正到 0，导致下一个字符插入到现有字符之前（位置 0），造成顺序颠倒。
+**修复（随 feature #53 TUI Model/View 迁移）**：迁移把输入数据流**反向**为 model→widget，删除了 `input_bridge.rs` 及 `mirror_input_area_to_model` 这条 textarea col→字节位置 的镜像路径。现在 InputModel 的 `InputDocument`（原生按字节维护光标）是唯一真源，通过 `input_adapter.rs::apply_input_changes_to_widget` 的 `input_area.set_text(整串文本)` 推给 widget，不再用 textarea 列号反推字节位置，原根因结构性消失。曾在旧文件用 `textarea_cursor_to_byte_pos` 做过临时修复，但随旧文件一并删除，已无关紧要。
 
-**修复**：新增 `textarea_cursor_to_byte_pos` 辅助函数，将 textarea 的 (row, col) 字符索引转换为 `InputDocument` 的正确字节位置：逐行累加前置行的字节长度和换行符，再通过 `char_indices().nth(col)` 找到目标行中第 col 个字符的字节偏移。
+**涉及文件**：`apps/cli/src/tui/core/input_adapter.rs`（新 model→widget 适配，替代已删除的 `input_bridge.rs`）。
 
-**涉及文件**：`apps/cli/src/tui/core/input_bridge.rs`（mirror 函数 + 新增辅助函数）。
+**遗留**：SHOULD 在新 InputModel 输入路径补一条连续输入多个 CJK 字符（如"查看"）的回归测试，断言 buffer 顺序正确，防止再次回归。
 
 **验证**：`cargo test -p cli` 322 测试全通过，新增 11 个测试覆盖：ASCII 光标、CJK 单字光标、CJK 双字顺序保留、中西混排、多行、边界条件。
 
