@@ -11,8 +11,13 @@ pub(crate) fn apply_input_changes_to_widget(
     let mut submission = None;
     for change in changes {
         match change {
-            InputChange::TextChanged { text, .. } | InputChange::HistorySelected { text } => {
+            InputChange::TextChanged { text, cursor }
+            | InputChange::HistorySelected { text, cursor } => {
                 input_area.set_text(text);
+                input_area.set_cursor_byte_index(*cursor);
+            }
+            InputChange::CursorMoved { cursor } => {
+                input_area.set_cursor_byte_index(*cursor);
             }
             InputChange::CompletionChanged { visible, items, .. } => {
                 if *visible {
@@ -35,7 +40,7 @@ pub(crate) fn apply_input_changes_to_widget(
             InputChange::AttachmentChanged { count } => {
                 input_area.set_pending_images(*count);
             }
-            InputChange::ModeChanged { .. } | InputChange::CursorMoved { .. } => {}
+            InputChange::ModeChanged { .. } => {}
         }
     }
     submission

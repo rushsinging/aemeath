@@ -4,14 +4,8 @@ use crate::tui::model::input::completion::{generate_suggestions, SuggestionConte
 impl super::super::App {
     /// Update suggestions based on current input
     pub(crate) fn update_suggestions(&mut self) {
-        let input = self.input_area.get_text();
-        let (_row, col) = self.input_area.cursor_position();
-        // Convert column (char count) to byte offset
-        let cursor_offset = input
-            .char_indices()
-            .nth(col)
-            .map(|(i, _)| i)
-            .unwrap_or(input.len());
+        let input = self.model.input.document.buffer.clone();
+        let cursor_offset = self.model.input.document.cursor;
 
         let models: Vec<(String, String)> = if let Some(agent_client) = &self.agent_client {
             tokio::task::block_in_place(|| {
@@ -51,12 +45,19 @@ impl super::super::App {
         };
 
         let suggestions = generate_suggestions(&ctx);
-        self.model.input.completion.visible = !suggestions.is_empty();
-        self.model.input.completion.selected_index = Some(0);
-        self.model.input.completion.items = suggestions
-            .iter()
-            .map(completion_item_from_suggestion)
-            .collect();
-        self.input_area.set_suggestions(suggestions);
+        let changes = self.model.input.apply(
+            crate::tui::model::input::intent::InputIntent::SetCompletions {
+                query: ctx.input.clone(),
+                items: suggestions
+                    .iter()
+                    .map(completion_item_from_suggestion)
+                    .collect(),
+            },
+        );
+        crate::tui::adapter::input_widget::apply_input_changes_to_widget(
+            &mut self.input_area,
+            &mut self.status_bar,
+            &changes,
+        );
     }
 }

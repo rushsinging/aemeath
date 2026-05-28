@@ -1,11 +1,15 @@
 use super::InputArea;
+#[cfg(test)]
 use crate::tui::render::display::safe_text::safe_char_slice;
 use tui_textarea::CursorMove;
+#[cfg(test)]
 use unicode_width::UnicodeWidthChar;
 
+#[cfg_attr(test, allow(dead_code))]
 impl InputArea {
     /// Handle a character input
-    pub fn input(&mut self, c: char) {
+    #[cfg(test)]
+    pub(crate) fn input(&mut self, c: char) {
         self.textarea.insert_char(c);
         self.hide_suggestions(); // Hide suggestions while typing
         self.reset_history_nav(); // Reset history navigation when typing
@@ -13,6 +17,7 @@ impl InputArea {
     }
 
     /// 当前行超过视觉宽度时，在合适位置插入换行符
+    #[cfg(test)]
     fn auto_wrap_current_line(&mut self) {
         let max_w = self.content_width as usize;
         if max_w < 10 {
@@ -62,14 +67,16 @@ impl InputArea {
     }
 
     /// Handle a backspace
-    pub fn backspace(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn backspace(&mut self) {
         self.textarea.delete_char();
         self.hide_suggestions();
         self.reset_history_nav(); // Reset history navigation when deleting
     }
 
     /// Handle enter key - returns true if should send
-    pub fn enter(&mut self, alt: bool) -> bool {
+    #[cfg(test)]
+    pub(crate) fn enter(&mut self, alt: bool) -> bool {
         if alt {
             self.textarea.insert_newline();
             false
@@ -82,21 +89,24 @@ impl InputArea {
     }
 
     /// Move cursor left
-    pub fn move_left(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_left(&mut self) {
         self.textarea.move_cursor(CursorMove::Back);
         self.hide_suggestions();
         self.reset_history_nav();
     }
 
     /// Move cursor right
-    pub fn move_right(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_right(&mut self) {
         self.textarea.move_cursor(CursorMove::Forward);
         self.hide_suggestions();
         self.reset_history_nav();
     }
 
     /// Move cursor up (or select previous suggestion, or browse history)
-    pub fn move_up(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_up(&mut self) {
         if self.select_previous() {
             return;
         }
@@ -119,7 +129,8 @@ impl InputArea {
     }
 
     /// Move cursor down (or select next suggestion, or browse history)
-    pub fn move_down(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_down(&mut self) {
         if self.select_next() {
             return;
         }
@@ -140,25 +151,27 @@ impl InputArea {
     }
 
     /// Move cursor to start of line
-    pub fn move_home(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_home(&mut self) {
         self.textarea.move_cursor(CursorMove::Head);
         self.hide_suggestions();
     }
 
     /// Move cursor to end of line
-    pub fn move_end(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn move_end(&mut self) {
         self.textarea.move_cursor(CursorMove::End);
         self.hide_suggestions();
     }
 
     /// Delete word
-    pub fn delete_word(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn delete_word(&mut self) {
         self.textarea.delete_word();
         self.hide_suggestions();
     }
 
-    /// Set text content
-    pub fn set_text(&mut self, text: &str) {
+    pub(crate) fn set_text(&mut self, text: &str) {
         // 全选并剪切，清空所有内容
         self.textarea.select_all();
         self.textarea.cut();
@@ -173,12 +186,54 @@ impl InputArea {
             self.textarea.insert_str(line);
         }
     }
+
+    pub(crate) fn set_cursor_byte_index(&mut self, cursor: usize) {
+        let text = self.get_text();
+        let cursor = cursor.min(text.len());
+        let cursor = clamp_to_char_boundary(&text, cursor);
+        let mut remaining = cursor;
+        let lines = self.textarea.lines();
+        let mut row = 0;
+        let mut col = 0;
+        for (idx, line) in lines.iter().enumerate() {
+            if remaining <= line.len() {
+                row = idx;
+                col = line[..remaining].chars().count();
+                break;
+            }
+            remaining = remaining.saturating_sub(line.len() + 1);
+            row = idx;
+            col = line.chars().count();
+        }
+        self.move_cursor_to(row, col);
+    }
+
+    fn move_cursor_to(&mut self, row: usize, col: usize) {
+        self.textarea.move_cursor(CursorMove::Head);
+        self.textarea.move_cursor(CursorMove::Top);
+        for _ in 0..row {
+            self.textarea.move_cursor(CursorMove::Down);
+        }
+        for _ in 0..col {
+            self.textarea.move_cursor(CursorMove::Forward);
+        }
+    }
 }
 
+fn clamp_to_char_boundary(text: &str, cursor: usize) -> usize {
+    let mut cursor = cursor.min(text.len());
+    while cursor > 0 && !text.is_char_boundary(cursor) {
+        cursor -= 1;
+    }
+    cursor
+}
+
+#[cfg(test)]
 fn display_width(chars: &[char]) -> usize {
     chars.iter().map(|&c| char_width(c)).sum()
 }
 
+#[cfg(test)]
 fn find_wrap_break(chars: &[char], max_w: usize) -> usize {
     let mut best_break = 0;
     let mut current_width = 0;
@@ -207,6 +262,7 @@ fn find_wrap_break(chars: &[char], max_w: usize) -> usize {
     0
 }
 
+#[cfg(test)]
 fn char_width(ch: char) -> usize {
     if ch == '\t' {
         4

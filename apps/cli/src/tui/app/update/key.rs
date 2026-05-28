@@ -1,7 +1,6 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
-use crate::tui::adapter::input_widget::apply_input_changes_to_widget;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -43,6 +42,15 @@ fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> Ct
 }
 
 impl App {
+    pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
+        let changes = self.model.input.apply(intent);
+        crate::tui::adapter::input_widget::apply_input_changes_to_widget(
+            &mut self.input_area,
+            &mut self.status_bar,
+            &changes,
+        );
+    }
+
     pub(super) fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
@@ -67,13 +75,7 @@ impl App {
                 .modifiers
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
-            self.input_area.enter(true);
-            // 同步模型状态：enter 直接修改 textarea 未走模型（同 #77/#78），
-            // 下次按键将触发 model.insert → TextChanged → set_text，
-            // 用旧文本覆盖 textarea 中的换行后内容。
-            let text = self.input_area.get_text();
-            self.model.input.document.clear();
-            self.model.input.document.insert_text(&text);
+            self.handle_input_intent(InputIntent::InsertNewline);
             return UpdateResult::none();
         }
 
@@ -85,16 +87,15 @@ impl App {
                     }
                     self.status_bar.set_warning("Interrupted");
                 } else if self.input_area.is_showing_suggestions() {
-                    self.input_area.clear_suggestions();
+                    self.handle_input_intent(InputIntent::SetCompletions {
+                        query: String::new(),
+                        items: Vec::new(),
+                    });
                 } else {
-                    match ctrlc_action(self.input_area.is_empty(), self.layout.last_ctrlc) {
+                    match ctrlc_action(self.model.input.document.is_empty(), self.layout.last_ctrlc)
+                    {
                         CtrlCAction::ClearInput => {
-                            let changes = self.model.input.apply(InputIntent::Clear);
-                            apply_input_changes_to_widget(
-                                &mut self.input_area,
-                                &mut self.status_bar,
-                                &changes,
-                            );
+                            self.handle_input_intent(InputIntent::Clear);
                             self.status_bar
                                 .set_warning("Input cleared (Ctrl+C again to exit)");
                             self.layout.mark_ctrlc_now();
@@ -118,7 +119,10 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) if !self.chat.is_processing => {
                 if self.input_area.is_showing_suggestions() {
-                    self.input_area.clear_suggestions();
+                    self.handle_input_intent(InputIntent::SetCompletions {
+                        query: String::new(),
+                        items: Vec::new(),
+                    });
                 }
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
@@ -129,14 +133,26 @@ impl App {
                 self.status_bar.set_warning("Interrupted");
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
-                if !self.input_area.is_empty() {
-                    let input = self.input_area.get_text();
+                if !self.model.input.document.is_empty() {
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    apply_input_changes_to_widget(
+                    crate::tui::adapter::input_widget::apply_input_changes_to_widget(
                         &mut self.input_area,
                         &mut self.status_bar,
                         &changes,
                     );
+                    let input = changes
+                        .iter()
+                        .find_map(|change| {
+                            if let crate::tui::model::input::change::InputChange::Submitted {
+                                submission,
+                            } = change
+                            {
+                                Some(submission.text.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
                     let n = self.input.push_queue(input.clone());
                     self.output_area.queued_messages.push(input);
                     self.status_bar
@@ -146,7 +162,7 @@ impl App {
             (_, KeyCode::Enter) if !self.chat.is_processing => {
                 if self.input_area.is_showing_suggestions() {
                     self.apply_current_suggestion();
-                } else if !self.input_area.is_empty() {
+                } else if !self.model.input.document.is_empty() {
                     return self.update_enter(ui_tx, spawn_refs);
                 }
             }
@@ -157,71 +173,37 @@ impl App {
                 } else {
                     c
                 };
-                let changes = self.model.input.apply(InputIntent::InsertChar(ch));
-                apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
+                self.handle_input_intent(InputIntent::InsertChar(ch));
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
-                let changes = self.model.input.apply(InputIntent::DeleteBackward);
-                apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
+                self.handle_input_intent(InputIntent::DeleteBackward);
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Left) => {
-                self.input_area.move_left();
-                self.input_area.clear_suggestions();
-                // 光标仅在 textarea 内移动，模型 cursor 未更新。
-                // 后续 InsertChar 以模型旧光标插入，表现错位。
-                self.model
-                    .input
-                    .document
-                    .set_cursor_col(self.input_area.cursor_position().1);
+                self.handle_input_intent(InputIntent::MoveCursorLeft);
             }
             (KeyModifiers::NONE, KeyCode::Right) => {
-                self.input_area.move_right();
-                self.input_area.clear_suggestions();
-                self.model
-                    .input
-                    .document
-                    .set_cursor_col(self.input_area.cursor_position().1);
+                self.handle_input_intent(InputIntent::MoveCursorRight);
             }
             (KeyModifiers::NONE, KeyCode::Up) => {
-                self.input_area.move_up();
-                // move_up 可能触发历史翻看，会改变 textarea 文本，
-                // 需要同步模型（同 #77/#78/#79 系列）
-                let text = self.input_area.get_text();
-                self.model.input.document.clear();
-                self.model.input.document.insert_text(&text);
+                self.handle_input_intent(InputIntent::MoveHistoryPrevious);
             }
             (KeyModifiers::NONE, KeyCode::Down) => {
-                self.input_area.move_down();
-                let text = self.input_area.get_text();
-                self.model.input.document.clear();
-                self.model.input.document.insert_text(&text);
+                self.handle_input_intent(InputIntent::MoveHistoryNext);
             }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-                self.input_area.move_home();
-                self.model
-                    .input
-                    .document
-                    .set_cursor_col(self.input_area.cursor_position().1);
+                self.handle_input_intent(InputIntent::MoveCursorHome);
             }
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-                self.input_area.move_end();
-                self.model
-                    .input
-                    .document
-                    .set_cursor_col(self.input_area.cursor_position().1);
+                self.handle_input_intent(InputIntent::MoveCursorEnd);
             }
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
-                self.input_area.delete_word();
-                // delete_word 修改 textarea 文本，需要同步模型
-                let text = self.input_area.get_text();
-                self.model.input.document.clear();
-                self.model.input.document.insert_text(&text);
+                self.handle_input_intent(InputIntent::DeleteWordBeforeCursor);
             }
             (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
                 if !self.chat.is_processing && !self.input.just_pasted =>
@@ -231,11 +213,7 @@ impl App {
                 return UpdateResult::one(Effect::ReadClipboardImage);
             }
             (KeyModifiers::NONE, KeyCode::End) => {
-                self.input_area.move_end();
-                self.model
-                    .input
-                    .document
-                    .set_cursor_col(self.input_area.cursor_position().1);
+                self.handle_input_intent(InputIntent::MoveCursorEnd);
             }
             _ => {}
         }

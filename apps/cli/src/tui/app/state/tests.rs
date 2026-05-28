@@ -244,7 +244,6 @@ mod tests {
             .apply(crate::tui::model::input::intent::InputIntent::InsertText(
                 "search bug 76".to_string(),
             ));
-        app.input_area.set_text("search bug 76");
         let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(8);
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
@@ -265,7 +264,6 @@ mod tests {
             .apply(crate::tui::model::input::intent::InputIntent::InsertText(
                 "search bug 76".to_string(),
             ));
-        app.input_area.set_text("search bug 76");
         app.output_area.last_visible_height = 3;
         app.output_area.scroll_offset = 99;
         let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(8);

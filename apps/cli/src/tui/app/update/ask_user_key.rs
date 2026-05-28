@@ -90,7 +90,9 @@ impl App {
                             chat_input_active: true,
                             ..state
                         });
-                        self.input_area.clear();
+                        self.handle_input_intent(
+                            crate::tui::model::input::intent::InputIntent::Clear,
+                        );
                         return Some(UpdateResult::none());
                     } else if multi_select {
                         // Multi-select: return selected items, comma-separated
@@ -110,7 +112,7 @@ impl App {
                         // Single select: return cursor item
                         state.options[cursor].clone()
                     } else {
-                        let text = self.input_area.get_text();
+                        let text = self.model.input.document.buffer.clone();
                         if text.is_empty() {
                             String::new()
                         } else {
@@ -122,14 +124,14 @@ impl App {
                     if !answer.is_empty() {
                         self.output_area.push_user_message(&answer);
                     }
-                    self.input_area.clear();
+                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(answer);
                     self.output_area.set_spinner_phase("Generating...");
                 }
                 KeyCode::Esc => {
                     let state = self.input.ask_user_state.take().unwrap();
                     self.output_area.dismiss_ask_user_block();
-                    self.input_area.clear();
+                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(String::new());
                     self.output_area.set_spinner_phase("Generating...");
                 }
@@ -145,12 +147,14 @@ impl App {
         if self.input.ask_user_reply_tx.is_some() {
             match key.code {
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                    let text = self.input_area.get_text();
+                    let text = self.model.input.document.buffer.clone();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                             self.output_area.dismiss_ask_user_block();
                             self.output_area.push_user_message(&text);
-                            self.input_area.clear();
+                            self.handle_input_intent(
+                                crate::tui::model::input::intent::InputIntent::Clear,
+                            );
                             let _ = reply_tx.send(text);
                             self.output_area.set_spinner_phase("Generating...");
                         }
@@ -160,7 +164,9 @@ impl App {
                 KeyCode::Esc => {
                     if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                         self.output_area.dismiss_ask_user_block();
-                        self.input_area.clear();
+                        self.handle_input_intent(
+                            crate::tui::model::input::intent::InputIntent::Clear,
+                        );
                         let _ = reply_tx.send(String::new());
                         self.output_area.set_spinner_phase("Generating...");
                     }
@@ -184,19 +190,19 @@ impl App {
     ) -> Option<UpdateResult> {
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                let text = self.input_area.get_text();
+                let text = self.model.input.document.buffer.clone();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
                     self.output_area.dismiss_ask_user_block();
                     self.output_area.push_user_message(&text);
-                    self.input_area.clear();
+                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(text);
                     self.output_area.set_spinner_phase("Generating...");
                 }
             }
             KeyCode::Esc => {
                 // Return to option list without submitting
-                self.input_area.clear();
+                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.input
                     .ask_user_state
                     .as_mut()
@@ -217,11 +223,7 @@ impl App {
                 .modifiers
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
         {
-            self.input_area.enter(true);
-            // 同步模型状态：enter 直接修改 textarea 未走模型（同 #77/#78/#79）
-            let text = self.input_area.get_text();
-            self.model.input.document.clear();
-            self.model.input.document.insert_text(&text);
+            self.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertNewline);
             return;
         }
         match (key.modifiers, key.code) {
@@ -231,22 +233,28 @@ impl App {
                 } else {
                     c
                 };
-                self.input_area.input(ch);
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::InsertChar(ch),
+                );
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
-                self.input_area.backspace();
+                self.handle_input_intent(
+                    crate::tui::model::input::intent::InputIntent::DeleteBackward,
+                );
             }
-            (KeyModifiers::NONE, KeyCode::Left) => self.input_area.move_left(),
-            (KeyModifiers::NONE, KeyCode::Right) => self.input_area.move_right(),
-            (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
-            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
+            (KeyModifiers::NONE, KeyCode::Left) => self
+                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorLeft),
+            (KeyModifiers::NONE, KeyCode::Right) => self.handle_input_intent(
+                crate::tui::model::input::intent::InputIntent::MoveCursorRight,
+            ),
+            (KeyModifiers::CONTROL, KeyCode::Char('a')) => self
+                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorHome),
+            (KeyModifiers::CONTROL, KeyCode::Char('e')) => self
+                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorEnd),
+            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.handle_input_intent(
+                crate::tui::model::input::intent::InputIntent::DeleteWordBeforeCursor,
+            ),
             _ => {}
         }
-        // 同步模型状态：AskUserQuestion chat-input 模式下直接操作 textarea，
-        // 所有 input/backspace/delete_word 均未走模型（同 #77/#78/#79）。
-        let text = self.input_area.get_text();
-        self.model.input.document.clear();
-        self.model.input.document.insert_text(&text);
     }
 }

@@ -18,6 +18,7 @@ pub enum InputChange {
     },
     HistorySelected {
         text: String,
+        cursor: usize,
     },
     AttachmentChanged {
         count: usize,

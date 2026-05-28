@@ -21,6 +21,7 @@ impl InputModel {
         match intent {
             InputIntent::InsertChar(ch) => self.insert_text(ch.to_string()),
             InputIntent::InsertText(text) => self.insert_text(text),
+            InputIntent::ReplaceText(text) => self.replace_text(text),
             InputIntent::MoveCursor(cursor) => {
                 self.document.move_cursor(cursor);
                 vec![InputChange::CursorMoved {
@@ -51,9 +52,15 @@ impl InputModel {
                     cursor: self.document.cursor,
                 }]
             }
+            InputIntent::InsertNewline => self.insert_text("\n".to_string()),
             InputIntent::DeleteBackward => {
                 self.completion.clear();
                 self.document.delete_backward();
+                self.text_changed()
+            }
+            InputIntent::DeleteWordBeforeCursor => {
+                self.completion.clear();
+                self.document.delete_word_before_cursor();
                 self.text_changed()
             }
             InputIntent::DeleteForward => {
@@ -84,15 +91,11 @@ impl InputModel {
                 vec![self.completion_changed()]
             }
             InputIntent::AcceptCompletion => self.accept_completion(),
-            InputIntent::AttachImage(image) => {
-                self.attachments.push(image);
-                vec![InputChange::AttachmentChanged {
-                    count: self.attachments.len(),
-                }]
+            InputIntent::AcceptCompletionValue(replacement) => {
+                self.accept_completion_value(replacement)
             }
-            InputIntent::ClearAttachments => {
-                self.attachments.clear();
-                vec![InputChange::AttachmentChanged { count: 0 }]
+            InputIntent::SetAttachmentCount(count) => {
+                vec![InputChange::AttachmentChanged { count }]
             }
             InputIntent::SetMode(mode) => {
                 self.mode = mode;
@@ -111,6 +114,13 @@ impl InputModel {
         self.completion.clear();
         self.history.selected_index = None;
         self.document.insert_text(&text);
+        self.text_changed()
+    }
+
+    fn replace_text(&mut self, text: String) -> Vec<InputChange> {
+        self.completion.clear();
+        self.history.selected_index = None;
+        self.document.replace_text(text);
         self.text_changed()
     }
 
@@ -137,8 +147,11 @@ impl InputModel {
         else {
             return vec![self.completion_changed()];
         };
-        self.document.clear();
-        self.document.insert_text(&replacement);
+        self.accept_completion_value(replacement)
+    }
+
+    fn accept_completion_value(&mut self, replacement: String) -> Vec<InputChange> {
+        self.document.replace_text(replacement);
         self.completion.clear();
         self.mode = InputMode::Normal;
         vec![
@@ -189,6 +202,7 @@ impl InputModel {
         vec![
             InputChange::HistorySelected {
                 text: self.document.buffer.clone(),
+                cursor: self.document.cursor,
             },
             InputChange::TextChanged {
                 text: self.document.buffer.clone(),

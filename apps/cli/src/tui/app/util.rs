@@ -1,5 +1,3 @@
-// Suggestion 在 apply_current_suggestion 中通过 self.input_area.accept_suggestion() 使用
-
 impl super::App {
     /// Copy text to clipboard with status bar feedback.
     pub fn copy_to_clipboard(&mut self, text: &str) {
@@ -24,20 +22,12 @@ impl super::App {
         use crate::tui::model::input::completion::extract_completion_token;
         use crate::tui::model::input::completion::SuggestionType;
 
-        if let Some(suggestion) = self.input_area.accept_suggestion() {
-            let current = self.input_area.get_text();
-            let (_row, col) = self.input_area.cursor_position();
-            // 将列号（字符计数）转换为字节偏移
-            let cursor_offset = current
-                .char_indices()
-                .nth(col)
-                .map(|(i, _)| i)
-                .unwrap_or(current.len());
+        if let Some(suggestion) = self.input_area.selected_suggestion().cloned() {
+            let current = self.model.input.document.buffer.clone();
+            let cursor_offset = self.model.input.document.cursor;
 
-            match suggestion.suggestion_type {
+            let new_text = match suggestion.suggestion_type {
                 SuggestionType::Session => {
-                    // display_text = "session_id  summary [Nmsg]"
-                    // 只取 session_id 部分，替换 /resume 后的参数
                     let id = suggestion
                         .display_text
                         .split_whitespace()
@@ -45,9 +35,9 @@ impl super::App {
                         .unwrap_or("");
                     if let Some(space_pos) = current.find(' ') {
                         let prefix = current.get(..=space_pos).unwrap_or("");
-                        self.input_area.set_text(&format!("{}{}", prefix, id));
+                        format!("{}{}", prefix, id)
                     } else {
-                        self.input_area.set_text(&format!("/resume {}", id));
+                        format!("/resume {}", id)
                     }
                 }
                 _ => {
@@ -93,18 +83,12 @@ impl super::App {
                         // 没有匹配到触发器，回退到全量替换
                         replacement.clone()
                     };
-                    self.input_area.set_text(&new_text);
-                    // 将光标移到末尾
-                    self.input_area.move_end();
+                    new_text
                 }
-            }
-            // 同步模型状态：apply_current_suggestion 直接修改了 textarea，
-            // 但未更新 self.model.input.document。若不同步，下次按键（如空格）
-            // 将触发 model.insert → TextChanged → set_text，用模型中的旧文本
-            // 覆盖 textarea 中已补全的正确内容，造成"回退删除"现象。
-            let text = self.input_area.get_text();
-            self.model.input.document.clear();
-            self.model.input.document.insert_text(&text);
+            };
+            self.handle_input_intent(
+                crate::tui::model::input::intent::InputIntent::AcceptCompletionValue(new_text),
+            );
         }
     }
 }

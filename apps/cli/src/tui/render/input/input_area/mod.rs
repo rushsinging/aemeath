@@ -27,6 +27,7 @@ pub struct InputArea {
     /// Whether suggestions are visible
     pub(super) show_suggestions: bool,
     /// Command history
+    #[cfg(test)]
     pub(super) history: Vec<String>,
     /// Current position in history (None means not browsing history)
     pub(super) history_index: Option<usize>,
@@ -55,6 +56,7 @@ impl InputArea {
             suggestions: Vec::new(),
             selected_suggestion: -1,
             show_suggestions: false,
+            #[cfg(test)]
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
@@ -65,6 +67,7 @@ impl InputArea {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn hide_suggestions(&mut self) {
         self.show_suggestions = false;
     }
@@ -75,25 +78,22 @@ impl InputArea {
     }
 
     /// Clear the input
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.textarea = configured_textarea();
         self.clear_suggestions();
-        self.reset_history_nav();
+        self.history_index = None;
+        self.saved_input.clear();
     }
 
     /// Set pending images count
-    pub fn set_pending_images(&mut self, count: usize) {
+    pub(crate) fn set_pending_images(&mut self, count: usize) {
         self.pending_images = count;
     }
 
     /// Check if input is empty
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.textarea.lines().iter().all(|line| line.is_empty())
-    }
-
-    /// Get cursor position (line, column)
-    pub fn cursor_position(&self) -> (usize, usize) {
-        self.textarea.cursor()
     }
 
     /// 获取 inner area（textarea 的实际渲染区域，去掉 border）

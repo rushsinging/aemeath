@@ -12,11 +12,22 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let input = self.input_area.get_text();
         let changes = self
             .model
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
+        let input = changes
+            .iter()
+            .find_map(|change| {
+                if let crate::tui::model::input::change::InputChange::Submitted { submission } =
+                    change
+                {
+                    Some(submission.text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
         apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
         if input.starts_with('/') {
             self.input.push_queue(input.clone());
