@@ -1,4 +1,5 @@
 use crate::tui::model::conversation::block::ConversationBlock;
+use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{
@@ -48,6 +49,9 @@ impl OutputViewAssembler {
                     is_error,
                     image_count,
                 } => {
+                    if tool_result_is_embedded(conversation, id) {
+                        continue;
+                    }
                     let mut text = output.clone();
                     if *image_count > 0 {
                         text.push_str(&format!("\n[图片: {image_count}]").to_string());
@@ -119,6 +123,20 @@ impl OutputViewAssembler {
     }
 }
 
+fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {
+    conversation.chats.iter().any(|chat| {
+        chat.turns.iter().any(|turn| {
+            turn.tool_calls.iter().any(|call| {
+                call.id.as_ref() == Some(tool_id)
+                    && call
+                        .result
+                        .as_ref()
+                        .is_some_and(|result| !result.is_empty())
+            })
+        })
+    })
+}
+
 fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<ToolCallBlockView> {
     for chat in &conversation.chats {
         for turn in &chat.turns {
@@ -173,26 +191,7 @@ mod tests {
     #[test]
     fn test_output_assembler_maps_tool_status_to_icon() {
         let mut conversation = ConversationModel::default();
-        conversation.apply(ConversationIntent::StartChat {
-            submission: "read".to_string(),
-        });
-        conversation.apply(ConversationIntent::ObserveToolCallStart {
-            name: "Read".to_string(),
-            index: 0,
-        });
-        conversation.apply(ConversationIntent::ObserveToolCall {
-            id: "tool-1".to_string(),
-            name: "Read".to_string(),
-            index: 0,
-            summary: "Read file".to_string(),
-        });
-        conversation.apply(ConversationIntent::ObserveToolResult {
-            id: "tool-1".to_string(),
-            tool_name: "Read".to_string(),
-            output: "ok".to_string(),
-            is_error: false,
-            image_count: 0,
-        });
+        add_completed_tool_after_thinking(&mut conversation, "Read", "ok");
 
         let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
         let tool = vm
@@ -206,5 +205,68 @@ mod tests {
 
         assert_eq!(tool.icon, "✓");
         assert_eq!(tool.semantic_status, ToolSemanticStatus::Success);
+    }
+
+    #[test]
+    fn test_output_assembler_keeps_tool_result_inside_tool_after_thinking() {
+        let mut conversation = ConversationModel::default();
+        add_completed_tool_after_thinking(
+            &mut conversation,
+            "Grep",
+            "/tmp/docs/bug/active.md:18:match",
+        );
+
+        let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+        let diagnostic_results = vm
+            .blocks
+            .iter()
+            .filter(|block| matches!(block, OutputBlockView::DiagnosticNotice(_)))
+            .count();
+        let tool = vm
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                OutputBlockView::ToolCall(tool) => Some(tool),
+                _ => None,
+            })
+            .expect("tool block");
+
+        assert_eq!(diagnostic_results, 0);
+        assert_eq!(tool.title, "Grep");
+        assert_eq!(
+            tool.result_summary.as_deref(),
+            Some("/tmp/docs/bug/active.md:18:match")
+        );
+    }
+
+    fn add_completed_tool_after_thinking(
+        conversation: &mut ConversationModel,
+        name: &str,
+        output: &str,
+    ) {
+        conversation.apply(ConversationIntent::StartChat {
+            submission: "search".to_string(),
+        });
+        conversation.apply(ConversationIntent::ObserveThinkingText {
+            text: "thinking".to_string(),
+        });
+        conversation.apply(ConversationIntent::CompleteTextBlock);
+        conversation.apply(ConversationIntent::ObserveToolCallStart {
+            name: name.to_string(),
+            index: 0,
+        });
+        conversation.apply(ConversationIntent::ObserveToolCall {
+            id: "tool-1".to_string(),
+            name: name.to_string(),
+            index: 0,
+            summary: "search docs".to_string(),
+        });
+        conversation.apply(ConversationIntent::ObserveToolResult {
+            id: "tool-1".to_string(),
+            tool_name: name.to_string(),
+            output: output.to_string(),
+            is_error: false,
+            image_count: 0,
+        });
     }
 }

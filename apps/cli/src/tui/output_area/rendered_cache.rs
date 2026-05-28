@@ -58,6 +58,8 @@ impl RenderedCache {
         if self.cache.len() > total_lines {
             self.cache.truncate(total_lines);
         }
+        self.render_start = self.render_start.min(total_lines);
+        self.render_end = self.render_end.min(total_lines);
     }
 
     /// 确保渲染窗口覆盖 [display_start, display_end)，前后各扩展 50%，

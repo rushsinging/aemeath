@@ -75,7 +75,7 @@ pub struct OutputArea {
     /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
     pub ask_user_block_start: Option<usize>,
     /// 渲染缓存（滑动窗口）
-    rendered_cache: RenderedCache,
+    pub(crate) rendered_cache: RenderedCache,
 }
 
 impl Default for OutputArea {

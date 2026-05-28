@@ -15,12 +15,12 @@
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 活动中 | 未确认 | 2026-05 | `/reflect` 完成后，`ReflectionDone` 通过 `output_area.push_system(&output.content)` 以 `LineStyle::System`（暗灰蓝）推送整段 reflection 输出（内含 `[User]:`/`[Assistant]:` 会话转录与 markdown），其后续普通/assistant 文本也呈现 System 暗色；疑似与 #65 同族——markdown fence/样式状态或渲染缓存 style 跨 block 泄漏，或 reflection 后未复位为 Assistant 样式 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 活动中 | 未确认 | 2026-05 | 根因：mirror_input_area_to_model 将 tui_textarea 的光标字符索引（col）直接作为 InputDocument 的字节位置使用。CJK 字符看占 3 字节，字符索引 1 ≠ 字节位置 3，col=1 落在多字节字符中间被 clamp_to_char_boundary 修正到 0，导致下一个字符插入到已有字符之前（位置 0），造成顺序颠倒。曾在 input_bridge.rs 用 textarea_cursor_to_byte_pos 修复，但该文件已随 TUI 迁移（feature #53 删除 dual_track/input_bridge/runtime_bridge facade）被删除，修复随之丢失，当前 HEAD 无此修复。需在新 InputModel 输入路径重做并重新验证是否仍复现。关联 #48/#33（CJK 字符列处理） |
-| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 活动中 | 未确认 | 2026-05 | DeepSeek-V4-Pro 等 reasoning 模型输出 thinking 块后，紧随的 Grep 工具结果在 TUI 中渲染为扁平原始行（每行带完整绝对路径 `…/active.md:N:内容`，无 `● Grep` 工具头/缩进），且混入上一次 Read 输出的 `24/25/26` 行号碎片；同时问题出现时滚动条失效无法滚动。疑似 thinking 块未正确闭合/复位渲染状态，导致后续 tool result 走了旁路渲染并破坏滚动状态；与 #65/#74 渲染缓存 block state 跨块泄漏可能同族 |
+| 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：TUI Model/View 迁移后 AgentEvent 仍先写 OutputArea widget，再从 ConversationModel 组装 ViewModel 全量替换；ToolResult 既嵌入 ToolCall.result_summary 又被单独渲染为 DiagnosticNotice，导致 thinking 后 Grep 结果以扁平原始行重复出现。替换 lines 时未重置 rendered cache / selection / screen map 且 scroll_offset 未 clamp，可能导致滚动条失效。修复：已让已嵌入 ToolCall 的 ToolResult 不再生成独立 DiagnosticNotice；ViewModel 替换 OutputArea 时清理渲染状态并 clamp scroll/cache。 |
 ## 专案
 
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
-**状态**：活动中
+**状态**：修复中（待确认）
 
 **症状**：使用 reasoning 模型（截图为 DeepSeek-V4-Pro）时，模型输出 thinking 块后紧随的 Grep 工具结果在 TUI 中显示异常：
 
@@ -40,10 +40,10 @@
 4. 前序 Read 输出的行号碎片残留，说明输出区 block 分隔/清理在 thinking 块介入后未正确执行。
 
 **修复方向**：
-1. 确认 thinking / reasoning 块结束后渲染状态、block state、样式正确复位，后续 tool result 走统一渲染路径。
-2. 排查滚动条/viewport 计算在渲染缓存被 thinking 块打乱后是否仍能正确取得总行数与可视区间。
-3. 按调试原则先加日志：记录 thinking 块进入/退出、后续 tool result 渲染分支、输出区行数与滚动状态，定位旁路渲染与滚动失效触发点。
-4. 补充回归：thinking 块后紧随 Grep 工具结果应走正常工具渲染格式，且滚动状态可用、无前序输出碎片残留。
+1. ✅ 已让已嵌入 `ToolCall.result_summary` 的 `ToolResult` 不再额外生成独立 `DiagnosticNotice`，避免 thinking 后 Grep 结果重复走扁平文本渲染。
+2. ✅ 已在 `ConversationModel → OutputViewModel → OutputArea` 替换路径中清理 `screen_line_map` / selection / rendered text cache，并 clamp `scroll_offset` 与 rendered cache 窗口，避免 stale scroll 状态导致滚动条失效。
+3. ✅ 已补充回归：thinking 后紧随 Grep 工具结果必须保留 `ToolCall` 块；ViewModel 全量替换后 stale scroll offset 必须回到合法范围。
+4. 待用户用 DeepSeek-V4-Pro 实机确认滚动条与 Grep 结果展示恢复正常。
 
 **涉及路径（预计）**：
 - `apps/cli/src/tui/output_area/`（tool result 渲染、渲染缓存 block state、滚动/viewport 计算）
