@@ -14,6 +14,36 @@
 | 51 | UI Domain DDD 设计 —— 将 apps/cli 提升为核心域 | 中 | ✅ 已合并 | 已确认 | 已并入 #47。经讨论回归支撑域（薄入口），AgentClient SDK 保留并纳入 #47 §6.5。 |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
+| 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 未开始 | 未确认 | feature #53 TUI Model/View 迁移的遗留收口。新 Model/View 骨架（model/、view_assembler/、view_model/、view_state/、effect/、update/）已建立，但 spec `2026-05-27-tui-model-view-architecture.md` 目标结构里的 `render/`、`adapter/`、`app/` 三层尚未落地，渲染仍散在 legacy `output_area/`+`display/`+`input/` widget，adapter 散在 `update/*_mapper.rs`+`core/*_adapter.rs`，legacy `core/update/`+`core/state/` 与新 `update/`+`model/` 并存。目标：建立统一 `render/`、`adapter/`，将 `app/` 收薄，清理 legacy 重复，落地剩余架构 guard。 |
+
+### #55 TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core
+
+**状态**：未开始
+
+**背景**：feature #53（TUI Model/View 迁移）的遗留收口。按 `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md` 的目标模块结构审计 `apps/cli/src/tui/`，新 Model/View 骨架已建立且依赖方向大体正确，但仍有以下偏差未落地（#53 状态"待确认"，legacy shell 作为兼容 facade 保留）。
+
+**已对齐 spec**：`model/{conversation,input,runtime,diagnostic}`、`view_assembler/`、`view_model/`、`view_state/`、`effect/`（部分）、`update/`（mapper + coordinator + root_reducer）。
+
+**待收口的偏差**：
+1. **缺 `render/` 层**：spec 要求统一 `render/{layout,output/{block,markdown,cache,line},status,input,dialog,theme}`；当前渲染散在 legacy `output_area/`（markdown/tool_display/rendered_lines/rendered_cache）+ `display/`（status_bar/theme/render/safe_text/task_window/syntax）+ `input/` widget + `view_model/render.rs`。
+2. **缺 `adapter/` 层**：spec 要求 `adapter/{agent_event,terminal_event,task_event,hook_event}`；当前 adapter 散在 `update/*_mapper.rs` 与 `core/*_adapter.rs`。
+3. **缺 `app/` 薄壳**：被臃肿的 `core/` 顶替，`core/` 还塞了 `core/update/`、`core/state/`、`effect_runtime.rs`、`slash` 等。
+4. **`effect/` 缺 `executor.rs`**：executor 现在在 `core/effect_runtime.rs`。
+5. **`view_state/` 缺 `cache.rs`**：render cache 在 `output_area/rendered_cache`。
+6. **legacy 重复并存**：`core/update/`（旧 ui_event/key/ask_user handler）vs 新 `update/`；`core/state/`（旧 AppState）vs 新 `model/`；顶层 `session/` vs `model/session/`、顶层 `completion/` vs `model/input/completion.rs`、顶层 `input/` vs `model/input/`。
+7. **多出第 5 个 model context `model/session/`**：spec 只定义 Conversation/Input/Runtime/Diagnostic 四个，需决定是否纳入正式设计或并回 Runtime。
+8. **细节**：`update/` 无 `change_router.rs`（由 `root_reducer.rs`+`dirty.rs` 承担，需确认是否符合设计）；`model/conversation/` 无 `message_snapshot.rs`。
+
+**目标**：
+1. 建立统一 `render/` 层，将 `output_area/`、`display/` 渲染逻辑、`view_model/render.rs` 收口进去。
+2. 建立 `adapter/` 层，归拢 agent/terminal/task/hook event 适配。
+3. 将 `core/` 收薄为 `app/`（或保留 core 命名但去除 legacy update/state/adapters）。
+4. 清理 legacy 重复目录，迁移完成后删除旧 `core/update/`、`core/state/` 等。
+5. 补齐 `effect/executor.rs`、`view_state/cache.rs`。
+6. 决定 `model/session/` 去留。
+7. 落地 spec §834 起的剩余架构 guard（render isolation / viewassembler boundary / adapter guard / output line legacy guard / effect boundary）。
+
+**关联**：feature #53（TUI Model/View 迁移）；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 
 ### #49 AskUserQuestion 增加「以上全是」与「chat about this」选项
 
