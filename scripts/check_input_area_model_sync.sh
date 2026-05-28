@@ -29,7 +29,7 @@ synced=0
 unsynced=0
 
 # 找出所有调用点
-grep -rn "self\.input_area\.\(input\|enter\|set_text\|delete_strategy\|delete_backward\|backspace\)(" "$DIR" --include="*.rs" \
+grep -rn "self\.input_area\.\(input\|enter\|set_text\|delete_strategy\|delete_backward\|backspace\|move_up\|move_down\|delete_word\|delete_forward\|clear\)(" "$DIR" --include="*.rs" \
   | grep -v "^\s*//" \
   | grep -v "mod tests" \
   | grep -v "#\[cfg" \

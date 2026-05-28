@@ -194,7 +194,13 @@ impl App {
             }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => self.input_area.move_home(),
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => self.input_area.move_end(),
-            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_area.delete_word(),
+            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                self.input_area.delete_word();
+                // delete_word 修改 textarea 文本，需要同步模型
+                let text = self.input_area.get_text();
+                self.model.input.document.clear();
+                self.model.input.document.insert_text(&text);
+            }
             (KeyModifiers::CONTROL | KeyModifiers::SUPER, KeyCode::Char('v'))
                 if !self.chat.is_processing && !self.input.just_pasted =>
             {
