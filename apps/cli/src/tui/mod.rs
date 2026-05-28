@@ -5,6 +5,7 @@ pub mod input;
 pub mod model;
 pub mod output_area;
 pub mod session;
+pub mod update;
 pub mod view_assembler;
 pub mod view_model;
 pub mod view_state;
