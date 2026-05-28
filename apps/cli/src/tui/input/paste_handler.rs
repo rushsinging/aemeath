@@ -72,6 +72,12 @@ impl crate::tui::core::App {
                     self.input_area.input(ch);
                 }
             }
+            // 同步模型状态：paste 直接修改 textarea 未走模型，
+            // 下次按键（如空格）将触发 model.insert → TextChanged → set_text，
+            // 用旧文本覆盖 textarea 已粘贴的内容（同 #77）。
+            let text = self.input_area.get_text();
+            self.model.input.document.clear();
+            self.model.input.document.insert_text(&text);
             self.update_suggestions();
         }
     }

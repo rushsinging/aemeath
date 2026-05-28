@@ -96,6 +96,10 @@ impl App {
                             self.input_area.input(ch);
                         }
                     }
+                    // 同步模型状态：paste 直接修改 textarea 未走模型（同 #77/#78）
+                    let text = self.input_area.get_text();
+                    self.model.input.document.clear();
+                    self.model.input.document.insert_text(&text);
                     return UpdateResult::none();
                 }
                 // Paste while processing: insert into input area so it can be queued
@@ -122,6 +126,10 @@ impl App {
                                 self.input_area.input(ch);
                             }
                         }
+                        // 同步模型状态：paste 直接修改 textarea 未走模型（同 #77/#78）
+                        let text = self.input_area.get_text();
+                        self.model.input.document.clear();
+                        self.model.input.document.insert_text(&text);
                     }
                 }
                 UpdateResult::none()

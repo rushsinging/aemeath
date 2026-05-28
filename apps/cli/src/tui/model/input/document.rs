@@ -199,4 +199,49 @@ mod tests {
         assert_eq!(doc.buffer, "@中文/路径/目标.rs ");
         assert_eq!(doc.cursor, "@中文/路径/目标.rs ".len());
     }
+
+    // 回归测试：Bug #78 — 粘贴后按空格清空粘贴内容
+    //
+    // 场景：用户粘贴文本，input_area.input(ch) 直接修改 textarea 但未同步模型。
+    // 按空格时模型 insert(' ') 产生旧文本+空格 → set_text 覆盖 textarea 中的粘贴内容。
+    //
+    // 修复：粘贴循环后执行 clear + insert_text 将模型同步到 textarea 的文本。
+
+    /// 粘贴后模型同步 → 按空格 → 正确追加
+    #[test]
+    fn test_synced_model_after_paste_preserves_text() {
+        let mut doc = InputDocument::default();
+        // 粘贴前状态（模型）
+        doc.insert_text("before ");
+        assert_eq!(doc.buffer, "before ");
+
+        // 用户粘贴 "hello world" → textarea = "before hello world"
+        // 修复：粘贴后同步模型
+        doc.clear();
+        doc.insert_text("before hello world");
+        assert_eq!(doc.buffer, "before hello world");
+
+        // 按空格
+        doc.insert_text(" ");
+        assert_eq!(doc.buffer, "before hello world ");
+        assert_eq!(doc.cursor, "before hello world ".len());
+    }
+
+    /// 粘贴 Cjk 文本后模型同步 + 按空格
+    #[test]
+    fn test_synced_model_after_cjk_paste_preserves_text() {
+        let mut doc = InputDocument::default();
+        // 粘贴前
+        doc.insert_text("前置");
+        assert_eq!(doc.buffer, "前置");
+
+        // 用户粘贴 "你好世界" → textarea = "前置你好世界"
+        doc.clear();
+        doc.insert_text("前置你好世界");
+        assert_eq!(doc.buffer, "前置你好世界");
+
+        // 按空格
+        doc.insert_text(" ");
+        assert_eq!(doc.buffer, "前置你好世界 ");
+    }
 }
