@@ -692,6 +692,8 @@ apps/cli/src/tui/
     mod.rs
     effect.rs
     executor.rs
+    session.rs       # session 生命周期副作用：spawn agent chat / save / load / resume
+    completion.rs    # 补全候选 IO 生成（扫描文件系统等），结果回灌 InputModel
 
   adapter/
     mod.rs
@@ -700,6 +702,28 @@ apps/cli/src/tui/
     task_event.rs
     hook_event.rs
 ```
+
+## completion 与 session 的归属
+
+`completion/` 与 `session/` 不是独立 layer，不应作为顶层目录长期存在。它们按职责拆入已有的层：
+
+### session → Effect 执行 + Runtime 状态
+
+session 相关代码（`spawn_processing`、`session_lifecycle.run`、`resume`）全是副作用编排：`tokio::spawn` 启动 chat 处理循环、`agent_client.load_session().await`、save/restore tasks。
+
+- **执行**归 Effect 层：对应 `Effect::SpawnAgentChat` / `Effect::SaveSession` / load/resume，由 `effect/executor.rs`（或 `effect/session.rs`）执行。
+- **状态**归 Runtime Model：processing job、session metadata 等存于 `model/runtime/`（`processing_job.rs` 等）。
+- 会话内的对话语义（resume 后的 messages）经 anti-corruption mapper 进入 Conversation Model，不在 session 副作用模块里维护业务真相。
+
+### completion → Input Model（纯）+ Effect（IO 候选）
+
+补全本就是 Input Model 的一部分（Input 维护 buffer、cursor、selection、history、**completion**、attachment）。candidate 生成需拆开：
+
+- **纯逻辑/状态**归 Input Model：补全上下文解析（`extract_completion_token` 等 parser）与补全弹窗状态（active/selected）存于 `model/input/`（`completion.rs`）。
+- **IO 候选生成**归 Effect：扫描文件系统（`std::fs::read_dir`）、枚举命令/模型/历史会话等，做成 `Effect::FetchCompletions`（类比 `Effect::FetchTaskStatus`），结果以 `Msg` 回灌 InputModel 的补全状态。
+- Model 不直接做 IO（见“分层职责”第 4 条），因此 `files.rs` 这类扫盘逻辑必须经 Effect，而非留在 Input Model 内。
+
+> 迁移由 feature #57 收口：删除/并入顶层 `completion/`、`session/`，并由顶层目录白名单 guard 锁定结构。
 
 ## 迁移里程碑
 
