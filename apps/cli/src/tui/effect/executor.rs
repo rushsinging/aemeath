@@ -1,7 +1,7 @@
 use crate::tui::app::event::UiEvent;
-use crate::tui::app::session::processing;
 use crate::tui::app::App;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
+use crate::tui::effect::session::processing;
 use tokio::sync::mpsc;
 
 impl App {

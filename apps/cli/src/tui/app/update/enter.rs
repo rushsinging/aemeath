@@ -1,7 +1,7 @@
 use super::UpdateResult;
 use crate::tui::adapter::input_widget::apply_input_changes_to_widget;
-use crate::tui::app::session::processing::SpawnContextRefs;
 use crate::tui::app::{App, UiEvent};
+use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use tokio::sync::mpsc;
 

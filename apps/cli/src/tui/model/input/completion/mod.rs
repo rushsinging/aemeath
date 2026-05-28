@@ -1,7 +1,6 @@
 //! 自动补全模块，处理 / 和 @ 触发的补全
 
 pub mod commands;
-pub mod files;
 pub mod models;
 pub mod parser;
 pub mod sessions;
@@ -13,7 +12,6 @@ pub use types::{Suggestion, SuggestionContext, SuggestionType, TriggerType};
 pub use commands::generate_command_suggestions;
 #[allow(unused_imports)]
 pub use commands::generate_command_suggestions as get_slash_commands_compat;
-pub use files::generate_file_suggestions;
 pub use models::{generate_model_subcommand_suggestions, generate_model_suggestions};
 pub use parser::extract_completion_token;
 pub use sessions::generate_resume_suggestions;
@@ -27,7 +25,9 @@ pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
             TriggerType::SlashCommand => {
                 generate_command_suggestions(&token, &ctx.skills, &ctx.commands)
             }
-            TriggerType::AtSymbol => generate_file_suggestions(&token, &ctx.cwd),
+            TriggerType::AtSymbol => {
+                crate::tui::effect::completion::generate_file_suggestions(&token, &ctx.cwd)
+            }
             TriggerType::ModelArg => generate_model_suggestions(&token, &ctx.models),
             TriggerType::ModelSubCommand => generate_model_subcommand_suggestions(&token),
             TriggerType::ResumeArg => generate_resume_suggestions(&token, &ctx.sessions),
@@ -38,7 +38,7 @@ pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
 }
 
 #[cfg(test)]
-mod tests {
+mod generation_tests {
     use super::*;
 
     fn test_commands() -> Vec<(String, String, Vec<String>)> {
@@ -120,5 +120,88 @@ mod tests {
         // 部分 "cr" → 匹配技能别名 "cr" → display_text 使用别名
         let suggestions = generate_command_suggestions("/cr", &skills, &cmds);
         assert!(suggestions.iter().any(|s| s.display_text == "/cr"));
+    }
+}
+
+use crate::tui::model::input::completion_item::CompletionItem;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InputCompletion {
+    pub visible: bool,
+    pub selected_index: Option<usize>,
+    pub query: String,
+    pub items: Vec<CompletionItem>,
+}
+
+impl InputCompletion {
+    pub fn set_items(&mut self, items: Vec<CompletionItem>, query: String) {
+        self.visible = !items.is_empty();
+        self.selected_index = self.visible.then_some(0);
+        self.items = items;
+        self.query = query;
+    }
+
+    pub fn clear(&mut self) {
+        self.visible = false;
+        self.selected_index = None;
+        self.items.clear();
+        self.query.clear();
+    }
+
+    pub fn select_next(&mut self) {
+        if self.items.is_empty() {
+            self.selected_index = None;
+            return;
+        }
+        let current = self.selected_index.unwrap_or(0);
+        self.selected_index = Some((current + 1) % self.items.len());
+    }
+
+    pub fn select_previous(&mut self) {
+        if self.items.is_empty() {
+            self.selected_index = None;
+            return;
+        }
+        let current = self.selected_index.unwrap_or(0);
+        self.selected_index = Some(if current == 0 {
+            self.items.len() - 1
+        } else {
+            current - 1
+        });
+    }
+
+    pub fn selected_item(&self) -> Option<&CompletionItem> {
+        self.selected_index.and_then(|index| self.items.get(index))
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    #[test]
+    fn test_completion_set_items_selects_first() {
+        let mut completion = InputCompletion::default();
+        completion.set_items(vec![CompletionItem::new("a", "a")], "a".to_string());
+        assert_eq!(completion.selected_index, Some(0));
+    }
+
+    #[test]
+    fn test_completion_set_empty_hides() {
+        let mut completion = InputCompletion::default();
+        completion.set_items(Vec::new(), "".to_string());
+        assert!(!completion.visible);
+    }
+
+    #[test]
+    fn test_completion_select_next_wraps() {
+        let mut completion = InputCompletion::default();
+        completion.set_items(
+            vec![CompletionItem::new("a", "a"), CompletionItem::new("b", "b")],
+            "".to_string(),
+        );
+        completion.select_next();
+        completion.select_next();
+        assert_eq!(completion.selected_index, Some(0));
     }
 }
