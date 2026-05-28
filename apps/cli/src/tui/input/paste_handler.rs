@@ -1,7 +1,7 @@
-use crate::tui::core::event::UiEvent;
+use crate::tui::app::event::UiEvent;
 use tokio::sync::mpsc;
 
-impl crate::tui::core::App {
+impl crate::tui::app::App {
     /// Handle paste events when not processing.
     pub(crate) fn handle_paste_event(&mut self, text: String, ui_tx: &mpsc::Sender<UiEvent>) {
         self.input.just_pasted = true;

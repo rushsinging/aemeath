@@ -237,7 +237,7 @@ mod tests {
         let result = update(
             &mut model,
             &mut view_state,
-            TuiMsg::AgentEvent(crate::tui::core::event::UiEvent::Text("hi".into())),
+            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text("hi".into())),
         );
         assert!(result.dirty.output);
     }

@@ -1,4 +1,4 @@
-use crate::tui::core::event::UiEvent;
+use crate::tui::app::event::UiEvent;
 use crate::tui::effect::effect::EffectResult;
 use crossterm::event::{KeyEvent, MouseEvent};
 

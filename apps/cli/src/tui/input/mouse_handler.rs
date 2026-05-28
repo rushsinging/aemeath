@@ -7,7 +7,7 @@ fn point_in_rect(row: u16, col: u16, rect: &ratatui::layout::Rect) -> bool {
     row >= rect.y && row < rect.y + rect.height && col >= rect.x && col < rect.x + rect.width
 }
 
-impl crate::tui::core::App {
+impl crate::tui::app::App {
     pub(crate) fn handle_mouse_event(
         &mut self,
         mouse: MouseEvent,

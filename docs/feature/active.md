@@ -14,7 +14,7 @@
 | 51 | UI Domain DDD 设计 —— 将 apps/cli 提升为核心域 | 中 | ✅ 已合并 | 已确认 | 已并入 #47。经讨论回归支撑域（薄入口），AgentClient SDK 保留并纳入 #47 §6.5。 |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
-| 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移的遗留收口。本轮已建立 `render/`、`adapter/`、`app/`，迁移 mapper、widget adapter、effect executor、status/theme/dialog/render cache/view_model render，并补齐 `view_state/cache.rs`；legacy core/state 等深层重复仍保留为兼容 facade，后续可继续拆。 |
+| 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 未开始 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。当前 legacy core/util.rs、core/update.rs、core/update/key.rs、core/update/ask_user_key.rs（及 input/mouse_handler.rs、paste_handler.rs）仍直接改 widget 后手动 sync，漂移持续产生 #79（Ctrl+A/E/方向键、上下翻历史、Ctrl+W）及 #75/#77 同族 bug。落地两层保障：①静态 guard check-tui-input-single-source.sh（禁 adapter 外对 input_area 调可变方法，仿 tea-purity 的豁免+逃逸，随迁移清零）接入 check-architecture-guards.sh；②迁移后将 InputArea 可变方法收紧为 pub(in crate::tui::...)，越界即编译失败。依赖 #55 把输入路径收口到 InputModel/adapter。 |
 
 ### #56 输入单一真相约束：禁止直接改 input_area 并加架构 guard
@@ -64,7 +64,11 @@
 6. 决定 `model/session/` 去留。
 7. 落地 spec §834 起的剩余架构 guard（render isolation / viewassembler boundary / adapter guard / output line legacy guard / effect boundary）。
 
-**本轮进展（feature/55）**：已建立顶层 `render/`、`adapter/`、`app/`；将 `update/*_mapper.rs` 迁入 `adapter/`，将 `core/*_adapter.rs` 迁入 `adapter/*_widget.rs`，将 `core/effect_runtime.rs` 迁入 `effect/executor.rs`；将 status/theme/dialog/render cache/output view model 渲染相关模块迁入 `render/`；新增 `view_state/cache.rs`，并让主绘制路径通过 `AppViewState.cache` 持有 output render cache。legacy `output_area`/`display` 保留必要兼容 facade，`core/update`/`core/state` 暂未深拆，避免本轮过度重构。
+**本轮补完（fix/feature-55-complete）**：
+- `app/` 不再只是 re-export：原 `core/mod.rs`、`event`、`resize`、`run_loop`、`runtime`、`state`、`update`、`slash`、`util` 已迁入 `app/`；`core/` 仅保留弃用兼容 namespace，legacy `core/update`、`core/state` 已删除。
+- `model/session/` 已并入 `model/runtime/session_*`，去掉第 5 个 model context。
+- `render/` 继续收口输出渲染实现：`output_area/markdown`、`rendered_lines`、`render_blocks`、`render_spans`、`render_status`、`diff`、`tool_display` 已迁入 `render/output/`；`display/syntax`、`display/task_window` 已迁入 `render/`。
+- 新增并接入 `.agents/hooks/check-tui-model-view-boundaries.sh`，覆盖 model 纯度、render legacy fallback、view_assembler、view_model、SDK/runtime event 边界与 #55 物理 legacy 目录约束；更新现有 TEA/effect/output guards。
 
 **关联**：feature #53（TUI Model/View 迁移）；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 

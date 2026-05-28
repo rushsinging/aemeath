@@ -232,5 +232,5 @@ impl super::OutputArea {
 }
 
 #[cfg(test)]
-#[path = "selection_tests.rs"]
+#[path = "../render/output/selection_tests.rs"]
 mod tests;

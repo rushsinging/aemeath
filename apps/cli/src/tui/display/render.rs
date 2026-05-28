@@ -1,6 +1,6 @@
 use crate::tui::model::conversation::intent::ConversationIntent;
 
-impl crate::tui::core::App {
+impl crate::tui::app::App {
     /// Load a saved history message into the TUI model (used during session resume).
     ///
     /// Resume keeps the visual format that users already see, but the source of truth is now

@@ -6,7 +6,7 @@ use crate::tui::render::theme;
 
 impl super::OutputArea {
     /// 渲染带选择高亮的单行（screen_idx 是屏幕行索引）
-    pub(super) fn render_line_with_selection(
+    pub(crate) fn render_line_with_selection(
         &self,
         screen_idx: usize,
         content: &str,
@@ -159,7 +159,7 @@ impl super::OutputArea {
     }
 
     /// 是否有实际选中范围（start != end）
-    pub(super) fn has_real_selection(&self) -> bool {
+    pub(crate) fn has_real_selection(&self) -> bool {
         match (self.selection_start, self.selection_end) {
             (Some((ss, sc)), Some((es, ec))) => ss != es || sc != ec,
             _ => false,

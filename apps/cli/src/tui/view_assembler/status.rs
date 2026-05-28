@@ -2,7 +2,7 @@ use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::model::RuntimeModel;
 use crate::tui::model::runtime::processing_job::ProcessingStatus;
-use crate::tui::model::session::model::SessionModel;
+use crate::tui::model::runtime::session_model::SessionModel;
 use crate::tui::view_model::{SemanticStyle, StatusLineViewModel, StatusSegment, StatusSeverity};
 
 pub struct StatusViewAssembler;

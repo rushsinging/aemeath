@@ -1,4 +1,4 @@
-use crate::tui::core::App;
+use crate::tui::app::App;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -25,8 +25,8 @@ impl App {
                     // 恢复 workspace 上下文
                     if let Some(ref ws) = s.workspace {
                         self.session.cwd = ws.path_base.clone();
-                        let ev = crate::tui::core::status_context_for_workspace(ws.clone());
-                        if let crate::tui::core::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
+                        let ev = crate::tui::app::status_context_for_workspace(ws.clone());
+                        if let crate::tui::app::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
                             self.status_bar
                                 .set_context_paths(ctx.path_base, ctx.working_root);
                             self.status_bar

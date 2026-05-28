@@ -1,4 +1,4 @@
-use crate::tui::core::event::{StatusContextUpdate, UiEvent};
+use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -139,12 +139,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             working_root,
             workspace,
         } => UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
-            path_base: crate::tui::core::display_status_path(std::path::Path::new(&path_base)),
-            working_root: crate::tui::core::display_status_path(std::path::Path::new(
-                &working_root,
-            )),
-            branch: crate::tui::core::git_branch_for(std::path::Path::new(&working_root)),
-            kind: crate::tui::core::worktree_kind_for(std::path::Path::new(&working_root)),
+            path_base: crate::tui::app::display_status_path(std::path::Path::new(&path_base)),
+            working_root: crate::tui::app::display_status_path(std::path::Path::new(&working_root)),
+            branch: crate::tui::app::git_branch_for(std::path::Path::new(&working_root)),
+            kind: crate::tui::app::worktree_kind_for(std::path::Path::new(&working_root)),
             raw_path_base: std::path::PathBuf::from(path_base),
             raw_working_root: std::path::PathBuf::from(working_root),
             workspace,

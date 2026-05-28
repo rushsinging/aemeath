@@ -1,7 +1,7 @@
 use crate::tui::effect::effect::EffectResult;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
-use crate::tui::model::session::intent::SessionIntent;
+use crate::tui::model::runtime::session_intent::SessionIntent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EffectResultMapping {

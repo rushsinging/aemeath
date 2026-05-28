@@ -1,4 +1,4 @@
-use crate::tui::core::App;
+use crate::tui::app::App;
 
 impl App {
     pub(crate) fn resume_session_messages(

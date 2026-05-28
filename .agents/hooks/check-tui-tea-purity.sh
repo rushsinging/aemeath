@@ -6,14 +6,14 @@ FAILED=0
 COUNT=0
 
 TUI_PURE_DIRS=(
-  "apps/cli/src/tui/core"
+  "apps/cli/src/tui/app"
   "apps/cli/src/tui/model"
   "apps/cli/src/tui/view_assembler"
   "apps/cli/src/tui/view_model"
 )
 
 # ---------------------------------------------------------------------------
-# Exemption list: files in tui/core/ that are part of the runtime / command-
+# Exemption list: files in tui/app/ that are part of the runtime / command-
 # execution layer and are expected to contain side effects (async ops,
 # block_on, spawns, etc.).
 #
@@ -21,20 +21,19 @@ TUI_PURE_DIRS=(
 # as well as pure-data modules (event.rs, msg.rs, resize.rs).
 # ---------------------------------------------------------------------------
 EXEMPT_FILES=(
-  "apps/cli/src/tui/core/effect_runtime.rs"
-  "apps/cli/src/tui/core/mod.rs"
-  "apps/cli/src/tui/core/run_loop.rs"
-  "apps/cli/src/tui/core/runtime.rs"
-  "apps/cli/src/tui/core/slash.rs"
-  "apps/cli/src/tui/core/slash/dialog.rs"
-  "apps/cli/src/tui/core/slash/help.rs"
-  "apps/cli/src/tui/core/slash/help_display.rs"
-  "apps/cli/src/tui/core/slash/memory.rs"
-  "apps/cli/src/tui/core/slash/reflection.rs"
-  "apps/cli/src/tui/core/slash/save.rs"
-  "apps/cli/src/tui/core/slash/suggestions.rs"
-  "apps/cli/src/tui/core/slash_tests.rs"
-  "apps/cli/src/tui/core/util.rs"
+  "apps/cli/src/tui/app/mod.rs"
+  "apps/cli/src/tui/app/run_loop.rs"
+  "apps/cli/src/tui/app/runtime.rs"
+  "apps/cli/src/tui/app/slash.rs"
+  "apps/cli/src/tui/app/slash/dialog.rs"
+  "apps/cli/src/tui/app/slash/help.rs"
+  "apps/cli/src/tui/app/slash/help_display.rs"
+  "apps/cli/src/tui/app/slash/memory.rs"
+  "apps/cli/src/tui/app/slash/reflection.rs"
+  "apps/cli/src/tui/app/slash/save.rs"
+  "apps/cli/src/tui/app/slash/suggestions.rs"
+  "apps/cli/src/tui/app/slash_tests.rs"
+  "apps/cli/src/tui/app/util.rs"
 )
 
 is_exempt() {

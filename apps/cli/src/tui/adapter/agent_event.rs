@@ -1,11 +1,11 @@
-use crate::tui::core::event::{StatusContextUpdate, UiEvent};
+use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::workspace::WorktreeKind;
-use crate::tui::model::session::intent::SessionIntent;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
