@@ -32,7 +32,7 @@ impl OutputViewAssembler {
                     }));
                 }
                 ConversationBlock::Thinking { id, text } => {
-                    blocks.push(OutputBlockView::AssistantMessage(TextBlockView {
+                    blocks.push(OutputBlockView::ThinkingMessage(TextBlockView {
                         key: id.clone(),
                         text: text.clone(),
                         style: SemanticStyle::Muted,

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::tui::display::syntax::extension_from_path;
 use crate::tui::output_area::{build_diff_lines, LineStyle, OutputLine, INDENT};
 

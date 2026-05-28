@@ -5,11 +5,14 @@ use sdk::{ByteIdx, StrSlice};
 /// **不要** 替换为多字节中文/emoji 字符串——`do_rerender` 里的偏移依赖
 /// 它们的字节长度，否则会 UTF-8 边界 panic（曾经因为误翻译为 `思路` /
 /// `</think` 触发过 `byte index 7 is not a char boundary`）。
+#[allow(dead_code)]
 const THINK_OPEN: &str = "<think>";
+#[allow(dead_code)]
 const THINK_CLOSE: &str = "</think>";
 
 impl super::OutputArea {
     /// 判断当前是否在未闭合的思考块内
+    #[allow(dead_code)]
     pub(super) fn has_unclosed_think(&self) -> bool {
         let opens = self.streaming_buffer.matches(THINK_OPEN).count();
         let closes = self.streaming_buffer.matches(THINK_CLOSE).count();
@@ -17,6 +20,7 @@ impl super::OutputArea {
     }
 
     /// 将思考文本追加到流式块
+    #[allow(dead_code)]
     pub fn append_thinking_text(&mut self, text: &str) {
         if text.contains(THINK_OPEN) || text.contains(THINK_CLOSE) {
             self.streaming_buffer.push_str(text);
@@ -31,6 +35,7 @@ impl super::OutputArea {
     }
 
     /// 将文本追加到流式助手块
+    #[allow(dead_code)]
     pub fn append_assistant_text(&mut self, text: &str) {
         if self.synthetic_think_open && self.has_unclosed_think() {
             self.streaming_buffer.push_str(THINK_CLOSE);
@@ -42,6 +47,7 @@ impl super::OutputArea {
     }
 
     /// 流式块的核心重绘逻辑
+    #[allow(dead_code)]
     pub(super) fn do_rerender(&mut self) {
         if self.streaming_start.is_none() {
             self.streaming_start = Some(self.lines.len());

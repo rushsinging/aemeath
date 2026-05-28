@@ -18,6 +18,7 @@ pub struct SpanPart {
 }
 
 impl SpanPart {
+    #[allow(dead_code)]
     pub fn plain(text: impl Into<String>, color: Color) -> Self {
         Self {
             text: text.into(),
@@ -37,6 +38,7 @@ pub struct OutputLine {
     pub spans: Option<Vec<SpanPart>>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default)]
 pub enum LineStyle {
     #[default]

@@ -21,6 +21,7 @@ impl Default for OutputViewModel {
 pub enum OutputBlockView {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
+    ThinkingMessage(TextBlockView),
     ToolCall(ToolCallBlockView),
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),

@@ -103,6 +103,7 @@ fn format_tool_group(name: &str, summaries: &[&str]) -> String {
 
 /// Extract a short preview string from partial JSON arguments for a given tool name.
 /// Returns empty string if no useful preview can be extracted yet.
+#[allow(dead_code)]
 pub(super) fn extract_tool_preview(name: &str, partial_args: &str) -> String {
     // Key parameter names for each tool — the first found non-empty value wins.
     let keys: &[&str] = match name {
@@ -131,6 +132,7 @@ pub(super) fn extract_tool_preview(name: &str, partial_args: &str) -> String {
 
 /// Extract a string value from (possibly incomplete) JSON by scanning for `"key":"value"`.
 /// Handles escaped quotes and partial values (value may be cut off at the end).
+#[allow(dead_code)]
 fn extract_string_value(json: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"");
     let start = json.find(&needle)?;
