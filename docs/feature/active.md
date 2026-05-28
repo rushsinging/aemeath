@@ -15,6 +15,27 @@
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移的遗留收口。本轮已建立 `render/`、`adapter/`、`app/`，迁移 mapper、widget adapter、effect executor、status/theme/dialog/render cache/view_model render，并补齐 `view_state/cache.rs`；legacy core/state 等深层重复仍保留为兼容 facade，后续可继续拆。 |
+| 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 未开始 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。当前 legacy core/util.rs、core/update.rs、core/update/key.rs、core/update/ask_user_key.rs（及 input/mouse_handler.rs、paste_handler.rs）仍直接改 widget 后手动 sync，漂移持续产生 #79（Ctrl+A/E/方向键、上下翻历史、Ctrl+W）及 #75/#77 同族 bug。落地两层保障：①静态 guard check-tui-input-single-source.sh（禁 adapter 外对 input_area 调可变方法，仿 tea-purity 的豁免+逃逸，随迁移清零）接入 check-architecture-guards.sh；②迁移后将 InputArea 可变方法收紧为 pub(in crate::tui::...)，越界即编译失败。依赖 #55 把输入路径收口到 InputModel/adapter。 |
+
+### #56 输入单一真相约束：禁止直接改 input_area 并加架构 guard
+
+**状态**：未开始
+
+**背景**：用户 2026-05-28 指出 `input_area` 所有直接修改（text 或 cursor）后未同步 `model.input.document`，突破了架构约束。约定先等 feature #55 输入路径收口后再做，故独立成 feature 跟踪。
+
+**约束**：输入的 text/cursor 业务真相只在 `model.input.document`（InputModel）。`InputArea` 是 View，必须由 model 单向派生（`adapter/input_widget.rs` / `core/input_adapter.rs`）。update 层 **不得**直接调 widget 可变方法（`set_text`/`move_*`/`delete_word`/`backspace`/`input`/`enter`/`clear`/`cut`）再手动 sync——"改完再 sync"本身就是反模式（spec 目标 #2、Milestone 3）。
+
+**当前违规点**（2026-05-28 核实）：`apps/cli/src/tui/core/util.rs`、`core/update.rs`、`core/update/key.rs`、`core/update/ask_user_key.rs`，以及 `input/mouse_handler.rs`、`input/paste_handler.rs` 仍直接改 input_area，部分跟一行 `model.input.document.set_cursor_col(...)`，很多未同步。
+
+**为什么重要**：widget 与 model 漂移正是 bug #79（`7c2639e` Ctrl+A/E/Left/Right/End 输入位置错位、`bcaca91` 上下翻历史 + Ctrl+W delete_word 未同步）以及 #75（CJK 顺序）、#77（@ 补全回删）的同源根因；"改完手动 sync" 持续产 bug。
+
+**目标（两层保障）**：
+1. **静态 guard**：新增 `.agents/hooks/check-tui-input-single-source.sh`，禁止 adapter 之外对 `input_area` 调可变方法；仿 `check-tui-tea-purity.sh` 的 `EXEMPT_FILES` + `// allow input_single_source` 逃逸，豁免随迁移逐项清零；接入 `check-architecture-guards.sh`（Stop hook）。
+2. **类型级**：迁移后将 `InputArea` 可变方法可见性收紧为 `pub(in crate::tui::...)`，只对 adapter 模块可见，越界即编译失败。
+
+**依赖**：feature #55（先把键盘输入收口为 InputIntent→InputModel→InputChange→adapter→widget，否则 guard 会被大量 legacy 违规挡住）。
+
+**关联**：bug #79、#75、#77；feature #53、#55；spec `docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`。
 
 ### #55 TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core
 
