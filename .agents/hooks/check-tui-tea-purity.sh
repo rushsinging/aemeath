@@ -2,14 +2,15 @@
 set -euo pipefail
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-TARGET="$ROOT/apps/cli/src/tui/core"
 FAILED=0
 COUNT=0
 
-if [[ ! -d "$TARGET" ]]; then
-  echo "ERROR: target directory not found: $TARGET" >&2
-  exit 2
-fi
+TUI_PURE_DIRS=(
+  "apps/cli/src/tui/core"
+  "apps/cli/src/tui/model"
+  "apps/cli/src/tui/view_assembler"
+  "apps/cli/src/tui/view_model"
+)
 
 # ---------------------------------------------------------------------------
 # Exemption list: files in tui/core/ that are part of the runtime / command-
@@ -46,37 +47,44 @@ is_exempt() {
   return 1
 }
 
-while IFS= read -r -d '' file; do
-  rel="${file#$ROOT/}"
-
-  # Skip files in the exemption list (runtime / command-execution layer)
-  if is_exempt "$rel"; then
+for dir in "${TUI_PURE_DIRS[@]}"; do
+  TARGET="$ROOT/$dir"
+  if [[ ! -d "$TARGET" ]]; then
     continue
   fi
 
-  while IFS=: read -r line_no line; do
-    if [[ "$line" == *"allow tea_side_effect"* ]]; then
+  while IFS= read -r -d '' file; do
+    rel="${file#$ROOT/}"
+
+    # Skip files in the exemption list (runtime / command-execution layer)
+    if is_exempt "$rel"; then
       continue
     fi
-    printf 'TUI update side effect: %s:%s:%s\n' "$rel" "$line_no" "$line"
-    FAILED=1
-    COUNT=$((COUNT + 1))
-  done < <(
-    perl -ne '
-      print "$.:$_" if /tokio::spawn\s*\(/;
-      print "$.:$_" if /std::thread::spawn\s*\(/;
-      print "$.:$_" if /Command::new\s*\(/;
-      print "$.:$_" if /HookRunner::run|\.run_hook\s*\(/;
-      print "$.:$_" if /clipboard::|arboard::|copypasta::/;
-      print "$.:$_" if /read_clipboard_image\s*\(/;
-      print "$.:$_" if /process_image_file\s*\(/;
-      # ── New patterns ──────────────────────────────────────────────
-      print "$.:$_" if /\bHandle::block_on\s*\(|\bRuntime::block_on\s*\(/;
-      print "$.:$_" if /block_in_place\b/;
-      print "$.:$_" if /\.await\b/;
-    ' "$file"
-  )
-done < <(find "$TARGET" -path "$ROOT/.worktrees" -prune -o -name '*.rs' -print0)
+
+    while IFS=: read -r line_no line; do
+      if [[ "$line" == *"allow tea_side_effect"* ]]; then
+        continue
+      fi
+      printf 'TUI update side effect: %s:%s:%s\n' "$rel" "$line_no" "$line"
+      FAILED=1
+      COUNT=$((COUNT + 1))
+    done < <(
+      perl -ne '
+        print "$.:$_" if /tokio::spawn\s*\(/;
+        print "$.:$_" if /std::thread::spawn\s*\(/;
+        print "$.:$_" if /Command::new\s*\(/;
+        print "$.:$_" if /HookRunner::run|\.run_hook\s*\(/;
+        print "$.:$_" if /clipboard::|arboard::|copypasta::/;
+        print "$.:$_" if /read_clipboard_image\s*\(/;
+        print "$.:$_" if /process_image_file\s*\(/;
+        # ── New patterns ──────────────────────────────────────────────
+        print "$.:$_" if /\bHandle::block_on\s*\(|\bRuntime::block_on\s*\(/;
+        print "$.:$_" if /block_in_place\b/;
+        print "$.:$_" if /\.await\b/;
+      ' "$file"
+    )
+  done < <(find "$TARGET" -name '*.rs' -print0)
+done
 
 if [[ "$FAILED" -ne 0 ]]; then
   echo "TUI update side effects found ($COUNT). Return Cmd variants from update() and execute side effects in app runtime/cmd_exec instead."

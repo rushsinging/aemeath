@@ -4,6 +4,9 @@ pub mod display;
 pub mod input;
 pub mod output_area;
 pub mod session;
+pub mod view_assembler;
+pub mod view_model;
+pub mod view_state;
 
 pub use self::core::App;
 pub use self::display::status_bar::StatusBar;
