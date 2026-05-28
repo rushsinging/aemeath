@@ -111,11 +111,16 @@ impl ConversationModel {
         let Some(turn) = chat.active_turn_mut() else {
             return Vec::new();
         };
-        if !turn.bind_tool(ToolCallId::new(id.clone()), &name, index, summary) {
+        let Some(args_preview) =
+            turn.bind_tool(ToolCallId::new(id.clone()), &name, index, summary.clone())
+        else {
             return Vec::new();
-        }
+        };
         self.blocks.push(ConversationBlock::ToolCall {
             id: ToolCallId::new(id.clone()),
+            name: name.clone(),
+            summary: summary.clone(),
+            args_preview,
         });
         vec![
             ConversationChange::ToolCallBound { id, name },
@@ -219,6 +224,8 @@ impl ConversationModel {
         index: usize,
         partial_args: String,
     ) -> Vec<ConversationChange> {
+        let mut found_call = false;
+        let mut bound_id = None;
         if let Some(chat) = self.active_chat_mut() {
             if let Some(turn) = chat.active_turn_mut() {
                 if let Some(call) = turn
@@ -226,10 +233,28 @@ impl ConversationModel {
                     .iter_mut()
                     .find(|call| call.stream_key.name == name && call.stream_key.index == index)
                 {
-                    call.update_args(partial_args);
-                    return vec![ConversationChange::OutputDirty];
+                    call.update_args(partial_args.clone());
+                    found_call = true;
+                    bound_id = call.id.clone();
                 }
             }
+        }
+        if let Some(bound_id) = bound_id {
+            for block in &mut self.blocks {
+                if let ConversationBlock::ToolCall {
+                    id, args_preview, ..
+                } = block
+                {
+                    if id == &bound_id {
+                        *args_preview = partial_args;
+                        break;
+                    }
+                }
+            }
+            return vec![ConversationChange::OutputDirty];
+        }
+        if found_call {
+            return vec![ConversationChange::OutputDirty];
         }
         Vec::new()
     }

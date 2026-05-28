@@ -1,7 +1,8 @@
 use super::InputArea;
 
 impl InputArea {
-    /// Add a message to history
+    /// Add a message to history in tests.
+    #[cfg(test)]
     pub fn add_history(&mut self, text: &str) {
         if text.is_empty() {
             return;

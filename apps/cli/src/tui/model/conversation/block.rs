@@ -16,6 +16,9 @@ pub enum ConversationBlock {
     },
     ToolCall {
         id: ToolCallId,
+        name: String,
+        summary: String,
+        args_preview: String,
     },
     ToolResult {
         id: ToolCallId,
@@ -58,7 +61,7 @@ impl ConversationBlock {
             | ConversationBlock::QueuedUserMessage { id, .. }
             | ConversationBlock::AgentProgress { id, .. }
             | ConversationBlock::OrphanToolResult { id, .. } => id,
-            ConversationBlock::ToolCall { id } | ConversationBlock::ToolResult { id, .. } => {
+            ConversationBlock::ToolCall { id, .. } | ConversationBlock::ToolResult { id, .. } => {
                 id.as_ref()
             }
         }
@@ -83,6 +86,9 @@ mod tests {
     fn test_conversation_block_returns_tool_id() {
         let block = ConversationBlock::ToolCall {
             id: ToolCallId::new("tool-1"),
+            name: "Read".to_string(),
+            summary: "read file".to_string(),
+            args_preview: String::new(),
         };
         assert_eq!(block.id(), "tool-1");
     }

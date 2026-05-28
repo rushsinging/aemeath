@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod tests {
     use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
+    use crate::tui::core::App;
 
     fn make_memory_config() -> sdk::MemoryConfigView {
         sdk::MemoryConfigView::default()
@@ -184,5 +185,59 @@ mod tests {
         assert_eq!(layout.output_area_rect, output);
         assert_eq!(layout.input_area_rect, input);
         assert_eq!(layout.status_bar_rect, status);
+    }
+
+    #[test]
+    fn test_app_dual_track_sync_initializes_session_runtime_and_input() {
+        let cwd = std::path::PathBuf::from("/tmp/aemeath");
+        let app = App::new("sess-1".to_string(), cwd.clone(), "gpt-test".to_string());
+
+        assert_eq!(
+            app.model.session.current_session_id.as_deref(),
+            Some("sess-1")
+        );
+        assert_eq!(app.model.runtime.model_id.as_deref(), Some("gpt-test"));
+        assert_eq!(
+            app.model.runtime.workspace.cwd,
+            Some(cwd.display().to_string())
+        );
+        assert!(app.model.input.document.buffer.is_empty());
+        assert!(app.dual_track_mismatches().is_empty());
+    }
+
+    #[test]
+    fn test_app_dual_track_sync_tracks_usage_messages_and_attachments() {
+        let mut app = App::new(
+            "sess-usage".to_string(),
+            std::path::PathBuf::from("/tmp/aemeath"),
+            "gpt-test".to_string(),
+        );
+        app.chat.messages.push(sdk::ChatMessage::user_text("hi"));
+        app.chat.record_usage(12, 7, 12);
+        app.chat.add_pending_image(make_clipboard_image(42));
+
+        app.sync_dual_track_state();
+
+        assert_eq!(app.model.session.message_count, 1);
+        assert_eq!(app.model.runtime.usage.input_tokens, 12);
+        assert_eq!(app.model.runtime.usage.output_tokens, 7);
+        assert_eq!(app.model.input.attachments.len(), 1);
+        assert!(app.dual_track_mismatches().is_empty());
+    }
+
+    #[test]
+    fn test_app_dual_track_mismatches_detect_stale_model() {
+        let mut app = App::new(
+            "sess-stale".to_string(),
+            std::path::PathBuf::from("/tmp/aemeath"),
+            "gpt-test".to_string(),
+        );
+        app.chat.messages.push(sdk::ChatMessage::user_text("late"));
+
+        let mismatches = app.dual_track_mismatches();
+
+        assert!(mismatches
+            .iter()
+            .any(|item| item == "session.message_count"));
     }
 }

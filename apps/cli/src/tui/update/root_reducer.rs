@@ -114,7 +114,10 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
     result
 }
 
-fn reduce_agent_event(model: &mut TuiModel, mapping: AgentEventMapping) -> TuiUpdateResult {
+pub(crate) fn reduce_agent_event(
+    model: &mut TuiModel,
+    mapping: AgentEventMapping,
+) -> TuiUpdateResult {
     let mut result = TuiUpdateResult::default();
     for intent in mapping.conversation {
         let changes = model.conversation.apply(intent);
@@ -237,5 +240,41 @@ mod tests {
             TuiMsg::AgentEvent(crate::tui::core::event::UiEvent::Text("hi".into())),
         );
         assert!(result.dirty.output);
+    }
+
+    #[test]
+    fn test_reduce_agent_event_tool_call_updates_conversation() {
+        let mut model = TuiModel::default();
+        model.conversation.apply(ConversationIntent::StartChat {
+            submission: "read".to_string(),
+        });
+        reduce_agent_event(
+            &mut model,
+            AgentEventMapping {
+                conversation: vec![ConversationIntent::ObserveToolCallStart {
+                    name: "Read".to_string(),
+                    index: 0,
+                }],
+                ..Default::default()
+            },
+        );
+        reduce_agent_event(
+            &mut model,
+            AgentEventMapping {
+                conversation: vec![ConversationIntent::ObserveToolCall {
+                    id: "tool-1".to_string(),
+                    name: "Read".to_string(),
+                    index: 0,
+                    summary: "Read file".to_string(),
+                }],
+                ..Default::default()
+            },
+        );
+
+        assert!(model.conversation.blocks.iter().any(|block| matches!(
+            block,
+            crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
+                if id.as_ref() == "tool-1"
+        )));
     }
 }

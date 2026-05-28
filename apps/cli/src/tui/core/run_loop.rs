@@ -1,6 +1,5 @@
 use super::App;
 use crate::tui::core::event::UiEvent;
-use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::session::processing;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
@@ -103,84 +102,5 @@ impl App {
             }
         }
         Ok(())
-    }
-
-    fn execute_spawn_effect(&mut self, effect: SpawnAgentChatEffect) {
-        if let Some(spawn_ctx) = effect.context {
-            processing::spawn_processing(spawn_ctx);
-        }
-    }
-
-    async fn execute_effect(&mut self, effect: Effect, ui_tx: &mpsc::Sender<UiEvent>) {
-        match effect {
-            Effect::None | Effect::RequestRender => {}
-            Effect::QuitApplication => self.layout.request_exit(),
-            Effect::SpawnAgentChat { .. } => {}
-            Effect::CancelAgentChat => {
-                if let Some(ref ac) = self.agent_client {
-                    ac.cancel();
-                }
-            }
-            Effect::SaveSession => {
-                if !self.chat.messages.is_empty() {
-                    if let Some(ref ac) = self.agent_client {
-                        if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
-                            log::warn!("sync failed: {e}");
-                        }
-                        if let Err(e) = ac.save_current_session().await {
-                            log::warn!("save failed: {e}");
-                        }
-                    }
-                }
-            }
-            Effect::RunHook { message, name } => {
-                if let Some(ref ac) = self.agent_client {
-                    let _ = ac.notify_hook(&message, &name).await;
-                }
-            }
-            Effect::ReadClipboardImage => {
-                if let Some(ref ac) = self.agent_client {
-                    match ac.read_clipboard_image().await {
-                        Ok(img) => {
-                            let count = self.chat.add_pending_image(img);
-                            self.input_area.set_pending_images(count);
-                        }
-                        Err(e) => log::warn!("clipboard read failed: {e}"),
-                    }
-                }
-            }
-            Effect::ProcessImageFile { path } => {
-                if let Some(ref ac) = self.agent_client {
-                    match ac.process_image_file(path).await {
-                        Ok(img) => {
-                            let count = self.chat.add_pending_image(img);
-                            self.input_area.set_pending_images(count);
-                        }
-                        Err(e) => log::warn!("image process failed: {e}"),
-                    }
-                }
-            }
-            Effect::SetCurrentTurn { turn } => {
-                if let Some(ref ac) = self.agent_client {
-                    ac.set_current_turn(turn);
-                }
-            }
-            Effect::FetchReminderRecap => {
-                if let Some(ref ac) = self.agent_client {
-                    match ac.list_reminders().await {
-                        Ok(reminders) => {
-                            if let Some(line) = sdk::ReminderView::recap_line(&reminders) {
-                                let _ = ui_tx.send(UiEvent::ReminderRecap(line)).await;
-                            }
-                        }
-                        Err(e) => log::warn!("fetch reminder recap failed: {e}"),
-                    }
-                }
-            }
-            Effect::FetchTaskStatus
-            | Effect::CopyToClipboard { .. }
-            | Effect::StartTimer { .. }
-            | Effect::StopTimer { .. } => {}
-        }
     }
 }

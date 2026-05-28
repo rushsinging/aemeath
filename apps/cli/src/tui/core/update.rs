@@ -13,10 +13,15 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
+use crate::tui::core::runtime_bridge::{
+    apply_diagnostic_status_to_legacy, apply_runtime_status_to_legacy,
+};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::session::processing::SpawnContext;
 use crate::tui::session::processing::SpawnContextRefs;
+use crate::tui::update::agent_event_mapper::map_agent_event;
 use crate::tui::update::msg::TuiMsg;
+use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use tokio::sync::mpsc;
 
 /// Return type for update: effects plus optional slash command continuation.
@@ -66,6 +71,8 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         match msg {
+            TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
+            TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, ui_tx, spawn_refs),
             TuiMsg::Mouse(mouse) => {
                 self.handle_mouse_event(mouse, self.layout.output_area_rect);
@@ -124,7 +131,6 @@ impl App {
                 self.output_area.tick_spinner();
                 UpdateResult::none()
             }
-            TuiMsg::Ui(ev) => self.update_ui(ev, ui_tx, spawn_refs),
             TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
                 self.handle_mouse_event(mouse, self.layout.output_area_rect);
@@ -134,11 +140,32 @@ impl App {
                 self.handle_resize(width, height);
                 UpdateResult::none()
             }
-            TuiMsg::AgentEvent(ev) => self.update_ui(ev, ui_tx, spawn_refs),
             TuiMsg::EffectCompleted(_) | TuiMsg::TimerTick { .. } | TuiMsg::RenderTick => {
                 UpdateResult::none()
             }
         }
+    }
+
+    fn update_agent_event(
+        &mut self,
+        ev: UiEvent,
+        ui_tx: &mpsc::Sender<UiEvent>,
+        spawn_refs: &SpawnContextRefs,
+    ) -> UpdateResult {
+        let model_result = self.reduce_agent_event_for_model(&ev);
+        let mut result = self.update_ui(ev, ui_tx, spawn_refs);
+        apply_runtime_status_to_legacy(&self.model, &self.chat, &mut self.status_bar);
+        apply_diagnostic_status_to_legacy(&self.model, &mut self.status_bar);
+        result.effects.extend(model_result.effects);
+        result
+    }
+
+    fn reduce_agent_event_for_model(&mut self, ev: &UiEvent) -> TuiUpdateResult {
+        let mapping = map_agent_event(ev);
+        if mapping == Default::default() {
+            return TuiUpdateResult::default();
+        }
+        reduce_agent_event(&mut self.model, mapping)
     }
 }
 
