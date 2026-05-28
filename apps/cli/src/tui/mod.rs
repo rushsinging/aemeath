@@ -1,6 +1,7 @@
 pub mod completion;
 pub mod core;
 pub mod display;
+pub mod effect;
 pub mod input;
 pub mod model;
 pub mod output_area;
