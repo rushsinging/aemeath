@@ -69,7 +69,7 @@ static TOOL_DISPLAYS: LazyLock<HashMap<&'static str, Box<dyn ToolDisplay>>> = La
     map
 });
 
-fn lookup_display(name: &str) -> Option<&dyn ToolDisplay> {
+pub(crate) fn lookup_display(name: &str) -> Option<&'static dyn ToolDisplay> {
     TOOL_DISPLAYS.get(name).map(|display| display.as_ref())
 }
 
