@@ -314,11 +314,12 @@ mod tests {
             UiEvent::TextBlockComplete("thinking".to_string()),
             UiEvent::ToolCallStart {
                 name: "Grep".to_string(),
-                index: 0,
+                index: 1,
             },
             UiEvent::ToolCall {
                 id: "grep-1".to_string(),
                 name: "Grep".to_string(),
+                index: Some(1),
                 summary: r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string(),
             },
             UiEvent::ToolResult {

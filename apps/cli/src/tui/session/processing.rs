@@ -50,7 +50,17 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             name,
             partial_args,
         },
-        sdk::ChatEvent::ToolCall { id, name, summary } => UiEvent::ToolCall { id, name, summary },
+        sdk::ChatEvent::ToolCall {
+            id,
+            name,
+            index,
+            summary,
+        } => UiEvent::ToolCall {
+            id,
+            name,
+            index,
+            summary,
+        },
         sdk::ChatEvent::ToolResult {
             id,
             tool_name,

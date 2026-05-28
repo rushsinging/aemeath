@@ -89,6 +89,7 @@ pub enum ChatEvent {
     ToolCall {
         id: String,
         name: String,
+        index: Option<usize>,
         summary: String,
     },
     /// 工具执行结果。

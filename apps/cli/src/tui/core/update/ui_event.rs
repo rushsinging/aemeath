@@ -60,7 +60,12 @@ impl App {
                 self.output_area
                     .update_tool_call_pending(&name, index, &partial_args);
             }
-            UiEvent::ToolCall { id, name, summary } => {
+            UiEvent::ToolCall {
+                id,
+                name,
+                index: _,
+                summary,
+            } => {
                 log::debug!(
                     "[SPINNER] ToolCall({name}): tool_call_active={}",
                     self.chat.tool_call_active

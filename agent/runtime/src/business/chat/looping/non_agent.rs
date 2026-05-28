@@ -188,6 +188,7 @@ where
     let owned_call = ToolCall {
         id: call.id.clone(),
         name: call.name.clone(),
+        index: call.index,
         input: call.input.clone(),
     };
     let pre_results = hook_ui

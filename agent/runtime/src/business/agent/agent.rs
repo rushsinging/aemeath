@@ -12,6 +12,7 @@ pub struct Agent<'a> {
 pub struct ToolCall {
     pub id: String,
     pub name: String,
+    pub index: usize,
     pub input: serde_json::Value,
 }
 
@@ -59,10 +60,12 @@ impl<'a> Agent<'a> {
         message
             .content
             .iter()
-            .filter_map(|block| match block {
+            .enumerate()
+            .filter_map(|(index, block)| match block {
                 ContentBlock::ToolUse { id, name, input } => Some(ToolCall {
                     id: id.clone(),
                     name: name.clone(),
+                    index,
                     input: input.clone(),
                 }),
                 _ => None,
@@ -192,6 +195,7 @@ impl<'a> Agent<'a> {
             .map(|c| ToolCall {
                 id: c.id.clone(),
                 name: c.name.clone(),
+                index: c.index,
                 input: c.input.clone(),
             })
             .collect();

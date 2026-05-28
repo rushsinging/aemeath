@@ -34,6 +34,7 @@ where
                 let call = ToolCall {
                     id: call.id.clone(),
                     name: call.name.clone(),
+                    index: call.index,
                     input: call.input.clone(),
                 };
                 let sink = sink.clone();

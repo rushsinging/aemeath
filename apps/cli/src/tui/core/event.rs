@@ -29,6 +29,7 @@ pub enum AppEvent {
     ToolCall {
         id: String,
         name: String,
+        index: Option<usize>,
         summary: String,
     },
     ToolResult {
