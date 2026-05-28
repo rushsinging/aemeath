@@ -1,4 +1,4 @@
-use crate::tui::display::safe_text::{col_to_char_idx, safe_char_slice};
+use crate::tui::render::display::safe_text::{col_to_char_idx, safe_char_slice};
 use crate::tui::render::status::{StatusBar, StatusBarRow};
 use crate::tui::render::theme;
 use ratatui::{style::Style, text::Span};

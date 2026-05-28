@@ -2,17 +2,9 @@ use std::collections::HashSet;
 
 use crate::tui::render::output::RenderedCache;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct OutputRenderCacheState {
     pub line_cache: RenderedCache,
-}
-
-impl Default for OutputRenderCacheState {
-    fn default() -> Self {
-        Self {
-            line_cache: RenderedCache::new(),
-        }
-    }
 }
 
 #[derive(Debug, Default)]

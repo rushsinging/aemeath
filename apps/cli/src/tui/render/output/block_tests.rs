@@ -1,5 +1,5 @@
 use super::block::{scan_code_blocks, scan_table_blocks};
-use crate::tui::output_area::{LineStyle, OutputLine};
+use crate::tui::render::output_area::{LineStyle, OutputLine};
 
 fn md_line(content: &str) -> OutputLine {
     OutputLine {

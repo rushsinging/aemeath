@@ -4,8 +4,8 @@ use ratatui::text::Line;
 
 use sdk::CharIdx;
 
-use crate::tui::output_area::OutputLine;
 use crate::tui::render::output::line;
+use crate::tui::render::output_area::OutputLine;
 
 /// 单行的渲染结果
 #[derive(Clone, Debug)]
@@ -168,8 +168,8 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
     let start_line = &lines[start];
     if line::is_markdown_style(start_line.style) {
         let trimmed = start_line.content.trim();
-        if crate::tui::output_area::markdown::is_table_row(trimmed)
-            || crate::tui::output_area::markdown::is_table_separator(trimmed)
+        if crate::tui::render::output_area::markdown::is_table_row(trimmed)
+            || crate::tui::render::output_area::markdown::is_table_separator(trimmed)
         {
             let mut scan = start;
             while scan > 0 {
@@ -178,8 +178,8 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
                 let is_md = line::is_markdown_style(prev.style);
                 let t = prev.content.trim();
                 if is_md
-                    && (crate::tui::output_area::markdown::is_table_row(t)
-                        || crate::tui::output_area::markdown::is_table_separator(t))
+                    && (crate::tui::render::output_area::markdown::is_table_row(t)
+                        || crate::tui::render::output_area::markdown::is_table_separator(t))
                 {
                     s = scan;
                 } else {
@@ -222,15 +222,15 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
         let end_line = &lines[end.min(total) - 1];
         if line::is_markdown_style(end_line.style) {
             let trimmed = end_line.content.trim();
-            if crate::tui::output_area::markdown::is_table_row(trimmed)
-                || crate::tui::output_area::markdown::is_table_separator(trimmed)
+            if crate::tui::render::output_area::markdown::is_table_row(trimmed)
+                || crate::tui::render::output_area::markdown::is_table_separator(trimmed)
             {
                 for (i, next) in lines.iter().enumerate().take(total).skip(end) {
                     let is_md = line::is_markdown_style(next.style);
                     let t = next.content.trim();
                     if is_md
-                        && (crate::tui::output_area::markdown::is_table_row(t)
-                            || crate::tui::output_area::markdown::is_table_separator(t))
+                        && (crate::tui::render::output_area::markdown::is_table_row(t)
+                            || crate::tui::render::output_area::markdown::is_table_separator(t))
                     {
                         e = i + 1;
                     } else {
@@ -247,7 +247,7 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::output_area::types::LineStyle;
+    use crate::tui::render::output_area::types::LineStyle;
     fn md_line(content: &str) -> OutputLine {
         OutputLine {
             content: content.to_string(),

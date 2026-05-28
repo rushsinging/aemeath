@@ -2,7 +2,7 @@
 pub struct SpawnAgentChatEffect {
     pub chat_id: String,
     pub prompt: String,
-    pub context: Option<crate::tui::session::processing::SpawnContext>,
+    pub context: Option<crate::tui::app::session::processing::SpawnContext>,
 }
 
 #[allow(dead_code)]

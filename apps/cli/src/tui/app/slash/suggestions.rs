@@ -1,5 +1,5 @@
 use crate::tui::adapter::input_widget::completion_item_from_suggestion;
-use crate::tui::completion::{generate_suggestions, SuggestionContext};
+use crate::tui::render::completion::{generate_suggestions, SuggestionContext};
 
 impl super::super::App {
     /// Update suggestions based on current input

@@ -1,7 +1,7 @@
 use sdk::{char_to_byte, CharIdx, StrSlice};
 
-use crate::tui::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
-use crate::tui::output_area::markdown;
+use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
+use crate::tui::render::output_area::markdown;
 
 impl super::OutputArea {
     /// 获取逻辑行总数（包括普通行 + task_status 虚拟行）
@@ -43,7 +43,7 @@ impl super::OutputArea {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
             if let Some(line) = self.get_line_content(logic_idx) {
                 let byte_start = char_to_byte(&line, char_start);
-                let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
+                let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
                     rel_col,
                 );
@@ -66,7 +66,7 @@ impl super::OutputArea {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
             if let Some(line) = self.get_line_content(logic_idx) {
                 let byte_start = char_to_byte(&line, char_start);
-                let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
+                let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
                     rel_col,
                 );
@@ -100,7 +100,7 @@ impl super::OutputArea {
         };
 
         let byte_start = char_to_byte(&line, char_start);
-        let char_col = crate::tui::output_area::display::screen_col_to_char_idx(
+        let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
             line.bslice_from(byte_start),
             rel_col,
         );
@@ -232,5 +232,5 @@ impl super::OutputArea {
 }
 
 #[cfg(test)]
-#[path = "../render/output/selection_tests.rs"]
+#[path = "../output/selection_tests.rs"]
 mod tests;

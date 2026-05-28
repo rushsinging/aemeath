@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::tui::output_area::{LineStyle, OutputLine, INDENT};
+use crate::tui::render::output_area::{LineStyle, OutputLine, INDENT};
 
 mod agent;
 mod common;
@@ -110,7 +110,7 @@ fn debug_log(msg: &str) {
     log::debug!("{}", msg);
 }
 
-impl crate::tui::output_area::OutputArea {
+impl crate::tui::render::output_area::OutputArea {
     /// 流式过程中 tool_use_start 时推送预占 header，立刻让用户看到 tool 被调用。
     /// `index` 是 LLM 返回的 tool call index，用于生成唯一 pending id
     /// （如 pending:Agent:2），以便后续精确匹配和原地更新。
@@ -245,7 +245,7 @@ mod agent_tests;
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::output_area::OutputArea;
+    use crate::tui::render::output_area::OutputArea;
 
     #[test]
     fn test_task_list_create_display_hides_success_result_noise() {

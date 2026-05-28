@@ -1,6 +1,6 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
-use crate::tui::session::processing;
+use crate::tui::app::session::processing;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;

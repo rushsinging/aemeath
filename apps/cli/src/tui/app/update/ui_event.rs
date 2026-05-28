@@ -1,9 +1,9 @@
 use super::ask_user_options::build_option_line_ranges;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
+use crate::tui::app::session::processing::SpawnContextRefs;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
-use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
 
 impl App {

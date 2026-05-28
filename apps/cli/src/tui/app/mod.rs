@@ -2,6 +2,7 @@ pub mod event;
 mod resize;
 mod run_loop;
 mod runtime;
+pub mod session;
 pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};

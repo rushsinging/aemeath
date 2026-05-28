@@ -1,5 +1,5 @@
 use super::InputArea;
-use crate::tui::display::safe_text::str_display_width;
+use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
@@ -111,7 +111,7 @@ fn char_col_to_screen_col(line_text: &str, char_col: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::display::safe_text::col_to_char_idx;
+    use crate::tui::render::display::safe_text::col_to_char_idx;
     use ratatui::buffer::Buffer;
 
     #[test]

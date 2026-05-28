@@ -16,11 +16,11 @@
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 未开始 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。当前 legacy core/util.rs、core/update.rs、core/update/key.rs、core/update/ask_user_key.rs（及 input/mouse_handler.rs、paste_handler.rs）仍直接改 widget 后手动 sync，漂移持续产生 #79（Ctrl+A/E/方向键、上下翻历史、Ctrl+W）及 #75/#77 同族 bug。落地两层保障：①静态 guard check-tui-input-single-source.sh（禁 adapter 外对 input_area 调可变方法，仿 tea-purity 的豁免+逃逸，随迁移清零）接入 check-architecture-guards.sh；②迁移后将 InputArea 可变方法收紧为 pub(in crate::tui::...)，越界即编译失败。依赖 #55 把输入路径收口到 InputModel/adapter。 |
-| 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 未开始 | 未确认 | #55 后对照 spec 目标结构仍多出 6 个顶层目录：core/（仅弃用说明的空 shim，可删）、output_area/、input/、display/（render/ 驱动的 ratatui widget，spec 想并入 render/{output,input,status,dialog,theme}）、completion/、session/（spec 未规划的服务模块，需定归属）。目标：删 core/ shim；将 widget 目录物理并入 render/ 或明确为 widget 子层；为 completion/session 定位（render/service 层）；收口后顶层目录与 spec 目标对齐。属 #55 声明延后的"深层重复后续可继续拆"。 |
+| 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/`、`completion/` 并入 `render/`；`session/` 定位为 app 边界服务并入 `app/session/`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
-**状态**：未开始
+**状态**：待确认
 
 **背景**：feature #55 完成三层(render/adapter/app)落地与 core/state·core/update·model/session 清理后，对照架构 spec `2026-05-27-tui-model-view-architecture.md` 的目标目录，`apps/cli/src/tui/` 仍多出 6 个顶层目录。#55 文档已把这部分声明为"深层重复后续可继续拆"，本 feature 专门收尾。
 
@@ -43,6 +43,19 @@
 6. **可选**：扩展 `check-forbidden-imports.sh`，禁止 `crate::tui::core` / `::output_area` / `::display` / `::completion` / `::session` 等被并入/删除的旧模块路径导入，防止目录改名后 import 仍引用旧位置。
 
 **为什么要 guard**：纯目录整理若不锁住会逐步漂回（有人又在顶层新建 `output_area/` 或 `use crate::tui::core::...`）。白名单 guard 让结构退化在 Stop hook 即被拦截。
+
+**完成情况（2026-05-28）**：
+1. ✅ 删除 `apps/cli/src/tui/core/` 空 shim。
+2. ✅ `output_area/` 迁入 `render/output_area/`，旧输出 widget 作为 render 层子模块保留，避免顶层漂移。
+3. ✅ `input/` 迁入 `render/input/`，与 `model/input/` 的业务状态层物理分离。
+4. ✅ `display/` 迁入 `render/display/`，status bar 相关 `#[path]` 测试引用同步调整。
+5. ✅ `completion/` 迁入 `render/completion/`，作为输入 UI 补全数据源/解析服务暂归 render 子层。
+6. ✅ `session/` 迁入 `app/session/`，定位为 App 边界会话生命周期/processing 服务，不放入 render。
+7. ✅ 新增 `.agents/hooks/check-tui-toplevel-layout.sh` 并接入 `check-architecture-guards.sh`：只允许 `adapter/app/effect/model/render/update/view_assembler/view_model/view_state` 顶层目录，禁止旧 `tui::core/output_area/input/display/completion/session` 路径回归。
+8. ✅ 同步修正既有架构 guard：`check-tui-model-view-boundaries.sh`、`check-tui-tea-purity.sh`、`check-unsafe-text-ops.sh`。
+9. ✅ 验证：`cargo check -p cli`、`check-tui-toplevel-layout.sh`、`check-architecture-guards.sh` 通过；待完整测试后合并。
+
+**归档前待确认**：用户确认目录归属（特别是 `completion -> render/completion`、`session -> app/session`）符合预期后归档。
 
 **性质**：低优先级、纯结构整理，不改业务行为；可分目录小步迁移，每步保证编译/测试通过。
 

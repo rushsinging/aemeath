@@ -1,4 +1,4 @@
-use crate::tui::output_area::{LineStyle, OutputArea, OutputLine};
+use crate::tui::render::output_area::{LineStyle, OutputArea, OutputLine};
 use ratatui::text::Line;
 
 pub(crate) fn replace_lines_from_view_model(

@@ -1,5 +1,5 @@
-use crate::tui::output_area::tool_display::{format_tool_call, lookup_display};
-use crate::tui::output_area::INDENT;
+use crate::tui::render::output_area::tool_display::{format_tool_call, lookup_display};
+use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::{
     OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
@@ -119,22 +119,22 @@ fn push_tool_result_lines(tool: &ToolCallBlockView, result: &str, lines: &mut Ve
 }
 
 fn map_result_style(
-    line_style: crate::tui::output_area::LineStyle,
+    line_style: crate::tui::render::output_area::LineStyle,
     fallback: SemanticStyle,
 ) -> SemanticStyle {
     match line_style {
-        crate::tui::output_area::LineStyle::Error
-        | crate::tui::output_area::LineStyle::ToolCallError => SemanticStyle::Error,
-        crate::tui::output_area::LineStyle::ToolCallSuccess => SemanticStyle::Success,
-        crate::tui::output_area::LineStyle::ToolCallRunning => SemanticStyle::Running,
-        crate::tui::output_area::LineStyle::System
-        | crate::tui::output_area::LineStyle::Thinking => SemanticStyle::Muted,
-        crate::tui::output_area::LineStyle::Assistant
-        | crate::tui::output_area::LineStyle::Normal
-        | crate::tui::output_area::LineStyle::DiffAdd
-        | crate::tui::output_area::LineStyle::DiffRemove
-        | crate::tui::output_area::LineStyle::AskUser
-        | crate::tui::output_area::LineStyle::User => fallback,
+        crate::tui::render::output_area::LineStyle::Error
+        | crate::tui::render::output_area::LineStyle::ToolCallError => SemanticStyle::Error,
+        crate::tui::render::output_area::LineStyle::ToolCallSuccess => SemanticStyle::Success,
+        crate::tui::render::output_area::LineStyle::ToolCallRunning => SemanticStyle::Running,
+        crate::tui::render::output_area::LineStyle::System
+        | crate::tui::render::output_area::LineStyle::Thinking => SemanticStyle::Muted,
+        crate::tui::render::output_area::LineStyle::Assistant
+        | crate::tui::render::output_area::LineStyle::Normal
+        | crate::tui::render::output_area::LineStyle::DiffAdd
+        | crate::tui::render::output_area::LineStyle::DiffRemove
+        | crate::tui::render::output_area::LineStyle::AskUser
+        | crate::tui::render::output_area::LineStyle::User => fallback,
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::tui::output_area::OutputArea;
+use crate::tui::render::output_area::OutputArea;
 use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
 
 #[test]

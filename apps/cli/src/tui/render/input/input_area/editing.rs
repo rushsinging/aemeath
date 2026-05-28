@@ -1,5 +1,5 @@
 use super::InputArea;
-use crate::tui::display::safe_text::safe_char_slice;
+use crate::tui::render::display::safe_text::safe_char_slice;
 use tui_textarea::CursorMove;
 use unicode_width::UnicodeWidthChar;
 
@@ -217,7 +217,7 @@ fn char_width(ch: char) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::input::input_area::InputArea;
+    use crate::tui::render::input::input_area::InputArea;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 

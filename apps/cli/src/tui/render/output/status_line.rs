@@ -2,10 +2,10 @@ use ratatui::{layout::Rect, style::Style, text::Line};
 
 use sdk::CharIdx;
 
-use crate::tui::display::safe_text::clamp_split_index;
+use crate::tui::render::display::safe_text::clamp_split_index;
 use crate::tui::render::theme;
 
-use crate::tui::output_area::{LineStyle, OutputArea};
+use crate::tui::render::output_area::{LineStyle, OutputArea};
 
 impl OutputArea {
     pub(crate) fn append_status_lines(
@@ -150,16 +150,18 @@ mod tests {
     use ratatui::{buffer::Buffer, layout::Rect};
 
     use super::*;
-    use crate::tui::output_area::types::SpinnerState;
+    use crate::tui::render::output_area::types::SpinnerState;
 
     #[test]
     fn test_color_tool_call_dots_preserves_success_icon() {
         let mut output = OutputArea::new();
-        output.lines.push_back(crate::tui::output_area::OutputLine {
-            content: "✓ Read".to_string(),
-            style: LineStyle::ToolCallSuccess,
-            ..Default::default()
-        });
+        output
+            .lines
+            .push_back(crate::tui::render::output_area::OutputLine {
+                content: "✓ Read".to_string(),
+                style: LineStyle::ToolCallSuccess,
+                ..Default::default()
+            });
         output
             .screen_line_map
             .push((0, CharIdx::ZERO, CharIdx::new(6)));

@@ -8,7 +8,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme as SyntectTheme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-use crate::tui::output_area::SpanPart;
+use crate::tui::render::output_area::SpanPart;
 
 /// 全局语法集（懒加载，只加载一次）
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
