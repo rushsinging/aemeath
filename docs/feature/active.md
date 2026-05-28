@@ -38,7 +38,11 @@
 1. 删除 `core/` 空 shim（确认无引用）。
 2. 将 `output_area/`、`input/`、`display/` 物理并入 `render/`（或明确标注为 render 的 widget 子层），消除"中间态"。
 3. 为 `completion/`、`session/` 定位（render/service 层或并入相关 model/effect）。
-4. 收口后顶层目录与 spec 目标结构对齐；同步收紧相关架构 guard。
+4. 收口后顶层目录与 spec 目标结构对齐。
+5. **加顶层目录白名单 guard**：新增 `.agents/hooks/check-tui-toplevel-layout.sh`，扫 `apps/cli/src/tui/*/`，只允许 spec 认可的目录集合（`app update model view_assembler view_model view_state render effect adapter` + 收口后最终保留项）；出现集合外目录即 fail，提示按 spec 归入对应层。接入 `check-architecture-guards.sh`（Stop hook）。必须在迁移完成的同一步加上（先迁移、迁完立刻加 guard 锁住，否则会被存量目录挡住）。
+6. **可选**：扩展 `check-forbidden-imports.sh`，禁止 `crate::tui::core` / `::output_area` / `::display` / `::completion` / `::session` 等被并入/删除的旧模块路径导入，防止目录改名后 import 仍引用旧位置。
+
+**为什么要 guard**：纯目录整理若不锁住会逐步漂回（有人又在顶层新建 `output_area/` 或 `use crate::tui::core::...`）。白名单 guard 让结构退化在 Stop hook 即被拦截。
 
 **性质**：低优先级、纯结构整理，不改业务行为；可分目录小步迁移，每步保证编译/测试通过。
 
