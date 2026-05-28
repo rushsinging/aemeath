@@ -1,7 +1,7 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
-use crate::tui::core::input_bridge::{apply_input_changes_to_legacy, mirror_input_area_to_model};
+use crate::tui::core::input_adapter::apply_input_changes_to_widget;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::input::intent::InputIntent;
@@ -84,7 +84,7 @@ impl App {
                     match ctrlc_action(self.input_area.is_empty(), self.layout.last_ctrlc) {
                         CtrlCAction::ClearInput => {
                             let changes = self.model.input.apply(InputIntent::Clear);
-                            apply_input_changes_to_legacy(
+                            apply_input_changes_to_widget(
                                 &mut self.input_area,
                                 &mut self.status_bar,
                                 &changes,
@@ -126,7 +126,7 @@ impl App {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    apply_input_changes_to_legacy(
+                    apply_input_changes_to_widget(
                         &mut self.input_area,
                         &mut self.status_bar,
                         &changes,
@@ -152,14 +152,14 @@ impl App {
                     c
                 };
                 let changes = self.model.input.apply(InputIntent::InsertChar(ch));
-                apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
+                apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 let changes = self.model.input.apply(InputIntent::DeleteBackward);
-                apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
+                apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
@@ -188,7 +188,6 @@ impl App {
             _ => {}
         }
 
-        mirror_input_area_to_model(&mut self.model, &self.input_area);
         UpdateResult::none()
     }
 }

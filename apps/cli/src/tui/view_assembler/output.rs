@@ -1,7 +1,6 @@
 use crate::tui::model::conversation::block::ConversationBlock;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::output_area::{LineStyle, OutputArea};
 use crate::tui::view_model::{
     OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
     ToolSemanticStatus,
@@ -10,33 +9,6 @@ use crate::tui::view_model::{
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
-    pub fn assemble_from_output_area(output: &OutputArea, version: u64) -> OutputViewModel {
-        let blocks = output
-            .lines
-            .iter()
-            .enumerate()
-            .map(|(idx, line)| {
-                let style = match line.style {
-                    LineStyle::Error | LineStyle::ToolCallError => SemanticStyle::Error,
-                    LineStyle::ToolCallSuccess => SemanticStyle::Success,
-                    LineStyle::ToolCallRunning => SemanticStyle::Running,
-                    LineStyle::System | LineStyle::Thinking => SemanticStyle::Muted,
-                    _ => SemanticStyle::Normal,
-                };
-                OutputBlockView::SystemNotice(TextBlockView {
-                    key: format!("legacy-line-{idx}"),
-                    text: line.content.clone(),
-                    style,
-                })
-            })
-            .collect();
-        OutputViewModel {
-            blocks,
-            version,
-            follow_tail_hint: output.auto_scroll,
-        }
-    }
-
     pub fn assemble_from_conversation(
         conversation: &ConversationModel,
         version: u64,
@@ -194,23 +166,9 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
 mod tests {
     use crate::tui::model::conversation::intent::ConversationIntent;
     use crate::tui::model::conversation::model::ConversationModel;
-    use crate::tui::output_area::{LineStyle, OutputArea};
     use crate::tui::view_model::{OutputBlockView, ToolSemanticStatus};
 
     use super::OutputViewAssembler;
-
-    #[test]
-    fn test_output_assembler_converts_existing_lines_to_blocks() {
-        let mut output = OutputArea::new();
-        output.push_system("hello");
-        let vm = OutputViewAssembler::assemble_from_output_area(&output, 1);
-        assert_eq!(vm.version, 1);
-        assert_eq!(vm.blocks.len(), 1);
-        assert!(matches!(
-            output.lines.front().map(|line| line.style),
-            Some(LineStyle::System)
-        ));
-    }
 
     #[test]
     fn test_output_assembler_maps_tool_status_to_icon() {

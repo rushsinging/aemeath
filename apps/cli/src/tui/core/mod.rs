@@ -1,14 +1,13 @@
-mod dual_track;
 mod effect_runtime;
 pub mod event;
-mod input_bridge;
+mod input_adapter;
+mod output_adapter;
 mod resize;
 mod run_loop;
 mod runtime;
-mod runtime_bridge;
 pub mod state;
+mod status_adapter;
 
-use crate::tui::core::dual_track::{sync_model_from_legacy, sync_view_state_from_legacy};
 use crate::tui::core::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::model::root::TuiModel;
 use crate::tui::view_state::AppViewState;
@@ -36,7 +35,6 @@ pub struct App {
     pub input: InputState,
     pub session: SessionState,
     pub layout: UiLayout,
-    // M12 双轨状态：当前只作为 legacy 生产路径的一致性基线
     pub model: TuiModel,
     pub view_state: AppViewState,
     // 业务数据（非 UI 状态）
@@ -140,7 +138,12 @@ impl App {
         let mut output_area = OutputArea::new();
         output_area.init();
 
-        let mut app = Self {
+        let mut model_state = TuiModel::default();
+        model_state.session.current_session_id = Some(session_id.clone());
+        model_state.runtime.model_id = Some(model.clone());
+        model_state.runtime.workspace.cwd = Some(cwd.display().to_string());
+
+        Self {
             output_area,
             input_area: InputArea::new(),
             status_bar,
@@ -155,43 +158,11 @@ impl App {
                 memory_config: sdk::MemoryConfigView::default(),
             },
             layout: UiLayout::default(),
-            model: TuiModel::default(),
+            model: model_state,
             view_state: AppViewState::default(),
             skills: std::collections::HashMap::new(),
             agent_client: None,
-        };
-        app.sync_dual_track_state();
-        app
-    }
-
-    pub fn sync_dual_track_state(&mut self) {
-        sync_model_from_legacy(
-            &mut self.model,
-            &self.chat,
-            &self.input,
-            &self.input_area,
-            &self.session,
-            &self.layout,
-            &self.output_area,
-        );
-        sync_view_state_from_legacy(&mut self.view_state, &self.layout, &self.output_area);
-    }
-
-    #[cfg(test)]
-    pub fn dual_track_mismatches(&self) -> Vec<String> {
-        let mut model = self.model.clone();
-        let mut view_state = self.view_state.clone();
-        sync_model_from_legacy(
-            &mut model,
-            &self.chat,
-            &self.input,
-            &self.input_area,
-            &self.session,
-            &self.layout,
-            &self.output_area,
-        );
-        sync_view_state_from_legacy(&mut view_state, &self.layout, &self.output_area);
-        dual_track::collect_mismatches(&self.model, &model, &self.view_state, &view_state)
+        }
     }
 
     /// Check if Ctrl+C timeout has expired and restore status line.
@@ -262,7 +233,6 @@ impl App {
         })?;
         self.layout
             .update_areas(output_rect, input_rect, status_rect);
-        self.sync_dual_track_state();
         Ok(())
     }
 }

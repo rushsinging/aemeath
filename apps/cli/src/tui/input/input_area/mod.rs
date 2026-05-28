@@ -74,15 +74,6 @@ impl InputArea {
         self.textarea.lines().join("\n")
     }
 
-    pub fn history_snapshot(&self) -> (&[String], Option<usize>, &str) {
-        (&self.history, self.history_index, &self.saved_input)
-    }
-
-    pub fn suggestions_snapshot(&self) -> (&[Suggestion], Option<usize>, bool) {
-        let selected = (self.selected_suggestion >= 0).then_some(self.selected_suggestion as usize);
-        (&self.suggestions, selected, self.show_suggestions)
-    }
-
     /// Clear the input
     pub fn clear(&mut self) {
         self.textarea = configured_textarea();

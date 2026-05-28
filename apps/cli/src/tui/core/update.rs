@@ -13,8 +13,9 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::core::runtime_bridge::{
-    apply_diagnostic_status_to_legacy, apply_runtime_status_to_legacy,
+use crate::tui::core::output_adapter::replace_lines_from_view_model;
+use crate::tui::core::status_adapter::{
+    apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
 };
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::session::processing::SpawnContext;
@@ -22,6 +23,8 @@ use crate::tui::session::processing::SpawnContextRefs;
 use crate::tui::update::agent_event_mapper::map_agent_event;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
+use crate::tui::view_assembler::output::OutputViewAssembler;
+use crate::tui::view_model::render::output_view_model_lines;
 use tokio::sync::mpsc;
 
 /// Return type for update: effects plus optional slash command continuation.
@@ -152,20 +155,33 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let model_result = self.reduce_agent_event_for_model(&ev);
+        let mapping = map_agent_event(&ev);
+        let model_result = if mapping == Default::default() {
+            TuiUpdateResult::default()
+        } else {
+            reduce_agent_event(&mut self.model, mapping)
+        };
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
-        apply_runtime_status_to_legacy(&self.model, &self.chat, &mut self.status_bar);
-        apply_diagnostic_status_to_legacy(&self.model, &mut self.status_bar);
+        self.refresh_output_widget_from_model();
+        apply_runtime_status_to_widget(
+            &self.model,
+            self.chat.last_input_tokens,
+            &mut self.status_bar,
+        );
+        apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
         result.effects.extend(model_result.effects);
         result
     }
 
-    fn reduce_agent_event_for_model(&mut self, ev: &UiEvent) -> TuiUpdateResult {
-        let mapping = map_agent_event(ev);
-        if mapping == Default::default() {
-            return TuiUpdateResult::default();
+    fn refresh_output_widget_from_model(&mut self) {
+        let view_model = OutputViewAssembler::assemble_from_conversation(
+            &self.model.conversation,
+            self.view_state.output.version,
+        );
+        let lines = output_view_model_lines(&view_model);
+        if !lines.is_empty() {
+            replace_lines_from_view_model(&mut self.output_area, lines);
         }
-        reduce_agent_event(&mut self.model, mapping)
     }
 }
 

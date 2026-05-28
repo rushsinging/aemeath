@@ -1,5 +1,5 @@
 use super::UpdateResult;
-use crate::tui::core::input_bridge::apply_input_changes_to_legacy;
+use crate::tui::core::input_adapter::apply_input_changes_to_widget;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
@@ -16,7 +16,7 @@ impl App {
             .model
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
-        apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
+        apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
         if input.starts_with('/') {
             self.input.push_queue(input.clone());
             return UpdateResult {

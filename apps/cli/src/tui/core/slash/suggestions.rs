@@ -1,4 +1,5 @@
 use crate::tui::completion::{generate_suggestions, SuggestionContext};
+use crate::tui::core::input_adapter::completion_item_from_suggestion;
 
 impl super::super::App {
     /// Update suggestions based on current input
@@ -50,6 +51,12 @@ impl super::super::App {
         };
 
         let suggestions = generate_suggestions(&ctx);
+        self.model.input.completion.visible = !suggestions.is_empty();
+        self.model.input.completion.selected_index = Some(0);
+        self.model.input.completion.items = suggestions
+            .iter()
+            .map(completion_item_from_suggestion)
+            .collect();
         self.input_area.set_suggestions(suggestions);
     }
 }
