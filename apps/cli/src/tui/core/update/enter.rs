@@ -1,4 +1,5 @@
 use super::UpdateResult;
+use crate::tui::core::input_bridge::apply_input_changes_to_legacy;
 use crate::tui::core::{App, UiEvent};
 use crate::tui::session::processing::SpawnContextRefs;
 use tokio::sync::mpsc;
@@ -11,9 +12,12 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         let input = self.input_area.get_text();
+        let changes = self
+            .model
+            .input
+            .apply(crate::tui::model::input::intent::InputIntent::Submit);
+        apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
         if input.starts_with('/') {
-            self.input_area.add_history(&input);
-            self.input_area.clear();
             self.input.push_queue(input.clone());
             return UpdateResult {
                 effects: Vec::new(),
@@ -23,8 +27,6 @@ impl App {
         }
 
         self.output_area.push_user_message(&input);
-        self.input_area.add_history(&input);
-        self.input_area.clear();
 
         let images: Vec<sdk::ToolResultImage> = self
             .chat

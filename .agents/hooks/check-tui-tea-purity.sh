@@ -21,6 +21,7 @@ TUI_PURE_DIRS=(
 # as well as pure-data modules (event.rs, msg.rs, resize.rs).
 # ---------------------------------------------------------------------------
 EXEMPT_FILES=(
+  "apps/cli/src/tui/core/effect_runtime.rs"
   "apps/cli/src/tui/core/mod.rs"
   "apps/cli/src/tui/core/run_loop.rs"
   "apps/cli/src/tui/core/runtime.rs"

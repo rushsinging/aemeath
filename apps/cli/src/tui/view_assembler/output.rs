@@ -65,7 +65,7 @@ impl OutputViewAssembler {
                         style: SemanticStyle::Muted,
                     }));
                 }
-                ConversationBlock::ToolCall { id } => {
+                ConversationBlock::ToolCall { id, .. } => {
                     if let Some(tool) = find_tool_view(conversation, id.as_ref()) {
                         blocks.push(OutputBlockView::ToolCall(tool));
                     }

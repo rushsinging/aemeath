@@ -27,7 +27,13 @@ impl ChatTurn {
         self.status = ChatTurnStatus::ToolCalling;
     }
 
-    pub fn bind_tool(&mut self, id: ToolCallId, name: &str, index: usize, summary: String) -> bool {
+    pub fn bind_tool(
+        &mut self,
+        id: ToolCallId,
+        name: &str,
+        index: usize,
+        summary: String,
+    ) -> Option<String> {
         if let Some(call) = self
             .tool_calls
             .iter_mut()
@@ -35,9 +41,9 @@ impl ChatTurn {
         {
             call.bind(id, summary);
             self.status = ChatTurnStatus::ToolExecuting;
-            return true;
+            return Some(call.args_preview.clone());
         }
-        false
+        None
     }
 
     pub fn complete_tool(

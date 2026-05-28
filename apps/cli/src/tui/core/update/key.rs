@@ -1,8 +1,10 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
+use crate::tui::core::input_bridge::{apply_input_changes_to_legacy, mirror_input_area_to_model};
 use crate::tui::core::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::input::intent::InputIntent;
 use crate::tui::session::processing::SpawnContextRefs;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
@@ -81,7 +83,12 @@ impl App {
                 } else {
                     match ctrlc_action(self.input_area.is_empty(), self.layout.last_ctrlc) {
                         CtrlCAction::ClearInput => {
-                            self.input_area.clear();
+                            let changes = self.model.input.apply(InputIntent::Clear);
+                            apply_input_changes_to_legacy(
+                                &mut self.input_area,
+                                &mut self.status_bar,
+                                &changes,
+                            );
                             self.status_bar
                                 .set_warning("Input cleared (Ctrl+C again to exit)");
                             self.layout.mark_ctrlc_now();
@@ -118,8 +125,12 @@ impl App {
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.input_area.is_empty() {
                     let input = self.input_area.get_text();
-                    self.input_area.add_history(&input);
-                    self.input_area.clear();
+                    let changes = self.model.input.apply(InputIntent::Submit);
+                    apply_input_changes_to_legacy(
+                        &mut self.input_area,
+                        &mut self.status_bar,
+                        &changes,
+                    );
                     let n = self.input.push_queue(input.clone());
                     self.output_area.queued_messages.push(input);
                     self.status_bar
@@ -140,13 +151,15 @@ impl App {
                 } else {
                     c
                 };
-                self.input_area.input(ch);
+                let changes = self.model.input.apply(InputIntent::InsertChar(ch));
+                apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
-                self.input_area.backspace();
+                let changes = self.model.input.apply(InputIntent::DeleteBackward);
+                apply_input_changes_to_legacy(&mut self.input_area, &mut self.status_bar, &changes);
                 if !self.chat.is_processing {
                     self.update_suggestions();
                 }
@@ -175,6 +188,7 @@ impl App {
             _ => {}
         }
 
+        mirror_input_area_to_model(&mut self.model, &self.input_area);
         UpdateResult::none()
     }
 }

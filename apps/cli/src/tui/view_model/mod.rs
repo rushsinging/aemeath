@@ -3,6 +3,7 @@
 pub mod dialog;
 pub mod input;
 pub mod output;
+pub mod render;
 pub mod status;
 pub mod style;
 
