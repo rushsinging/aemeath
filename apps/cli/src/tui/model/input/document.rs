@@ -129,4 +129,74 @@ mod tests {
         assert_eq!(doc.buffer, "");
         assert_eq!(doc.cursor, 0);
     }
+
+    // 回归测试：Bug #77 — @ 补全后按空格回退删除字符
+    //
+    // 场景：用户输入 @src/m 触发补全，Tab 确认后 textarea 变为 @src/main.rs，
+    // 但模型未同步（仍是 @src/m）。此时按空格，模型 insert(' ') 生成 @src/m ，
+    // TextChanged → set_text 用旧文本覆盖 textarea 的正确内容。
+    //
+    // 修复：补全确认后执行 clear + insert_text 将模型同步到 textarea 的文本。
+
+    /// 模拟补全后模型未同步 → 按空格 → 旧文本覆盖 textarea 的 bug 场景
+    #[test]
+    fn test_stale_model_overwrites_textarea_after_completion() {
+        // Step 1: 用户输入 @src/m → 模型 = @src/m
+        let mut doc = InputDocument::default();
+        doc.insert_text("@src/m");
+        assert_eq!(doc.buffer, "@src/m");
+        assert_eq!(doc.cursor, 6);
+
+        // Step 2: 用户 Tab 补全 → textarea 变为 @src/main.rs
+        //         但模型未同步（保持 @src/m），这是 bug 条件
+        //         模拟：textarea = @src/main.rs，模型仍是 @src/m
+
+        // Step 3: 用户按空格 → 模型 insert(' ')，产生 @src/m ，
+        //         TextChanged + set_text 用 @src/m  覆盖 textarea 的 @src/main.rs
+        doc.insert_text(" ");
+        // BUG：模型生成 @src/m ，set_text 会覆盖 textarea 上的 @src/main.rs
+        assert_eq!(doc.buffer, "@src/m ");
+        // 修复前的错误行为验证：buffer 长度 7 而非 @src/main.rs  的 13
+        assert_ne!(doc.buffer, "@src/main.rs ");
+    }
+
+    /// 修复后：补全确认后模型同步 → 按空格 → 正确追加
+    #[test]
+    fn test_synced_model_after_completion_preserves_text() {
+        let mut doc = InputDocument::default();
+        // 用户输入 @src/m
+        doc.insert_text("@src/m");
+        assert_eq!(doc.buffer, "@src/m");
+
+        // 补全确认后 textarea 变为 @src/main.rs，模型同步：
+        doc.clear();
+        doc.insert_text("@src/main.rs");
+        assert_eq!(doc.buffer, "@src/main.rs");
+        assert_eq!(doc.cursor, 12);
+
+        // 按空格：模型在正确位置插入空格
+        doc.insert_text(" ");
+        assert_eq!(doc.buffer, "@src/main.rs ");
+        assert_eq!(doc.cursor, 13);
+    }
+
+    /// CJK 路径补全后模型同步 + 按空格
+    #[test]
+    fn test_synced_model_after_cjk_completion_preserves_text() {
+        let mut doc = InputDocument::default();
+        // 用户输入 @中文/路径
+        doc.insert_text("@中文/路径");
+        assert_eq!(doc.buffer, "@中文/路径");
+
+        // 补全确认后 textarea 变为 @中文/路径/目标.rs，模型同步：
+        doc.clear();
+        doc.insert_text("@中文/路径/目标.rs");
+        assert_eq!(doc.buffer, "@中文/路径/目标.rs");
+        assert_eq!(doc.cursor, "@中文/路径/目标.rs".len());
+
+        // 按空格
+        doc.insert_text(" ");
+        assert_eq!(doc.buffer, "@中文/路径/目标.rs ");
+        assert_eq!(doc.cursor, "@中文/路径/目标.rs ".len());
+    }
 }

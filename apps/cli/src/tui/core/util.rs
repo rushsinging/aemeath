@@ -98,6 +98,13 @@ impl super::App {
                     self.input_area.move_end();
                 }
             }
+            // 同步模型状态：apply_current_suggestion 直接修改了 textarea，
+            // 但未更新 self.model.input.document。若不同步，下次按键（如空格）
+            // 将触发 model.insert → TextChanged → set_text，用模型中的旧文本
+            // 覆盖 textarea 中已补全的正确内容，造成"回退删除"现象。
+            let text = self.input_area.get_text();
+            self.model.input.document.clear();
+            self.model.input.document.insert_text(&text);
         }
     }
 }
