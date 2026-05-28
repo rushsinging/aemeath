@@ -32,7 +32,7 @@ pub fn format_ask_user_option_lines(
 
 impl super::OutputArea {
     /// 在指定索引处插入一批行
-    pub(super) fn insert_lines_at(&mut self, idx: usize, lines: Vec<OutputLine>) {
+    pub(crate) fn insert_lines_at(&mut self, idx: usize, lines: Vec<OutputLine>) {
         let n = lines.len();
         if n == 0 {
             return;

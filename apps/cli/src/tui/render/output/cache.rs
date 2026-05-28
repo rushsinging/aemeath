@@ -4,8 +4,8 @@ use ratatui::text::Line;
 
 use sdk::CharIdx;
 
-use crate::tui::output_area::rendered_lines;
 use crate::tui::output_area::OutputLine;
+use crate::tui::render::output::line;
 
 /// 单行的渲染结果
 #[derive(Clone, Debug)]
@@ -106,20 +106,14 @@ impl RenderedCache {
         if self.dirty {
             self.cache.clear();
             self.cache.resize_with(total, || None);
-            rendered_lines::render_range(
-                lines,
-                block_start,
-                block_end,
-                term_width,
-                &mut self.cache,
-            );
+            line::render_range(lines, block_start, block_end, term_width, &mut self.cache);
             self.render_start = block_start;
             self.render_end = block_end;
             self.dirty = false;
         } else {
             self.cache.resize_with(total, || None);
             if block_start < self.render_start {
-                rendered_lines::render_range(
+                line::render_range(
                     lines,
                     block_start,
                     self.render_start,
@@ -129,7 +123,7 @@ impl RenderedCache {
                 self.render_start = block_start;
             }
             if block_end > self.render_end {
-                rendered_lines::render_range(
+                line::render_range(
                     lines,
                     self.render_end,
                     block_end,
@@ -152,7 +146,7 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
     let mut s = start;
     let mut in_code = false;
     for (_i, line) in lines.iter().enumerate().take(start) {
-        let is_md = rendered_lines::is_markdown_style(line.style);
+        let is_md = line::is_markdown_style(line.style);
         if is_md && line.content.trim().starts_with("```") {
             in_code = !in_code;
         }
@@ -163,7 +157,7 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
         while scan > 0 {
             scan -= 1;
             let line = &lines[scan];
-            let is_md = rendered_lines::is_markdown_style(line.style);
+            let is_md = line::is_markdown_style(line.style);
             if is_md && line.content.trim().starts_with("```") {
                 s = scan;
                 break;
@@ -172,7 +166,7 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
     }
 
     let start_line = &lines[start];
-    if rendered_lines::is_markdown_style(start_line.style) {
+    if line::is_markdown_style(start_line.style) {
         let trimmed = start_line.content.trim();
         if crate::tui::output_area::markdown::is_table_row(trimmed)
             || crate::tui::output_area::markdown::is_table_separator(trimmed)
@@ -181,7 +175,7 @@ fn expand_to_block_start(lines: &[OutputLine], start: usize) -> usize {
             while scan > 0 {
                 scan -= 1;
                 let prev = &lines[scan];
-                let is_md = rendered_lines::is_markdown_style(prev.style);
+                let is_md = line::is_markdown_style(prev.style);
                 let t = prev.content.trim();
                 if is_md
                     && (crate::tui::output_area::markdown::is_table_row(t)
@@ -205,7 +199,7 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 
     let mut in_code = false;
     for (_i, line) in lines.iter().enumerate().take(end) {
-        let is_md = rendered_lines::is_markdown_style(line.style);
+        let is_md = line::is_markdown_style(line.style);
         if is_md && line.content.trim().starts_with("```") {
             in_code = !in_code;
         }
@@ -213,7 +207,7 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 
     if in_code {
         for (i, line) in lines.iter().enumerate().take(total).skip(end) {
-            let is_md = rendered_lines::is_markdown_style(line.style);
+            let is_md = line::is_markdown_style(line.style);
             if is_md && line.content.trim().starts_with("```") {
                 e = i + 1;
                 break;
@@ -226,13 +220,13 @@ fn expand_to_block_end(lines: &[OutputLine], end: usize) -> usize {
 
     if end < total {
         let end_line = &lines[end.min(total) - 1];
-        if rendered_lines::is_markdown_style(end_line.style) {
+        if line::is_markdown_style(end_line.style) {
             let trimmed = end_line.content.trim();
             if crate::tui::output_area::markdown::is_table_row(trimmed)
                 || crate::tui::output_area::markdown::is_table_separator(trimmed)
             {
                 for (i, next) in lines.iter().enumerate().take(total).skip(end) {
-                    let is_md = rendered_lines::is_markdown_style(next.style);
+                    let is_md = line::is_markdown_style(next.style);
                     let t = next.content.trim();
                     if is_md
                         && (crate::tui::output_area::markdown::is_table_row(t)
@@ -316,7 +310,7 @@ mod tests {
     fn test_render_range_basic() {
         let lines = vec![md_line("hello"), md_line("world")];
         let mut cache_inner = vec![None, None];
-        rendered_lines::render_range(&lines, 0, 2, 80, &mut cache_inner);
+        line::render_range(&lines, 0, 2, 80, &mut cache_inner);
         assert!(cache_inner[0].is_some(), "line 0 should be rendered");
         assert!(cache_inner[1].is_some(), "line 1 should be rendered");
     }

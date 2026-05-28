@@ -172,10 +172,10 @@ impl StatusBar {
     pub fn init(&mut self, session_id: &str, model: &str, cwd: &std::path::Path) {
         self.set_session_id(session_id);
         self.set_model(model);
-        let cwd_display = crate::tui::core::display_status_path(cwd);
+        let cwd_display = crate::tui::app::display_status_path(cwd);
         self.set_context_paths(&cwd_display, &cwd_display);
-        if let Some(branch) = crate::tui::core::git_branch_for(cwd) {
-            self.set_git_context(crate::tui::core::worktree_kind_for(cwd), branch);
+        if let Some(branch) = crate::tui::app::git_branch_for(cwd) {
+            self.set_git_context(crate::tui::app::worktree_kind_for(cwd), branch);
         }
     }
 

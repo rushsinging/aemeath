@@ -7,31 +7,24 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use crate::tui::output_area::types::DEFAULT_WIDTH;
 
 pub mod content;
-pub mod diff;
 pub mod display;
-pub mod markdown;
 mod queued;
 pub mod render;
-pub mod render_blocks;
-pub mod render_spans;
-pub mod render_status;
-pub mod rendered_lines;
 mod resize;
 pub mod scroll;
 pub mod selection;
 mod selection_render;
 pub mod spinner;
 pub mod streaming;
-pub mod tool_display;
 pub mod types;
 
 #[cfg(test)]
 mod content_tests;
-#[cfg(test)]
-mod render_blocks_tests;
 
 // 重新导出核心类型，方便外部使用
-pub use diff::build_diff_lines;
+pub use crate::tui::render::output::diff::build_diff_lines;
+pub use crate::tui::render::output::markdown;
+pub use crate::tui::render::output::tool_display;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
 use crate::tui::view_state::cache::OutputRenderCacheState;
