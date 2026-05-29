@@ -18,6 +18,7 @@
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
 | 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
+| 60 | TUI Block 抽象 trait 化 + 真正渲染树（嵌套规则） | 高 | 设计中 | 未确认 | 接 #58 留白：①把自由函数 render_block 升为 BlockComponent trait（模板+类型层不变式）；②ViewModel 升为 BlockNode 树，渲染器递归走树+逐层缩进+DFS 展平；③显式嵌套规则表（allowed_child + MAX_BLOCK_DEPTH=3，构造期校验）。tool result 不再压平成字符串，改子块用 Diff/Markdown 组件富渲染——从根修复 #65（fence 跨块泄漏）/#76（thinking 后 result 扁平）。决策：缓存不折叠子 version（流式只重渲子块）、缩进不进 plain（复制干净）。终端本质仍行渲染，树/嵌套/缩进为逻辑外壳。详见 [spec](../superpowers/specs/2026-05-29-tui-block-trait-nesting-design.md) |
 
 ### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
 
