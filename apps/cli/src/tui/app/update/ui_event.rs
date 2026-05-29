@@ -117,7 +117,8 @@ impl App {
                     "[SPINNER] Error: tool_call_active {} -> false",
                     self.chat.tool_call_active
                 );
-                self.output_area.push_error(&msg);
+                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
+                // 此处不再重复写 output_area（消除双表示）。
                 self.output_area.stop_spinner();
                 self.chat.stop_processing();
                 return UpdateResult::one(Effect::RunHook {
@@ -141,15 +142,16 @@ impl App {
                 );
             }
             UiEvent::SystemMessage(msg) => {
-                // Hook notification deferred to Cmd; state update stays here
-                self.output_area.push_system(&msg);
+                // SystemMessage 已由 map_agent_event -> AppendSystemMessage 注入
+                // ConversationModel；此处仅触发 hook（副作用经 Cmd 描述）。
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::ReminderRecap(line) => {
-                self.handle_reminder_recap(&line);
+            UiEvent::ReminderRecap(_line) => {
+                // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
+                // ConversationModel，无需在此重复写入。
             }
             UiEvent::MemoryList(reminders) => {
                 self.handle_memory_list(&reminders);
@@ -169,7 +171,7 @@ impl App {
                 );
             }
             UiEvent::ReflectionDone { output } => {
-                self.output_area.push_system(&output.content);
+                self.append_system_notice(output.content.clone());
                 if self.session.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);
                 } else {
@@ -177,7 +179,7 @@ impl App {
                     let outdated_count = output.outdated_memories.len();
                     self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
-                        self.output_area.push_system(&format!(
+                        self.append_system_notice(format!(
                             "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
                         ));
                     }
@@ -243,11 +245,10 @@ impl App {
                 additional_context,
             } => {
                 if let Some(ref msg) = system_message {
-                    self.output_area.push_system(msg);
+                    self.append_system_notice(msg.clone());
                 }
                 if let Some(ref ctx) = additional_context {
-                    self.output_area
-                        .push_system(&format!("[Additional Context] {ctx}"));
+                    self.append_system_notice(format!("[Additional Context] {ctx}"));
                 }
                 if let Some(msg) = system_message {
                     return UpdateResult::one(Effect::RunHook {
