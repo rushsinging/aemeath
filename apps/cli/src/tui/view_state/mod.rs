@@ -5,12 +5,14 @@ pub mod input;
 pub mod layout;
 pub mod output;
 pub mod spinner_anim;
+pub mod status;
 
 pub use animation::AnimationViewState;
 pub use input::InputViewState;
 pub use layout::LayoutViewState;
 pub use output::OutputViewState;
 pub use spinner_anim::SpinnerAnim;
+pub use status::StatusSelectionViewState;
 
 #[derive(Debug, Default)]
 pub struct AppViewState {
@@ -19,6 +21,8 @@ pub struct AppViewState {
     pub layout: LayoutViewState,
     pub animation: AnimationViewState,
     pub spinner: SpinnerAnim,
+    /// Status 选区真相（#59 S4）。T2 接入 mouse_handler + 渲染前管线。
+    pub status_sel: StatusSelectionViewState,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

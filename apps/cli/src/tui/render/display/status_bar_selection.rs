@@ -106,6 +106,27 @@ impl StatusBar {
         self.is_selecting = false;
     }
 
+    /// 由 adapter（`apply_status_selection_to_widget`）单向写回 status 选区镜像。
+    ///
+    /// #59 S4：选区真相在 `view_state::StatusSelectionViewState`，widget 的
+    /// `is_selecting`/`selection_*` 降为只读镜像，供 render 期 `spans_with_selection`
+    /// 高亮与 `get_selected_text` 取 plain 文本。这是这些镜像字段的**唯一**生产写入
+    /// 路径（widget 内部 `clear_selection`/`reset_runtime_state` 与测试除外）。T2 接线。
+    pub(crate) fn apply_selection_mirror(
+        &mut self,
+        is_selecting: bool,
+        selection_start: Option<usize>,
+        selection_end: Option<usize>,
+        selection_row: StatusBarRow,
+        selection_width: u16,
+    ) {
+        self.is_selecting = is_selecting;
+        self.selection_start = selection_start;
+        self.selection_end = selection_end;
+        self.selection_row = selection_row;
+        self.selection_width = selection_width;
+    }
+
     pub fn is_selecting(&self) -> bool {
         self.is_selecting
     }
