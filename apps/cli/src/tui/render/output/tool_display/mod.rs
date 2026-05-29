@@ -27,6 +27,15 @@ pub trait ToolDisplay: Send + Sync {
     fn result_max_lines(&self) -> usize {
         TOOL_RESULT_MAX_LINES
     }
+
+    /// Format the result summary line(s). Default: "✓ {name} completed".
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec![format!("✗ {} failed", self.name())]
+        } else {
+            vec![format!("✓ {} completed", self.name())]
+        }
+    }
 }
 
 // ── Registration via inventory ─────────────────────────────────────

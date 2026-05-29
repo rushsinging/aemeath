@@ -226,6 +226,13 @@ impl ToolDisplay for AskUserQuestionDisplay {
         // answer is already echoed via App::append_user_echo; suppress redundant display
         0
     }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ 回答失败".to_string()]
+        } else {
+            vec!["✓ 已回答".to_string()]
+        }
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "AskUserQuestion",

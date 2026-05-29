@@ -91,6 +91,9 @@ impl ToolDisplay for TaskListCreateDisplay {
     fn result_max_lines(&self) -> usize {
         0
     }
+    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
+        vec![]
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "TaskListCreate",
@@ -110,6 +113,9 @@ impl ToolDisplay for TaskListCompleteDisplay {
     }
     fn result_max_lines(&self) -> usize {
         0
+    }
+    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
+        vec![]
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -226,6 +232,13 @@ impl ToolDisplay for EnterPlanModeDisplay {
     fn result_max_lines(&self) -> usize {
         0
     }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ Failed to enter plan mode".to_string()]
+        } else {
+            vec![]
+        }
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "EnterPlanMode",
@@ -253,6 +266,13 @@ impl ToolDisplay for ExitPlanModeDisplay {
     }
     fn result_max_lines(&self) -> usize {
         0
+    }
+    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
+        if is_error {
+            vec!["✗ Failed to exit plan mode".to_string()]
+        } else {
+            vec![]
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {

@@ -53,6 +53,14 @@ mod tests {
     }
 
     #[test]
+    fn test_assistant_cjk_text_does_not_wrap_per_character_at_normal_width() {
+        let block = render("整理一轮，不改代码。");
+
+        assert_eq!(block.lines.len(), 1);
+        assert_eq!(block.lines[0].plain, "整理一轮，不改代码。");
+    }
+
+    #[test]
     fn test_assistant_base_color_is_assistant_theme() {
         let block = render("plain text");
 

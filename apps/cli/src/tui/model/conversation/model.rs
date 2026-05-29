@@ -5,7 +5,6 @@ use super::chat::{Chat, ChatStatus};
 use super::ids::{ChatId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::queued_submission::QueuedSubmission;
-use super::tool_call::ToolCallStatus;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConversationModel {
@@ -157,62 +156,25 @@ impl ConversationModel {
         else {
             return Vec::new();
         };
-        self.blocks.push(ConversationBlock::ToolCall {
-            id: ToolCallId::new(id.clone()),
-            name: name.clone(),
-            summary: summary.clone(),
-            args_preview,
-        });
+        self.promote_orphan_tool_result(&id);
+        if !self.blocks.iter().any(|block| {
+            matches!(
+                block,
+                ConversationBlock::ToolCall { id: block_id, .. } if block_id.as_ref() == id
+            )
+        }) {
+            self.blocks.push(ConversationBlock::ToolCall {
+                id: ToolCallId::new(id.clone()),
+                name: name.clone(),
+                summary: summary.clone(),
+                args_preview,
+            });
+        }
         vec![
             ConversationChange::ToolCallBound { id, name },
             ConversationChange::OutputDirty,
         ]
     }
-
-    fn observe_tool_result(
-        &mut self,
-        id: String,
-        _tool_name: String,
-        output: String,
-        is_error: bool,
-        image_count: usize,
-    ) -> Vec<ConversationChange> {
-        if let Some(status) = self.complete_active_tool(&id, output.clone(), is_error) {
-            self.blocks.push(ConversationBlock::ToolResult {
-                id: ToolCallId::new(id.clone()),
-                output,
-                is_error,
-                image_count,
-            });
-            return vec![
-                ConversationChange::ToolCallCompleted { id, status },
-                ConversationChange::StyleBoundaryResetRequired,
-                ConversationChange::OutputDirty,
-            ];
-        }
-        self.blocks.push(ConversationBlock::OrphanToolResult {
-            id: id.clone(),
-            output,
-            is_error,
-        });
-        vec![
-            ConversationChange::OrphanToolResultObserved { id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
-    fn complete_active_tool(
-        &mut self,
-        id: &str,
-        output: String,
-        is_error: bool,
-    ) -> Option<ToolCallStatus> {
-        let chat = self.active_chat_mut()?;
-        let turn = chat.active_turn_mut()?;
-        turn.complete_tool(id, output, is_error)
-    }
-
     fn complete_chat(&mut self) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
         self.active_thinking_block_id = None;
@@ -389,7 +351,7 @@ impl ConversationModel {
         format!("{prefix}-{}", self.next_block_sequence)
     }
 
-    fn active_chat_mut(&mut self) -> Option<&mut Chat> {
+    pub(super) fn active_chat_mut(&mut self) -> Option<&mut Chat> {
         let active = self.active_chat_id.clone()?;
         self.chats.iter_mut().find(|chat| chat.id == active)
     }

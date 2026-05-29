@@ -2,6 +2,7 @@ use crate::tui::model::conversation::block::ConversationBlock;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
     AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
     TextBlockView, ToolCallBlockView, ToolSemanticStatus,
@@ -231,7 +232,11 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                         .then(|| call.args_preview.clone()),
                     summary: call.summary.clone(),
                     activity_summary: call.activities.last().cloned(),
-                    result_summary: call.result.clone(),
+                    result_summary: tool_result_summary(
+                        &call.name,
+                        call.result.as_deref(),
+                        call.status,
+                    ),
                     collapsible: true,
                     collapsed: false,
                 });
@@ -239,6 +244,31 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
         }
     }
     None
+}
+
+fn tool_result_summary(
+    tool_name: &str,
+    result: Option<&str>,
+    status: ToolCallStatus,
+) -> Option<String> {
+    let result = result?;
+    if result.is_empty() {
+        return None;
+    }
+    let is_error = matches!(status, ToolCallStatus::Error);
+    let lines = lookup_display(tool_name)
+        .map(|display| display.format_result_summary(result, is_error))
+        .filter(|lines| !lines.is_empty())
+        .unwrap_or_else(|| default_tool_result_summary(tool_name, is_error));
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {
+    if is_error {
+        vec![format!("✗ {tool_name} failed")]
+    } else {
+        vec![format!("✓ {tool_name} completed")]
+    }
 }
 
 fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus, SemanticStyle) {
@@ -254,90 +284,5 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::OutputViewAssembler;
-    use crate::tui::model::conversation::intent::ConversationIntent;
-    use crate::tui::model::conversation::model::ConversationModel;
-    use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
-    #[test]
-    fn test_output_assembler_maps_tool_status_to_icon() {
-        let mut conversation = ConversationModel::default();
-        add_completed_tool_after_thinking(&mut conversation, "Read", "ok");
-
-        let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
-        let tool = vm
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                OutputBlockKind::ToolCall(tool) => Some(tool),
-                _ => None,
-            })
-            .expect("tool block");
-
-        assert_eq!(tool.icon, "✓");
-        assert_eq!(tool.semantic_status, ToolSemanticStatus::Success);
-    }
-
-    #[test]
-    fn test_output_assembler_keeps_tool_result_inside_tool_after_thinking() {
-        let mut conversation = ConversationModel::default();
-        add_completed_tool_after_thinking(
-            &mut conversation,
-            "Grep",
-            "/tmp/docs/bug/active.md:18:match",
-        );
-
-        let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
-        let diagnostic_results = vm
-            .blocks
-            .iter()
-            .filter(|block| matches!(&block.kind, OutputBlockKind::DiagnosticNotice(_)))
-            .count();
-        let tool = vm
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                OutputBlockKind::ToolCall(tool) => Some(tool),
-                _ => None,
-            })
-            .expect("tool block");
-
-        assert_eq!(diagnostic_results, 0);
-        assert_eq!(tool.title, "Grep");
-        assert_eq!(
-            tool.result_summary.as_deref(),
-            Some("/tmp/docs/bug/active.md:18:match")
-        );
-    }
-
-    fn add_completed_tool_after_thinking(
-        conversation: &mut ConversationModel,
-        name: &str,
-        output: &str,
-    ) {
-        conversation.apply(ConversationIntent::StartChat {
-            submission: "search".to_string(),
-        });
-        conversation.apply(ConversationIntent::ObserveThinkingText {
-            text: "thinking".to_string(),
-        });
-        conversation.apply(ConversationIntent::CompleteTextBlock);
-        conversation.apply(ConversationIntent::ObserveToolCallStart {
-            name: name.to_string(),
-            index: 0,
-        });
-        conversation.apply(ConversationIntent::ObserveToolCall {
-            id: "tool-1".to_string(),
-            name: name.to_string(),
-            index: 0,
-            summary: "search docs".to_string(),
-        });
-        conversation.apply(ConversationIntent::ObserveToolResult {
-            id: "tool-1".to_string(),
-            tool_name: name.to_string(),
-            output: output.to_string(),
-            is_error: false,
-            image_count: 0,
-        });
-    }
-}
+#[path = "output_tests.rs"]
+mod tests;
