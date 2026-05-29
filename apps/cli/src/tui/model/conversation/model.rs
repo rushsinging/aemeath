@@ -29,6 +29,7 @@ impl ConversationModel {
     pub fn apply(&mut self, intent: ConversationIntent) -> Vec<ConversationChange> {
         match intent {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
+            ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
             ConversationIntent::ObserveToolCallStart { name, index } => {
                 self.observe_tool_call_start(name, index)
             }
@@ -84,6 +85,18 @@ impl ConversationModel {
                 chat_id: chat_id.as_ref().to_string(),
                 turn_id,
             },
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    fn append_user_message(&mut self, text: String) -> Vec<ConversationChange> {
+        let block_id = self.next_block_id("user");
+        self.blocks.push(ConversationBlock::UserMessage {
+            id: block_id.clone(),
+            text,
+        });
+        vec![
+            ConversationChange::UserMessageAppended { block_id },
             ConversationChange::OutputDirty,
         ]
     }

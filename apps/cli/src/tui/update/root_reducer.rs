@@ -168,6 +168,7 @@ fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[Conversat
     for change in changes {
         match change {
             ConversationChange::OutputDirty
+            | ConversationChange::UserMessageAppended { .. }
             | ConversationChange::AssistantTextAppended { .. }
             | ConversationChange::ThinkingTextAppended { .. }
             | ConversationChange::ToolCallObserved { .. }

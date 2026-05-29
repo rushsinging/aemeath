@@ -122,7 +122,7 @@ impl App {
 
                     self.output_area.dismiss_ask_user_block();
                     if !answer.is_empty() {
-                        self.output_area.push_user_message(&answer);
+                        self.append_user_echo(answer.clone());
                     }
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(answer);
@@ -151,7 +151,7 @@ impl App {
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                             self.output_area.dismiss_ask_user_block();
-                            self.output_area.push_user_message(&text);
+                            self.append_user_echo(text.clone());
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
@@ -194,7 +194,7 @@ impl App {
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
                     self.output_area.dismiss_ask_user_block();
-                    self.output_area.push_user_message(&text);
+                    self.append_user_echo(text.clone());
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(text);
                     self.output_area.set_spinner_phase("Generating...");

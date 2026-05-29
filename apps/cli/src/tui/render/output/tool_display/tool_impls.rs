@@ -229,7 +229,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
         vec![]
     }
     fn result_max_lines(&self) -> usize {
-        // answer is already shown via push_user_message; suppress redundant display
+        // answer is already echoed via App::append_user_echo; suppress redundant display
         0
     }
     fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {

@@ -79,33 +79,6 @@ impl super::OutputArea {
         }
     }
 
-    /// 添加用户消息
-    pub fn push_user_message(&mut self, text: &str) {
-        for (i, line) in text.lines().enumerate() {
-            let prefix = if i == 0 { "> " } else { "  " };
-            self.push_line(OutputLine {
-                content: format!("{}{}", prefix, line),
-                style: LineStyle::User,
-                ..Default::default()
-            });
-            if self.streaming_start.is_some() {
-                self.queued_line_count += 1;
-            }
-        }
-        if text.is_empty() || text.ends_with('\n') {
-            self.push_line(OutputLine {
-                content: String::new(),
-                style: LineStyle::User,
-                ..Default::default()
-            });
-            if self.streaming_start.is_some() {
-                self.queued_line_count += 1;
-            }
-        }
-        // 始终将用户刚提交的输入滚动到可视区域，即使之前手动向上滚动过
-        self.scroll_to_bottom();
-    }
-
     /// 添加取消消息
     pub fn push_cancelled(&mut self) {
         self.finish_streaming();
@@ -329,7 +302,7 @@ impl super::OutputArea {
     }
 
     /// 移除 AskUserQuestion 互动块（separator + 问题 + 提示行），用于用户提交答案后折叠。
-    /// 必须在 push_user_message 之前调用，否则会把答案行一起删除。
+    /// 必须在回显用户答案（`App::append_user_echo`）之前调用，否则会把答案行一起删除。
     pub fn dismiss_ask_user_block(&mut self) {
         if let Some(start) = self.ask_user_block_start.take() {
             let start = start.min(self.lines.len());

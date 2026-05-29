@@ -33,6 +33,24 @@
 
 **验证**：`cargo build/test(-p cli 374 passed)/clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
 
+### #58 Phase 5 · T2：迁移 push_user_message 到单一真相源
+
+**状态**：进行中（T2 完成，lines 字段/legacy 垫片仍待后续 Task 删除）
+
+**问题**：用户输入回显仍由 `OutputArea::push_user_message` 直接写 `output_area.lines`，构成与 `ConversationModel` 的「双写/双表示」。document 非空后该路径不再显示，存在丢失风险。
+
+**改法**：
+- 新增 `ConversationIntent::AppendUserMessage` + `ConversationChange::UserMessageAppended` + `ConversationModel::append_user_message`：仅追加 `UserMessage` 回显块，**不新开 chat/turn、不改 active_chat_id**（区别于 `StartChat`），用于 ask_user 应答、队列输入冲刷等「已激活回合内回显」场景，避免破坏在途工具绑定。
+- 新增 `App::append_user_echo`（notice.rs）作为回显唯一入口（派发 intent 后 `refresh_output_widget_from_model`）。
+- 判别 4 处 `push_user_message` 调用点：
+  - `ask_user_key.rs`×3（选项应答 / 自由输入 / Chat-about-this 子模式）— 唯一显示路径，迁移到 `append_user_echo`。
+  - `ui_event.rs` 队列输入冲刷 — 唯一显示路径，迁移到 `append_user_echo`。
+  - `run_loop.rs` review-prompt — 新建对话语义，改派 `StartChat` + `refresh`（与 `update_enter` 一致）。
+- 迁移后 `push_user_message` 无调用者，删除其定义（`lines` 字段与 legacy 垫片保留，留待后续 Task）。
+- 回显渲染确认：`UserMessage` block → `OutputBlockKind::UserMessage` → `render_user_message` 输出 `> ...` 前缀（已有单测覆盖）。
+
+**验证**：`cargo build / test(-p cli 380 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认

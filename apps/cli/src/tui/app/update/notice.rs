@@ -14,6 +14,18 @@ impl App {
         self.refresh_output_widget_from_model();
     }
 
+    /// 将一条用户输入回显写入单一真相源 `ConversationModel`，并刷新输出文档。
+    ///
+    /// 用于 ask_user 应答、队列输入冲刷等「在已激活回合内回显用户输入」的场景：
+    /// 走 `AppendUserMessage` 而非 `StartChat`，不新开 chat、不破坏在途工具绑定。
+    /// 回显经 `ConversationBlock::UserMessage -> UserMessage view -> "> ..."` 渲染。
+    pub(crate) fn append_user_echo(&mut self, text: impl Into<String>) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::AppendUserMessage { text: text.into() });
+        self.refresh_output_widget_from_model();
+    }
+
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`
@@ -76,6 +88,59 @@ mod tests {
         assert!(
             plain.contains("渲染检查"),
             "系统消息应经 document 渲染出现在输出区，实际: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn test_append_user_echo_pushes_user_block_without_new_chat() {
+        let mut app = make_app();
+        app.model
+            .conversation
+            .apply(crate::tui::model::conversation::intent::ConversationIntent::StartChat {
+                submission: "原始提问".to_string(),
+            });
+        let chats_before = app.model.conversation.chats.len();
+
+        app.append_user_echo("我的答复");
+
+        // 正常路径：回显作为 UserMessage 块进入模型，但不新开 chat。
+        assert_eq!(
+            app.model.conversation.chats.len(),
+            chats_before,
+            "回显不应新建 chat"
+        );
+        let has_user = app.model.conversation.blocks.iter().any(|block| {
+            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "我的答复")
+        });
+        assert!(has_user, "回显应作为 UserMessage block 进入 ConversationModel");
+    }
+
+    #[test]
+    fn test_append_user_echo_renders_gt_prefix_into_document() {
+        let mut app = make_app();
+        app.append_user_echo("回显检查");
+        let plain = app
+            .output_area
+            .document()
+            .iter_lines()
+            .map(|line| line.plain.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            plain.contains("> 回显检查"),
+            "用户回显应以 \"> \" 前缀经 document 渲染，实际: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn test_append_user_echo_empty_text_still_creates_block() {
+        let mut app = make_app();
+        let before = app.model.conversation.blocks.len();
+        app.append_user_echo("");
+        assert_eq!(
+            app.model.conversation.blocks.len(),
+            before + 1,
+            "空回显文本仍应创建一个 UserMessage block"
         );
     }
 

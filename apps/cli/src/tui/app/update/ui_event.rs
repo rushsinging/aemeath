@@ -261,8 +261,8 @@ impl App {
                 let queued = self.input.drain_queue();
                 if !queued.is_empty() {
                     let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
-                    for msg in &flushed {
-                        self.output_area.push_user_message(msg);
+                    for msg in flushed {
+                        self.append_user_echo(msg);
                     }
                     self.output_area
                         .set_spinner_phase("Thinking with queued input...");

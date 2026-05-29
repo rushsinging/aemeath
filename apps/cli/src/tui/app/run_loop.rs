@@ -1,6 +1,7 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
+use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -70,7 +71,12 @@ impl App {
                     .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
                     .await;
                 if let Some(prompt) = review_prompt {
-                    self.output_area.push_user_message(&input);
+                    self.model
+                        .conversation
+                        .apply(ConversationIntent::StartChat {
+                            submission: input.clone(),
+                        });
+                    self.refresh_output_widget_from_model();
                     self.chat
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));
