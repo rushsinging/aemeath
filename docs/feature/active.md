@@ -51,6 +51,30 @@
 
 **验证**：`cargo build / test(-p cli 380 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
 
+### #58 Phase 5 · T3：清理 tool_display 旧命令式渲染
+
+**状态**：进行中（T3 完成，lines 字段/legacy 垫片仍待后续 Task 删除）
+
+**背景**：ToolCall 现经单一管线 `ConversationModel → OutputViewModel → OutputDocumentRenderer`，由 `render/output/blocks/tool_call.rs`（`OutputBlockKind::ToolCall`）渲染。`render/output/tool_display/` 中产出 `OutputLine` 的旧 OutputArea 命令式渲染路径已无活跃使用，本轮清理。
+
+**判别结论**：
+- 命令式显示方法 `push_tool_call_start` / `update_tool_call_pending` / `push_tool_call` / `format_todowrite`（mod.rs）、`push_tool_result_with_diff`（results.rs）均 `#[allow(dead_code)]`、仅被模块自身单测引用，**死代码 → 删**。
+- `agent.rs` 的 `push_agent_progress` / `push_tool_progress` 仍被 `app/update/ui_event.rs` 调用（sub-agent 进度尚未迁移到 ConversationModel），**保留**。
+- `tool_call.rs` 仅复用 `tool_display::format_tool_call`（纯格式化 header+detail），不依赖任何命令式渲染，删除死代码后保持复用。
+
+**删除**：
+- `tool_display/results.rs`（整文件死路径）。
+- `mod.rs` 内 `impl OutputArea` 命令式块 + `debug_log` + 旧 `mod tests`。
+- `common.rs` 内 `extract_tool_preview` / `extract_string_value`（仅服务于已删的 pending 预览）。
+- `output_area/mod.rs` 中失去使用者的 `build_diff_lines` re-export。
+
+**保留**：`ToolDisplay` trait（`result_*` / `format_result_summary` 默认方法标 `#[allow(dead_code)]` 供未来结果渲染迁移复用）、各工具 `ToolDisplay` impl（经 `format_tool_call` 使用）、`agent.rs` 全部、`common.rs` 其余纯格式化函数。
+
+**边界遵守**：未删 `OutputLine` / `LineStyle` 类型、`lines` 字段与 legacy 垫片、streaming/queued/旧行级链。
+
+**TDD/验证**：为 `tool_call.rs` 补充渲染测试（参数 detail 行来自 `format_tool_call`、result_summary 结果行），确保删除旧路径后行为不回退。`cargo build / test(-p cli 378 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认
