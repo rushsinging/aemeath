@@ -66,7 +66,11 @@ pub fn apply_gutter(
             };
             let mut spans = vec![Span::styled(gutter_text, Style::default().fg(color))];
             spans.extend(line.spans);
-            RenderedLine::with_plain(spans, line.plain)
+            let mut gutted = RenderedLine::with_plain(spans, line.plain);
+            // gutter 文本均为宽度 1 字符（缩进空格 + 字形 + 空格），
+            // 故 gutter_cols 同时等于前导显示列数与首 span 字符数。
+            gutted.gutter_cols = gutter_width(depth);
+            gutted
         })
         .collect()
 }
@@ -134,5 +138,27 @@ mod tests {
         let w1 = d1[0].spans[0].content.chars().count();
         assert!(w1 > w0, "depth 越深，gutter 前导越宽");
         assert_eq!(d1[0].plain, "x", "缩进不进 plain");
+    }
+
+    #[test]
+    fn test_apply_gutter_sets_gutter_cols() {
+        let kind = tool(ToolSemanticStatus::Success);
+        let lines = vec![
+            RenderedLine::new(vec![Span::raw("Grep")]),
+            RenderedLine::new(vec![Span::raw("detail")]),
+        ];
+        let d0 = apply_gutter(&kind, 0, lines.clone());
+        assert_eq!(d0[0].gutter_cols, gutter_width(0));
+        assert_eq!(
+            d0[1].gutter_cols,
+            gutter_width(0),
+            "续行 gutter_cols 同首行"
+        );
+        // gutter_cols 须等于首 span 字符数（不变式：均宽度 1 字符）。
+        assert_eq!(d0[0].spans[0].content.chars().count(), d0[0].gutter_cols);
+
+        let d1 = apply_gutter(&kind, 1, lines);
+        assert_eq!(d1[0].gutter_cols, gutter_width(1));
+        assert_eq!(d1[0].spans[0].content.chars().count(), d1[0].gutter_cols);
     }
 }

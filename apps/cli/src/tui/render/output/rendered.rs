@@ -16,10 +16,15 @@ pub struct RenderCtx {
 
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
 /// `plain` 是逻辑纯文本（选中/复制用）。
+///
+/// `gutter_cols` 记录前导 gutter 占用的显示列 / span 字符数（gutter 不进 plain）。
+/// 选区高亮与点击列→plain 字符映射据此补偿（gutter 是 chrome，不参与选中/复制）。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedLine {
     pub spans: Vec<Span<'static>>,
     pub plain: String,
+    /// 前导 gutter 的显示列数（亦即 spans 首部 gutter 字符数）。无 gutter 时为 0。
+    pub gutter_cols: usize,
 }
 
 impl RenderedLine {
@@ -29,12 +34,20 @@ impl RenderedLine {
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
-        Self { spans, plain }
+        Self {
+            spans,
+            plain,
+            gutter_cols: 0,
+        }
     }
 
     /// 显式提供 plain（用于 markdown 等显示文本 ≠ 逻辑文本的场景）。
     pub fn with_plain(spans: Vec<Span<'static>>, plain: String) -> Self {
-        Self { spans, plain }
+        Self {
+            spans,
+            plain,
+            gutter_cols: 0,
+        }
     }
 }
 

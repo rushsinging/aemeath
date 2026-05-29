@@ -8,6 +8,16 @@ impl super::OutputArea {
         self.document.total_lines() + self.task_status_lines.len()
     }
 
+    /// 逻辑行的前导 gutter 显示列数（不进 plain）。task_status 等虚拟行无 gutter 返回 0。
+    /// 点击列 → plain 字符映射需先减去此宽度（gutter 是 chrome，不可选）。
+    fn gutter_cols_for_line(&self, idx: usize) -> usize {
+        self.document
+            .iter_lines()
+            .nth(idx)
+            .map(|line| line.gutter_cols)
+            .unwrap_or(0)
+    }
+
     /// 根据逻辑索引获取行文本内容。
     /// idx < document.total_lines() → document 行；否则 → task_status_lines[i]
     pub fn get_line_content(&mut self, idx: usize) -> Option<String> {
@@ -40,11 +50,13 @@ impl super::OutputArea {
         // 将屏幕行映射到逻辑行+char偏移
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
+            // 减去 gutter 显示列：gutter 不进 plain，点击 gutter 区间映射到 plain 字符 0。
+            let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
             if let Some(line) = self.get_line_content(logic_idx) {
                 let byte_start = char_to_byte(&line, char_start);
                 let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
-                    rel_col,
+                    content_col,
                 );
                 self.selection_start = Some((logic_idx, char_start.advance(char_col.as_usize())));
                 self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
@@ -63,11 +75,12 @@ impl super::OutputArea {
 
         if rel_row < self.screen_line_map.len() {
             let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
+            let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
             if let Some(line) = self.get_line_content(logic_idx) {
                 let byte_start = char_to_byte(&line, char_start);
                 let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
                     line.bslice_from(byte_start),
-                    rel_col,
+                    content_col,
                 );
                 self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
             }
@@ -94,6 +107,7 @@ impl super::OutputArea {
         }
 
         let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
+        let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
         let Some(line) = self.get_line_content(logic_idx) else {
             return;
         };
@@ -101,7 +115,7 @@ impl super::OutputArea {
         let byte_start = char_to_byte(&line, char_start);
         let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
             line.bslice_from(byte_start),
-            rel_col,
+            content_col,
         );
         let abs_char_idx = char_start.advance(char_col.as_usize());
 

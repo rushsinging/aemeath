@@ -72,11 +72,8 @@ impl OutputDocumentRenderer {
         live_ids.push(node.block_id.clone());
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
-        let gutted = crate::tui::render::output::gutter::apply_gutter(
-            &node.kind,
-            depth,
-            rendered.lines,
-        );
+        let gutted =
+            crate::tui::render::output::gutter::apply_gutter(&node.kind, depth, rendered.lines);
         out.push(RenderedBlock {
             block_id: rendered.block_id,
             lines: gutted,
