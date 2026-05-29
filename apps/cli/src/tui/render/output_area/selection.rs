@@ -1,7 +1,6 @@
 use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
-use crate::tui::render::output_area::markdown;
 
 impl super::OutputArea {
     /// 获取逻辑行总数（包括普通行 + task_status 虚拟行）
@@ -11,9 +10,24 @@ impl super::OutputArea {
 
     /// 根据逻辑索引获取行文本内容。
     /// idx < self.lines.len() → 普通行；否则 → task_status_lines[i]
-    fn get_line_content(&self, idx: usize) -> Option<String> {
+    pub fn get_line_content(&mut self, idx: usize) -> Option<String> {
         if let Some(rendered) = self.rendered_line_content.get(&idx) {
             return Some(rendered.clone());
+        }
+        if self.document.blocks.is_empty() && !self.lines.is_empty() {
+            let lines = crate::tui::render::output_area::render::legacy_lines_to_rendered(
+                &self.lines,
+                self.term_width,
+            );
+            self.document = crate::tui::render::output::rendered::RenderedDocument {
+                blocks: vec![crate::tui::render::output::rendered::RenderedBlock {
+                    block_id: "legacy".into(),
+                    lines,
+                }],
+            };
+        }
+        if let Some(line) = self.document.iter_lines().nth(idx) {
+            return Some(line.plain.clone());
         }
         if idx < self.lines.len() {
             return Some(self.lines[idx].content.clone());
@@ -141,7 +155,7 @@ impl super::OutputArea {
     }
 
     /// Get the selected text based on logic line coordinates
-    pub fn get_selected_text(&self) -> Option<String> {
+    pub fn get_selected_text(&mut self) -> Option<String> {
         let (start_logic, start_col) = self.selection_start?;
         let (end_logic, end_col) = self.selection_end?;
 
@@ -156,7 +170,10 @@ impl super::OutputArea {
             return None;
         }
 
-        let total = self.total_virtual_line_count();
+        let total = self
+            .document
+            .total_lines()
+            .max(self.total_virtual_line_count());
         let mut result = String::new();
 
         for logic_idx in start_logic..=end_logic {
@@ -214,7 +231,7 @@ impl super::OutputArea {
         if result.is_empty() {
             None
         } else {
-            Some(markdown::strip_inline_formatting(&result))
+            Some(result)
         }
     }
 
@@ -234,3 +251,29 @@ impl super::OutputArea {
 #[cfg(test)]
 #[path = "../output/selection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod document_selection_tests {
+    use super::super::OutputArea;
+    use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
+    use ratatui::text::Span;
+    use sdk::CharIdx;
+
+    #[test]
+    fn test_copy_selection_returns_plain_chars_across_lines() {
+        let mut area = OutputArea::new();
+        area.set_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![
+                    RenderedLine::with_plain(vec![Span::raw("**bold**")], "bold".into()),
+                    RenderedLine::new(vec![Span::raw("世界")]),
+                ],
+            }],
+        });
+        area.set_selection_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
+        let copied = area.get_selected_text();
+
+        assert_eq!(copied.as_deref(), Some("bold\n世界"));
+    }
+}

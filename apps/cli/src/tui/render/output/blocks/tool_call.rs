@@ -1,0 +1,140 @@
+use crate::tui::render::output::blocks::diagnostic::semantic_color;
+use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
+use crate::tui::render::output::tool_display::format_tool_call;
+use crate::tui::render::output_area::{LineStyle, OutputLine, INDENT};
+use crate::tui::render::theme;
+use crate::tui::view_model::output::ToolCallBlockView;
+use ratatui::style::Style;
+use ratatui::text::Span;
+
+pub fn render_tool_call(
+    block_id: &str,
+    view: &ToolCallBlockView,
+    _ctx: &RenderCtx,
+) -> RenderedBlock {
+    let (header_text, detail_lines) = view
+        .summary
+        .as_deref()
+        .map(|summary| format_tool_call(&view.title, summary))
+        .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
+    let header_text = header_text.replacen('●', &view.icon, 1);
+    let icon_color = semantic_color(view.style);
+    let mut lines = vec![RenderedLine::new(vec![
+        Span::styled(format!("{} ", view.icon), Style::default().fg(icon_color)),
+        Span::styled(
+            header_text
+                .strip_prefix(&view.icon)
+                .unwrap_or(&header_text)
+                .trim_start()
+                .to_string(),
+            Style::default().fg(theme::TEXT),
+        ),
+    ])];
+    for detail in detail_lines {
+        lines.push(RenderedLine::new(vec![Span::styled(
+            format!("{INDENT}{detail}"),
+            Style::default().fg(theme::TEXT_MUTED),
+        )]));
+    }
+    for detail in [&view.activity_summary, &view.result_summary]
+        .into_iter()
+        .flatten()
+    {
+        let style = if detail == view.result_summary.as_ref().unwrap_or(detail) {
+            LineStyle::System
+        } else {
+            LineStyle::Normal
+        };
+        for line in format_result_lines(&view.title, detail, style) {
+            lines.push(line.as_rendered_line(_ctx.width as usize));
+        }
+    }
+
+    RenderedBlock {
+        block_id: block_id.to_string(),
+        lines,
+    }
+}
+
+fn format_result_lines(tool_name: &str, result: &str, style: LineStyle) -> Vec<OutputLine> {
+    if result.trim().is_empty() {
+        return Vec::new();
+    }
+    let max_lines = if tool_name == "TaskListComplete" {
+        0
+    } else {
+        5
+    };
+    let total = result.lines().count();
+    let mut out = Vec::new();
+    for line in result.lines().take(max_lines) {
+        out.push(OutputLine {
+            content: format!("{INDENT}{line}"),
+            style,
+            ..Default::default()
+        });
+    }
+    if total > max_lines {
+        out.push(OutputLine {
+            content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
+            style,
+            ..Default::default()
+        });
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::view_model::output::ToolSemanticStatus;
+    use crate::tui::view_model::style::SemanticStyle;
+
+    fn tool(status: ToolSemanticStatus) -> ToolCallBlockView {
+        ToolCallBlockView {
+            key: "t1".into(),
+            chat_id: None,
+            turn_id: None,
+            tool_call_id: Some("t1".into()),
+            title: "Grep".into(),
+            icon: "●".into(),
+            semantic_status: status,
+            style: SemanticStyle::Running,
+            args_preview: Some("/foo/".into()),
+            summary: None,
+            activity_summary: None,
+            result_summary: None,
+            collapsible: false,
+            collapsed: false,
+        }
+    }
+
+    #[test]
+    fn test_tool_call_title_visible_not_background_color() {
+        let block = render_tool_call(
+            "t1",
+            &tool(ToolSemanticStatus::Running),
+            &RenderCtx { width: 80 },
+        );
+        let title_span = block.lines[0]
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref().contains("Grep"))
+            .unwrap();
+
+        assert_ne!(title_span.style.fg, Some(theme::SURFACE));
+        assert_ne!(title_span.style.fg, title_span.style.bg);
+        assert!(block.lines[0].plain.contains("Grep"));
+    }
+
+    #[test]
+    fn test_tool_call_success_uses_success_icon_color() {
+        let block = render_tool_call(
+            "t1",
+            &tool(ToolSemanticStatus::Success),
+            &RenderCtx { width: 80 },
+        );
+
+        assert!(block.lines[0].plain.contains("Grep"));
+    }
+}

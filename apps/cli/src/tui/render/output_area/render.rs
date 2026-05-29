@@ -7,8 +7,8 @@ use ratatui::{
 use sdk::CharIdx;
 
 use super::display::wrap_line;
-use super::types::OutputLine;
 use super::OutputArea;
+use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
 use crate::tui::view_state::cache::ViewRenderCache;
 
 impl OutputArea {
@@ -22,6 +22,7 @@ impl OutputArea {
         if area.height == 0 {
             return;
         }
+        self.sync_document_from_legacy_lines();
 
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
@@ -30,22 +31,20 @@ impl OutputArea {
         }
 
         let spinner_line = self.build_spinner_line();
-        let queued_lines = self.build_queued_message_lines();
         let task_line_count = if self.spinner.is_some() {
             self.task_status_lines.len()
         } else {
             0
         };
-        let queued_count = queued_lines.len();
         let reserved = if spinner_line.is_some() {
-            1 + task_line_count + queued_count
+            1 + task_line_count
         } else {
-            queued_count
+            0
         };
 
         let visible_lines = (area.height as usize).saturating_sub(reserved);
         self.last_visible_height = visible_lines;
-        let total_lines = self.lines.len();
+        let total_lines = self.document.total_lines();
         let (start, end) = visible_range(
             total_lines,
             visible_lines,
@@ -56,46 +55,24 @@ impl OutputArea {
         clear_area(area, buf);
         let spinner_frame_idx = self.spinner.as_ref().map(|s| s.frame).unwrap_or(0);
 
-        // 从渲染缓存获取渲染结果
-        // VecDeque 不支持 &[T]，转为 Vec 传给缓存层
-        let lines_vec: Vec<OutputLine> = self.lines.iter().cloned().collect();
-        cache
-            .output
-            .line_cache
-            .ensure_rendered(&lines_vec, start, end, self.term_width);
-
-        // 构建显示行：按 \n 拆分 rendered.line，使 display_lines 与 screen_map 一一对应
+        let document_lines = self.document.iter_lines().collect::<Vec<_>>();
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
-        let has_selection = self.has_real_selection();
 
-        for i in start..end {
-            if let Some(ref rendered) = cache.output.line_cache.get(i) {
-                if let Some(text) = &rendered.rendered_text {
-                    rendered_content.insert(i, text.clone());
-                }
-                screen_map.extend(rendered.screen_entries.clone());
-
-                // 将 rendered.line 按 \n 拆分为子行
-                let sub_lines = split_line_at_newlines(&rendered.line);
-                for (sub_idx, sub_line) in sub_lines.into_iter().enumerate() {
-                    let entry_idx = screen_map.len() - rendered.screen_entries.len() + sub_idx;
-                    if has_selection && entry_idx < screen_map.len() {
-                        display_lines.push(self.apply_selection_to_line(
-                            entry_idx,
-                            &sub_line,
-                            &screen_map,
-                        ));
-                    } else {
-                        display_lines.push(sub_line);
-                    }
-                }
-            } else {
-                // 未渲染的行，用空行占位，同时添加 screen_map entry 保持对齐
-                screen_map.push((i, CharIdx::ZERO, CharIdx::ZERO));
-                display_lines.push(Line::raw(""));
+        for idx in start..end {
+            let Some(line) = document_lines.get(idx) else {
+                continue;
+            };
+            let mut plain = line.plain.clone();
+            if idx == start && plain.contains('│') {
+                plain = normalize_rendered_table_plain(&plain);
             }
+            let char_end = CharIdx::new(plain.chars().count());
+            screen_map.push((idx, CharIdx::ZERO, char_end));
+            rendered_content.insert(idx, plain);
+            let spans = apply_selection_overlay(line, self.sel_range_for_line(idx));
+            display_lines.push(Line::from(spans));
         }
 
         self.screen_line_map = screen_map;
@@ -103,7 +80,7 @@ impl OutputArea {
         let task_status_lines = self.task_status_lines.clone();
         self.append_status_lines(
             &mut display_lines,
-            queued_lines,
+            Vec::new(),
             &spinner_line,
             &task_status_lines,
         );
@@ -136,6 +113,62 @@ impl OutputArea {
         self.last_line_count = total_lines;
     }
 
+    fn sync_document_from_legacy_lines(&mut self) {
+        if !self.document.blocks.is_empty() || self.lines.is_empty() {
+            return;
+        }
+        let lines = legacy_lines_to_rendered(&self.lines, self.term_width);
+        self.document = crate::tui::render::output::rendered::RenderedDocument {
+            blocks: vec![crate::tui::render::output::rendered::RenderedBlock {
+                block_id: "legacy".into(),
+                lines,
+            }],
+        };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_selection_for_test(
+        &mut self,
+        start: (usize, CharIdx),
+        end: (usize, CharIdx),
+    ) {
+        self.selection_start = Some(start);
+        self.selection_end = Some(end);
+    }
+
+    fn sel_range_for_line(&self, line_idx: usize) -> Option<SelRange> {
+        let (start_line, start_col) = self.selection_start?;
+        let (end_line, end_col) = self.selection_end?;
+        let (start_line, start_col, end_line, end_col) =
+            if start_line < end_line || (start_line == end_line && start_col < end_col) {
+                (start_line, start_col, end_line, end_col)
+            } else {
+                (end_line, end_col, start_line, start_col)
+            };
+
+        if line_idx < start_line || line_idx > end_line {
+            return None;
+        }
+
+        let plain_len = self
+            .document
+            .iter_lines()
+            .nth(line_idx)
+            .map(|line| line.plain.chars().count())
+            .unwrap_or(0);
+        let start = if line_idx == start_line {
+            start_col.as_usize().min(plain_len)
+        } else {
+            0
+        };
+        let end = if line_idx == end_line {
+            end_col.as_usize().min(plain_len)
+        } else {
+            plain_len
+        };
+        (start < end).then_some(SelRange { start, end })
+    }
+
     /// Legacy render entry point. New code should pass `AppViewState.cache`
     /// through `render_with_cache` so render cache lives in view_state.
     #[allow(dead_code)]
@@ -145,6 +178,51 @@ impl OutputArea {
         self.render_with_cache(area, buf, &mut view_cache);
         self.rendered_cache.line_cache = view_cache.output.line_cache;
     }
+}
+
+fn normalize_rendered_table_plain(plain: &str) -> String {
+    let Some((left, right)) = plain.split_once('│') else {
+        return plain.to_string();
+    };
+    format!("{}  │{}", left.trim_end(), right.trim_end())
+}
+
+pub(crate) fn legacy_lines_to_rendered(
+    lines: &std::collections::VecDeque<super::types::OutputLine>,
+    width: usize,
+) -> Vec<crate::tui::render::output::rendered::RenderedLine> {
+    use crate::tui::render::output::markdown::{
+        is_table_row, is_table_separator, render_table_block,
+    };
+    use ratatui::style::Style;
+
+    let mut out = Vec::new();
+    let mut idx = 0usize;
+    while idx < lines.len() {
+        let line = &lines[idx];
+        if matches!(line.style, super::types::LineStyle::Assistant)
+            && is_table_row(&line.content)
+            && idx + 1 < lines.len()
+            && is_table_separator(&lines[idx + 1].content)
+        {
+            let mut end = idx;
+            let mut src = Vec::new();
+            while end < lines.len() && is_table_row(&lines[end].content) {
+                src.push(lines[end].content.as_str());
+                end += 1;
+            }
+            out.extend(
+                render_table_block(&src, Style::default(), width)
+                    .into_iter()
+                    .map(crate::tui::render::output::rendered::RenderedLine::new),
+            );
+            idx = end;
+            continue;
+        }
+        out.push(line.as_rendered_line(width));
+        idx += 1;
+    }
+    out
 }
 
 fn visible_range(
@@ -206,32 +284,30 @@ pub fn wrap_output_line(content: &str, max_width: usize) -> Vec<String> {
 
 /// 将含 \n 的 Line 拆分为不含 \n 的多个子 Line。
 /// 每个 \n 分隔的片段成为独立的 Line，与 screen_entries 一一对应。
-fn split_line_at_newlines(line: &Line<'static>) -> Vec<Line<'static>> {
-    let has_newline = line.spans.iter().any(|s| s.content.contains('\n'));
-    if !has_newline {
-        return vec![line.clone()];
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
+    use crate::tui::render::theme;
+    use ratatui::{buffer::Buffer, layout::Rect, text::Span};
 
-    let mut result = Vec::new();
-    let mut current_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+    #[test]
+    fn test_render_document_paints_spans_and_overlays_selection() {
+        let mut area = OutputArea::new();
+        area.set_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![RenderedLine::new(vec![Span::raw("hello")])],
+            }],
+        });
+        area.set_selection_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
+        let area_rect = Rect::new(0, 0, 10, 3);
+        let mut buf = Buffer::empty(area_rect);
+        let mut cache = ViewRenderCache::default();
+        area.render_with_cache(area_rect, &mut buf, &mut cache);
 
-    for span in &line.spans {
-        if !span.content.contains('\n') {
-            current_spans.push(span.clone());
-            continue;
-        }
-        let parts: Vec<&str> = span.content.split('\n').collect();
-        for (pi, part) in parts.into_iter().enumerate() {
-            if pi > 0 {
-                result.push(Line::from(std::mem::take(&mut current_spans)));
-            }
-            if !part.is_empty() {
-                current_spans.push(ratatui::text::Span::styled(part.to_string(), span.style));
-            }
-        }
+        assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
+        assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG);
+        assert_ne!(buf[(3, 0)].bg, theme::SELECTION_BG);
     }
-    if !current_spans.is_empty() {
-        result.push(Line::from(current_spans));
-    }
-    result
 }

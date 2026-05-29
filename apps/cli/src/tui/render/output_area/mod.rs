@@ -4,6 +4,8 @@ use sdk::CharIdx;
 
 use ratatui::{buffer::Buffer, layout::Rect};
 
+use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
+use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
 pub mod content;
@@ -24,7 +26,6 @@ mod content_tests;
 // 重新导出核心类型，方便外部使用
 pub use crate::tui::render::output::diff::build_diff_lines;
 pub use crate::tui::render::output::markdown;
-pub use crate::tui::render::output::tool_display;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
 use crate::tui::view_state::cache::OutputRenderCacheState;
@@ -68,6 +69,10 @@ pub struct OutputArea {
     pub ask_user_block_start: Option<usize>,
     /// 渲染缓存（滑动窗口）
     pub(crate) rendered_cache: OutputRenderCacheState,
+    /// 新输出渲染管线产物（spans + plain）。
+    pub document: RenderedDocument,
+    /// 新输出渲染管线的 block 级缓存渲染器。
+    pub document_renderer: OutputDocumentRenderer,
 }
 
 impl Default for OutputArea {
@@ -105,7 +110,17 @@ impl OutputArea {
             queued_messages: Vec::new(),
             ask_user_block_start: None,
             rendered_cache: OutputRenderCacheState::default(),
+            document: RenderedDocument::default(),
+            document_renderer: OutputDocumentRenderer::default(),
         }
+    }
+
+    pub fn set_document(&mut self, document: RenderedDocument) {
+        self.document = document;
+    }
+
+    pub fn document(&self) -> &RenderedDocument {
+        &self.document
     }
 
     /// 显示欢迎横幅。
@@ -120,5 +135,26 @@ impl OutputArea {
     #[allow(dead_code)]
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
         self.render(area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
+    use ratatui::text::Span;
+
+    #[test]
+    fn test_output_area_set_document_replaces_content() {
+        let mut area = OutputArea::new();
+        let document = RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![RenderedLine::new(vec![Span::raw("x")])],
+            }],
+        };
+        area.set_document(document);
+
+        assert_eq!(area.document().total_lines(), 1);
     }
 }

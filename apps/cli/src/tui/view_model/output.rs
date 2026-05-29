@@ -1,4 +1,5 @@
 use super::style::SemanticStyle;
+use std::hash::Hash;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {
@@ -18,8 +19,16 @@ impl Default for OutputViewModel {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum OutputBlockView {
+pub struct OutputBlockView {
+    pub block_id: String,
+    pub block_version: u64,
+    pub kind: OutputBlockKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum OutputBlockKind {
     UserMessage(TextBlockView),
+    QueuedSubmission(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
     ToolCall(ToolCallBlockView),
@@ -28,14 +37,14 @@ pub enum OutputBlockView {
     Separator,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TextBlockView {
     pub key: String,
     pub text: String,
     pub style: SemanticStyle,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ToolCallBlockView {
     pub key: String,
     pub chat_id: Option<String>,
@@ -53,7 +62,7 @@ pub struct ToolCallBlockView {
     pub collapsed: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
     Pending,
     Running,
