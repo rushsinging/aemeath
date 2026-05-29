@@ -54,8 +54,8 @@ impl crate::tui::app::App {
                         .unwrap_or(false);
 
                     if is_double {
-                        // 输出区选区真相归 view_state；status 清 view_state（S4），input clear 暂留（T4）。
-                        self.input_area.clear_selection();
+                        // 输出区选区真相归 view_state；status/input 清 view_state（S4）。
+                        self.view_state.input_sel.clear_selection();
                         self.view_state.status_sel.clear_selection();
                         if let Some((line, ws, we)) =
                             self.output_area.word_bounds_at(row, col, &output_area)
@@ -64,8 +64,8 @@ impl crate::tui::app::App {
                         }
                         self.input.last_click = None;
                     } else {
-                        // 清除其他区域的选中（status 清 view_state；input 暂留 T4）
-                        self.input_area.clear_selection();
+                        // 清除其他区域的选中（status/input 清 view_state）
+                        self.view_state.input_sel.clear_selection();
                         self.view_state.status_sel.clear_selection();
                         if let Some((line, anchor)) =
                             self.output_area.screen_to_anchor(row, col, &output_area)
@@ -75,15 +75,18 @@ impl crate::tui::app::App {
                         self.input.last_click = Some((now, row, col));
                     }
                 } else if point_in_rect(row, col, &input_area) {
-                    // 清除其他区域的选中（status 清 view_state；input 仍直驱 widget，T4 迁移）
+                    // 清除其他区域的选中（status 清 view_state）
                     self.output_area.clear_selection();
                     self.view_state.status_sel.clear_selection();
+                    // 屏幕坐标 → textarea 锚点只读折算借 widget（依赖 render 期布局），
+                    // 选区真相写入 view_state（#59 S4 T4）。
                     let inner = self.input_area.get_inner_area(&input_area);
-                    self.input_area.start_selection(row, col, &inner);
+                    let anchor = self.input_area.screen_to_input_anchor(row, col, &inner);
+                    self.view_state.input_sel.begin_selection(anchor);
                 } else if point_in_rect(row, col, &status_bar) {
-                    // 清除其他区域的选中
+                    // 清除其他区域的选中（input 清 view_state）
                     self.output_area.clear_selection();
-                    self.input_area.clear_selection();
+                    self.view_state.input_sel.clear_selection();
                     // 屏幕坐标 → status 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4）。
                     let (status_row, char_idx, width) = self.status_bar.screen_to_status_anchor(
@@ -109,9 +112,11 @@ impl crate::tui::app::App {
                     } else if let Some((line, anchor)) = self.output_area.last_visible_anchor() {
                         self.view_state.output.update_selection(line, anchor);
                     }
-                } else if self.input_area.is_selecting() {
+                } else if self.view_state.input_sel.is_selecting() {
+                    // 屏幕坐标 → textarea 锚点只读折算借 widget，写入 view_state。
                     let inner = self.input_area.get_inner_area(&input_area);
-                    self.input_area.update_selection(row, col, &inner);
+                    let anchor = self.input_area.screen_to_input_anchor(row, col, &inner);
+                    self.view_state.input_sel.update_selection(anchor);
                 } else if self.view_state.status_sel.is_selecting() {
                     // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
                     let sel = &self.view_state.status_sel;
@@ -138,8 +143,19 @@ impl crate::tui::app::App {
                     // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
                     self.view_state.output.clear_selection();
                     text
-                } else if self.input_area.is_selecting() {
-                    self.input_area.end_selection()
+                } else if self.view_state.input_sel.is_selecting() {
+                    // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
+                    self.view_state.input_sel.end_selection();
+                    // 复制时序：取文本前先把 view_state 最新选区同步到 widget 镜像，消一帧滞后。
+                    crate::tui::adapter::input_widget::apply_input_selection_to_widget(
+                        &self.view_state.input_sel,
+                        &mut self.input_area,
+                    );
+                    // 取 plain 文本（读 widget 选区镜像 + render 期 textarea.lines() 折算）。
+                    let text = self.input_area.get_selected_text();
+                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                    self.view_state.input_sel.clear_selection();
+                    text
                 } else if self.view_state.status_sel.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.status_sel.end_selection();

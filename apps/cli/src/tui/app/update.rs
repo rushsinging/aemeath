@@ -218,6 +218,11 @@ impl App {
             &self.view_state.status_sel,
             &mut self.status_bar,
         );
+        // #59 S4 T4：input 选区真相归 view_state，每帧渲染前写回 widget 镜像。
+        crate::tui::adapter::input_widget::apply_input_selection_to_widget(
+            &self.view_state.input_sel,
+            &mut self.input_area,
+        );
     }
 }
 

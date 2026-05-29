@@ -11,6 +11,17 @@ impl InputArea {
         self.is_selecting = true;
     }
 
+    /// 屏幕坐标 → textarea `(row, col)` 锚点只读折算（#59 S4 T4）。
+    ///
+    /// 仿 output `screen_to_anchor` / status `screen_to_status_anchor`：依赖 render 期
+    /// `textarea.lines()` 布局，把相对 inner rect 的屏幕 (row, col) 折算成 textarea
+    /// `(行号, 字符索引)` 锚点，**不改 widget 选区字段**。供 mouse_handler 写入
+    /// `view_state.input_sel`（选区真相）。折算逻辑与 `start_selection` 内的
+    /// `textarea_pos` 一致，无行为漂移。
+    pub fn screen_to_input_anchor(&self, row: u16, col: u16, inner_area: &Rect) -> (usize, usize) {
+        self.textarea_pos(row, col, inner_area)
+    }
+
     /// 更新选中位置
     pub fn update_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
         if !self.is_selecting {
@@ -149,6 +160,28 @@ mod tests {
         input.update_selection(5, 14, &inner);
 
         assert_eq!(input.get_selected_text(), Some("🚀b".to_string()));
+    }
+
+    #[test]
+    fn test_screen_to_input_anchor_maps_screen_col_without_mutating_state() {
+        let mut input = InputArea::new();
+        input.set_text("你好a");
+        let inner = Rect {
+            x: 10,
+            y: 5,
+            width: 20,
+            height: 3,
+        };
+
+        // 正常路径：CJK 屏幕列折算为字符索引（"好" 起点 = 第 1 字符）。
+        assert_eq!(input.screen_to_input_anchor(5, 12, &inner), (0, 1));
+        // 边界：超界列钳制到行字符数。
+        assert_eq!(input.screen_to_input_anchor(5, 99, &inner), (0, 3));
+        // 错误/越界行：不存在的 textarea 行折算为 (row, 0)。
+        assert_eq!(input.screen_to_input_anchor(8, 12, &inner), (3, 0));
+        // 只读：折算不改 widget 选区状态。
+        assert!(!input.is_selecting());
+        assert_eq!(input.get_selected_text(), None);
     }
 
     #[test]

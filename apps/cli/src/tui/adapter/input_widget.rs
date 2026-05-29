@@ -57,7 +57,6 @@ pub(crate) fn apply_input_changes_to_widget(
 ///
 /// 每帧渲染前调用；mouse-up 复制前亦显式调用以消除一帧滞后（对齐 output/status 选区
 /// 时序）。T4 接线。
-#[allow(dead_code)] // S4 T4 接线：渲染前管线 + mouse_handler input 分支。
 pub(crate) fn apply_input_selection_to_widget(
     view: &InputSelectionViewState,
     input_area: &mut InputArea,
