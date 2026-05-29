@@ -192,7 +192,7 @@
 2. **markdown 完整接线**：markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。
 3. **syntax 高亮接线广度**：fence 已接，diff 内语法高亮原语就绪但随 diff 接线一并待办。
 4. **tool 结果摘要渲染**：~~`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。~~（G2 收口：`result_max_lines` 已接入 `format_result_lines`；`format_result_summary` 判定无价值已删除。）
-5. **排队中即时显示**：排队提交需 `key.rs` → `QueueSubmission` 即时反馈、`(default:)` 行、done 间距等交互细节待补。
+5. **排队中即时显示**：~~排队提交需 `key.rs` → `QueueSubmission` 即时反馈~~（G3 收口：`key.rs` 入队同时派发 `QueueSubmission` 即时显示「⏳ 排队中」块，drain 时 `ClearQueuedSubmissions` 清块再正式回显，无双显示）；`(default:)` 行、done 间距等交互细节仍待补。
 
 **TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
 
@@ -223,6 +223,23 @@
 **测试副作用修正**：`app/state/tests.rs::test_thinking_then_grep_renders_tool_block_in_output_area` 此前未设 `layout.output_area_rect`，宽度回退为 1，工具结果走 markdown 换行后逐字拆行。设 `output_area_rect = Rect::new(0,0,100,40)` 提供真实宽度（与实际终端行为一致）。
 
 **TDD/验证**：先写 #65 工具结果 fence 回归见红（旧代码代码行非 CODE 色）再实现；`cargo build -p cli`、`cargo test -p cli`（406 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
+### #58 G3 · 排队中输入即时显示接线（收口 Phase 6 gap 5）
+
+**状态**：待确认（接续 Phase 6 后续 gap 第 5 项）
+
+**问题**：model 层 `QueueSubmission`/`ClearQueuedSubmissions` intent + `ConversationBlock::QueuedUserMessage → OutputBlockKind::QueuedSubmission`（暗色「⏳ 排队中: ...」）+ view_assembler 映射均已就绪并带测试，但**无 live 调用者**：活跃排队入口 `key.rs` 处理中提交仅 `input.push_queue`（写 `InputState::input_queue`），从不派发 `QueueSubmission`，故排队消息在等待期间不显示，仅在 drain 后作为已发送消息显示。`root_reducer` 虽路由 `QueueSubmission` 但其顶层 update 未接入运行时。
+
+**实现**：
+- 新增 `notice.rs::App::enqueue_submission_echo(text)`（派发 `QueueSubmission` + `refresh_output_widget_from_model`）与 `clear_queued_submission_echo()`（派发 `ClearQueuedSubmissions` + refresh），沿用既有 `append_user_echo`/`append_system_notice` 的「model.apply → refresh」单向模式，副作用不在 update 直接 IO。
+- 入队：`key.rs` 处理中提交分支在 `input.push_queue(input)` 同时调 `enqueue_submission_echo(input)`，即时显示「⏳ 排队中」块。
+- drain：`ui_event.rs::DrainQueuedInput` 在 `drain_queue` 后、`append_user_echo` 前调 `clear_queued_submission_echo()`，先清排队块再以正式 `UserMessage` 回显，避免「排队块 + 已发送回显」双显示。
+
+**一致性策略（避免双真相）**：`InputState::input_queue`（VecDeque）为权威发送队列（drain 决定实际注入 agent 的内容），`QueuedUserMessage` 块为其显示投影。二者仅在两处成对维护——入队（key.rs：push_queue + QueueSubmission）与出队（ui_event.rs drain：drain_queue + ClearQueuedSubmissions）——故始终同步。slash 命令路径（`enter.rs`/`key_nav.rs`）的 `push_queue` 是 `pending_slash` 传输载体、立即 drain，**不**派发 `QueueSubmission`（不应显示为排队消息）；drain 时 `ClearQueuedSubmissions` 对其为 `count=0` 无副作用 no-op，一致性不受影响。
+
+**TDD/验证**：notice.rs 新增 3 测试见红再实现——入队→QueuedUserMessage 块出现并经 document 渲染「⏳ 排队中」、清除→排队块全清 + 仅一条正式 UserMessage（无双显示）、空队列清除 no-op；`cargo build -p cli`、`cargo test -p cli`（409 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。提交 `7e022b0`。
+
+> 注：`app/state/tests.rs::test_thinking_then_grep_renders_tool_block_in_output_area` 为依赖 `/tmp` 实际文件 + 测试并行调度的既有非确定性 flake（与本改动逻辑无关），单测/重跑均通过。
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
