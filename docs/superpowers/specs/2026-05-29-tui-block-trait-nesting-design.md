@@ -1,4 +1,4 @@
-# TUI Block 抽象 trait 化 + 真正渲染树（嵌套规则）设计（Feature #60）
+# TUI Block 抽象 trait 化 + 真正渲染树（嵌套规则）设计（Feature #63）
 
 **日期**：2026-05-29（2026-05-29 二次审查后修订，详见 §0）
 **关联**：feature #58（输出区渲染管线统一，本设计的直接前置，已落地待确认）、#59（单源迁移 roadmap，正交）；bug #65（与之相关，main 已结构性隔离，本设计仅进一步加固，**不认领修复**）
@@ -12,7 +12,7 @@
 3. **#76 与本设计无关**：其 main 根因是 #58 域的 legacy 直写 vs ViewModel 全量替换双路径 + ToolCall index 丢失，归 #58/#76 处理。→ 本设计**完全摘除 #76**。
 4. **缩进现状进 plain**：`render_fenced_markdown` 的 `indent` 参数注释明写"加在每行最前且保证 plain 与可见 spans 一致"——即现状缩进**进** plain。本设计决策为"缩进/gutter **不**进 plain"，需改该原语契约（见 §6）。
 
-**因此 #60 的真实价值定位**（非修 bug）：① gutter 行首标志槽（main 完全没有的新能力）；② BlockComponent trait 抽象（代码组织）；③ result 由"内联行"升为"子块树"（结构性收益：独立缓存粒度、gutter 按 depth 对齐、组合更干净）。
+**因此 #63 的真实价值定位**（非修 bug）：① gutter 行首标志槽（main 完全没有的新能力）；② BlockComponent trait 抽象（代码组织）；③ result 由"内联行"升为"子块树"（结构性收益：独立缓存粒度、gutter 按 depth 对齐、组合更干净）。
 
 ## 背景与定位
 

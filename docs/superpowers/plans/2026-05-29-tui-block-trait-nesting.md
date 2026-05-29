@@ -166,7 +166,7 @@ Expected: 3 测试 PASS。
 
 ```bash
 git add apps/cli/src/tui/render/output/block_component.rs apps/cli/src/tui/render/output/mod.rs
-git commit -m "feat(tui): 引入 BlockComponent trait 与 enum 分发 (refs #60)"
+git commit -m "feat(tui): 引入 BlockComponent trait 与 enum 分发 (refs #63)"
 ```
 
 ### Task 1.2：document_renderer 改用 trait + cache_version
@@ -215,7 +215,7 @@ Expected: 无 error、guard 通过。
 
 ```bash
 git add apps/cli/src/tui/render/output/document_renderer.rs apps/cli/src/tui/view_assembler/output.rs
-git commit -m "refactor(tui): document_renderer/assembler 改用 BlockComponent (refs #60)"
+git commit -m "refactor(tui): document_renderer/assembler 改用 BlockComponent (refs #63)"
 ```
 
 ### Task 1.3：保留 render_block 包装或删除
@@ -238,7 +238,7 @@ Expected: PASS。
 
 ```bash
 git add apps/cli/src/tui/render/output/blocks/mod.rs
-git commit -m "refactor(tui): 移除 render_block match 分发，统一走 trait (refs #60)"
+git commit -m "refactor(tui): 移除 render_block match 分发，统一走 trait (refs #63)"
 ```
 
 ---
@@ -323,7 +323,7 @@ Expected: 全 PASS（新增字段有默认值，现有构造处补 `roots: Vec::
 
 ```bash
 git add apps/cli/src/tui/view_model/output.rs
-git commit -m "feat(tui): 新增 BlockNode 树节点与 OutputViewModel.roots (refs #60)"
+git commit -m "feat(tui): 新增 BlockNode 树节点与 OutputViewModel.roots (refs #63)"
 ```
 
 ### Task 2.2：assembler 同时产 roots（叶子，children 空）
@@ -388,7 +388,7 @@ Expected: 全 PASS。
 
 ```bash
 git add apps/cli/src/tui/view_assembler/output.rs apps/cli/src/tui/view_assembler/output_tests.rs
-git commit -m "feat(tui): assembler 产 roots 叶子树（与 blocks 镜像，过渡）(refs #60)"
+git commit -m "feat(tui): assembler 产 roots 叶子树（与 blocks 镜像，过渡）(refs #63)"
 ```
 
 ### Task 2.3：渲染器递归走 roots（depth=0，输出不变）
@@ -494,7 +494,7 @@ Expected: 全 PASS。
 
 ```bash
 git add apps/cli/src/tui/render/output/document_renderer.rs apps/cli/src/tui/adapter/output_widget.rs
-git commit -m "feat(tui): document_renderer 递归 render_tree DFS 展平 (refs #60)"
+git commit -m "feat(tui): document_renderer 递归 render_tree DFS 展平 (refs #63)"
 ```
 
 ---
@@ -560,7 +560,7 @@ Expected: 全 PASS（assistant/tool 视觉不变）。
 
 ```bash
 git add apps/cli/src/tui/render/output/primitives/fenced.rs apps/cli/src/tui/render/output/blocks/assistant_message.rs apps/cli/src/tui/render/output/blocks/tool_call.rs
-git commit -m "refactor(tui): render_fenced_markdown 去 indent 参数，产无缩进行 (refs #60)"
+git commit -m "refactor(tui): render_fenced_markdown 去 indent 参数，产无缩进行 (refs #63)"
 ```
 
 ---
@@ -726,7 +726,7 @@ Expected: PASS。
 
 ```bash
 git add apps/cli/src/tui/render/output/gutter.rs apps/cli/src/tui/render/output/mod.rs
-git commit -m "feat(tui): 新增 gutter 模块（缩进+marker，不进 plain）(refs #60)"
+git commit -m "feat(tui): 新增 gutter 模块（缩进+marker，不进 plain）(refs #63)"
 ```
 
 ### Task 4.2：渲染器组合期注入 gutter + 组件去自写 marker
@@ -778,7 +778,7 @@ Run: `cargo clippy -p cli 2>&1 | tail -5 && bash .agents/hooks/check-architectur
 
 ```bash
 git add apps/cli/src/tui/render/output/document_renderer.rs apps/cli/src/tui/render/output/blocks/
-git commit -m "feat(tui): 渲染器组合期注入 gutter，组件去自写 marker/缩进 (refs #60)"
+git commit -m "feat(tui): 渲染器组合期注入 gutter，组件去自写 marker/缩进 (refs #63)"
 ```
 
 ### Task 4.3：选区列偏移补偿 gutter 宽度
@@ -815,7 +815,7 @@ Expected: PASS（含选区回归）。
 
 ```bash
 git add apps/cli/src/tui/render/output/rendered.rs apps/cli/src/tui/render/output/gutter.rs apps/cli/src/tui/render/output_area/render.rs
-git commit -m "feat(tui): 选区列偏移补偿 gutter 宽度（gutter 不进 plain）(refs #60)"
+git commit -m "feat(tui): 选区列偏移补偿 gutter 宽度（gutter 不进 plain）(refs #63)"
 ```
 
 ---
@@ -901,7 +901,7 @@ Run: `cargo test -p cli 2>&1 | tail -10 && bash .agents/hooks/check-tui-block-ne
 
 ```bash
 git add apps/cli/src/tui/render/output/nesting.rs apps/cli/src/tui/render/output/mod.rs apps/cli/src/tui/view_assembler/output.rs .agents/hooks/check-tui-block-nesting.sh .agents/hooks/check-architecture-guards.sh
-git commit -m "feat(tui): 嵌套规则表 allowed_child/MAX_BLOCK_DEPTH + 校验 + guard (refs #60)"
+git commit -m "feat(tui): 嵌套规则表 allowed_child/MAX_BLOCK_DEPTH + 校验 + guard (refs #63)"
 ```
 
 ---
@@ -953,7 +953,7 @@ Expected: 全 PASS。
 
 ```bash
 git add apps/cli/src/tui/view_assembler/output.rs apps/cli/src/tui/render/output/blocks/tool_call.rs apps/cli/src/tui/view_model/output.rs apps/cli/src/tui/render/output/document_renderer.rs apps/cli/src/tui/view_assembler/output_tests.rs
-git commit -m "feat(tui): tool result 升为子块，删父块内联渲染与 blocks 字段 (refs #60)"
+git commit -m "feat(tui): tool result 升为子块，删父块内联渲染与 blocks 字段 (refs #63)"
 ```
 
 ---
@@ -1008,24 +1008,24 @@ Expected: 全绿。
 
 ```bash
 git add apps/cli/src/tui/render/output/document_renderer.rs
-git commit -m "feat(tui): retain 全树 DFS + MAX_LINES 按 root 子树裁剪 (refs #60)"
+git commit -m "feat(tui): retain 全树 DFS + MAX_LINES 按 root 子树裁剪 (refs #63)"
 ```
 
 ---
 
 ## 收尾：文档联动
 
-### Task 8.1：更新 feature #60 状态
+### Task 8.1：更新 feature #63 状态
 
 **Files:**
 - Modify: `docs/feature/active.md`
 
-- [ ] **Step 1:** 把 #60 行状态从「设计中」改为「待确认」，补一句实现摘要（trait + 树 + gutter 已落地，result 子块化，#65 加固回归通过）。
+- [ ] **Step 1:** 把 #63 行状态从「设计中」改为「待确认」，补一句实现摘要（trait + 树 + gutter 已落地，result 子块化，#65 加固回归通过）。
 - [ ] **Step 2: Commit**
 
 ```bash
 git add docs/feature/active.md
-git commit -m "docs: #60 状态更新为待确认 (refs #60)"
+git commit -m "docs: #63 状态更新为待确认 (refs #63)"
 ```
 
 ---
