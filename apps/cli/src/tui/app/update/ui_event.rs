@@ -1,4 +1,3 @@
-use super::ask_user_options::build_option_line_ranges;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
@@ -107,8 +106,9 @@ impl App {
             UiEvent::LiveTps(tps) => {
                 self.status_bar.set_tps(tps);
             }
-            UiEvent::AgentProgress { tool_id, event } => {
-                self.output_area.push_agent_progress(&tool_id, event);
+            UiEvent::AgentProgress { .. } => {
+                // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
+                // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
                 self.output_area.start_spinner();
                 self.output_area.set_spinner_phase("Agent working...");
             }
@@ -117,7 +117,8 @@ impl App {
                     "[SPINNER] Error: tool_call_active {} -> false",
                     self.chat.tool_call_active
                 );
-                self.output_area.push_error(&msg);
+                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
+                // 此处不再重复写 output_area（消除双表示）。
                 self.output_area.stop_spinner();
                 self.chat.stop_processing();
                 return UpdateResult::one(Effect::RunHook {
@@ -126,7 +127,8 @@ impl App {
                 });
             }
             UiEvent::Cancelled => {
-                self.output_area.push_cancelled();
+                // 取消提示改为注入 ConversationModel 的 System notice，经 document 渲染。
+                self.append_system_notice("已取消");
                 self.output_area.stop_spinner();
                 self.chat.stop_processing();
             }
@@ -141,15 +143,16 @@ impl App {
                 );
             }
             UiEvent::SystemMessage(msg) => {
-                // Hook notification deferred to Cmd; state update stays here
-                self.output_area.push_system(&msg);
+                // SystemMessage 已由 map_agent_event -> AppendSystemMessage 注入
+                // ConversationModel；此处仅触发 hook（副作用经 Cmd 描述）。
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::ReminderRecap(line) => {
-                self.handle_reminder_recap(&line);
+            UiEvent::ReminderRecap(_line) => {
+                // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
+                // ConversationModel，无需在此重复写入。
             }
             UiEvent::MemoryList(reminders) => {
                 self.handle_memory_list(&reminders);
@@ -169,7 +172,7 @@ impl App {
                 );
             }
             UiEvent::ReflectionDone { output } => {
-                self.output_area.push_system(&output.content);
+                self.append_system_notice(output.content.clone());
                 if self.session.memory_config.reflection.auto_apply_suggestions {
                     self.apply_reflection_output(output);
                 } else {
@@ -177,7 +180,7 @@ impl App {
                     let outdated_count = output.outdated_memories.len();
                     self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
-                        self.output_area.push_system(&format!(
+                        self.append_system_notice(format!(
                             "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
                         ));
                     }
@@ -206,35 +209,29 @@ impl App {
                     all_options.push(crate::tui::app::state::BUILTIN_OPTION_CHAT.to_string());
                 }
 
-                let default_ref = default.as_deref();
-                let option_line_start = self.output_area.push_ask_user(
-                    &question,
-                    &all_options,
-                    default_ref,
-                    multi_select,
-                );
-
-                if let Some(start) = option_line_start {
+                if all_options.is_empty() {
+                    // 无选项：仍以 AskUser 块渲染问题（自由输入模式），应答走 reply_tx
+                    self.show_ask_user_block(question, Vec::new(), 0, multi_select, 0);
+                    self.input.ask_user_reply_tx = Some(reply_tx);
+                } else {
                     let cursor = default
                         .as_ref()
                         .and_then(|d| all_options.iter().position(|o| o == d))
                         .unwrap_or(0);
-                    let total = all_options.len();
-                    let option_line_ranges = build_option_line_ranges(start, &all_options);
+                    self.show_ask_user_block(
+                        question,
+                        all_options.clone(),
+                        llm_option_count,
+                        multi_select,
+                        cursor,
+                    );
                     self.input.ask_user_state = Some(crate::tui::app::state::AskUserState {
                         reply_tx,
                         options: all_options,
                         llm_option_count,
-                        cursor,
                         multi_select,
-                        selected: vec![false; total],
-                        option_line_ranges,
                         allow_free_input,
-                        chat_input_active: false,
                     });
-                } else {
-                    // 无选项：退回自由输入模式
-                    self.input.ask_user_reply_tx = Some(reply_tx);
                 }
                 self.output_area.stop_spinner();
             }
@@ -243,11 +240,10 @@ impl App {
                 additional_context,
             } => {
                 if let Some(ref msg) = system_message {
-                    self.output_area.push_system(msg);
+                    self.append_system_notice(msg.clone());
                 }
                 if let Some(ref ctx) = additional_context {
-                    self.output_area
-                        .push_system(&format!("[Additional Context] {ctx}"));
+                    self.append_system_notice(format!("[Additional Context] {ctx}"));
                 }
                 if let Some(msg) = system_message {
                     return UpdateResult::one(Effect::RunHook {
@@ -259,9 +255,8 @@ impl App {
             UiEvent::DrainQueuedInput { reply_tx } => {
                 let queued = self.input.drain_queue();
                 if !queued.is_empty() {
-                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
-                    for msg in &flushed {
-                        self.output_area.push_user_message(msg);
+                    for msg in &queued {
+                        self.append_user_echo(msg.clone());
                     }
                     self.output_area
                         .set_spinner_phase("Thinking with queued input...");
@@ -310,10 +305,10 @@ impl App {
                     self.chat.tool_call_active
                 );
                 log::info!(
-                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),
-                    self.output_area.queued_messages.len(),
+                    self.model.conversation.queued_submissions.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
@@ -329,10 +324,10 @@ impl App {
                     self.chat.tool_call_active
                 );
                 log::info!(
-                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),
-                    self.output_area.queued_messages.len(),
+                    self.model.conversation.queued_submissions.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),

@@ -6,28 +6,19 @@ use ratatui::{
 
 use sdk::CharIdx;
 
-use super::display::wrap_line;
 use super::OutputArea;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
-use crate::tui::view_state::cache::ViewRenderCache;
 
 impl OutputArea {
     /// 渲染输出区域
-    pub fn render_with_cache(
-        &mut self,
-        area: Rect,
-        buf: &mut ratatui::buffer::Buffer,
-        cache: &mut ViewRenderCache,
-    ) {
+    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         if area.height == 0 {
             return;
         }
-        self.sync_document_from_legacy_lines();
 
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
             self.term_width = new_width;
-            cache.output.line_cache.invalidate();
         }
 
         let spinner_line = self.build_spinner_line();
@@ -53,7 +44,6 @@ impl OutputArea {
         );
 
         clear_area(area, buf);
-        let spinner_frame_idx = self.spinner.as_ref().map(|s| s.frame).unwrap_or(0);
 
         let document_lines = self.document.iter_lines().collect::<Vec<_>>();
         let mut screen_map = Vec::new();
@@ -78,12 +68,7 @@ impl OutputArea {
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
         let task_status_lines = self.task_status_lines.clone();
-        self.append_status_lines(
-            &mut display_lines,
-            Vec::new(),
-            &spinner_line,
-            &task_status_lines,
-        );
+        self.append_status_lines(&mut display_lines, &spinner_line, &task_status_lines);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -101,7 +86,6 @@ impl OutputArea {
             );
         }
 
-        self.color_tool_call_dots(area, buf, spinner_frame_idx, total_rendered);
         render_scrollbar(
             area,
             buf,
@@ -111,19 +95,6 @@ impl OutputArea {
             self.scroll_offset,
         );
         self.last_line_count = total_lines;
-    }
-
-    fn sync_document_from_legacy_lines(&mut self) {
-        if !self.document.blocks.is_empty() || self.lines.is_empty() {
-            return;
-        }
-        let lines = legacy_lines_to_rendered(&self.lines, self.term_width);
-        self.document = crate::tui::render::output::rendered::RenderedDocument {
-            blocks: vec![crate::tui::render::output::rendered::RenderedBlock {
-                block_id: "legacy".into(),
-                lines,
-            }],
-        };
     }
 
     #[cfg(test)]
@@ -168,16 +139,6 @@ impl OutputArea {
         };
         (start < end).then_some(SelRange { start, end })
     }
-
-    /// Legacy render entry point. New code should pass `AppViewState.cache`
-    /// through `render_with_cache` so render cache lives in view_state.
-    #[allow(dead_code)]
-    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        let mut view_cache = ViewRenderCache::default();
-        view_cache.output.line_cache = std::mem::take(&mut self.rendered_cache.line_cache);
-        self.render_with_cache(area, buf, &mut view_cache);
-        self.rendered_cache.line_cache = view_cache.output.line_cache;
-    }
 }
 
 fn normalize_rendered_table_plain(plain: &str) -> String {
@@ -185,44 +146,6 @@ fn normalize_rendered_table_plain(plain: &str) -> String {
         return plain.to_string();
     };
     format!("{}  │{}", left.trim_end(), right.trim_end())
-}
-
-pub(crate) fn legacy_lines_to_rendered(
-    lines: &std::collections::VecDeque<super::types::OutputLine>,
-    width: usize,
-) -> Vec<crate::tui::render::output::rendered::RenderedLine> {
-    use crate::tui::render::output::markdown::{
-        is_table_row, is_table_separator, render_table_block,
-    };
-    use ratatui::style::Style;
-
-    let mut out = Vec::new();
-    let mut idx = 0usize;
-    while idx < lines.len() {
-        let line = &lines[idx];
-        if matches!(line.style, super::types::LineStyle::Assistant)
-            && is_table_row(&line.content)
-            && idx + 1 < lines.len()
-            && is_table_separator(&lines[idx + 1].content)
-        {
-            let mut end = idx;
-            let mut src = Vec::new();
-            while end < lines.len() && is_table_row(&lines[end].content) {
-                src.push(lines[end].content.as_str());
-                end += 1;
-            }
-            out.extend(
-                render_table_block(&src, Style::default(), width)
-                    .into_iter()
-                    .map(crate::tui::render::output::rendered::RenderedLine::new),
-            );
-            idx = end;
-            continue;
-        }
-        out.push(line.as_rendered_line(width));
-        idx += 1;
-    }
-    out
 }
 
 fn visible_range(
@@ -277,13 +200,6 @@ fn render_scrollbar(
     StatefulWidget::render(scrollbar, scrollbar_area, buf, &mut scrollbar_state);
 }
 
-/// 供 rendered_cache.rs 使用
-pub fn wrap_output_line(content: &str, max_width: usize) -> Vec<String> {
-    wrap_line(content, max_width)
-}
-
-/// 将含 \n 的 Line 拆分为不含 \n 的多个子 Line。
-/// 每个 \n 分隔的片段成为独立的 Line，与 screen_entries 一一对应。
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,8 +219,7 @@ mod tests {
         area.set_selection_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
         let area_rect = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area_rect);
-        let mut cache = ViewRenderCache::default();
-        area.render_with_cache(area_rect, &mut buf, &mut cache);
+        area.render(area_rect, &mut buf);
 
         assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
         assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG);

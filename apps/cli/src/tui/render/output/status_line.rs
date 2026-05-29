@@ -1,26 +1,19 @@
-use ratatui::{layout::Rect, style::Style, text::Line};
+use ratatui::{style::Style, text::Line};
 
 use sdk::CharIdx;
 
 use crate::tui::render::display::safe_text::clamp_split_index;
 use crate::tui::render::theme;
 
-use crate::tui::render::output_area::{LineStyle, OutputArea};
+use crate::tui::render::output_area::OutputArea;
 
 impl OutputArea {
     pub(crate) fn append_status_lines(
         &mut self,
         lines: &mut Vec<Line<'static>>,
-        queued_lines: Vec<Line<'static>>,
         spinner_line: &Option<Line<'static>>,
         task_status_lines: &[String],
     ) {
-        // queued_lines: 每行加一个不可选的 screen_map entry 保持对齐
-        for _ in queued_lines.iter() {
-            self.screen_line_map
-                .push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
-        }
-        lines.extend(queued_lines);
         if let Some(sl) = spinner_line {
             // spinner 行也加一个不可选的 screen_map entry
             self.screen_line_map
@@ -29,7 +22,7 @@ impl OutputArea {
         }
         if spinner_line.is_some() {
             let screen_start = self.screen_line_map.len();
-            let task_base_idx = self.lines.len();
+            let task_base_idx = self.document.total_lines();
             for (i, task_line) in task_status_lines.iter().enumerate() {
                 let text = format!("  {task_line}");
                 let char_count = text.chars().count();
@@ -81,54 +74,6 @@ impl OutputArea {
         }
     }
 
-    pub(crate) fn color_tool_call_dots(
-        &self,
-        area: Rect,
-        buf: &mut ratatui::buffer::Buffer,
-        spinner_frame_idx: u64,
-        total_rendered: usize,
-    ) {
-        let blink_on = (spinner_frame_idx / 10).is_multiple_of(2);
-        for (si, &(li, _, _)) in self.screen_line_map.iter().enumerate() {
-            if li >= self.lines.len() {
-                continue;
-            }
-            let line = &self.lines[li];
-            let dot_color = match line.style {
-                LineStyle::ToolCallRunning if line.content.starts_with('●') => {
-                    Some(if blink_on {
-                        theme::ACCENT_BRIGHT
-                    } else {
-                        theme::TEXT_DIM
-                    })
-                }
-                LineStyle::ToolCallSuccess if line.content.starts_with('✓') => {
-                    Some(theme::SUCCESS)
-                }
-                LineStyle::ToolCallError if line.content.starts_with('✗') => Some(theme::ERROR),
-                _ => None,
-            };
-            if let Some(color) = dot_color {
-                let visible_offset = total_rendered.saturating_sub(area.height as usize);
-                let screen_y = si.saturating_sub(visible_offset);
-                if screen_y >= area.height as usize {
-                    continue;
-                }
-                if let Some(cell) = buf.cell_mut((area.x, area.y + screen_y as u16)) {
-                    set_running_tool_dot(cell, line.style);
-                    let mut style = cell.style();
-                    style.fg = Some(color);
-                    cell.set_style(style);
-                }
-            }
-        }
-    }
-}
-
-fn set_running_tool_dot(cell: &mut ratatui::buffer::Cell, style: LineStyle) {
-    if matches!(style, LineStyle::ToolCallRunning) {
-        cell.set_symbol("●");
-    }
 }
 
 fn task_status_style(text: &str) -> Style {
@@ -153,28 +98,6 @@ mod tests {
     use crate::tui::render::output_area::types::SpinnerState;
 
     #[test]
-    fn test_color_tool_call_dots_preserves_success_icon() {
-        let mut output = OutputArea::new();
-        output
-            .lines
-            .push_back(crate::tui::render::output_area::OutputLine {
-                content: "✓ Read".to_string(),
-                style: LineStyle::ToolCallSuccess,
-                ..Default::default()
-            });
-        output
-            .screen_line_map
-            .push((0, CharIdx::ZERO, CharIdx::new(6)));
-        let area = Rect::new(0, 0, 20, 1);
-        let mut buf = Buffer::empty(area);
-        buf.cell_mut((0, 0)).unwrap().set_char('✓');
-
-        output.color_tool_call_dots(area, &mut buf, 0, 1);
-
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "✓");
-    }
-
-    #[test]
     fn test_render_maps_task_status_lines_for_selection() {
         let mut output = OutputArea::new();
         output.task_status_lines =
@@ -193,8 +116,9 @@ mod tests {
         assert_eq!(output.screen_line_map.len(), 3);
         // spinner 在 index 0, 不可选(usize::MAX)
         assert_eq!(output.screen_line_map[0].0, usize::MAX);
-        assert_eq!(output.screen_line_map[1].0, output.lines.len());
-        assert_eq!(output.screen_line_map[2].0, output.lines.len() + 1);
+        let base = output.document().total_lines();
+        assert_eq!(output.screen_line_map[1].0, base);
+        assert_eq!(output.screen_line_map[2].0, base + 1);
         assert_eq!(output.task_status_lines.len(), 2);
         // rel_row=2 对应第 2 个 task_status 行
         output.start_selection(2, 0, &area);

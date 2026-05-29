@@ -3,36 +3,21 @@ use sdk::{char_to_byte, CharIdx, StrSlice};
 use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
 
 impl super::OutputArea {
-    /// 获取逻辑行总数（包括普通行 + task_status 虚拟行）
+    /// 获取逻辑行总数（包括 document 行 + task_status 虚拟行）
     fn total_virtual_line_count(&self) -> usize {
-        self.lines.len() + self.task_status_lines.len()
+        self.document.total_lines() + self.task_status_lines.len()
     }
 
     /// 根据逻辑索引获取行文本内容。
-    /// idx < self.lines.len() → 普通行；否则 → task_status_lines[i]
+    /// idx < document.total_lines() → document 行；否则 → task_status_lines[i]
     pub fn get_line_content(&mut self, idx: usize) -> Option<String> {
         if let Some(rendered) = self.rendered_line_content.get(&idx) {
             return Some(rendered.clone());
         }
-        if self.document.blocks.is_empty() && !self.lines.is_empty() {
-            let lines = crate::tui::render::output_area::render::legacy_lines_to_rendered(
-                &self.lines,
-                self.term_width,
-            );
-            self.document = crate::tui::render::output::rendered::RenderedDocument {
-                blocks: vec![crate::tui::render::output::rendered::RenderedBlock {
-                    block_id: "legacy".into(),
-                    lines,
-                }],
-            };
-        }
         if let Some(line) = self.document.iter_lines().nth(idx) {
             return Some(line.plain.clone());
         }
-        if idx < self.lines.len() {
-            return Some(self.lines[idx].content.clone());
-        }
-        let task_idx = idx - self.lines.len();
+        let task_idx = idx - self.document.total_lines();
         self.task_status_lines
             .get(task_idx)
             .map(|s| format!("  {s}"))

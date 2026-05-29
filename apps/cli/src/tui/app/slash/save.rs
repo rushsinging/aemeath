@@ -14,12 +14,10 @@ impl super::super::App {
             ))
         };
         match result {
-            Ok(()) => self
-                .output_area
-                .push_system(&format!("[session saved: {}]", self.session.session_id)),
-            Err(e) => self
-                .output_area
-                .push_error(&format!("Failed to save session: {e}")),
+            Ok(()) => {
+                self.append_system_notice(format!("[session saved: {}]", self.session.session_id))
+            }
+            Err(e) => self.append_error_notice(format!("Failed to save session: {e}")),
         }
     }
 }

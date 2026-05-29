@@ -3,7 +3,7 @@ impl super::OutputArea {
     pub fn scroll_up(&mut self, amount: usize) {
         self.auto_scroll = false;
         let visible_height = self.last_visible_height;
-        let max_offset = self.lines.len().saturating_sub(visible_height);
+        let max_offset = self.document.total_lines().saturating_sub(visible_height);
         self.scroll_offset = (self.scroll_offset.saturating_add(amount)).min(max_offset);
         if max_offset == 0 {
             self.scroll_offset = 0;
@@ -27,13 +27,13 @@ impl super::OutputArea {
 
     /// 获取行数
     pub fn line_count(&self) -> usize {
-        self.lines.len()
+        self.document.total_lines()
     }
 
     /// 获取当前可见行范围
     #[allow(dead_code)]
     pub fn get_visible_range(&self, visible_height: usize) -> (usize, usize) {
-        let total_lines = self.lines.len();
+        let total_lines = self.document.total_lines();
         if self.auto_scroll {
             let start = total_lines.saturating_sub(visible_height);
             (start, total_lines)

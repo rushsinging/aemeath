@@ -1,7 +1,6 @@
 //! TUI 模式下的语法高亮封装。
 //!
 //! 基于 syntect，将代码行高亮为 `Vec<SpanPart>` 供 ratatui 渲染。
-#![allow(dead_code)]
 
 use once_cell::sync::Lazy;
 use syntect::easy::HighlightLines;

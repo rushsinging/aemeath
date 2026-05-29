@@ -3,8 +3,8 @@ use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{
-    OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView,
-    ToolCallBlockView, ToolSemanticStatus,
+    AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
+    TextBlockView, ToolCallBlockView, ToolSemanticStatus,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -124,6 +124,30 @@ impl OutputViewAssembler {
                             key: id.clone(),
                             text: format!("{tool_id}: {message}"),
                             style: SemanticStyle::Running,
+                        }),
+                    ));
+                }
+                ConversationBlock::AskUser {
+                    id,
+                    question,
+                    options,
+                    llm_option_count,
+                    multi_select,
+                    cursor,
+                    selected,
+                    chat_input_active,
+                } => {
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::AskUser(AskUserBlockView {
+                            key: id.clone(),
+                            question: question.clone(),
+                            options: options.clone(),
+                            llm_option_count: *llm_option_count,
+                            multi_select: *multi_select,
+                            cursor: *cursor,
+                            selected: selected.clone(),
+                            chat_input_active: *chat_input_active,
                         }),
                     ));
                 }

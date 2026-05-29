@@ -4,6 +4,7 @@ use super::tool_call::ToolCallStatus;
 pub enum ConversationChange {
     ChatStarted { chat_id: String },
     ChatTurnStarted { chat_id: String, turn_id: String },
+    UserMessageAppended { block_id: String },
     AssistantTextAppended { block_id: String },
     ThinkingTextAppended { block_id: String },
     TextBlockCompleted { block_id: Option<String> },
@@ -18,6 +19,9 @@ pub enum ConversationChange {
     ChatCompleting { chat_id: String },
     ChatCompleted { chat_id: String },
     OrphanToolResultObserved { id: String },
+    AskUserShown { id: String },
+    AskUserUpdated { id: String },
+    AskUserDismissed,
     OutputDirty,
     StyleBoundaryResetRequired,
 }

@@ -17,7 +17,184 @@
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
-| 58 | TUI 输出区渲染管线统一重构 | 高 | 活动中 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
+| 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
+
+### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
+
+**状态**：进行中（T1 完成，等待后续 Task 删除 lines 字段/legacy 垫片）
+
+**问题**：输出区主渲染已切换到 `ConversationModel → OutputViewModel → OutputDocumentRenderer → RenderedDocument`，但 `OutputArea::push_system`/`push_error` 仍直接写 `output_area.lines`，经 `sync_document_from_legacy_lines` 垫片兜底——构成「双表示」残留。且 `sync_document_from_legacy_lines` 仅在 `document` 为空时生效，一旦对话开始（document 非空），这些 push 的消息将不再显示（潜在显示丢失）。
+
+**改法**：
+- 新增 `App::append_system_notice / append_error_notice`：派发 `AppendSystemMessage/AppendError` intent 后 `refresh_output_widget_from_model`，作为系统/错误消息的唯一注入入口。
+- 判别 12+ 处调用点：`UiEvent::Error/SystemMessage/ReminderRecap` 经 `map_agent_event` 已注入 ConversationModel → 属冗余双写，直接删除；其余 slash/effect/paste/key/resume 等为唯一显示路径 → 迁移到新入口。
+- 新增 `ConversationModel::reset()`，并在 `App::reset_runtime_state` 中清空对话单一真相源 + 刷新文档，修复 `/clear` 后旧 block 残留。
+- `push_error` 迁移后无调用者，删除其定义；`push_system` 仅保留给 `OutputArea::init()` 欢迎横幅（lines 字段与 legacy 垫片保留，留待后续 Task）。
+
+**验证**：`cargo build/test(-p cli 374 passed)/clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+### #58 Phase 5 · T2：迁移 push_user_message 到单一真相源
+
+**状态**：进行中（T2 完成，lines 字段/legacy 垫片仍待后续 Task 删除）
+
+**问题**：用户输入回显仍由 `OutputArea::push_user_message` 直接写 `output_area.lines`，构成与 `ConversationModel` 的「双写/双表示」。document 非空后该路径不再显示，存在丢失风险。
+
+**改法**：
+- 新增 `ConversationIntent::AppendUserMessage` + `ConversationChange::UserMessageAppended` + `ConversationModel::append_user_message`：仅追加 `UserMessage` 回显块，**不新开 chat/turn、不改 active_chat_id**（区别于 `StartChat`），用于 ask_user 应答、队列输入冲刷等「已激活回合内回显」场景，避免破坏在途工具绑定。
+- 新增 `App::append_user_echo`（notice.rs）作为回显唯一入口（派发 intent 后 `refresh_output_widget_from_model`）。
+- 判别 4 处 `push_user_message` 调用点：
+  - `ask_user_key.rs`×3（选项应答 / 自由输入 / Chat-about-this 子模式）— 唯一显示路径，迁移到 `append_user_echo`。
+  - `ui_event.rs` 队列输入冲刷 — 唯一显示路径，迁移到 `append_user_echo`。
+  - `run_loop.rs` review-prompt — 新建对话语义，改派 `StartChat` + `refresh`（与 `update_enter` 一致）。
+- 迁移后 `push_user_message` 无调用者，删除其定义（`lines` 字段与 legacy 垫片保留，留待后续 Task）。
+- 回显渲染确认：`UserMessage` block → `OutputBlockKind::UserMessage` → `render_user_message` 输出 `> ...` 前缀（已有单测覆盖）。
+
+**验证**：`cargo build / test(-p cli 380 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+### #58 Phase 5 · T3：清理 tool_display 旧命令式渲染
+
+**状态**：进行中（T3 完成，lines 字段/legacy 垫片仍待后续 Task 删除）
+
+**背景**：ToolCall 现经单一管线 `ConversationModel → OutputViewModel → OutputDocumentRenderer`，由 `render/output/blocks/tool_call.rs`（`OutputBlockKind::ToolCall`）渲染。`render/output/tool_display/` 中产出 `OutputLine` 的旧 OutputArea 命令式渲染路径已无活跃使用，本轮清理。
+
+**判别结论**：
+- 命令式显示方法 `push_tool_call_start` / `update_tool_call_pending` / `push_tool_call` / `format_todowrite`（mod.rs）、`push_tool_result_with_diff`（results.rs）均 `#[allow(dead_code)]`、仅被模块自身单测引用，**死代码 → 删**。
+- `agent.rs` 的 `push_agent_progress` / `push_tool_progress` 仍被 `app/update/ui_event.rs` 调用（sub-agent 进度尚未迁移到 ConversationModel），**保留**。
+- `tool_call.rs` 仅复用 `tool_display::format_tool_call`（纯格式化 header+detail），不依赖任何命令式渲染，删除死代码后保持复用。
+
+**删除**：
+- `tool_display/results.rs`（整文件死路径）。
+- `mod.rs` 内 `impl OutputArea` 命令式块 + `debug_log` + 旧 `mod tests`。
+- `common.rs` 内 `extract_tool_preview` / `extract_string_value`（仅服务于已删的 pending 预览）。
+- `output_area/mod.rs` 中失去使用者的 `build_diff_lines` re-export。
+
+**保留**：`ToolDisplay` trait（`result_*` / `format_result_summary` 默认方法标 `#[allow(dead_code)]` 供未来结果渲染迁移复用）、各工具 `ToolDisplay` impl（经 `format_tool_call` 使用）、`agent.rs` 全部、`common.rs` 其余纯格式化函数。
+
+**边界遵守**：未删 `OutputLine` / `LineStyle` 类型、`lines` 字段与 legacy 垫片、streaming/queued/旧行级链。
+
+**TDD/验证**：为 `tool_call.rs` 补充渲染测试（参数 detail 行来自 `format_tool_call`、result_summary 结果行），确保删除旧路径后行为不回退。`cargo build / test(-p cli 378 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+
+### #58 Phase 5 · T4：删除 streaming 旧重渲与 legacy 排队机制
+
+**状态**：进行中（T4 完成，`lines` 字段/`OutputLine`/`LineStyle`/legacy 垫片仍待后续 Task 删除）
+
+**判别结论**：
+- streaming：流式文本现由 `ConversationModel::append_assistant_text/append_thinking_text`（`ObserveAssistantText`/`ObserveThinkingText` intent，经 `adapter/agent_event.rs`）驱动 active block 渲染。`OutputArea` 的 `do_rerender`/`append_assistant_text`/`append_thinking_text`/`has_unclosed_think` 全标 `#[allow(dead_code)]`、无活跃调用者，**死代码 → 删**。
+- queued：排队显示已由 `ConversationBlock::QueuedUserMessage → OutputBlockKind::QueuedSubmission`（`view_assembler/output.rs` + `blocks/queued_submission.rs`）经文档管线渲染；`render.rs` 调用 `append_status_lines` 时 `queued_lines` 恒传空向量，`build_queued_message_lines` 无活跃调用者，**死代码 → 删**。legacy `queued_messages` 仅作 `InputState::input_queue` 的镜像用于 drain 回显，**统一到 input_queue 后删除**。
+
+**删除**：
+- 文件 `output_area/streaming.rs`、`output_area/queued.rs`（整文件死路径）；`mod.rs` 中对应 `mod streaming;`/`mod queued;` 声明。
+- `OutputArea` 字段 `streaming_buffer`/`streaming_start`/`synthetic_think_open`/`queued_line_count`/`queued_messages`，及 `content.rs`（`insert_lines_at` 的 `streaming_start` 调整、`reset_runtime_state` 清理）、`new()` 初始化中的对应项。
+- `finish_streaming` 方法及其 no-op 调用点（`done.rs`、`agent.rs::push_agent_tool_calls/push_tool_progress`、`content.rs::push_cancelled/push_ask_user/push_system`）。
+- `append_status_lines` 恒空的 `queued_lines` 参数。
+- 队列回显统一：`key.rs` 不再 push `queued_messages`；`ui_event.rs::DrainQueuedInput` 直接回显已 `drain` 的 `queued`；诊断日志 `queued_messages_len` 改为 `queued_submissions_len`（取自 ConversationModel）。
+
+**保留**：`OutputLine`/`LineStyle` 类型本体、`lines` 字段、legacy 垫片 `sync_document_from_legacy_lines`/`legacy_lines_to_rendered`、旧行级链 cache/line/block/span（后续 Task）；`agent.rs` 仍写 `lines` 的工具进度路径（sub-agent 进度尚未迁移）。
+
+**TDD/验证**：复用已有 streaming 回归（`model_tests.rs::test_conversation_streams_text_and_thinking_into_blocks`）与 QueuedSubmission 渲染测试（`blocks/queued_submission.rs`）；新增 `model_tests.rs` 队列 block 回归（QueueSubmission 落 `QueuedUserMessage` 块、ClearQueuedSubmissions 清空、空队列清理 noop）。`cargo build / test(-p cli 381 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+
+### #58 Phase 5 · T5：删除旧「行级渲染链」及其缓存
+
+**状态**：进行中（T5 完成，`lines` 字段/`OutputLine`/`LineStyle`/legacy 垫片仍待 T6 删除）
+
+**判别结论**：
+- 主渲染（`output_area/render.rs`）只画 `self.document.iter_lines()` + `apply_selection_overlay`，**不再读** line_cache：`ensure_rendered` 无任何活跃调用，`RenderedCache.get` 无调用者。`render.rs`/`content.rs`/`resize.rs` 中所有 `line_cache.invalidate/content_changed/mark_clean` 都是「维护一个不被读的缓存」→ 死维护，随链删除。
+- `ViewRenderCache` 的 `dirty_blocks`/`mark_output_dirty`/`mark_block_dirty`/`clear_dirty_blocks` 仅被自身单测引用，无生产调用者；`OutputRenderCacheState.line_cache` 同为死维护。故 `render_with_cache(area, buf, cache)` 的 `cache` 参数整体为死代码 → 删除参数，方法重命名为 `render(area, buf)`。
+
+**删除**：
+- 文件 `render/output/{line.rs,block.rs,span.rs,cache.rs,block_tests.rs}`（旧行级链 `render_range`/`collect_table_ranges`/`scan_code_blocks`/`scan_table_blocks`/`CodeBlockInfo`/`slice_spans`/旧 `RenderedCache`/旧 `RenderedLine{line,screen_entries,rendered_text}`）。
+- 文件 `view_state/cache.rs`（`OutputRenderCacheState`、`ViewRenderCache`）；`view_state/mod.rs` 的 `pub mod cache`/`pub use ViewRenderCache` 及 `AppViewState.cache` 字段。
+- `OutputArea.rendered_cache` 字段及 `content.rs`（4 处）/`resize.rs`（1 处）对 `line_cache` 的维护调用；`mod.rs` 的 legacy `draw()`（仅转调旧 `render`）；`render.rs` 的 legacy `render()` 方法（仅 swap line_cache）与 `wrap_output_line`（仅旧链使用）。
+- `render_with_cache` → `render`，去掉 `cache` 参数；`app/mod.rs` 调用点同步；`output_area/mod.rs` 去掉随之失效的 `markdown` 顶层 re-export。
+- `output/mod.rs` 删 `pub use cache::{RenderedCache, RenderedLine}` 与 `pub mod {line,block,span,cache}`、`mod block_tests`。
+
+**RenderedLine 提升**：`output/mod.rs` 新增 `pub use rendered::{RenderCtx, RenderedBlock, RenderedDocument, RenderedLine}`；全仓对 `RenderedLine` 的引用均指向新 `rendered::RenderedLine{spans, plain}`，无命名歧义。
+
+**保留（留 T6）**：`OutputLine`/`LineStyle` 类型本体、`lines` 字段、legacy 垫片 `sync_document_from_legacy_lines`/`legacy_lines_to_rendered`；`document` 为空时仍经垫片渲染。
+
+**TDD/验证**：保留 document 渲染回归 `render.rs::test_render_document_paints_spans_and_overlays_selection`（改用无 cache 参数的 `render`）；`resize.rs` 两个断言旧 cache dirty 的测试改为断言 `term_width` 行为（缓存已删，行为不变由 document 渲染覆盖）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
+### #58 Phase 5 · T6a：迁移 agent_progress / cancelled / init 横幅到 ConversationModel
+
+**状态**：进行中（T6a 完成，AskUser 命令式路径留 T6b、`lines` 镜像/`OutputLine`/`LineStyle`/legacy 类型留 T6c）
+
+**判别结论**：三类内容此前由 `update/ui_event.rs` 命令式直写 `output_area.lines`，但 `update_agent_event` 在 `update_ui` 之后立即 `refresh_output_widget_from_model()`（内部 `lines.clear()` 重建），这些写入当帧即被镜像清空 → 死写。其中 agent_progress / SystemMessage / Cancelled 均已由 `adapter/agent_event.rs::map_agent_event` 映射为对应 intent 并注入 ConversationModel。
+
+**改法**：
+- **agent_progress**：复用既有 `RecordAgentProgress` intent / `AgentProgress` block（已映射 DiagnosticNotice(Running)）。`ui_event.rs` 删除命令式 `push_agent_progress` 调用，仅保留 spinner。删除 `render/output/tool_display/agent.rs`（`push_agent_progress`/`push_agent_tool_calls`/`push_tool_progress`/`tool_insert_position`）及其 `agent_tests.rs`、`common.rs` 中仅服务它的 `format_agent_tool_calls`/`format_tool_group`。
+- **cancelled**：`map_agent_event` 将 `Cancelled` 映射为 `CompleteChat`（不产生可见提示）。`ui_event.rs` 把 `push_cancelled()` 改为 `append_system_notice("已取消")`，经 System block 渲染。删除 `OutputArea::push_cancelled`。
+- **init 横幅**：新增 `ConversationModel::seed_banner()`，在 `App::new()` 注入 4 行 System block（横幅纳入单一真相源，`/clear` reset 会清除，已确认接受）。删除 `OutputArea::init()` 及无调用者的 `OutputArea::push_system`。`run_loop` 增加首帧 `draw + refresh_output_widget_from_model`，让横幅按真实宽度渲染。
+
+**model.rs 拆分**：因 model.rs 已 398/400 行，先把 `append_system_message`/`append_error` 迁入新 `model/conversation/notice.rs`（含 `seed_banner` 与 `BANNER_LINES` 常量），model.rs 降至 373 行、notice.rs 120 行。
+
+**TDD/验证**：notice.rs 新增 seed_banner / append_system_message / append_error 单测；修正 `state/tests.rs`（用户消息不再是首行，改 `.any` 断言并校验横幅）与 `update/reminder.rs`（System block 计数加上 `BANNER_LINES.len()` 偏移）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
+### #58 Phase 5 · T6b：迁移 AskUser 选项交互到 ConversationModel 单一真相
+
+**状态**：进行中（T6b 完成，`lines` 镜像/`OutputLine`/`LineStyle`/legacy 类型留 T6c）
+
+**判别结论**：AskUser 选项渲染是最后一条命令式直写 `output_area.lines` 的路径。旧实现 `ui_event.rs` 调 `OutputArea::push_ask_user` 渲染「问题 + 选项列表」，靠 `ask_user_block_start`/`option_line_start`/`option_line_ranges` 记坐标，选项导航（↑↓/Space）靠 `update_ask_user_options` 原地改写对应行高亮，提交后 `dismiss_ask_user_block` 按起始坐标回卷 `lines`。该路径绕过 ViewModel→document 管线，是删 `OutputLine`/`lines`（T6c）的最后障碍，也与 bug #63「options 选择同步」「渲染缓存随 selected 失效」相关。
+
+**selected 归属决定**：选项导航的可变状态（`cursor`/`selected`/`chat_input_active`）此前存于 `input.ask_user_state`，与 `reply_tx`/键处理深度耦合。本次将其**迁入 ConversationModel 的 `AskUser` 块**作为渲染与导航高亮的单一真相；`AskUserState` 只保留应答回传所需的静态元数据（`reply_tx`/`options`/`llm_option_count`/`multi_select`/`allow_free_input`）。键处理通过 `ConversationModel::ask_user_snapshot()` 读回 cursor/selected/chat_input_active，导航/勾选/子态切换均派发 intent 更新块。避免双真相：渲染与提交都从块读取同一份状态。
+
+**改法**：
+- **model 层**：`ConversationBlock::AskUser { id, question, options, llm_option_count, multi_select, cursor, selected, chat_input_active }`（固定 id `ask-user`，同一时刻至多一个）。新增 intents `ShowAskUser`/`SetAskUserCursor`/`ToggleAskUserSelected`/`SetAskUserChatInput`/`DismissAskUser` 与对应 changes；逻辑落在新 `model/conversation/ask_user.rs`（含 `ask_user_snapshot()` 与 cursor 夹取、内建选项不可勾选校验），避免 model.rs 超 400 行（model.rs 388 行）。
+- **view 层**：`OutputBlockKind::AskUser(AskUserBlockView)`；`view_assembler` 映射块字段；新增 `render/output/blocks/ask_user.rs` 渲染问题 + 操作提示 + 选项列表，按 `cursor`（❯/反白）与 `selected`（multi_select 勾选框 [✓]）高亮当前项，`chat_input_active` 子态下不高亮。高亮属「选项导航高亮」，与文本选区 overlay 无关。
+- **controller 层**：`notice.rs` 新增 App 端 `show_ask_user_block`/`set_ask_user_cursor`/`toggle_ask_user_selected`/`set_ask_user_chat_input`/`dismiss_ask_user_block`（派发 intent + `refresh_output_widget_from_model`，无 IO/spawn）。`ui_event.rs::AskUser` 改为 `show_ask_user_block`；`ask_user_key.rs` 导航/勾选/子态改派发 intent，提交读 snapshot。
+- **删除项**：`OutputArea::push_ask_user`、`update_ask_user_options`、`dismiss_ask_user_block`、`format_ask_user_option_lines`、`ask_user_block_start` 字段、`update/ask_user_options.rs`（`build_option_line_ranges`）整模块、`AskUserState` 的 `cursor`/`selected`/`option_line_ranges`/`chat_input_active` 字段、`output_area/content_tests.rs`（仅测已删函数，回归改由 `blocks/ask_user.rs` 单测覆盖）。
+
+**行为兼容**：↑↓ 导航、Space 勾选（内建项不可勾）、Enter 提交（单选/多选/「All of the above」结构化列表/「Chat about this...」进自由输入子态）、Esc 取消、无选项自由输入模式均保持原行为；内建选项（#49）与 selected→高亮同步（#63）由块单一真相天然保证。
+
+**TDD/验证**：model 层 8 个单测（show 替换、cursor 越界夹取、无块 noop、toggle LLM/内建、dismiss、chat_input、snapshot）；render 层 6 个单测（cursor 高亮、空选项提示、单选项标记、多选勾选框、chat 子态抑制高亮、多行选项缩进）。`cargo build -p cli`、`cargo test -p cli`（372 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
+### #58 Phase 5 · T6c：删除 OutputLine/LineStyle/lines 字段/legacy 垫片/镜像
+
+**状态**：待确认（T6c 完成，输出区只剩 `document: RenderedDocument` 单一表示）
+
+**判别结论**：T6b 后所有命令式写 `OutputArea.lines` 的业务路径已迁完，`lines` 仅剩两类残留：①`adapter/output_widget.rs::render_document_from_view_model` 每帧把 document 各行 plain 镜像写回 lines；②少数逻辑仍读 lines（scroll/resize 算 max_offset、selection 虚拟行映射、status_line task 基址、render 兜底垫片）。`OutputLine`/`LineStyle` 另有两类非 legacy 使用：`blocks/tool_call.rs` 与 `output/diff.rs` 把它们当作行的着色中间单元；`tool_display` trait 的 `detail_style`/`result_style` 是从未被调用的死代码。
+
+**改法**：
+- **删镜像**：`render_document_from_view_model` 去掉 `lines.clear()` + 写 OutputLine 循环，只 `set_document` + clamp scroll。
+- **读 lines 改读 document**：`scroll.rs`（`scroll_up` max_offset、`line_count`、`get_visible_range`）、`resize.rs`（max_offset）、`selection.rs`（`total_virtual_line_count`、`get_line_content` 虚拟行基址）、`status_line.rs`（task 基址）全部改读 `document.total_lines()`/`iter_lines()`。
+- **删 legacy 垫片**：`render.rs` 的 `sync_document_from_legacy_lines`、`legacy_lines_to_rendered` 及调用；`render.rs::render` 不再调 `color_tool_call_dots`（dot 着色已由 `blocks/tool_call.rs` 的 `semantic_color` 在 document 内完成），`status_line.rs::color_tool_call_dots`/`set_running_tool_dot` 整体删除。
+- **迁 push_done**：`done.rs` 原经 `OutputArea::push_done` 写 lines 的「✻ Sautéed for Xs」完成提示改派发 `append_system_notice`（ConversationModel → document），并把动词/耗时格式化抽为纯函数 `done_notice`（3 个单测）。
+- **删字段/方法/类型**：`OutputArea.lines` 字段及 `new()` 初始化；`content.rs` 的 `insert_lines_at`（无调用者）、`push_line`、`push_done`（`clear()` 改清 document）；`tool_display` trait 的 `detail_style`/`result_style` 及各 impl 重写；`output_area/types.rs` 的 `OutputLine`、`LineStyle` 类型本体与 `mod.rs` re-export。
+- **重写非 legacy 着色中间单元**：`output/diff.rs::build_diff_lines` 由产出 `Vec<OutputLine>` 改为 `Vec<Vec<SpanPart>>`（style 字段本就被 spans 覆盖、未实际使用）；`primitives/diff.rs` 适配；`blocks/tool_call.rs::format_result_lines` 直接产出 `RenderedLine`（System/Normal 两种语义色映射 `theme::TEXT_DIM`/`theme::TEXT`）。
+
+**SpanPart 保留**：`SpanPart` 是 `render/syntax.rs` 与 `output/diff.rs` 着色原语的中间单元（`primitives/convert.rs::spanparts_to_spans` 消费），与 OutputLine/LineStyle 解耦，定义留在 `output_area/types.rs`，re-export 保留。
+
+**行为兼容**：滚动 max_offset、resize 夹取、选区（含 markdown 表格/内联格式 plain 偏移）、复制、task_status 虚拟行选择均保持原行为；markdown 选区回归测试改由真实 `blocks/assistant_message::render_assistant_message` 渲染 document 后断言（取代旧 legacy_lines_to_rendered 路径）。tool-call dot 闪烁（旧 `color_tool_call_dots` 在镜像回写 lines 时 style 恒为 `LineStyle::Normal`，而 dots 的 match 仅对 `ToolCallRunning`/`Success`/`Error` 着色，故对 Normal 行恒返回 None、实际早已不生效）随之移除，dot 颜色由 document 静态语义色提供。
+
+**TDD/验证**：`output/diff.rs` 4 个单测改断言 SpanPart 文本/标记；`selection_tests.rs` 11 个用例改用 document 填充辅助（plain + assistant_message markdown）；`resize.rs`/`status_line.rs`/`app/state/tests.rs`/`output_widget.rs` 测试改读 document；`done.rs` 新增 3 个 `done_notice` 单测。`cargo build -p cli`、`cargo test -p cli`（374 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含 ≤400 行）全绿；`OutputLine`/`LineStyle` 全仓零残留。
+
+### #58 Phase 6 · T7：渲染隔离守卫 + 删除门禁 + 回归收尾
+
+**状态**：待确认（Phase 5 删除全部完成、Phase 6 守卫落地，仍有后续接线 gap，故 #58 整体维持「待确认」而非「完成」）
+
+**渲染隔离守卫**：新增 `.agents/hooks/check-render-isolation.sh` 并接入 `check-architecture-guards.sh`，扫描 `apps/cli/src/tui/render/output/`：①禁止 `use crate::tui::model::`（render 层不得依赖 Model 可变类型，引用 `view_model::` 允许）；②禁止 IO（`std::fs::`/`std::process::`/`tokio::`，注释与 `#[cfg(test)]` 测试代码豁免）；③选区上色唯一路径——除 `selection_overlay.rs` 外不得出现 `SELECTION_BG`（防 #61/#62 旁路上色回归，测试断言行豁免）。注入临时违规验证三类规则均能命中（RC=1），现状全绿。
+
+**删除验证门禁**：`grep -rE 'OutputLine\b|LineStyle\b|replace_lines_from_view_model|output_view_model_lines|build_queued_message_lines|queued_messages|queued_line_count|render_range|slice_spans|RenderedCache|do_rerender' apps/cli/src` 仅剩 `model/conversation/model_tests.rs` 一条历史注释，零真实残留。`adapter/output_widget.rs` 已收敛为 `set_document` + `clamp_scroll_state`，不再镜像写 `lines`。
+
+**allow(dead_code) 处理**：移除 `render/syntax.rs` 文件级 `#![allow(dead_code)]`（其 `language_by_extension`/`highlight_line`/`extension_from_path` 已被 `blocks/assistant_message.rs`（fence 高亮）与 `output/diff.rs` 实际调用，clippy 验证活跃）。保留 `render/mod.rs` 模块级 `#![allow(dead_code)]`：它仍在屏蔽尚未接线的 diff 渲染链（`output/diff.rs::build_diff_lines`/`build_delete_line`/`build_insert_line`/`build_context_line`/`line_num_width`、`primitives/diff.rs::diff`、相关 DIFF_* 常量）以及 `tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法——这些原语已带回归测试但尚未在 AssistantMessage/ToolCall block 中接通，强行去 allow 会触发 dead_code 警告。
+
+**关联 bug 回归测试现状**：
+- #61：`primitives/diff.rs::test_diff_line_keeps_left_indent_not_flush_left`（diff 行保留两空格左缩进）+ `selection_overlay.rs::test_overlay_sets_bg_keeps_fg`（选中行只设 bg、保留原 fg）。
+- #62：`blocks/tool_call.rs::test_tool_call_title_visible_not_background_color`（标题 span fg ≠ bg 且 ≠ SURFACE）。
+- #65：`blocks/assistant_message.rs::test_assistant_fence_does_not_leak_style_after_close`（fence 结束后普通行不继续 CODE 色）——fence 已在 assistant 组件接线，非 gap。
+- #71：结构性消除，输出区无 `render_range`/行下标越界路径（grep 零残留 + `clamp_scroll_state` 用 `total_lines().saturating_sub` 夹取）。
+- #74：新增 `blocks/mod.rs::test_render_block_assistant_after_system_does_not_inherit_dark`（System(Muted) block 后 Assistant block 独立用 ASSISTANT 色，不继承暗色）。
+- #80：`adapter/output_widget.rs::test_render_document_from_view_model_clamps_stale_scroll_offset`/`_preserves_valid_scroll_offset`（auto_scroll clamp 行为）。
+
+**后续 gap（#58 待办，不阻塞本 task 的结构性修复）**：
+1. **diff 渲染完整接线**：`output/diff.rs` + `primitives/diff.rs::diff` 原语已就绪并带测试，但尚未在 ToolCall（Edit/Write 工具结果）或 AssistantMessage 中接通。
+2. **markdown 完整接线**：markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。
+3. **syntax 高亮接线广度**：fence 已接，diff 内语法高亮原语就绪但随 diff 接线一并待办。
+4. **tool 结果摘要渲染**：`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。
+5. **排队中即时显示**：排队提交需 `key.rs` → `QueueSubmission` 即时反馈、`(default:)` 行、done 间距等交互细节待补。
+
+**TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 

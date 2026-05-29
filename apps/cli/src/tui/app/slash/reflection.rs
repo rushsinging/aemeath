@@ -9,32 +9,29 @@ impl super::super::App {
         ui_tx: Option<mpsc::Sender<UiEvent>>,
     ) {
         if !self.session.memory_config.enabled || !self.session.memory_config.reflection.enabled {
-            self.output_area.push_error("Reflection 系统已禁用。");
+            self.append_error_notice("Reflection 系统已禁用。");
             return;
         }
 
         match args.trim() {
             "" => self.spawn_llm_reflection(ui_tx, true),
             "apply" => self.apply_pending_reflection(),
-            "stats" | "history" => self
-                .output_area
-                .push_system("Reflection stats/history 将在打磨阶段支持。"),
-            other => self
-                .output_area
-                .push_error(&format!("未知 reflect 子命令: {other}")),
+            "stats" | "history" => {
+                self.append_system_notice("Reflection stats/history 将在打磨阶段支持。")
+            }
+            other => self.append_error_notice(format!("未知 reflect 子命令: {other}")),
         }
     }
 
     fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>, foreground: bool) {
         let Some(agent_client) = self.agent_client.clone() else {
-            self.output_area
-                .push_error("当前没有可用的 SDK agent client，无法执行 Reflection。");
+            self.append_error_notice("当前没有可用的 SDK agent client，无法执行 Reflection。");
             return;
         };
         let messages = self.chat.messages.clone();
 
         if foreground {
-            self.output_area.push_system("[reflection: calling LLM...]");
+            self.append_system_notice("[reflection: calling LLM...]");
             self.output_area.start_spinner();
             self.output_area.set_spinner_phase("Reflecting...");
             self.chat.is_processing = true;
@@ -67,8 +64,7 @@ impl super::super::App {
 
     fn apply_pending_reflection(&mut self) {
         let Some(output) = self.chat.pending_reflection.clone() else {
-            self.output_area
-                .push_system("没有待应用的 Reflection 建议。");
+            self.append_system_notice("没有待应用的 Reflection 建议。");
             return;
         };
 
@@ -101,15 +97,13 @@ impl super::super::App {
 
     pub(crate) fn apply_reflection_output(&mut self, output: sdk::ReflectionOutputView) -> bool {
         let Some(agent_client) = self.agent_client.clone() else {
-            self.output_area
-                .push_error("当前没有可用的 SDK agent client，无法应用 Reflection。");
+            self.append_error_notice("当前没有可用的 SDK agent client，无法应用 Reflection。");
             return false;
         };
         tokio::spawn(async move {
             let _ = agent_client.apply_reflection(output).await;
         });
-        self.output_area
-            .push_system("[reflection apply 已提交给 SDK memory 能力]");
+        self.append_system_notice("[reflection apply 已提交给 SDK memory 能力]");
         true
     }
 }

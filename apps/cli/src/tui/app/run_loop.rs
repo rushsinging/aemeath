@@ -1,6 +1,7 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
+use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -22,6 +23,10 @@ impl App {
         let mut event_stream = EventStream::new();
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
+        self.draw(terminal)?;
+        self.refresh_output_widget_from_model();
 
         loop {
             // Update task status lines
@@ -70,7 +75,12 @@ impl App {
                     .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
                     .await;
                 if let Some(prompt) = review_prompt {
-                    self.output_area.push_user_message(&input);
+                    self.model
+                        .conversation
+                        .apply(ConversationIntent::StartChat {
+                            submission: input.clone(),
+                        });
+                    self.refresh_output_widget_from_model();
                     self.chat
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));
@@ -81,8 +91,7 @@ impl App {
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
                         processing::spawn_processing(spawn_ctx);
                     } else {
-                        self.output_area
-                            .push_error("SDK agent client is unavailable");
+                        self.append_error_notice("SDK agent client is unavailable");
                     }
                 }
             }

@@ -1,10 +1,10 @@
 mod ask_user_key;
-mod ask_user_options;
 mod done;
 mod enter;
 mod key;
 mod key_nav;
 mod key_scroll;
+mod notice;
 mod reminder;
 mod spawn_context;
 mod spinner;
@@ -96,12 +96,11 @@ impl App {
                 match sdk::classify_paste(&text) {
                     sdk::PasteKind::Empty => {
                         self.input.just_pasted = true;
-                        self.output_area.push_system("[reading clipboard image...]");
+                        self.append_system_notice("[reading clipboard image...]");
                         return UpdateResult::one(Effect::ReadClipboardImage);
                     }
                     sdk::PasteKind::ImageFile => {
-                        self.output_area
-                            .push_system(&format!("[loading image: {}...]", text.trim()));
+                        self.append_system_notice(format!("[loading image: {}...]", text.trim()));
                         self.input.just_pasted = true;
                         return UpdateResult::one(Effect::ProcessImageFile {
                             path: text.trim().to_string(),

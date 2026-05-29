@@ -48,25 +48,25 @@ impl App {
                         self.render_history_message(&msgs[i], subsequent);
                     }
                     self.chat.messages = msgs;
-                    self.output_area.push_system(&format!(
+                    self.append_system_notice(format!(
                         "[resumed session {} ({} messages)]",
                         id, msg_count
                     ));
                     if s.trimmed > 0 {
-                        self.output_area.push_system(&format!(
+                        self.append_system_notice(format!(
                             "[trimmed {} incomplete tool-call message(s)]",
                             s.trimmed
                         ));
                     }
                     if s.repaired > 0 {
-                        self.output_area.push_system(&format!(
+                        self.append_system_notice(format!(
                             "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
                             s.repaired
                         ));
                     }
                 }
                 Err(e) => {
-                    self.output_area.push_system(&format!(
+                    self.append_system_notice(format!(
                         "[warning: failed to resume session {}: {}, starting new]",
                         id, e
                     ));

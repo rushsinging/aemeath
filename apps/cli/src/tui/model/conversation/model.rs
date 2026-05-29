@@ -21,9 +21,15 @@ pub struct ConversationModel {
 }
 
 impl ConversationModel {
+    /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     pub fn apply(&mut self, intent: ConversationIntent) -> Vec<ConversationChange> {
         match intent {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
+            ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
             ConversationIntent::ObserveToolCallStart { name, index } => {
                 self.observe_tool_call_start(name, index)
             }
@@ -56,6 +62,21 @@ impl ConversationModel {
             ConversationIntent::RecordAgentProgress { tool_id, message } => {
                 self.record_agent_progress(tool_id, message)
             }
+            ConversationIntent::ShowAskUser {
+                question,
+                options,
+                llm_option_count,
+                multi_select,
+                cursor,
+            } => self.show_ask_user(question, options, llm_option_count, multi_select, cursor),
+            ConversationIntent::SetAskUserCursor { cursor } => self.set_ask_user_cursor(cursor),
+            ConversationIntent::ToggleAskUserSelected { index } => {
+                self.toggle_ask_user_selected(index)
+            }
+            ConversationIntent::SetAskUserChatInput { active } => {
+                self.set_ask_user_chat_input(active)
+            }
+            ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
         }
     }
 
@@ -79,6 +100,18 @@ impl ConversationModel {
                 chat_id: chat_id.as_ref().to_string(),
                 turn_id,
             },
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    fn append_user_message(&mut self, text: String) -> Vec<ConversationChange> {
+        let block_id = self.next_block_id("user");
+        self.blocks.push(ConversationBlock::UserMessage {
+            id: block_id.clone(),
+            text,
+        });
+        vec![
+            ConversationChange::UserMessageAppended { block_id },
             ConversationChange::OutputDirty,
         ]
     }
@@ -259,36 +292,6 @@ impl ConversationModel {
         Vec::new()
     }
 
-    fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
-        self.active_text_block_id = None;
-        self.active_thinking_block_id = None;
-        let block_id = self.next_block_id("system");
-        self.blocks.push(ConversationBlock::System {
-            id: block_id.clone(),
-            text,
-        });
-        vec![
-            ConversationChange::SystemMessageAppended { block_id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
-    fn append_error(&mut self, text: String) -> Vec<ConversationChange> {
-        self.active_text_block_id = None;
-        self.active_thinking_block_id = None;
-        let block_id = self.next_block_id("error");
-        self.blocks.push(ConversationBlock::Error {
-            id: block_id.clone(),
-            text,
-        });
-        vec![
-            ConversationChange::ErrorAppended { block_id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
     fn queue_submission(&mut self, text: String) -> Vec<ConversationChange> {
         let id = self.next_block_id("queued");
         self.queued_submissions
@@ -368,7 +371,12 @@ impl ConversationModel {
         block_id
     }
 
-    fn next_block_id(&mut self, prefix: &str) -> String {
+    pub(super) fn clear_active_text_blocks(&mut self) {
+        self.active_text_block_id = None;
+        self.active_thinking_block_id = None;
+    }
+
+    pub(super) fn next_block_id(&mut self, prefix: &str) -> String {
         self.next_block_sequence += 1;
         format!("{prefix}-{}", self.next_block_sequence)
     }

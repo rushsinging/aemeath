@@ -14,8 +14,7 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    self.output_area
-                        .push_error(&format!("获取 reminders 失败: {e}"));
+                    self.append_error_notice(format!("获取 reminders 失败: {e}"));
                 }
             }
         }

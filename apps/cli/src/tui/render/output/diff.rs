@@ -1,8 +1,6 @@
-#![allow(dead_code)]
-
 use similar::{ChangeTag, TextDiff};
 
-use crate::tui::render::output_area::types::{LineStyle, OutputLine, SpanPart, INDENT};
+use crate::tui::render::output_area::types::{SpanPart, INDENT};
 use crate::tui::render::syntax::{self, language_by_extension};
 use crate::tui::render::theme;
 use ratatui::style::Color;
@@ -15,13 +13,12 @@ const DIFF_REMOVE_FG: Color = theme::DIFF_REMOVE_FG;
 /// 对比 old_content 与 new_content，生成带行号和语法高亮的 diff 输出行。
 ///
 /// `file_ext` 用于推断语言进行语法高亮（如 `"rs"`、`"py"`），None 则不进行语法高亮。
-/// 所有行都标记 id_tag 以关联到原始工具块。
+/// 每行产出一组 `SpanPart`（着色原语），由调用方转为 `RenderedLine`。
 pub fn build_diff_lines(
     old_content: &str,
     new_content: &str,
     file_ext: Option<&str>,
-    id_tag: &Option<String>,
-    out: &mut Vec<OutputLine>,
+    out: &mut Vec<Vec<SpanPart>>,
 ) {
     let diff = TextDiff::from_lines(old_content, new_content);
     let changes: Vec<_> = diff.iter_all_changes().collect();
@@ -41,39 +38,25 @@ pub fn build_diff_lines(
                 old_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                let spans = build_delete_line(old_line, width, line_text_trimmed);
-                out.push(OutputLine {
-                    content: format!("  - {}", line_text),
-                    style: LineStyle::DiffRemove,
-                    tool_id: id_tag.clone(),
-                    spans: Some(spans),
-                });
+                out.push(build_delete_line(old_line, width, line_text_trimmed));
             }
             ChangeTag::Insert => {
                 new_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                let spans =
-                    build_insert_line(new_line, width, line_text_trimmed, syntax_ref.as_ref());
-                out.push(OutputLine {
-                    content: format!("  + {}", line_text),
-                    style: LineStyle::DiffAdd,
-                    tool_id: id_tag.clone(),
-                    spans: Some(spans),
-                });
+                out.push(build_insert_line(
+                    new_line,
+                    width,
+                    line_text_trimmed,
+                    syntax_ref.as_ref(),
+                ));
             }
             ChangeTag::Equal => {
                 old_line += 1;
                 new_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                let spans = build_context_line(old_line, new_line, width, line_text_trimmed);
-                out.push(OutputLine {
-                    content: format!("{INDENT}{line_text}"),
-                    style: LineStyle::System,
-                    tool_id: id_tag.clone(),
-                    spans: Some(spans),
-                });
+                out.push(build_context_line(old_line, new_line, width, line_text_trimmed));
             }
         }
     }
@@ -166,19 +149,25 @@ mod tests {
         assert_eq!(line_num_width(1000), 4);
     }
 
+    fn line_text(spans: &[SpanPart]) -> String {
+        spans.iter().map(|span| span.text.as_str()).collect()
+    }
+
     #[test]
     fn test_build_diff_lines_basic() {
         let old = "line1\nline2\nline3\n";
         let new = "line1\nchanged\nline3\n";
         let mut out = Vec::new();
-        build_diff_lines(old, new, None, &None, &mut out);
+        build_diff_lines(old, new, None, &mut out);
 
         // 预期：context(line1) + delete(line2) + insert(changed) + context(line3)
         assert_eq!(out.len(), 4);
-        assert!(matches!(out[0].style, LineStyle::System));
-        assert!(matches!(out[1].style, LineStyle::DiffRemove));
-        assert!(matches!(out[2].style, LineStyle::DiffAdd));
-        assert!(matches!(out[3].style, LineStyle::System));
+        // delete 行含删除标记 "- " 与原文本
+        assert!(line_text(&out[1]).contains("- "));
+        assert!(line_text(&out[1]).contains("line2"));
+        // insert 行含新增标记 "+ " 与新文本
+        assert!(line_text(&out[2]).contains("+ "));
+        assert!(line_text(&out[2]).contains("changed"));
     }
 
     #[test]
@@ -186,24 +175,22 @@ mod tests {
         let old = "a\nb\nc\n";
         let new = "a\nx\nc\n";
         let mut out = Vec::new();
-        build_diff_lines(old, new, None, &None, &mut out);
+        build_diff_lines(old, new, None, &mut out);
 
         // 每行都有 spans
-        for line in &out {
-            assert!(line.spans.is_some());
+        for spans in &out {
+            assert!(!spans.is_empty());
         }
 
         // 删除行(第二行)：old_num=2, new_num 为空
-        let delete_spans = out[1].spans.as_ref().unwrap();
-        let full: String = delete_spans.iter().map(|s| s.text.as_str()).collect();
+        let full = line_text(&out[1]);
         assert!(
             full.contains("2"),
             "delete line should show old line number 2, got: {full}"
         );
 
         // 插入行：old_num 为空, new_num=2
-        let insert_spans = out[2].spans.as_ref().unwrap();
-        let full: String = insert_spans.iter().map(|s| s.text.as_str()).collect();
+        let full = line_text(&out[2]);
         assert!(
             full.contains("2"),
             "insert line should show new line number 2, got: {full}"
@@ -215,15 +202,14 @@ mod tests {
         let old = "fn old() {}\n";
         let new = "fn new() {}\n";
         let mut out = Vec::new();
-        build_diff_lines(old, new, Some("rs"), &None, &mut out);
+        build_diff_lines(old, new, Some("rs"), &mut out);
 
-        // Insert 行应该有语法高亮
-        let insert_line = &out[1];
-        assert!(matches!(insert_line.style, LineStyle::DiffAdd));
-        let spans = insert_line.spans.as_ref().unwrap();
+        // Insert 行（第二行）应有语法高亮
+        let insert_spans = &out[1];
+        assert!(line_text(insert_spans).contains("+ "));
         // 语法高亮会产生多个不同颜色的 span
         assert!(
-            spans.len() > 2,
+            insert_spans.len() > 2,
             "syntax highlight should produce multiple spans"
         );
     }
@@ -231,7 +217,7 @@ mod tests {
     #[test]
     fn test_build_diff_lines_empty() {
         let mut out = Vec::new();
-        build_diff_lines("", "", None, &None, &mut out);
+        build_diff_lines("", "", None, &mut out);
         assert!(out.is_empty());
     }
 }

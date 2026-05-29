@@ -131,13 +131,14 @@ impl App {
         let mut status_bar = StatusBar::new();
         status_bar.init(&session_id, &model, &cwd);
 
-        let mut output_area = OutputArea::new();
-        output_area.init();
+        let output_area = OutputArea::new();
 
         let mut model_state = TuiModel::default();
         model_state.session.current_session_id = Some(session_id.clone());
         model_state.runtime.model_id = Some(model.clone());
         model_state.runtime.workspace.cwd = Some(cwd.display().to_string());
+        // 启动横幅纳入单一真相源 ConversationModel，经 document 渲染。
+        model_state.conversation.seed_banner();
 
         Self {
             output_area,
@@ -204,8 +205,7 @@ impl App {
 
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.output_area
-                    .render_with_cache(chunks[0], buf, &mut self.view_state.cache);
+                self.output_area.render(chunks[0], buf);
             }))
             .is_err()
             {

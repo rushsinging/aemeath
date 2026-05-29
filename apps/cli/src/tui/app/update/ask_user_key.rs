@@ -9,67 +9,48 @@ impl App {
     ) -> Option<UpdateResult> {
         // AskUserQuestion 交互模式（有选项列表）
         if let Some(ref state) = self.input.ask_user_state {
+            // 导航/勾选/子态的可变真相在 ConversationModel 的 AskUser 块
+            let snapshot = self.model.conversation.ask_user_snapshot();
+            let chat_input_active = snapshot
+                .as_ref()
+                .map(|s| s.chat_input_active)
+                .unwrap_or(false);
             // Chat-input sub-mode: user is typing free text via "Chat about this..."
-            if state.chat_input_active {
+            if chat_input_active {
                 return self.update_ask_user_chat_input_key(key);
             }
 
             let options_count = state.options.len();
             let multi_select = state.multi_select;
+            let cursor = snapshot.as_ref().map(|s| s.cursor).unwrap_or(0);
 
             match key.code {
                 KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
                     if options_count > 0 {
-                        let cursor = if state.cursor == 0 {
+                        let next = if cursor == 0 {
                             options_count - 1
                         } else {
-                            state.cursor - 1
+                            cursor - 1
                         };
-                        self.input.ask_user_state.as_mut().unwrap().cursor = cursor;
-                        let s = self.input.ask_user_state.as_ref().unwrap();
-                        self.output_area.update_ask_user_options(
-                            &s.option_line_ranges,
-                            &s.options,
-                            s.cursor,
-                            s.multi_select,
-                            &s.selected,
-                        );
+                        self.set_ask_user_cursor(next);
                     }
                 }
                 KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
                     if options_count > 0 {
-                        let cursor = (state.cursor + 1) % options_count;
-                        self.input.ask_user_state.as_mut().unwrap().cursor = cursor;
-                        let s = self.input.ask_user_state.as_ref().unwrap();
-                        self.output_area.update_ask_user_options(
-                            &s.option_line_ranges,
-                            &s.options,
-                            s.cursor,
-                            s.multi_select,
-                            &s.selected,
-                        );
+                        let next = (cursor + 1) % options_count;
+                        self.set_ask_user_cursor(next);
                     }
                 }
                 KeyCode::Char(' ') if key.modifiers == KeyModifiers::NONE && multi_select => {
-                    let idx = state.cursor;
-                    // Prevent toggling built-in options
-                    if idx >= state.llm_option_count {
+                    // 内建选项不可勾选（toggle 内部已校验，此处保持早返回行为一致）
+                    if cursor >= state.llm_option_count {
                         return Some(UpdateResult::none());
                     }
-                    self.input.ask_user_state.as_mut().unwrap().selected[idx] =
-                        !state.selected[idx];
-                    let s = self.input.ask_user_state.as_ref().unwrap();
-                    self.output_area.update_ask_user_options(
-                        &s.option_line_ranges,
-                        &s.options,
-                        s.cursor,
-                        s.multi_select,
-                        &s.selected,
-                    );
+                    self.toggle_ask_user_selected(cursor);
                 }
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                     let state = self.input.ask_user_state.take().unwrap();
-                    let cursor = state.cursor;
+                    let selected = snapshot.map(|s| s.selected).unwrap_or_default();
                     let llm_count = state.llm_option_count;
                     let builtin_all_idx = llm_count;
                     let builtin_chat_idx = llm_count + 1;
@@ -86,27 +67,24 @@ impl App {
                         all_opts.join("\n")
                     } else if cursor == builtin_chat_idx && state.options.len() > builtin_chat_idx {
                         // "Chat about this...": switch to chat input sub-mode
-                        self.input.ask_user_state = Some(crate::tui::app::state::AskUserState {
-                            chat_input_active: true,
-                            ..state
-                        });
+                        self.input.ask_user_state = Some(state);
+                        self.set_ask_user_chat_input(true);
                         self.handle_input_intent(
                             crate::tui::model::input::intent::InputIntent::Clear,
                         );
                         return Some(UpdateResult::none());
                     } else if multi_select {
                         // Multi-select: return selected items, comma-separated
-                        let selected: Vec<&str> = state
-                            .selected
+                        let chosen: Vec<&str> = selected
                             .iter()
                             .enumerate()
                             .filter(|(_, s)| **s)
-                            .map(|(i, _)| state.options[i].as_str())
+                            .filter_map(|(i, _)| state.options.get(i).map(|o| o.as_str()))
                             .collect();
-                        if selected.is_empty() {
+                        if chosen.is_empty() {
                             state.options[cursor].clone()
                         } else {
-                            selected.join(", ")
+                            chosen.join(", ")
                         }
                     } else if options_count > 0 {
                         // Single select: return cursor item
@@ -120,9 +98,9 @@ impl App {
                         }
                     };
 
-                    self.output_area.dismiss_ask_user_block();
+                    self.dismiss_ask_user_block();
                     if !answer.is_empty() {
-                        self.output_area.push_user_message(&answer);
+                        self.append_user_echo(answer.clone());
                     }
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(answer);
@@ -130,7 +108,7 @@ impl App {
                 }
                 KeyCode::Esc => {
                     let state = self.input.ask_user_state.take().unwrap();
-                    self.output_area.dismiss_ask_user_block();
+                    self.dismiss_ask_user_block();
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(String::new());
                     self.output_area.set_spinner_phase("Generating...");
@@ -150,8 +128,8 @@ impl App {
                     let text = self.model.input.document.buffer.clone();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                            self.output_area.dismiss_ask_user_block();
-                            self.output_area.push_user_message(&text);
+                            self.dismiss_ask_user_block();
+                            self.append_user_echo(text.clone());
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
@@ -163,7 +141,7 @@ impl App {
                 }
                 KeyCode::Esc => {
                     if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                        self.output_area.dismiss_ask_user_block();
+                        self.dismiss_ask_user_block();
                         self.handle_input_intent(
                             crate::tui::model::input::intent::InputIntent::Clear,
                         );
@@ -193,8 +171,8 @@ impl App {
                 let text = self.model.input.document.buffer.clone();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
-                    self.output_area.dismiss_ask_user_block();
-                    self.output_area.push_user_message(&text);
+                    self.dismiss_ask_user_block();
+                    self.append_user_echo(text.clone());
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(text);
                     self.output_area.set_spinner_phase("Generating...");
@@ -203,11 +181,7 @@ impl App {
             KeyCode::Esc => {
                 // Return to option list without submitting
                 self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-                self.input
-                    .ask_user_state
-                    .as_mut()
-                    .unwrap()
-                    .chat_input_active = false;
+                self.set_ask_user_chat_input(false);
             }
             _ => {
                 self.update_ask_user_input_key(key);

@@ -276,12 +276,14 @@ mod tests {
 
         let rendered = app
             .output_area
-            .lines
-            .iter()
-            .map(|line| line.content.clone())
+            .document()
+            .iter_lines()
+            .map(|line| line.plain.clone())
             .collect::<Vec<_>>();
 
-        assert_eq!(rendered[0], "> search bug 76");
+        // 启动横幅现纳入 ConversationModel，用户消息不再是首行。
+        assert!(rendered.iter().any(|line| line == "> search bug 76"));
+        assert!(rendered.iter().any(|line| line == "Aemeath - AI Agent"));
         assert!(rendered.iter().any(|line| line == "💭 thinking"));
         assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
         assert!(rendered
@@ -297,7 +299,7 @@ mod tests {
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
-        assert!(app.output_area.scroll_offset <= app.output_area.lines.len());
+        assert!(app.output_area.scroll_offset <= app.output_area.document().total_lines());
     }
 
     fn enter_key() -> crossterm::event::KeyEvent {

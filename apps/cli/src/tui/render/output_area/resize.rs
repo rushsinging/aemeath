@@ -3,13 +3,12 @@ impl super::OutputArea {
         let new_term_width = (width as usize).saturating_sub(2);
         if new_term_width != self.term_width {
             self.term_width = new_term_width;
-            self.rendered_cache.line_cache.invalidate();
         }
 
         let visible_height = visible_height_hint as usize;
         self.last_visible_height = visible_height;
 
-        let max_offset = self.lines.len().saturating_sub(visible_height);
+        let max_offset = self.document.total_lines().saturating_sub(visible_height);
         self.scroll_offset = self.scroll_offset.min(max_offset);
         if self.scroll_offset == 0 {
             self.auto_scroll = true;
@@ -23,53 +22,37 @@ impl super::OutputArea {
 
 #[cfg(test)]
 pub mod tests {
-    use super::super::{LineStyle, OutputArea, OutputLine};
+    use super::super::OutputArea;
     use sdk::CharIdx;
 
-    fn output_area_with_clean_cache(term_width: usize) -> OutputArea {
+    fn output_area_with_term_width(term_width: usize) -> OutputArea {
         let mut output = OutputArea::new();
         output.term_width = term_width;
         output
-            .rendered_cache
-            .line_cache
-            .mark_clean_for_test(term_width);
-        output
-    }
-
-    fn push_lines(output: &mut OutputArea, count: usize) {
-        for i in 0..count {
-            output.push_line(OutputLine {
-                content: format!("line {i}"),
-                style: LineStyle::Normal,
-                ..Default::default()
-            });
-        }
     }
 
     #[test]
-    fn width_change_invalidates_render_cache() {
-        let mut output = output_area_with_clean_cache(78);
+    fn width_change_updates_term_width() {
+        let mut output = output_area_with_term_width(78);
 
         output.handle_resize(100, 20);
 
         assert_eq!(output.term_width, 98);
-        assert!(output.rendered_cache.line_cache.is_dirty());
     }
 
     #[test]
-    fn same_width_does_not_invalidate_render_cache() {
-        let mut output = output_area_with_clean_cache(78);
+    fn same_width_keeps_term_width() {
+        let mut output = output_area_with_term_width(78);
 
         output.handle_resize(80, 20);
 
         assert_eq!(output.term_width, 78);
-        assert!(!output.rendered_cache.line_cache.is_dirty());
     }
 
     #[test]
     fn resize_clamps_scroll_offset_to_visible_height() {
-        let mut output = output_area_with_clean_cache(78);
-        push_lines(&mut output, 10);
+        let mut output = output_area_with_term_width(78);
+        output.set_plain_document_lines(10);
         output.scroll_offset = 9;
         output.auto_scroll = false;
 
@@ -82,8 +65,8 @@ pub mod tests {
 
     #[test]
     fn resize_restores_auto_scroll_when_offset_is_zero() {
-        let mut output = output_area_with_clean_cache(78);
-        push_lines(&mut output, 3);
+        let mut output = output_area_with_term_width(78);
+        output.set_plain_document_lines(3);
         output.scroll_offset = 2;
         output.auto_scroll = false;
 
@@ -95,7 +78,7 @@ pub mod tests {
 
     #[test]
     fn resize_clears_active_selection() {
-        let mut output = output_area_with_clean_cache(78);
+        let mut output = output_area_with_term_width(78);
         output.is_selecting = true;
         output.selection_start = Some((0, CharIdx::new(0)));
         output.selection_end = Some((0, CharIdx::new(4)));
