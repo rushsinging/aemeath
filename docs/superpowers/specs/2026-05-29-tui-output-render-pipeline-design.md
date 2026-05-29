@@ -58,11 +58,14 @@ ConversationModel.blocks
 ## 组件系统（顶层 block 级）
 
 ```rust
-struct RenderCtx<'a> { width: u16, theme: &'a Theme }   // 不含 selection：渲染产物与选区解耦
-struct RenderedBlock { lines: Vec<RenderedLine> }
-trait BlockRenderer {
-    fn render(&self, block: &OutputBlockView, ctx: &RenderCtx) -> RenderedBlock;
-}
+// 注：现状主题是编译期 render/theme/palette.rs 常量，无运行时 Theme 实例，
+// 故 RenderCtx 暂只持 width；渲染层直接引用 theme::* 常量。
+// TODO(theme): 引入运行时主题后再加 theme 字段并把 theme_version 纳入 CacheKey。
+struct RenderCtx { width: u16 }            // 不含 selection：渲染产物与选区解耦
+struct RenderedBlock { block_id: String, lines: Vec<RenderedLine> }
+// 实现采用具体 render_xxx 函数 + OutputDocumentRenderer 按 kind 分发，
+// BlockRenderer trait 为概念描述（可不落地为 trait）。
+fn render_block(kind: &OutputBlockKind, block_id: &str, ctx: &RenderCtx) -> RenderedBlock;
 ```
 
 - `OutputDocumentRenderer` 按 `OutputBlockView` 变体分发到组件。
@@ -141,3 +144,25 @@ CacheKey = (block_version, width, theme_version)
 - 删除：`adapter/output_widget.rs`、`render/output_view_model.rs`、`OutputLine` 及旧行级 `rendered_cache`、`render/output_area/queued.rs` 及 OutputArea 的 `queued_messages`/`queued_line_count`。
 - ViewModel：`view_model/output.rs` 新增 `OutputBlockView::QueuedSubmission`；`view_assembler/output.rs` 把 `QueuedUserMessage` 映射到它。
 - guard：新增 render isolation guard，接入 `.agents/hooks/check-architecture-guards.sh`。
+
+## 现状核对与设计修正（2026-05-29 审查）
+
+落 plan 前对 spec 与现状代码做了交叉核对，以下偏差以本节为准（优先级高于上文原始设计描述），并已写入 [plan](../plans/2026-05-29-tui-output-render-pipeline.md) 的「设计决策」约束：
+
+1. **`RenderedLine` 命名冲突**：现状 `render/output/cache.rs` 已有同名 `RenderedLine{ line, screen_entries, rendered_text }` 且被 `output/mod.rs` re-export。新 `RenderedLine{ spans, plain }` 落 `render/output/rendered.rs`，迁移期一律用全路径引用、**不**顶层 `pub use`；Phase 5 删旧类型后再提升。
+
+2. **`OutputBlockView` 当前是 enum，需重构为 struct**：现状 `OutputBlockView` 是无 id/version 的 enum（变体 UserMessage/AssistantMessage/ThinkingMessage/ToolCall/DiagnosticNotice/SystemNotice/Separator）。改为 `struct{ block_id, block_version, kind: OutputBlockKind }`，新增 `QueuedSubmission` 变体并入 `OutputBlockKind`。
+
+3. **block_version 来源**：不侵入 `ConversationModel`（其无 per-block version）。在 `OutputViewAssembler` 用 `DefaultHasher` 对 kind 语义数据求 version；需给 `TextBlockView`/`ToolCallBlockView`/`ToolSemanticStatus`/`SemanticStyle` 补 `Hash` derive。`block_id`：文本/工具块用 `key`，`Separator` 用 `sep-{seq}`。
+
+4. **`RenderCtx` 无 theme**：现状主题是编译期 `render/theme/palette.rs` 常量，无运行时 `Theme`。`RenderCtx` 只持 `width`，`CacheKey=(block_version, width)`，`theme_version` 退化省略（见上方代码块修正）。
+
+5. **原语目录/产出与设想不符**：现状 `syntax` 在 `render/syntax.rs`（非 output 下）、`table` 在 `render/output/markdown/table.rs`、`diff` 在 `render/output/diff.rs`；产出为 ratatui `Line`/`Span`（markdown）与 `OutputLine`+`SpanPart`（diff/syntax）。新建 `render/output/primitives/` **包装**这些既有实现统一产出 `Vec<RenderedLine>`（DRY，不重写富渲染核心）；`SpanPart→Span` 与 markdown `plain`（复用 `strip_inline_formatting`）各提供 helper。存在两套着色单元（`SpanPart{text,color}` vs ratatui `Span`），RenderedLine 统一用 ratatui `Span`。
+
+6. **QueuedUserMessage 现状被复用为 UserMessage**：`view_assembler/output.rs:83-89` 现把 `QueuedUserMessage` 映射成 `UserMessage`(Muted+「排队中:」前缀)。改为映射到独立 `QueuedSubmission` 变体，前缀/样式交由 `QueuedSubmissionRenderer`。
+
+7. **选区现状已部分满足目标**：`render/output_area/selection_render.rs::apply_selection_to_line` 已实现「拆 span、只改 fg/bg、保留前景」，`selection_start/end` 已是 `(行号, CharIdx)`。真正缺口是把 diff/tool 等**旁路**统一进唯一 `apply_selection_overlay`（#61/#62 根因），以及复制改取 `plain` 切片。新 overlay 基于单行 plain 字符偏移，移植现有 split 逻辑。
+
+8. **流式现状是独立扫描路径**：`render/output_area/streaming.rs::do_rerender` 基于扫描 `<think>` 切 `streaming_buffer`，与 block-version 机制是两套。迁移需把 streaming 文本纳入 ConversationModel 的 active block（`active_text_block_id`/`active_thinking_block_id`），由 ViewModel 驱动重渲，删除 `<think>` 扫描。
+
+9. **关联 bug 比原 spec 列举更广**：除 #61/#51/#48/#60/#71/#62 外，#65/#74（fence/System 样式跨 block 泄漏）、#80（全量替换 scroll_offset 累加）属同族，本重构一并覆盖回归并做 bug 追踪联动（plan Phase 0 / Task 6.3）。
