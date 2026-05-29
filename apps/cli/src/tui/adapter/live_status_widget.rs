@@ -44,7 +44,6 @@ mod tests {
             spinner: Some(SpinnerLineView {
                 frame,
                 verb: verb.to_string(),
-                elapsed_secs: 0,
                 phase_text: phase.map(|s| s.to_string()),
             }),
             task_lines: Vec::new(),

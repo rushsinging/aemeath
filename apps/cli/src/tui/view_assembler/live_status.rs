@@ -9,9 +9,6 @@ use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
 use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
 use crate::tui::view_state::SpinnerAnim;
 
-/// 单个 SpinnerTick 周期（毫秒），与渲染层 90ms 节奏一致。
-const TICK_MS: u64 = 90;
-
 pub struct LiveStatusAssembler;
 
 impl LiveStatusAssembler {
@@ -21,7 +18,6 @@ impl LiveStatusAssembler {
             Some(SpinnerLineView {
                 frame: anim.frame,
                 verb: anim.verb.clone(),
-                elapsed_secs: anim.frame * TICK_MS / 1000,
                 phase_text: runtime.spinner.phase.as_ref().map(phase_text),
             })
         } else {
@@ -53,7 +49,6 @@ fn phase_text(phase: &SpinnerPhase) -> String {
         } => match outcome {
             HookOutcome::Running => format!("Hook {event}: {detail}"),
             HookOutcome::Blocked => format!("Hook {event} blocked"),
-            HookOutcome::Timeout => format!("Hook {event} timeout..."),
             HookOutcome::Done => format!("Hook {event} done"),
             HookOutcome::Failed => format!("Hook {event} failed: {detail}"),
         },
@@ -84,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    fn test_assemble_active_transfers_frame_verb_elapsed() {
+    fn test_assemble_active_transfers_frame_verb() {
         let runtime = runtime_with_spinner(true, None);
         let anim = SpinnerAnim {
             frame: 12,
@@ -94,20 +89,7 @@ mod tests {
         let view = vm.spinner.expect("spinner present");
         assert_eq!(view.frame, 12);
         assert_eq!(view.verb, "Forging");
-        // 12 * 90 / 1000 = 1
-        assert_eq!(view.elapsed_secs, 1);
         assert_eq!(view.phase_text, None);
-    }
-
-    #[test]
-    fn test_assemble_elapsed_secs_zero_when_below_one_second() {
-        let runtime = runtime_with_spinner(true, None);
-        let anim = SpinnerAnim {
-            frame: 10, // 10*90=900ms < 1s
-            verb: "Cooking".to_string(),
-        };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim);
-        assert_eq!(vm.spinner.unwrap().elapsed_secs, 0);
     }
 
     #[test]
@@ -159,10 +141,6 @@ mod tests {
         assert_eq!(
             phase_text(&mk(HookOutcome::Blocked)),
             "Hook PreToolUse blocked"
-        );
-        assert_eq!(
-            phase_text(&mk(HookOutcome::Timeout)),
-            "Hook PreToolUse timeout..."
         );
         assert_eq!(phase_text(&mk(HookOutcome::Done)), "Hook PreToolUse done");
         assert_eq!(

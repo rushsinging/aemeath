@@ -11,8 +11,6 @@ pub struct SpinnerLineView {
     pub frame: u64,
     /// 当前动词文本。
     pub verb: String,
-    /// 已运行秒数（由 frame 推算，无需 Instant）。
-    pub elapsed_secs: u64,
     /// 细分阶段文案（已由 phase 语义转换；None 表示无括号阶段）。
     pub phase_text: Option<String>,
 }
@@ -42,7 +40,6 @@ mod tests {
         let view = SpinnerLineView {
             frame: 9,
             verb: "Thinking".to_string(),
-            elapsed_secs: 1,
             phase_text: Some("Thinking...".to_string()),
         };
         assert_eq!(view.frame, 9);
@@ -55,7 +52,6 @@ mod tests {
             spinner: Some(SpinnerLineView {
                 frame: 1,
                 verb: "Brewing".to_string(),
-                elapsed_secs: 0,
                 phase_text: None,
             }),
             task_lines: vec!["□ #1".to_string()],

@@ -28,7 +28,6 @@ pub enum SpinnerPhase {
 pub enum HookOutcome {
     Running,
     Blocked,
-    Timeout,
     Done,
     Failed,
 }
