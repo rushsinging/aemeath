@@ -37,6 +37,8 @@
 
 > 原 D5（audit 实现）/ D6（policy/PermissionEngine 实现）属**新功能而非债务收口**，已拆出至 **#62**。
 
+**D2 进度 · skill loader 归位（fs IO 收尾）**：`share::skill_ops_loader`（`load_all_skills`/`load_all_skills_cached`/`load_and_filter_skills`/`load_skills_from_dir`，含 `std::fs::read_dir`/`metadata` 目录遍历 IO）已移入 `prompt::skill::loader`（prompt 成为 loader canonical，符合 rule6「prompt 承载 skills」）；`agent/share/src/skill_ops_loader.rs` 删除，`lib.rs` 移除 `pub mod skill_ops_loader`。`Skill` DTO 与单文件 parser（`parse_skill`/`read_skill_content`/`builtin_commit_skill`）**保留** `share::skill_ops`——`Skill` 与 `read_skill_content` 被 `tools`/`runtime`/`prompt` 多 crate 依赖，属合理共享内核契约；保留可避免新增 `tools→prompt` 横向边（tools 仅用 DTO+parser，不用 loader）。`prompt::skill` re-export DTO/parser 保持调用方接口一致；runtime 经 `prompt::skill::load_all_skills` 调用（`runtime→prompt` 已批准边，无新增边、无环）。loader 单测随迁至 `prompt::skill::loader::loader_tests`，行为不变。
+
 **性质**：纯架构债务收口（D1-D4），不改业务行为。各子项 SHOULD 独立走 spec→plan→实施；D1/D2/D3 完成后 SHOULD 补对应 guard（如 api 收窄 guard）防回归。
 
 **关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）。

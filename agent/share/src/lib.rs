@@ -9,7 +9,6 @@ pub mod memory_ops;
 pub mod message;
 pub mod session_types;
 pub mod skill_ops;
-pub mod skill_ops_loader;
 pub mod string_idx;
 pub mod task;
 pub mod task_ops;

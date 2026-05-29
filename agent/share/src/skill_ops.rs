@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-// Re-export loader functions so external callers don't need to change paths.
-pub use crate::skill_ops_loader::{
-    load_all_skills, load_all_skills_cached, load_and_filter_skills, load_skills_from_dir,
-};
+// 目录遍历 loader（含 fs IO）已归位 prompt domain（`prompt::skill::loader`，refs #61 D2）。
+// 本模块仅保留 `Skill` DTO 与单文件 parser（被 tools/runtime/prompt 多 crate 依赖的契约）。
 
 /// A skill definition loaded from a markdown file with YAML frontmatter
 #[derive(Debug, Clone, Serialize, Deserialize)]

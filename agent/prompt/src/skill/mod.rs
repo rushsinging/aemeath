@@ -1,9 +1,15 @@
 //! Skill Prompt domain.
 //!
-//! Canonical implementation resides in share（shared kernel）。
-//! Prompt domain re-exports from share for interface consistency.
+//! Loader（目录遍历 fs IO）的 canonical 实现位于本域 [`loader`]（refs #61 D2）。
+//! `Skill` DTO 与单文件 parser（被 tools/runtime/prompt 多 crate 依赖的契约）
+//! 仍由共享内核 `share::skill_ops` 承载，此处 re-export 以保持调用方接口一致。
 
-pub use share::skill_ops::*;
+mod loader;
+
+pub use loader::{
+    load_all_skills, load_all_skills_cached, load_and_filter_skills, load_skills_from_dir,
+};
+pub use share::skill_ops::{builtin_commit_skill, parse_skill, read_skill_content, Skill};
 
 #[cfg(test)]
 mod tests {
