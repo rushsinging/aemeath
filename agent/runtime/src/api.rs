@@ -37,8 +37,8 @@ pub mod project {
 }
 
 pub mod prompt {
-    pub use ::prompt::guidance;
-    pub use ::prompt::skill;
+    pub use ::prompt::api::guidance;
+    pub use ::prompt::api::skill;
 }
 
 pub mod provider {

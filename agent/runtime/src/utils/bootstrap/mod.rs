@@ -73,7 +73,7 @@ pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
 
 #[async_trait::async_trait(?Send)]
-impl prompt::guidance::resolver::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
+impl crate::api::prompt::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
         let _ = self
             .0
