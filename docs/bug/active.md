@@ -20,7 +20,7 @@
 | 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 待确认（随 #58 渲染管线重构修复） | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
 | 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
 | 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 待确认 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；已确认新 `render_tool_call` 只给 icon 使用语义状态色，却把标题 span 固定为 `theme::TEXT`，导致工具名/标题看起来像普通文本；修复后标题与 icon 一起使用状态语义色 |
-| 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 根因：`ToolDisplay` trait 已有 `result_max_lines()`/`format_result_summary()` 但 #58 新管线中的 `find_tool_view` 未调用，直接把完整 `call.result.clone()` 塞入 `result_summary`，导致工具块摘要区展示完整结果；已绑定 result 的独立 `ToolResult` block 会被跳过，不再额外渲染。修复：`find_tool_view` 改用 `ToolDisplay::format_result_summary()` 生成短摘要，默认回退为完成/失败状态文案，完整 tool result 只保留给模型上下文 |
+| 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在：Read 工具仍显示 `✓ Read(...)`、`Read <path>`、`✓ Read completed` 后继续把完整文件内容渲染进工具块，导致 summary 与完整内容重复刷屏；需重新定位 #58 新管线中 tool result summary 生成/绑定路径是否仍绕过 `ToolDisplay::format_result_summary()` |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 活动中 | 未确认 | 2026-05 | LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈，用户看不到 task list 的创建过程和结果；`ToolDisplay` registry 中可能未注册 TaskListCreate 的 display 实现，或 `OutputViewAssembler` 对该工具名的 lookup 返回 None 后静默跳过渲染 |
 
 ### #81 TUI 输出区中文按单字竖排显示
@@ -60,7 +60,9 @@
 
 ### #83 TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏
 
-**状态**：待确认
+**状态**：活动中（用户反馈仍存在）
+
+**最新反馈（2026-05）**：用户确认问题仍存在。当前可见表现为 Read 工具渲染 `✓ Read(...)`、`Read <path>`、`✓ Read completed` 后，仍继续把完整文件内容（例如 `docs/bug/active.md` 表格行）显示在工具块内，说明摘要区仍承载了完整 tool result 或存在另一条渲染路径绕过了 summary 截断。
 
 **症状**：所有工具（Read/Grep/Bash/Edit 等）的 tool result 在 TUI 工具块结果摘要区展示完整内容，导致长输出重复且刷屏。例如 Read 工具先显示 `✓ Read(...)` + `Read <path>` 详情行，紧接着又在工具块内把整个文件内容原样输出一遍。
 
