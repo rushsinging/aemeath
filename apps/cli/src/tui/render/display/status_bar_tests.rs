@@ -9,14 +9,28 @@ pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {
     bar.thinking = false;
 }
 
+/// 屏幕列经只读折算 + 镜像写回（adapter 唯一生产写入路径），驱动 plain 取文本。
+/// 替代已删除的 `start_selection*`/`update_selection*` 状态变更方法，覆盖不弱化。
+#[cfg(test)]
+fn select_via_mirror(bar: &mut StatusBar, row: StatusBarRow, sc: u16, ec: u16, width: u16) {
+    let start = bar.screen_col_to_char_idx(row, sc, width);
+    let end = bar.screen_col_to_char_idx(row, ec, width);
+    bar.apply_selection_mirror(true, Some(start), Some(end), row, width);
+}
+
 #[test]
 fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
     let mut bar = StatusBar::new();
     set_test_status_text(&mut bar, "你好a");
     let prefix_width = 1;
 
-    bar.start_selection(prefix_width + 2);
-    bar.update_selection(prefix_width + 6);
+    select_via_mirror(
+        &mut bar,
+        StatusBarRow::Runtime,
+        prefix_width + 2,
+        prefix_width + 6,
+        0,
+    );
 
     assert_eq!(bar.get_selected_text(), Some("好a ".to_string()));
 }
@@ -27,8 +41,13 @@ fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
     set_test_status_text(&mut bar, "a🚀b");
     let prefix_width = 1;
 
-    bar.start_selection(prefix_width + 1);
-    bar.update_selection(prefix_width + 4);
+    select_via_mirror(
+        &mut bar,
+        StatusBarRow::Runtime,
+        prefix_width + 1,
+        prefix_width + 4,
+        0,
+    );
 
     assert_eq!(bar.get_selected_text(), Some("🚀b".to_string()));
 }
@@ -206,8 +225,7 @@ fn test_status_bar_selection_supports_context_row() {
     bar.set_current_dir("~/aemeath");
     let width = 80;
 
-    bar.start_selection_at(StatusBarRow::Context, 2, width);
-    bar.update_selection_at(9, width);
+    select_via_mirror(&mut bar, StatusBarRow::Context, 2, 9, width);
 
     assert_eq!(bar.get_selected_text(), Some("aemeath".to_string()));
 }
@@ -219,8 +237,7 @@ fn test_status_bar_render_highlights_context_row_selection() {
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.start_selection_at(StatusBarRow::Context, 4, area.width);
-    bar.update_selection_at(11, area.width);
+    select_via_mirror(&mut bar, StatusBarRow::Context, 4, 11, area.width);
     bar.render(area, &mut buf);
 
     assert_eq!(

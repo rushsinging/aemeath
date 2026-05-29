@@ -4,39 +4,6 @@ use crate::tui::render::theme;
 use ratatui::{style::Style, text::Span};
 
 impl StatusBar {
-    #[allow(dead_code)]
-    pub fn start_selection(&mut self, col: u16) {
-        self.start_selection_at(StatusBarRow::Runtime, col, 0);
-    }
-
-    pub fn start_selection_at(&mut self, row: StatusBarRow, col: u16, width: u16) {
-        self.selection_row = row;
-        self.selection_width = width;
-        self.selection_start = Some(self.screen_col_to_char_idx(row, col, width));
-        self.selection_end = Some(self.screen_col_to_char_idx(row, col, width));
-        self.is_selecting = true;
-    }
-
-    #[allow(dead_code)]
-    pub fn update_selection(&mut self, col: u16) {
-        self.update_selection_at(col, 0);
-    }
-
-    pub fn update_selection_at(&mut self, col: u16, width: u16) {
-        if self.is_selecting {
-            self.selection_end = Some(self.screen_col_to_char_idx(self.selection_row, col, width));
-        }
-    }
-
-    pub fn end_selection(&mut self) -> Option<String> {
-        self.is_selecting = false;
-        let text = self.get_selected_text();
-        self.selection_start = None;
-        self.selection_end = None;
-        self.selection_width = 0;
-        text
-    }
-
     pub fn get_selected_text(&self) -> Option<String> {
         let start = self.selection_start?;
         let end = self.selection_end?;

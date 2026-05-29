@@ -128,8 +128,10 @@ mod tests {
         input.render(area, &mut buf);
         let inner = input.get_inner_area(&area);
 
-        input.start_selection(inner.y, inner.x, &inner);
-        input.update_selection(inner.y, inner.x + 36, &inner);
+        // 选区真相经只读折算 + 镜像写回（adapter 唯一生产写入路径）。
+        let start = input.screen_to_input_anchor(inner.y, inner.x, &inner);
+        let end = input.screen_to_input_anchor(inner.y, inner.x + 36, &inner);
+        input.apply_selection_mirror(true, Some(start), Some(end));
         input.render(area, &mut buf);
         let selected_end = col_to_char_idx(&input.get_text(), 36);
         let screen_col = char_col_to_screen_col(&input.get_text(), selected_end) - 1;

@@ -75,8 +75,8 @@ impl crate::tui::app::App {
                         self.input.last_click = Some((now, row, col));
                     }
                 } else if point_in_rect(row, col, &input_area) {
-                    // 清除其他区域的选中（status 清 view_state）
-                    self.output_area.clear_selection();
+                    // 清除其他区域的选中（output/status 清 view_state）
+                    self.view_state.output.clear_selection();
                     self.view_state.status_sel.clear_selection();
                     // 屏幕坐标 → textarea 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4 T4）。
@@ -84,8 +84,8 @@ impl crate::tui::app::App {
                     let anchor = self.input_area.screen_to_input_anchor(row, col, &inner);
                     self.view_state.input_sel.begin_selection(anchor);
                 } else if point_in_rect(row, col, &status_bar) {
-                    // 清除其他区域的选中（input 清 view_state）
-                    self.output_area.clear_selection();
+                    // 清除其他区域的选中（output/input 清 view_state）
+                    self.view_state.output.clear_selection();
                     self.view_state.input_sel.clear_selection();
                     // 屏幕坐标 → status 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4）。

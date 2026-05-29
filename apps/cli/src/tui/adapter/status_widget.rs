@@ -138,10 +138,9 @@ mod tests {
     #[test]
     fn test_apply_status_selection_clears_widget_when_view_empty() {
         use crate::tui::render::status::StatusBarRow;
-        // widget 先持有旧镜像，模拟上一帧选区。
+        // widget 先持有旧镜像，模拟上一帧选区（经 adapter 唯一生产写入路径写回）。
         let mut status_bar = StatusBar::new();
-        status_bar.start_selection_at(StatusBarRow::Runtime, 0, 0);
-        status_bar.update_selection_at(50, 0);
+        status_bar.apply_selection_mirror(true, Some(0), Some(50), StatusBarRow::Runtime, 0);
         assert!(status_bar.is_selecting());
 
         // view_state 为空（默认）→ 镜像被清空。

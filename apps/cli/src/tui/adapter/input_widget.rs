@@ -129,18 +129,10 @@ mod tests {
 
     #[test]
     fn test_apply_input_selection_clears_widget_when_view_empty() {
-        use ratatui::layout::Rect;
         let mut input_area = InputArea::new();
         input_area.set_text("hello");
-        // widget 先持有旧镜像，模拟上一帧选区。
-        let inner = Rect {
-            x: 0,
-            y: 0,
-            width: 20,
-            height: 3,
-        };
-        input_area.start_selection(0, 0, &inner);
-        input_area.update_selection(0, 5, &inner);
+        // widget 先持有旧镜像，模拟上一帧选区（经 adapter 唯一生产写入路径写回）。
+        input_area.apply_selection_mirror(true, Some((0, 0)), Some((0, 5)));
         assert!(input_area.is_selecting());
 
         // view_state 为空（默认）→ 镜像被清空。

@@ -3,14 +3,6 @@ use crate::tui::render::display::safe_text::{col_to_char_idx, safe_char_slice};
 use ratatui::layout::Rect;
 
 impl InputArea {
-    /// 开始选中。row/col 是相对于 input_area inner rect 的偏移
-    pub fn start_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
-        let pos = self.textarea_pos(row, col, inner_area);
-        self.selection_start = Some(pos);
-        self.selection_end = Some(pos);
-        self.is_selecting = true;
-    }
-
     /// 屏幕坐标 → textarea `(row, col)` 锚点只读折算（#59 S4 T4）。
     ///
     /// 仿 output `screen_to_anchor` / status `screen_to_status_anchor`：依赖 render 期
@@ -20,23 +12,6 @@ impl InputArea {
     /// `textarea_pos` 一致，无行为漂移。
     pub fn screen_to_input_anchor(&self, row: u16, col: u16, inner_area: &Rect) -> (usize, usize) {
         self.textarea_pos(row, col, inner_area)
-    }
-
-    /// 更新选中位置
-    pub fn update_selection(&mut self, row: u16, col: u16, inner_area: &Rect) {
-        if !self.is_selecting {
-            return;
-        }
-        self.selection_end = Some(self.textarea_pos(row, col, inner_area));
-    }
-
-    /// 结束选中并返回选中文本，不在 selection 层执行剪贴板副作用
-    pub fn end_selection(&mut self) -> Option<String> {
-        self.is_selecting = false;
-        let text = self.get_selected_text();
-        self.selection_start = None;
-        self.selection_end = None;
-        text
     }
 
     /// 获取选中的文本
@@ -128,6 +103,14 @@ impl InputArea {
 mod tests {
     use super::*;
 
+    /// 屏幕坐标经只读折算 + 镜像写回（adapter 唯一生产写入路径），驱动 plain 取文本。
+    /// 替代已删除的 `start_selection`/`update_selection` 状态变更方法，覆盖不弱化。
+    fn select_via_mirror(input: &mut InputArea, sr: u16, sc: u16, er: u16, ec: u16, inner: &Rect) {
+        let start = input.screen_to_input_anchor(sr, sc, inner);
+        let end = input.screen_to_input_anchor(er, ec, inner);
+        input.apply_selection_mirror(true, Some(start), Some(end));
+    }
+
     #[test]
     fn test_start_selection_maps_cjk_screen_col_to_char_index() {
         let mut input = InputArea::new();
@@ -139,8 +122,7 @@ mod tests {
             height: 3,
         };
 
-        input.start_selection(5, 12, &inner);
-        input.update_selection(5, 15, &inner);
+        select_via_mirror(&mut input, 5, 12, 5, 15, &inner);
 
         assert_eq!(input.get_selected_text(), Some("好a".to_string()));
     }
@@ -156,8 +138,7 @@ mod tests {
             height: 3,
         };
 
-        input.start_selection(5, 11, &inner);
-        input.update_selection(5, 14, &inner);
+        select_via_mirror(&mut input, 5, 11, 5, 14, &inner);
 
         assert_eq!(input.get_selected_text(), Some("🚀b".to_string()));
     }
@@ -195,8 +176,7 @@ mod tests {
             height: 3,
         };
 
-        input.start_selection(5, 10, &inner);
-        input.update_selection(5, 99, &inner);
+        select_via_mirror(&mut input, 5, 10, 5, 99, &inner);
 
         assert_eq!(input.get_selected_text(), Some("你好".to_string()));
     }
