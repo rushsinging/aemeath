@@ -200,6 +200,16 @@ impl App {
         );
         apply_live_status_to_widget(&mut self.output_area, &vm);
     }
+
+    /// 据 view_state 滚动真相单向写回 widget 镜像（含 last_visible_height 反喂 + 钳制）。
+    /// 这是 `output_area.scroll_offset` / `auto_scroll` 镜像的唯一生产写入路径，
+    /// 每帧渲染前调用，与 `refresh_live_status_from_model` 同处渲染前管线。
+    pub(crate) fn refresh_output_scroll_from_view_state(&mut self) {
+        crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget(
+            &mut self.view_state.output,
+            &mut self.output_area,
+        );
+    }
 }
 
 /// Type alias so update.rs can use `App` without circular path

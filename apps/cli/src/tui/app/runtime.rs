@@ -9,6 +9,8 @@ impl App {
         self.model.conversation.reset();
         self.refresh_output_widget_from_model();
         self.output_area.reset_runtime_state();
+        // 滚动真相归 view_state：清空时同步复位，避免下一帧 adapter 用旧滚动态覆盖 widget。
+        self.view_state.output.scroll_to_bottom();
         self.status_bar.reset_runtime_state();
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;

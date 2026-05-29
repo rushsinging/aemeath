@@ -11,7 +11,9 @@ pub(crate) fn render_document_from_view_model(
         .document_renderer
         .render_tree(view_model, render_width);
     output_area.set_document(document);
-    clamp_scroll_state(output_area);
+    // 滚动钳制（offset 反喂 + clamp + 镜像写回）统一由
+    // `adapter::output_view_widget::apply_output_scroll_to_widget` 在渲染前管线处理，
+    // 真相归 view_state，此处不再直改 widget 滚动态。
 }
 
 fn effective_render_width(output_area: &OutputArea, width: u16) -> u16 {
@@ -19,17 +21,6 @@ fn effective_render_width(output_area: &OutputArea, width: u16) -> u16 {
         return width;
     }
     u16::try_from(output_area.term_width.max(1)).unwrap_or(u16::MAX)
-}
-
-fn clamp_scroll_state(output_area: &mut OutputArea) {
-    let max_offset = output_area
-        .document()
-        .total_lines()
-        .saturating_sub(output_area.last_visible_height);
-    output_area.scroll_offset = output_area.scroll_offset.min(max_offset);
-    if output_area.scroll_offset == 0 {
-        output_area.auto_scroll = true;
-    }
 }
 
 #[cfg(test)]
@@ -95,27 +86,44 @@ mod tests {
         );
     }
 
+    /// 钳制真相已迁至 `output_view_widget::apply_output_scroll_to_widget`（操作 view_state）。
+    /// 这两个回归用例改为走渲染（render_document_from_view_model）+ 滚动写回（adapter）组合，
+    /// 验证 stale offset 钳零 / 有效 offset 保留的整链行为不变。
     #[test]
-    fn test_render_document_from_view_model_clamps_stale_scroll_offset() {
+    fn test_render_then_apply_scroll_clamps_stale_offset() {
+        use crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget;
+        use crate::tui::view_state::output::OutputViewState;
+
         let mut output_area = OutputArea::new();
         output_area.last_visible_height = 2;
-        output_area.auto_scroll = false;
-        output_area.scroll_offset = 100;
+        let mut view = OutputViewState {
+            scroll_offset: 100,
+            auto_scroll: false,
+            ..Default::default()
+        };
 
         render_document_from_view_model(&mut output_area, &vm(1), 80);
+        apply_output_scroll_to_widget(&mut view, &mut output_area);
 
         assert_eq!(output_area.scroll_offset, 0);
         assert!(output_area.auto_scroll);
     }
 
     #[test]
-    fn test_render_document_from_view_model_preserves_valid_scroll_offset() {
+    fn test_render_then_apply_scroll_preserves_valid_offset() {
+        use crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget;
+        use crate::tui::view_state::output::OutputViewState;
+
         let mut output_area = OutputArea::new();
         output_area.last_visible_height = 20;
-        output_area.auto_scroll = false;
-        output_area.scroll_offset = 5;
+        let mut view = OutputViewState {
+            scroll_offset: 5,
+            auto_scroll: false,
+            ..Default::default()
+        };
 
         render_document_from_view_model(&mut output_area, &vm(100), 80);
+        apply_output_scroll_to_widget(&mut view, &mut output_area);
 
         assert_eq!(output_area.scroll_offset, 5);
         assert!(!output_area.auto_scroll);

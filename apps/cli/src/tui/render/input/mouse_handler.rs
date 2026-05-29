@@ -20,13 +20,15 @@ impl crate::tui::app::App {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if point_in_rect(row, col, &output_area) {
-                    self.output_area.scroll_up(3);
+                    // 滚动真相归 view_state；widget 镜像每帧由 adapter 写回。
+                    let total_lines = self.output_area.document().total_lines();
+                    self.view_state.output.scroll_up(3, total_lines);
                 }
                 return Vec::new();
             }
             MouseEventKind::ScrollDown => {
                 if point_in_rect(row, col, &output_area) {
-                    self.output_area.scroll_down(3);
+                    self.view_state.output.scroll_down(3);
                 }
                 return Vec::new();
             }
