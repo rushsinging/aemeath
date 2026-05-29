@@ -81,8 +81,7 @@ impl App {
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
                         processing::spawn_processing(spawn_ctx);
                     } else {
-                        self.output_area
-                            .push_error("SDK agent client is unavailable");
+                        self.append_error_notice("SDK agent client is unavailable");
                     }
                 }
             }

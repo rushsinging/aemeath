@@ -12,8 +12,7 @@ impl super::super::App {
             Vec::new()
         };
         if models.is_empty() {
-            self.output_area
-                .push_system("No models configured. Add models to ~/.aemeath/config.json");
+            self.append_system_notice("No models configured. Add models to ~/.aemeath/config.json");
             return None;
         }
         let current = self.session.current_model_display.clone();

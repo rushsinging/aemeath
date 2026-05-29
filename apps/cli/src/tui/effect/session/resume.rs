@@ -22,7 +22,7 @@ impl App {
             self.render_history_message(&messages[i], subsequent);
         }
         self.chat.messages = messages;
-        self.output_area.push_system(&format!(
+        self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
         ));

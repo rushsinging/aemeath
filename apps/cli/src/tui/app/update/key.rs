@@ -209,7 +209,7 @@ impl App {
                 if !self.chat.is_processing && !self.input.just_pasted =>
             {
                 self.input.just_pasted = true;
-                self.output_area.push_system("[reading clipboard image...]");
+                self.append_system_notice("[reading clipboard image...]");
                 return UpdateResult::one(Effect::ReadClipboardImage);
             }
             (KeyModifiers::NONE, KeyCode::End) => {

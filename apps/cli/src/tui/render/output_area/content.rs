@@ -106,16 +106,6 @@ impl super::OutputArea {
         self.scroll_to_bottom();
     }
 
-    /// 添加错误消息
-    pub fn push_error(&mut self, error: &str) {
-        self.finish_streaming();
-        self.push_line(OutputLine {
-            content: format!("Error: {}", error),
-            style: LineStyle::Error,
-            ..Default::default()
-        });
-    }
-
     /// 添加取消消息
     pub fn push_cancelled(&mut self) {
         self.finish_streaming();

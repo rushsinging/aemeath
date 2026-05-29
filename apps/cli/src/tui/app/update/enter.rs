@@ -60,8 +60,7 @@ impl App {
         }
 
         let Some(spawn_ctx) = self.build_spawn_context(ui_tx, spawn_refs) else {
-            self.output_area
-                .push_error("SDK agent client is unavailable");
+            self.append_error_notice("SDK agent client is unavailable");
             return UpdateResult::none();
         };
         self.chat.clear_tool_activity();

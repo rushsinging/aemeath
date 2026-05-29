@@ -9,8 +9,7 @@ impl crate::tui::app::App {
             // Empty paste — try to read clipboard image
             let output_tx = ui_tx.clone();
             let Some(agent_client) = self.agent_client.clone() else {
-                self.output_area
-                    .push_system("[cannot read clipboard image without SDK client]");
+                self.append_system_notice("[cannot read clipboard image without SDK client]");
                 return;
             };
             tokio::spawn(async move {
@@ -32,16 +31,14 @@ impl crate::tui::app::App {
                     }
                 }
             });
-            self.output_area.push_system("[reading clipboard image...]");
+            self.append_system_notice("[reading clipboard image...]");
         } else if is_image_path(text.trim()) {
-            self.output_area
-                .push_system(&format!("[loading image: {}...]", text.trim()));
+            self.append_system_notice(format!("[loading image: {}...]", text.trim()));
             // We can't await here directly since this is a sync method,
             // so we'll handle image file loading via spawn
             let path = text.trim().to_string();
             let Some(agent_client) = self.agent_client.clone() else {
-                self.output_area
-                    .push_system("[cannot load image without SDK client]");
+                self.append_system_notice("[cannot load image without SDK client]");
                 return;
             };
             let tx = ui_tx.clone();

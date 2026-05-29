@@ -47,7 +47,7 @@ impl super::App {
                 );
                 self.output_area.clear();
                 self.reset_runtime_state().await;
-                self.output_area.push_system("[conversation cleared]");
+                self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
                 if let Some(ref ac) = self.agent_client {
@@ -63,29 +63,27 @@ impl super::App {
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
-                                self.output_area.push_system(&format!(
+                                self.append_system_notice(format!(
                                     "[compacted: {} → {} messages]",
                                     old_len,
                                     self.chat.messages.len()
                                 ));
                             } else {
-                                self.output_area.push_system("[no compaction needed]");
+                                self.append_system_notice("[no compaction needed]");
                             }
                         }
                         Err(e) => {
-                            self.output_area
-                                .push_error(&format!("compact failed: {}", e));
+                            self.append_error_notice(format!("compact failed: {}", e));
                         }
                     }
                 } else {
-                    self.output_area
-                        .push_system("[compact skipped: no agent client]");
+                    self.append_system_notice("[compact skipped: no agent client]");
                 }
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
                 let total = self.chat.total_input_tokens + self.chat.total_output_tokens;
-                self.output_area.push_system(&format!(
+                self.append_system_notice(format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
                     self.chat.total_api_calls,
                     sdk::format_tokens(self.chat.total_input_tokens),
@@ -101,26 +99,22 @@ impl super::App {
                         .await
                     {
                         Ok(est) => {
-                            self.output_area.push_system(&format!(
+                            self.append_system_notice(format!(
                                 "Context window: ~{} / {} tokens ({:.0}%)",
                                 est.estimated_tokens, est.context_size, est.usage_percentage
                             ));
-                            self.output_area
-                                .push_system(&format!("Messages: {}", self.chat.messages.len()));
+                            self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
                             if est.usage_percentage > 80.0 {
-                                self.output_area
-                                    .push_system("[auto-compaction will trigger at 80%]");
+                                self.append_system_notice("[auto-compaction will trigger at 80%]");
                             }
                         }
                         Err(e) => {
-                            self.output_area
-                                .push_error(&format!("context estimate failed: {}", e));
+                            self.append_error_notice(format!("context estimate failed: {}", e));
                         }
                     }
                 } else {
                     // Fallback: simple message count
-                    self.output_area
-                        .push_system(&format!("Messages: {}", self.chat.messages.len()));
+                    self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
                 }
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
@@ -155,31 +149,27 @@ impl super::App {
                                 count,
                             ),
                         );
-                        self.output_area
-                            .push_system(&format!("[clipboard image added ({} bytes)]", size));
+                        self.append_system_notice(format!("[clipboard image added ({} bytes)]", size));
                     }
                     Err(e) => {
-                        self.output_area
-                            .push_error(&format!("Failed to read clipboard: {e}"));
+                        self.append_error_notice(format!("Failed to read clipboard: {e}"));
                     }
                 }
             }
             "/images" => {
                 if self.chat.pending_image_count() == 0 {
-                    self.output_area.push_system("No pending images.");
+                    self.append_system_notice("No pending images.");
                 } else {
-                    self.output_area.push_system(&format!(
-                        "Pending images: {}",
-                        self.chat.pending_image_count()
-                    ));
+                    let mut text = format!("Pending images: {}", self.chat.pending_image_count());
                     for (i, img) in self.chat.pending_images().iter().enumerate() {
-                        self.output_area.push_system(&format!(
-                            "  {}. [image {}] ({} bytes)",
+                        text.push_str(&format!(
+                            "\n  {}. [image {}] ({} bytes)",
                             i + 1,
                             i + 1,
                             img.final_size
                         ));
                     }
+                    self.append_system_notice(text);
                 }
             }
             "/clear-images" => {
@@ -187,7 +177,7 @@ impl super::App {
                 self.handle_input_intent(
                     crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
                 );
-                self.output_area.push_system("[pending images cleared]");
+                self.append_system_notice("[pending images cleared]");
             }
             // Try to execute via AgentClient (delegates to CommandRegistry in runtime)
             _ => {
@@ -203,10 +193,10 @@ impl super::App {
                     };
                     match ac.execute_command(cmd_name, &args, ctx).await {
                         Ok(sdk::CommandResult::Success(msg)) => {
-                            self.output_area.push_system(&msg);
+                            self.append_system_notice(msg);
                         }
                         Ok(sdk::CommandResult::Error(msg)) => {
-                            self.output_area.push_error(&msg);
+                            self.append_error_notice(msg);
                         }
                         Ok(sdk::CommandResult::Action(action)) => {
                             if let Some(prompt) = self.handle_command_action(action).await {
@@ -214,8 +204,7 @@ impl super::App {
                             }
                         }
                         Ok(sdk::CommandResult::Confirm { message, .. }) => {
-                            self.output_area
-                                .push_system(&format!("[confirm: {}]", message));
+                            self.append_system_notice(format!("[confirm: {}]", message));
                         }
                         Err(_) => {
                             // Fallback to skill alias lookup
@@ -225,12 +214,10 @@ impl super::App {
                                 if !args.is_empty() {
                                     content = format!("{content}\n\nArguments: {args}");
                                 }
-                                self.output_area
-                                    .push_system(&format!("[skill: {}]", skill.name));
+                                self.append_system_notice(format!("[skill: {}]", skill.name));
                                 return Some(content);
                             }
-                            self.output_area
-                                .push_error(&format!("Unknown command: {cmd}"));
+                            self.append_error_notice(format!("Unknown command: {cmd}"));
                         }
                     }
                 } else if let Some(skill) = self.find_skill_by_alias(cmd_name) {
@@ -239,12 +226,10 @@ impl super::App {
                     if !args.is_empty() {
                         content = format!("{content}\n\nArguments: {args}");
                     }
-                    self.output_area
-                        .push_system(&format!("[skill: {}]", skill.name));
+                    self.append_system_notice(format!("[skill: {}]", skill.name));
                     return Some(content);
                 } else {
-                    self.output_area
-                        .push_error(&format!("Unknown command: {cmd}"));
+                    self.append_error_notice(format!("Unknown command: {cmd}"));
                 }
             }
         }
@@ -267,7 +252,7 @@ impl super::App {
                 );
                 self.output_area.clear();
                 self.reset_runtime_state().await;
-                self.output_area.push_system("[cleared]");
+                self.append_system_notice("[cleared]");
                 None
             }
             sdk::CommandAction::Compact => {
@@ -283,14 +268,13 @@ impl super::App {
                         Ok((compacted, was_compacted)) => {
                             if was_compacted {
                                 self.chat.messages = compacted;
-                                self.output_area.push_system("[compacted]");
+                                self.append_system_notice("[compacted]");
                             } else {
-                                self.output_area.push_system("[no compaction needed]");
+                                self.append_system_notice("[no compaction needed]");
                             }
                         }
                         Err(e) => {
-                            self.output_area
-                                .push_error(&format!("compact failed: {}", e));
+                            self.append_error_notice(format!("compact failed: {}", e));
                         }
                     }
                 }
@@ -331,23 +315,21 @@ impl super::App {
                             if let Some(ra) = result.reasoning_active {
                                 self.status_bar.set_thinking(ra);
                             }
-                            self.output_area
-                                .push_system(&format!("[switched to {}]", result.display_name));
+                            self.append_system_notice(format!("[switched to {}]", result.display_name));
                         }
                         Err(e) => {
-                            self.output_area
-                                .push_error(&format!("model switch failed: {}", e));
+                            self.append_error_notice(format!("model switch failed: {}", e));
                         }
                     }
                 }
                 None
             }
             sdk::CommandAction::InjectMessage(prompt) => {
-                self.output_area.push_system("[reviewing code changes...]");
+                self.append_system_notice("[reviewing code changes...]");
                 Some(prompt)
             }
             sdk::CommandAction::RunSkill(content) => {
-                self.output_area.push_system("[running skill...]");
+                self.append_system_notice("[running skill...]");
                 Some(content)
             }
             sdk::CommandAction::SetThinking(desired) => {
@@ -355,13 +337,11 @@ impl super::App {
                     match ac.set_thinking(desired).await {
                         Ok(new_state) => {
                             let label = if new_state { "ON" } else { "OFF" };
-                            self.output_area
-                                .push_system(&format!("[thinking mode: {}]", label));
+                            self.append_system_notice(format!("[thinking mode: {}]", label));
                             self.status_bar.set_thinking(new_state);
                         }
                         Err(e) => {
-                            self.output_area
-                                .push_error(&format!("set thinking failed: {}", e));
+                            self.append_error_notice(format!("set thinking failed: {}", e));
                         }
                     }
                 }
@@ -378,7 +358,7 @@ impl super::App {
                             );
                         }
                         Err(e) => {
-                            self.output_area.push_error(&format!(
+                            self.append_error_notice(format!(
                                 "Failed to resume session {}: {}",
                                 session_id, e
                             ));
@@ -388,8 +368,7 @@ impl super::App {
                 None
             }
             _ => {
-                self.output_area
-                    .push_system(&format!("[action: {:?}]", action));
+                self.append_system_notice(format!("[action: {:?}]", action));
                 None
             }
         }
