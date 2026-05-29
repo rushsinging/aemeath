@@ -3,7 +3,7 @@
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument};
 use crate::tui::render::output_area::types::MAX_LINES;
-use crate::tui::view_model::output::OutputViewModel;
+use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
@@ -38,6 +38,48 @@ impl OutputDocumentRenderer {
             blocks: trim_blocks_to_max_lines(blocks, MAX_LINES),
         }
     }
+    /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
+    /// 当前 roots 为 blocks 的叶子镜像，故输出顺序与 `render` 完全一致；gutter 缩进在 Phase 4 接入。
+    pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
+        let mut blocks = Vec::new();
+        let mut live_ids = Vec::new();
+        for root in &view_model.roots {
+            self.render_node(root, width, 0, &mut blocks, &mut live_ids);
+        }
+        self.cache.retain(&live_ids);
+        RenderedDocument {
+            blocks: trim_blocks_to_max_lines(blocks, MAX_LINES),
+        }
+    }
+
+    fn render_node(
+        &mut self,
+        node: &BlockNode,
+        width: u16,
+        _depth: usize,
+        out: &mut Vec<RenderedBlock>,
+        live_ids: &mut Vec<String>,
+    ) {
+        let key = CacheKey {
+            version: node.block_version,
+            width,
+        };
+        // 借用拆分：闭包仅捕获 render_count（不可变）与 node，避免与 get_or_render 的 &mut cache 冲突。
+        let cache = &mut self.cache;
+        #[cfg(test)]
+        let render_count = &self.render_count;
+        let rendered = cache.get_or_render(&node.block_id, key, |ctx| {
+            #[cfg(test)]
+            render_count.set(render_count.get() + 1);
+            node.kind.component().render_self(&node.block_id, ctx)
+        });
+        live_ids.push(node.block_id.clone());
+        out.push(rendered);
+        for child in &node.children {
+            self.render_node(child, width, _depth + 1, out, live_ids);
+        }
+    }
+
     #[cfg(test)]
     pub fn render_count(&self) -> usize {
         self.render_count.get()
@@ -120,6 +162,39 @@ mod tests {
             1,
             "同 version+width 第二次应命中缓存"
         );
+    }
+
+    #[test]
+    fn test_render_tree_dfs_flattens_parent_then_children() {
+        use crate::tui::view_model::output::{BlockNode, OutputBlockKind, TextBlockView};
+        use crate::tui::view_model::style::SemanticStyle;
+
+        fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
+            let kind = OutputBlockKind::SystemNotice(TextBlockView {
+                key: id.into(),
+                text: text.into(),
+                style: SemanticStyle::Muted,
+            });
+            BlockNode {
+                block_id: id.into(),
+                block_version: kind.cache_version(),
+                kind,
+                children,
+            }
+        }
+
+        let vm = OutputViewModel {
+            blocks: Vec::new(),
+            roots: vec![node("p", "parent", vec![node("c", "child", vec![])])],
+            version: 1,
+            follow_tail_hint: true,
+        };
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
+
+        assert_eq!(doc.blocks.len(), 2);
+        assert_eq!(doc.blocks[0].block_id, "p");
+        assert_eq!(doc.blocks[1].block_id, "c");
     }
 
     #[test]
