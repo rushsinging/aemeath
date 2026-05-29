@@ -88,7 +88,7 @@ rule1_scan() {
     scan_nontest "$f"
   done \
     | grep -E '\b(output|output_area|self)\.(scroll_offset|auto_scroll|is_selecting|selection_start|selection_end)\s*=' \
-    | perl -ne 'print unless /(?<![\w.])view_state\.output\./'
+    | perl -ne 'print unless /view_state\.output\./'
 }
 
 report_matches \

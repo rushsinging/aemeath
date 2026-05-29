@@ -11,6 +11,8 @@ impl App {
         self.output_area.reset_runtime_state();
         // 滚动真相归 view_state：清空时同步复位，避免下一帧 adapter 用旧滚动态覆盖 widget。
         self.view_state.output.scroll_to_bottom();
+        // 选区真相同样归 view_state：清空时一并清选区，避免下一帧 adapter 用旧选区复活 widget 镜像。
+        self.view_state.output.clear_selection();
         self.status_bar.reset_runtime_state();
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
@@ -70,5 +72,41 @@ impl App {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use sdk::CharIdx;
+    use std::path::PathBuf;
+
+    fn test_app() -> App {
+        App::new(
+            "test-session".to_string(),
+            PathBuf::from("/tmp"),
+            "test-model".to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn reset_runtime_state_clears_view_state_selection_truth() {
+        let mut app = test_app();
+        // 在 view_state（选区真相）中建立选区。
+        app.view_state.output.begin_selection(0, CharIdx::new(1));
+        app.view_state.output.update_selection(0, CharIdx::new(5));
+        assert!(app.view_state.output.selection_range().is_some());
+
+        app.reset_runtime_state().await;
+
+        // 真相被清空：避免下一帧 adapter 复活 widget 镜像。
+        assert_eq!(app.view_state.output.selection_range(), None);
+        assert!(!app.view_state.output.is_selecting());
+
+        // 经渲染前刷新后，widget 镜像也被同步清空。
+        app.refresh_output_scroll_from_view_state();
+        assert!(!app.output_area.is_selecting);
+        assert!(app.output_area.selection_start.is_none());
+        assert!(app.output_area.selection_end.is_none());
     }
 }

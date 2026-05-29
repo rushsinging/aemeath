@@ -15,6 +15,9 @@ impl App {
             .height
             .max(height.saturating_sub(7));
         self.output_area.handle_resize(width, visible_height_hint);
+        // 选区真相归 view_state：resize 时清选区真相，否则 widget 的镜像清空会被下一帧
+        // adapter 用旧 view_state 选区复活（resize 仅作用于 widget 镜像，不动真相）。
+        self.view_state.output.clear_selection();
         let input_width = self.layout.input_area_rect.width.max(width);
         self.input_area.handle_resize(input_width);
     }
@@ -55,6 +58,29 @@ mod tests {
         app.handle_resize(80, 24);
 
         assert_eq!(app.input_area.content_width, 78);
+    }
+
+    #[test]
+    fn handle_resize_clears_view_state_selection_truth() {
+        use sdk::CharIdx;
+        let mut app = test_app();
+        // 在 view_state（选区真相）中建立选区。
+        app.view_state.output.begin_selection(1, CharIdx::new(2));
+        app.view_state.output.update_selection(3, CharIdx::new(7));
+        assert!(app.view_state.output.selection_range().is_some());
+
+        // 触发 resize（用与初始不同的尺寸，避免 early-return）。
+        app.handle_resize(100, 30);
+
+        // 真相被清空：避免下一帧 adapter 复活 widget 镜像。
+        assert_eq!(app.view_state.output.selection_range(), None);
+        assert!(!app.view_state.output.is_selecting());
+
+        // 经渲染前刷新后，widget 镜像也被同步清空。
+        app.refresh_output_scroll_from_view_state();
+        assert!(!app.output_area.is_selecting);
+        assert!(app.output_area.selection_start.is_none());
+        assert!(app.output_area.selection_end.is_none());
     }
 
     #[test]
