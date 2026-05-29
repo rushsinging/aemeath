@@ -153,6 +153,133 @@ fn test_output_assembler_uses_error_summary_for_failed_tool_result() {
     assert_eq!(tool.result_summary.as_deref(), Some("✗ Read failed"));
 }
 
+#[test]
+fn test_output_assembler_renders_task_list_create_tool_call() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "fix bug".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        name: "TaskListCreate".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-tlc".to_string(),
+        name: "TaskListCreate".to_string(),
+        index: 0,
+        summary: r#"{"subject":"修复 bug","summary":"修复 bug 84"}"#.to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-tlc".to_string(),
+        tool_name: "TaskListCreate".to_string(),
+        output: "Task list #0 created".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+
+    // 应有且仅有一个 ToolCall block（不应泄漏为 DiagnosticNotice）
+    let diagnostic_count = vm
+        .blocks
+        .iter()
+        .filter(|block| matches!(&block.kind, OutputBlockKind::DiagnosticNotice(_)))
+        .count();
+    assert_eq!(diagnostic_count, 0, "TaskListCreate 结果不应泄漏为诊断文本");
+
+    let tool = vm
+        .blocks
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("应有 TaskListCreate 工具调用块");
+
+    assert_eq!(tool.title, "TaskListCreate");
+    assert_eq!(tool.icon, "✓");
+    assert_eq!(tool.semantic_status, ToolSemanticStatus::Success);
+    // result_summary 应使用 fallback（TaskListCreateDisplay 返回空，走 default）
+    assert!(tool.result_summary.is_some(), "应有结果摘要");
+}
+
+#[test]
+fn test_output_assembler_renders_task_create_tool_call() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "fix bug".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        name: "TaskCreate".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-tc".to_string(),
+        name: "TaskCreate".to_string(),
+        index: 0,
+        summary: r#"{"subject":"分析代码","description":"查看代码结构"}"#.to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-tc".to_string(),
+        tool_name: "TaskCreate".to_string(),
+        output: "Task #0 created".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let tool = vm
+        .blocks
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("应有 TaskCreate 工具调用块");
+
+    assert_eq!(tool.title, "TaskCreate");
+    assert_eq!(tool.icon, "✓");
+    assert_eq!(tool.semantic_status, ToolSemanticStatus::Success);
+}
+
+#[test]
+fn test_output_assembler_renders_task_update_tool_call() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "fix bug".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        name: "TaskUpdate".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-tu".to_string(),
+        name: "TaskUpdate".to_string(),
+        index: 0,
+        summary: r#"{"taskId":"1","status":"completed"}"#.to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-tu".to_string(),
+        tool_name: "TaskUpdate".to_string(),
+        output: "Task #1 updated".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let tool = vm
+        .blocks
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("应有 TaskUpdate 工具调用块");
+
+    assert_eq!(tool.title, "TaskUpdate");
+    assert_eq!(tool.icon, "✓");
+}
+
 fn add_failed_tool_after_thinking(conversation: &mut ConversationModel, name: &str, output: &str) {
     add_tool_after_thinking(conversation, name, output, true);
 }
