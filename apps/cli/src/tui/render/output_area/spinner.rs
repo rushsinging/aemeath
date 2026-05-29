@@ -1,48 +1,12 @@
-use rand::prelude::IndexedRandom;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
-use crate::tui::render::output_area::SpinnerState;
 use crate::tui::render::theme;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
 const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];
-
-/// Fun verbs shown while the LLM is thinking
-const SPINNER_VERBS: &[&str] = &[
-    "Thinking",
-    "Pondering",
-    "Crafting",
-    "Computing",
-    "Brewing",
-    "Weaving",
-    "Conjuring",
-    "Forging",
-    "Hatching",
-    "Cooking",
-    "Channeling",
-    "Ruminating",
-    "Composing",
-    "Imagining",
-    "Processing",
-    "Puzzling",
-    "Mulling",
-    "Noodling",
-    "Tinkering",
-    "Crystallizing",
-    "Synthesizing",
-    "Architecting",
-    "Orchestrating",
-    "Incubating",
-    "Fermenting",
-    "Simmering",
-    "Percolating",
-    "Cogitating",
-    "Meandering",
-    "Harmonizing",
-];
 
 /// Spinner colors (theme accent)
 const SPINNER_BASE: Color = theme::SPINNER_BASE;
@@ -62,55 +26,11 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 }
 
 impl super::OutputArea {
-    /// Start the animated spinner in the output area
-    pub fn start_spinner(&mut self) {
-        if self.spinner.is_some() {
-            log::debug!(
-                "[SPINNER] start_spinner: already running, frame={}",
-                self.spinner.as_ref().unwrap().frame
-            );
-            return;
-        }
-        let mut rng = rand::rng();
-        self.spinner = Some(SpinnerState {
-            frame: 0,
-            verb: SPINNER_VERBS
-                .choose(&mut rng)
-                .unwrap_or(&"Thinking")
-                .to_string(),
-            start: std::time::Instant::now(),
-            phase: None,
-        });
-        log::debug!("[SPINNER] start_spinner: started");
-    }
-
-    /// Update the detailed phase shown on the spinner line.
-    pub fn set_spinner_phase(&mut self, phase: impl Into<String>) {
-        let phase = phase.into();
-        if self.spinner.is_none() {
-            self.start_spinner();
-        }
-        if let Some(ref mut spinner) = self.spinner {
-            spinner.phase = Some(phase);
-        }
-    }
-
-    /// Stop the animated spinner
-    pub fn stop_spinner(&mut self) {
-        if self.spinner.is_some() {
-            log::debug!("[SPINNER] stop_spinner: stopping (was running)");
-        }
-        self.spinner = None;
-    }
-
-    /// Advance the animated spinner by one fixed ticker step.
-    pub fn tick_spinner(&mut self) {
-        if let Some(ref mut s) = self.spinner {
-            s.frame = s.frame.wrapping_add(1);
-        }
-    }
-
     /// Build the animated spinner line (called during render)
+    ///
+    /// 真相边界：spinner 镜像（`self.spinner`）由 `adapter/live_status_widget.rs`
+    /// 据 Model（active/phase）+ view_state（frame/verb）单向写回。本函数只读镜像渲染，
+    /// 不再自持 verb 选择/动画推进。
     pub fn build_spinner_line(&self) -> Option<Line<'static>> {
         let s = self.spinner.as_ref()?;
 

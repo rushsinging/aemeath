@@ -34,8 +34,8 @@ impl App {
     /// Update task status display in output area. Also runs lifecycle checks.
     ///
     /// 单一真相：task 行真相归 `RuntimeModel.task_status.lines`，经 `UpdateTaskLines`
-    /// intent 写入，再由 adapter 单向写回 widget 镜像。此处只走 task 路径——spinner
-    /// 镜像仍由旧触发点直管（Task 4.1 再统一），故用只写 task 的 adapter 入口。
+    /// intent 写入。widget 镜像由每帧 `refresh_live_status_from_model` 统一写回
+    /// （spinner + task 同源），此处只更新 Model，不直写 widget。
     pub(crate) async fn update_task_status(&mut self, _is_processing: bool) {
         let lines = match &self.agent_client {
             None => Vec::new(),
@@ -50,10 +50,6 @@ impl App {
         self.model
             .runtime
             .apply(crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(lines));
-        crate::tui::adapter::live_status_widget::apply_task_lines_to_widget(
-            &mut self.output_area,
-            &self.model.runtime.task_status.lines,
-        );
     }
 
     /// Refresh the cached session list for /resume autocomplete

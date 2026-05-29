@@ -55,6 +55,7 @@ fn phase_text(phase: &SpinnerPhase) -> String {
             HookOutcome::Blocked => format!("Hook {event} blocked"),
             HookOutcome::Timeout => format!("Hook {event} timeout..."),
             HookOutcome::Done => format!("Hook {event} done"),
+            HookOutcome::Failed => format!("Hook {event} failed: {detail}"),
         },
     }
 }
@@ -164,6 +165,10 @@ mod tests {
             "Hook PreToolUse timeout..."
         );
         assert_eq!(phase_text(&mk(HookOutcome::Done)), "Hook PreToolUse done");
+        assert_eq!(
+            phase_text(&mk(HookOutcome::Failed)),
+            "Hook PreToolUse failed: lint"
+        );
     }
 
     #[test]

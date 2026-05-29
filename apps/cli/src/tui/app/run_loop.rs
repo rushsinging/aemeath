@@ -35,6 +35,9 @@ impl App {
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();
 
+            // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
+            self.refresh_live_status_from_model();
+
             // Draw UI
             self.draw(terminal)?;
 
@@ -85,8 +88,11 @@ impl App {
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
-                    self.output_area.start_spinner();
-                    self.output_area.set_spinner_phase("Thinking...");
+                    self.model.runtime.apply(
+                        crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(
+                            crate::tui::model::runtime::spinner::SpinnerPhase::Thinking,
+                        ),
+                    );
                     self.chat.start_processing();
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
                         processing::spawn_processing(spawn_ctx);

@@ -1,5 +1,6 @@
 use super::UpdateResult;
 use crate::tui::app::App;
+use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl App {
@@ -104,14 +105,14 @@ impl App {
                     }
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(answer);
-                    self.output_area.set_spinner_phase("Generating...");
+                    self.spinner_phase(SpinnerPhase::Generating);
                 }
                 KeyCode::Esc => {
                     let state = self.input.ask_user_state.take().unwrap();
                     self.dismiss_ask_user_block();
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(String::new());
-                    self.output_area.set_spinner_phase("Generating...");
+                    self.spinner_phase(SpinnerPhase::Generating);
                 }
                 _ => {
                     // 普通按键传递给 input_area（用于自由输入模式）
@@ -134,7 +135,7 @@ impl App {
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
                             let _ = reply_tx.send(text);
-                            self.output_area.set_spinner_phase("Generating...");
+                            self.spinner_phase(SpinnerPhase::Generating);
                         }
                     }
                     return Some(UpdateResult::none());
@@ -146,7 +147,7 @@ impl App {
                             crate::tui::model::input::intent::InputIntent::Clear,
                         );
                         let _ = reply_tx.send(String::new());
-                        self.output_area.set_spinner_phase("Generating...");
+                        self.spinner_phase(SpinnerPhase::Generating);
                     }
                     return Some(UpdateResult::none());
                 }
@@ -175,7 +176,7 @@ impl App {
                     self.append_user_echo(text.clone());
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(text);
-                    self.output_area.set_spinner_phase("Generating...");
+                    self.spinner_phase(SpinnerPhase::Generating);
                 }
             }
             KeyCode::Esc => {

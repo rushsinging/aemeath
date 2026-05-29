@@ -64,8 +64,7 @@ impl App {
             return UpdateResult::none();
         };
         self.chat.clear_tool_activity();
-        self.output_area.start_spinner();
-        self.output_area.set_spinner_phase("Thinking...");
+        self.spinner_phase(crate::tui::model::runtime::spinner::SpinnerPhase::Thinking);
         self.chat.start_processing();
 
         UpdateResult::spawn_processing(spawn_ctx)

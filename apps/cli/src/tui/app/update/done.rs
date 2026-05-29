@@ -55,7 +55,7 @@ impl App {
             // 完成提示作为系统消息进入 ConversationModel（单一真相源），经 document 渲染。
             self.append_system_notice(done_notice(dur));
         }
-        self.output_area.stop_spinner();
+        self.spinner_stop();
         self.chat.stop_processing();
         self.status_bar.set_success("Ready");
         let mut effects = Vec::new();

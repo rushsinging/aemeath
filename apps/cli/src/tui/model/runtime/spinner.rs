@@ -30,6 +30,7 @@ pub enum HookOutcome {
     Blocked,
     Timeout,
     Done,
+    Failed,
 }
 
 #[cfg(test)]

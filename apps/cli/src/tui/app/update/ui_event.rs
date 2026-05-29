@@ -3,6 +3,7 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
 use tokio::sync::mpsc;
 
 impl App {
@@ -20,7 +21,7 @@ impl App {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
                     self.chat.clear_tool_activity();
                 }
-                self.output_area.set_spinner_phase("Generating...");
+                self.spinner_phase(SpinnerPhase::Generating);
             }
             UiEvent::Thinking(_text) => {
                 if self.chat.tool_call_active {
@@ -29,7 +30,7 @@ impl App {
                     );
                     self.chat.clear_tool_activity();
                 }
-                self.output_area.set_spinner_phase("Thinking...");
+                self.spinner_phase(SpinnerPhase::Thinking);
             }
             UiEvent::TextBlockComplete(_text) => {}
             UiEvent::ToolCallStart { name, index } => {
@@ -40,9 +41,7 @@ impl App {
                 self.chat.start_tool_activity();
                 // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
-                    self.output_area.start_spinner();
-                    self.output_area
-                        .set_spinner_phase(format!("Calling {name}..."));
+                    self.spinner_phase(SpinnerPhase::CallingTool(name));
                 }
             }
             UiEvent::ToolArgumentsDelta {
@@ -61,9 +60,7 @@ impl App {
                     self.chat.tool_call_active
                 );
                 self.chat.register_tool_call(id.clone());
-                self.output_area.start_spinner();
-                self.output_area
-                    .set_spinner_phase(format!("Calling {name}..."));
+                self.spinner_phase(SpinnerPhase::CallingTool(name));
             }
             UiEvent::ToolResult {
                 id,
@@ -80,12 +77,9 @@ impl App {
                 if remaining == 0 {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
-                    self.output_area.start_spinner();
-                    self.output_area.set_spinner_phase("Thinking...");
+                    self.spinner_phase(SpinnerPhase::Thinking);
                 } else {
-                    self.output_area.start_spinner();
-                    self.output_area
-                        .set_spinner_phase(format!("Calling tools... ({remaining} running)"));
+                    self.spinner_phase(SpinnerPhase::CallingTools { remaining });
                 }
             }
             UiEvent::Usage {
@@ -107,8 +101,7 @@ impl App {
             UiEvent::AgentProgress { .. } => {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
                 // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
-                self.output_area.start_spinner();
-                self.output_area.set_spinner_phase("Agent working...");
+                self.spinner_phase(SpinnerPhase::AgentWorking);
             }
             UiEvent::Error(msg) => {
                 log::debug!(
@@ -117,7 +110,7 @@ impl App {
                 );
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
                 // 此处不再重复写 output_area（消除双表示）。
-                self.output_area.stop_spinner();
+                self.spinner_stop();
                 self.chat.stop_processing();
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
@@ -127,7 +120,7 @@ impl App {
             UiEvent::Cancelled => {
                 // 取消提示改为注入 ConversationModel 的 System notice，经 document 渲染。
                 self.append_system_notice("已取消");
-                self.output_area.stop_spinner();
+                self.spinner_stop();
                 self.chat.stop_processing();
             }
             UiEvent::MessagesSync(msgs) => {
@@ -156,8 +149,7 @@ impl App {
                 self.handle_memory_list(&reminders);
             }
             UiEvent::ReflectionStarted => {
-                self.output_area.start_spinner();
-                self.output_area.set_spinner_phase("Reflecting...");
+                self.spinner_phase(SpinnerPhase::Reflecting);
                 self.chat.start_processing();
             }
             UiEvent::ReflectionUsage { input, output } => {
@@ -182,7 +174,7 @@ impl App {
                         ));
                     }
                 }
-                self.output_area.stop_spinner();
+                self.spinner_stop();
                 self.chat.stop_processing();
                 self.status_bar.set_success("Ready");
             }
@@ -196,7 +188,7 @@ impl App {
                 reply_tx,
             } => {
                 self.chat.finish_tool_call(&id);
-                self.output_area.stop_spinner();
+                self.spinner_stop();
 
                 // Append built-in options when LLM provides ≥ 1 option
                 let llm_option_count = options.len();
@@ -232,7 +224,7 @@ impl App {
                         allow_free_input,
                     });
                 }
-                self.output_area.stop_spinner();
+                self.spinner_stop();
             }
             UiEvent::StopFailureHook {
                 system_message,
@@ -260,33 +252,34 @@ impl App {
                     for msg in &queued {
                         self.append_user_echo(msg.clone());
                     }
-                    self.output_area
-                        .set_spinner_phase("Thinking with queued input...");
+                    self.spinner_phase(SpinnerPhase::ThinkingQueued);
                 }
                 let _ = reply_tx.send(queued);
             }
             UiEvent::HookStart { event, command } => {
-                self.output_area.start_spinner();
-                self.output_area
-                    .set_spinner_phase(format!("Hook {event}: {}", short_hook_command(&command)));
+                self.spinner_phase(SpinnerPhase::Hook {
+                    event,
+                    detail: short_hook_command(&command),
+                    outcome: HookOutcome::Running,
+                });
             }
             UiEvent::HookEnd {
                 event,
                 blocked,
                 error,
             } => {
-                if blocked {
-                    self.output_area
-                        .set_spinner_phase(format!("Hook {event} blocked"));
+                let (detail, outcome) = if blocked {
+                    (String::new(), HookOutcome::Blocked)
                 } else if let Some(error) = error {
-                    self.output_area.set_spinner_phase(format!(
-                        "Hook {event} failed: {}",
-                        truncate_for_spinner(&error, 48)
-                    ));
+                    (truncate_for_spinner(&error, 48), HookOutcome::Failed)
                 } else {
-                    self.output_area
-                        .set_spinner_phase(format!("Hook {event} done"));
-                }
+                    (String::new(), HookOutcome::Done)
+                };
+                self.spinner_phase(SpinnerPhase::Hook {
+                    event,
+                    detail,
+                    outcome,
+                });
             }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
