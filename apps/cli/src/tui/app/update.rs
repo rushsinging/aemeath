@@ -209,6 +209,10 @@ impl App {
             &mut self.view_state.output,
             &mut self.output_area,
         );
+        crate::tui::adapter::output_view_widget::apply_output_selection_to_widget(
+            &self.view_state.output,
+            &mut self.output_area,
+        );
     }
 }
 

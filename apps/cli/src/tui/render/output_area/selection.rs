@@ -33,95 +33,57 @@ impl super::OutputArea {
             .map(|s| format!("  {s}"))
     }
 
-    /// Start a selection at the given screen position
-    /// row/col 是相对于输出区域 rect 的偏移
-    pub fn start_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
+    /// 屏幕坐标 → 选区锚点 `(逻辑行, plain CharIdx)`（#63 坐标系）的纯换算。
+    ///
+    /// 只读：查 `screen_line_map` + gutter_cols 列补偿 + `screen_col_to_char_idx`，
+    /// 不改 widget 选区状态。供 mouse_handler 折算后写入 view_state 选区真相。
+    /// row/col 为终端绝对坐标，rect 为输出区。映射失败（行超界/无行内容）返回 None。
+    pub fn screen_to_anchor(
+        &mut self,
+        row: u16,
+        col: u16,
+        rect: &ratatui::layout::Rect,
+    ) -> Option<(usize, CharIdx)> {
         let rel_row = row.saturating_sub(rect.y) as usize;
         let rel_col = col.saturating_sub(rect.x) as usize;
-
-        log::debug!(
-            "sel: rect.y={}, row={}, rel_row={}, screen_map.len={}",
-            rect.y,
-            row,
-            rel_row,
-            self.screen_line_map.len()
-        );
-
-        // 将屏幕行映射到逻辑行+char偏移
-        if rel_row < self.screen_line_map.len() {
-            let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
-            // 减去 gutter 显示列：gutter 不进 plain，点击 gutter 区间映射到 plain 字符 0。
-            let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
-            if let Some(line) = self.get_line_content(logic_idx) {
-                let byte_start = char_to_byte(&line, char_start);
-                let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
-                    line.bslice_from(byte_start),
-                    content_col,
-                );
-                self.selection_start = Some((logic_idx, char_start.advance(char_col.as_usize())));
-                self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
-            }
-        }
-        self.is_selecting = true;
-    }
-
-    /// Update selection end position during drag
-    pub fn update_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
-        if !self.is_selecting {
-            return;
-        }
-        let rel_row = row.saturating_sub(rect.y) as usize;
-        let rel_col = col.saturating_sub(rect.x) as usize;
-
-        if rel_row < self.screen_line_map.len() {
-            let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
-            let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
-            if let Some(line) = self.get_line_content(logic_idx) {
-                let byte_start = char_to_byte(&line, char_start);
-                let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
-                    line.bslice_from(byte_start),
-                    content_col,
-                );
-                self.selection_end = Some((logic_idx, char_start.advance(char_col.as_usize())));
-            }
-        } else {
-            // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
-            if let Some(&(_, _, char_end)) = self.screen_line_map.last() {
-                let last_logic = self
-                    .screen_line_map
-                    .last()
-                    .map(|(li, _, _)| *li)
-                    .unwrap_or(0);
-                self.selection_end = Some((last_logic, char_end));
-            }
-        }
-    }
-
-    /// Select the word at the given screen position
-    pub fn select_word(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
-        let rel_row = row.saturating_sub(rect.y) as usize;
-        let rel_col = col.saturating_sub(rect.x) as usize;
-
         if rel_row >= self.screen_line_map.len() {
-            return;
+            return None;
         }
-
         let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
+        // 减去 gutter 显示列：gutter 不进 plain，点击 gutter 区间映射到 plain 字符 0。
         let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
-        let Some(line) = self.get_line_content(logic_idx) else {
-            return;
-        };
-
+        let line = self.get_line_content(logic_idx)?;
         let byte_start = char_to_byte(&line, char_start);
         let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
             line.bslice_from(byte_start),
             content_col,
         );
-        let abs_char_idx = char_start.advance(char_col.as_usize());
+        Some((logic_idx, char_start.advance(char_col.as_usize())))
+    }
 
+    /// 拖拽超出可见范围时的兜底锚点：最后一个屏幕行对应逻辑行的末尾。
+    /// 只读，供 mouse_handler 在 `screen_to_anchor` 返回 None 时（行超界）补位。
+    pub fn last_visible_anchor(&self) -> Option<(usize, CharIdx)> {
+        self.screen_line_map
+            .last()
+            .map(|&(logic_idx, _, char_end)| (logic_idx, char_end))
+    }
+
+    /// 屏幕坐标 → 整词边界 `(逻辑行, word_start, word_end)`（半开区间）的纯换算。
+    ///
+    /// 只读：在 `screen_to_anchor` 命中的字符位置向两侧扫描 word-char（字母数字/下划线）。
+    /// 非 word-char 命中点返回单字符词。映射失败返回 None。不改 widget 选区状态。
+    pub fn word_bounds_at(
+        &mut self,
+        row: u16,
+        col: u16,
+        rect: &ratatui::layout::Rect,
+    ) -> Option<(usize, CharIdx, CharIdx)> {
+        let (logic_idx, abs_char_idx) = self.screen_to_anchor(row, col, rect)?;
+        let line = self.get_line_content(logic_idx)?;
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {
-            return;
+            return None;
         }
 
         let idx = abs_char_idx.as_usize().min(chars.len() - 1);
@@ -129,7 +91,6 @@ impl super::OutputArea {
 
         let mut start = idx;
         let mut end = idx;
-
         if is_word_char(chars[idx]) {
             while start > 0 && is_word_char(chars[start - 1]) {
                 start -= 1;
@@ -139,9 +100,39 @@ impl super::OutputArea {
             }
         }
 
-        self.selection_start = Some((logic_idx, CharIdx::new(start)));
-        self.selection_end = Some((logic_idx, CharIdx::new(end + 1)));
+        Some((logic_idx, CharIdx::new(start), CharIdx::new(end + 1)))
+    }
+
+    /// Start a selection at the given screen position
+    /// row/col 是相对于输出区域 rect 的偏移
+    pub fn start_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
+        if let Some((logic_idx, anchor)) = self.screen_to_anchor(row, col, rect) {
+            self.selection_start = Some((logic_idx, anchor));
+            self.selection_end = Some((logic_idx, anchor));
+        }
         self.is_selecting = true;
+    }
+
+    /// Update selection end position during drag
+    pub fn update_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
+        if !self.is_selecting {
+            return;
+        }
+        if let Some(anchor) = self.screen_to_anchor(row, col, rect) {
+            self.selection_end = Some(anchor);
+        } else if let Some(anchor) = self.last_visible_anchor() {
+            // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
+            self.selection_end = Some(anchor);
+        }
+    }
+
+    /// Select the word at the given screen position
+    pub fn select_word(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
+        if let Some((logic_idx, word_start, word_end)) = self.word_bounds_at(row, col, rect) {
+            self.selection_start = Some((logic_idx, word_start));
+            self.selection_end = Some((logic_idx, word_end));
+            self.is_selecting = true;
+        }
     }
 
     /// End selection and return selected text without performing clipboard side effects.
