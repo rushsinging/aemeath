@@ -79,7 +79,7 @@ render_node(node, ctx, depth):
 ```
 
 - 产物仍是扁平 `RenderedDocument{ blocks: Vec<RenderedBlock> }`，每个 `BlockNode` → 一个 `RenderedBlock`（保持 block_id 粒度，利于缓存 retain 与 root 边界识别）。
-- 缩进 = 每层一个 `INDENT`，累积；**只施加到 spans，不进 plain**（见 §6）。
+- 组合期对每行前置 **gutter**（`[depth 缩进] + [marker 列]`，详见 §6.5）；**只施加到 spans，不进 plain**（见 §6）。
 
 ### §4 嵌套规则表（吸收方案 C）
 
@@ -114,6 +114,20 @@ const MAX_BLOCK_DEPTH: usize = 3;   // top → tool_call → result-content
   - 适配点：`screen_line_map` 的列偏移与 `apply_selection_overlay` 的 `SelRange` 需把"缩进显示宽度"作为显示偏移补偿，区别于 `plain` 字符偏移。即：屏幕列 → 减去缩进宽度 → 映射到 plain 字符偏移。
 - MAX_LINES 裁剪：改为按"最旧的 **root 子树**整组"丢弃（现 `trim_blocks_to_max_lines` 按单 RenderedBlock）。需让 trim 识别 root 边界（RenderedBlock 标注其所属 root，或按 root 分组裁剪）。
 
+### §6.5 行首标志槽 gutter（决策：仅首行 marker + 后续纯空白，静态）
+
+把"状态标志 + 缩进"统一为每个 block 行首的**固定宽度槽位（gutter）**：
+
+- **gutter 组成**：`[depth 缩进] + [marker 列]`。`marker 列`固定宽度 `GUTTER_WIDTH`（建议 2：字形 + 空格），所有 block 共用同一宽度 → 内容左边缘对齐；嵌套块按 depth 叠加缩进后再接 marker 列。
+- **marker 来源（按 block kind）**：
+  - 有状态的块（ToolCall）：按状态映射字形 ●运行 / ✓成功 / ✗失败 / –取消 / ?孤儿（复用现 `map_tool_status`）。
+  - 无状态的块（UserMessage / AssistantMessage / Thinking / Diagnostic 等）：用固定 kind 字形（初版建议：UserMessage `>`、其余可空 gutter，具体字形 review 时定）。
+  - 全部**静态**：marker 只随 block 状态变；状态已纳入 `block_version`，故无需动画帧、无缓存失效问题（不引入 #59 S1 的 tick）。
+- **仅首行画 marker**：block 第一行 gutter 显示 marker 字形；**后续行 gutter 为等宽纯空白**（无竖线续接）。
+- **施加时机 = 组合期（与缩进同源）**：gutter（缩进 + marker）在渲染器组合/展平期前置到每行，**不进缓存的 `render_self` 内容、不进 `plain`**（与 §5 §6 一致）。组件 `render_self` 永远产"无 gutter 的纯内容行"；marker 字形由渲染器在组合期现读 node 的 kind/status 决定。
+- **与现状关系**：现 `tool_call.rs` 把 `● `/`✓ ` 直接写进首行 spans——迁移后改为不在组件内写 marker，统一由 gutter 机制注入，使 UserMessage 等也获得一致的对齐 gutter。
+- **plain 一致性**：marker 与缩进均为显示装饰，不进 plain → 复制内容不含 marker / 前导空格（§6 列偏移补偿需把 `GUTTER_WIDTH + depth 缩进` 一并算作显示偏移）。
+
 ### §7 assembler 改造
 
 - `OutputViewAssembler::assemble_from_conversation` 产 `Vec<BlockNode>`。
@@ -141,7 +155,7 @@ const MAX_BLOCK_DEPTH: usize = 3;   // top → tool_call → result-content
 ### §10 guard
 
 - 新增/扩展架构 guard：
-  - 组件 `render_self` 内禁止施加缩进（缩进唯一在渲染器 `indent()`）。
+  - 组件 `render_self` 内禁止施加 gutter（缩进 + marker 唯一在渲染器组合期；组件不写 marker 字形、不加前导缩进）。
   - 禁止绕过 `BlockComponent` 直接拼 block 行。
   - 嵌套合法性 + 深度由 assembler 校验路径覆盖（guard 检查校验函数被调用 / 无旁路建树）。
 - 接入 `.agents/hooks/check-architecture-guards.sh`。
@@ -150,9 +164,10 @@ const MAX_BLOCK_DEPTH: usize = 3;   // top → tool_call → result-content
 
 1. **trait 落地**：定义 `BlockComponent`，各 view impl（`render_self` 复用现有 `render_xxx` 函数体），`render_block` 分发改 trait。扁平结构与行为不变。
 2. **引入树**：ViewModel 加 `children`（暂空），渲染器改递归 `render_node`（depth=0）。行为不变。
-3. **嵌套规则表 + 校验 + guard**：`allowed_child`、`MAX_BLOCK_DEPTH`、assembler 建树校验、guard。
-4. **ToolCall result 改子节点**：assembler 把 ToolResult 解析成 Diff/Markdown/Diagnostic 子块；删 `result_summary` 字符串路径；缩进施加 + plain 解耦（§6）。**本步修 #65/#76**。
-5. **缓存与裁剪适配**：`retain` 改全树 DFS；MAX_LINES 按 root 子树裁剪。
+3. **gutter 收口**：渲染器组合期统一注入 gutter（depth 缩进 + marker 列，§6.5）；组件 `render_self` 去掉自写 marker/缩进；plain 解耦 + 列偏移补偿；各 block kind 的 marker 字形映射。这步让 UserMessage 等获得一致 gutter。
+4. **嵌套规则表 + 校验 + guard**：`allowed_child`、`MAX_BLOCK_DEPTH`、assembler 建树校验、guard。
+5. **ToolCall result 改子节点**：assembler 把 ToolResult 解析成 Diff/Markdown/Diagnostic 子块；删 `result_summary` 字符串路径。**本步修 #65/#76**。
+6. **缓存与裁剪适配**：`retain` 改全树 DFS；MAX_LINES 按 root 子树裁剪。
 
 ## 涉及路径
 
