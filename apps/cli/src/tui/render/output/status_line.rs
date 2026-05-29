@@ -73,7 +73,6 @@ impl OutputArea {
             lines
         }
     }
-
 }
 
 fn task_status_style(text: &str) -> Style {

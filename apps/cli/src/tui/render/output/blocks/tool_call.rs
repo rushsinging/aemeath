@@ -27,7 +27,7 @@ pub fn render_tool_call(
                 .unwrap_or(&header_text)
                 .trim_start()
                 .to_string(),
-            Style::default().fg(theme::TEXT),
+            Style::default().fg(icon_color),
         ),
     ])];
     for detail in detail_lines {
@@ -109,31 +109,47 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_title_visible_not_background_color() {
+    fn test_tool_call_running_applies_theme_color_to_icon_and_title() {
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
             &RenderCtx { width: 80 },
         );
+        let icon_span = block.lines[0]
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == "● ")
+            .unwrap();
         let title_span = block.lines[0]
             .spans
             .iter()
             .find(|span| span.content.as_ref().contains("Grep"))
             .unwrap();
 
-        assert_ne!(title_span.style.fg, Some(theme::SURFACE));
-        assert_ne!(title_span.style.fg, title_span.style.bg);
+        assert_eq!(icon_span.style.fg, Some(theme::TOOL_RUNNING));
+        assert_eq!(title_span.style.fg, Some(theme::TOOL_RUNNING));
         assert!(block.lines[0].plain.contains("Grep"));
     }
 
     #[test]
     fn test_tool_call_success_uses_success_icon_color() {
-        let block = render_tool_call(
-            "t1",
-            &tool(ToolSemanticStatus::Success),
-            &RenderCtx { width: 80 },
-        );
+        let mut view = tool(ToolSemanticStatus::Success);
+        view.style = SemanticStyle::Success;
+        view.icon = "✓".into();
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let icon_span = block.lines[0]
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == "✓ ")
+            .unwrap();
+        let title_span = block.lines[0]
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref().contains("Grep"))
+            .unwrap();
 
+        assert_eq!(icon_span.style.fg, Some(theme::SUCCESS));
+        assert_eq!(title_span.style.fg, Some(theme::SUCCESS));
         assert!(block.lines[0].plain.contains("Grep"));
     }
 

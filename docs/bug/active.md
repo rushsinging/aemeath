@@ -19,7 +19,7 @@
 | 78 | input area 粘贴后按空格清空粘贴内容 | 中 | 修复中 | 未确认 | 2026-05 | 同 #77 根因：handle_paste_event 和 processing 模式 paste 均直接调用 input_area.input(ch) 修改 textarea，未走模型。后续空格触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本覆盖 textarea 中的粘贴内容。修复：两处 paste 循环后添加 model.input.document.clear() + insert_text() 同步 |
 | 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 待确认（随 #58 渲染管线重构修复） | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
 | 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
-| 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 活动中 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；疑似渲染管线从 legacy OutputArea 迁移到 ConversationModel 全量替换后，ToolDisplay 组件的样式/颜色信息未正确传递或被覆盖 |
+| 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 待确认 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；已确认新 `render_tool_call` 只给 icon 使用语义状态色，却把标题 span 固定为 `theme::TEXT`，导致工具名/标题看起来像普通文本；修复后标题与 icon 一起使用状态语义色 |
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 根因：`ToolDisplay` trait 已有 `result_max_lines()`/`format_result_summary()` 但 #58 新管线中的 `find_tool_view` 未调用，直接把完整 `call.result.clone()` 塞入 `result_summary`，导致工具块摘要区展示完整结果；已绑定 result 的独立 `ToolResult` block 会被跳过，不再额外渲染。修复：`find_tool_view` 改用 `ToolDisplay::format_result_summary()` 生成短摘要，默认回退为完成/失败状态文案，完整 tool result 只保留给模型上下文 |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 活动中 | 未确认 | 2026-05 | LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈，用户看不到 task list 的创建过程和结果；`ToolDisplay` registry 中可能未注册 TaskListCreate 的 display 实现，或 `OutputViewAssembler` 对该工具名的 lookup 返回 None 后静默跳过渲染 |
 
@@ -43,20 +43,20 @@
 
 ### #82 TUI 渲染 tool call 时丢失 theme 颜色
 
-**状态**：活动中
+**状态**：待确认
 
 **症状**：#58 渲染管线重构后，TUI 中 tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等），所有工具调用看起来像纯文本，无视觉区分。
 
-**根因假设**：
-1. 渲染管线从 legacy `OutputArea` 直接写入迁移到 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换后，`ToolDisplay` 组件的 `LineStyle`/`Color` 信息未在新路径中正确传递。
-2. `OutputViewAssembler` 构建 `RenderedLine` 时未应用 theme 中的工具样式映射，或 ViewModel 输出路径丢失了 `Span` 样式信息。
-3. 新管线输出的行可能只携带文本内容，而颜色/样式需要通过 `RenderedLine` 的样式字段或 `Span` 序列传递到 `OutputArea` 渲染层。
+**根因（已确认）**：新渲染管线中 `render_tool_call` 已按 `ToolCallBlockView.style` 给状态 icon 应用语义状态色（Running/Success/Error 等），但工具标题 span 固定使用 `theme::TEXT`。因此 `●`/`✓` 仍有颜色，`Bash`/`Grep`/`Read(...)` 等工具名和标题看起来像普通文本，造成 tool call theme 颜色丢失。
 
-**涉及路径（预计）**：
-- `apps/cli/src/tui/view_model/`（ViewModel 渲染输出是否携带样式）
-- `apps/cli/src/tui/view_assembler/`（Assembler 是否为 tool call 行应用 theme 颜色）
-- `apps/cli/src/tui/render/output/tool_display/`（ToolDisplay 组件的样式定义）
-- `apps/cli/src/tui/adapter/output_widget.rs`（全量替换时是否保留样式）
+**修复**：将 tool call header 标题 span 的前景色从 `theme::TEXT` 改为与 icon 一致的 `icon_color`，即由 `semantic_color(view.style)` 派生。这样 running/success/error/cancelled/orphaned 等状态下，状态指示器和工具标题共享对应 theme 颜色。
+
+**回归测试**：
+1. `test_tool_call_running_applies_theme_color_to_icon_and_title`：Running 状态下 icon 与标题均使用 `theme::TOOL_RUNNING`。
+2. `test_tool_call_success_uses_success_icon_color`：Success 状态下 icon 与标题均使用 `theme::SUCCESS`。
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/blocks/tool_call.rs`
 
 ### #83 TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏
 

@@ -116,13 +116,10 @@ fn test_clear_queued_submissions_removes_blocks() {
         ConversationChange::QueuedSubmissionsCleared { count } if *count == 2
     )));
     assert!(model.queued_submissions.is_empty());
-    assert!(!model
-        .blocks
-        .iter()
-        .any(|block| matches!(
-            block,
-            super::block::ConversationBlock::QueuedUserMessage { .. }
-        )));
+    assert!(!model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::QueuedUserMessage { .. }
+    )));
 }
 
 #[test]
@@ -181,11 +178,13 @@ fn test_append_user_message_pushes_block_without_new_chat() {
 
     // 正常路径：追加 UserMessage 块，但不新开 chat、不改 active_chat_id。
     assert_eq!(model.chats.len(), chats_before, "不应新建 chat");
-    assert_eq!(model.active_chat_id, active_before, "active_chat_id 应保持不变");
-    assert!(changes.iter().any(|change| matches!(
-        change,
-        ConversationChange::UserMessageAppended { .. }
-    )));
+    assert_eq!(
+        model.active_chat_id, active_before,
+        "active_chat_id 应保持不变"
+    );
+    assert!(changes
+        .iter()
+        .any(|change| matches!(change, ConversationChange::UserMessageAppended { .. })));
     assert!(model.blocks.iter().any(|block| matches!(
         block,
         super::block::ConversationBlock::UserMessage { text, .. } if text == "我的答复"

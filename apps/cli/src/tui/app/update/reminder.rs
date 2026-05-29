@@ -22,7 +22,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_app() -> App {
-        App::new("sess-rem".to_string(), PathBuf::from("/tmp"), "m".to_string())
+        App::new(
+            "sess-rem".to_string(),
+            PathBuf::from("/tmp"),
+            "m".to_string(),
+        )
     }
 
     fn system_texts(app: &App) -> Vec<String> {
@@ -78,7 +82,7 @@ mod tests {
             id: "only".to_string(),
             content: "x".to_string(),
             done: false,
-                created_at: 0,
+            created_at: 0,
         }];
         app.handle_memory_list(&reminders);
         // 启动横幅占用 BANNER_LINES.len() 个 System block，reminder 再追加一个。
