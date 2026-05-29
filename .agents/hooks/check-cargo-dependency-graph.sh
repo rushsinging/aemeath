@@ -17,7 +17,9 @@ business_allow = {
       "policy": {"share"},
       "prompt": {"share"},
       "provider": {"share"},
-      "tools": {"share"},
+      # tools 横向依赖 project：worktree 行为/IO 从 share 瘦身后归位 project domain，
+      # tools 复用 project::worktree（refs #61 D2）。无环：project 仅依赖 share，不反依赖 tools。
+      "tools": {"share", "project"},
       "storage": {"share"},
       "hook": {"share"},
       "audit": {"share"},

@@ -2530,6 +2530,7 @@ dependencies = [
  "glob",
  "log",
  "percent-encoding",
+ "project",
  "reqwest",
  "serde",
  "serde_json",

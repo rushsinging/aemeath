@@ -386,11 +386,13 @@ agent/runtime → packages/sdk (implements)
 | `policy` | `share` |
 | `prompt` | `share` |
 | `provider` | `share` |
-| `tools` | `share` |
+| `tools` | `share`, `project` |
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
 | `share` | 无 |
+
+> **横向依赖说明（refs #61 D2，rule4）**：`tools → project` 为已批准的横向依赖。原因：worktree 进入/退出/上下文恢复属带 git 子进程 + 文件系统 IO 的行为，不应留在 `share` 共享内核。该逻辑原在 `share::worktree_ops` 与 `project::worktree` 重复（DRY 违规）。瘦身将 `share::worktree_ops` 删除，归位 `project::worktree`（worktree 是 project domain 的天然职责），`tools` 复用之。方向 `tools → project → share`，`project` 不反依赖 `tools`，无环。替代方案（移入 tools / 复制副本）会再生 DRY 违规或语义错位，故采用横向依赖。
 
 规则：
 

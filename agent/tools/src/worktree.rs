@@ -6,8 +6,8 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
+use project::worktree as worktree_ops;
 use share::tool::{Tool, ToolContext, ToolResult};
-use share::worktree_ops;
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory
