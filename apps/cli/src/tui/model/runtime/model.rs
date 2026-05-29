@@ -204,6 +204,20 @@ mod tests {
     }
 
     #[test]
+    fn test_runtime_update_task_status_preserves_lines() {
+        // 计数更新（UpdateTaskStatus）不得清空已设置的显示行（UpdateTaskLines）。
+        let mut model = RuntimeModel::default();
+        model.apply(RuntimeIntent::UpdateTaskLines(vec!["x".to_string()]));
+        model.apply(RuntimeIntent::UpdateTaskStatus {
+            total: 2,
+            completed: 1,
+            in_progress: 1,
+        });
+        assert_eq!(model.task_status.lines, vec!["x".to_string()]);
+        assert_eq!(model.task_status.total, 2);
+    }
+
+    #[test]
     fn test_runtime_updates_task_status() {
         let mut model = RuntimeModel::default();
         let changes = model.apply(RuntimeIntent::UpdateTaskStatus {
