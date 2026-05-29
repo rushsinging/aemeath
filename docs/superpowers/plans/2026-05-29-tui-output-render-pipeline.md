@@ -62,6 +62,7 @@
 - `render/output_view_model.rs`（`output_view_model_lines` 纯文本路径）。
 - `render/output_area/types.rs` 的 `OutputLine` / `LineStyle`（及 `SpanPart` 若无残留引用）。
 - `render/output/cache.rs` 旧 `RenderedLine`/`RenderedCache`、`view_state/cache.rs` 的 `OutputRenderCacheState`。
+- **旧行级渲染链**：`render/output/line.rs`（`render_range`/`collect_table_ranges`，仅被 `cache.rs` 调用）、`render/output/block.rs`（`CodeBlockInfo`/`scan_code_blocks`，已 `#[allow(dead_code)]`）、`render/output/span.rs`（`slice_spans`，已 `#[allow(dead_code)]`）——删 `cache.rs` 后整条孤立。
 - `render/output_area/queued.rs`（`build_queued_message_lines`）及 `OutputArea` 的 `queued_messages`/`queued_line_count`。
 - `render/output_area/streaming.rs` 的 `do_rerender` `<think>` 扫描路径。
 
@@ -1892,21 +1893,32 @@ git add -A
 git commit -m "refactor(tui): 删除拍平桥 output_widget 与纯文本 output_view_model 路径 (refs #58)"
 ```
 
-### Task 5.2：删除 OutputLine / LineStyle / 旧行级缓存
+### Task 5.2：删除 OutputLine / LineStyle / 旧行级渲染链（cache/line/block/span）
+
+> 现状核对发现：`render/output/{line,block,span}.rs` 与 `cache.rs` 构成一条没接线的旧行级渲染链（`OutputLine → line::render_range → RenderedCache`），其中 `block.rs`/`span.rs` 已整体 `#[allow(dead_code)]`，`line.rs` 仅被 `cache.rs` 调用。删 `cache.rs` 后三者孤立，必须一并删除，否则残留死代码会被 Task 6.1 门禁拦截。
 
 **Files:**
 - Modify: `apps/cli/src/tui/render/output_area/mod.rs`（删 `lines: VecDeque<OutputLine>` 及相关方法 `push_line`/`do_rerender` 等）
 - Delete: `apps/cli/src/tui/render/output_area/types.rs` 的 `OutputLine`/`LineStyle`
 - Delete: `apps/cli/src/tui/render/output/cache.rs` 旧 `RenderedLine`/`RenderedCache`、`view_state/cache.rs` 的 `OutputRenderCacheState`
+- Delete: `apps/cli/src/tui/render/output/line.rs`、`apps/cli/src/tui/render/output/block.rs`、`apps/cli/src/tui/render/output/span.rs`（旧行级渲染链，删 cache.rs 后孤立）
 - Delete: `apps/cli/src/tui/render/output_area/streaming.rs` 的 `do_rerender` `<think>` 路径
+- Modify: `apps/cli/src/tui/render/output/mod.rs`（移除 `pub mod line/block/span/cache;`）
 
 - [ ] **Step 1: grep 依赖**
 
 ```bash
-grep -rn "OutputLine\b\|LineStyle\|RenderedCache\|OutputRenderCacheState\|do_rerender\|push_line" apps/cli/src/
+grep -rn "OutputLine\b\|LineStyle\|RenderedCache\|OutputRenderCacheState\|do_rerender\|push_line\|render_range\|collect_table_ranges\|scan_code_blocks\|slice_spans" apps/cli/src/
 ```
 
 - [ ] **Step 2: 逐个删除并修复编译** — 把仍引用旧类型的代码迁到 RenderedDocument 路径（streaming 文本改为更新 ConversationModel 的 active block，由 ViewModel 驱动重渲）。
+
+- [ ] **Step 2b: 删除旧行级渲染链文件** — `git rm` 掉 `line.rs`/`block.rs`/`span.rs`，并从 `render/output/mod.rs` 移除其 `pub mod` 声明；其测试（`render/output/block_tests.rs`/`selection_tests.rs` 中依赖 `render_range`/`slice_spans` 的用例）一并删除或迁移到新组件测试。
+
+```bash
+grep -rln "render_range\|slice_spans\|scan_code_blocks\|CodeBlockInfo" apps/cli/src/ # 确认仅测试/自身引用
+git rm apps/cli/src/tui/render/output/line.rs apps/cli/src/tui/render/output/block.rs apps/cli/src/tui/render/output/span.rs
+```
 
 - [ ] **Step 3: 提升新 `RenderedLine` 到 `output/mod.rs` 顶层 re-export**（此时旧同名类型已删，无冲突）
 
@@ -1923,7 +1935,7 @@ Expected: 无警告；全 PASS
 
 ```bash
 git add -A
-git commit -m "refactor(tui): 删除 OutputLine/LineStyle/旧行级缓存/streaming think 扫描，提升 RenderedLine (refs #58, refs #71)"
+git commit -m "refactor(tui): 删除 OutputLine/LineStyle/旧行级渲染链(cache/line/block/span)/streaming think 扫描，提升 RenderedLine (refs #58, refs #71)"
 ```
 
 ### Task 5.3：删除 legacy 排队机制
@@ -1966,7 +1978,7 @@ git commit -m "refactor(tui): 删除 legacy 排队机制，排队显示单一真
 - [ ] **Step 1: 全仓零命中验证**
 
 ```bash
-grep -rn "OutputLine\b\|replace_lines_from_view_model\|output_view_model_lines\|build_queued_message_lines\|queued_messages\|queued_line_count" apps/cli/src/ \
+grep -rn "OutputLine\b\|LineStyle\|replace_lines_from_view_model\|line_to_plain_text\|output_view_model_lines\|build_queued_message_lines\|queued_messages\|queued_line_count\|RenderedCache\|OutputRenderCacheState\|render_range\|collect_table_ranges\|scan_code_blocks\|slice_spans" apps/cli/src/ \
   --include=*.rs | grep -v "//"
 ```
 Expected: 0 命中
@@ -1974,16 +1986,22 @@ Expected: 0 命中
 - [ ] **Step 2: 确认删除的文件不存在**
 
 ```bash
-test ! -f apps/cli/src/tui/adapter/output_widget.rs && test ! -f apps/cli/src/tui/render/output_view_model.rs && test ! -f apps/cli/src/tui/render/output_area/queued.rs && echo "OK: 旧文件已删除"
+for f in adapter/output_widget.rs render/output_view_model.rs render/output_area/queued.rs \
+         render/output/line.rs render/output/block.rs render/output/span.rs render/output/cache.rs; do
+  test ! -f "apps/cli/src/tui/$f" || { echo "✗ 仍存在: $f"; exit 1; }
+done
+echo "OK: 旧文件已删除"
 ```
 Expected: `OK: 旧文件已删除`
 
-- [ ] **Step 3: 无 `#[allow(dead_code)]` 掩盖残留**
+- [ ] **Step 3: 复用原语后必须移除其 `#[allow(dead_code)]`，且 output 渲染层无死代码残留**
+
+现状 `render/output/diff.rs`、`render/syntax.rs`、`render/output/tool_display/results.rs`、`tool_display/mod.rs` 整体/大量 `#[allow(dead_code)]`（即「富渲染引擎被绕过」的实锤）。Phase 2/3 经 `primitives` 包装、ToolCall 组件复用后，它们已被真正调用，**必须删除对应 `allow(dead_code)`**，否则掩盖回归。
 
 ```bash
 grep -rn "allow(dead_code)" apps/cli/src/tui/render/output/ apps/cli/src/tui/render/output_area/
 ```
-Expected: 0（或仅有充分理由的已存在豁免）
+Expected: 0 命中（被本重构激活/删除的模块；若有残留必须有充分书面理由）。逐项核对 `diff.rs`/`syntax.rs`/`tool_display/results.rs`/`tool_display/mod.rs` 的 `allow(dead_code)` 已随复用移除。
 
 ### Task 6.2：render isolation guard
 
