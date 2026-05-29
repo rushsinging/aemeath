@@ -57,6 +57,48 @@ fn test_conversation_reports_orphan_tool_result() {
 }
 
 #[test]
+fn test_conversation_late_tool_call_binds_existing_result() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "read file".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-1".to_string(),
+        tool_name: "Read".to_string(),
+        output: "line1\nline2".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: "Read file".to_string(),
+    });
+
+    assert!(!model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::OrphanToolResult { id, .. } if id == "tool-1"
+    )));
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolResult { id, .. } if id.as_ref() == "tool-1"
+    )));
+    assert_eq!(
+        model.chats[0].turns[0].tool_calls[0].result.as_deref(),
+        Some("line1\nline2")
+    );
+    assert_eq!(
+        model.chats[0].turns[0].tool_calls[0].status,
+        ToolCallStatus::Success
+    );
+}
+
+#[test]
 fn test_conversation_streams_text_and_thinking_into_blocks() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {

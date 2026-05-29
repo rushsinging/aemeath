@@ -20,7 +20,7 @@
 | 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 待确认（随 #58 渲染管线重构修复） | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
 | 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
 | 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 待确认 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；已确认新 `render_tool_call` 只给 icon 使用语义状态色，却把标题 span 固定为 `theme::TEXT`，导致工具名/标题看起来像普通文本；修复后标题与 icon 一起使用状态语义色 |
-| 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 活动中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在：Read 工具仍显示 `✓ Read(...)`、`Read <path>`、`✓ Read completed` 后继续把完整文件内容渲染进工具块，导致 summary 与完整内容重复刷屏；需重新定位 #58 新管线中 tool result summary 生成/绑定路径是否仍绕过 `ToolDisplay::format_result_summary()` |
+| 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 二次根因：ToolResult 事件可能先于正式 ToolCall 绑定到达，ConversationModel 会先创建 OrphanToolResult；后续 ToolCall 绑定时未提升该 orphan result，导致完整结果作为块外 DiagnosticNotice 泄漏。修复：ToolCall 绑定时按 id 提升 orphan result 为 ToolResult 并完成 ToolCall；assembler 继续跳过已嵌入结果，仅保留短摘要 |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 活动中 | 未确认 | 2026-05 | LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈，用户看不到 task list 的创建过程和结果；`ToolDisplay` registry 中可能未注册 TaskListCreate 的 display 实现，或 `OutputViewAssembler` 对该工具名的 lookup 返回 None 后静默跳过渲染 |
 
 ### #81 TUI 输出区中文按单字竖排显示
@@ -60,26 +60,31 @@
 
 ### #83 TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏
 
-**状态**：活动中（用户反馈仍存在）
+**状态**：待确认
 
-**最新反馈（2026-05）**：用户确认问题仍存在。当前可见表现为 Read 工具渲染 `✓ Read(...)`、`Read <path>`、`✓ Read completed` 后，仍继续把完整文件内容（例如 `docs/bug/active.md` 表格行）显示在工具块内，说明摘要区仍承载了完整 tool result 或存在另一条渲染路径绕过了 summary 截断。
+**最新反馈（2026-05）**：用户确认问题仍存在。当前可见表现为 Read 工具渲染 `✓ Read(...)`、`Read <path>`、`✓ Read completed` 后，仍继续把完整文件内容（例如 `docs/bug/active.md` 表格行）显示在工具块内；另有 Edit 等工具的块内容（如 `replaced ...` 和 `---DIFF---`）出现在工具块外面的情况。已修复 ToolResult 早于正式 ToolCall 绑定时 orphan result 未提升的问题，待用户确认。
 
 **症状**：所有工具（Read/Grep/Bash/Edit 等）的 tool result 在 TUI 工具块结果摘要区展示完整内容，导致长输出重复且刷屏。例如 Read 工具先显示 `✓ Read(...)` + `Read <path>` 详情行，紧接着又在工具块内把整个文件内容原样输出一遍。
 
 **根因（已确认）**：
-1. `ToolDisplay` trait 已定义 `format_result_summary()`，但 #58 新管线中的 `OutputViewAssembler::find_tool_view()` 未调用它。
+1. `ToolDisplay` trait 已定义 `format_result_summary()`，但 #58 新管线中的 `OutputViewAssembler::find_tool_view()` 曾未调用它。
 2. `find_tool_view()` 直接把完整 tool result 塞入 `ToolCallBlockView.result_summary`，该字段会渲染在工具块结果摘要区。
 3. 已绑定 tool call 的独立 `ToolResult` block 会被 `tool_result_is_embedded()` 跳过，不会再输出完整内容；重复刷屏实际来自工具块 summary 字段承载了完整结果。
+4. ToolResult 事件可能先于正式 ToolCall 绑定到达；旧逻辑先创建 `OrphanToolResult`，后续 ToolCall 绑定时没有按 id 提升该 orphan result，导致完整结果继续作为块外 `DiagnosticNotice` 渲染。
 
-**修复**：`find_tool_view()` 改用 `ToolDisplay::format_result_summary()` 生成短摘要；未注册 display 时回退为 `✓ <tool> completed` / `✗ <tool> failed`。完整 tool result 仍保存在 conversation/tool call 中供模型上下文使用，但不直接作为 TUI summary 输出。
+**修复**：`find_tool_view()` 改用 `ToolDisplay::format_result_summary()` 生成短摘要；未注册 display 时回退为 `✓ <tool> completed` / `✗ <tool> failed`。完整 tool result 仍保存在 conversation/tool call 中供模型上下文使用，但不直接作为 TUI summary 输出。ToolCall 绑定时如果发现同 id 的 orphan result，会先移除 orphan block、完成 active tool，再插入可被 assembler 去重的 `ToolResult` block，避免完整结果泄漏到工具块外。
 
 **回归测试**：
 1. `test_output_assembler_summarizes_embedded_tool_result_without_full_output`：Read 多行完整结果不会进入 `result_summary`。
 2. `test_output_assembler_uses_error_summary_for_failed_tool_result`：错误结果显示失败短摘要。
 3. `test_output_assembler_keeps_tool_result_inside_tool_after_thinking`：thinking 后绑定工具结果不生成独立 DiagnosticNotice，仍嵌入工具块。
+4. `test_conversation_late_tool_call_binds_existing_result`：ToolResult 先到达、ToolCall 后绑定时，orphan result 会被提升并绑定回工具调用。
+5. `test_output_assembler_late_bound_tool_result_stays_inside_tool_block`：Edit diff 等完整结果不会作为块外诊断文本泄漏。
 
 **涉及路径**：
 - `apps/cli/src/tui/view_assembler/output.rs`（`find_tool_view`、result summary 生成）
+- `apps/cli/src/tui/model/conversation/model.rs`（ToolCall 绑定时触发 orphan result 提升）
+- `apps/cli/src/tui/model/conversation/tool_flow.rs`（ToolResult / orphan result 流转）
 - `apps/cli/src/tui/render/output/tool_display/mod.rs`（`ToolDisplay::format_result_summary`）
 
 ### #84 TUI 未渲染 TaskListCreate 工具调用
