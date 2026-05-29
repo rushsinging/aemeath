@@ -16,14 +16,18 @@ impl OutputDocumentRenderer {
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
     /// gutter（depth 缩进 + marker）在组合期注入。
     pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
-        let mut blocks = Vec::new();
+        // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
+        // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
+        let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
         let mut live_ids = Vec::new();
         for root in &view_model.roots {
-            self.render_node(root, width, 0, &mut blocks, &mut live_ids);
+            let mut group = Vec::new();
+            self.render_node(root, width, 0, &mut group, &mut live_ids);
+            groups.push(group);
         }
         self.cache.retain(&live_ids);
         RenderedDocument {
-            blocks: trim_blocks_to_max_lines(blocks, MAX_LINES),
+            blocks: trim_root_groups_to_max_lines(groups, MAX_LINES),
         }
     }
 
@@ -64,23 +68,31 @@ impl OutputDocumentRenderer {
     }
 }
 
-fn trim_blocks_to_max_lines(blocks: Vec<RenderedBlock>, max_lines: usize) -> Vec<RenderedBlock> {
+/// 按 root 子树整组裁剪：从尾部（最新）向前累计每个 group 的总行数，
+/// 仅当加入该 group 不超过 `max_lines` 时保留整组；NEVER 拆分 group
+/// （即父块与其后代要么整体保留、要么整体丢弃）。
+/// 边界语义与旧的 per-block 裁剪一致：最新一组即便单独超限也始终保留
+/// （首组跳过超限判断），避免输出为空。
+fn trim_root_groups_to_max_lines(
+    groups: Vec<Vec<RenderedBlock>>,
+    max_lines: usize,
+) -> Vec<RenderedBlock> {
     if max_lines == 0 {
         return Vec::new();
     }
 
-    let mut kept = Vec::new();
+    let mut kept: Vec<Vec<RenderedBlock>> = Vec::new();
     let mut used = 0usize;
-    for block in blocks.into_iter().rev() {
-        let line_count = block.lines.len();
-        if used > 0 && used.saturating_add(line_count) > max_lines {
+    for group in groups.into_iter().rev() {
+        let group_lines: usize = group.iter().map(|b| b.lines.len()).sum();
+        if used > 0 && used.saturating_add(group_lines) > max_lines {
             break;
         }
-        used = used.saturating_add(line_count);
-        kept.push(block);
+        used = used.saturating_add(group_lines);
+        kept.push(group);
     }
     kept.reverse();
-    kept
+    kept.into_iter().flatten().collect()
 }
 
 #[cfg(test)]
@@ -221,25 +233,97 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_document_drops_oldest_block_when_over_max_lines() {
-        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
+    fn rb(id: &str, lines: usize) -> RenderedBlock {
+        use crate::tui::render::output::rendered::RenderedLine;
         use ratatui::text::Span;
+        RenderedBlock {
+            block_id: id.into(),
+            lines: vec![RenderedLine::new(vec![Span::raw(id.to_string())]); lines],
+        }
+    }
 
-        let blocks = vec![
-            RenderedBlock {
-                block_id: "old".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("old")]); 2],
-            },
-            RenderedBlock {
-                block_id: "new".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("new")]); 2],
-            },
-        ];
-        let trimmed = trim_blocks_to_max_lines(blocks, 3);
+    #[test]
+    fn test_trim_root_groups_drops_oldest_group_when_over_max_lines() {
+        // 每个 root 子树自成一组（单块）；总 4 行，max=3，最新组（2 行）保留，最旧组丢弃。
+        let groups = vec![vec![rb("old", 2)], vec![rb("new", 2)]];
+        let trimmed = trim_root_groups_to_max_lines(groups, 3);
 
         assert_eq!(trimmed.len(), 1);
         assert_eq!(trimmed[0].block_id, "new");
         assert_eq!(trimmed[0].lines.len(), 2);
+    }
+
+    #[test]
+    fn test_trim_root_groups_never_splits_subtree() {
+        // 两个 root 子树，各 = parent(1) + child(1) = 2 行，共 4 行；max=3 只容得下最新整组。
+        let old_group = vec![rb("p-old", 1), rb("c-old", 1)];
+        let new_group = vec![rb("p-new", 1), rb("c-new", 1)];
+        let trimmed = trim_root_groups_to_max_lines(vec![old_group, new_group], 3);
+
+        let ids: Vec<&str> = trimmed.iter().map(|b| b.block_id.as_str()).collect();
+        // 最新子树的父与子都在；最旧子树的父与子都不在——子树从不被拆开。
+        assert_eq!(
+            ids,
+            vec!["p-new", "c-new"],
+            "裁剪必须以整棵 root 子树为单位，NEVER 拆分父/子块"
+        );
+    }
+
+    #[test]
+    fn test_trim_root_groups_keeps_newest_even_if_over_max() {
+        // 边界：最新组单独超限也始终保留（与旧 per-block 裁剪一致），避免输出为空。
+        let groups = vec![vec![rb("old", 5)], vec![rb("new", 10)]];
+        let trimmed = trim_root_groups_to_max_lines(groups, 3);
+
+        assert_eq!(trimmed.len(), 1);
+        assert_eq!(trimmed[0].block_id, "new");
+    }
+
+    #[test]
+    fn test_trim_root_groups_zero_max_returns_empty() {
+        let trimmed = trim_root_groups_to_max_lines(vec![vec![rb("a", 1)]], 0);
+        assert!(trimmed.is_empty());
+    }
+
+    #[test]
+    fn test_child_version_change_only_rerenders_child() {
+        let mut renderer = OutputDocumentRenderer::default();
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
+        let _ = renderer.render_tree(&vm, 80);
+        assert_eq!(renderer.render_count(), 2, "首次渲染 parent + child = 2 次");
+
+        // 仅改子块 version，父块 version/width 不变 → 父命中缓存，仅子块重渲。
+        let mut child = node("c", "child", vec![]);
+        child.block_version += 1;
+        let vm2 = vm_with_roots(vec![node("p", "parent", vec![child])]);
+        let _ = renderer.render_tree(&vm2, 80);
+
+        assert_eq!(
+            renderer.render_count(),
+            3,
+            "仅子块 version 变 → 父命中缓存，只重渲子块（+1）"
+        );
+    }
+
+    #[test]
+    fn test_retain_keeps_all_tree_block_ids() {
+        let mut renderer = OutputDocumentRenderer::default();
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
+        let _ = renderer.render_tree(&vm, 80);
+        assert!(renderer.cache.contains("p"), "渲染后父块在缓存中");
+        assert!(
+            renderer.cache.contains("c"),
+            "渲染后子块也在缓存中（全树 retain）"
+        );
+
+        // 再渲染只剩父块的树：子块从 ViewModel 消失 → retain 应清除其缓存条目。
+        let vm2 = vm_with_roots(vec![node("p", "parent", vec![])]);
+        let _ = renderer.render_tree(&vm2, 80);
+
+        assert!(renderer.cache.contains("p"), "父块仍存活");
+        assert!(
+            !renderer.cache.contains("c"),
+            "子块已从树中移除 → retain 清除缓存防泄漏"
+        );
     }
 }
