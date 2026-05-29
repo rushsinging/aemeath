@@ -4,14 +4,14 @@
 //! 内部 guidance / security / skill 模块保持 crate-private。
 
 pub mod guidance {
-    pub use crate::guidance::{
+    pub use crate::business::guidance::resolver::InstructionsLoadedHook;
+    pub use crate::business::guidance::{
         init_guidance_dir, resolve_guidance, resolve_guidance_async, UNIVERSAL_EXECUTION_DISCIPLINE,
     };
-    pub use crate::guidance::resolver::InstructionsLoadedHook;
 }
 
 pub mod skill {
-    pub use crate::skill::{load_all_skills, Skill};
+    pub use crate::business::skill::{load_all_skills, Skill};
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
