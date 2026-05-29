@@ -26,7 +26,7 @@
 
 ### #61 架构债务收口（047 DDD 软约束落实）
 
-**状态**：活动中
+**状态**：待确认（D1-D4 + Ollama 接线 #85 全部完成，合回 main `aa9f0d3`，`cargo clean` 后 1120 测试绿、clippy --workspace + 架构 guard 含 COLA layer purity 全过）
 
 **背景**：2026-05-29 核对 047 DDD spec vs `agent/` 实现——**硬约束（6 个架构 guard：Cargo 依赖图/CLI 薄入口/share 无上游/COLA 纯度/forbidden import/行数）全部遵守且焊死**，经历 #58/#59 等大量并行开发后仍未破。但 guard 不强制的**软约束**仍停留在 spec 已标注的「技术债/未实现」状态，docs 此前未登记落实计划。本 feature 把这些债务转为可执行子项。
 
@@ -53,7 +53,17 @@ commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa1781
 
 **性质**：纯架构债务收口（D1-D4），不改业务行为。各子项 SHOULD 独立走 spec→plan→实施；D1/D2/D3 完成后 SHOULD 补对应 guard（如 api 收窄 guard）防回归。
 
-**关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）。
+**遗留技术债（#61 后续待结清，2026-05-30 登记）**：D1-D4 主体收口完成，下列由收口过程暴露/引入的债务待逐项结清：
+1. **`tools→{project,storage}` 横向依赖**（D2 引入，依赖图 allowlist）：破「supporting domain 仅依赖 share」原则；后续应把 tools 用到的 `project::worktree` / `storage::MemoryStore` 经 share 端口（trait）注入解耦，或评估固化为永久 allowlist 并在 spec §6.4.1 说明。
+2. **`share_warn_io` 9 个 IO 依赖**（tokio/tokio-util/reqwest/chrono/bytes/parking_lot/futures/futures-util/unicode-width，cola-purity warning-only）：share 仍非纯共享内核（`config`/`tool`(ToolRegistry/ToolContext)/`task`(TaskStore) 等带行为/IO 依赖的类型仍在 share）；后续继续移出对应 domain 或评估接受。
+3. **D3/D4 暴露的 `#[allow(dead_code)]` 孤儿**（逐个确认接线遗漏 vs 移除）：Ollama builder（`with_max_retries`/`with_timeout_secs` 无配置来源，refs #85）、`storage::business::history` 整模块、MCP 资源 Tool（`ListMcpResourcesTool`/`ReadMcpResourceTool` 未注册）、prompt `load_all_skills_cached`/`load_and_filter_skills`、Anthropic builder、`StreamEvent`/`DeltaPayload` 反序列化字段。
+4. **provider `core↔business` 双向引用**（D4 暴露）：`core/client` ↔ `business/providers` 模块级循环，COLA「core 不依赖 business」方向性被破；后续解耦 client↔providers。
+5. **runtime 内部 100+ 处经 `crate::api::<crate>::` 引用下游**（D1 发现）：runtime 把自身对下游 crate 的引用路由经自己的 `api`，属架构异味；后续改直接 `use <crate>::` 或评估接受为现状。
+6. **补回归 guard**：D1/D3 SHOULD 补「api 收窄」guard（防 supporting domain 内部模块重新 `pub` / `runtime::api` 重新整体转发），D2 SHOULD 补「share 禁含 fs/process IO」AST guard 防回归。
+
+> 教训记录：`cargo test --workspace` 的**增量缓存会制造 unresolved import 假错**，多次误导本次收口判断——涉及可见性/import 改动的验证必须 `cargo clean` 后重跑才是真相。
+
+**关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）；#85（Ollama 接线，已修）。
 
 ### #59 S3 · StatusBar 去镜像 + 单写入者
 
