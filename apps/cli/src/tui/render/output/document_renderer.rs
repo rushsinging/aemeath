@@ -13,33 +13,8 @@ pub struct OutputDocumentRenderer {
 }
 
 impl OutputDocumentRenderer {
-    pub fn render(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
-        let mut blocks = Vec::with_capacity(view_model.blocks.len());
-        let live_ids = view_model
-            .blocks
-            .iter()
-            .map(|block| block.block_id.clone())
-            .collect::<Vec<_>>();
-
-        for block in &view_model.blocks {
-            let key = CacheKey {
-                version: block.block_version,
-                width,
-            };
-            let rendered = self.cache.get_or_render(&block.block_id, key, |ctx| {
-                #[cfg(test)]
-                self.render_count.set(self.render_count.get() + 1);
-                block.kind.component().render_self(&block.block_id, ctx)
-            });
-            blocks.push(rendered);
-        }
-        self.cache.retain(&live_ids);
-        RenderedDocument {
-            blocks: trim_blocks_to_max_lines(blocks, MAX_LINES),
-        }
-    }
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
-    /// 当前 roots 为 blocks 的叶子镜像，故输出顺序与 `render` 完全一致；gutter 缩进在 Phase 4 接入。
+    /// gutter（depth 缩进 + marker）在组合期注入。
     pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
         let mut blocks = Vec::new();
         let mut live_ids = Vec::new();
@@ -112,35 +87,37 @@ fn trim_blocks_to_max_lines(blocks: Vec<RenderedBlock>, max_lines: usize) -> Vec
 mod tests {
     use super::*;
     use crate::tui::view_model::output::{
-        OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
+        BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     };
     use crate::tui::view_model::style::SemanticStyle;
 
-    fn vm_with(kind: OutputBlockKind, id: &str) -> OutputViewModel {
+    fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
+        let kind = OutputBlockKind::SystemNotice(TextBlockView {
+            key: id.into(),
+            text: text.into(),
+            style: SemanticStyle::Muted,
+        });
+        BlockNode {
+            block_id: id.into(),
+            block_version: kind.cache_version(),
+            kind,
+            children,
+        }
+    }
+
+    fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
         OutputViewModel {
-            blocks: vec![OutputBlockView {
-                block_id: id.into(),
-                block_version: 1,
-                kind,
-            }],
-            roots: Vec::new(),
+            roots,
             version: 1,
             follow_tail_hint: true,
         }
     }
 
     #[test]
-    fn test_renderer_emits_one_block_per_view() {
+    fn test_renderer_emits_one_block_per_root() {
         let mut renderer = OutputDocumentRenderer::default();
-        let vm = vm_with(
-            OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "ok".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-        );
-        let doc = renderer.render(&vm, 80);
+        let vm = vm_with_roots(vec![node("s", "ok", vec![])]);
+        let doc = renderer.render_tree(&vm, 80);
 
         assert_eq!(doc.blocks.len(), 1);
         assert_eq!(doc.blocks[0].block_id, "s");
@@ -149,16 +126,9 @@ mod tests {
     #[test]
     fn test_renderer_caches_unchanged_block() {
         let mut renderer = OutputDocumentRenderer::default();
-        let vm = vm_with(
-            OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "ok".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-        );
-        let _ = renderer.render(&vm, 80);
-        let _ = renderer.render(&vm, 80);
+        let vm = vm_with_roots(vec![node("s", "ok", vec![])]);
+        let _ = renderer.render_tree(&vm, 80);
+        let _ = renderer.render_tree(&vm, 80);
 
         assert_eq!(
             renderer.render_count(),
@@ -169,35 +139,87 @@ mod tests {
 
     #[test]
     fn test_render_tree_dfs_flattens_parent_then_children() {
-        use crate::tui::view_model::output::{BlockNode, OutputBlockKind, TextBlockView};
-        use crate::tui::view_model::style::SemanticStyle;
-
-        fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
-            let kind = OutputBlockKind::SystemNotice(TextBlockView {
-                key: id.into(),
-                text: text.into(),
-                style: SemanticStyle::Muted,
-            });
-            BlockNode {
-                block_id: id.into(),
-                block_version: kind.cache_version(),
-                kind,
-                children,
-            }
-        }
-
-        let vm = OutputViewModel {
-            blocks: Vec::new(),
-            roots: vec![node("p", "parent", vec![node("c", "child", vec![])])],
-            version: 1,
-            follow_tail_hint: true,
-        };
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
         let mut renderer = OutputDocumentRenderer::default();
         let doc = renderer.render_tree(&vm, 80);
 
         assert_eq!(doc.blocks.len(), 2);
         assert_eq!(doc.blocks[0].block_id, "p");
         assert_eq!(doc.blocks[1].block_id, "c");
+    }
+
+    #[test]
+    fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
+        // #65 结构回归：ToolResult 子块含完整 ```fenced``` 代码块，其后兄弟
+        // AssistantMessage root 的首行不应残留 CODE 色——每个 block 经独立组件渲染，
+        // fence 状态机随 block 销毁，结构上隔离泄漏（不依赖行内顺序补偿）。
+        use crate::tui::render::theme;
+        use crate::tui::view_model::output::{
+            ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+        };
+
+        let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+            key: "tool".into(),
+            chat_id: None,
+            turn_id: None,
+            tool_call_id: Some("tool".into()),
+            title: "Bash".into(),
+            icon: "✓".into(),
+            semantic_status: ToolSemanticStatus::Success,
+            style: SemanticStyle::Success,
+            args_preview: None,
+            summary: None,
+            activity_summary: None,
+            result_summary: Some("```\ncode\n```".into()),
+            collapsible: false,
+            collapsed: false,
+        });
+        let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+            key: "tool-result".into(),
+            tool_title: "Bash".into(),
+            summary: None,
+            result_text: "```\ncode\n```".into(),
+            is_error: false,
+        });
+        let tool_node = BlockNode {
+            block_id: "tool".into(),
+            block_version: tool_kind.cache_version(),
+            kind: tool_kind,
+            children: vec![BlockNode {
+                block_id: "tool-result".into(),
+                block_version: result_kind.cache_version(),
+                kind: result_kind,
+                children: Vec::new(),
+            }],
+        };
+        let assistant_kind = OutputBlockKind::AssistantMessage(TextBlockView {
+            key: "a".into(),
+            text: "plain assistant line".into(),
+            style: SemanticStyle::Normal,
+        });
+        let assistant_node = BlockNode {
+            block_id: "a".into(),
+            block_version: assistant_kind.cache_version(),
+            kind: assistant_kind,
+            children: Vec::new(),
+        };
+
+        let vm = vm_with_roots(vec![tool_node, assistant_node]);
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
+
+        let assistant_block = doc
+            .blocks
+            .iter()
+            .find(|b| b.block_id == "a")
+            .expect("assistant block 存在");
+        assert!(
+            assistant_block.lines[0]
+                .spans
+                .iter()
+                .all(|s| s.style.fg != Some(theme::CODE)),
+            "兄弟 AssistantMessage 首行不应残留工具结果 fence 的 CODE 色（#65）"
+        );
     }
 
     #[test]

@@ -3,7 +3,6 @@ use std::hash::Hash;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {
-    pub blocks: Vec<OutputBlockView>,
     pub roots: Vec<BlockNode>,
     pub version: u64,
     pub follow_tail_hint: bool,
@@ -12,7 +11,6 @@ pub struct OutputViewModel {
 impl Default for OutputViewModel {
     fn default() -> Self {
         Self {
-            blocks: Vec::new(),
             roots: Vec::new(),
             version: 0,
             follow_tail_hint: true,
@@ -29,13 +27,6 @@ pub struct BlockNode {
     pub children: Vec<BlockNode>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OutputBlockView {
-    pub block_id: String,
-    pub block_version: u64,
-    pub kind: OutputBlockKind,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum OutputBlockKind {
     UserMessage(TextBlockView),
@@ -43,6 +34,7 @@ pub enum OutputBlockKind {
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
     ToolCall(ToolCallBlockView),
+    ToolResult(ToolResultBlockView),
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
     AskUser(AskUserBlockView),
@@ -91,6 +83,19 @@ pub struct ToolCallBlockView {
     pub result_summary: Option<String>,
     pub collapsible: bool,
     pub collapsed: bool,
+}
+
+/// 工具结果子块视图：作为 ToolCall 的子节点，独占结果富渲染。
+///
+/// - `summary`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断），同 `ToolCallBlockView.summary`。
+/// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ToolResultBlockView {
+    pub key: String,
+    pub tool_title: String,
+    pub summary: Option<String>,
+    pub result_text: String,
+    pub is_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

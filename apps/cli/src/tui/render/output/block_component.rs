@@ -38,6 +38,9 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::ToolCall(tool) => {
                 blocks::tool_call::render_tool_call(block_id, tool, ctx)
             }
+            OutputBlockKind::ToolResult(result) => {
+                blocks::tool_result::render_tool_result(block_id, result, ctx)
+            }
             OutputBlockKind::ThinkingMessage(text) => {
                 blocks::thinking::render_thinking(block_id, text, ctx)
             }

@@ -291,7 +291,8 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "  in docs/bug/active.md"));
-        assert!(rendered.iter().any(|line| line == "  ✓ Grep completed"));
+        // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(空白 marker 槽) = 4 列前导。
+        assert!(rendered.iter().any(|line| line == "    ✓ Grep completed"));
         assert!(!rendered
             .iter()
             .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));

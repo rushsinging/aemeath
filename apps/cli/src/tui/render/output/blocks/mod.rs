@@ -8,6 +8,7 @@ pub mod queued_submission;
 pub mod separator;
 pub mod thinking;
 pub mod tool_call;
+pub mod tool_result;
 pub mod user_message;
 
 #[cfg(test)]
