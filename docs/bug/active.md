@@ -21,7 +21,7 @@
 | 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
 | 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 待确认 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；已确认新 `render_tool_call` 只给 icon 使用语义状态色，却把标题 span 固定为 `theme::TEXT`，导致工具名/标题看起来像普通文本；修复后标题与 icon 一起使用状态语义色 |
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 二次根因：ToolResult 事件可能先于正式 ToolCall 绑定到达，ConversationModel 会先创建 OrphanToolResult；后续 ToolCall 绑定时未提升该 orphan result，导致完整结果作为块外 DiagnosticNotice 泄漏。修复：ToolCall 绑定时按 id 提升 orphan result 为 ToolResult 并完成 ToolCall；assembler 继续跳过已嵌入结果，仅保留短摘要 |
-| 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 活动中 | 未确认 | 2026-05 | LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈，用户看不到 task list 的创建过程和结果；`ToolDisplay` registry 中可能未注册 TaskListCreate 的 display 实现，或 `OutputViewAssembler` 对该工具名的 lookup 返回 None 后静默跳过渲染 |
+| 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
 
 ### #81 TUI 输出区中文按单字竖排显示
 
