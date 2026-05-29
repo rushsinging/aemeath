@@ -1,6 +1,7 @@
 use crate::tui::model::input::change::InputChange;
 use crate::tui::model::input::completion::Suggestion;
 use crate::tui::model::input::completion_item::CompletionItem;
+use crate::tui::view_state::InputSelectionViewState;
 use crate::tui::{InputArea, StatusBar};
 
 pub(crate) fn apply_input_changes_to_widget(
@@ -44,6 +45,24 @@ pub(crate) fn apply_input_changes_to_widget(
         }
     }
     submission
+}
+
+/// 据 view_state 选区真相单向写回 widget input 选区镜像（#59 S4，仿
+/// `output_view_widget.rs::apply_output_selection_to_widget` /
+/// `status_widget.rs::apply_status_selection_to_widget`）。
+///
+/// `view_state.input_sel` 是 input 选区真相（textarea `(row, col)` 锚点状态机），
+/// widget 的 `is_selecting`/`selection_start`/`selection_end` 降为只读镜像，供 render
+/// 期高亮与 `get_selected_text` 取 plain 文本。这是这些镜像字段的唯一生产写入路径。
+///
+/// 每帧渲染前调用；mouse-up 复制前亦显式调用以消除一帧滞后（对齐 output/status 选区
+/// 时序）。T4 接线。
+#[allow(dead_code)] // S4 T4 接线：渲染前管线 + mouse_handler input 分支。
+pub(crate) fn apply_input_selection_to_widget(
+    view: &InputSelectionViewState,
+    input_area: &mut InputArea,
+) {
+    input_area.apply_selection_mirror(view.is_selecting, view.selection_start, view.selection_end);
 }
 
 pub(crate) fn completion_item_from_suggestion(suggestion: &Suggestion) -> CompletionItem {
@@ -90,6 +109,48 @@ mod tests {
 
         assert_eq!(item.label, "/help");
         assert_eq!(item.replacement, "/help");
+    }
+
+    #[test]
+    fn test_apply_input_selection_writes_view_anchors_to_widget() {
+        let mut input_area = InputArea::new();
+        input_area.set_text("你好a");
+        // render 期 textarea 折算（widget textarea_pos）取得 (row, col) 锚点，
+        // 这里直接构造已折算的 view_state 选区覆盖 "好a"（字符索引 1..3）。
+        let mut view = InputSelectionViewState::default();
+        view.begin_selection((0, 1));
+        view.update_selection((0, 3));
+
+        apply_input_selection_to_widget(&view, &mut input_area);
+
+        // 正常路径：镜像写回后 is_selecting 置位，经 widget plain 取到选中文本。
+        assert!(input_area.is_selecting());
+        assert_eq!(input_area.get_selected_text(), Some("好a".to_string()));
+    }
+
+    #[test]
+    fn test_apply_input_selection_clears_widget_when_view_empty() {
+        use ratatui::layout::Rect;
+        let mut input_area = InputArea::new();
+        input_area.set_text("hello");
+        // widget 先持有旧镜像，模拟上一帧选区。
+        let inner = Rect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 3,
+        };
+        input_area.start_selection(0, 0, &inner);
+        input_area.update_selection(0, 5, &inner);
+        assert!(input_area.is_selecting());
+
+        // view_state 为空（默认）→ 镜像被清空。
+        let view = InputSelectionViewState::default();
+        apply_input_selection_to_widget(&view, &mut input_area);
+
+        // 边界/清空路径：view_state 无选区 → 镜像被清空（is_selecting 关，取不到文本）。
+        assert!(!input_area.is_selecting());
+        assert!(input_area.get_selected_text().is_none());
     }
 
     #[test]

@@ -2,7 +2,6 @@
 pub struct InputDocument {
     pub buffer: String,
     pub cursor: usize,
-    pub selection: Option<InputSelection>,
 }
 
 impl InputDocument {
@@ -15,18 +14,15 @@ impl InputDocument {
         let cursor = clamp_to_char_boundary(&self.buffer, cursor);
         self.buffer.insert_str(cursor, text);
         self.cursor = cursor + text.len();
-        self.selection = None;
     }
 
     pub fn replace_text(&mut self, text: String) {
         self.buffer = text;
         self.cursor = self.buffer.len();
-        self.selection = None;
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
         self.cursor = clamp_to_char_boundary(&self.buffer, cursor.min(self.buffer.len()));
-        self.selection = None;
     }
 
     /// 用字符索引（char index）设置光标，自动转为字节位置
@@ -53,7 +49,6 @@ impl InputDocument {
             previous = idx;
         }
         self.cursor = previous;
-        self.selection = None;
     }
 
     pub fn move_right(&mut self) {
@@ -66,17 +61,14 @@ impl InputDocument {
             .map(|ch| self.cursor + ch.len_utf8())
             .unwrap_or(self.buffer.len());
         self.cursor = next.min(self.buffer.len());
-        self.selection = None;
     }
 
     pub fn move_home(&mut self) {
         self.cursor = 0;
-        self.selection = None;
     }
 
     pub fn move_end(&mut self) {
         self.cursor = self.buffer.len();
-        self.selection = None;
     }
 
     pub fn delete_backward(&mut self) {
@@ -86,7 +78,6 @@ impl InputDocument {
         let old_cursor = self.cursor;
         self.move_left();
         self.buffer.drain(self.cursor..old_cursor);
-        self.selection = None;
     }
 
     pub fn delete_word_before_cursor(&mut self) {
@@ -106,7 +97,6 @@ impl InputDocument {
         }
         self.buffer.drain(start..end);
         self.cursor = start;
-        self.selection = None;
     }
 
     pub fn delete_forward(&mut self) {
@@ -118,13 +108,11 @@ impl InputDocument {
         let end = self.cursor;
         self.buffer.drain(start..end);
         self.cursor = start;
-        self.selection = None;
     }
 
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.cursor = 0;
-        self.selection = None;
     }
 }
 
@@ -134,12 +122,6 @@ fn clamp_to_char_boundary(text: &str, cursor: usize) -> usize {
         cursor -= 1;
     }
     cursor
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct InputSelection {
-    pub start: usize,
-    pub end: usize,
 }
 
 #[cfg(test)]

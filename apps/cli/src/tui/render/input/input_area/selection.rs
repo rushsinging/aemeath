@@ -65,6 +65,23 @@ impl InputArea {
         self.is_selecting = false;
     }
 
+    /// 由 adapter（`apply_input_selection_to_widget`）单向写回 input 选区镜像。
+    ///
+    /// #59 S4：选区真相在 `view_state::InputSelectionViewState`，widget 的
+    /// `is_selecting`/`selection_start`/`selection_end` 降为只读镜像，供 render 期
+    /// 高亮与 `get_selected_text` 取 plain 文本。这是这些镜像字段的**唯一**生产写入
+    /// 路径（widget 内部 `clear_selection` 与测试除外）。T4 接线。
+    pub(crate) fn apply_selection_mirror(
+        &mut self,
+        is_selecting: bool,
+        selection_start: Option<(usize, usize)>,
+        selection_end: Option<(usize, usize)>,
+    ) {
+        self.is_selecting = is_selecting;
+        self.selection_start = selection_start;
+        self.selection_end = selection_end;
+    }
+
     /// 是否正在选中
     pub fn is_selecting(&self) -> bool {
         self.is_selecting

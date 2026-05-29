@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod input;
+pub mod input_selection;
 pub mod layout;
 pub mod output;
 pub mod spinner_anim;
@@ -9,6 +10,7 @@ pub mod status;
 
 pub use animation::AnimationViewState;
 pub use input::InputViewState;
+pub use input_selection::InputSelectionViewState;
 pub use layout::LayoutViewState;
 pub use output::OutputViewState;
 pub use spinner_anim::SpinnerAnim;
@@ -23,6 +25,8 @@ pub struct AppViewState {
     pub spinner: SpinnerAnim,
     /// Status 选区真相（#59 S4）。T2 接入 mouse_handler + 渲染前管线。
     pub status_sel: StatusSelectionViewState,
+    /// Input 选区真相（#59 S4）。T4 接入 mouse_handler + 渲染前管线。
+    pub input_sel: InputSelectionViewState,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
