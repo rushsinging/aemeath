@@ -113,6 +113,7 @@ pub(crate) fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send
         ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
         ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
         ApiDriverKind::Volcengine => Box::new(VolcengineDriver),
-        ApiDriverKind::Anthropic => Box::new(OpenAiDriver),
+        // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
+        ApiDriverKind::Anthropic | ApiDriverKind::Ollama => Box::new(OpenAiDriver),
     }
 }

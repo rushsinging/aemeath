@@ -26,6 +26,7 @@ pub enum ApiDriverKind {
     Zhipu,
     LiteLLM,
     Volcengine,
+    Ollama,
 }
 
 impl ApiDriverKind {
@@ -37,6 +38,7 @@ impl ApiDriverKind {
             "zhipu" => Some(ApiDriverKind::Zhipu),
             "litellm" => Some(ApiDriverKind::LiteLLM),
             "volcengine" => Some(ApiDriverKind::Volcengine),
+            "ollama" => Some(ApiDriverKind::Ollama),
             _ => None,
         }
     }
@@ -48,6 +50,7 @@ impl ApiDriverKind {
             ApiDriverKind::Zhipu => "zhipu",
             ApiDriverKind::LiteLLM => "litellm",
             ApiDriverKind::Volcengine => "volcengine",
+            ApiDriverKind::Ollama => "ollama",
         }
     }
 }
@@ -79,6 +82,20 @@ mod tests {
         assert_eq!(
             ApiDriverKind::parse("volcengine"),
             Some(ApiDriverKind::Volcengine)
+        );
+    }
+
+    #[test]
+    fn test_from_str_ollama() {
+        assert_eq!(ApiDriverKind::parse("ollama"), Some(ApiDriverKind::Ollama));
+    }
+
+    #[test]
+    fn test_as_str_ollama_roundtrip() {
+        assert_eq!(ApiDriverKind::Ollama.as_str(), "ollama");
+        assert_eq!(
+            ApiDriverKind::parse(ApiDriverKind::Ollama.as_str()),
+            Some(ApiDriverKind::Ollama)
         );
     }
 

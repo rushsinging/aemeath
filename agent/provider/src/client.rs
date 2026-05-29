@@ -90,7 +90,9 @@ impl OpenAIProviderConfig {
                 ApiDriverKind::Zhipu => "/chat/completions".to_string(),
                 ApiDriverKind::Anthropic => "/v1/messages".to_string(),
                 ApiDriverKind::Volcengine => "/chat/completions".to_string(),
-                ApiDriverKind::OpenAI | ApiDriverKind::LiteLLM => {
+                // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容路径；
+                // 兜底归入 OpenAI 风格 suffix。
+                ApiDriverKind::OpenAI | ApiDriverKind::LiteLLM | ApiDriverKind::Ollama => {
                     "/v1/chat/completions".to_string()
                 }
             },
@@ -153,6 +155,13 @@ impl LlmClient {
                 options.model,
                 options.max_tokens,
                 options.thinking_max_tokens,
+            )),
+            ApiDriverKind::Ollama => Arc::new(crate::providers::OllamaProvider::new(
+                options.api_key,
+                options.base_url,
+                options.model,
+                options.max_tokens,
+                options.reasoning,
             )),
             ApiDriverKind::OpenAI
             | ApiDriverKind::Zhipu

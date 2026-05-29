@@ -22,6 +22,28 @@
 | 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 待确认 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；已确认新 `render_tool_call` 只给 icon 使用语义状态色，却把标题 span 固定为 `theme::TEXT`，导致工具名/标题看起来像普通文本；修复后标题与 icon 一起使用状态语义色 |
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 二次根因：ToolResult 事件可能先于正式 ToolCall 绑定到达，ConversationModel 会先创建 OrphanToolResult；后续 ToolCall 绑定时未提升该 orphan result，导致完整结果作为块外 DiagnosticNotice 泄漏。修复：ToolCall 绑定时按 id 提升 orphan result 为 ToolResult 并完成 ToolCall；assembler 继续跳过已嵌入结果，仅保留短摘要 |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
+| 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 见 commit |
+
+### #85 Ollama provider 声明但工厂未接线（整模块死代码）
+
+**状态**：待确认
+
+**症状**：`agent/provider/src/providers/ollama/` 是一个完整的 `OllamaProvider` 实现（856 行：带重试/取消的 `stream_message`、非流式回退、空响应检测、`think:false` reasoning 控制、model/max_tokens 管理），但全代码库零构造点。#61 D3 收窄 provider crate 可见性、移除 crate-root `pub use` 后，该模块以 `#[allow(dead_code)]` 暴露为整模块死代码。
+
+**根因（已确认，属接线遗漏）**：
+1. `ApiDriverKind` 枚举只有 5 个变体（Anthropic/OpenAI/Zhipu/LiteLLM/Volcengine），**无 `Ollama` 变体**；`ApiDriverKind::parse("ollama")` 返回 `None`。
+2. 两个客户端工厂（`client.rs::with_provider`、`pool.rs::create_client`）的 `match` 均无 Ollama 分支。
+3. 因此 config 中 `api:"ollama"` 在 `from_args.rs:68` / `pool.rs:120` 处被 `unwrap_or(ApiDriverKind::OpenAI)` 静默回退到 OpenAI；同时 `openai_config()` 仅排除 Anthropic，会给 Ollama 生成 openai_config，使 `from_config` 把它路由到 `OpenAICompatibleProvider`。
+4. 结论：专用 `OllamaProvider` 永不构造，Ollama 模型实际走通用 OpenAI 兼容路径，丢失 Ollama 的长超时与空响应处理。CLAUDE.md 架构约定 Provider 支持列表含 Ollama，确认为接线遗漏 bug 而非半成品。
+
+**修复**：
+- `api.rs`：补 `ApiDriverKind::Ollama` 变体 + `parse("ollama")` / `as_str()=="ollama"`。
+- `client.rs::with_provider`：加 `ApiDriverKind::Ollama => OllamaProvider::new(...)` 分支；`from_api_driver` 的 suffix match 把 Ollama 归入 OpenAI 兜底。
+- `pool.rs::create_client`：`openai_config` 与 api_key env match 排除/覆盖 Ollama，使其经 `from_config` 走专用 provider。
+- `provider_client.rs::openai_config`：Anthropic | Ollama 均不生成 openai_config；env 名补 `OLLAMA_API_KEY`。
+- `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
+- `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
+- 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
 
 ### #81 TUI 输出区中文按单字竖排显示
 

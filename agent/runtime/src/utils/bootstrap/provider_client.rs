@@ -64,6 +64,7 @@ fn provider_api_key_env_name(api_type: ApiDriverKind) -> Option<&'static str> {
         ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
         ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
         ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+        ApiDriverKind::Ollama => Some("OLLAMA_API_KEY"),
         ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
     }
 }
@@ -85,7 +86,8 @@ fn non_empty_string(value: &str) -> Option<String> {
 }
 
 fn openai_config(api_type: ApiDriverKind, source_key: &str) -> Option<OpenAIProviderConfig> {
-    if matches!(api_type, ApiDriverKind::Anthropic) {
+    // Anthropic 与 Ollama 各有专用 provider，不走 OpenAI 兼容工厂分支。
+    if matches!(api_type, ApiDriverKind::Anthropic | ApiDriverKind::Ollama) {
         None
     } else {
         Some(OpenAIProviderConfig::from_api_driver(api_type, source_key))
@@ -312,6 +314,42 @@ mod tests {
         let result = reasoning_config(&settings, Some(false));
 
         assert!(matches!(result, Some(ReasoningConfig::Bool(false))));
+    }
+
+    #[test]
+    fn test_openai_config_skips_ollama() {
+        // 回归 #85：Ollama 有专用 OllamaProvider，不应生成 openai_config，
+        // 否则 from_config 会把它错误地路由到 OpenAI 兼容工厂分支。
+        let result = openai_config(ApiDriverKind::Ollama, "ollama");
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_llm_client_ollama_constructs_ollama_provider() {
+        // 回归 #85：config 中 api="ollama" 必须由工厂构造出 OllamaProvider，
+        // 修复前会回退到 ApiDriverKind::OpenAI 并构造 OpenAICompatibleProvider。
+        let resolved = resolved_model(ApiDriverKind::Ollama, "", "", "ollama");
+        let settings = runtime_settings(0, false, None);
+
+        let client = build_llm_client(
+            ApiDriverKind::Ollama,
+            "ollama".to_string(),
+            Some("http://localhost:11434".to_string()),
+            "llama3.2".to_string(),
+            &resolved,
+            &settings,
+        );
+
+        assert_eq!(client.provider_name(), "ollama");
+    }
+
+    #[test]
+    fn test_provider_api_key_env_name_ollama() {
+        assert_eq!(
+            provider_api_key_env_name(ApiDriverKind::Ollama),
+            Some("OLLAMA_API_KEY")
+        );
     }
 
     #[test]

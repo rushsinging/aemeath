@@ -119,8 +119,9 @@ impl LlmClientPool {
         // Resolve ApiDriverKind from config (the `api` field)
         let api = ApiDriverKind::parse(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
 
-        // Build OpenAI provider config for OpenAI-compatible providers
-        let openai_config = if !matches!(api, ApiDriverKind::Anthropic) {
+        // Build OpenAI provider config for OpenAI-compatible providers.
+        // Anthropic 与 Ollama 各有专用 provider，不生成 openai_config。
+        let openai_config = if !matches!(api, ApiDriverKind::Anthropic | ApiDriverKind::Ollama) {
             Some(OpenAIProviderConfig::from_api_driver(api, provider_name))
         } else {
             None
@@ -131,6 +132,7 @@ impl LlmClientPool {
                 ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
                 ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
                 ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+                ApiDriverKind::Ollama => Some("OLLAMA_API_KEY"),
                 ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
             };
             driver_env

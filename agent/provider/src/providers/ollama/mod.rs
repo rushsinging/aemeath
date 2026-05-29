@@ -67,11 +67,15 @@ impl OllamaProvider {
         }
     }
 
+    // 重试次数 / 超时为可选构建器旋钮，尚无配置来源接线；保留以备后续从
+    // ModelRuntimeSettings 注入（refs #85）。
+    #[allow(dead_code)]
     pub fn with_max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self.http = reqwest::Client::builder()
