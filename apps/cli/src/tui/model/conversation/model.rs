@@ -277,36 +277,6 @@ impl ConversationModel {
         Vec::new()
     }
 
-    fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
-        self.active_text_block_id = None;
-        self.active_thinking_block_id = None;
-        let block_id = self.next_block_id("system");
-        self.blocks.push(ConversationBlock::System {
-            id: block_id.clone(),
-            text,
-        });
-        vec![
-            ConversationChange::SystemMessageAppended { block_id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
-    fn append_error(&mut self, text: String) -> Vec<ConversationChange> {
-        self.active_text_block_id = None;
-        self.active_thinking_block_id = None;
-        let block_id = self.next_block_id("error");
-        self.blocks.push(ConversationBlock::Error {
-            id: block_id.clone(),
-            text,
-        });
-        vec![
-            ConversationChange::ErrorAppended { block_id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
     fn queue_submission(&mut self, text: String) -> Vec<ConversationChange> {
         let id = self.next_block_id("queued");
         self.queued_submissions
@@ -386,7 +356,12 @@ impl ConversationModel {
         block_id
     }
 
-    fn next_block_id(&mut self, prefix: &str) -> String {
+    pub(super) fn clear_active_text_blocks(&mut self) {
+        self.active_text_block_id = None;
+        self.active_thinking_block_id = None;
+    }
+
+    pub(super) fn next_block_id(&mut self, prefix: &str) -> String {
         self.next_block_sequence += 1;
         format!("{prefix}-{}", self.next_block_sequence)
     }
