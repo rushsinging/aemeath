@@ -36,11 +36,7 @@ fn option_lines(index: usize, option: &str, active: bool, multi_select: bool) ->
         .collect()
 }
 
-pub fn render_ask_user(
-    block_id: &str,
-    view: &AskUserBlockView,
-    _ctx: &RenderCtx,
-) -> RenderedBlock {
+pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx) -> RenderedBlock {
     let header_style = Style::default()
         .fg(theme::WARNING)
         .add_modifier(Modifier::BOLD);
@@ -128,7 +124,11 @@ mod tests {
 
     #[test]
     fn test_render_ask_user_highlights_cursor_option() {
-        let block = render_ask_user("ask", &view(&["A", "B"], 1, false), &RenderCtx { width: 80 });
+        let block = render_ask_user(
+            "ask",
+            &view(&["A", "B"], 1, false),
+            &RenderCtx { width: 80 },
+        );
         // 找到选项 B 行（含 ❯ 标记表示高亮）
         let highlighted = block
             .lines
@@ -157,10 +157,7 @@ mod tests {
             .iter()
             .any(|line| line.plain.contains("[Enter] 确认")));
         // 无选项时不渲染 ↑↓ 选择提示
-        assert!(!block
-            .lines
-            .iter()
-            .any(|line| line.plain.contains("[↑↓]")));
+        assert!(!block.lines.iter().any(|line| line.plain.contains("[↑↓]")));
     }
 
     #[test]

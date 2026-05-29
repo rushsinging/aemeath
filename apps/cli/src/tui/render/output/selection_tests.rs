@@ -1,6 +1,8 @@
 use super::super::OutputArea;
 use crate::tui::render::output::blocks::assistant_message::render_assistant_message;
-use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedDocument, RenderedLine};
+use crate::tui::render::output::rendered::{
+    RenderCtx, RenderedBlock, RenderedDocument, RenderedLine,
+};
 use crate::tui::view_model::output::TextBlockView;
 use crate::tui::view_model::style::SemanticStyle;
 use ratatui::{buffer::Buffer, layout::Rect, text::Span};
@@ -210,7 +212,11 @@ fn test_get_selected_text_preserves_unclosed_markdown_marker() {
         width: 120,
         height: 3,
     };
-    set_assistant_markdown(&mut output, "**unclosed marker", area.width.saturating_sub(2));
+    set_assistant_markdown(
+        &mut output,
+        "**unclosed marker",
+        area.width.saturating_sub(2),
+    );
     let mut buf = Buffer::empty(area);
     output.render(area, &mut buf);
     let plain = output

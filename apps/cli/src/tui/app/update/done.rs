@@ -74,7 +74,10 @@ mod tests {
     fn test_done_notice_short_duration_uses_seconds() {
         let notice = done_notice(Duration::from_secs(3));
         assert!(notice.starts_with('✻'), "应以 ✻ 开头，实际: {notice}");
-        assert!(notice.ends_with("for 3s"), "短耗时应以秒展示，实际: {notice}");
+        assert!(
+            notice.ends_with("for 3s"),
+            "短耗时应以秒展示，实际: {notice}"
+        );
     }
 
     #[test]
