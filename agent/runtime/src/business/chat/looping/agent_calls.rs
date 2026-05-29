@@ -111,7 +111,7 @@ where
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
     let working_root = ag_ctx.current_working_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = crate::api::project::worktree::workspace_context_from_tool_context(ag_ctx);
+    let workspace = crate::api::project::workspace_context_from_tool_context(ag_ctx);
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),

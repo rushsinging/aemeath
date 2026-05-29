@@ -217,7 +217,7 @@ where
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
     let working_root = agent.ctx.current_working_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = crate::api::project::worktree::workspace_context_from_tool_context(&agent.ctx);
+    let workspace = crate::api::project::workspace_context_from_tool_context(&agent.ctx);
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),

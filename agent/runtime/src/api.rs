@@ -31,7 +31,9 @@ pub mod policy {
 }
 
 pub mod project {
-    pub use ::project::worktree;
+    pub use ::project::api::{
+        enter_worktree, exit_worktree, workspace_context_from_tool_context,
+    };
 }
 
 pub mod prompt {

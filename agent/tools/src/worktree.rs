@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use project::worktree as worktree_ops;
+use project::api as worktree_ops;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::path::{Path, PathBuf};
 
