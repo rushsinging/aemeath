@@ -82,6 +82,60 @@ fn test_output_assembler_summarizes_embedded_tool_result_without_full_output() {
 }
 
 #[test]
+fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "edit docs".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Edit".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-1".to_string(),
+        tool_name: "Edit".to_string(),
+        output: "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew"
+            .to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Edit".to_string(),
+        index: 0,
+        summary: r#"{"file_path":"docs/bug/active.md"}"#.to_string(),
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let diagnostics = vm
+        .blocks
+        .iter()
+        .filter(|block| matches!(&block.kind, OutputBlockKind::DiagnosticNotice(_)))
+        .count();
+    let tool = vm
+        .blocks
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block");
+
+    assert_eq!(diagnostics, 0, "已绑定工具结果不应泄漏成块外诊断文本");
+    assert_eq!(tool.title, "Edit");
+    assert!(tool
+        .result_summary
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Edit completed"));
+    assert!(!tool
+        .result_summary
+        .as_deref()
+        .unwrap_or_default()
+        .contains("---DIFF---"));
+}
+
+#[test]
 fn test_output_assembler_uses_error_summary_for_failed_tool_result() {
     let mut conversation = ConversationModel::default();
     add_failed_tool_after_thinking(&mut conversation, "Read", "permission denied");

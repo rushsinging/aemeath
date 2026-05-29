@@ -187,4 +187,23 @@ mod tests {
             .any(|line| line.plain.contains("done: 3 matches"));
         assert!(has_result, "result_summary 应渲染为结果行");
     }
+
+    #[test]
+    fn test_tool_call_deduplicates_repeated_completion_summary() {
+        let mut view = tool(ToolSemanticStatus::Success);
+        view.style = SemanticStyle::Success;
+        view.icon = "✓".into();
+        view.title = "Read".into();
+        view.summary = Some(r#"{"file_path":"docs/bug/active.md"}"#.into());
+        view.result_summary = Some("✓ Read completed".into());
+
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let completed_count = block
+            .lines
+            .iter()
+            .filter(|line| line.plain.contains("✓ Read completed"))
+            .count();
+
+        assert_eq!(completed_count, 1, "完成摘要不应同时出现在标题和结果行");
+    }
 }
