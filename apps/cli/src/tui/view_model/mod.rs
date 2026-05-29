@@ -9,7 +9,7 @@ pub mod style;
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
 pub use output::{
-    AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
+    AskUserBlockView, BlockNode, OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
     ToolCallBlockView, ToolSemanticStatus,
 };
 pub use status::{StatusLineViewModel, StatusSegment, StatusSeverity};

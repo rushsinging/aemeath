@@ -280,6 +280,20 @@ fn test_output_assembler_renders_task_update_tool_call() {
     assert_eq!(tool.icon, "✓");
 }
 
+#[test]
+fn test_output_assembler_produces_roots_mirroring_blocks() {
+    let mut conversation = ConversationModel::default();
+    add_completed_tool_after_thinking(&mut conversation, "Read", "ok");
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+
+    assert_eq!(vm.roots.len(), vm.blocks.len());
+    assert!(vm.roots.iter().all(|n| n.children.is_empty()));
+    assert_eq!(vm.roots[0].block_id, vm.blocks[0].block_id);
+    assert_eq!(vm.roots[0].block_version, vm.blocks[0].block_version);
+    assert_eq!(vm.roots[0].kind, vm.blocks[0].kind);
+}
+
 fn add_failed_tool_after_thinking(conversation: &mut ConversationModel, name: &str, output: &str) {
     add_tool_after_thinking(conversation, name, output, true);
 }

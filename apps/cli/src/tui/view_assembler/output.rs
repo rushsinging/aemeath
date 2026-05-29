@@ -4,7 +4,7 @@ use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
-    AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
+    AskUserBlockView, BlockNode, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
     TextBlockView, ToolCallBlockView, ToolSemanticStatus,
 };
 
@@ -172,9 +172,18 @@ impl OutputViewAssembler {
                 }
             }
         }
+        let roots = blocks
+            .iter()
+            .map(|b| BlockNode {
+                block_id: b.block_id.clone(),
+                block_version: b.block_version,
+                kind: b.kind.clone(),
+                children: Vec::new(),
+            })
+            .collect();
         OutputViewModel {
             blocks,
-            roots: Vec::new(),
+            roots,
             version,
             follow_tail_hint: true,
         }
