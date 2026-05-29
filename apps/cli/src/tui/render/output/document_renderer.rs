@@ -56,7 +56,7 @@ impl OutputDocumentRenderer {
         &mut self,
         node: &BlockNode,
         width: u16,
-        _depth: usize,
+        depth: usize,
         out: &mut Vec<RenderedBlock>,
         live_ids: &mut Vec<String>,
     ) {
@@ -70,9 +70,19 @@ impl OutputDocumentRenderer {
             node.kind.component().render_self(&node.block_id, ctx)
         });
         live_ids.push(node.block_id.clone());
-        out.push(rendered);
+        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
+        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
+        let gutted = crate::tui::render::output::gutter::apply_gutter(
+            &node.kind,
+            depth,
+            rendered.lines,
+        );
+        out.push(RenderedBlock {
+            block_id: rendered.block_id,
+            lines: gutted,
+        });
         for child in &node.children {
-            self.render_node(child, width, _depth + 1, out, live_ids);
+            self.render_node(child, width, depth + 1, out, live_ids);
         }
     }
 

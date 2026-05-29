@@ -3,7 +3,6 @@ use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::primitives::fenced::render_fenced_markdown;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::{format_tool_call, result_max_lines};
-use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
 use ratatui::style::{Color, Style};
@@ -21,20 +20,18 @@ pub fn render_tool_call(
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
     let header_text = header_text.replacen('●', &view.icon, 1);
     let icon_color = semantic_color(view.style);
-    let mut lines = vec![RenderedLine::new(vec![
-        Span::styled(format!("{} ", view.icon), Style::default().fg(icon_color)),
-        Span::styled(
-            header_text
-                .strip_prefix(&view.icon)
-                .unwrap_or(&header_text)
-                .trim_start()
-                .to_string(),
-            Style::default().fg(icon_color),
-        ),
-    ])];
+    // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉前导 icon 的标题文本（颜色不变）。
+    let mut lines = vec![RenderedLine::new(vec![Span::styled(
+        header_text
+            .strip_prefix(&view.icon)
+            .unwrap_or(&header_text)
+            .trim_start()
+            .to_string(),
+        Style::default().fg(icon_color),
+    )])];
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
-            format!("{INDENT}{detail}"),
+            detail,
             Style::default().fg(theme::TEXT_MUTED),
         )]));
     }
@@ -81,21 +78,14 @@ fn format_result_lines(
     }
     let max_lines = result_max_lines(tool_name);
     let base = Style::default().fg(color);
-    // render_fenced_markdown 现产无缩进行（#60）；此处自拼 INDENT 保持当前视觉（过渡，
-    // Phase 6 子块化后这段连同 INDENT 一并删除，改由 gutter 注入）。
-    let rendered: Vec<RenderedLine> = render_fenced_markdown(result, base, width)
-        .into_iter()
-        .map(|l| {
-            let mut spans = vec![Span::styled(INDENT.to_string(), base)];
-            spans.extend(l.spans);
-            RenderedLine::with_plain(spans, format!("{INDENT}{}", l.plain))
-        })
-        .collect();
+    // render_fenced_markdown 现产无缩进行（#60）；块级缩进由 gutter 在组合期注入，
+    // 此处不再自拼 INDENT（结果行属于 tool_call block 的后续行，gutter 给等宽空白）。
+    let rendered: Vec<RenderedLine> = render_fenced_markdown(result, base, width);
     let total = rendered.len();
     let mut out: Vec<RenderedLine> = rendered.into_iter().take(max_lines).collect();
     if total > max_lines {
         out.push(RenderedLine::new(vec![Span::styled(
-            format!("{INDENT}... ({} lines omitted)", total - max_lines),
+            format!("... ({} lines omitted)", total - max_lines),
             base,
         )]));
     }
@@ -128,48 +118,46 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_running_applies_theme_color_to_icon_and_title() {
+    fn test_tool_call_running_applies_theme_color_to_title() {
+        // marker（●）现由 gutter 注入；组件只渲染带语义色的标题（无自写 icon span）。
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
             &RenderCtx { width: 80 },
         );
-        let icon_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref() == "● ")
-            .unwrap();
         let title_span = block.lines[0]
             .spans
             .iter()
             .find(|span| span.content.as_ref().contains("Grep"))
             .unwrap();
 
-        assert_eq!(icon_span.style.fg, Some(theme::TOOL_RUNNING));
         assert_eq!(title_span.style.fg, Some(theme::TOOL_RUNNING));
         assert!(block.lines[0].plain.contains("Grep"));
+        // header 行不再自写 marker 字形（gutter.rs 覆盖 marker）。
+        assert!(
+            !block.lines[0].plain.starts_with('●'),
+            "header 不应自写 ● marker"
+        );
     }
 
     #[test]
-    fn test_tool_call_success_uses_success_icon_color() {
+    fn test_tool_call_success_uses_success_title_color() {
         let mut view = tool(ToolSemanticStatus::Success);
         view.style = SemanticStyle::Success;
         view.icon = "✓".into();
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
-        let icon_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref() == "✓ ")
-            .unwrap();
         let title_span = block.lines[0]
             .spans
             .iter()
             .find(|span| span.content.as_ref().contains("Grep"))
             .unwrap();
 
-        assert_eq!(icon_span.style.fg, Some(theme::SUCCESS));
         assert_eq!(title_span.style.fg, Some(theme::SUCCESS));
         assert!(block.lines[0].plain.contains("Grep"));
+        assert!(
+            !block.lines[0].plain.starts_with('✓'),
+            "header 不应自写 ✓ marker"
+        );
     }
 
     #[test]
@@ -263,7 +251,7 @@ mod tests {
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
         assert!(
-            block.lines.iter().all(|l| l.plain != "  a"),
+            block.lines.iter().all(|l| l.plain != "a"),
             "max_lines=0 时不应渲染结果内容行"
         );
         assert!(
