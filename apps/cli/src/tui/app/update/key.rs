@@ -153,7 +153,9 @@ impl App {
                             }
                         })
                         .unwrap_or_default();
-                    let n = self.input.push_queue(input);
+                    let n = self.input.push_queue(input.clone());
+                    // 入队即时显示「排队中」块（QueuedUserMessage），与 input_queue 同步维护。
+                    self.enqueue_submission_echo(input);
                     self.status_bar
                         .set_warning(&format!("{n} message(s) queued"));
                 }

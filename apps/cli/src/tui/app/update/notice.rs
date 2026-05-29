@@ -26,6 +26,33 @@ impl App {
         self.refresh_output_widget_from_model();
     }
 
+    /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新输出文档。
+    ///
+    /// 用于「agent 处理期间用户提交输入」场景：在 `InputState::input_queue`
+    /// 入队的同时，派发 `QueueSubmission` 产生 `ConversationBlock::QueuedUserMessage`
+    /// 块，经 `QueuedSubmission` view 渲染为暗色「⏳ 排队中: ...」即时反馈。
+    ///
+    /// 一致性约定：`input_queue` 为权威发送队列，`QueuedUserMessage` 块是其显示投影；
+    /// 入队（此处）与出队（`clear_queued_submission_echo`）成对维护，二者始终同步。
+    pub(crate) fn enqueue_submission_echo(&mut self, text: impl Into<String>) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::QueueSubmission { text: text.into() });
+        self.refresh_output_widget_from_model();
+    }
+
+    /// 清除所有「排队中」用户提交块，并刷新输出文档。
+    ///
+    /// 在 agent 取用（drain）排队输入时调用：先清除 `QueuedUserMessage` 排队块，
+    /// 再由 `append_user_echo` 以正式 `UserMessage` 显示，避免「排队块」与「已发送
+    /// 回显」双显示。空队列时为无副作用 no-op（`QueuedSubmissionsCleared { count: 0 }`）。
+    pub(crate) fn clear_queued_submission_echo(&mut self) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::ClearQueuedSubmissions);
+        self.refresh_output_widget_from_model();
+    }
+
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`
@@ -205,5 +232,84 @@ mod tests {
             before + 1,
             "空错误文本仍应创建一个 Error block"
         );
+    }
+
+    #[test]
+    fn test_enqueue_submission_echo_renders_queued_block_into_document() {
+        // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型，
+        // 且经 document 渲染出现「排队中」即时反馈。
+        let mut app = make_app();
+        app.enqueue_submission_echo("排队中的输入");
+
+        let has_queued = app.model.conversation.blocks.iter().any(|block| {
+            matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "排队中的输入")
+        });
+        assert!(
+            has_queued,
+            "入队应作为 QueuedUserMessage block 进入 ConversationModel"
+        );
+
+        let plain = app
+            .output_area
+            .document()
+            .iter_lines()
+            .map(|line| line.plain.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            plain.contains("排队中的输入"),
+            "排队提交应经 document 渲染出现在输出区，实际: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn test_clear_queued_submission_echo_removes_queued_blocks_no_double_display() {
+        // 边界 + 关键：drain 时先清排队块，再以正式 UserMessage 回显——
+        // 验证清除后不再有 QueuedUserMessage（避免与已发送回显双显示）。
+        let mut app = make_app();
+        app.enqueue_submission_echo("第一条");
+        app.enqueue_submission_echo("第二条");
+        assert_eq!(app.model.conversation.queued_submissions.len(), 2);
+
+        app.clear_queued_submission_echo();
+        // 模拟 drain 后正式回显其中一条。
+        app.append_user_echo("第一条");
+
+        assert!(app.model.conversation.queued_submissions.is_empty());
+        let queued_remaining = app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .filter(|block| matches!(block, ConversationBlock::QueuedUserMessage { .. }))
+            .count();
+        assert_eq!(
+            queued_remaining, 0,
+            "清除后不应残留任何 QueuedUserMessage 排队块"
+        );
+        let user_echoes = app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block, ConversationBlock::UserMessage { text, .. } if text == "第一条")
+            })
+            .count();
+        assert_eq!(user_echoes, 1, "应仅以一条正式 UserMessage 回显，无双显示");
+    }
+
+    #[test]
+    fn test_clear_queued_submission_echo_on_empty_is_noop() {
+        // 错误/空路径：无排队块时清除应为无副作用 no-op，不 panic、不改变块数量。
+        let mut app = make_app();
+        let before = app.model.conversation.blocks.len();
+        app.clear_queued_submission_echo();
+        assert_eq!(
+            app.model.conversation.blocks.len(),
+            before,
+            "空队列清除不应改变块数量"
+        );
+        assert!(app.model.conversation.queued_submissions.is_empty());
     }
 }
