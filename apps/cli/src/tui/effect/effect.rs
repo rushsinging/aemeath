@@ -19,6 +19,11 @@ pub enum Effect {
     CopyToClipboard { text: String },
     ReadClipboardImage,
     ProcessImageFile { path: String },
+    /// 触发 LLM reflection。`foreground=true` 时由前台 /reflect 发起（会推送
+    /// ReflectionStarted 事件），`false` 时由 maybe_auto_reflect 后台发起。
+    RunReflection { foreground: bool },
+    /// 将 reflection 输出应用到 SDK memory 能力。
+    ApplyReflection { output: sdk::ReflectionOutputView },
     RunHook { name: String, message: String },
     SetCurrentTurn { turn: usize },
     StartTimer { id: String },

@@ -169,7 +169,9 @@ impl App {
             UiEvent::ReflectionDone { output } => {
                 self.append_system_notice(output.content.clone());
                 if self.session.memory_config.reflection.auto_apply_suggestions {
-                    self.apply_reflection_output(output);
+                    if let Some(effect) = self.apply_reflection_output(output) {
+                        effects.push(effect);
+                    }
                 } else {
                     let suggestion_count = output.suggested_memories.len();
                     let outdated_count = output.outdated_memories.len();
@@ -309,9 +311,7 @@ impl App {
                     self.chat.active_tool_call_ids.len(),
                     self.model.input.document.is_empty(),                    self.input.queue_preview()
                 );
-                if let Some(effect) = self.handle_done(ui_tx, None) {
-                    effects.push(effect);
-                }
+                effects.extend(self.handle_done(ui_tx, None));
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 log::debug!(
@@ -328,9 +328,7 @@ impl App {
                     self.chat.active_tool_call_ids.len(),
                     self.model.input.document.is_empty(),                    self.input.queue_preview()
                 );
-                if let Some(effect) = self.handle_done(ui_tx, Some(elapsed)) {
-                    effects.push(effect);
-                }
+                effects.extend(self.handle_done(ui_tx, Some(elapsed)));
             }
         }
 

@@ -23,6 +23,10 @@ impl App {
             Effect::ProcessImageFile { path } => self.process_image_file_effect(path).await,
             Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx).await,
+            Effect::RunReflection { foreground } => {
+                self.run_reflection_effect(foreground, ui_tx)
+            }
+            Effect::ApplyReflection { output } => self.apply_reflection_effect(output),
             Effect::FetchTaskStatus
             | Effect::CopyToClipboard { .. }
             | Effect::StartTimer { .. }
@@ -85,6 +89,47 @@ impl App {
         if let Some(ref ac) = self.agent_client {
             ac.set_current_turn(turn);
         }
+    }
+
+    /// 执行 LLM reflection：克隆当前消息与 agent client，后台 spawn 调用 SDK，
+    /// 结果经 UiEvent 回流到 update。前台发起时先推送 ReflectionStarted。
+    fn run_reflection_effect(&mut self, foreground: bool, ui_tx: &mpsc::Sender<UiEvent>) {
+        let Some(agent_client) = self.agent_client.clone() else {
+            return;
+        };
+        let messages = self.chat.messages.clone();
+        let tx = ui_tx.clone();
+        tokio::spawn(async move {
+            if foreground {
+                let _ = tx.send(UiEvent::ReflectionStarted).await;
+            }
+            match agent_client.run_reflection(messages).await {
+                Ok(output) => {
+                    let _ = tx
+                        .send(UiEvent::ReflectionUsage {
+                            input: output.input_tokens,
+                            output: output.output_tokens,
+                        })
+                        .await;
+                    let _ = tx.send(UiEvent::ReflectionDone { output }).await;
+                }
+                Err(error) => {
+                    let _ = tx
+                        .send(UiEvent::Error(format!("Reflection LLM 调用失败: {error}")))
+                        .await;
+                }
+            }
+        });
+    }
+
+    /// 将 reflection 输出应用到 SDK memory 能力（后台 spawn）。
+    fn apply_reflection_effect(&mut self, output: sdk::ReflectionOutputView) {
+        let Some(agent_client) = self.agent_client.clone() else {
+            return;
+        };
+        tokio::spawn(async move {
+            let _ = agent_client.apply_reflection(output).await;
+        });
     }
 
     async fn fetch_reminder_recap_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {

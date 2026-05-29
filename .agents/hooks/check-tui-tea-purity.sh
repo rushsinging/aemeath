@@ -31,7 +31,6 @@ EXEMPT_FILES=(
   "apps/cli/src/tui/app/slash/help.rs"
   "apps/cli/src/tui/app/slash/help_display.rs"
   "apps/cli/src/tui/app/slash/memory.rs"
-  "apps/cli/src/tui/app/slash/reflection.rs"
   "apps/cli/src/tui/app/slash/save.rs"
   "apps/cli/src/tui/app/slash/suggestions.rs"
   "apps/cli/src/tui/app/slash_tests.rs"

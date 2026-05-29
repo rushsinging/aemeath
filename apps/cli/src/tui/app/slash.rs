@@ -122,7 +122,12 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                self.handle_reflect_command_with_events(&args, ui_tx).await;
+                let effects = self.handle_reflect_command(&args);
+                if let Some(tx) = ui_tx.clone() {
+                    for effect in effects {
+                        self.execute_effect(effect, &tx).await;
+                    }
+                }
             }
             "/memory" | "/mem"
                 if matches!(

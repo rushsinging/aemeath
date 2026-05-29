@@ -48,9 +48,9 @@ fn done_notice(elapsed: std::time::Duration) -> String {
 impl App {
     pub(super) fn handle_done(
         &mut self,
-        ui_tx: &mpsc::Sender<UiEvent>,
+        _ui_tx: &mpsc::Sender<UiEvent>,
         elapsed: Option<std::time::Duration>,
-    ) -> Option<Effect> {
+    ) -> Vec<Effect> {
         if let Some(dur) = elapsed {
             // 完成提示作为系统消息进入 ConversationModel（单一真相源），经 document 渲染。
             self.append_system_notice(done_notice(dur));
@@ -58,13 +58,16 @@ impl App {
         self.output_area.stop_spinner();
         self.chat.stop_processing();
         self.status_bar.set_success("Ready");
-        self.maybe_auto_reflect(ui_tx);
+        let mut effects = Vec::new();
+        // 自动 reflection 的 spawn 由 executor 执行，此处仅描述 Effect。
+        if let Some(effect) = self.maybe_auto_reflect() {
+            effects.push(effect);
+        }
         // 异步获取 reminders 并推送 recap 行
         if self.agent_client.is_some() {
-            Some(Effect::FetchReminderRecap)
-        } else {
-            None
+            effects.push(Effect::FetchReminderRecap);
         }
+        effects
     }
 }
 

@@ -209,18 +209,26 @@ fn app_with_blocking_reflection_client() -> (App, oneshot::Receiver<()>, oneshot
 
 #[tokio::test]
 async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
+    use crate::tui::effect::effect::Effect;
     let (mut app, started_rx, finish_tx) = app_with_blocking_reflection_client();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-    let elapsed = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        app.handle_reflect_command_with_events("", Some(tx)),
-    )
-    .await;
-
-    assert!(elapsed.is_ok(), "/reflect 不应同步等待 LLM 完成");
+    // /reflect 同步返回 RunReflection Effect（不在此处 spawn），UI 状态立即更新。
+    let effects = app.handle_reflect_command("");
+    assert!(
+        matches!(
+            effects.first(),
+            Some(Effect::RunReflection { foreground: true })
+        ),
+        "/reflect 应返回前台 RunReflection Effect"
+    );
     assert!(app.chat.is_processing, "/reflect 后应进入后台处理中状态");
     assert!(app.output_area.spinner.is_some());
+
+    // 由 executor 执行 Effect：后台 spawn 调用 LLM，不阻塞调用方。
+    for effect in effects {
+        app.execute_effect(effect, &tx).await;
+    }
     tokio::time::timeout(std::time::Duration::from_secs(1), started_rx)
         .await
         .expect("后台 reflection LLM 应在 1 秒内启动")
@@ -253,11 +261,16 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
     app.session.memory_config.reflection.interval_turns = 2;
 
     let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.maybe_auto_reflect(&tx);
+    let effect1 = app.maybe_auto_reflect();
+    assert!(effect1.is_none(), "第一轮不应返回 reflection Effect");
     assert_eq!(app.chat.turn_count, 1);
     assert!(started_rx.try_recv().is_err(), "第一轮不应触发 reflection");
 
-    app.maybe_auto_reflect(&tx);
+    let effect2 = app.maybe_auto_reflect();
+    assert!(effect2.is_some(), "第二轮应返回后台 reflection Effect");
+    if let Some(effect) = effect2 {
+        app.execute_effect(effect, &tx).await;
+    }
     assert_eq!(app.chat.turn_count, 2);
     tokio::time::timeout(std::time::Duration::from_secs(1), started_rx)
         .await
@@ -278,8 +291,9 @@ async fn test_auto_reflection_boundary_disabled_does_not_trigger() {
     app.session.memory_config.reflection.enabled = false;
     app.session.memory_config.reflection.interval_turns = 1;
 
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.maybe_auto_reflect(&tx);
+    let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);
+    let effect = app.maybe_auto_reflect();
+    assert!(effect.is_none(), "禁用时不应返回 reflection Effect");
 
     assert_eq!(app.chat.turn_count, 1);
     assert!(started_rx.try_recv().is_err(), "禁用时不应触发 reflection");
@@ -292,8 +306,9 @@ async fn test_auto_reflection_boundary_memory_disabled_does_not_trigger() {
     app.session.memory_config.enabled = false;
     app.session.memory_config.reflection.interval_turns = 1;
 
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.maybe_auto_reflect(&tx);
+    let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);
+    let effect = app.maybe_auto_reflect();
+    assert!(effect.is_none(), "memory 禁用时不应返回 reflection Effect");
 
     assert_eq!(app.chat.turn_count, 1);
     assert!(
@@ -315,8 +330,9 @@ async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
         outdated_memories: Vec::new(),
     });
 
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.maybe_auto_reflect(&tx);
+    let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);
+    let effect = app.maybe_auto_reflect();
+    assert!(effect.is_none(), "已有 pending reflection 时不应返回 Effect");
 
     assert_eq!(app.chat.turn_count, 1);
     assert!(
@@ -331,8 +347,9 @@ async fn test_auto_reflection_error_zero_interval_does_not_trigger() {
     let (mut app, mut started_rx, finish_tx) = app_with_blocking_reflection_client();
     app.session.memory_config.reflection.interval_turns = 0;
 
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    app.maybe_auto_reflect(&tx);
+    let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);
+    let effect = app.maybe_auto_reflect();
+    assert!(effect.is_none(), "间隔为 0 时不应返回 reflection Effect");
 
     assert_eq!(app.chat.turn_count, 1);
     assert!(

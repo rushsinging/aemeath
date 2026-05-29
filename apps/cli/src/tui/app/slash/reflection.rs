@@ -1,34 +1,34 @@
-use tokio::sync::mpsc;
-
-use crate::tui::app::UiEvent;
+use crate::tui::effect::effect::Effect;
 
 impl super::super::App {
-    pub(crate) async fn handle_reflect_command_with_events(
-        &mut self,
-        args: &str,
-        ui_tx: Option<mpsc::Sender<UiEvent>>,
-    ) {
+    /// 处理 /reflect 命令，返回需由调用方执行的副作用 Effect（保持 update 纯净）。
+    pub(crate) fn handle_reflect_command(&mut self, args: &str) -> Vec<Effect> {
         if !self.session.memory_config.enabled || !self.session.memory_config.reflection.enabled {
             self.append_error_notice("Reflection 系统已禁用。");
-            return;
+            return Vec::new();
         }
 
         match args.trim() {
-            "" => self.spawn_llm_reflection(ui_tx, true),
-            "apply" => self.apply_pending_reflection(),
+            "" => self.prepare_llm_reflection(true).into_iter().collect(),
+            "apply" => self.apply_pending_reflection().into_iter().collect(),
             "stats" | "history" => {
-                self.append_system_notice("Reflection stats/history 将在打磨阶段支持。")
+                self.append_system_notice("Reflection stats/history 将在打磨阶段支持。");
+                Vec::new()
             }
-            other => self.append_error_notice(format!("未知 reflect 子命令: {other}")),
+            other => {
+                self.append_error_notice(format!("未知 reflect 子命令: {other}"));
+                Vec::new()
+            }
         }
     }
 
-    fn spawn_llm_reflection(&mut self, ui_tx: Option<mpsc::Sender<UiEvent>>, foreground: bool) {
-        let Some(agent_client) = self.agent_client.clone() else {
+    /// 准备一次 LLM reflection：前台模式下设置 spinner/processing 状态，
+    /// 返回 RunReflection Effect 交由 executor 后台执行（不在此处 spawn）。
+    fn prepare_llm_reflection(&mut self, foreground: bool) -> Option<Effect> {
+        if self.agent_client.is_none() {
             self.append_error_notice("当前没有可用的 SDK agent client，无法执行 Reflection。");
-            return;
-        };
-        let messages = self.chat.messages.clone();
+            return None;
+        }
 
         if foreground {
             self.append_system_notice("[reflection: calling LLM...]");
@@ -37,73 +37,96 @@ impl super::super::App {
             self.chat.is_processing = true;
         }
 
-        if let Some(tx) = ui_tx {
-            tokio::spawn(async move {
-                if foreground {
-                    let _ = tx.send(UiEvent::ReflectionStarted).await;
-                }
-                match agent_client.run_reflection(messages).await {
-                    Ok(output) => {
-                        let _ = tx
-                            .send(UiEvent::ReflectionUsage {
-                                input: output.input_tokens,
-                                output: output.output_tokens,
-                            })
-                            .await;
-                        let _ = tx.send(UiEvent::ReflectionDone { output }).await;
-                    }
-                    Err(error) => {
-                        let _ = tx
-                            .send(UiEvent::Error(format!("Reflection LLM 调用失败: {error}")))
-                            .await;
-                    }
-                }
-            });
-        }
+        Some(Effect::RunReflection { foreground })
     }
 
-    fn apply_pending_reflection(&mut self) {
+    fn apply_pending_reflection(&mut self) -> Option<Effect> {
         let Some(output) = self.chat.pending_reflection.clone() else {
             self.append_system_notice("没有待应用的 Reflection 建议。");
-            return;
+            return None;
         };
 
-        if self.apply_reflection_output(output) {
+        let effect = self.apply_reflection_output(output);
+        if effect.is_some() {
             self.chat.pending_reflection = None;
         }
+        effect
     }
 
-    pub(crate) fn maybe_auto_reflect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+    /// 自动 reflection：到达 interval 时返回后台 RunReflection Effect。
+    pub(crate) fn maybe_auto_reflect(&mut self) -> Option<Effect> {
         self.chat.turn_count += 1;
         let reflection = &self.session.memory_config.reflection;
         if !self.session.memory_config.enabled
             || !reflection.enabled
             || reflection.interval_turns == 0
         {
-            return;
+            return None;
         }
         if self.chat.pending_reflection.is_some() {
-            return;
+            return None;
         }
         if !self
             .chat
             .turn_count
             .is_multiple_of(reflection.interval_turns)
         {
-            return;
+            return None;
         }
-        self.spawn_llm_reflection(Some(ui_tx.clone()), false);
+        self.prepare_llm_reflection(false)
     }
 
-    pub(crate) fn apply_reflection_output(&mut self, output: sdk::ReflectionOutputView) -> bool {
-        let Some(agent_client) = self.agent_client.clone() else {
+    /// 返回 ApplyReflection Effect，将 reflection 输出交由 executor 后台应用。
+    pub(crate) fn apply_reflection_output(
+        &mut self,
+        output: sdk::ReflectionOutputView,
+    ) -> Option<Effect> {
+        if self.agent_client.is_none() {
             self.append_error_notice("当前没有可用的 SDK agent client，无法应用 Reflection。");
-            return false;
-        };
-        tokio::spawn(async move {
-            let _ = agent_client.apply_reflection(output).await;
-        });
+            return None;
+        }
         self.append_system_notice("[reflection apply 已提交给 SDK memory 能力]");
-        true
+        Some(Effect::ApplyReflection { output })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tui::app::App;
+    use std::path::PathBuf;
+
+    fn make_app() -> App {
+        App::new("s".to_string(), PathBuf::from("/tmp"), "m".to_string())
+    }
+
+    #[test]
+    fn test_handle_reflect_command_disabled_returns_no_effect() {
+        let mut app = make_app();
+        app.session.memory_config.enabled = false;
+        let effects = app.handle_reflect_command("");
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn test_handle_reflect_command_unknown_subcommand_returns_no_effect() {
+        let mut app = make_app();
+        app.session.memory_config.enabled = true;
+        app.session.memory_config.reflection.enabled = true;
+        let effects = app.handle_reflect_command("bogus");
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn test_apply_reflection_output_without_client_returns_none() {
+        let mut app = make_app();
+        // 无 agent_client（App::new 默认无）-> 返回 None 并记录错误。
+        let effect = app.apply_reflection_output(sdk::ReflectionOutputView {
+            content: "c".to_string(),
+            suggested_memories: Vec::new(),
+            outdated_memories: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+        });
+        assert!(effect.is_none());
     }
 }
