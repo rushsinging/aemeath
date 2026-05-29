@@ -120,9 +120,10 @@ fn strip_list_item(line: &str) -> Option<(String, String, &str)> {
         return Some((indent.to_string(), BULLET.to_string(), body));
     }
     // 有序列表：开头若干数字 + `.`/`)` + 空格。
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() {
-        let after = &rest[digits.len()..];
+    let digit_len = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_len > 0 {
+        // digit_len 为 ASCII 数字字节数，是合法字符边界。
+        let (digits, after) = rest.split_at(digit_len);
         for sep in [". ", ") "] {
             if let Some(body) = after.strip_prefix(sep) {
                 return Some((indent.to_string(), format!("{digits}. "), body));
