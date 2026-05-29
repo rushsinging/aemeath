@@ -8,11 +8,12 @@ fn point_in_rect(row: u16, col: u16, rect: &ratatui::layout::Rect) -> bool {
 }
 
 impl crate::tui::app::App {
+    /// 处理鼠标事件。复制选区等副作用以 Effect 形式返回，由 update/runtime 执行。
     pub(crate) fn handle_mouse_event(
         &mut self,
         mouse: MouseEvent,
         output_area: ratatui::layout::Rect,
-    ) {
+    ) -> Vec<crate::tui::effect::effect::Effect> {
         let row = mouse.row;
         let col = mouse.column;
 
@@ -21,13 +22,13 @@ impl crate::tui::app::App {
                 if point_in_rect(row, col, &output_area) {
                     self.output_area.scroll_up(3);
                 }
-                return;
+                return Vec::new();
             }
             MouseEventKind::ScrollDown => {
                 if point_in_rect(row, col, &output_area) {
                     self.output_area.scroll_down(3);
                 }
-                return;
+                return Vec::new();
             }
             _ => {}
         }
@@ -97,18 +98,19 @@ impl crate::tui::app::App {
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
-                if self.output_area.is_selecting() {
-                    let text = self.output_area.end_selection();
-                    self.copy_selection_to_clipboard(text);
+                let text = if self.output_area.is_selecting() {
+                    self.output_area.end_selection()
                 } else if self.input_area.is_selecting() {
-                    let text = self.input_area.end_selection();
-                    self.copy_selection_to_clipboard(text);
+                    self.input_area.end_selection()
                 } else if self.status_bar.is_selecting() {
-                    let text = self.status_bar.end_selection();
-                    self.copy_selection_to_clipboard(text);
-                }
+                    self.status_bar.end_selection()
+                } else {
+                    None
+                };
+                return self.copy_selection_to_clipboard(text).into_iter().collect();
             }
             _ => {}
         }
+        Vec::new()
     }
 }

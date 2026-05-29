@@ -1,20 +1,17 @@
+use crate::tui::effect::effect::Effect;
+
 impl super::App {
-    /// Copy text to clipboard with status bar feedback.
-    pub fn copy_to_clipboard(&mut self, text: &str) {
-        match crate::tui::render::input::clipboard::copy_text(text) {
-            Ok(()) => self.status_bar.set_success("已复制选中内容"),
-            Err(err) => {
-                log::warn!("复制选中内容失败: {err}");
-                self.status_bar.set_warning(&err);
-            }
+    /// 描述「复制文本到剪贴板」副作用，返回 CopyToClipboard Effect（不在此处做 IO）。
+    /// 实际的剪贴板写入与 status bar 反馈由 effect/executor 执行。
+    pub fn copy_to_clipboard(&self, text: &str) -> Effect {
+        Effect::CopyToClipboard {
+            text: text.to_string(),
         }
     }
 
-    /// Copy optional selection text to clipboard; no-op if None.
-    pub fn copy_selection_to_clipboard(&mut self, text: Option<String>) {
-        if let Some(t) = text {
-            self.copy_to_clipboard(&t);
-        }
+    /// 描述「复制可选选区文本」副作用；None 时返回 None（不复制）。
+    pub fn copy_selection_to_clipboard(&self, text: Option<String>) -> Option<Effect> {
+        text.map(|t| self.copy_to_clipboard(&t))
     }
 
     /// Accept the currently highlighted suggestion
@@ -100,5 +97,55 @@ fn find_token_end(input: &str, cursor_offset: usize) -> usize {
         cursor_offset + space_pos
     } else {
         input.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tui::app::App;
+    use crate::tui::effect::effect::Effect;
+    use std::path::PathBuf;
+
+    fn make_app() -> App {
+        App::new("s".to_string(), PathBuf::from("/tmp"), "m".to_string())
+    }
+
+    #[test]
+    fn test_copy_to_clipboard_returns_effect() {
+        let app = make_app();
+        let effect = app.copy_to_clipboard("hello");
+        assert!(matches!(effect, Effect::CopyToClipboard { text } if text == "hello"));
+    }
+
+    #[test]
+    fn test_copy_selection_to_clipboard_some_returns_effect() {
+        let app = make_app();
+        let effect = app.copy_selection_to_clipboard(Some("sel".to_string()));
+        assert!(matches!(
+            effect,
+            Some(Effect::CopyToClipboard { text }) if text == "sel"
+        ));
+    }
+
+    #[test]
+    fn test_copy_selection_to_clipboard_none_returns_none() {
+        let app = make_app();
+        assert!(app.copy_selection_to_clipboard(None).is_none());
+    }
+
+    #[test]
+    fn test_find_token_end_with_space() {
+        assert_eq!(super::find_token_end("ab cd", 0), 2);
+    }
+
+    #[test]
+    fn test_find_token_end_no_space_returns_len() {
+        assert_eq!(super::find_token_end("abcd", 0), 4);
+    }
+
+    #[test]
+    fn test_find_token_end_cursor_past_space() {
+        // cursor 在空格之后，下一个空格不存在 -> 返回总长度。
+        assert_eq!(super::find_token_end("ab cd", 3), 5);
     }
 }

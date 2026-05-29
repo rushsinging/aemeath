@@ -34,7 +34,6 @@ EXEMPT_FILES=(
   "apps/cli/src/tui/app/slash/save.rs"
   "apps/cli/src/tui/app/slash/suggestions.rs"
   "apps/cli/src/tui/app/slash_tests.rs"
-  "apps/cli/src/tui/app/util.rs"
 )
 
 is_exempt() {

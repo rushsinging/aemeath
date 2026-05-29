@@ -27,8 +27,8 @@ impl App {
                 self.run_reflection_effect(foreground, ui_tx)
             }
             Effect::ApplyReflection { output } => self.apply_reflection_effect(output),
+            Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::FetchTaskStatus
-            | Effect::CopyToClipboard { .. }
             | Effect::StartTimer { .. }
             | Effect::StopTimer { .. } => {}
         }
@@ -83,6 +83,17 @@ impl App {
         self.handle_input_intent(
             crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
         );
+    }
+
+    /// 将文本复制到系统剪贴板，并据结果在 status bar 给出反馈。
+    fn copy_to_clipboard_effect(&mut self, text: &str) {
+        match crate::tui::render::input::clipboard::copy_text(text) {
+            Ok(()) => self.status_bar.set_success("已复制选中内容"),
+            Err(err) => {
+                log::warn!("复制选中内容失败: {err}");
+                self.status_bar.set_warning(&err);
+            }
+        }
     }
 
     fn set_current_turn_effect(&mut self, turn: usize) {

@@ -77,8 +77,12 @@ impl App {
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, ui_tx, spawn_refs),
             TuiMsg::Mouse(mouse) => {
-                self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                UpdateResult::none()
+                let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
+                    pending_slash: None,
+                }
             }
             TuiMsg::Paste(text) if !self.chat.is_processing => {
                 self.handle_paste_event(text, ui_tx);
@@ -125,8 +129,12 @@ impl App {
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
-                self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                UpdateResult::none()
+                let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
+                    pending_slash: None,
+                }
             }
             TuiMsg::TerminalResize { width, height } => {
                 self.handle_resize(width, height);
