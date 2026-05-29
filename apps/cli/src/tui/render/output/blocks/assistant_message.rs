@@ -1,6 +1,7 @@
 use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
 use crate::tui::render::output::primitives::{
     markdown::markdown, rendered_line_from_spanparts, table::table,
+    unified_diff::render_unified_diff,
 };
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::{syntax, theme};
@@ -40,6 +41,13 @@ pub fn render_assistant_message(
         }
 
         if in_fence {
+            // ` ```diff ` 代码块走 unified diff 渲染（行号信息来自 @@ 原文）：
+            // 保留 INDENT 缩进 + 加减语义色 + 新增行语法高亮，修复 #61。
+            if fence_lang.as_deref() == Some("diff") {
+                lines.extend(render_unified_diff(line, None, ctx.width));
+                idx += 1;
+                continue;
+            }
             let syntax_ref = fence_lang
                 .as_deref()
                 .and_then(syntax::language_by_extension);
@@ -123,5 +131,91 @@ mod tests {
 
         assert_eq!(after.plain, "after");
         assert_ne!(after.spans[0].style.fg, Some(theme::CODE));
+    }
+
+    #[test]
+    fn test_assistant_diff_fence_renders_indent_signs_and_semantic_color() {
+        // #61：LLM markdown 中 ```diff 代码块应走 unified diff 渲染——
+        // INDENT 缩进（不贴最左）+ 加减语义色，而非通用代码块单色着色。
+        let block = render("```diff\n@@ -1 +1 @@\n-let a = 1;\n+let a = 2;\n```");
+
+        // 删除行带 DIFF_REMOVE_FG。
+        let removed = block.lines.iter().find(|l| l.plain.contains("1;")).unwrap();
+        assert!(
+            removed.plain.starts_with("  "),
+            "diff 行应保留 INDENT 缩进, got: {:?}",
+            removed.plain
+        );
+        assert!(
+            removed
+                .spans
+                .iter()
+                .any(|s| s.style.fg == Some(theme::DIFF_REMOVE_FG)),
+            "删除行应带删除语义色"
+        );
+        // 新增行带 DIFF_ADD_FG。
+        let added = block.lines.iter().find(|l| l.plain.contains("2;")).unwrap();
+        assert!(
+            added
+                .spans
+                .iter()
+                .any(|s| s.style.fg == Some(theme::DIFF_ADD_FG)),
+            "新增行应带新增语义色"
+        );
+    }
+
+    #[test]
+    fn test_assistant_diff_fence_added_line_syntax_highlight() {
+        // 注：assistant_message 对 ```diff 不传 ext（无文件信息），故新增行仅语义色，
+        // 不做语法高亮——本测试锁定该行为（语法高亮归 Edit 工具路径）。
+        let block = render("```diff\n+fn main() {}\n```");
+        let added = block
+            .lines
+            .iter()
+            .find(|l| l.plain.contains("fn main"))
+            .unwrap();
+
+        assert!(added.plain.starts_with("  +"));
+        assert!(added
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(theme::DIFF_ADD_FG)));
+    }
+
+    #[test]
+    fn test_assistant_diff_fence_line_keeps_fg_under_selection_overlay() {
+        // #61：diff 行经 apply_selection_overlay 选中后应保留前景色（高亮不丢）。
+        use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
+
+        let block = render("```diff\n+let a = 2;\n```");
+        let added = block
+            .lines
+            .iter()
+            .find(|l| l.plain.contains("2;"))
+            .unwrap();
+        let add_fg = added
+            .spans
+            .iter()
+            .find(|s| s.style.fg == Some(theme::DIFF_ADD_FG))
+            .map(|s| s.style.fg)
+            .expect("新增行存在带新增色的 span");
+
+        let overlaid = apply_selection_overlay(
+            added,
+            Some(SelRange {
+                start: 0,
+                end: added.plain.chars().count(),
+            }),
+        );
+
+        // 选中区段保留原 fg（只叠加 bg），且原新增色仍在。
+        assert!(
+            overlaid.iter().all(|s| s.style.bg == Some(theme::SELECTION_BG)),
+            "全选后每段应带选区背景"
+        );
+        assert!(
+            overlaid.iter().any(|s| s.style.fg == add_fg),
+            "选中后应保留新增前景色（修 #61）"
+        );
     }
 }

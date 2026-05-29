@@ -196,6 +196,20 @@
 
 **TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
 
+### #58 G1 · diff 完整接线（含 #61 原始场景修复）
+
+**状态**：待确认（接续 Phase 6 后续 gap 第 1/3 项）
+
+**Edit 工具结果 diff 接线**（commit f0bd1f5）：新增 `blocks/edit_diff.rs`，解析 Edit 结果的 `---DIFF---\n{old}\n---DIFF---\n{new}` → `primitives/diff::diff` 渲染（行号 + 加减语义色 + INDENT 缩进 + 新增行语法高亮）；`tool_call.rs` 路由。
+
+**必修 1 · assistant markdown unified diff**（#61 原始症状）：LLM 输出含 unified diff 的 ` ```diff ` 代码块此前只当通用代码块（syntect 单色），diff 行贴最左、无加减语义。新增原语 `primitives/unified_diff.rs::render_unified_diff`：识别 `@@` hunk 头 / `+++`·`---`·`diff `·`index ` 文件头与元信息（Meta，不误判加减）/ `+` 新增 / `-` 删除 / 其它 context 五类行；复用 `output/diff.rs` 的 INDENT 缩进 + `DIFF_ADD_FG`/`DIFF_REMOVE_FG` 语义色；新增行去前导 `+` 后可选 syntect 高亮再补回 `+`；不重算行号（@@ 原文自带）。`blocks/assistant_message.rs` 在 fence 语言为 `diff` 时路由到此原语。回归测试覆盖缩进/加减语义色/新增行高亮/选中叠加保留 fg（#61）/空 diff/无 hunk 头纯 context/文件头不误判。
+
+**必修 2（M1）· Edit 路径语法高亮运行时失效**：运行时 `view.title` 是裸工具名 `"Edit"`（`view_assembler/output.rs:224 title: call.name.clone()`，无路径括号），原 `file_ext_from_title("Edit")` 恒返回 None → 语法高亮永不激活，旧测试因人工注入 `title="Edit(...)"` 掩盖。改为 `file_ext_for_edit(summary, result)`：优先从 `summary`（工具入参 JSON，含 `file_path`，由 `adapter` 将 `input.to_string()` 存入）取扩展名；退而从 Edit 结果 header `replaced N occurrence(s) ... in {path}` 解析。`render_edit_diff` 签名改为接收 `summary` 而非 `title`，`tool_call.rs` 传 `view.summary`。新增真实裸 `title="Edit"` + summary 含 file_path 的测试，断言 ext 被推断、语法高亮激活（with-ext span 数 > 无 ext 基线），锁死 M1 回归。
+
+**allow(dead_code)**：`render/mod.rs` 模块级 `#![allow(dead_code)]` 仍保留——经验证其余未接线 gap 原语（`safe_text::safe_char_at`、`block_cache::contains`、`output_area/display` 换行族、`selection_render::apply_selection_to_line`、theme `ACCENT_BRIGHT`/`DIFF_ADD_BG`/`DIFF_REMOVE_BG`）仍依赖它（去除会触发 9 条 dead_code 警告），不可收窄。本次接线的 `render_unified_diff`/`file_ext_for_edit` 等均已活跃，无需 allow。
+
+**TDD/验证**：先写暴露 M1 的真实 title 测试 + assistant unified diff 测试见红再实现；`cargo build -p cli`、`cargo test -p cli`（394 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认

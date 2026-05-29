@@ -42,7 +42,8 @@ pub fn render_tool_call(
         .flatten()
     {
         // Edit 工具结果含 ---DIFF--- 标记时，渲染为带行号/语义色/语法高亮的 diff。
-        if let Some(diff_lines) = render_edit_diff(&view.title, detail, ctx.width) {
+        // ext 从 summary（入参 JSON 含 file_path）推断，而非裸 title="Edit"（M1）。
+        if let Some(diff_lines) = render_edit_diff(view.summary.as_deref(), detail, ctx.width) {
             lines.extend(diff_lines);
             continue;
         }
@@ -182,8 +183,11 @@ mod tests {
     fn test_tool_call_edit_result_renders_diff_with_numbers_signs_indent_color() {
         // #61 端到端：Edit 结果含 ---DIFF--- 标记，应渲染为带行号 + 加减语义色 +
         // 缩进 + 语法高亮的 diff 行，而非原始标记纯文本。
+        // M1：使用运行时真实的裸 title "Edit"（无括号路径）+ summary 含 file_path，
+        // ext 必须从 summary 推断而非 title。
         let mut view = tool(ToolSemanticStatus::Success);
-        view.title = "Edit(src/lib.rs)".into();
+        view.title = "Edit".into();
+        view.summary = Some(r#"{"file_path":"src/lib.rs"}"#.into());
         view.result_summary = Some(
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;"
                 .into(),
