@@ -223,10 +223,8 @@ mod tests {
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
-        assert!(block
-            .lines
-            .iter()
-            .any(|l| l.plain.contains("line1") && l.spans.iter().any(|s| s.style.fg == Some(theme::CODE))));
+        assert!(block.lines.iter().any(|l| l.plain.contains("line1")
+            && l.spans.iter().any(|s| s.style.fg == Some(theme::CODE))));
     }
 
     #[test]
@@ -244,7 +242,10 @@ mod tests {
             "max_lines=0 时不应渲染结果内容行"
         );
         assert!(
-            block.lines.iter().any(|l| l.plain.contains("lines omitted")),
+            block
+                .lines
+                .iter()
+                .any(|l| l.plain.contains("lines omitted")),
             "应出现省略提示"
         );
     }
@@ -279,7 +280,10 @@ mod tests {
 
         // 不残留原始标记
         assert!(
-            block.lines.iter().all(|line| !line.plain.contains("---DIFF---")),
+            block
+                .lines
+                .iter()
+                .all(|line| !line.plain.contains("---DIFF---")),
             "不应残留 ---DIFF--- 标记"
         );
         // 删除/新增行带加减语义
@@ -308,9 +312,6 @@ mod tests {
             "diff 行应带前景色 span，供选中叠加保留"
         );
         // 行号缩进
-        assert!(
-            diff_line.plain.starts_with("  "),
-            "diff 行应保留两空格缩进"
-        );
+        assert!(diff_line.plain.starts_with("  "), "diff 行应保留两空格缩进");
     }
 }

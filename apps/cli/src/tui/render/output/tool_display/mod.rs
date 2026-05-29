@@ -90,4 +90,3 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     let truncated = truncate_json(raw_json);
     (format!("● {name}"), vec![truncated])
 }
-

@@ -133,19 +133,14 @@ mod tests {
         // summary 缺失/无 file_path → 从结果 header 的 "in {path}" 解析。
         let result = "replaced 2 occurrence(s) in /a/b/main.py\n---DIFF---\nx\n---DIFF---\ny";
         assert_eq!(file_ext_for_edit(None, result).as_deref(), Some("py"));
-        assert_eq!(
-            file_ext_for_edit(Some("{}"), result).as_deref(),
-            Some("py")
-        );
+        assert_eq!(file_ext_for_edit(Some("{}"), result).as_deref(), Some("py"));
     }
 
     #[test]
     fn test_file_ext_for_edit_none_when_no_extension_or_no_source() {
         // 边界/错误：无扩展名、无 in 路径、非 JSON summary 均返回 None。
         assert!(file_ext_for_edit(Some("not json"), "no path here").is_none());
-        assert!(
-            file_ext_for_edit(Some(r#"{"file_path":"Makefile"}"#), "done").is_none()
-        );
+        assert!(file_ext_for_edit(Some(r#"{"file_path":"Makefile"}"#), "done").is_none());
         assert!(file_ext_for_edit(None, "replaced 1 occurrence(s) in Dockerfile").is_none());
     }
 

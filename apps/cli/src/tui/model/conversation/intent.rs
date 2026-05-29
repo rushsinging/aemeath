@@ -60,6 +60,8 @@ pub enum ConversationIntent {
         llm_option_count: usize,
         multi_select: bool,
         cursor: usize,
+        /// 无选项自由输入模式下的默认值提示。
+        default: Option<String>,
     },
     /// 更新 AskUser 块的光标位置（选项导航高亮的单一真相）。
     SetAskUserCursor {

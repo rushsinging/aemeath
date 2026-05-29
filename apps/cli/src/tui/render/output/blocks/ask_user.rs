@@ -36,11 +36,7 @@ fn option_lines(index: usize, option: &str, active: bool, multi_select: bool) ->
         .collect()
 }
 
-pub fn render_ask_user(
-    block_id: &str,
-    view: &AskUserBlockView,
-    _ctx: &RenderCtx,
-) -> RenderedBlock {
+pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx) -> RenderedBlock {
     let header_style = Style::default()
         .fg(theme::WARNING)
         .add_modifier(Modifier::BOLD);
@@ -61,6 +57,13 @@ pub fn render_ask_user(
     }
 
     if view.options.is_empty() {
+        // 自由输入模式：若携带默认值，补回 `(default: ...)` 提示行（迁移后回归）。
+        if let Some(d) = &view.default {
+            lines.push(RenderedLine::new(vec![Span::styled(
+                format!("  (default: {d})"),
+                hint_style,
+            )]));
+        }
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         lines.push(RenderedLine::new(vec![Span::styled(
             "  [Enter] 确认  [Esc] 取消".to_string(),
@@ -123,12 +126,17 @@ mod tests {
             cursor,
             selected: vec![false; options.len()],
             chat_input_active: false,
+            default: None,
         }
     }
 
     #[test]
     fn test_render_ask_user_highlights_cursor_option() {
-        let block = render_ask_user("ask", &view(&["A", "B"], 1, false), &RenderCtx { width: 80 });
+        let block = render_ask_user(
+            "ask",
+            &view(&["A", "B"], 1, false),
+            &RenderCtx { width: 80 },
+        );
         // 找到选项 B 行（含 ❯ 标记表示高亮）
         let highlighted = block
             .lines
@@ -157,10 +165,37 @@ mod tests {
             .iter()
             .any(|line| line.plain.contains("[Enter] 确认")));
         // 无选项时不渲染 ↑↓ 选择提示
+        assert!(!block.lines.iter().any(|line| line.plain.contains("[↑↓]")));
+    }
+
+    #[test]
+    fn test_render_ask_user_empty_options_shows_default_line() {
+        // 自由输入模式携带 default 时应渲染 `(default: ...)` 行（迁移回归）。
+        let mut v = view(&[], 0, false);
+        v.options.clear();
+        v.llm_option_count = 0;
+        v.default = Some("main".into());
+        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+        assert!(
+            block
+                .lines
+                .iter()
+                .any(|line| line.plain.contains("(default: main)")),
+            "应渲染 default 提示行"
+        );
+    }
+
+    #[test]
+    fn test_render_ask_user_empty_options_no_default_omits_line() {
+        // 边界：无 default 时不渲染 `(default:` 行。
+        let mut v = view(&[], 0, false);
+        v.options.clear();
+        v.llm_option_count = 0;
+        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
         assert!(!block
             .lines
             .iter()
-            .any(|line| line.plain.contains("[↑↓]")));
+            .any(|line| line.plain.contains("(default:")));
     }
 
     #[test]

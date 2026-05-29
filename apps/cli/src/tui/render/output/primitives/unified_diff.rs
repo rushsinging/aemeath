@@ -58,10 +58,7 @@ pub fn render_unified_diff(text: &str, ext: Option<&str>, _width: u16) -> Vec<Re
 }
 
 /// 单行渲染：保持 `INDENT` 缩进（修 #61 贴最左），按类型着色。
-fn render_line(
-    line: &str,
-    syntax_ref: Option<&syntect::parsing::SyntaxReference>,
-) -> RenderedLine {
+fn render_line(line: &str, syntax_ref: Option<&syntect::parsing::SyntaxReference>) -> RenderedLine {
     let kind = classify(line);
     let mut parts: Vec<SpanPart> = vec![SpanPart::plain(INDENT.to_string(), theme::TEXT_DIM)];
     match kind {
@@ -119,7 +116,10 @@ mod tests {
         );
         // hunk 头行存在且为 dim 色。
         let hunk = lines.iter().find(|l| l.plain.contains("@@")).unwrap();
-        assert!(hunk.spans.iter().any(|s| s.style.fg == Some(theme::TEXT_DIM)));
+        assert!(hunk
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(theme::TEXT_DIM)));
         // 删除行带 remove 语义色。
         let removed = lines.iter().find(|l| l.plain.contains("1;")).unwrap();
         assert!(

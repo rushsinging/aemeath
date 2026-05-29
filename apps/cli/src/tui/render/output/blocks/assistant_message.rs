@@ -123,11 +123,7 @@ mod tests {
         use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
 
         let block = render("```diff\n+let a = 2;\n```");
-        let added = block
-            .lines
-            .iter()
-            .find(|l| l.plain.contains("2;"))
-            .unwrap();
+        let added = block.lines.iter().find(|l| l.plain.contains("2;")).unwrap();
         let add_fg = added
             .spans
             .iter()
@@ -145,7 +141,9 @@ mod tests {
 
         // 选中区段保留原 fg（只叠加 bg），且原新增色仍在。
         assert!(
-            overlaid.iter().all(|s| s.style.bg == Some(theme::SELECTION_BG)),
+            overlaid
+                .iter()
+                .all(|s| s.style.bg == Some(theme::SELECTION_BG)),
             "全选后每段应带选区背景"
         );
         assert!(

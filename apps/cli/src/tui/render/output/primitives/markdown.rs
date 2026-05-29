@@ -196,11 +196,13 @@ mod tests {
         let lines = markdown("> see **this**", Style::default(), 80);
 
         assert!(lines[0].plain.contains("see this"));
-        assert!(lines[0]
-            .spans
-            .iter()
-            .any(|s| s.content.as_ref() == "this"
-                && s.style.add_modifier.contains(Modifier::BOLD)));
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|s| s.content.as_ref() == "this"
+                    && s.style.add_modifier.contains(Modifier::BOLD))
+        );
     }
 
     #[test]

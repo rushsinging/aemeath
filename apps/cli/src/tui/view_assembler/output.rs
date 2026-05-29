@@ -136,6 +136,7 @@ impl OutputViewAssembler {
                     cursor,
                     selected,
                     chat_input_active,
+                    default,
                 } => {
                     blocks.push(output_block(
                         id.clone(),
@@ -148,6 +149,7 @@ impl OutputViewAssembler {
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
+                            default: default.clone(),
                         }),
                     ));
                 }

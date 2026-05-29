@@ -103,7 +103,10 @@ impl super::App {
                                 "Context window: ~{} / {} tokens ({:.0}%)",
                                 est.estimated_tokens, est.context_size, est.usage_percentage
                             ));
-                            self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
+                            self.append_system_notice(format!(
+                                "Messages: {}",
+                                self.chat.messages.len()
+                            ));
                             if est.usage_percentage > 80.0 {
                                 self.append_system_notice("[auto-compaction will trigger at 80%]");
                             }
@@ -149,7 +152,10 @@ impl super::App {
                                 count,
                             ),
                         );
-                        self.append_system_notice(format!("[clipboard image added ({} bytes)]", size));
+                        self.append_system_notice(format!(
+                            "[clipboard image added ({} bytes)]",
+                            size
+                        ));
                     }
                     Err(e) => {
                         self.append_error_notice(format!("Failed to read clipboard: {e}"));
@@ -315,7 +321,10 @@ impl super::App {
                             if let Some(ra) = result.reasoning_active {
                                 self.status_bar.set_thinking(ra);
                             }
-                            self.append_system_notice(format!("[switched to {}]", result.display_name));
+                            self.append_system_notice(format!(
+                                "[switched to {}]",
+                                result.display_name
+                            ));
                         }
                         Err(e) => {
                             self.append_error_notice(format!("model switch failed: {}", e));

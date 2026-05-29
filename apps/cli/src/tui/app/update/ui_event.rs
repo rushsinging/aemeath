@@ -210,8 +210,9 @@ impl App {
                 }
 
                 if all_options.is_empty() {
-                    // 无选项：仍以 AskUser 块渲染问题（自由输入模式），应答走 reply_tx
-                    self.show_ask_user_block(question, Vec::new(), 0, multi_select, 0);
+                    // 无选项：仍以 AskUser 块渲染问题（自由输入模式），应答走 reply_tx；
+                    // 携带 default 以渲染 `(default: ...)` 提示行。
+                    self.show_ask_user_block(question, Vec::new(), 0, multi_select, 0, default);
                     self.input.ask_user_reply_tx = Some(reply_tx);
                 } else {
                     let cursor = default
@@ -224,6 +225,7 @@ impl App {
                         llm_option_count,
                         multi_select,
                         cursor,
+                        None,
                     );
                     self.input.ask_user_state = Some(crate::tui::app::state::AskUserState {
                         reply_tx,

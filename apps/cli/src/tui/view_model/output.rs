@@ -53,6 +53,8 @@ pub struct AskUserBlockView {
     pub selected: Vec<bool>,
     /// 处于「Chat about this...」自由输入子态时不高亮选项。
     pub chat_input_active: bool,
+    /// 无选项自由输入模式下的默认值提示（渲染 `(default: ...)` 行）。
+    pub default: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

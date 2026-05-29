@@ -66,6 +66,8 @@ pub enum ConversationBlock {
         selected: Vec<bool>,
         /// 是否处于「Chat about this...」自由输入子态（此时不高亮选项）。
         chat_input_active: bool,
+        /// 无选项自由输入模式下的默认值提示。
+        default: Option<String>,
     },
 }
 

@@ -72,14 +72,18 @@ impl App {
         llm_option_count: usize,
         multi_select: bool,
         cursor: usize,
+        default: Option<String>,
     ) {
-        self.model.conversation.apply(ConversationIntent::ShowAskUser {
-            question,
-            options,
-            llm_option_count,
-            multi_select,
-            cursor,
-        });
+        self.model
+            .conversation
+            .apply(ConversationIntent::ShowAskUser {
+                question,
+                options,
+                llm_option_count,
+                multi_select,
+                cursor,
+                default,
+            });
         self.refresh_output_widget_from_model();
     }
 
@@ -134,20 +138,27 @@ mod tests {
     fn test_append_system_notice_pushes_system_block() {
         let mut app = make_app();
         app.append_system_notice("你好");
-        let has_system = app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::System { text, .. } if text == "你好")
-        });
-        assert!(has_system, "系统消息应作为 System block 进入 ConversationModel");
+        let has_system =
+            app.model.conversation.blocks.iter().any(
+                |block| matches!(block, ConversationBlock::System { text, .. } if text == "你好"),
+            );
+        assert!(
+            has_system,
+            "系统消息应作为 System block 进入 ConversationModel"
+        );
     }
 
     #[test]
     fn test_append_error_notice_pushes_error_block() {
         let mut app = make_app();
         app.append_error_notice("出错了");
-        let has_error = app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text == "出错了")
-        });
-        assert!(has_error, "错误消息应作为 Error block 进入 ConversationModel");
+        let has_error = app.model.conversation.blocks.iter().any(
+            |block| matches!(block, ConversationBlock::Error { text, .. } if text == "出错了"),
+        );
+        assert!(
+            has_error,
+            "错误消息应作为 Error block 进入 ConversationModel"
+        );
     }
 
     #[test]
@@ -172,11 +183,11 @@ mod tests {
     #[test]
     fn test_append_user_echo_pushes_user_block_without_new_chat() {
         let mut app = make_app();
-        app.model
-            .conversation
-            .apply(crate::tui::model::conversation::intent::ConversationIntent::StartChat {
+        app.model.conversation.apply(
+            crate::tui::model::conversation::intent::ConversationIntent::StartChat {
                 submission: "原始提问".to_string(),
-            });
+            },
+        );
         let chats_before = app.model.conversation.chats.len();
 
         app.append_user_echo("我的答复");
@@ -190,7 +201,10 @@ mod tests {
         let has_user = app.model.conversation.blocks.iter().any(|block| {
             matches!(block, ConversationBlock::UserMessage { text, .. } if text == "我的答复")
         });
-        assert!(has_user, "回显应作为 UserMessage block 进入 ConversationModel");
+        assert!(
+            has_user,
+            "回显应作为 UserMessage block 进入 ConversationModel"
+        );
     }
 
     #[test]

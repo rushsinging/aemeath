@@ -49,6 +49,7 @@ impl ConversationModel {
         llm_option_count: usize,
         multi_select: bool,
         cursor: usize,
+        default: Option<String>,
     ) -> Vec<ConversationChange> {
         let total = options.len();
         let cursor = if total == 0 { 0 } else { cursor.min(total - 1) };
@@ -62,6 +63,7 @@ impl ConversationModel {
             cursor,
             selected: vec![false; total],
             chat_input_active: false,
+            default,
         });
         vec![
             ConversationChange::AskUserShown {
@@ -166,6 +168,7 @@ mod tests {
             llm_option_count: llm,
             multi_select: multi,
             cursor: 0,
+            default: None,
         });
     }
 

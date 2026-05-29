@@ -56,7 +56,12 @@ pub fn build_diff_lines(
                 new_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                out.push(build_context_line(old_line, new_line, width, line_text_trimmed));
+                out.push(build_context_line(
+                    old_line,
+                    new_line,
+                    width,
+                    line_text_trimmed,
+                ));
             }
         }
     }

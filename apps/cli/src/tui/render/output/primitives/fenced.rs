@@ -14,7 +14,8 @@
 
 use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
 use crate::tui::render::output::primitives::{
-    markdown::markdown, rendered_line_from_spanparts, table::table, unified_diff::render_unified_diff,
+    markdown::markdown, rendered_line_from_spanparts, table::table,
+    unified_diff::render_unified_diff,
 };
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::{syntax, theme};
@@ -218,11 +219,7 @@ mod tests {
         let lines = render_fenced_markdown("text", Style::default().fg(theme::TEXT), "  ", 80);
 
         assert!(lines[0].plain.starts_with("  "));
-        let visible: String = lines[0]
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect();
+        let visible: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         // markdown 行 plain 去标记后可能与 visible 不同，但普通文本两者一致。
         assert!(visible.starts_with("  "));
     }
