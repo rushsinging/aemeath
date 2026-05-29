@@ -179,7 +179,6 @@ mod tests {
             tool_title: "Bash".into(),
             summary: None,
             result_text: "```\ncode\n```".into(),
-            is_error: false,
         });
         let tool_node = BlockNode {
             block_id: "tool".into(),

@@ -30,7 +30,6 @@ mod tests {
             tool_title: "Grep".into(),
             summary: None,
             result_text: "done".into(),
-            is_error: false,
         })
     }
 

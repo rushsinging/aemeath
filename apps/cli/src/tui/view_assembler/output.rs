@@ -55,17 +55,14 @@ impl OutputViewAssembler {
                             leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
                         // 工具结果升为子块：取 result_summary 同源文本，附加为 depth-1 子节点。
                         if let Some(result_text) = tool.result_summary.clone() {
+                            let result_id = format!("{}-result", id.as_ref());
                             let child = leaf(
-                                format!("{}-result", id.as_ref()),
+                                result_id.clone(),
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
-                                    key: format!("{}-result", id.as_ref()),
+                                    key: result_id,
                                     tool_title: tool.title.clone(),
                                     summary: tool.summary.clone(),
                                     result_text,
-                                    is_error: matches!(
-                                        tool.semantic_status,
-                                        ToolSemanticStatus::Error
-                                    ),
                                 }),
                             );
                             push_child_checked(&mut parent, child, 1);

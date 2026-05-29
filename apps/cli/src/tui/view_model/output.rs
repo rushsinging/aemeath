@@ -95,7 +95,6 @@ pub struct ToolResultBlockView {
     pub tool_title: String,
     pub summary: Option<String>,
     pub result_text: String,
-    pub is_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

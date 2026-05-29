@@ -81,7 +81,6 @@ mod tests {
             tool_title: tool_title.into(),
             summary: None,
             result_text: result_text.into(),
-            is_error: false,
         }
     }
 
