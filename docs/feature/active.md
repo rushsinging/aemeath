@@ -191,7 +191,7 @@
 1. **diff 渲染完整接线**：`output/diff.rs` + `primitives/diff.rs::diff` 原语已就绪并带测试，但尚未在 ToolCall（Edit/Write 工具结果）或 AssistantMessage 中接通。
 2. **markdown 完整接线**：markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。
 3. **syntax 高亮接线广度**：fence 已接，diff 内语法高亮原语就绪但随 diff 接线一并待办。
-4. **tool 结果摘要渲染**：`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。
+4. **tool 结果摘要渲染**：~~`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。~~（G2 收口：`result_max_lines` 已接入 `format_result_lines`；`format_result_summary` 判定无价值已删除。）
 5. **排队中即时显示**：排队提交需 `key.rs` → `QueueSubmission` 即时反馈、`(default:)` 行、done 间距等交互细节待补。
 
 **TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
@@ -209,6 +209,20 @@
 **allow(dead_code)**：`render/mod.rs` 模块级 `#![allow(dead_code)]` 仍保留——经验证其余未接线 gap 原语（`safe_text::safe_char_at`、`block_cache::contains`、`output_area/display` 换行族、`selection_render::apply_selection_to_line`、theme `ACCENT_BRIGHT`/`DIFF_ADD_BG`/`DIFF_REMOVE_BG`）仍依赖它（去除会触发 9 条 dead_code 警告），不可收窄。本次接线的 `render_unified_diff`/`file_ext_for_edit` 等均已活跃，无需 allow。
 
 **TDD/验证**：先写暴露 M1 的真实 title 测试 + assistant unified diff 测试见红再实现；`cargo build -p cli`、`cargo test -p cli`（394 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
+### #58 G2 · 工具结果 fence/markdown 接线（修 #65）+ 结果摘要 gap 收口
+
+**状态**：待确认（接续 Phase 6 后续 gap 第 2/4 项 + #65）
+
+**修 #65（共享 fence 渲染）**：把原 `blocks/assistant_message.rs` 内联的 fence/markdown/table 状态机提取为共享原语 `primitives/fenced.rs::render_fenced_markdown(text, base_style, indent, width) -> Vec<RenderedLine>`（fence 切换着 TEXT_DIM、` ```diff ` 走 `render_unified_diff`、其余按 fence_lang 语法高亮或 CODE 单色、fence 外走 markdown/table；`indent` 前缀加在每行首并保持 plain 一致）。`assistant_message.rs` 改为单行调用（indent=""），`tool_call.rs::format_result_lines` 改为调用它（indent=INDENT）后再按行数截断。状态机随调用销毁，fence 结束后普通行恢复 base 色，结构上隔离 #65。Edit 工具 `---DIFF---` diff 渲染路径（G1）保持优先——`render_tool_call` 先判 `render_edit_diff`，否则才走 fence/markdown。回归：`primitives/fenced.rs` 8 个单测（正常/空/无闭合 fence/多 fence 交替/indent/diff）+ `tool_call.rs::test_tool_call_result_fence_does_not_leak_code_color_after_close`（先红：旧 `format_result_lines` 单色套行，代码行不为 CODE 色）+ 无闭合 fence/max_lines=0/空结果三个边界测试。
+
+**结果摘要 gap（Phase 6 gap 4）择一处理**：
+- **`result_max_lines` → 接入**：新增 `tool_display::result_max_lines(name)` 查注册的 `ToolDisplay::result_max_lines`（未注册回退 `TOOL_RESULT_MAX_LINES`），`format_result_lines` 用它替换原硬编码 `if tool_name=="TaskListComplete" {0} else {5}`，把行数策略收敛到 `ToolDisplay`（DRY，AskUserQuestion/TaskListCreate/TaskListComplete 的 0 行抑制现已生效），移除其 `allow(dead_code)`。回归 `test_tool_call_result_max_lines_uses_tool_display_zero`。
+- **`format_result_summary` → 删除**：该方法合成「✓ {name} completed」类摘要字符串，但 G1/G2 管线渲染的是 `call.result` 真实结果文本，从未调用它；返回 `vec![]` 的 override 等价于 `result_max_lines()==0`（已覆盖），AskUserQuestion 的「✓ 已回答」在 `result_max_lines==0` 下不渲染亦无意义。故删除 trait 默认方法 + 全部 5 处 override（tool_impls AskUserQuestion、task_impls TaskListCreate/TaskListComplete/EnterPlanMode/ExitPlanMode）+ 其 `allow(dead_code)`，避免接入会以合成文本覆盖真实结果。
+
+**测试副作用修正**：`app/state/tests.rs::test_thinking_then_grep_renders_tool_block_in_output_area` 此前未设 `layout.output_area_rect`，宽度回退为 1，工具结果走 markdown 换行后逐字拆行。设 `output_area_rect = Rect::new(0,0,100,40)` 提供真实宽度（与实际终端行为一致）。
+
+**TDD/验证**：先写 #65 工具结果 fence 回归见红（旧代码代码行非 CODE 色）再实现；`cargo build -p cli`、`cargo test -p cli`（406 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 

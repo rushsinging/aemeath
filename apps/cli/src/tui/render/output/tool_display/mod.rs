@@ -24,19 +24,8 @@ pub trait ToolDisplay: Send + Sync {
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
     /// Max lines of result output to show (default 5).
-    #[allow(dead_code)]
     fn result_max_lines(&self) -> usize {
         TOOL_RESULT_MAX_LINES
-    }
-
-    /// Format the result summary line(s). Default: "✓ {name} completed".
-    #[allow(dead_code)]
-    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
-        if is_error {
-            vec![format!("✗ {} failed", self.name())]
-        } else {
-            vec![format!("✓ {} completed", self.name())]
-        }
     }
 }
 
@@ -59,6 +48,16 @@ static TOOL_DISPLAYS: LazyLock<HashMap<&'static str, Box<dyn ToolDisplay>>> = La
 
 pub(crate) fn lookup_display(name: &str) -> Option<&'static dyn ToolDisplay> {
     TOOL_DISPLAYS.get(name).map(|display| display.as_ref())
+}
+
+/// 返回某工具结果在 TUI 中最多展示的行数。
+///
+/// 取自该工具注册的 `ToolDisplay::result_max_lines`；未注册的工具回退到默认值。
+/// 把行数策略收敛到 `ToolDisplay`，避免在渲染层硬编码工具名特判（DRY）。
+pub fn result_max_lines(name: &str) -> usize {
+    lookup_display(name)
+        .map(|display| display.result_max_lines())
+        .unwrap_or(TOOL_RESULT_MAX_LINES)
 }
 
 /// Format a tool call for human-friendly display.

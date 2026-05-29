@@ -1,13 +1,8 @@
-use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
-use crate::tui::render::output::primitives::{
-    markdown::markdown, rendered_line_from_spanparts, table::table,
-    unified_diff::render_unified_diff,
-};
+use crate::tui::render::output::primitives::fenced::render_fenced_markdown;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
-use crate::tui::render::{syntax, theme};
+use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
-use ratatui::text::Span;
 
 pub fn render_assistant_message(
     block_id: &str,
@@ -15,68 +10,8 @@ pub fn render_assistant_message(
     ctx: &RenderCtx,
 ) -> RenderedBlock {
     let base = Style::default().fg(theme::ASSISTANT);
-    let mut lines: Vec<RenderedLine> = Vec::new();
-    let src = view.text.lines().collect::<Vec<_>>();
-    let mut idx = 0;
-    let mut in_fence = false;
-    let mut fence_lang: Option<String> = None;
-
-    while idx < src.len() {
-        let line = src[idx];
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
-            if in_fence {
-                in_fence = false;
-                fence_lang = None;
-            } else {
-                in_fence = true;
-                fence_lang = Some(trimmed.trim_start_matches('`').trim().to_string());
-            }
-            lines.push(RenderedLine::new(vec![Span::styled(
-                line.to_string(),
-                Style::default().fg(theme::TEXT_DIM),
-            )]));
-            idx += 1;
-            continue;
-        }
-
-        if in_fence {
-            // ` ```diff ` 代码块走 unified diff 渲染（行号信息来自 @@ 原文）：
-            // 保留 INDENT 缩进 + 加减语义色 + 新增行语法高亮，修复 #61。
-            if fence_lang.as_deref() == Some("diff") {
-                lines.extend(render_unified_diff(line, None, ctx.width));
-                idx += 1;
-                continue;
-            }
-            let syntax_ref = fence_lang
-                .as_deref()
-                .and_then(syntax::language_by_extension);
-            if let Some(parts) = syntax::highlight_line(line, syntax_ref.as_ref()) {
-                lines.push(rendered_line_from_spanparts(&parts));
-            } else {
-                lines.push(RenderedLine::new(vec![Span::styled(
-                    line.to_string(),
-                    Style::default().fg(theme::CODE),
-                )]));
-            }
-            idx += 1;
-            continue;
-        }
-
-        if is_table_row(line) && idx + 1 < src.len() && is_table_separator(src[idx + 1]) {
-            let mut end = idx;
-            while end < src.len() && is_table_row(src[end]) {
-                end += 1;
-            }
-            let block_src: Vec<&str> = src.iter().skip(idx).take(end - idx).copied().collect();
-            lines.extend(table(&block_src, base, ctx.width));
-            idx = end;
-            continue;
-        }
-
-        lines.extend(markdown(line, base, ctx.width));
-        idx += 1;
-    }
+    // fence/markdown/table 解析统一走 primitives::fenced（DRY，与工具结果共用）。
+    let mut lines = render_fenced_markdown(&view.text, base, "", ctx.width);
 
     if lines.is_empty() {
         lines.push(RenderedLine::default());
