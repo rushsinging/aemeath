@@ -142,6 +142,7 @@ aemeath/                    # workspace root
 
 ## Bug/Feature 追踪联动
 
+- **编号独立**：bug 与 feature **NEVER** 共享编号序列，各自独立递增。bug 编号取 `docs/bug/active.md` 与 `docs/bug/archived/` 的最大值 +1；feature 编号取 `docs/feature/active.md` 与 `docs/feature/archived/` 的最大值 +1。新增条目前 **MUST** 在对应类别（bug 或 feature）内核对最大编号，不得跨类别取号。
 - **Bug 修复 MUST 使用 git worktree**：修复 bug 或实现 feature 时，**MUST** 在独立 git worktree 中执行所有修改，NEVER 直接在 `main` 工作区修改。worktree 分支完成验证并提交后合并回 `main`，在 `main` 上运行对应验证后清理已完成的 worktree。详见上方工作流约束。
 - **Bug 状态流程**：`活动中` → `修复中` → `待确认` → 用户确认后归档。
 - **修改涉及已知 bug 时 MUST**：
