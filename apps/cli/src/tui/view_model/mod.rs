@@ -1,13 +1,18 @@
-#![allow(dead_code)]
-
+// 以下模块为后续单源迁移子任务（S2~S5：dialog/input/status）预备的 ViewModel 脚手架，
+// 当前尚未接线消费，故按模块标注 dead_code（spinner 派生的 live_status 已接线，不在此列）。
+#[allow(dead_code)]
 pub mod dialog;
+#[allow(dead_code)]
 pub mod input;
+pub mod live_status;
 pub mod output;
+#[allow(dead_code)]
 pub mod status;
 pub mod style;
 
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
+pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use output::{
     AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,

@@ -2,6 +2,7 @@ use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -34,6 +35,9 @@ impl App {
 
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();
+
+            // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
+            self.refresh_live_status_from_model();
 
             // Draw UI
             self.draw(terminal)?;
@@ -85,8 +89,7 @@ impl App {
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
-                    self.output_area.start_spinner();
-                    self.output_area.set_spinner_phase("Thinking...");
+                    self.spinner_phase(SpinnerPhase::Thinking);
                     self.chat.start_processing();
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
                         processing::spawn_processing(spawn_ctx);

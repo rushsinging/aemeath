@@ -38,6 +38,8 @@ pub enum OutputBlockKind {
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
     AskUser(AskUserBlockView),
+    /// 预留：分隔块（后续渲染管线 S 任务接线，当前仅测试构造）。
+    #[allow(dead_code)]
     Separator,
 }
 
@@ -99,6 +101,8 @@ pub struct ToolResultBlockView {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
+    /// 预留：工具尚未开始执行（当前 assembler 未产出此状态）。
+    #[allow(dead_code)]
     Pending,
     Running,
     Success,

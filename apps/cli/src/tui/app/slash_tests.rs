@@ -223,6 +223,12 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
         "/reflect 应返回前台 RunReflection Effect"
     );
     assert!(app.chat.is_processing, "/reflect 后应进入后台处理中状态");
+    // spinner 业务真相在 Model；widget 镜像经 refresh_live_status_from_model 单向派生。
+    assert!(
+        app.model.runtime.spinner.active,
+        "/reflect 后 Model spinner 应 active"
+    );
+    app.refresh_live_status_from_model();
     assert!(app.output_area.spinner.is_some());
 
     // 由 executor 执行 Effect：后台 spawn 调用 LLM，不阻塞调用方。
@@ -278,8 +284,13 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
         .expect("第二轮应触发后台 reflection");
     assert!(!app.chat.is_processing, "自动 reflection 不应阻塞 UI 输入");
     assert!(
+        !app.model.runtime.spinner.active,
+        "自动 reflection 不应启动 spinner（Model 真相）"
+    );
+    app.refresh_live_status_from_model();
+    assert!(
         app.output_area.spinner.is_none(),
-        "自动 reflection 不应启动 spinner"
+        "自动 reflection 不应启动 spinner（widget 镜像）"
     );
 
     let _ = finish_tx.send(());
@@ -332,7 +343,10 @@ async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
 
     let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);
     let effect = app.maybe_auto_reflect();
-    assert!(effect.is_none(), "已有 pending reflection 时不应返回 Effect");
+    assert!(
+        effect.is_none(),
+        "已有 pending reflection 时不应返回 Effect"
+    );
 
     assert_eq!(app.chat.turn_count, 1);
     assert!(

@@ -14,6 +14,7 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
+use crate::tui::adapter::live_status_widget::apply_live_status_to_widget;
 use crate::tui::adapter::output_widget::render_document_from_view_model;
 use crate::tui::adapter::status_widget::{
     apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
@@ -124,7 +125,9 @@ impl App {
                 UpdateResult::none()
             }
             TuiMsg::SpinnerTick => {
-                self.output_area.tick_spinner();
+                // 动画帧真相归 view_state；spinner 是否可见由 Model 决定，
+                // 镜像写回统一在每帧渲染前的 refresh_live_status_from_model。
+                self.view_state.spinner.advance();
                 UpdateResult::none()
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
@@ -173,6 +176,29 @@ impl App {
         );
         let width = self.layout.output_area_rect.width.saturating_sub(2).max(1);
         render_document_from_view_model(&mut self.output_area, &view_model, width);
+    }
+
+    /// 据 Model 业务态（spinner.active + phase）+ view_state 动画态（frame/verb）
+    /// 派生实时状态行，单向写回 widget 镜像。这是 spinner/task 镜像的唯一写入路径。
+    ///
+    /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
+    /// 而非纯 reducer：
+    /// - 由 inactive→active（verb 为空）时一次性 `pick_verb`（选 verb + 复位 frame=0）；
+    /// - inactive 时复位 view_state.spinner，使下次激活重新 pick，elapsed/frame 归零。
+    pub(crate) fn refresh_live_status_from_model(&mut self) {
+        let active = self.model.runtime.spinner.active;
+        if active {
+            if self.view_state.spinner.verb.is_empty() {
+                self.view_state.spinner.pick_verb();
+            }
+        } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
+            self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
+        }
+        let vm = crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
+            &self.model.runtime,
+            &self.view_state.spinner,
+        );
+        apply_live_status_to_widget(&mut self.output_area, &vm);
     }
 }
 

@@ -4,11 +4,13 @@ pub mod animation;
 pub mod input;
 pub mod layout;
 pub mod output;
+pub mod spinner_anim;
 
 pub use animation::AnimationViewState;
 pub use input::InputViewState;
 pub use layout::LayoutViewState;
 pub use output::OutputViewState;
+pub use spinner_anim::SpinnerAnim;
 
 #[derive(Debug, Default)]
 pub struct AppViewState {
@@ -16,6 +18,7 @@ pub struct AppViewState {
     pub input: InputViewState,
     pub layout: LayoutViewState,
     pub animation: AnimationViewState,
+    pub spinner: SpinnerAnim,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

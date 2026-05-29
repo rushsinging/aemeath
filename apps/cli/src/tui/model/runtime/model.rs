@@ -1,6 +1,7 @@
 use super::change::RuntimeChange;
 use super::intent::RuntimeIntent;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
+use super::spinner::SpinnerModel;
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
 use super::workspace::WorkspaceState;
@@ -14,6 +15,7 @@ pub struct RuntimeModel {
     pub live_tps: Option<f64>,
     pub task_status: TaskStatusSnapshot,
     pub processing_jobs: Vec<ProcessingJob>,
+    pub spinner: SpinnerModel,
 }
 
 impl RuntimeModel {
@@ -73,6 +75,7 @@ impl RuntimeModel {
                     total,
                     completed,
                     in_progress,
+                    lines: std::mem::take(&mut self.task_status.lines),
                 };
                 vec![RuntimeChange::TaskStatusChanged {
                     total,
@@ -97,6 +100,20 @@ impl RuntimeModel {
                     };
                 }
                 vec![RuntimeChange::ProcessingJobChanged { id }]
+            }
+            RuntimeIntent::SetSpinnerPhase(phase) => {
+                self.spinner.active = true;
+                self.spinner.phase = Some(phase);
+                vec![RuntimeChange::SpinnerPhaseChanged]
+            }
+            RuntimeIntent::StopSpinner => {
+                self.spinner.active = false;
+                self.spinner.phase = None;
+                vec![RuntimeChange::SpinnerStopped]
+            }
+            RuntimeIntent::UpdateTaskLines(lines) => {
+                self.task_status.lines = lines;
+                vec![RuntimeChange::TaskLinesChanged]
             }
         }
     }
@@ -130,6 +147,60 @@ mod tests {
         });
         assert_eq!(model.usage.input_tokens, 10);
         assert_eq!(model.usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn test_runtime_set_spinner_phase_activates_and_sets() {
+        use crate::tui::model::runtime::spinner::SpinnerPhase;
+        let mut model = RuntimeModel::default();
+        assert!(!model.spinner.active);
+        let changes = model.apply(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
+        assert!(model.spinner.active);
+        assert_eq!(model.spinner.phase, Some(SpinnerPhase::Thinking));
+        assert!(matches!(
+            changes.first(),
+            Some(RuntimeChange::SpinnerPhaseChanged)
+        ));
+    }
+
+    #[test]
+    fn test_runtime_stop_spinner_idempotent() {
+        use crate::tui::model::runtime::spinner::SpinnerPhase;
+        let mut model = RuntimeModel::default();
+        model.apply(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
+        model.apply(RuntimeIntent::StopSpinner);
+        let changes = model.apply(RuntimeIntent::StopSpinner);
+        assert!(!model.spinner.active);
+        assert_eq!(model.spinner.phase, None);
+        assert!(matches!(
+            changes.first(),
+            Some(RuntimeChange::SpinnerStopped)
+        ));
+    }
+
+    #[test]
+    fn test_runtime_update_task_lines() {
+        let mut model = RuntimeModel::default();
+        let changes = model.apply(RuntimeIntent::UpdateTaskLines(vec!["a".to_string()]));
+        assert_eq!(model.task_status.lines, vec!["a".to_string()]);
+        assert!(matches!(
+            changes.first(),
+            Some(RuntimeChange::TaskLinesChanged)
+        ));
+    }
+
+    #[test]
+    fn test_runtime_update_task_status_preserves_lines() {
+        // 计数更新（UpdateTaskStatus）不得清空已设置的显示行（UpdateTaskLines）。
+        let mut model = RuntimeModel::default();
+        model.apply(RuntimeIntent::UpdateTaskLines(vec!["x".to_string()]));
+        model.apply(RuntimeIntent::UpdateTaskStatus {
+            total: 2,
+            completed: 1,
+            in_progress: 1,
+        });
+        assert_eq!(model.task_status.lines, vec!["x".to_string()]);
+        assert_eq!(model.task_status.total, 2);
     }
 
     #[test]

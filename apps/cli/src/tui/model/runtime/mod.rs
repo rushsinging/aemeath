@@ -7,6 +7,7 @@ pub mod session_intent;
 pub mod session_metadata;
 pub mod session_model;
 pub mod session_resume;
+pub mod spinner;
 pub mod task_status;
 pub mod usage;
 pub mod workspace;

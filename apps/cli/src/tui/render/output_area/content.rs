@@ -19,9 +19,4 @@ impl super::OutputArea {
         self.todo_subject_cache.clear();
         self.task_status_lines.clear();
     }
-
-    /// 更新 spinner 下方显示的任务状态行
-    pub fn set_task_status(&mut self, lines: Vec<String>) {
-        self.task_status_lines = lines;
-    }
 }
