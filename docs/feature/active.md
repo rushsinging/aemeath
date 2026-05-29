@@ -20,6 +20,25 @@
 | 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
 | 59 | TUI Model/View 单源迁移收口（伞型 roadmap） | 中 | S3 待确认 | 未确认 | 对账 #53/#55/#56/#57/#58 已有迁移成果与 6 个现存 guard，列出真正未被守护的剩余单源缺口，定义收口顺序。采用单写入者/单向 + guard 范式（非"状态零留 widget"）。子项：S1 OutputArea live tail（spinner+task window 入 Model）、S2 OutputArea 滚动/follow-tail/选区入 Model、S3 StatusBar 去镜像+单写入者（✅ 完成）、S4 选区统一+mouse_handler 走 intent、S5 Effect 化 tea-purity 豁免名单内副作用（✅ 部分完成：reflection/clipboard 已 Effect 化并移出豁免，slash/dialog/suggestions/save/memory 异步分发与同步取模型列表为剩余 gap）。每子项各走独立 spec→plan→实施并加对应 guard。详见 [roadmap](../superpowers/specs/2026-05-29-tui-single-source-completion-roadmap.md) |
 | 60 | Auto-compact LLM 语义化压缩 | 中 | 实现中 | 未确认 | 将 auto-compact 的本地文本摘要（build_summary_text：每消息取前200字+工具名）替换为 LLM 调用（build_compact_request + COMPACT_PROMPT），生成结构化摘要（目标/进度/关键决策/相关文件/当前状态/下一步）。失败时回退到本地摘要。涉及：summary.rs 新增 compact_messages_with_llm（async + Arc<LlmClient>），looping/compact.rs 传参，trait_command.rs 走 LLM 路径 |
+| 61 | 架构债务收口（047 DDD 软约束落实） | 中 | 活动中 | 未确认 | 047 DDD spec 的**硬约束**（依赖图/CLI 薄入口/share 无上游/COLA 纯度/forbidden import/行数，6 个 guard）已全部遵守且焊死；guard 不强制的**软约束**仍停留在 spec 已标注的「技术债/未实现」状态，docs 此前无落实计划。子项（按优先级）：**D1** `runtime::api` 去整体转发（现 `pub use audit/hook/policy/.../tools` + `share::*` 整体转发，违 §6.4.3 rule4；改为 use case 门面，最高优先、低风险）；**D2** share 瘦身（移出 `config`/`memory`/`task`/`tool` 等带行为/IO 模块到对应 domain，回归最小内核，§6.4.1 rule6，工作量大）；**D3** supporting domain Public API 收窄（8/10 crate 的 api.rs 仍是 Marker/转发，改 use case 门面，§6.4.3）；**D4** COLA 内部分层 core/business/utils（仅 runtime 完整，9/10 平铺，§6.4.3/§7.2，与 D3 协同）；**D5** audit 实现（现空骨架，AuditTrail/correlation id/policy·hook·outcome 记录，§4.2/§8/§9，依赖需求）；**D6** policy/PermissionEngine 实现（现仅 security 扫描，PermissionRequest/Decision/Grant，§4.3/§9，关联 #42）。详见 [spec](specs/047-ddd-redesign.md) 与下方详情段。 |
+
+### #61 架构债务收口（047 DDD 软约束落实）
+
+**状态**：活动中
+
+**背景**：2026-05-29 核对 047 DDD spec vs `agent/` 实现——**硬约束（6 个架构 guard：Cargo 依赖图/CLI 薄入口/share 无上游/COLA 纯度/forbidden import/行数）全部遵守且焊死**，经历 #58/#59 等大量并行开发后仍未破。但 guard 不强制的**软约束**仍停留在 spec 已标注的「技术债/未实现」状态，docs 此前未登记落实计划。本 feature 把这些债务转为可执行子项。
+
+**子项（按优先级 / 风险）**：
+1. **D1 `runtime::api` 去整体转发**（§6.4.3 rule4，**最高优先、低风险**）：`agent/runtime/src/api.rs` 当前 `pub use audit/hook/policy/project/prompt/provider/storage/tools` + `pub use share::*` 整体转发下游 crate，违反"api 只暴露 use case/DTO、不暴露内部"。改为只 re-export 业务 use case（chat/session/agent_runner 等）。
+2. **D2 share 瘦身**（§6.4.1 rule6，**工作量大**）：`agent/share`（55 文件）含 `config`(19f)/`memory`(9f)/`task`(8f)/`tool`(1f，ToolRegistry/ToolContext) 等带行为/IO 类型，超出"最小共享内核"。移出到对应 domain，保留 message/session_types/error/string_idx。
+3. **D3 supporting domain Public API 收窄**（§6.4.3）：project/prompt/storage/policy/hook 的 api.rs 仍是 `XxxApiMarker`/`pub use 内部::*`，tools/provider 无 api facade。收窄为 use case 门面、内部 crate-private。
+4. **D4 COLA 内部分层 core/business/utils**（§6.4.3/§7.2）：仅 runtime 完整分层，其余 8 个平铺。与 D3 协同。
+5. **D5 audit 实现**（§4.2/§8/§9，**依赖审计需求、可暂缓**）：现空骨架（仅 `AuditApiMarker` 14 行）。实现 AuditTrail/correlation id、policy·hook·outcome 三分记录。
+6. **D6 policy/PermissionEngine 实现**（§4.3/§9，**关联 #42**）：现仅 `security` 内容扫描（149 行），无权限模型。实现 PermissionRequest/Decision/Grant/Mode/Capability。
+
+**性质**：纯架构债务收口，不改业务行为。各子项 SHOULD 独立走 spec→plan→实施；D1/D2/D3 完成后 SHOULD 补对应 guard（如 api 收窄 guard）防回归。
+
+**关联**：feature #47（DDD spec 基线）、#42（权限管控系统，对应 D6）。
 
 ### #59 S3 · StatusBar 去镜像 + 单写入者
 
