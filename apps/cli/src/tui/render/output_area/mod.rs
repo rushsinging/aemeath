@@ -16,9 +16,6 @@ mod selection_render;
 pub mod spinner;
 pub mod types;
 
-#[cfg(test)]
-mod content_tests;
-
 // 重新导出核心类型，方便外部使用
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 
@@ -47,8 +44,6 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// spinner 下方显示的任务状态行
     pub task_status_lines: Vec<String>,
-    /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
-    pub ask_user_block_start: Option<usize>,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
     /// 新输出渲染管线的 block 级缓存渲染器。
@@ -83,7 +78,6 @@ impl OutputArea {
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
-            ask_user_block_start: None,
             document: RenderedDocument::default(),
             document_renderer: OutputDocumentRenderer::default(),
         }

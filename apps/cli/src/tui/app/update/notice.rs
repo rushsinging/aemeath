@@ -36,6 +36,57 @@ impl App {
             .apply(ConversationIntent::AppendError { text: text.into() });
         self.refresh_output_widget_from_model();
     }
+
+    /// 显示 AskUserQuestion 交互块（问题 + 选项），作为渲染单一真相进入 ConversationModel。
+    pub(crate) fn show_ask_user_block(
+        &mut self,
+        question: String,
+        options: Vec<String>,
+        llm_option_count: usize,
+        multi_select: bool,
+        cursor: usize,
+    ) {
+        self.model.conversation.apply(ConversationIntent::ShowAskUser {
+            question,
+            options,
+            llm_option_count,
+            multi_select,
+            cursor,
+        });
+        self.refresh_output_widget_from_model();
+    }
+
+    /// 更新 AskUser 块光标位置（选项导航高亮），并刷新文档。
+    pub(crate) fn set_ask_user_cursor(&mut self, cursor: usize) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::SetAskUserCursor { cursor });
+        self.refresh_output_widget_from_model();
+    }
+
+    /// 切换 AskUser 块某选项勾选状态（multi_select），并刷新文档。
+    pub(crate) fn toggle_ask_user_selected(&mut self, index: usize) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::ToggleAskUserSelected { index });
+        self.refresh_output_widget_from_model();
+    }
+
+    /// 设置 AskUser 块是否处于「Chat about this...」自由输入子态，并刷新文档。
+    pub(crate) fn set_ask_user_chat_input(&mut self, active: bool) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::SetAskUserChatInput { active });
+        self.refresh_output_widget_from_model();
+    }
+
+    /// 移除 AskUser 交互块（用户提交/取消后折叠），并刷新文档。
+    pub(crate) fn dismiss_ask_user_block(&mut self) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::DismissAskUser);
+        self.refresh_output_widget_from_model();
+    }
 }
 
 #[cfg(test)]

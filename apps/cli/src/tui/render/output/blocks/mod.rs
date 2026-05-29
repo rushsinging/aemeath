@@ -3,6 +3,7 @@
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
 use crate::tui::view_model::output::OutputBlockKind;
 
+pub mod ask_user;
 pub mod assistant_message;
 pub mod diagnostic;
 pub mod queued_submission;
@@ -24,6 +25,7 @@ pub fn render_block(kind: &OutputBlockKind, block_id: &str, ctx: &RenderCtx) -> 
         OutputBlockKind::UserMessage(text) => {
             user_message::render_user_message(block_id, text, ctx)
         }
+        OutputBlockKind::AskUser(ask) => ask_user::render_ask_user(block_id, ask, ctx),
         OutputBlockKind::Separator => separator::render_separator(block_id),
         OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
             diagnostic::render_diagnostic(block_id, text, ctx)

@@ -48,6 +48,25 @@ pub enum ConversationBlock {
         output: String,
         is_error: bool,
     },
+    /// AskUserQuestion 交互块（问题 + 选项列表）。渲染与选项导航高亮的单一真相。
+    ///
+    /// 选项导航的可变状态（`cursor`、`selected`、`chat_input_active`）随键盘交互
+    /// 派发 intent 写入本块，渲染组件据此高亮，避免命令式重写输出行。
+    AskUser {
+        id: String,
+        question: String,
+        /// 全部选项（LLM 选项 + 内建选项）。
+        options: Vec<String>,
+        /// LLM 提供的选项数量（内建选项从该索引开始，不可在 multi_select 下勾选）。
+        llm_option_count: usize,
+        multi_select: bool,
+        /// 当前光标所在选项索引（导航高亮的单一真相）。
+        cursor: usize,
+        /// multi_select 下各选项是否已勾选。
+        selected: Vec<bool>,
+        /// 是否处于「Chat about this...」自由输入子态（此时不高亮选项）。
+        chat_input_active: bool,
+    },
 }
 
 impl ConversationBlock {
@@ -60,7 +79,8 @@ impl ConversationBlock {
             | ConversationBlock::Error { id, .. }
             | ConversationBlock::QueuedUserMessage { id, .. }
             | ConversationBlock::AgentProgress { id, .. }
-            | ConversationBlock::OrphanToolResult { id, .. } => id,
+            | ConversationBlock::OrphanToolResult { id, .. }
+            | ConversationBlock::AskUser { id, .. } => id,
             ConversationBlock::ToolCall { id, .. } | ConversationBlock::ToolResult { id, .. } => {
                 id.as_ref()
             }

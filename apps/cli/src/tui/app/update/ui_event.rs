@@ -1,4 +1,3 @@
-use super::ask_user_options::build_option_line_ranges;
 use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
@@ -210,35 +209,29 @@ impl App {
                     all_options.push(crate::tui::app::state::BUILTIN_OPTION_CHAT.to_string());
                 }
 
-                let default_ref = default.as_deref();
-                let option_line_start = self.output_area.push_ask_user(
-                    &question,
-                    &all_options,
-                    default_ref,
-                    multi_select,
-                );
-
-                if let Some(start) = option_line_start {
+                if all_options.is_empty() {
+                    // 无选项：仍以 AskUser 块渲染问题（自由输入模式），应答走 reply_tx
+                    self.show_ask_user_block(question, Vec::new(), 0, multi_select, 0);
+                    self.input.ask_user_reply_tx = Some(reply_tx);
+                } else {
                     let cursor = default
                         .as_ref()
                         .and_then(|d| all_options.iter().position(|o| o == d))
                         .unwrap_or(0);
-                    let total = all_options.len();
-                    let option_line_ranges = build_option_line_ranges(start, &all_options);
+                    self.show_ask_user_block(
+                        question,
+                        all_options.clone(),
+                        llm_option_count,
+                        multi_select,
+                        cursor,
+                    );
                     self.input.ask_user_state = Some(crate::tui::app::state::AskUserState {
                         reply_tx,
                         options: all_options,
                         llm_option_count,
-                        cursor,
                         multi_select,
-                        selected: vec![false; total],
-                        option_line_ranges,
                         allow_free_input,
-                        chat_input_active: false,
                     });
-                } else {
-                    // 无选项：退回自由输入模式
-                    self.input.ask_user_reply_tx = Some(reply_tx);
                 }
                 self.output_area.stop_spinner();
             }

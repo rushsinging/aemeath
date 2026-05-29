@@ -1,35 +1,5 @@
 use super::types::{LineStyle, OutputLine, MAX_LINES};
 
-pub fn format_ask_user_option_lines(
-    index: usize,
-    option: &str,
-    active: bool,
-    multi_select: bool,
-) -> Vec<String> {
-    let prefix = if multi_select {
-        let check = if active { "✓" } else { " " };
-        format!("  [{check}] {}. ", index + 1)
-    } else {
-        let marker = if active { "❯" } else { " " };
-        format!("  {marker} {}. ", index + 1)
-    };
-    let continuation = " ".repeat(prefix.chars().count());
-    let mut lines = Vec::new();
-    let parts: Vec<&str> = option.lines().collect();
-    if parts.is_empty() {
-        lines.push(prefix);
-        return lines;
-    }
-    for (line_idx, part) in parts.iter().enumerate() {
-        if line_idx == 0 {
-            lines.push(format!("{prefix}{part}"));
-        } else {
-            lines.push(format!("{continuation}{part}"));
-        }
-    }
-    lines
-}
-
 impl super::OutputArea {
     /// 在指定索引处插入一批行
     pub(crate) fn insert_lines_at(&mut self, idx: usize, lines: Vec<OutputLine>) {
@@ -65,140 +35,6 @@ impl super::OutputArea {
         self.lines.push_back(line);
         if !self.auto_scroll {
             self.scroll_offset += 1;
-        }
-    }
-
-
-    /// 添加 AskUserQuestion 确认界面
-    /// 添加 AskUserQuestion 界面，返回选项行在 lines 中的起始索引（无选项返回 None）
-    pub fn push_ask_user(
-        &mut self,
-        question: &str,
-        options: &[String],
-        default: Option<&str>,
-        multi_select: bool,
-    ) -> Option<usize> {
-        self.ask_user_block_start = Some(self.lines.len());
-
-        // 分隔标题行
-        self.push_line(OutputLine {
-            content: "━━ 需要你的回答 ━━".to_string(),
-            style: LineStyle::AskUser,
-            ..Default::default()
-        });
-
-        // 空行
-        self.push_line(OutputLine {
-            content: String::new(),
-            style: LineStyle::Normal,
-            ..Default::default()
-        });
-
-        // 问题文本（醒目样式）
-        for line in question.lines() {
-            self.push_line(OutputLine {
-                content: line.to_string(),
-                style: LineStyle::AskUser,
-                ..Default::default()
-            });
-        }
-
-        if options.is_empty() {
-            if let Some(d) = default {
-                self.push_line(OutputLine {
-                    content: format!("  (default: {d})"),
-                    style: LineStyle::System,
-                    ..Default::default()
-                });
-            }
-            // 操作提示
-            self.push_line(OutputLine {
-                content: String::new(),
-                style: LineStyle::Normal,
-                ..Default::default()
-            });
-            self.push_line(OutputLine {
-                content: "  [Enter] 确认  [Esc] 取消".to_string(),
-                style: LineStyle::System,
-                ..Default::default()
-            });
-            return None;
-        }
-
-        // 操作提示行
-        let hint = if multi_select {
-            "  [↑↓] 移动  [Space] 选中/取消  [Enter] 确认  [Esc] 取消"
-        } else {
-            "  [↑↓] 选择  [Enter] 确认  [Esc] 取消"
-        };
-        self.push_line(OutputLine {
-            content: hint.to_string(),
-            style: LineStyle::System,
-            ..Default::default()
-        });
-
-        // 空行分隔
-        self.push_line(OutputLine {
-            content: String::new(),
-            style: LineStyle::Normal,
-            ..Default::default()
-        });
-
-        let option_start = self.lines.len();
-
-        for (i, opt) in options.iter().enumerate() {
-            let is_default = default.as_ref().map_or(i == 0, |d| opt == d);
-            for (line_idx, content) in
-                format_ask_user_option_lines(i, opt, is_default, multi_select)
-                    .into_iter()
-                    .enumerate()
-            {
-                self.push_line(OutputLine {
-                    content,
-                    style: if line_idx == 0 && is_default {
-                        LineStyle::AskUser
-                    } else {
-                        LineStyle::Normal
-                    },
-                    ..Default::default()
-                });
-            }
-        }
-
-        // 底部空行
-        self.push_line(OutputLine {
-            content: String::new(),
-            style: LineStyle::Normal,
-            ..Default::default()
-        });
-
-        Some(option_start)
-    }
-
-    /// 原地更新 AskUser 选项行的显示
-    pub fn update_ask_user_options(
-        &mut self,
-        option_line_ranges: &[std::ops::Range<usize>],
-        options: &[String],
-        cursor: usize,
-        multi_select: bool,
-        selected: &[bool],
-    ) {
-        for (i, opt) in options.iter().enumerate() {
-            let is_highlight = i == cursor || (multi_select && selected[i]);
-            let rendered = format_ask_user_option_lines(i, opt, is_highlight, multi_select);
-            if let Some(range) = option_line_ranges.get(i) {
-                for (line_idx, line_pos) in range.clone().enumerate() {
-                    if let Some(line) = self.lines.get_mut(line_pos) {
-                        line.content = rendered.get(line_idx).cloned().unwrap_or_default();
-                        line.style = if is_highlight && line_idx == 0 {
-                            LineStyle::AskUser
-                        } else {
-                            LineStyle::Normal
-                        };
-                    }
-                }
-            }
         }
     }
 
@@ -257,18 +93,6 @@ impl super::OutputArea {
         self.reset_runtime_state();
     }
 
-    /// 移除 AskUserQuestion 互动块（separator + 问题 + 提示行），用于用户提交答案后折叠。
-    /// 必须在回显用户答案（`App::append_user_echo`）之前调用，否则会把答案行一起删除。
-    pub fn dismiss_ask_user_block(&mut self) {
-        if let Some(start) = self.ask_user_block_start.take() {
-            let start = start.min(self.lines.len());
-            let drain_count = self.lines.len().saturating_sub(start);
-            for _ in 0..drain_count {
-                self.lines.pop_back();
-            }
-        }
-    }
-
     /// 重置输出区域的运行态临时数据
     pub fn reset_runtime_state(&mut self) {
         self.scroll_offset = 0;
@@ -282,7 +106,6 @@ impl super::OutputArea {
         self.last_visible_height = 0;
         self.todo_subject_cache.clear();
         self.task_status_lines.clear();
-        self.ask_user_block_start = None;
     }
 
     /// 更新 spinner 下方显示的任务状态行

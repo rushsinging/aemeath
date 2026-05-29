@@ -181,6 +181,9 @@ fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[Conversat
             | ConversationChange::QueuedSubmissionsCleared { .. }
             | ConversationChange::AgentProgressRecorded { .. }
             | ConversationChange::TextBlockCompleted { .. }
+            | ConversationChange::AskUserShown { .. }
+            | ConversationChange::AskUserUpdated { .. }
+            | ConversationChange::AskUserDismissed
             | ConversationChange::StyleBoundaryResetRequired => result.dirty.mark_output(),
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }

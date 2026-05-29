@@ -19,6 +19,9 @@ pub enum ConversationChange {
     ChatCompleting { chat_id: String },
     ChatCompleted { chat_id: String },
     OrphanToolResultObserved { id: String },
+    AskUserShown { id: String },
+    AskUserUpdated { id: String },
+    AskUserDismissed,
     OutputDirty,
     StyleBoundaryResetRequired,
 }

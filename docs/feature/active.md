@@ -131,6 +131,24 @@
 
 **TDD/验证**：notice.rs 新增 seed_banner / append_system_message / append_error 单测；修正 `state/tests.rs`（用户消息不再是首行，改 `.any` 断言并校验横幅）与 `update/reminder.rs`（System block 计数加上 `BANNER_LINES.len()` 偏移）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
 
+### #58 Phase 5 · T6b：迁移 AskUser 选项交互到 ConversationModel 单一真相
+
+**状态**：进行中（T6b 完成，`lines` 镜像/`OutputLine`/`LineStyle`/legacy 类型留 T6c）
+
+**判别结论**：AskUser 选项渲染是最后一条命令式直写 `output_area.lines` 的路径。旧实现 `ui_event.rs` 调 `OutputArea::push_ask_user` 渲染「问题 + 选项列表」，靠 `ask_user_block_start`/`option_line_start`/`option_line_ranges` 记坐标，选项导航（↑↓/Space）靠 `update_ask_user_options` 原地改写对应行高亮，提交后 `dismiss_ask_user_block` 按起始坐标回卷 `lines`。该路径绕过 ViewModel→document 管线，是删 `OutputLine`/`lines`（T6c）的最后障碍，也与 bug #63「options 选择同步」「渲染缓存随 selected 失效」相关。
+
+**selected 归属决定**：选项导航的可变状态（`cursor`/`selected`/`chat_input_active`）此前存于 `input.ask_user_state`，与 `reply_tx`/键处理深度耦合。本次将其**迁入 ConversationModel 的 `AskUser` 块**作为渲染与导航高亮的单一真相；`AskUserState` 只保留应答回传所需的静态元数据（`reply_tx`/`options`/`llm_option_count`/`multi_select`/`allow_free_input`）。键处理通过 `ConversationModel::ask_user_snapshot()` 读回 cursor/selected/chat_input_active，导航/勾选/子态切换均派发 intent 更新块。避免双真相：渲染与提交都从块读取同一份状态。
+
+**改法**：
+- **model 层**：`ConversationBlock::AskUser { id, question, options, llm_option_count, multi_select, cursor, selected, chat_input_active }`（固定 id `ask-user`，同一时刻至多一个）。新增 intents `ShowAskUser`/`SetAskUserCursor`/`ToggleAskUserSelected`/`SetAskUserChatInput`/`DismissAskUser` 与对应 changes；逻辑落在新 `model/conversation/ask_user.rs`（含 `ask_user_snapshot()` 与 cursor 夹取、内建选项不可勾选校验），避免 model.rs 超 400 行（model.rs 388 行）。
+- **view 层**：`OutputBlockKind::AskUser(AskUserBlockView)`；`view_assembler` 映射块字段；新增 `render/output/blocks/ask_user.rs` 渲染问题 + 操作提示 + 选项列表，按 `cursor`（❯/反白）与 `selected`（multi_select 勾选框 [✓]）高亮当前项，`chat_input_active` 子态下不高亮。高亮属「选项导航高亮」，与文本选区 overlay 无关。
+- **controller 层**：`notice.rs` 新增 App 端 `show_ask_user_block`/`set_ask_user_cursor`/`toggle_ask_user_selected`/`set_ask_user_chat_input`/`dismiss_ask_user_block`（派发 intent + `refresh_output_widget_from_model`，无 IO/spawn）。`ui_event.rs::AskUser` 改为 `show_ask_user_block`；`ask_user_key.rs` 导航/勾选/子态改派发 intent，提交读 snapshot。
+- **删除项**：`OutputArea::push_ask_user`、`update_ask_user_options`、`dismiss_ask_user_block`、`format_ask_user_option_lines`、`ask_user_block_start` 字段、`update/ask_user_options.rs`（`build_option_line_ranges`）整模块、`AskUserState` 的 `cursor`/`selected`/`option_line_ranges`/`chat_input_active` 字段、`output_area/content_tests.rs`（仅测已删函数，回归改由 `blocks/ask_user.rs` 单测覆盖）。
+
+**行为兼容**：↑↓ 导航、Space 勾选（内建项不可勾）、Enter 提交（单选/多选/「All of the above」结构化列表/「Chat about this...」进自由输入子态）、Esc 取消、无选项自由输入模式均保持原行为；内建选项（#49）与 selected→高亮同步（#63）由块单一真相天然保证。
+
+**TDD/验证**：model 层 8 个单测（show 替换、cursor 越界夹取、无块 noop、toggle LLM/内建、dismiss、chat_input、snapshot）；render 层 6 个单测（cursor 高亮、空选项提示、单选项标记、多选勾选框、chat 子态抑制高亮、多行选项缩进）。`cargo build -p cli`、`cargo test -p cli`（372 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认

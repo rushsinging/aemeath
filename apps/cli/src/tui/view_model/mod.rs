@@ -9,8 +9,8 @@ pub mod style;
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
 pub use output::{
-    OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView, ToolCallBlockView,
-    ToolSemanticStatus,
+    AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
+    ToolCallBlockView, ToolSemanticStatus,
 };
 pub use status::{StatusLineViewModel, StatusSegment, StatusSeverity};
 pub use style::SemanticStyle;

@@ -1,4 +1,5 @@
 pub mod agent_progress;
+pub mod ask_user;
 pub mod block;
 pub mod change;
 pub mod chat;

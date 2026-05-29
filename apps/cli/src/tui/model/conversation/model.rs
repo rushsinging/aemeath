@@ -62,6 +62,21 @@ impl ConversationModel {
             ConversationIntent::RecordAgentProgress { tool_id, message } => {
                 self.record_agent_progress(tool_id, message)
             }
+            ConversationIntent::ShowAskUser {
+                question,
+                options,
+                llm_option_count,
+                multi_select,
+                cursor,
+            } => self.show_ask_user(question, options, llm_option_count, multi_select, cursor),
+            ConversationIntent::SetAskUserCursor { cursor } => self.set_ask_user_cursor(cursor),
+            ConversationIntent::ToggleAskUserSelected { index } => {
+                self.toggle_ask_user_selected(index)
+            }
+            ConversationIntent::SetAskUserChatInput { active } => {
+                self.set_ask_user_chat_input(active)
+            }
+            ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
         }
     }
 
