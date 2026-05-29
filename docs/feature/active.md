@@ -189,10 +189,10 @@
 
 **后续 gap（#58 待办，不阻塞本 task 的结构性修复）**：
 1. **diff 渲染完整接线**：`output/diff.rs` + `primitives/diff.rs::diff` 原语已就绪并带测试，但尚未在 ToolCall（Edit/Write 工具结果）或 AssistantMessage 中接通。
-2. **markdown 完整接线**：markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。
+2. **markdown 完整接线**：~~markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。~~（G4 项1 收口：`primitives/markdown.rs` 按行补嵌套列表圆点/序号 + 引用块竖线，assistant 与工具结果共享路径自动受益。）
 3. **syntax 高亮接线广度**：fence 已接，diff 内语法高亮原语就绪但随 diff 接线一并待办。
 4. **tool 结果摘要渲染**：~~`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。~~（G2 收口：`result_max_lines` 已接入 `format_result_lines`；`format_result_summary` 判定无价值已删除。）
-5. **排队中即时显示**：~~排队提交需 `key.rs` → `QueueSubmission` 即时反馈~~（G3 收口：`key.rs` 入队同时派发 `QueueSubmission` 即时显示「⏳ 排队中」块，drain 时 `ClearQueuedSubmissions` 清块再正式回显，无双显示）；`(default:)` 行、done 间距等交互细节仍待补。
+5. **排队中即时显示**：~~排队提交需 `key.rs` → `QueueSubmission` 即时反馈~~（G3 收口：`key.rs` 入队同时派发 `QueueSubmission` 即时显示「⏳ 排队中」块，drain 时 `ClearQueuedSubmissions` 清块再正式回显，无双显示）；~~`(default:)` 行、done 间距等交互细节仍待补。~~（G4 项2/3 收口：AskUser 自由输入补回 `(default:)` 行、done 提示恢复尾随空行间距。）
 
 **TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
 
@@ -240,6 +240,23 @@
 **TDD/验证**：notice.rs 新增 3 测试见红再实现——入队→QueuedUserMessage 块出现并经 document 渲染「⏳ 排队中」、清除→排队块全清 + 仅一条正式 UserMessage（无双显示）、空队列清除 no-op；`cargo build -p cli`、`cargo test -p cli`（409 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。提交 `7e022b0`。
 
 > 注：`app/state/tests.rs::test_thinking_then_grep_renders_tool_block_in_output_area` 为依赖 `/tmp` 实际文件 + 测试并行调度的既有非确定性 flake（与本改动逻辑无关），单测/重跑均通过。
+
+### #58 G4 · markdown 完整性（嵌套列表 + 引用块）+ AskUser default 行 + done 间距
+
+**状态**：待确认（收口 Phase 6 后续 gap 第 2 项 + Phase 5 T6b/T6c 迁移遗漏的两处交互细节）
+
+**项 1 · markdown 嵌套列表 + 引用块**（commit b96c6fb + 5af541f）：原 `primitives/markdown.rs::markdown` 仅做 inline 解析（bold/italic/code/link/strikethrough），无块级处理；引用块 `> ` 原样显示、列表标记 `- `/`1. ` 无视觉区分（缩进虽因 `text.lines()` 保留但无 marker 样式）。在 inline 之上按行补块级装饰（与 `fenced.rs` 逐行喂入契合，assistant 与工具结果共享 `render_fenced_markdown → markdown` 路径自动受益，DRY）：
+- 引用块：`> ` / 嵌套 `> > ` → 弱化色（TEXT_DIM）竖线 `│ `（每层一根），正文走 inline（保留 bold/code/link），正文着 TEXT_MUTED。
+- 列表：`- `/`* `/`+ ` 无序统一渲染 ACCENT 色圆点 `• `，`N. `/`N) ` 有序保留序号 `N. `，保留行首缩进层级；续行按 marker 宽度对齐缩进、不重复 marker。
+- `plain` 与可见 spans 保持一致；`-notalist`（无空格）等非列表行原样走 inline。
+- 有序列表前缀提取用 `split_at(digit_len)` 而非裸索引切片，规避 unsafe text op 守卫（digit_len 为 ASCII 数字字节数，合法字符边界）。
+- 回归：11 个新增单测（引用竖线+弱化色/嵌套两竖线/引用内 bold/无序圆点+ACCENT/嵌套缩进/有序序号/列表内 code/无空格非列表/多行混合）。
+
+**项 2 · AskUser 自由输入 `(default: ...)` 行**（commit 0a75cb5）：Phase 5 T6b 把 AskUser 迁到 `ConversationModel` 时，空选项自由输入分支丢失了旧 `push_ask_user` 的 `(default: {d})` 提示行（block 未携带 default）。沿 intent→block→view→render 链补回 `default: Option<String>` 字段：`ConversationIntent::ShowAskUser` / `ConversationBlock::AskUser` / `AskUserBlockView` 均加该字段；`ui_event.rs` 空选项分支传入 `default`（有选项分支 default 仅用于定位 cursor，传 `None`）；`blocks/ask_user.rs` 空选项分支渲染弱化色 `  (default: {d})` 行。回归：携带 default 渲染该行 / 无 default 省略该行两测试。
+
+**项 3 · done 完成提示尾随空行间距**（commit 7d9bb29）：Phase 5 T6c 把 done 提示迁到 `append_system_notice(done_notice)` 时丢失了旧 `push_done` 的尾随空行间距。按「间距由块组件承担」设计恢复：`done_notice` 文案末尾保留 `\n`，`render_diagnostic` 检测 `text.ends_with('\n')` 时追加一行尾随空行（System block 文本经 model→assembler 全程不 trim，换行保真到达渲染层）。该语义对普通单行 notice 无影响（不以换行结尾不追加）。回归：`done_notice` 改 `trim_end` 断言 + 新增换行断言；`diagnostic.rs` 新增有/无尾随换行两测试。
+
+**TDD/验证**：三项均先写见红再实现；`cargo build -p cli`、`cargo test -p cli`（423 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含 ≤400 行、unsafe text op）全绿。markdown 原语 268 行、model.rs 396 行均 < 400。
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
