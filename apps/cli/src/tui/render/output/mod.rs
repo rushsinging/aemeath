@@ -1,4 +1,5 @@
 pub mod block_cache;
+pub mod block_component;
 pub mod blocks;
 pub mod diff;
 pub mod document_renderer;
