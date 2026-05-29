@@ -7,6 +7,7 @@ use crate::business::compact::micro::microcompact;
 use crate::business::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
 use crate::business::compact::truncate::safe_slice;
 use share::message::{ContentBlock, Message, Role};
+use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
 pub use crate::business::compact::needs_compaction;
@@ -205,4 +206,116 @@ pub fn build_summary_text(messages: &[Message]) -> String {
         }
     }
     summary
+}
+
+/// 使用 LLM 进行语义化压缩（对早期消息生成结构化摘要）。
+///
+/// 如果 LLM 调用失败，回退到本地 `build_summary_text`。
+/// 返回 (压缩后的消息, 是否进行了压缩)
+pub async fn compact_messages_with_llm(
+    messages: &[Message],
+    system_prompt: &str,
+    context_size: usize,
+    client: Option<&crate::api::provider::client::LlmClient>,
+) -> (Vec<Message>, bool) {
+    if !needs_compaction(messages, system_prompt, context_size) {
+        return (messages.to_vec(), false);
+    }
+
+    let total = messages.len();
+    if total <= 4 {
+        return (messages.to_vec(), false);
+    }
+
+    // 第一步：微压缩
+    let mut result = messages.to_vec();
+    microcompact(&mut result, 10);
+
+    if !needs_compaction(&result, system_prompt, context_size) {
+        return (result, true);
+    }
+
+    // 第二步：完整压缩 — 头部/尾部保护
+    let head_protect = 2usize.min(total);
+    let tail_budget = total * 30 / 100;
+    let keep_recent = tail_budget.max(4).min(total - head_protect);
+    let split_point = (total - keep_recent).max(head_protect);
+
+    if split_point <= head_protect {
+        return (result, false);
+    }
+
+    let early_messages = &result[head_protect..split_point];
+
+    // 尝试 LLM 摘要，失败则回退到本地
+    let summary = match client {
+        Some(client) => {
+            match llm_compact(client, early_messages).await {
+                Ok(text) => text,
+                Err(_) => build_summary_text(early_messages),
+            }
+        }
+        None => build_summary_text(early_messages),
+    };
+
+    // 重组：头部 + 摘要 + 近期消息
+    let mut compacted = Vec::with_capacity(head_protect + keep_recent + 3);
+    compacted.extend_from_slice(&result[..head_protect]);
+
+    let summary_text = format!(
+        "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
+        early_messages.len(),
+        summary
+    );
+    compacted.push(Message::user(summary_text));
+    compacted.push(Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "I understand. I'll continue from where we left off.".to_string(),
+        }],
+    });
+    compacted.extend_from_slice(&result[split_point..]);
+
+    fix_role_alternation(&mut compacted);
+    sanitize_tool_pairs(&mut compacted);
+
+    (compacted, true)
+}
+
+/// 调用 LLM 生成语义化压缩摘要
+async fn llm_compact(
+    client: &crate::api::provider::client::LlmClient,
+    early_messages: &[Message],
+) -> Result<String, String> {
+    let mut request = build_compact_request(early_messages);
+    // 将 COMPACT_PROMPT 作为最后一条 user 消息
+    request.push(Message::user(format!(
+        "{}\n\n这里是要总结的对话：",
+        COMPACT_PROMPT
+    )));
+
+    let cancel = CancellationToken::new();
+    let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let collected_clone = collected.clone();
+    {
+        let mut handler = crate::api::provider::provider::CallbackHandler::new(Box::new(
+            move |text: &str| {
+                if let Ok(mut guard) = collected_clone.lock() {
+                    guard.push_str(text);
+                }
+            },
+        ));
+
+        client
+            .stream_message(&[], &request, &[], &mut handler, &cancel)
+            .await
+            .map_err(|e| format!("LLM compact call failed: {e}"))?;
+    }
+
+    let full_text = collected.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let summary = parse_compact_response(full_text.as_str());
+    if summary.is_empty() {
+        return Err("LLM returned empty summary".into());
+    }
+    Ok(summary)
 }

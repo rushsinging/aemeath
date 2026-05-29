@@ -64,7 +64,7 @@ where
     let ChatLoopContext {
         sink,
         queue,
-        client,
+        ref client,
         registry,
         system_blocks,
         system_prompt_text,
@@ -198,6 +198,7 @@ where
             context_size,
             tool_schema_tokens,
             last_api_input_tokens,
+            &ctx.client,
         )
         .await;
 

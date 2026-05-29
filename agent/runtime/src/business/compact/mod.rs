@@ -36,8 +36,8 @@ pub use micro::microcompact;
 
 // summary 模块
 pub use summary::{
-    build_compact_request, build_summary_text, compact_messages, parse_compact_response,
-    COMPACT_PROMPT,
+    build_compact_request, build_summary_text, compact_messages, compact_messages_with_llm,
+    parse_compact_response, COMPACT_PROMPT,
 };
 
 // restore 模块

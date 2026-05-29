@@ -155,7 +155,7 @@ pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool
 }
 
 pub(super) async fn compact_messages_impl(
-    _me: &AgentClientImpl,
+    me: &AgentClientImpl,
     messages: Vec<sdk::ChatMessage>,
     system_prompt: &str,
     context_size: usize,
@@ -164,8 +164,14 @@ pub(super) async fn compact_messages_impl(
         .into_iter()
         .map(super::mapping::message_from_sdk)
         .collect();
-    let (compacted, was_compacted) =
-        crate::business::compact::compact_messages(&runtime_messages, system_prompt, context_size);
+    let client = me.inner.current_client.read().ok().map(|guard| (*guard).clone());
+    let (compacted, was_compacted) = crate::business::compact::compact_messages_with_llm(
+        &runtime_messages,
+        system_prompt,
+        context_size,
+        client.as_ref().map(|c| c.as_ref()),
+    )
+    .await;
     let sdk_messages: Vec<sdk::ChatMessage> = compacted
         .into_iter()
         .map(super::mapping::message_to_sdk)
