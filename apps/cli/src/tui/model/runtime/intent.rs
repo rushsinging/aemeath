@@ -1,3 +1,4 @@
+use super::spinner::SpinnerPhase;
 use super::workspace::WorktreeKind;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,4 +38,8 @@ pub enum RuntimeIntent {
         id: String,
         success: bool,
     },
+    StartSpinner,
+    SetSpinnerPhase(SpinnerPhase),
+    StopSpinner,
+    UpdateTaskLines(Vec<String>),
 }
