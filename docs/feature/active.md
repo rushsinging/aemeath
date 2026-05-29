@@ -75,6 +75,26 @@
 **TDD/验证**：为 `tool_call.rs` 补充渲染测试（参数 detail 行来自 `format_tool_call`、result_summary 结果行），确保删除旧路径后行为不回退。`cargo build / test(-p cli 378 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
 
 
+### #58 Phase 5 · T4：删除 streaming 旧重渲与 legacy 排队机制
+
+**状态**：进行中（T4 完成，`lines` 字段/`OutputLine`/`LineStyle`/legacy 垫片仍待后续 Task 删除）
+
+**判别结论**：
+- streaming：流式文本现由 `ConversationModel::append_assistant_text/append_thinking_text`（`ObserveAssistantText`/`ObserveThinkingText` intent，经 `adapter/agent_event.rs`）驱动 active block 渲染。`OutputArea` 的 `do_rerender`/`append_assistant_text`/`append_thinking_text`/`has_unclosed_think` 全标 `#[allow(dead_code)]`、无活跃调用者，**死代码 → 删**。
+- queued：排队显示已由 `ConversationBlock::QueuedUserMessage → OutputBlockKind::QueuedSubmission`（`view_assembler/output.rs` + `blocks/queued_submission.rs`）经文档管线渲染；`render.rs` 调用 `append_status_lines` 时 `queued_lines` 恒传空向量，`build_queued_message_lines` 无活跃调用者，**死代码 → 删**。legacy `queued_messages` 仅作 `InputState::input_queue` 的镜像用于 drain 回显，**统一到 input_queue 后删除**。
+
+**删除**：
+- 文件 `output_area/streaming.rs`、`output_area/queued.rs`（整文件死路径）；`mod.rs` 中对应 `mod streaming;`/`mod queued;` 声明。
+- `OutputArea` 字段 `streaming_buffer`/`streaming_start`/`synthetic_think_open`/`queued_line_count`/`queued_messages`，及 `content.rs`（`insert_lines_at` 的 `streaming_start` 调整、`reset_runtime_state` 清理）、`new()` 初始化中的对应项。
+- `finish_streaming` 方法及其 no-op 调用点（`done.rs`、`agent.rs::push_agent_tool_calls/push_tool_progress`、`content.rs::push_cancelled/push_ask_user/push_system`）。
+- `append_status_lines` 恒空的 `queued_lines` 参数。
+- 队列回显统一：`key.rs` 不再 push `queued_messages`；`ui_event.rs::DrainQueuedInput` 直接回显已 `drain` 的 `queued`；诊断日志 `queued_messages_len` 改为 `queued_submissions_len`（取自 ConversationModel）。
+
+**保留**：`OutputLine`/`LineStyle` 类型本体、`lines` 字段、legacy 垫片 `sync_document_from_legacy_lines`/`legacy_lines_to_rendered`、旧行级链 cache/line/block/span（后续 Task）；`agent.rs` 仍写 `lines` 的工具进度路径（sub-agent 进度尚未迁移）。
+
+**TDD/验证**：复用已有 streaming 回归（`model_tests.rs::test_conversation_streams_text_and_thinking_into_blocks`）与 QueuedSubmission 渲染测试（`blocks/queued_submission.rs`）；新增 `model_tests.rs` 队列 block 回归（QueueSubmission 落 `QueuedUserMessage` 块、ClearQueuedSubmissions 清空、空队列清理 noop）。`cargo build / test(-p cli 381 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认
