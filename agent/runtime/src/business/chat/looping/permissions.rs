@@ -21,7 +21,7 @@ fn is_auto_approved(call: &ToolCall, registry: &ToolRegistry) -> bool {
             .input
             .get("command")
             .and_then(|v| v.as_str())
-            .map(crate::api::tools::bash::is_readonly_command)
+            .map(crate::api::tools::is_readonly_command)
             .unwrap_or(false);
     }
 

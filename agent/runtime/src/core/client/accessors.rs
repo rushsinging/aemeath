@@ -8,7 +8,7 @@ use tokio::sync::watch;
 
 use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::task::TaskStore;
-use crate::api::tools::mcp_manager::McpConnectionManager;
+use crate::api::tools::McpConnectionManager;
 use crate::core::port::ChatRuntimeContext;
 
 // ─── 结构体定义 ───

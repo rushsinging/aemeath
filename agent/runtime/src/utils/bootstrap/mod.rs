@@ -11,7 +11,7 @@ pub mod runtime_support;
 
 use crate::api::core::config::models::ResolvedModel;
 use crate::api::core::config::Config;
-use crate::api::tools::mcp_manager::McpConnectionManager;
+use crate::api::tools::McpConnectionManager;
 use crate::core::port::ChatRuntimeContext;
 pub use concurrency::resolve_concurrency_limits;
 pub use logging_setup::{init_logging, set_current_turn, set_session_id};

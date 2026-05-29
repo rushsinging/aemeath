@@ -57,8 +57,10 @@ pub mod storage {
 }
 
 pub mod tools {
-    pub use ::tools::{bash, mcp, mcp_manager};
-    pub use ::tools::{register_all_tools, register_subagent_tools};
+    pub use ::tools::api::{
+        is_readonly_command, register_all_tools, register_subagent_tools, McpConnectionManager,
+        McpServerConfig,
+    };
 }
 
 // `core` 仅精确 re-export share 中实际被 runtime use case 消费的领域子模块，
