@@ -2,12 +2,14 @@
 
 pub mod dialog;
 pub mod input;
+pub mod live_status;
 pub mod output;
 pub mod status;
 pub mod style;
 
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
+pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use output::{
     AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,

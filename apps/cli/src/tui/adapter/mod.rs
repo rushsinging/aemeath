@@ -5,6 +5,7 @@ pub mod effect_result;
 pub mod input;
 pub mod input_widget;
 pub mod key_event;
+pub mod live_status_widget;
 pub mod mouse_event;
 pub mod output_widget;
 pub mod resize;
