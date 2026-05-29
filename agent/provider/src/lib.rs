@@ -5,18 +5,14 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod api;
-pub mod client;
-pub mod pool;
-pub mod provider;
-pub mod providers;
-pub mod stream;
-pub mod types;
+mod client;
+mod pool;
+mod provider;
+mod providers;
+mod stream;
+mod types;
 
 pub use api::ApiDriverKind;
-pub use client::LlmClient;
-pub use pool::LlmClientPool;
-pub use provider::{CallbackHandler, LlmProvider, StreamHandler};
-pub use providers::{AnthropicProvider, OpenAICompatibleProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {

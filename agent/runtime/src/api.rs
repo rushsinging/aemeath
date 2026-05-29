@@ -42,13 +42,8 @@ pub mod prompt {
 }
 
 pub mod provider {
-    pub use ::provider::client;
-    pub use ::provider::pool;
-    pub use ::provider::provider;
-    pub use ::provider::providers;
-    pub use ::provider::stream;
-    pub use ::provider::types;
-    pub use ::provider::{ApiDriverKind, LlmClientPool, LlmError, StreamHandler};
+    pub use ::provider::api::*;
+    pub use ::provider::{ApiDriverKind, LlmError};
 }
 
 pub mod storage {

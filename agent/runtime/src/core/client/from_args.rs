@@ -8,7 +8,7 @@ use crate::api::core::task::TaskStore;
 use crate::api::core::tool::ToolRegistry;
 use crate::api::prompt::skill::{load_all_skills, Skill};
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
-use crate::api::provider::types::SystemBlock;
+use crate::api::provider::SystemBlock;
 use crate::api::provider::ApiDriverKind;
 use crate::api::tools as tools_crate;
 use crate::core::port::ChatRuntimeContext;

@@ -18,7 +18,7 @@ pub(crate) async fn auto_compact<S>(
     context_size: usize,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
-    llm_client: &Arc<crate::api::provider::client::LlmClient>,
+    llm_client: &Arc<crate::api::provider::LlmClient>,
 ) -> bool
 where
     S: ChatEventSink,

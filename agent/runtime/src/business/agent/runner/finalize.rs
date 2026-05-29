@@ -1,6 +1,6 @@
 use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind};
 use crate::api::hook::HookRunner;
-use crate::api::provider::client::LlmClient;
+use crate::api::provider::LlmClient;
 use std::time::Duration;
 
 /// Agent 循环退出状态

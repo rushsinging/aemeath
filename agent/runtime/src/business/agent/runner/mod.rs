@@ -1,8 +1,8 @@
 use crate::api::core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use crate::api::hook::HookRunner;
-use crate::api::provider::client::LlmClient;
-use crate::api::provider::pool::LlmClientPool;
-use crate::api::provider::stream::StreamHandler;
+use crate::api::provider::LlmClient;
+use crate::api::provider::LlmClientPool;
+use crate::api::provider::StreamHandler;
 use ::logging::JsonLogger;
 use std::sync::Arc;
 

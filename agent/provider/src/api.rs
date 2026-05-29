@@ -5,6 +5,18 @@
 
 use serde::{Deserialize, Serialize};
 
+// Provider crate 对外公开门面：仅精确暴露 runtime 实际消费的类型与子模块，
+// 内部模块（client/pool/provider/providers/stream/types）保持私有。
+pub use crate::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+pub use crate::pool::LlmClientPool;
+pub use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
+pub use crate::types::{StopReason, StreamResponse, SystemBlock, Usage};
+
+/// openai_compatible 子模块（consumer 需要 `ReasoningConfig` 等驱动配置类型）。
+pub mod openai_compatible {
+    pub use crate::providers::openai_compatible::*;
+}
+
 /// API driver kind. Every model source in config.json maps to one of these via its `api` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ApiDriverKind {

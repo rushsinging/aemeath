@@ -133,14 +133,18 @@ pub enum StreamEvent {
         message: MessageStartPayload,
     },
     ContentBlockStart {
+        // index 为反序列化所需字段，业务侧暂未读取；收窄可见性后暴露为孤儿，保留以正确解析（refs #61 D3）。
+        #[allow(dead_code)]
         index: usize,
         content_block: ContentBlockPayload,
     },
     ContentBlockDelta {
+        #[allow(dead_code)]
         index: usize,
         delta: DeltaPayload,
     },
     ContentBlockStop {
+        #[allow(dead_code)]
         index: usize,
     },
     MessageDelta {
@@ -191,7 +195,9 @@ pub enum DeltaPayload {
         thinking: String,
     },
     SignatureDelta {
+        // signature 为反序列化所需字段，业务侧暂未读取；收窄可见性后暴露为孤儿，保留以正确解析（refs #61 D3）。
         #[serde(default)]
+        #[allow(dead_code)]
         signature: String,
     },
     #[serde(other)]

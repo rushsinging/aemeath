@@ -1,6 +1,6 @@
 use crate::api::agent::ToolCall;
 use crate::api::core::message::Message;
-use crate::api::provider::types::{StreamResponse, SystemBlock};
+use crate::api::provider::{StreamResponse, SystemBlock};
 use crate::business::chat::looping::input_log::logged_input_messages;
 use logging::JsonLogger;
 use std::sync::Arc;

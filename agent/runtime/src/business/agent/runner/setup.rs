@@ -6,7 +6,7 @@ use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{
     AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner, ToolContext, ToolRegistry,
 };
-use crate::api::provider::types::SystemBlock;
+use crate::api::provider::SystemBlock;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 

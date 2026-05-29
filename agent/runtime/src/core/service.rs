@@ -47,7 +47,7 @@ mod tests {
     use crate::api::core::task::TaskStore;
     use crate::api::core::tool::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
     use crate::api::hook::HookRunner;
-    use crate::api::provider::client::LlmClient;
+    use crate::api::provider::LlmClient;
     use crate::business::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
     use std::collections::HashMap;

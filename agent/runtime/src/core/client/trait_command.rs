@@ -97,8 +97,8 @@ pub(super) async fn switch_model_impl(
     me: &AgentClientImpl,
     params: sdk::ModelSwitchParams,
 ) -> Result<sdk::ModelSwitchResult> {
-    use crate::api::provider::client::OpenAIProviderConfig;
-    use crate::api::provider::providers::openai_compatible::ReasoningConfig;
+    use crate::api::provider::OpenAIProviderConfig;
+    use crate::api::provider::openai_compatible::ReasoningConfig;
     use crate::api::provider::ApiDriverKind;
 
     let api_type = ApiDriverKind::parse(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
@@ -115,8 +115,8 @@ pub(super) async fn switch_model_impl(
     let reasoning = params.reasoning.unwrap_or(true);
     let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
 
-    let new_client = crate::api::provider::client::LlmClient::from_config(
-        crate::api::provider::client::LlmConfigOptions {
+    let new_client = crate::api::provider::LlmClient::from_config(
+        crate::api::provider::LlmConfigOptions {
             api: api_type,
             api_key: params.api_key,
             base_url: Some(params.base_url),

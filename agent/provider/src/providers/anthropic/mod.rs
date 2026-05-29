@@ -26,6 +26,8 @@ pub struct AnthropicProvider {
     /// Maximum retry attempts (default 3)
     max_retries: u32,
     /// Request timeout in seconds (default 60)
+    /// 仅由未消费的 builder `with_timeout_secs` 写入，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    #[allow(dead_code)]
     timeout_secs: u64,
 }
 
@@ -54,12 +56,16 @@ impl AnthropicProvider {
     }
 
     /// Set maximum retry attempts
+    /// builder 方法当前无调用点，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    #[allow(dead_code)]
     pub fn with_max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
         self
     }
 
     /// Set request timeout in seconds
+    /// builder 方法当前无调用点，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    #[allow(dead_code)]
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self.http = reqwest::Client::builder()

@@ -1,7 +1,7 @@
 use super::model_runtime::ModelRuntimeSettings;
 use crate::api::core::config::models::ResolvedModel;
-use crate::api::provider::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
-use crate::api::provider::providers::openai_compatible::ReasoningConfig;
+use crate::api::provider::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use crate::api::provider::openai_compatible::ReasoningConfig;
 use crate::api::provider::ApiDriverKind;
 use std::env;
 

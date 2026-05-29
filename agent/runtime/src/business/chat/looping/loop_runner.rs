@@ -2,7 +2,7 @@ use crate::api::agent::Agent;
 use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::api::core::message::Message;
 use crate::api::core::tool::{ToolContext, ToolRegistry};
-use crate::api::provider::types::StopReason;
+use crate::api::provider::StopReason;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
@@ -30,9 +30,9 @@ where
 {
     pub sink: S,
     pub queue: Q,
-    pub client: Arc<crate::api::provider::client::LlmClient>,
+    pub client: Arc<crate::api::provider::LlmClient>,
     pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<crate::api::provider::types::SystemBlock>,
+    pub system_blocks: Vec<crate::api::provider::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     pub messages: Vec<Message>,
@@ -411,8 +411,8 @@ mod tests {
     use super::*;
     use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use crate::api::hook::HookRunner;
-    use crate::api::provider::provider::{LlmProvider, StreamHandler};
-    use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
+    use crate::api::provider::{LlmProvider, StreamHandler};
+    use crate::api::provider::{StopReason, StreamResponse, SystemBlock, Usage};
     use async_trait::async_trait;
     use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::AtomicBool;
@@ -576,7 +576,7 @@ mod tests {
         process_chat_loop(ChatLoopContext {
             sink: sink.clone(),
             queue,
-            client: Arc::new(crate::api::provider::client::LlmClient::from_provider(
+            client: Arc::new(crate::api::provider::LlmClient::from_provider(
                 Arc::new(TwoTurnProvider),
             )),
             registry: Arc::new(ToolRegistry::new()),

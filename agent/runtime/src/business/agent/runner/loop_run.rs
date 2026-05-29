@@ -9,8 +9,8 @@ use crate::api::agent::Agent;
 use crate::api::compact::safe_slice;
 use crate::api::core::message::Message;
 use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
-use crate::api::provider::client::LlmClient;
-use crate::api::provider::types::{StopReason, SystemBlock};
+use crate::api::provider::LlmClient;
+use crate::api::provider::{StopReason, SystemBlock};
 use std::sync::Arc;
 
 #[allow(clippy::type_complexity)]
@@ -204,7 +204,7 @@ impl<'a> SubAgentRun<'a> {
     fn progress_api_ok(
         &self,
         turn_number: usize,
-        resp: &crate::api::provider::types::StreamResponse,
+        resp: &crate::api::provider::StreamResponse,
     ) {
         (self.progress)(
             Some(turn_number),
@@ -215,7 +215,7 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, turn_number: usize, resp: &crate::api::provider::types::StreamResponse) {
+    fn log_output(&self, turn_number: usize, resp: &crate::api::provider::StreamResponse) {
         if let Some(ref jl) = self.runner.json_logger {
             let data = build_json_logger_output_data(
                 resp,
@@ -231,7 +231,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn send_text_progress(&self, turn: usize, resp: &crate::api::provider::types::StreamResponse) {
+    fn send_text_progress(&self, turn: usize, resp: &crate::api::provider::StreamResponse) {
         if let Some(ref tx) = self.progress_tx {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();

@@ -33,7 +33,7 @@ pub(crate) fn build_json_logger_input_data(
 }
 
 pub(crate) fn build_json_logger_output_data(
-    resp: &crate::api::provider::types::StreamResponse,
+    resp: &crate::api::provider::StreamResponse,
     elapsed_secs: f64,
     provider: &str,
 ) -> serde_json::Value {

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{AgentRunner, ToolRegistry};
 use crate::api::hook::HookRunner;
-use crate::api::provider::client::LlmClient;
-use crate::api::provider::types::SystemBlock;
+use crate::api::provider::LlmClient;
+use crate::api::provider::SystemBlock;
 use logging::JsonLogger;
 
 /// TUI 启动所需的过渡上下文。

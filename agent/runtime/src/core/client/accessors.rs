@@ -34,7 +34,7 @@ pub struct RuntimeHandle {
     pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
-    pub(crate) current_client: std::sync::RwLock<Arc<crate::api::provider::client::LlmClient>>,
+    pub(crate) current_client: std::sync::RwLock<Arc<crate::api::provider::LlmClient>>,
 
     // ─── SDK 状态 ───
     pub(crate) cancel_token: Arc<std::sync::atomic::AtomicBool>,

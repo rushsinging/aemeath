@@ -13,7 +13,7 @@ pub async fn run_reflection(
     turn_count: usize,
     messages: &[crate::api::core::message::Message],
     cwd: &Path,
-    client: &crate::api::provider::client::LlmClient,
+    client: &crate::api::provider::LlmClient,
     system_prompt_text: &str,
 ) -> Option<String> {
     run_reflection_with_base_dir(
@@ -33,7 +33,7 @@ async fn run_reflection_with_base_dir(
     turn_count: usize,
     messages: &[crate::api::core::message::Message],
     cwd: &Path,
-    client: &crate::api::provider::client::LlmClient,
+    client: &crate::api::provider::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
@@ -98,11 +98,11 @@ async fn run_reflection_with_base_dir(
 
 /// Call LLM with a simple prompt and return the full text response.
 async fn call_llm_for_reflection(
-    client: &crate::api::provider::client::LlmClient,
+    client: &crate::api::provider::LlmClient,
     prompt: &str,
     system_prompt_text: &str,
 ) -> Option<String> {
-    use crate::api::provider::types::SystemBlock;
+    use crate::api::provider::SystemBlock;
     use crate::api::provider::StreamHandler;
 
     let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
@@ -215,8 +215,8 @@ async fn lightweight_reflection_text_with_base_dir(
 mod tests {
     use super::*;
     use crate::api::core::memory::{MemoryCategory, MemoryLayer, MemorySource};
-    use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
-    use provider::{LlmProvider, StreamHandler};
+    use crate::api::provider::{StopReason, StreamResponse, SystemBlock, Usage};
+    use provider::api::{LlmProvider, StreamHandler};
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -263,8 +263,8 @@ mod tests {
         }
     }
 
-    fn build_client(response: &str) -> crate::api::provider::client::LlmClient {
-        crate::api::provider::client::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
+    fn build_client(response: &str) -> crate::api::provider::LlmClient {
+        crate::api::provider::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
             response: response.to_string(),
         }))
     }
