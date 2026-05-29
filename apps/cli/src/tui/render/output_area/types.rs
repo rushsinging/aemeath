@@ -7,8 +7,10 @@ pub const DEFAULT_WIDTH: usize = 120;
 /// 工具调用详情行的缩进
 pub const INDENT: &str = "  ";
 
+use crate::tui::render::output::markdown;
+use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
-use ratatui::style::Color;
+use ratatui::{style::Color, text::Span};
 
 /// 带颜色的一段文本，用于行内分段着色（如 diff 语法高亮）
 #[derive(Clone, Debug)]
@@ -38,7 +40,42 @@ pub struct OutputLine {
     pub spans: Option<Vec<SpanPart>>,
 }
 
-#[allow(dead_code)]
+impl OutputLine {
+    pub fn as_rendered_line(&self, width: usize) -> RenderedLine {
+        if let Some(parts) = &self.spans {
+            let spans = parts
+                .iter()
+                .map(|part| Span::styled(part.text.clone(), self.style.to_style().fg(part.color)))
+                .collect();
+            return RenderedLine::new(spans);
+        }
+
+        match self.style {
+            LineStyle::Assistant => {
+                markdown::inline_markdown_lines(&self.content, self.style.to_style(), width.max(1))
+                    .into_iter()
+                    .next()
+                    .map(|line| {
+                        let visible = line
+                            .spans
+                            .iter()
+                            .map(|span| span.content.as_ref())
+                            .collect::<String>();
+                        RenderedLine::with_plain(
+                            line.spans,
+                            markdown::strip_inline_formatting(&visible),
+                        )
+                    })
+                    .unwrap_or_default()
+            }
+            _ => RenderedLine::new(vec![Span::styled(
+                self.content.clone(),
+                self.style.to_style(),
+            )]),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub enum LineStyle {
     #[default]

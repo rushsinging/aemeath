@@ -3,9 +3,11 @@ use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{
-    OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
-    ToolSemanticStatus,
+    OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle, TextBlockView,
+    ToolCallBlockView, ToolSemanticStatus,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 pub struct OutputViewAssembler;
 
@@ -18,29 +20,41 @@ impl OutputViewAssembler {
         for conversation_block in &conversation.blocks {
             match conversation_block {
                 ConversationBlock::UserMessage { id, text } => {
-                    blocks.push(OutputBlockView::UserMessage(TextBlockView {
-                        key: id.clone(),
-                        text: text.clone(),
-                        style: SemanticStyle::Normal,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::UserMessage(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Normal,
+                        }),
+                    ));
                 }
                 ConversationBlock::AssistantText { id, text } => {
-                    blocks.push(OutputBlockView::AssistantMessage(TextBlockView {
-                        key: id.clone(),
-                        text: text.clone(),
-                        style: SemanticStyle::Normal,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::AssistantMessage(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Normal,
+                        }),
+                    ));
                 }
                 ConversationBlock::Thinking { id, text } => {
-                    blocks.push(OutputBlockView::ThinkingMessage(TextBlockView {
-                        key: id.clone(),
-                        text: text.clone(),
-                        style: SemanticStyle::Muted,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::ThinkingMessage(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Muted,
+                        }),
+                    ));
                 }
                 ConversationBlock::ToolCall { id, .. } => {
                     if let Some(tool) = find_tool_view(conversation, id.as_ref()) {
-                        blocks.push(OutputBlockView::ToolCall(tool));
+                        blocks.push(output_block(
+                            tool.key.clone(),
+                            OutputBlockKind::ToolCall(tool),
+                        ));
                     }
                 }
                 ConversationBlock::ToolResult {
@@ -56,62 +70,80 @@ impl OutputViewAssembler {
                     if *image_count > 0 {
                         text.push_str(&format!("\n[图片: {image_count}]").to_string());
                     }
-                    blocks.push(OutputBlockView::DiagnosticNotice(TextBlockView {
-                        key: format!("{}-result", id.as_ref()),
-                        text,
-                        style: if *is_error {
-                            SemanticStyle::Error
-                        } else {
-                            SemanticStyle::Success
-                        },
-                    }));
+                    blocks.push(output_block(
+                        format!("{}-result", id.as_ref()),
+                        OutputBlockKind::DiagnosticNotice(TextBlockView {
+                            key: format!("{}-result", id.as_ref()),
+                            text,
+                            style: if *is_error {
+                                SemanticStyle::Error
+                            } else {
+                                SemanticStyle::Success
+                            },
+                        }),
+                    ));
                 }
                 ConversationBlock::System { id, text } => {
-                    blocks.push(OutputBlockView::SystemNotice(TextBlockView {
-                        key: id.clone(),
-                        text: text.clone(),
-                        style: SemanticStyle::Muted,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::SystemNotice(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Muted,
+                        }),
+                    ));
                 }
                 ConversationBlock::Error { id, text } => {
-                    blocks.push(OutputBlockView::DiagnosticNotice(TextBlockView {
-                        key: id.clone(),
-                        text: text.clone(),
-                        style: SemanticStyle::Error,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::DiagnosticNotice(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Error,
+                        }),
+                    ));
                 }
                 ConversationBlock::QueuedUserMessage { id, text } => {
-                    blocks.push(OutputBlockView::UserMessage(TextBlockView {
-                        key: id.clone(),
-                        text: format!("排队中: {text}"),
-                        style: SemanticStyle::Muted,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::QueuedSubmission(TextBlockView {
+                            key: id.clone(),
+                            text: text.clone(),
+                            style: SemanticStyle::Muted,
+                        }),
+                    ));
                 }
                 ConversationBlock::AgentProgress {
                     id,
                     tool_id,
                     message,
                 } => {
-                    blocks.push(OutputBlockView::DiagnosticNotice(TextBlockView {
-                        key: id.clone(),
-                        text: format!("{tool_id}: {message}"),
-                        style: SemanticStyle::Running,
-                    }));
+                    blocks.push(output_block(
+                        id.clone(),
+                        OutputBlockKind::DiagnosticNotice(TextBlockView {
+                            key: id.clone(),
+                            text: format!("{tool_id}: {message}"),
+                            style: SemanticStyle::Running,
+                        }),
+                    ));
                 }
                 ConversationBlock::OrphanToolResult {
                     id,
                     output,
                     is_error,
                 } => {
-                    blocks.push(OutputBlockView::DiagnosticNotice(TextBlockView {
-                        key: format!("orphan-{id}"),
-                        text: output.clone(),
-                        style: if *is_error {
-                            SemanticStyle::Error
-                        } else {
-                            SemanticStyle::Warning
-                        },
-                    }));
+                    blocks.push(output_block(
+                        format!("orphan-{id}"),
+                        OutputBlockKind::DiagnosticNotice(TextBlockView {
+                            key: format!("orphan-{id}"),
+                            text: output.clone(),
+                            style: if *is_error {
+                                SemanticStyle::Error
+                            } else {
+                                SemanticStyle::Warning
+                            },
+                        }),
+                    ));
                 }
             }
         }
@@ -121,6 +153,21 @@ impl OutputViewAssembler {
             follow_tail_hint: true,
         }
     }
+}
+
+fn output_block(block_id: String, kind: OutputBlockKind) -> OutputBlockView {
+    let block_version = semantic_version(&kind);
+    OutputBlockView {
+        block_id,
+        block_version,
+        kind,
+    }
+}
+
+fn semantic_version(kind: &OutputBlockKind) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    kind.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {
@@ -182,12 +229,10 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
 
 #[cfg(test)]
 mod tests {
+    use super::OutputViewAssembler;
     use crate::tui::model::conversation::intent::ConversationIntent;
     use crate::tui::model::conversation::model::ConversationModel;
-    use crate::tui::view_model::{OutputBlockView, ToolSemanticStatus};
-
-    use super::OutputViewAssembler;
-
+    use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
     #[test]
     fn test_output_assembler_maps_tool_status_to_icon() {
         let mut conversation = ConversationModel::default();
@@ -197,8 +242,8 @@ mod tests {
         let tool = vm
             .blocks
             .iter()
-            .find_map(|block| match block {
-                OutputBlockView::ToolCall(tool) => Some(tool),
+            .find_map(|block| match &block.kind {
+                OutputBlockKind::ToolCall(tool) => Some(tool),
                 _ => None,
             })
             .expect("tool block");
@@ -220,13 +265,13 @@ mod tests {
         let diagnostic_results = vm
             .blocks
             .iter()
-            .filter(|block| matches!(block, OutputBlockView::DiagnosticNotice(_)))
+            .filter(|block| matches!(&block.kind, OutputBlockKind::DiagnosticNotice(_)))
             .count();
         let tool = vm
             .blocks
             .iter()
-            .find_map(|block| match block {
-                OutputBlockView::ToolCall(tool) => Some(tool),
+            .find_map(|block| match &block.kind {
+                OutputBlockKind::ToolCall(tool) => Some(tool),
                 _ => None,
             })
             .expect("tool block");

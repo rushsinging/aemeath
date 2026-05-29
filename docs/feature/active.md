@@ -17,6 +17,7 @@
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
+| 58 | TUI 输出区渲染管线统一重构 | 高 | 活动中 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 

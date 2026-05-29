@@ -14,14 +14,13 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
-use crate::tui::adapter::output_widget::replace_lines_from_view_model;
+use crate::tui::adapter::output_widget::render_document_from_view_model;
 use crate::tui::adapter::status_widget::{
     apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
 };
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::render::output_view_model::output_view_model_lines;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
@@ -169,10 +168,8 @@ impl App {
             &self.model.conversation,
             self.view_state.output.version,
         );
-        let lines = output_view_model_lines(&view_model);
-        if !lines.is_empty() {
-            replace_lines_from_view_model(&mut self.output_area, lines);
-        }
+        let width = self.layout.output_area_rect.width.saturating_sub(2).max(1);
+        render_document_from_view_model(&mut self.output_area, &view_model, width);
     }
 }
 

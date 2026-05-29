@@ -41,6 +41,7 @@ impl super::OutputArea {
         for (offset, line) in lines.into_iter().enumerate() {
             self.lines.insert(idx + offset, line);
         }
+        self.document = Default::default();
         if let Some(start) = self.streaming_start {
             if start >= idx {
                 self.streaming_start = Some(start + n);
@@ -71,6 +72,7 @@ impl super::OutputArea {
         self.rendered_cache
             .line_cache
             .content_changed(self.lines.len() + 1);
+        self.document = Default::default();
         self.lines.push_back(line);
         if !self.auto_scroll {
             self.scroll_offset += 1;
