@@ -216,7 +216,7 @@ mod tests {
     use super::*;
     use crate::api::core::memory::{MemoryCategory, MemoryLayer, MemorySource};
     use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
-    use crate::api::provider::{LlmProvider, StreamHandler};
+    use provider::{LlmProvider, StreamHandler};
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
