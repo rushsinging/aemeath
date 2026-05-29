@@ -13,12 +13,26 @@ TUI_PURE_DIRS=(
 )
 
 # ---------------------------------------------------------------------------
-# Exemption list: files in tui/app/ that are part of the runtime / command-
-# execution layer and are expected to contain side effects (async ops,
-# block_on, spawns, etc.).
+# 豁免名单（EXEMPT）：tui/app/ 下属于 runtime / 命令执行层、预期含副作用
+# （async、block_on、spawn、Command 等）的文件。严格 TEA 纯度检查仍作用于
+# update/ 与 state/ 子目录以及纯数据模块（event.rs、msg.rs、resize.rs）。
 #
-# The strict TEA purity check applies to update/ and state/ subdirectories
-# as well as pure-data modules (event.rs, msg.rs, resize.rs).
+# 各项豁免理由（#59 S5-gap 裁定）：
+#   mod.rs              — 同步 git 元数据探测（Command::new），非 update 副作用。
+#   run_loop.rs         — runtime 编排层（事件循环 .await），TEA 副作用执行器所在。
+#   runtime.rs          — runtime 编排层 / Effect executor 本身，.await 为其职责。
+#   slash.rs            — B 块 wontfix：命令主分发为 request-response + 返回
+#                         Option<String> 控制流语义（命令需 IO 返回值做即时同步
+#                         UI 反馈与 prompt 注入决策）。Effect 化需把每命令拆成
+#                         "发 Effect + UiEvent 回流续接"状态机，引入大量 pending
+#                         状态、破坏 Some(prompt) 直返、重写 slash_tests，收益仅
+#                         guard 名单少一项、成本高 → 整文件豁免，行级豁免亦不引入
+#                         （14 处 .await 散布于 do-not-touch 分发逻辑，徒增噪声）。
+#   slash_tests.rs      — 测试 mock。
+#   slash_effect_tests.rs — 测试 mock。
+#
+# 注：A1-A4 已 Effect 化/转纯的文件（dialog.rs、suggestions.rs、已删除的
+# save.rs、memory.rs）已移出本名单，受严格纯度检查约束。
 # ---------------------------------------------------------------------------
 EXEMPT_FILES=(
   "apps/cli/src/tui/app/mod.rs"
