@@ -271,13 +271,17 @@ mod tests {
         area.render(area_rect, &mut buf);
 
         // 点击屏幕列 2（内容 "h"）→ plain 字符 0；拖到列 5（内容 "l" 之后）→ plain 3。
-        area.start_selection(0, 2, &area_rect);
-        area.update_selection(0, 5, &area_rect);
+        // 经只读换算 screen_to_anchor 折算锚点后直接置选区镜像（widget start/update_selection
+        // 已删除，选区真相迁至 view_state）。
+        let s = area.screen_to_anchor(0, 2, &area_rect).unwrap();
+        let e = area.screen_to_anchor(0, 5, &area_rect).unwrap();
+        area.set_selection_for_test(s, e);
         assert_eq!(area.get_selected_text().as_deref(), Some("hel"));
 
         // 点击 gutter 区间（列 0）→ 映射到 plain 字符 0，不偏移。
-        area.start_selection(0, 0, &area_rect);
-        area.update_selection(0, 4, &area_rect);
+        let s = area.screen_to_anchor(0, 0, &area_rect).unwrap();
+        let e = area.screen_to_anchor(0, 4, &area_rect).unwrap();
+        area.set_selection_for_test(s, e);
         assert_eq!(
             area.get_selected_text().as_deref(),
             Some("he"),

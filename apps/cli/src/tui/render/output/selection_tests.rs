@@ -134,8 +134,11 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
     let mut buf = Buffer::empty(area);
     output.render(area, &mut buf);
 
-    output.start_selection(0, 0, &area);
-    output.update_selection(0, 15, &area);
+    // 经只读换算 screen_to_anchor 取屏幕坐标对应的逻辑锚点，直接置选区镜像（替代
+    // 已删除的 widget start/update_selection；选区真相迁至 view_state）。
+    let start = output.screen_to_anchor(0, 0, &area).unwrap();
+    let end = output.screen_to_anchor(0, 15, &area).unwrap();
+    output.set_selection_for_test(start, end);
 
     let selected = output.get_selected_text();
 
@@ -159,8 +162,9 @@ fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
     let mut buf = Buffer::empty(area);
     output.render(area, &mut buf);
 
-    output.start_selection(0, 0, &area);
-    output.update_selection(0, 32, &area);
+    let start = output.screen_to_anchor(0, 0, &area).unwrap();
+    let end = output.screen_to_anchor(0, 32, &area).unwrap();
+    output.set_selection_for_test(start, end);
 
     let selected = output.get_selected_text();
 
@@ -269,7 +273,7 @@ fn test_screen_to_anchor_returns_none_when_row_out_of_range() {
     // 错误/边界路径：屏幕行超出 screen_line_map 返回 None（不改任何状态）。
     assert_eq!(output.screen_to_anchor(5, 0, &area), None);
     assert!(output.selection_start.is_none());
-    assert!(!output.is_selecting());
+    assert!(!output.is_selecting);
 }
 
 #[test]

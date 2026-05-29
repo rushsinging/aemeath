@@ -10,7 +10,6 @@ pub mod content;
 pub mod display;
 pub mod render;
 mod resize;
-pub mod scroll;
 pub mod selection;
 mod selection_render;
 pub mod spinner;

@@ -5,14 +5,10 @@ impl super::OutputArea {
             self.term_width = new_term_width;
         }
 
-        let visible_height = visible_height_hint as usize;
-        self.last_visible_height = visible_height;
-
-        let max_offset = self.document.total_lines().saturating_sub(visible_height);
-        self.scroll_offset = self.scroll_offset.min(max_offset);
-        if self.scroll_offset == 0 {
-            self.auto_scroll = true;
-        }
+        // 仅回填可见高度供 adapter 反喂；滚动钳制真相归 view_state，由每帧渲染前的
+        // `apply_output_scroll_to_widget` 重新钳制并覆盖 widget 镜像（resize 与下一次
+        // 钳制之间无 draw，故此处就地钳制冗余，已删除）。
+        self.last_visible_height = visible_height_hint as usize;
 
         if self.is_selecting || self.selection_start.is_some() || self.selection_end.is_some() {
             self.clear_selection();
@@ -50,7 +46,9 @@ pub mod tests {
     }
 
     #[test]
-    fn resize_clamps_scroll_offset_to_visible_height() {
+    fn resize_records_visible_height_without_touching_scroll() {
+        // 滚动钳制真相归 view_state（由 adapter 每帧重新钳制覆盖镜像）；handle_resize
+        // 仅回填 last_visible_height，不再就地改 scroll_offset/auto_scroll。
         let mut output = output_area_with_term_width(78);
         output.set_plain_document_lines(10);
         output.scroll_offset = 9;
@@ -59,21 +57,9 @@ pub mod tests {
         output.handle_resize(80, 4);
 
         assert_eq!(output.last_visible_height, 4);
-        assert_eq!(output.scroll_offset, 6);
+        // 镜像未被就地钳制：保持调用前的值。
+        assert_eq!(output.scroll_offset, 9);
         assert!(!output.auto_scroll);
-    }
-
-    #[test]
-    fn resize_restores_auto_scroll_when_offset_is_zero() {
-        let mut output = output_area_with_term_width(78);
-        output.set_plain_document_lines(3);
-        output.scroll_offset = 2;
-        output.auto_scroll = false;
-
-        output.handle_resize(80, 10);
-
-        assert_eq!(output.scroll_offset, 0);
-        assert!(output.auto_scroll);
     }
 
     #[test]

@@ -103,47 +103,6 @@ impl super::OutputArea {
         Some((logic_idx, CharIdx::new(start), CharIdx::new(end + 1)))
     }
 
-    /// Start a selection at the given screen position
-    /// row/col 是相对于输出区域 rect 的偏移
-    pub fn start_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
-        if let Some((logic_idx, anchor)) = self.screen_to_anchor(row, col, rect) {
-            self.selection_start = Some((logic_idx, anchor));
-            self.selection_end = Some((logic_idx, anchor));
-        }
-        self.is_selecting = true;
-    }
-
-    /// Update selection end position during drag
-    pub fn update_selection(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
-        if !self.is_selecting {
-            return;
-        }
-        if let Some(anchor) = self.screen_to_anchor(row, col, rect) {
-            self.selection_end = Some(anchor);
-        } else if let Some(anchor) = self.last_visible_anchor() {
-            // 超出可见范围时，选到最后一个屏幕行对应的逻辑行末尾
-            self.selection_end = Some(anchor);
-        }
-    }
-
-    /// Select the word at the given screen position
-    pub fn select_word(&mut self, row: u16, col: u16, rect: &ratatui::layout::Rect) {
-        if let Some((logic_idx, word_start, word_end)) = self.word_bounds_at(row, col, rect) {
-            self.selection_start = Some((logic_idx, word_start));
-            self.selection_end = Some((logic_idx, word_end));
-            self.is_selecting = true;
-        }
-    }
-
-    /// End selection and return selected text without performing clipboard side effects.
-    pub fn end_selection(&mut self) -> Option<String> {
-        self.is_selecting = false;
-        let text = self.get_selected_text();
-        self.selection_start = None;
-        self.selection_end = None;
-        text
-    }
-
     /// Get the selected text based on logic line coordinates
     pub fn get_selected_text(&mut self) -> Option<String> {
         let (start_logic, start_col) = self.selection_start?;
@@ -230,11 +189,6 @@ impl super::OutputArea {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
-    }
-
-    /// Whether a selection drag is in progress
-    pub fn is_selecting(&self) -> bool {
-        self.is_selecting
     }
 }
 

@@ -123,7 +123,7 @@ mod tests {
         apply_output_selection_to_widget(&view, &mut output);
 
         // 正常路径：view_state 选区真相单向写回 widget 镜像。
-        assert!(output.is_selecting());
+        assert!(output.is_selecting);
         assert_eq!(output.selection_start, Some((1, CharIdx::new(2))));
         assert_eq!(output.selection_end, Some((3, CharIdx::new(7))));
     }
@@ -141,7 +141,7 @@ mod tests {
         apply_output_selection_to_widget(&view, &mut output);
 
         // 边界/清空路径：view_state 无选区 → 镜像被清空（下帧同步清 widget）。
-        assert!(!output.is_selecting());
+        assert!(!output.is_selecting);
         assert_eq!(output.selection_start, None);
         assert_eq!(output.selection_end, None);
     }

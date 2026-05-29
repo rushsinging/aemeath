@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use sdk::CharIdx;
 
 /// 选区锚点：`(逻辑行, plain CharIdx)`（#63 坐标系）。
@@ -12,14 +10,11 @@ pub type SelectionAnchor = (usize, CharIdx);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewState {
     pub scroll_offset: usize,
-    pub follow_tail: bool,
     pub auto_scroll: bool,
     pub is_selecting: bool,
     pub selection_start: Option<SelectionAnchor>,
     pub selection_end: Option<SelectionAnchor>,
     pub last_visible_height: usize,
-    pub render_revision: u64,
-    pub collapsed_blocks: HashSet<String>,
     pub version: u64,
 }
 
@@ -30,14 +25,11 @@ impl Default for OutputViewState {
     fn default() -> Self {
         Self {
             scroll_offset: 0,
-            follow_tail: false,
             auto_scroll: true,
             is_selecting: false,
             selection_start: None,
             selection_end: None,
             last_visible_height: 0,
-            render_revision: 0,
-            collapsed_blocks: HashSet::new(),
             version: 0,
         }
     }
@@ -46,8 +38,7 @@ impl Default for OutputViewState {
 impl OutputViewState {
     /// 向上滚动指定行数。
     ///
-    /// 逻辑与 `render::output_area::scroll::OutputArea::scroll_up` 等价：
-    /// view_state 不持有 document，故总行数由调用方传入。
+    /// view_state 是滚动真相；不持有 document，故总行数由调用方传入。
     /// - `max_offset = total_lines - last_visible_height`（饱和减）；
     /// - `max_offset == 0`（内容不超过可见高度）时复位 offset=0 并恢复 auto_scroll；
     /// - 否则关闭 auto_scroll，并将 offset 钳制到 `max_offset`。
@@ -164,13 +155,10 @@ mod tests {
         assert!(state.auto_scroll);
         // 其余字段保持类型默认值。
         assert_eq!(state.scroll_offset, 0);
-        assert!(!state.follow_tail);
         assert!(!state.is_selecting);
         assert_eq!(state.selection_start, None);
         assert_eq!(state.selection_end, None);
         assert_eq!(state.last_visible_height, 0);
-        assert_eq!(state.render_revision, 0);
-        assert!(state.collapsed_blocks.is_empty());
         assert_eq!(state.version, 0);
     }
 

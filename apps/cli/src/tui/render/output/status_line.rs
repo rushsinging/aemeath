@@ -120,8 +120,9 @@ mod tests {
         assert_eq!(output.screen_line_map[2].0, base + 1);
         assert_eq!(output.task_status_lines.len(), 2);
         // rel_row=2 对应第 2 个 task_status 行
-        output.start_selection(2, 0, &area);
-        output.update_selection(2, 15, &area);
+        let s = output.screen_to_anchor(2, 0, &area).unwrap();
+        let e = output.screen_to_anchor(2, 15, &area).unwrap();
+        output.set_selection_for_test(s, e);
 
         assert_eq!(
             output.get_selected_text(),
@@ -145,8 +146,9 @@ mod tests {
         output.render(area, &mut buf);
         // screen_map: [spinner(usize::MAX), task_status(lines.len())]
         // 选 task_status 行（screen 行 1）
-        output.start_selection(1, 0, &area);
-        output.update_selection(1, 8, &area);
+        let s = output.screen_to_anchor(1, 0, &area).unwrap();
+        let e = output.screen_to_anchor(1, 8, &area).unwrap();
+        output.set_selection_for_test(s, e);
         output.render(area, &mut buf);
 
         let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
