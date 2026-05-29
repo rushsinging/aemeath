@@ -22,6 +22,7 @@ HOOKS_DIR="$ROOT/.agents/hooks"
 "$HOOKS_DIR/check-tui-model-view-boundaries.sh"
 "$HOOKS_DIR/check-tui-input-single-source.sh"
 "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
+"$HOOKS_DIR/check-tui-block-nesting.sh"
 "$HOOKS_DIR/check-render-isolation.sh"
 "$HOOKS_DIR/check-unsafe-text-ops.sh"
 
