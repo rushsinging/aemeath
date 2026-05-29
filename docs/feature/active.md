@@ -40,6 +40,17 @@
 
 **D2 进度 · skill loader 归位（fs IO 收尾）**：`share::skill_ops_loader`（`load_all_skills`/`load_all_skills_cached`/`load_and_filter_skills`/`load_skills_from_dir`，含 `std::fs::read_dir`/`metadata` 目录遍历 IO）已移入 `prompt::skill::loader`（prompt 成为 loader canonical，符合 rule6「prompt 承载 skills」）；`agent/share/src/skill_ops_loader.rs` 删除，`lib.rs` 移除 `pub mod skill_ops_loader`。`Skill` DTO 与单文件 parser（`parse_skill`/`read_skill_content`/`builtin_commit_skill`）**保留** `share::skill_ops`——`Skill` 与 `read_skill_content` 被 `tools`/`runtime`/`prompt` 多 crate 依赖，属合理共享内核契约；保留可避免新增 `tools→prompt` 横向边（tools 仅用 DTO+parser，不用 loader）。`prompt::skill` re-export DTO/parser 保持调用方接口一致；runtime 经 `prompt::skill::load_all_skills` 调用（`runtime→prompt` 已批准边，无新增边、无环）。loader 单测随迁至 `prompt::skill::loader::loader_tests`，行为不变。
 
+**D4 进度 · supporting domain 内部 COLA 分层（待确认）**：7 个 supporting domain 已按 §6.4.3/§7.2 完成内部分层，api.rs 门面对外路径不变，纯目录/模块组织无业务逻辑改动。务实原则——只建实际有职责的层，不为凑满三层建空目录：
+- **policy** → `business/security`（仅内容安全扫描一个领域模块）。
+- **project** → `business/worktree`（仅 worktree 工作区上下文一个模块）。
+- **storage** → `business/{memory,history,tool_result_storage}`（三者均为持久化领域规则；history 的 dead_code allow 随迁）。
+- **hook** → `business/hook`（整体为单一 hook 执行引擎 data/result/runner/events；`crate::hook::` → `crate::business::hook::`）。
+- **prompt** → `business/{guidance,skill,security}`（提示词领域规则；guidance/resolver 内 `crate::security` 同步更新）。
+- **tools** → 三层：`core/registry`（register_all_tools 等注册编排，从 lib.rs 抽出）+ `business/*`（各 Tool 实现）+ `utils/path_security`（路径校验纯辅助）；内部 `crate::{bash,mcp,mcp_manager,path_security}` 改分层路径。
+- **provider** → `core/{provider(端口),client,pool}` + `business/{providers,stream,types}`；内部 6 个模块引用全部改分层路径。
+- **audit**（14 行 marker 骨架，无内部模块）：无可分层内容，免分层。
+commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa17810`、prompt `bdb8187`、tools `adb67d4`、provider `773afe0`。验证：`cargo clean && cargo test --workspace` 1120 passed / 0 failed；`cargo clippy --workspace -- -D warnings` 通过；`check-architecture-guards.sh`（含 COLA layer purity）全绿。
+
 **性质**：纯架构债务收口（D1-D4），不改业务行为。各子项 SHOULD 独立走 spec→plan→实施；D1/D2/D3 完成后 SHOULD 补对应 guard（如 api 收窄 guard）防回归。
 
 **关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）。
