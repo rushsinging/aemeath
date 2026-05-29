@@ -1,4 +1,4 @@
-use crate::path_security::validate_and_normalize_path_from_base;
+use crate::utils::path_security::validate_and_normalize_path_from_base;
 fn safe_slice(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;

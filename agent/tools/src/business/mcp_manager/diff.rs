@@ -1,4 +1,4 @@
-use crate::mcp::McpToolDef;
+use crate::business::mcp::McpToolDef;
 use std::collections::HashMap;
 
 pub struct ToolListDiff {

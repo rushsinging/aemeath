@@ -1,4 +1,4 @@
-use crate::mcp::{McpClient, McpServerConfig, McpToolDef};
+use crate::business::mcp::{McpClient, McpServerConfig, McpToolDef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -87,7 +87,7 @@ fn default_health_check_interval_seconds() -> u64 {
 }
 
 fn default_max_tool_response_bytes() -> usize {
-    crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
+    crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
 }
 
 /// MCP connection manager configuration
@@ -125,7 +125,7 @@ impl Default for McpManagerConfig {
             reconnect_delay_seconds: 5,
             max_reconnect_attempts: 3,
             health_check_interval_seconds: 30,
-            max_tool_response_bytes: crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
+            max_tool_response_bytes: crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
         }
     }
 }

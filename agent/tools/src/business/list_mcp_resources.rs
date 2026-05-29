@@ -1,6 +1,6 @@
 //! List resources from connected MCP servers
 
-use crate::mcp::McpClient;
+use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

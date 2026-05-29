@@ -1,5 +1,5 @@
 use super::*;
-use crate::mcp::sse_stream::try_parse_incomplete_event;
+use crate::business::mcp::sse_stream::try_parse_incomplete_event;
 
 #[test]
 fn test_parse_sse_events_single() {

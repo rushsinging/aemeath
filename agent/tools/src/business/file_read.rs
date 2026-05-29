@@ -1,4 +1,4 @@
-use crate::path_security::validate_and_normalize_path_from_base;
+use crate::utils::path_security::validate_and_normalize_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{Tool, ToolContext, ToolResult};

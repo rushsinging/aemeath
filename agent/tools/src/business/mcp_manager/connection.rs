@@ -1,7 +1,7 @@
 use super::config::{ConnectionState, McpManagerConfig, McpServerConnection};
 use super::diff::qualified_tool_name;
 use super::wrapper::McpToolWrapper;
-use crate::mcp::{McpClient, McpServerConfig, McpToolDef};
+use crate::business::mcp::{McpClient, McpServerConfig, McpToolDef};
 use share::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;

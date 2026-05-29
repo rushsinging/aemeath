@@ -1,4 +1,4 @@
-use crate::mcp::McpClient;
+use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{Tool, ToolContext, ToolResult};
@@ -39,9 +39,9 @@ impl Tool for McpTool {
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
-            Ok(output) => ToolResult::success(crate::mcp::limit_tool_response(
+            Ok(output) => ToolResult::success(crate::business::mcp::limit_tool_response(
                 &output,
-                crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
+                crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
             )),
             Err(e) => ToolResult::error(format!("MCP tool error: {e}")),
         }

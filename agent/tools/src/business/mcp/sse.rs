@@ -10,7 +10,7 @@
 //! Each `send_request` POSTs the request then directly reads the response from the
 //! stream — no background task, no channel, no race conditions.
 
-use crate::mcp::sse_stream::SseReadStream;
+use crate::business::mcp::sse_stream::SseReadStream;
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;

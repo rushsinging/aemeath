@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod mcp_server_config_tests {
-    use crate::mcp::{
+    use crate::business::mcp::{
         limit_tool_response, redact_headers, validate_remote_url, McpServerConfig, McpTransportKind,
     };
     use std::collections::HashMap;

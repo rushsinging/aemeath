@@ -1,4 +1,4 @@
-use crate::mcp::sse::SseEvent;
+use crate::business::mcp::sse::SseEvent;
 use futures_util::StreamExt;
 use serde_json::Value;
 

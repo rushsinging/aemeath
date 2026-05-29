@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::mcp::{McpServerConfig, McpToolDef};
-    use crate::mcp_manager::{
+    use crate::business::mcp::{McpServerConfig, McpToolDef};
+    use crate::business::mcp_manager::{
         diff_tools, qualified_tool_name, removed_qualified_tool_names, ConnectionState,
         McpConnectionManager, McpManagerConfig, McpServerConnection,
     };
@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(config.health_check_interval_seconds, 30);
         assert_eq!(
             config.max_tool_response_bytes,
-            crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
+            crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
         );
     }
 
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(config.health_check_interval_seconds, 30);
         assert_eq!(
             config.max_tool_response_bytes,
-            crate::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
+            crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES
         );
     }
 
