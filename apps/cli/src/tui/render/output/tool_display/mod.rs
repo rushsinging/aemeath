@@ -99,3 +99,55 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     let truncated = truncate_json(raw_json);
     (format!("● {name}"), vec![truncated])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lookup_display_finds_task_list_create() {
+        let display = lookup_display("TaskListCreate");
+        assert!(display.is_some(), "TaskListCreate 应在 display registry 中注册");
+        assert_eq!(display.unwrap().name(), "TaskListCreate");
+    }
+
+    #[test]
+    fn test_lookup_display_finds_task_create() {
+        assert!(lookup_display("TaskCreate").is_some());
+    }
+
+    #[test]
+    fn test_lookup_display_finds_task_update() {
+        assert!(lookup_display("TaskUpdate").is_some());
+    }
+
+    #[test]
+    fn test_format_tool_call_task_list_create() {
+        let (header, details) =
+            format_tool_call("TaskListCreate", r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#);
+        assert!(header.contains("修复 bug 84"), "header 应包含 subject: {header}");
+        assert!(!details.is_empty(), "details 应包含 summary");
+    }
+
+    #[test]
+    fn test_format_tool_call_task_create() {
+        let (header, details) =
+            format_tool_call("TaskCreate", r#"{"subject":"分析","description":"查看结构"}"#);
+        assert!(header.contains("分析"), "header: {header}");
+        assert!(!details.is_empty());
+    }
+
+    #[test]
+    fn test_format_tool_call_unknown_tool_uses_fallback() {
+        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#);
+        assert_eq!(header, "● UnknownTool");
+        assert!(!details.is_empty(), "fallback 应截断 JSON");
+    }
+
+    #[test]
+    fn test_format_tool_call_invalid_json_uses_fallback() {
+        let (header, _details) = format_tool_call("TaskListCreate", "not json");
+        // 不应 panic，应 fallback
+        assert!(header.contains("TaskListCreate"));
+    }
+}
