@@ -27,6 +27,9 @@ const DONE_VERBS: [&str; 20] = [
 ];
 
 /// 生成"完成"提示文案，如 `✻ Sautéed for 3s`。
+///
+/// 末尾保留一个换行：diagnostic 块据此追加一行尾随空行，使完成提示与后续
+/// 内容（下一回合用户输入回显等）保持视觉间距（迁移前 push_done 的行为）。
 fn done_notice(elapsed: std::time::Duration) -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -39,7 +42,7 @@ fn done_notice(elapsed: std::time::Duration) -> String {
     } else {
         format!("{secs}s")
     };
-    format!("✻ {verb} for {duration}")
+    format!("✻ {verb} for {duration}\n")
 }
 
 impl App {
@@ -75,8 +78,18 @@ mod tests {
         let notice = done_notice(Duration::from_secs(3));
         assert!(notice.starts_with('✻'), "应以 ✻ 开头，实际: {notice}");
         assert!(
-            notice.ends_with("for 3s"),
+            notice.trim_end().ends_with("for 3s"),
             "短耗时应以秒展示，实际: {notice}"
+        );
+    }
+
+    #[test]
+    fn test_done_notice_keeps_trailing_newline_for_spacing() {
+        // 末尾换行用于让 diagnostic 块追加尾随空行（间距，迁移回归）。
+        let notice = done_notice(Duration::from_secs(1));
+        assert!(
+            notice.ends_with('\n'),
+            "应以换行结尾以提供尾随间距，实际: {notice:?}"
         );
     }
 
@@ -84,7 +97,7 @@ mod tests {
     fn test_done_notice_long_duration_uses_minutes_and_seconds() {
         let notice = done_notice(Duration::from_secs(125));
         assert!(
-            notice.ends_with("for 2m 5s"),
+            notice.trim_end().ends_with("for 2m 5s"),
             "超过 60s 应以分秒展示，实际: {notice}"
         );
     }
@@ -93,7 +106,7 @@ mod tests {
     fn test_done_notice_zero_duration() {
         let notice = done_notice(Duration::from_secs(0));
         assert!(
-            notice.ends_with("for 0s"),
+            notice.trim_end().ends_with("for 0s"),
             "边界：0 耗时应展示 0s，实际: {notice}"
         );
     }
