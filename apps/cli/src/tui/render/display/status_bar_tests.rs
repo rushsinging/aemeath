@@ -164,6 +164,43 @@ fn test_status_bar_render_second_row_uses_muted_color() {
 }
 
 #[test]
+fn test_screen_to_status_anchor_runtime_row_folds_relative_col() {
+    let mut bar = StatusBar::new();
+    set_test_status_text(&mut bar, "你好a");
+    // bar_y=10：row==10 非 Context（!=bar_y+1）→ Runtime；列相对 bar_x=0 偏移后折算。
+    let (row, char_idx, width) = bar.screen_to_status_anchor(10, 2, 10, 0, 0);
+    assert_eq!(row, StatusBarRow::Runtime);
+    // 屏幕列 2（"你"宽 2）→ char_idx 1（"好" 起点）。
+    assert_eq!(char_idx, 1);
+    assert_eq!(width, 0);
+}
+
+#[test]
+fn test_screen_to_status_anchor_context_row_and_col_offset() {
+    let mut bar = StatusBar::new();
+    bar.set_current_dir("~/aemeath");
+    // bar_y=5、bar_x=3、bar_width=80：row==6(==bar_y+1) → Context；列减去 bar_x。
+    let (row, char_idx, width) = bar.screen_to_status_anchor(6, 3 + 2, 5, 3, 80);
+    assert_eq!(row, StatusBarRow::Context);
+    // 相对列 2 在 Context 行折算（与 start_selection_at(Context,2,80) 一致）。
+    assert_eq!(
+        char_idx,
+        bar.screen_col_to_char_idx(StatusBarRow::Context, 2, 80)
+    );
+    assert_eq!(width, 80);
+}
+
+#[test]
+fn test_screen_to_status_anchor_does_not_mutate_widget_state() {
+    let mut bar = StatusBar::new();
+    set_test_status_text(&mut bar, "abc");
+    // 只读折算 NEVER 触动 widget 选区字段。
+    let _ = bar.screen_to_status_anchor(0, 1, 0, 0, 0);
+    assert!(!bar.is_selecting());
+    assert!(bar.get_selected_text().is_none());
+}
+
+#[test]
 fn test_status_bar_selection_supports_context_row() {
     let mut bar = StatusBar::new();
     bar.set_current_dir("~/aemeath");

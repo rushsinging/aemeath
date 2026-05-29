@@ -1,4 +1,3 @@
-use crate::tui::render::status::StatusBarRow;
 use crossterm::event::{MouseEvent, MouseEventKind};
 use std::time::Instant;
 
@@ -55,9 +54,9 @@ impl crate::tui::app::App {
                         .unwrap_or(false);
 
                     if is_double {
-                        // 输出区选区真相归 view_state；input/status clear 暂留（S4 统一）。
+                        // 输出区选区真相归 view_state；status 清 view_state（S4），input clear 暂留（T4）。
                         self.input_area.clear_selection();
-                        self.status_bar.clear_selection();
+                        self.view_state.status_sel.clear_selection();
                         if let Some((line, ws, we)) =
                             self.output_area.word_bounds_at(row, col, &output_area)
                         {
@@ -65,9 +64,9 @@ impl crate::tui::app::App {
                         }
                         self.input.last_click = None;
                     } else {
-                        // 清除其他区域的选中
+                        // 清除其他区域的选中（status 清 view_state；input 暂留 T4）
                         self.input_area.clear_selection();
-                        self.status_bar.clear_selection();
+                        self.view_state.status_sel.clear_selection();
                         if let Some((line, anchor)) =
                             self.output_area.screen_to_anchor(row, col, &output_area)
                         {
@@ -76,25 +75,27 @@ impl crate::tui::app::App {
                         self.input.last_click = Some((now, row, col));
                     }
                 } else if point_in_rect(row, col, &input_area) {
-                    // 清除其他区域的选中
+                    // 清除其他区域的选中（status 清 view_state；input 仍直驱 widget，T4 迁移）
                     self.output_area.clear_selection();
-                    self.status_bar.clear_selection();
+                    self.view_state.status_sel.clear_selection();
                     let inner = self.input_area.get_inner_area(&input_area);
                     self.input_area.start_selection(row, col, &inner);
                 } else if point_in_rect(row, col, &status_bar) {
                     // 清除其他区域的选中
                     self.output_area.clear_selection();
                     self.input_area.clear_selection();
-                    let status_row = if row == status_bar.y.saturating_add(1) {
-                        StatusBarRow::Context
-                    } else {
-                        StatusBarRow::Runtime
-                    };
-                    self.status_bar.start_selection_at(
-                        status_row,
-                        col.saturating_sub(status_bar.x),
+                    // 屏幕坐标 → status 锚点只读折算借 widget（依赖 render 期布局），
+                    // 选区真相写入 view_state（#59 S4）。
+                    let (status_row, char_idx, width) = self.status_bar.screen_to_status_anchor(
+                        row,
+                        col,
+                        status_bar.y,
+                        status_bar.x,
                         status_bar.width,
                     );
+                    self.view_state
+                        .status_sel
+                        .begin_selection(status_row, char_idx, width);
                 }
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
@@ -111,9 +112,15 @@ impl crate::tui::app::App {
                 } else if self.input_area.is_selecting() {
                     let inner = self.input_area.get_inner_area(&input_area);
                     self.input_area.update_selection(row, col, &inner);
-                } else if self.status_bar.is_selecting() {
-                    self.status_bar
-                        .update_selection_at(col.saturating_sub(status_bar.x), status_bar.width);
+                } else if self.view_state.status_sel.is_selecting() {
+                    // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
+                    let sel = &self.view_state.status_sel;
+                    let char_idx = self.status_bar.screen_col_to_char_idx(
+                        sel.selection_row,
+                        col.saturating_sub(status_bar.x),
+                        sel.selection_width,
+                    );
+                    self.view_state.status_sel.update_selection(char_idx);
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
@@ -133,8 +140,19 @@ impl crate::tui::app::App {
                     text
                 } else if self.input_area.is_selecting() {
                     self.input_area.end_selection()
-                } else if self.status_bar.is_selecting() {
-                    self.status_bar.end_selection()
+                } else if self.view_state.status_sel.is_selecting() {
+                    // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
+                    self.view_state.status_sel.end_selection();
+                    // 复制时序：取文本前先把 view_state 最新选区同步到 widget 镜像，消一帧滞后。
+                    crate::tui::adapter::status_widget::apply_status_selection_to_widget(
+                        &self.view_state.status_sel,
+                        &mut self.status_bar,
+                    );
+                    // 取 plain 文本（读 widget 选区镜像 + render 期 line_text 折算）。
+                    let text = self.status_bar.get_selected_text();
+                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                    self.view_state.status_sel.clear_selection();
+                    text
                 } else {
                     None
                 };

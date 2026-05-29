@@ -91,6 +91,33 @@ impl StatusBar {
         col_to_char_idx(&self.line_text(row, width), col as usize)
     }
 
+    /// 只读折算：把状态栏屏幕坐标 `(row, col)`（已相对 `status_bar_rect`）折算成
+    /// view_state 选区锚点 `(StatusBarRow, char_idx, width)`，**不改 widget 选区字段**。
+    ///
+    /// `bar_y`/`bar_x`/`bar_width` 为 render 期 `status_bar_rect` 的几何（由 mouse_handler
+    /// 据当前 layout 传入）。逻辑搬自 `mouse_handler` 的 Down/status 分支：
+    /// - `row == bar_y + 1` 判定为 Context 行，否则 Runtime 行；
+    /// - 列相对 `bar_x` 偏移后经 `screen_col_to_char_idx` 折算成 plain 文本 char_idx
+    ///   （依赖 render 期 `build_full_text`/`context_row_text`，故留 widget 只读借用，
+    ///   对齐 output 的 `screen_to_anchor`）。
+    pub(crate) fn screen_to_status_anchor(
+        &self,
+        row: u16,
+        col: u16,
+        bar_y: u16,
+        bar_x: u16,
+        bar_width: u16,
+    ) -> (StatusBarRow, usize, u16) {
+        let status_row = if row == bar_y.saturating_add(1) {
+            StatusBarRow::Context
+        } else {
+            StatusBarRow::Runtime
+        };
+        let char_idx =
+            self.screen_col_to_char_idx(status_row, col.saturating_sub(bar_x), bar_width);
+        (status_row, char_idx, bar_width)
+    }
+
     pub(crate) fn line_text(&self, row: StatusBarRow, width: u16) -> String {
         match row {
             StatusBarRow::Runtime => self.build_full_text(),

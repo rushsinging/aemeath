@@ -213,6 +213,11 @@ impl App {
             &self.view_state.output,
             &mut self.output_area,
         );
+        // #59 S4：status 选区真相归 view_state，每帧渲染前写回 widget 镜像。
+        crate::tui::adapter::status_widget::apply_status_selection_to_widget(
+            &self.view_state.status_sel,
+            &mut self.status_bar,
+        );
     }
 }
 

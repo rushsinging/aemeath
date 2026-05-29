@@ -28,8 +28,8 @@ pub(crate) fn apply_diagnostic_status_to_widget(model: &TuiModel, status_bar: &m
 /// `selection_width` 降为只读镜像，供 render 期 `spans_with_selection` 高亮与
 /// `get_selected_text` 取 plain 文本。这是这些镜像字段的唯一生产写入路径。
 ///
-/// **未接入渲染管线**（T2 原子接入渲染前管线 + mouse_handler 改写）。
-#[allow(dead_code)] // S4 T2 接线：渲染前管线 + mouse_handler status 分支。
+/// 每帧渲染前由 `refresh_output_scroll_from_view_state` 调用；mouse-up 复制前亦显式
+/// 调用以消除一帧滞后（对齐 output 选区时序）。
 pub(crate) fn apply_status_selection_to_widget(
     view: &StatusSelectionViewState,
     status_bar: &mut StatusBar,
