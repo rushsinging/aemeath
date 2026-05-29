@@ -149,6 +149,26 @@
 
 **TDD/验证**：model 层 8 个单测（show 替换、cursor 越界夹取、无块 noop、toggle LLM/内建、dismiss、chat_input、snapshot）；render 层 6 个单测（cursor 高亮、空选项提示、单选项标记、多选勾选框、chat 子态抑制高亮、多行选项缩进）。`cargo build -p cli`、`cargo test -p cli`（372 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
 
+### #58 Phase 5 · T6c：删除 OutputLine/LineStyle/lines 字段/legacy 垫片/镜像
+
+**状态**：待确认（T6c 完成，输出区只剩 `document: RenderedDocument` 单一表示）
+
+**判别结论**：T6b 后所有命令式写 `OutputArea.lines` 的业务路径已迁完，`lines` 仅剩两类残留：①`adapter/output_widget.rs::render_document_from_view_model` 每帧把 document 各行 plain 镜像写回 lines；②少数逻辑仍读 lines（scroll/resize 算 max_offset、selection 虚拟行映射、status_line task 基址、render 兜底垫片）。`OutputLine`/`LineStyle` 另有两类非 legacy 使用：`blocks/tool_call.rs` 与 `output/diff.rs` 把它们当作行的着色中间单元；`tool_display` trait 的 `detail_style`/`result_style` 是从未被调用的死代码。
+
+**改法**：
+- **删镜像**：`render_document_from_view_model` 去掉 `lines.clear()` + 写 OutputLine 循环，只 `set_document` + clamp scroll。
+- **读 lines 改读 document**：`scroll.rs`（`scroll_up` max_offset、`line_count`、`get_visible_range`）、`resize.rs`（max_offset）、`selection.rs`（`total_virtual_line_count`、`get_line_content` 虚拟行基址）、`status_line.rs`（task 基址）全部改读 `document.total_lines()`/`iter_lines()`。
+- **删 legacy 垫片**：`render.rs` 的 `sync_document_from_legacy_lines`、`legacy_lines_to_rendered` 及调用；`render.rs::render` 不再调 `color_tool_call_dots`（dot 着色已由 `blocks/tool_call.rs` 的 `semantic_color` 在 document 内完成），`status_line.rs::color_tool_call_dots`/`set_running_tool_dot` 整体删除。
+- **迁 push_done**：`done.rs` 原经 `OutputArea::push_done` 写 lines 的「✻ Sautéed for Xs」完成提示改派发 `append_system_notice`（ConversationModel → document），并把动词/耗时格式化抽为纯函数 `done_notice`（3 个单测）。
+- **删字段/方法/类型**：`OutputArea.lines` 字段及 `new()` 初始化；`content.rs` 的 `insert_lines_at`（无调用者）、`push_line`、`push_done`（`clear()` 改清 document）；`tool_display` trait 的 `detail_style`/`result_style` 及各 impl 重写；`output_area/types.rs` 的 `OutputLine`、`LineStyle` 类型本体与 `mod.rs` re-export。
+- **重写非 legacy 着色中间单元**：`output/diff.rs::build_diff_lines` 由产出 `Vec<OutputLine>` 改为 `Vec<Vec<SpanPart>>`（style 字段本就被 spans 覆盖、未实际使用）；`primitives/diff.rs` 适配；`blocks/tool_call.rs::format_result_lines` 直接产出 `RenderedLine`（System/Normal 两种语义色映射 `theme::TEXT_DIM`/`theme::TEXT`）。
+
+**SpanPart 保留**：`SpanPart` 是 `render/syntax.rs` 与 `output/diff.rs` 着色原语的中间单元（`primitives/convert.rs::spanparts_to_spans` 消费），与 OutputLine/LineStyle 解耦，定义留在 `output_area/types.rs`，re-export 保留。
+
+**行为兼容**：滚动 max_offset、resize 夹取、选区（含 markdown 表格/内联格式 plain 偏移）、复制、task_status 虚拟行选择均保持原行为；markdown 选区回归测试改由真实 `blocks/assistant_message::render_assistant_message` 渲染 document 后断言（取代旧 legacy_lines_to_rendered 路径）。tool-call dot 闪烁（旧 `color_tool_call_dots` 基于已恒空的 lines，实际早已不生效）随之移除，dot 颜色由 document 静态语义色提供。
+
+**TDD/验证**：`output/diff.rs` 4 个单测改断言 SpanPart 文本/标记；`selection_tests.rs` 11 个用例改用 document 填充辅助（plain + assistant_message markdown）；`resize.rs`/`status_line.rs`/`app/state/tests.rs`/`output_widget.rs` 测试改读 document；`done.rs` 新增 3 个 `done_notice` 单测。`cargo build -p cli`、`cargo test -p cli`（374 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含 ≤400 行）全绿；`OutputLine`/`LineStyle` 全仓零残留。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认

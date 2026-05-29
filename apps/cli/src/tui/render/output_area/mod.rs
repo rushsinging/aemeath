@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use sdk::CharIdx;
 
@@ -17,11 +17,10 @@ pub mod spinner;
 pub mod types;
 
 // 重新导出核心类型，方便外部使用
-pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
+pub use types::{SpanPart, SpinnerState, INDENT};
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
-    pub lines: VecDeque<OutputLine>,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
     pub last_line_count: usize,
@@ -64,7 +63,6 @@ impl OutputArea {
             .saturating_sub(2);
 
         Self {
-            lines: VecDeque::with_capacity(MAX_LINES),
             scroll_offset: 0,
             auto_scroll: true,
             last_line_count: 0,
@@ -91,6 +89,22 @@ impl OutputArea {
         &self.document
     }
 
+    /// 测试辅助：以 `count` 行纯文本填充 document（单 block）。
+    #[cfg(test)]
+    pub(crate) fn set_plain_document_lines(&mut self, count: usize) {
+        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
+        use ratatui::text::Span;
+
+        let lines = (0..count)
+            .map(|i| RenderedLine::new(vec![Span::raw(format!("line {i}"))]))
+            .collect();
+        self.document = RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "test".into(),
+                lines,
+            }],
+        };
+    }
 }
 
 #[cfg(test)]

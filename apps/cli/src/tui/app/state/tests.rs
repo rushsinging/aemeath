@@ -276,9 +276,9 @@ mod tests {
 
         let rendered = app
             .output_area
-            .lines
-            .iter()
-            .map(|line| line.content.clone())
+            .document()
+            .iter_lines()
+            .map(|line| line.plain.clone())
             .collect::<Vec<_>>();
 
         // 启动横幅现纳入 ConversationModel，用户消息不再是首行。
@@ -299,7 +299,7 @@ mod tests {
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
-        assert!(app.output_area.scroll_offset <= app.output_area.lines.len());
+        assert!(app.output_area.scroll_offset <= app.output_area.document().total_lines());
     }
 
     fn enter_key() -> crossterm::event::KeyEvent {

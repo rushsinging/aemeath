@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::tui::render::output_area::LineStyle;
-
 mod common;
 mod task_impls;
 mod tool_impls;
@@ -25,22 +23,10 @@ pub trait ToolDisplay: Send + Sync {
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
-    /// Style for detail lines.
-    #[allow(dead_code)]
-    fn detail_style(&self) -> LineStyle {
-        LineStyle::System
-    }
-
     /// Max lines of result output to show (default 5).
     #[allow(dead_code)]
     fn result_max_lines(&self) -> usize {
         TOOL_RESULT_MAX_LINES
-    }
-
-    /// Style for result content lines.
-    #[allow(dead_code)]
-    fn result_style(&self) -> LineStyle {
-        LineStyle::System
     }
 
     /// Format the result summary line(s). Default: "✓ {name} completed".

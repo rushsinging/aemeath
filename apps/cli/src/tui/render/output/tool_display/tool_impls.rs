@@ -1,4 +1,4 @@
-use crate::tui::render::output_area::{display, LineStyle, INDENT};
+use crate::tui::render::output_area::{display, INDENT};
 
 use super::common::{file_path, str_arg, truncate_ellipsis, u64_arg};
 use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
@@ -23,9 +23,6 @@ impl ToolDisplay for BashDisplay {
             }
         }
         vec![detail]
-    }
-    fn detail_style(&self) -> LineStyle {
-        LineStyle::Normal
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -187,9 +184,6 @@ impl ToolDisplay for AgentDisplay {
     }
     fn result_max_lines(&self) -> usize {
         TOOL_RESULT_MAX_LINES
-    }
-    fn result_style(&self) -> LineStyle {
-        LineStyle::Assistant
     }
 }
 inventory::submit!(ToolDisplayEntry {

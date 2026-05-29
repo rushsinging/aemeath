@@ -15,7 +15,6 @@ impl OutputArea {
         if area.height == 0 {
             return;
         }
-        self.sync_document_from_legacy_lines();
 
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
@@ -45,7 +44,6 @@ impl OutputArea {
         );
 
         clear_area(area, buf);
-        let spinner_frame_idx = self.spinner.as_ref().map(|s| s.frame).unwrap_or(0);
 
         let document_lines = self.document.iter_lines().collect::<Vec<_>>();
         let mut screen_map = Vec::new();
@@ -88,7 +86,6 @@ impl OutputArea {
             );
         }
 
-        self.color_tool_call_dots(area, buf, spinner_frame_idx, total_rendered);
         render_scrollbar(
             area,
             buf,
@@ -98,19 +95,6 @@ impl OutputArea {
             self.scroll_offset,
         );
         self.last_line_count = total_lines;
-    }
-
-    fn sync_document_from_legacy_lines(&mut self) {
-        if !self.document.blocks.is_empty() || self.lines.is_empty() {
-            return;
-        }
-        let lines = legacy_lines_to_rendered(&self.lines, self.term_width);
-        self.document = crate::tui::render::output::rendered::RenderedDocument {
-            blocks: vec![crate::tui::render::output::rendered::RenderedBlock {
-                block_id: "legacy".into(),
-                lines,
-            }],
-        };
     }
 
     #[cfg(test)]
@@ -162,44 +146,6 @@ fn normalize_rendered_table_plain(plain: &str) -> String {
         return plain.to_string();
     };
     format!("{}  │{}", left.trim_end(), right.trim_end())
-}
-
-pub(crate) fn legacy_lines_to_rendered(
-    lines: &std::collections::VecDeque<super::types::OutputLine>,
-    width: usize,
-) -> Vec<crate::tui::render::output::rendered::RenderedLine> {
-    use crate::tui::render::output::markdown::{
-        is_table_row, is_table_separator, render_table_block,
-    };
-    use ratatui::style::Style;
-
-    let mut out = Vec::new();
-    let mut idx = 0usize;
-    while idx < lines.len() {
-        let line = &lines[idx];
-        if matches!(line.style, super::types::LineStyle::Assistant)
-            && is_table_row(&line.content)
-            && idx + 1 < lines.len()
-            && is_table_separator(&lines[idx + 1].content)
-        {
-            let mut end = idx;
-            let mut src = Vec::new();
-            while end < lines.len() && is_table_row(&lines[end].content) {
-                src.push(lines[end].content.as_str());
-                end += 1;
-            }
-            out.extend(
-                render_table_block(&src, Style::default(), width)
-                    .into_iter()
-                    .map(crate::tui::render::output::rendered::RenderedLine::new),
-            );
-            idx = end;
-            continue;
-        }
-        out.push(line.as_rendered_line(width));
-        idx += 1;
-    }
-    out
 }
 
 fn visible_range(

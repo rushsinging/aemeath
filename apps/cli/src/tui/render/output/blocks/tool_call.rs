@@ -1,10 +1,10 @@
 use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::format_tool_call;
-use crate::tui::render::output_area::{LineStyle, OutputLine, INDENT};
+use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 
 pub fn render_tool_call(
@@ -40,13 +40,13 @@ pub fn render_tool_call(
         .into_iter()
         .flatten()
     {
-        let style = if detail == view.result_summary.as_ref().unwrap_or(detail) {
-            LineStyle::System
+        let color = if detail == view.result_summary.as_ref().unwrap_or(detail) {
+            theme::TEXT_DIM
         } else {
-            LineStyle::Normal
+            theme::TEXT
         };
-        for line in format_result_lines(&view.title, detail, style) {
-            lines.push(line.as_rendered_line(_ctx.width as usize));
+        for line in format_result_lines(&view.title, detail, color) {
+            lines.push(line);
         }
     }
 
@@ -56,7 +56,7 @@ pub fn render_tool_call(
     }
 }
 
-fn format_result_lines(tool_name: &str, result: &str, style: LineStyle) -> Vec<OutputLine> {
+fn format_result_lines(tool_name: &str, result: &str, color: Color) -> Vec<RenderedLine> {
     if result.trim().is_empty() {
         return Vec::new();
     }
@@ -66,20 +66,19 @@ fn format_result_lines(tool_name: &str, result: &str, style: LineStyle) -> Vec<O
         5
     };
     let total = result.lines().count();
+    let style = Style::default().fg(color);
     let mut out = Vec::new();
     for line in result.lines().take(max_lines) {
-        out.push(OutputLine {
-            content: format!("{INDENT}{line}"),
+        out.push(RenderedLine::new(vec![Span::styled(
+            format!("{INDENT}{line}"),
             style,
-            ..Default::default()
-        });
+        )]));
     }
     if total > max_lines {
-        out.push(OutputLine {
-            content: format!("{INDENT}... ({} lines omitted)", total - max_lines),
+        out.push(RenderedLine::new(vec![Span::styled(
+            format!("{INDENT}... ({} lines omitted)", total - max_lines),
             style,
-            ..Default::default()
-        });
+        )]));
     }
     out
 }

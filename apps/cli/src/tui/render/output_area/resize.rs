@@ -8,7 +8,7 @@ impl super::OutputArea {
         let visible_height = visible_height_hint as usize;
         self.last_visible_height = visible_height;
 
-        let max_offset = self.lines.len().saturating_sub(visible_height);
+        let max_offset = self.document.total_lines().saturating_sub(visible_height);
         self.scroll_offset = self.scroll_offset.min(max_offset);
         if self.scroll_offset == 0 {
             self.auto_scroll = true;
@@ -22,23 +22,13 @@ impl super::OutputArea {
 
 #[cfg(test)]
 pub mod tests {
-    use super::super::{LineStyle, OutputArea, OutputLine};
+    use super::super::OutputArea;
     use sdk::CharIdx;
 
     fn output_area_with_term_width(term_width: usize) -> OutputArea {
         let mut output = OutputArea::new();
         output.term_width = term_width;
         output
-    }
-
-    fn push_lines(output: &mut OutputArea, count: usize) {
-        for i in 0..count {
-            output.push_line(OutputLine {
-                content: format!("line {i}"),
-                style: LineStyle::Normal,
-                ..Default::default()
-            });
-        }
     }
 
     #[test]
@@ -62,7 +52,7 @@ pub mod tests {
     #[test]
     fn resize_clamps_scroll_offset_to_visible_height() {
         let mut output = output_area_with_term_width(78);
-        push_lines(&mut output, 10);
+        output.set_plain_document_lines(10);
         output.scroll_offset = 9;
         output.auto_scroll = false;
 
@@ -76,7 +66,7 @@ pub mod tests {
     #[test]
     fn resize_restores_auto_scroll_when_offset_is_zero() {
         let mut output = output_area_with_term_width(78);
-        push_lines(&mut output, 3);
+        output.set_plain_document_lines(3);
         output.scroll_offset = 2;
         output.auto_scroll = false;
 

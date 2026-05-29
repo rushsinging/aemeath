@@ -1,4 +1,4 @@
-use crate::tui::render::output_area::{LineStyle, OutputArea, OutputLine};
+use crate::tui::render::output_area::OutputArea;
 use crate::tui::view_model::OutputViewModel;
 
 pub(crate) fn render_document_from_view_model(
@@ -7,14 +7,6 @@ pub(crate) fn render_document_from_view_model(
     width: u16,
 ) {
     let document = output_area.document_renderer.render(view_model, width);
-    output_area.lines.clear();
-    for line in document.iter_lines() {
-        output_area.lines.push_back(OutputLine {
-            content: line.plain.clone(),
-            style: LineStyle::Normal,
-            ..Default::default()
-        });
-    }
     output_area.set_document(document);
     clamp_scroll_state(output_area);
 }

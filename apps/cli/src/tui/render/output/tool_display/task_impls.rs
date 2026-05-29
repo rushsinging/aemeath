@@ -1,5 +1,3 @@
-use crate::tui::render::output_area::LineStyle;
-
 use super::common::{bool_arg, str_arg, truncate_ellipsis};
 use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
 
@@ -191,9 +189,6 @@ impl ToolDisplay for TaskStopDisplay {
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
-    }
-    fn detail_style(&self) -> LineStyle {
-        LineStyle::ToolCallError
     }
 }
 inventory::submit!(ToolDisplayEntry {
