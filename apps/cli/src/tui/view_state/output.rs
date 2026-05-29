@@ -9,7 +9,7 @@ use sdk::CharIdx;
 /// （依赖 render 期的 screen_line_map/document），view_state 只持纯锚点状态。
 pub type SelectionAnchor = (usize, CharIdx);
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewState {
     pub scroll_offset: usize,
     pub follow_tail: bool,
@@ -21,6 +21,26 @@ pub struct OutputViewState {
     pub render_revision: u64,
     pub collapsed_blocks: HashSet<String>,
     pub version: u64,
+}
+
+impl Default for OutputViewState {
+    /// `auto_scroll` 默认 `true`，对齐 widget `OutputArea::new()` 的启动贴尾语义
+    /// （view_state 现为滚动真相，S2 Task 3）：避免启动内容超过可见高度时
+    /// 首帧出现非贴尾闪烁。其余字段保持类型默认值。
+    fn default() -> Self {
+        Self {
+            scroll_offset: 0,
+            follow_tail: false,
+            auto_scroll: true,
+            is_selecting: false,
+            selection_start: None,
+            selection_end: None,
+            last_visible_height: 0,
+            render_revision: 0,
+            collapsed_blocks: HashSet::new(),
+            version: 0,
+        }
+    }
 }
 
 impl OutputViewState {
@@ -135,6 +155,23 @@ mod tests {
 
     fn anchor(line: usize, col: usize) -> SelectionAnchor {
         (line, CharIdx::new(col))
+    }
+
+    #[test]
+    fn test_default_enables_auto_scroll_for_follow_tail() {
+        let state = OutputViewState::default();
+        // 默认贴尾：对齐 widget OutputArea::new() 启动 follow-tail 语义。
+        assert!(state.auto_scroll);
+        // 其余字段保持类型默认值。
+        assert_eq!(state.scroll_offset, 0);
+        assert!(!state.follow_tail);
+        assert!(!state.is_selecting);
+        assert_eq!(state.selection_start, None);
+        assert_eq!(state.selection_end, None);
+        assert_eq!(state.last_visible_height, 0);
+        assert_eq!(state.render_revision, 0);
+        assert!(state.collapsed_blocks.is_empty());
+        assert_eq!(state.version, 0);
     }
 
     #[test]
