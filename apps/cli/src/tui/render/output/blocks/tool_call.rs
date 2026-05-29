@@ -18,15 +18,14 @@ pub fn render_tool_call(
         .as_deref()
         .map(|summary| format_tool_call(&view.title, summary))
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
-    let header_text = header_text.replacen('●', &view.icon, 1);
     let icon_color = semantic_color(view.style);
-    // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉前导 icon 的标题文本（颜色不变）。
+    // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本（颜色不变）。
+    let title_text = header_text
+        .strip_prefix('●')
+        .unwrap_or(&header_text)
+        .trim_start();
     let mut lines = vec![RenderedLine::new(vec![Span::styled(
-        header_text
-            .strip_prefix(&view.icon)
-            .unwrap_or(&header_text)
-            .trim_start()
-            .to_string(),
+        title_text.to_string(),
         Style::default().fg(icon_color),
     )])];
     for detail in detail_lines {
