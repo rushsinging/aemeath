@@ -2,7 +2,6 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 42 | TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列） | 中 | 活动中 | 未确认 | 2026-05 | 多条 Bash 命令输出中的中文字符在 TUI 中显示为 `M-eM-^P` 等 cat -v 风格转义序列；Bash tool 使用 `from_utf8_lossy` 不会产生此输出，疑似 TUI 渲染层或 ratatui 文本处理将 UTF-8 多字节字符误转义 |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
 | 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
 | 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
@@ -44,6 +43,8 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
+| 86 | TUI 中先展示结论再展示 tool call，顺序颠倒 | 中 | 活动中 | 未确认 | 2026-05 | LLM 响应流中先输出 text block（结论/总结），随后再输出 tool_use block；TUI 按流式到达顺序渲染，导致用户先看到结论文本，再看到 tool call 执行过程，视觉上不符合"先执行工具、再给结论"的因果顺序。疑似 ConversationModel / OutputViewAssembler 按流式事件追加块而非按语义因果排序；需确认是否应延迟渲染 text block 直到后续无 tool_use、或在流结束后重排块的显示顺序 |
+| 87 | tool call result 渲染格式错误且不受最大行数限制 | 中 | 活动中 | 未确认 | 2026-05 | tool call result 渲染时直接展示了工具返回的原始 diff 内容（如 Edit 的 ---DIFF--- 全文），而非格式化的摘要（如 `✓ replaced 1 occurrence(s) in ...`）；同时 tool result 内容不受最大行数输出制约，大文件操作的完整 diff 会全部刷屏，导致输出区被极长内容淹没。疑似 #58 渲染管线重构后 tool result 走了原始文本渲染路径而非 ToolResultBlockView 的格式化摘要路径，且缺少 max_lines 截断 |
 
 ### #81 TUI 输出区中文按单字竖排显示
 
@@ -1192,3 +1193,41 @@ Tool Bash timed out after 120s
 - `apps/cli/src/tui/adapter/output_widget.rs`（`replace_lines_from_view_model`、`clamp_scroll_state`）
 - `apps/cli/src/tui/output_area/scroll.rs`（`scroll_up`/`scroll_down`）
 - `apps/cli/src/tui/app/update.rs`（`refresh_output_widget_from_model`）
+
+### #85 TUI 中先展示结论再展示 tool call，顺序颠倒
+
+**状态**：活动中
+
+**症状**：LLM 响应流中先输出 text block（结论/总结文本），随后再输出 tool_use block；TUI 按流式到达顺序渲染，导致用户先看到结论文本，再看到 tool call 执行过程，视觉上不符合"先执行工具、再给结论"的因果顺序。
+
+**根因（待确认）**：ConversationModel / OutputViewAssembler 按流式事件到达顺序追加 block，未对 text 与 tool_use 做因果排序。LLM（尤其 reasoning 模型）有时先输出一段总结/思考文本，再决定调用工具。
+
+**修复方向**：
+1. 延迟渲染 text block：当 text block 后续紧接 tool_use 时，暂缓显示 text，等 tool call 完成后再统一渲染
+2. 流结束后重排：在 assistant turn 完成时，将 tool_use block 移到 text block 之前重新排列
+3. 仅调整视觉顺序，不改变消息实际存储顺序（避免影响 conversation history）
+
+**涉及文件**：
+- `apps/cli/src/tui/model/output/conversation_model.rs`（block 追加逻辑）
+- `apps/cli/src/tui/model/output/assembler.rs`（OutputViewAssembler 块排序）
+- `apps/cli/src/tui/render/output/`（渲染管线）
+
+### #86 tool call result 渲染格式错误且不受最大行数限制
+
+**状态**：活动中
+
+**症状**：tool call result 在 TUI 中渲染时存在两个问题：
+1. **格式错误**：直接展示工具返回的原始 diff 内容（如 Edit 工具的 `---DIFF---` 全文、Read 工具的 `cat -n` 格式完整输出），而非格式化的摘要视图（如 `✓ replaced 1 occurrence(s) in ...` 短摘要）
+2. **不受最大行数限制**：tool result 内容不受 max_lines 输出制约，大文件操作（如 Read 大文件、Edit 多处替换）的完整内容会全部刷屏，导致输出区被极长内容淹没
+
+**根因（待确认）**：#58 渲染管线重构后，tool result 可能走了原始文本渲染路径而非 ToolResultBlockView 的格式化摘要路径；同时 tool result block 缺少 max_lines 截断逻辑，或在全量替换时绕过了行数限制。
+
+**修复方向**：
+1. 确认 tool result 事件走 ToolResultBlockView 格式化渲染路径，显示短摘要而非原始输出
+2. 为 tool result block 添加 max_lines 截断，超出部分折叠为 `... (N lines truncated)`
+3. 仅保留 diff 关键行（文件名、变更摘要），完整内容通过展开交互查看
+
+**涉及文件**：
+- `apps/cli/src/tui/model/output/assembler.rs`（tool result 块绑定与格式化）
+- `apps/cli/src/tui/render/output/blocks/tool_result.rs`（tool result 渲染）
+- `apps/cli/src/tui/adapter/output_widget.rs`（max_lines 截断逻辑）
