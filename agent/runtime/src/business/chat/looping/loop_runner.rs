@@ -301,7 +301,7 @@ where
                         turn_count,
                         &messages,
                         &cwd,
-                        &client,
+                        client,
                         &system_prompt_text,
                     )
                     .await
