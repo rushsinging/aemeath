@@ -276,33 +276,52 @@ mod tests {
             let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
         }
 
-        let rendered = app
-            .output_area
-            .document()
-            .iter_lines()
-            .map(|line| line.plain.clone())
-            .collect::<Vec<_>>();
+        // marker（>/✓）与块级缩进现由 gutter 注入到行首 span（plain 保持内容原文）；
+        // 故拼接 span 内容复现 gutter 后的可见行文本进行断言。
+        let rendered = render_output_rows(&app.output_area);
 
+        // gutter 为每个 block 注入 2 列行首槽：UserMessage→`> `，ToolCall→状态字形 + 空格，
+        // 其余 block→2 空格。故所有可见行均带 gutter 前缀。
         // 启动横幅现纳入 ConversationModel，用户消息不再是首行。
         assert!(rendered.iter().any(|line| line == "> search bug 76"));
-        assert!(rendered.iter().any(|line| line == "Aemeath - AI Agent"));
-        assert!(rendered.iter().any(|line| line == "💭 thinking"));
+        assert!(rendered.iter().any(|line| line == "  Aemeath - AI Agent"));
+        assert!(rendered.iter().any(|line| line == "  💭 thinking"));
         assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
+        // 工具 detail/result 行 gutter 给等宽空白（2 列），与旧 INDENT 视觉一致。
         assert!(rendered
             .iter()
             .any(|line| line == "  in docs/bug/active.md"));
-        assert!(rendered.iter().any(|line| line == "  ✓ Grep completed"));
+        // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(空白 marker 槽) = 4 列前导。
+        assert!(rendered.iter().any(|line| line == "    ✓ Grep completed"));
         assert!(!rendered
             .iter()
             .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));
         assert!(!rendered
             .iter()
             .any(|line| line == "  ... (1 lines omitted)"));
-        assert!(!rendered.iter().any(|line| line.starts_with("You:")));
+        assert!(!rendered.iter().any(|line| line.contains("You:")));
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
         assert!(app.output_area.scroll_offset <= app.output_area.document().total_lines());
+    }
+
+    /// 拼接 document 各行的 span 内容（gutter span + 内容 span）为逻辑可见行。
+    /// gutter（marker/缩进）注入到行首 span 而非 plain，故拼接 span 才能复现屏幕文本，
+    /// 且避免 buffer cell 回读对 CJK 宽字符的拆分。`output_area` 取引用即可（document 已就绪）。
+    fn render_output_rows(
+        output_area: &crate::tui::render::output_area::OutputArea,
+    ) -> Vec<String> {
+        output_area
+            .document()
+            .iter_lines()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
     }
 
     fn enter_key() -> crossterm::event::KeyEvent {

@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {
-    pub blocks: Vec<OutputBlockView>,
+    pub roots: Vec<BlockNode>,
     pub version: u64,
     pub follow_tail_hint: bool,
 }
@@ -11,18 +11,20 @@ pub struct OutputViewModel {
 impl Default for OutputViewModel {
     fn default() -> Self {
         Self {
-            blocks: Vec::new(),
+            roots: Vec::new(),
             version: 0,
             follow_tail_hint: true,
         }
     }
 }
 
+/// 渲染树节点。children 为子块（如 tool result 子块）。
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OutputBlockView {
+pub struct BlockNode {
     pub block_id: String,
     pub block_version: u64,
     pub kind: OutputBlockKind,
+    pub children: Vec<BlockNode>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -32,6 +34,7 @@ pub enum OutputBlockKind {
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
     ToolCall(ToolCallBlockView),
+    ToolResult(ToolResultBlockView),
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
     AskUser(AskUserBlockView),
@@ -82,6 +85,18 @@ pub struct ToolCallBlockView {
     pub collapsed: bool,
 }
 
+/// 工具结果子块视图：作为 ToolCall 的子节点，独占结果富渲染。
+///
+/// - `summary`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断），同 `ToolCallBlockView.summary`。
+/// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ToolResultBlockView {
+    pub key: String,
+    pub tool_title: String,
+    pub summary: Option<String>,
+    pub result_text: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
     Pending,
@@ -90,4 +105,38 @@ pub enum ToolSemanticStatus {
     Error,
     Cancelled,
     Orphaned,
+}
+
+#[cfg(test)]
+mod node_tests {
+    use super::*;
+
+    fn leaf(id: &str) -> BlockNode {
+        let kind = OutputBlockKind::Separator;
+        BlockNode {
+            block_id: id.into(),
+            block_version: 0,
+            kind,
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_block_node_leaf_has_no_children() {
+        let n = leaf("a");
+        assert!(n.children.is_empty());
+    }
+
+    #[test]
+    fn test_block_node_can_nest_child() {
+        let mut parent = leaf("p");
+        parent.children.push(leaf("c"));
+        assert_eq!(parent.children[0].block_id, "c");
+    }
+
+    #[test]
+    fn test_output_view_model_roots_default_empty() {
+        let vm = OutputViewModel::default();
+        assert!(vm.roots.is_empty());
+    }
 }

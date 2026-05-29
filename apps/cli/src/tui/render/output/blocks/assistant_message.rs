@@ -11,7 +11,7 @@ pub fn render_assistant_message(
 ) -> RenderedBlock {
     let base = Style::default().fg(theme::ASSISTANT);
     // fence/markdown/table 解析统一走 primitives::fenced（DRY，与工具结果共用）。
-    let mut lines = render_fenced_markdown(&view.text, base, "", ctx.width);
+    let mut lines = render_fenced_markdown(&view.text, base, ctx.width);
 
     if lines.is_empty() {
         lines.push(RenderedLine::default());
