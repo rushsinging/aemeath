@@ -19,6 +19,20 @@
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
 | 58 | TUI 输出区渲染管线统一重构 | 高 | 活动中 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
 
+### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
+
+**状态**：进行中（T1 完成，等待后续 Task 删除 lines 字段/legacy 垫片）
+
+**问题**：输出区主渲染已切换到 `ConversationModel → OutputViewModel → OutputDocumentRenderer → RenderedDocument`，但 `OutputArea::push_system`/`push_error` 仍直接写 `output_area.lines`，经 `sync_document_from_legacy_lines` 垫片兜底——构成「双表示」残留。且 `sync_document_from_legacy_lines` 仅在 `document` 为空时生效，一旦对话开始（document 非空），这些 push 的消息将不再显示（潜在显示丢失）。
+
+**改法**：
+- 新增 `App::append_system_notice / append_error_notice`：派发 `AppendSystemMessage/AppendError` intent 后 `refresh_output_widget_from_model`，作为系统/错误消息的唯一注入入口。
+- 判别 12+ 处调用点：`UiEvent::Error/SystemMessage/ReminderRecap` 经 `map_agent_event` 已注入 ConversationModel → 属冗余双写，直接删除；其余 slash/effect/paste/key/resume 等为唯一显示路径 → 迁移到新入口。
+- 新增 `ConversationModel::reset()`，并在 `App::reset_runtime_state` 中清空对话单一真相源 + 刷新文档，修复 `/clear` 后旧 block 残留。
+- `push_error` 迁移后无调用者，删除其定义；`push_system` 仅保留给 `OutputArea::init()` 欢迎横幅（lines 字段与 legacy 垫片保留，留待后续 Task）。
+
+**验证**：`cargo build/test(-p cli 374 passed)/clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认
