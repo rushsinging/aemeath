@@ -18,7 +18,7 @@
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
 | 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
-| 59 | TUI Model/View 单源迁移收口（伞型 roadmap） | 中 | S3 待确认 | 未确认 | 对账 #53/#55/#56/#57/#58 已有迁移成果与 6 个现存 guard，列出真正未被守护的剩余单源缺口，定义收口顺序。采用单写入者/单向 + guard 范式（非"状态零留 widget"）。子项：S1 OutputArea live tail（spinner+task window 入 Model）、S2 OutputArea 滚动/follow-tail/选区入 Model、S3 StatusBar 去镜像+单写入者（✅ 完成）、S4 选区统一+mouse_handler 走 intent、S5 Effect 化 tea-purity 豁免名单内副作用。每子项各走独立 spec→plan→实施并加对应 guard。详见 [roadmap](../superpowers/specs/2026-05-29-tui-single-source-completion-roadmap.md) |
+| 59 | TUI Model/View 单源迁移收口（伞型 roadmap） | 中 | S3 待确认 | 未确认 | 对账 #53/#55/#56/#57/#58 已有迁移成果与 6 个现存 guard，列出真正未被守护的剩余单源缺口，定义收口顺序。采用单写入者/单向 + guard 范式（非"状态零留 widget"）。子项：S1 OutputArea live tail（spinner+task window 入 Model）、S2 OutputArea 滚动/follow-tail/选区入 Model、S3 StatusBar 去镜像+单写入者（✅ 完成）、S4 选区统一+mouse_handler 走 intent、S5 Effect 化 tea-purity 豁免名单内副作用（✅ 部分完成：reflection/clipboard 已 Effect 化并移出豁免，slash/dialog/suggestions/save/memory 异步分发与同步取模型列表为剩余 gap）。每子项各走独立 spec→plan→实施并加对应 guard。详见 [roadmap](../superpowers/specs/2026-05-29-tui-single-source-completion-roadmap.md) |
 
 ### #59 S3 · StatusBar 去镜像 + 单写入者
 
@@ -35,6 +35,26 @@
 **边界**：token/api 总量真相仍在 `ChatState`（渲染期由 `StatusBar::draw` 从快照写回，作为 widget 渲染缓存）；`context_size`/`permission_mode` 为启动期一次性配置；status 文案（`set_success`/`set_warning`）、`set_thinking`、selection 不在本子项范围（选区属 S4），行为保持不变。
 
 **TDD/验证**：assembler 三路径单测（正常/空 branch 边界/缺 model+session 错误）+ adapter 三测；443 cli 测试全绿；`cargo build/clippy -p cli -D warnings` 全绿；全部架构 guard（含新增）通过。
+
+### #59 S5 · Effect 化 tea-purity 豁免名单内副作用
+
+**状态**：待确认
+
+**问题**：`check-tui-tea-purity.sh` 的 EXEMPT 名单豁免了一批仍在 `app/` 内联副作用的文件（reflection 的 `tokio::spawn`、util 的 `clipboard::copy_text` 等），属已知技术债，违反 TEA「update 纯 + 副作用经 Effect/executor」约束。
+
+**解决思路**：
+1. **reflection** — `slash/reflection.rs` 的 `/reflect` 与自动 reflection 不再内联 `tokio::spawn`：新增 `Effect::RunReflection { foreground }` / `Effect::ApplyReflection { output }`，由 `effect/executor` 后台 spawn 调用 SDK，结果经既有 `UiEvent`（ReflectionStarted/Usage/Done/Error）回流。`handle_reflect_command`/`maybe_auto_reflect`/`apply_reflection_output` 改为返回 Effect；`update/done.rs`、`update/ui_event.rs` 收集进 `effects` 向量。reflection.rs 现为纯函数。
+2. **clipboard** — `util.rs` 的 `copy_to_clipboard`/`copy_selection_to_clipboard` 不再调用 `clipboard::copy_text`，改为返回 `Effect::CopyToClipboard { text }`；实际剪贴板写入与 status bar 成功/失败反馈搬到 `effect/executor`。`render/input/mouse_handler.rs::handle_mouse_event` 改为返回 `Vec<Effect>`，经 `update` 的 Mouse/TerminalMouse 分支收口由 runtime 执行。
+3. **名单清理** — 移除 `slash/reflection.rs`、`util.rs`（已 Effect 化）；移除无任何副作用的 `slash/help.rs`、`slash/help_display.rs`；移除两条失效条目 `session/processing.rs`、`session/session_lifecycle.rs`（真实文件在 `effect/session/` 下，不在 tea-purity 受检目录）。
+
+**剩余 gap（仍豁免，需后续子项）**：
+- `slash.rs`（15 处 `.await`）、`slash/save.rs`、`slash/memory.rs`（各 2 处 `.await`）：均为 slash 命令异步分发层，深度耦合 `handle_slash_command_with_events` 的 async 调度，Effect 化需重塑整条异步派发管线（含 `[session saved]` 等同步反馈语义），改动面大，本批未动。
+- `slash/dialog.rs`、`slash/suggestions.rs`（各 1 处 `block_in_place`+`block_on(list_models)`）：需要**同步**模型列表来即时构建对话框/补全候选；改异步会改变「打开即有列表」的交互语义，需要专门的 ListModels 预取/缓存设计，本批保留。
+- `mod.rs`（`Command::new("git")`）、`run_loop.rs`、`runtime.rs`（runtime 编排层本身需要 `.await`）、`slash_tests.rs`（测试 mock 的 `.await`）：属 runtime/测试边界，合理豁免。
+
+**边界**：不碰 S3 StatusBar；纯把副作用搬到 Effect，不引入新业务行为——`/reflect`、自动 reflection、`/reflect apply`、鼠标选区复制行为均保持原样。
+
+**TDD/验证**：reflection 6 测（含 `handle_reflect_command` 返回 Effect、auto-reflect 触发返回 Effect 并经 `execute_effect` spawn、4 个不触发边界）+ util 6 测（copy_to_clipboard/copy_selection 返回 Effect、None 路径、find_token_end 三路径）全绿；452 cli 测试全绿；`cargo build/clippy -p cli -D warnings` 全绿；`check-architecture-guards.sh`（含缩小后的 tea-purity）全过。
 
 ### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
 
