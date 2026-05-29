@@ -17,7 +17,7 @@
 | 55 | TUI 架构收口：render / adapter / app 三层落地 + 清理 legacy core | 中 | 待确认 | 未确认 | feature #53 TUI Model/View 迁移遗留收口。本轮补完：`app/` 承接原 `core` 主实现，`core/` 仅保留弃用兼容 namespace；删除 legacy `core/update`、`core/state`；`model/session` 并入 runtime；output/status/theme/dialog/task_window/syntax/render cache/output view model 渲染实现收口到 `render/`；补齐 `adapter/`、`effect/executor.rs`、`view_state/cache.rs` 与架构 guard。 |
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
-| 58 | TUI 输出区渲染管线统一重构 | 高 | 活动中 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
+| 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
 
 ### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
 
@@ -165,9 +165,36 @@
 
 **SpanPart 保留**：`SpanPart` 是 `render/syntax.rs` 与 `output/diff.rs` 着色原语的中间单元（`primitives/convert.rs::spanparts_to_spans` 消费），与 OutputLine/LineStyle 解耦，定义留在 `output_area/types.rs`，re-export 保留。
 
-**行为兼容**：滚动 max_offset、resize 夹取、选区（含 markdown 表格/内联格式 plain 偏移）、复制、task_status 虚拟行选择均保持原行为；markdown 选区回归测试改由真实 `blocks/assistant_message::render_assistant_message` 渲染 document 后断言（取代旧 legacy_lines_to_rendered 路径）。tool-call dot 闪烁（旧 `color_tool_call_dots` 基于已恒空的 lines，实际早已不生效）随之移除，dot 颜色由 document 静态语义色提供。
+**行为兼容**：滚动 max_offset、resize 夹取、选区（含 markdown 表格/内联格式 plain 偏移）、复制、task_status 虚拟行选择均保持原行为；markdown 选区回归测试改由真实 `blocks/assistant_message::render_assistant_message` 渲染 document 后断言（取代旧 legacy_lines_to_rendered 路径）。tool-call dot 闪烁（旧 `color_tool_call_dots` 在镜像回写 lines 时 style 恒为 `LineStyle::Normal`，而 dots 的 match 仅对 `ToolCallRunning`/`Success`/`Error` 着色，故对 Normal 行恒返回 None、实际早已不生效）随之移除，dot 颜色由 document 静态语义色提供。
 
 **TDD/验证**：`output/diff.rs` 4 个单测改断言 SpanPart 文本/标记；`selection_tests.rs` 11 个用例改用 document 填充辅助（plain + assistant_message markdown）；`resize.rs`/`status_line.rs`/`app/state/tests.rs`/`output_widget.rs` 测试改读 document；`done.rs` 新增 3 个 `done_notice` 单测。`cargo build -p cli`、`cargo test -p cli`（374 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含 ≤400 行）全绿；`OutputLine`/`LineStyle` 全仓零残留。
+
+### #58 Phase 6 · T7：渲染隔离守卫 + 删除门禁 + 回归收尾
+
+**状态**：待确认（Phase 5 删除全部完成、Phase 6 守卫落地，仍有后续接线 gap，故 #58 整体维持「待确认」而非「完成」）
+
+**渲染隔离守卫**：新增 `.agents/hooks/check-render-isolation.sh` 并接入 `check-architecture-guards.sh`，扫描 `apps/cli/src/tui/render/output/`：①禁止 `use crate::tui::model::`（render 层不得依赖 Model 可变类型，引用 `view_model::` 允许）；②禁止 IO（`std::fs::`/`std::process::`/`tokio::`，注释与 `#[cfg(test)]` 测试代码豁免）；③选区上色唯一路径——除 `selection_overlay.rs` 外不得出现 `SELECTION_BG`（防 #61/#62 旁路上色回归，测试断言行豁免）。注入临时违规验证三类规则均能命中（RC=1），现状全绿。
+
+**删除验证门禁**：`grep -rE 'OutputLine\b|LineStyle\b|replace_lines_from_view_model|output_view_model_lines|build_queued_message_lines|queued_messages|queued_line_count|render_range|slice_spans|RenderedCache|do_rerender' apps/cli/src` 仅剩 `model/conversation/model_tests.rs` 一条历史注释，零真实残留。`adapter/output_widget.rs` 已收敛为 `set_document` + `clamp_scroll_state`，不再镜像写 `lines`。
+
+**allow(dead_code) 处理**：移除 `render/syntax.rs` 文件级 `#![allow(dead_code)]`（其 `language_by_extension`/`highlight_line`/`extension_from_path` 已被 `blocks/assistant_message.rs`（fence 高亮）与 `output/diff.rs` 实际调用，clippy 验证活跃）。保留 `render/mod.rs` 模块级 `#![allow(dead_code)]`：它仍在屏蔽尚未接线的 diff 渲染链（`output/diff.rs::build_diff_lines`/`build_delete_line`/`build_insert_line`/`build_context_line`/`line_num_width`、`primitives/diff.rs::diff`、相关 DIFF_* 常量）以及 `tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法——这些原语已带回归测试但尚未在 AssistantMessage/ToolCall block 中接通，强行去 allow 会触发 dead_code 警告。
+
+**关联 bug 回归测试现状**：
+- #61：`primitives/diff.rs::test_diff_line_keeps_left_indent_not_flush_left`（diff 行保留两空格左缩进）+ `selection_overlay.rs::test_overlay_sets_bg_keeps_fg`（选中行只设 bg、保留原 fg）。
+- #62：`blocks/tool_call.rs::test_tool_call_title_visible_not_background_color`（标题 span fg ≠ bg 且 ≠ SURFACE）。
+- #65：`blocks/assistant_message.rs::test_assistant_fence_does_not_leak_style_after_close`（fence 结束后普通行不继续 CODE 色）——fence 已在 assistant 组件接线，非 gap。
+- #71：结构性消除，输出区无 `render_range`/行下标越界路径（grep 零残留 + `clamp_scroll_state` 用 `total_lines().saturating_sub` 夹取）。
+- #74：新增 `blocks/mod.rs::test_render_block_assistant_after_system_does_not_inherit_dark`（System(Muted) block 后 Assistant block 独立用 ASSISTANT 色，不继承暗色）。
+- #80：`adapter/output_widget.rs::test_render_document_from_view_model_clamps_stale_scroll_offset`/`_preserves_valid_scroll_offset`（auto_scroll clamp 行为）。
+
+**后续 gap（#58 待办，不阻塞本 task 的结构性修复）**：
+1. **diff 渲染完整接线**：`output/diff.rs` + `primitives/diff.rs::diff` 原语已就绪并带测试，但尚未在 ToolCall（Edit/Write 工具结果）或 AssistantMessage 中接通。
+2. **markdown 完整接线**：markdown/table 原语已接 AssistantMessage，但更复杂 markdown（嵌套列表、引用块等）覆盖待补。
+3. **syntax 高亮接线广度**：fence 已接，diff 内语法高亮原语就绪但随 diff 接线一并待办。
+4. **tool 结果摘要渲染**：`tool_display` trait 的 `result_max_lines`/`format_result_summary` 默认方法未被 `format_tool_call` 调用。
+5. **排队中即时显示**：排队提交需 `key.rs` → `QueueSubmission` 即时反馈、`(default:)` 行、done 间距等交互细节待补。
+
+**TDD/验证**：新增 #74 回归测试；`cargo build -p cli`、`cargo test -p cli`（375 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh`（含新增 check-render-isolation.sh）全绿。
 
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 

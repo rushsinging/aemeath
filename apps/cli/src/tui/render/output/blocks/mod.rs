@@ -40,6 +40,38 @@ mod tests {
     use crate::tui::view_model::style::SemanticStyle;
 
     #[test]
+    fn test_render_block_assistant_after_system_does_not_inherit_dark() {
+        // #74 回归：System 样式 block（Muted）后渲染 Assistant block 时，
+        // 每个 block 独立从自身 kind/style 派生颜色，Assistant 不继承前一 block 的暗色。
+        let ctx = RenderCtx { width: 80 };
+        let _system = render_block(
+            &OutputBlockKind::SystemNotice(TextBlockView {
+                key: "s".into(),
+                text: "system muted".into(),
+                style: SemanticStyle::Muted,
+            }),
+            "s",
+            &ctx,
+        );
+        let assistant = render_block(
+            &OutputBlockKind::AssistantMessage(TextBlockView {
+                key: "a".into(),
+                text: "assistant reply".into(),
+                style: SemanticStyle::Normal,
+            }),
+            "a",
+            &ctx,
+        );
+
+        use crate::tui::render::theme;
+        assert_eq!(
+            assistant.lines[0].spans[0].style.fg,
+            Some(theme::ASSISTANT),
+            "Assistant block 应使用 ASSISTANT 前景色，不继承 System block 的暗色"
+        );
+    }
+
+    #[test]
     fn test_render_block_system_notice_routes_to_component() {
         let block = render_block(
             &OutputBlockKind::SystemNotice(TextBlockView {
