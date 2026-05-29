@@ -17,7 +17,6 @@ impl crate::tui::render::output_area::OutputArea {
     }
 
     fn push_agent_tool_calls(&mut self, tool_id: &str, calls: &[AgentToolCallProgressView]) {
-        self.finish_streaming();
         let summary = format_agent_tool_calls(calls);
         let content = format!("{INDENT}↳ {summary}");
         if let Some(line) = self.lines.iter_mut().rev().find(|line| {
@@ -40,8 +39,6 @@ impl crate::tui::render::output_area::OutputArea {
     }
 
     pub fn push_tool_progress(&mut self, tool_id: &str, text: &str) {
-        self.finish_streaming();
-
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return;

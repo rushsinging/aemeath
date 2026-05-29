@@ -11,7 +11,6 @@ impl App {
         if let Some(dur) = elapsed {
             self.output_area.push_done(dur);
         }
-        self.output_area.finish_streaming();
         self.output_area.stop_spinner();
         self.chat.stop_processing();
         self.status_bar.set_success("Ready");

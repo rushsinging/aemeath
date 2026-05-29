@@ -42,11 +42,6 @@ impl super::OutputArea {
             self.lines.insert(idx + offset, line);
         }
         self.document = Default::default();
-        if let Some(start) = self.streaming_start {
-            if start >= idx {
-                self.streaming_start = Some(start + n);
-            }
-        }
         if !self.auto_scroll {
             self.scroll_offset += n;
         }
@@ -54,9 +49,6 @@ impl super::OutputArea {
             self.lines.pop_front();
             if self.scroll_offset > 0 {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
-            }
-            if let Some(start) = self.streaming_start {
-                self.streaming_start = Some(start.saturating_sub(1));
             }
         }
     }
@@ -81,7 +73,6 @@ impl super::OutputArea {
 
     /// 添加取消消息
     pub fn push_cancelled(&mut self) {
-        self.finish_streaming();
         self.push_line(OutputLine {
             content: "Cancelled".to_string(),
             style: LineStyle::Error,
@@ -98,7 +89,6 @@ impl super::OutputArea {
         default: Option<&str>,
         multi_select: bool,
     ) -> Option<usize> {
-        self.finish_streaming();
         self.ask_user_block_start = Some(self.lines.len());
 
         // 分隔标题行
@@ -228,7 +218,6 @@ impl super::OutputArea {
 
     /// 添加系统消息
     pub fn push_system(&mut self, msg: &str) {
-        self.finish_streaming();
         if msg.is_empty() {
             self.push_line(OutputLine {
                 content: String::new(),
@@ -321,10 +310,6 @@ impl super::OutputArea {
         self.scroll_offset = 0;
         self.auto_scroll = true;
         self.last_line_count = 0;
-        self.streaming_buffer.clear();
-        self.streaming_start = None;
-        self.synthetic_think_open = false;
-        self.queued_line_count = 0;
         self.is_selecting = false;
         self.selection_start = None;
         self.selection_end = None;
@@ -333,7 +318,6 @@ impl super::OutputArea {
         self.last_visible_height = 0;
         self.todo_subject_cache.clear();
         self.task_status_lines.clear();
-        self.queued_messages.clear();
         self.ask_user_block_start = None;
     }
 

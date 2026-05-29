@@ -10,14 +10,12 @@ use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
 pub mod content;
 pub mod display;
-mod queued;
 pub mod render;
 mod resize;
 pub mod scroll;
 pub mod selection;
 mod selection_render;
 pub mod spinner;
-pub mod streaming;
 pub mod types;
 
 #[cfg(test)]
@@ -36,14 +34,6 @@ pub struct OutputArea {
     pub auto_scroll: bool,
     pub last_line_count: usize,
     pub term_width: usize,
-    /// 当前流式助手块的完整文本
-    pub streaming_buffer: String,
-    /// lines 中当前流式块的起始索引
-    pub streaming_start: Option<usize>,
-    /// 是否为合成的未闭合 think 标签
-    pub synthetic_think_open: bool,
-    /// 排队的用户消息行数（流式过程中添加的）
-    pub queued_line_count: usize,
     /// 鼠标是否正在拖拽选择
     pub is_selecting: bool,
     /// 选择起始点：(逻辑行索引, char 偏移)
@@ -62,8 +52,6 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// spinner 下方显示的任务状态行
     pub task_status_lines: Vec<String>,
-    /// 排队的用户消息
-    pub queued_messages: Vec<String>,
     /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
     pub ask_user_block_start: Option<usize>,
     /// 渲染缓存（滑动窗口）
@@ -93,10 +81,6 @@ impl OutputArea {
             auto_scroll: true,
             last_line_count: 0,
             term_width,
-            streaming_buffer: String::new(),
-            streaming_start: None,
-            synthetic_think_open: false,
-            queued_line_count: 0,
             is_selecting: false,
             selection_start: None,
             selection_end: None,
@@ -106,7 +90,6 @@ impl OutputArea {
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
-            queued_messages: Vec::new(),
             ask_user_block_start: None,
             rendered_cache: OutputRenderCacheState::default(),
             document: RenderedDocument::default(),

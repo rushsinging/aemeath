@@ -80,6 +80,64 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
 }
 
 #[test]
+fn test_queue_submission_pushes_queued_user_message_block() {
+    // 正常路径：排队提交经 ConversationModel 进入 QueuedUserMessage 块（取代旧
+    // OutputArea::queued_messages 命令式显示路径）。
+    let mut model = ConversationModel::default();
+    let changes = model.apply(ConversationIntent::QueueSubmission {
+        text: "排队的消息".to_string(),
+    });
+
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, ConversationChange::QueuedSubmissionAdded { .. })));
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::QueuedUserMessage { text, .. } if text == "排队的消息"
+    )));
+    assert_eq!(model.queued_submissions.len(), 1);
+}
+
+#[test]
+fn test_clear_queued_submissions_removes_blocks() {
+    // 边界 + 清理：冲刷队列后 QueuedUserMessage 块应被全部移除。
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::QueueSubmission {
+        text: "a".to_string(),
+    });
+    model.apply(ConversationIntent::QueueSubmission {
+        text: "b".to_string(),
+    });
+
+    let changes = model.apply(ConversationIntent::ClearQueuedSubmissions);
+
+    assert!(changes.iter().any(|c| matches!(
+        c,
+        ConversationChange::QueuedSubmissionsCleared { count } if *count == 2
+    )));
+    assert!(model.queued_submissions.is_empty());
+    assert!(!model
+        .blocks
+        .iter()
+        .any(|block| matches!(
+            block,
+            super::block::ConversationBlock::QueuedUserMessage { .. }
+        )));
+}
+
+#[test]
+fn test_clear_queued_submissions_on_empty_is_noop() {
+    // 错误/空路径：无排队项时清理返回 count=0，不 panic。
+    let mut model = ConversationModel::default();
+    let changes = model.apply(ConversationIntent::ClearQueuedSubmissions);
+
+    assert!(changes.iter().any(|c| matches!(
+        c,
+        ConversationChange::QueuedSubmissionsCleared { count } if *count == 0
+    )));
+}
+
+#[test]
 fn test_conversation_keeps_tool_args_preview() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {

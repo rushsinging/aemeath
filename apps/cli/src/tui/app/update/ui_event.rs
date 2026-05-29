@@ -260,9 +260,8 @@ impl App {
             UiEvent::DrainQueuedInput { reply_tx } => {
                 let queued = self.input.drain_queue();
                 if !queued.is_empty() {
-                    let flushed: Vec<String> = self.output_area.queued_messages.drain(..).collect();
-                    for msg in flushed {
-                        self.append_user_echo(msg);
+                    for msg in &queued {
+                        self.append_user_echo(msg.clone());
                     }
                     self.output_area
                         .set_spinner_phase("Thinking with queued input...");
@@ -311,10 +310,10 @@ impl App {
                     self.chat.tool_call_active
                 );
                 log::info!(
-                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),
-                    self.output_area.queued_messages.len(),
+                    self.model.conversation.queued_submissions.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
@@ -330,10 +329,10 @@ impl App {
                     self.chat.tool_call_active
                 );
                 log::info!(
-                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_messages_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
+                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),
-                    self.output_area.queued_messages.len(),
+                    self.model.conversation.queued_submissions.len(),
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),

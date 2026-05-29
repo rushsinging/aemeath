@@ -153,8 +153,7 @@ impl App {
                             }
                         })
                         .unwrap_or_default();
-                    let n = self.input.push_queue(input.clone());
-                    self.output_area.queued_messages.push(input);
+                    let n = self.input.push_queue(input);
                     self.status_bar
                         .set_warning(&format!("{n} message(s) queued"));
                 }
