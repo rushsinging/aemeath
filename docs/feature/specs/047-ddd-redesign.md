@@ -386,13 +386,15 @@ agent/runtime → packages/sdk (implements)
 | `policy` | `share` |
 | `prompt` | `share` |
 | `provider` | `share` |
-| `tools` | `share`, `project` |
+| `tools` | `share`, `project`, `storage` |
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
 | `share` | 无 |
 
 > **横向依赖说明（refs #61 D2，rule4）**：`tools → project` 为已批准的横向依赖。原因：worktree 进入/退出/上下文恢复属带 git 子进程 + 文件系统 IO 的行为，不应留在 `share` 共享内核。该逻辑原在 `share::worktree_ops` 与 `project::worktree` 重复（DRY 违规）。瘦身将 `share::worktree_ops` 删除，归位 `project::worktree`（worktree 是 project domain 的天然职责），`tools` 复用之。方向 `tools → project → share`，`project` 不反依赖 `tools`，无环。替代方案（移入 tools / 复制副本）会再生 DRY 违规或语义错位，故采用横向依赖。
+>
+> **横向依赖说明（refs #61 D2 第二批，rule4）**：`tools → storage` 为已批准的横向依赖。原因：memory 持久化（`MemoryStore` 的 fs read/write/create_dir、`path` 的 `canonicalize`）属带文件系统 IO 的行为，不应留在 `share` 共享内核；按 §13 rule7（storage 统一承载 memory persistence），其天然归位 `storage::memory`。`memory_tool` 与 runtime 双方消费 `MemoryStore`，runtime 已依赖 storage，`tools` 复用同一实现避免重复实现/复制副本（DRY）。memory 的 DTO / 枚举 / error / 纯函数（`MemoryEntry`/`MemoryCategory`/`MemoryLayer`/`MemorySource`/`MemoryError`/`AddResult`/`CompactResult`/`MemoryStats`/scoring/dedup/format/`SessionReminders`）属协议无关共享内核，保留 `share::memory`。方向 `tools → storage → share`，`storage` 不反依赖 `tools`，无环。替代方案（port 注入 `dyn MemoryStorePort`）需 13 方法 1:1 透传 trait + per-call 工厂 + 跨 19 处 ToolContext 构造点注入，抽象收益为零而改造面巨大，故采用横向依赖（与 `tools → project` 同范式）。
 
 规则：
 

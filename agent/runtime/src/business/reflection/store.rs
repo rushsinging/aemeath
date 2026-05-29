@@ -1,4 +1,5 @@
-use share::memory::{MemoryEntry, MemoryLayer, MemoryStore};
+use share::memory::{MemoryEntry, MemoryLayer};
+use storage::memory::MemoryStore;
 
 pub fn memory_summary(entries: &[MemoryEntry]) -> String {
     entries

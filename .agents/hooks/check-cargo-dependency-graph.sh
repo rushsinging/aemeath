@@ -19,7 +19,10 @@ business_allow = {
       "provider": {"share"},
       # tools 横向依赖 project：worktree 行为/IO 从 share 瘦身后归位 project domain，
       # tools 复用 project::worktree（refs #61 D2）。无环：project 仅依赖 share，不反依赖 tools。
-      "tools": {"share", "project"},
+      # tools 横向依赖 storage：memory 持久化（MemoryStore + path canonicalize，含 fs IO）
+      # 从 share 瘦身后归位 storage domain（spec §13），memory_tool 复用 storage::memory
+      # （refs #61 D2 第二批）。无环：storage 仅依赖 share，不反依赖 tools。
+      "tools": {"share", "project", "storage"},
       "storage": {"share"},
       "hook": {"share"},
       "audit": {"share"},

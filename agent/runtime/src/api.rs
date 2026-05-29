@@ -50,6 +50,7 @@ pub mod provider {
 }
 
 pub mod storage {
+    pub use ::storage::memory;
     pub use ::storage::tool_result_storage;
 }
 

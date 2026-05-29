@@ -1,5 +1,6 @@
 use super::*;
-use share::memory::{MemoryEntry, MemoryStore};
+use share::memory::MemoryEntry;
+use storage::memory::MemoryStore;
 
 fn temp_store(max_entries: usize) -> (MemoryStore, std::path::PathBuf) {
     let dir =
