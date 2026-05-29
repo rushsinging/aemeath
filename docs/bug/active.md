@@ -429,7 +429,7 @@
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 
-**状态**：待确认（已修复渲染缓存未 invalidate 问题）。#58 渲染管线下：diff 行保留左缩进由 `primitives/diff.rs::test_diff_line_keeps_left_indent_not_flush_left` 覆盖，选中后保留原 fg 由 `selection_overlay.rs::test_overlay_sets_bg_keeps_fg`（唯一上色路径，只设 bg）覆盖。注意 diff 渲染原语尚未在 ToolCall/AssistantMessage block 中接通（见 #58 后续 gap），完整端到端验证待接线。
+**状态**：待确认（diff 渲染原语已端到端接通，G1 完成）。#58 渲染管线下：diff 行保留左缩进由 `primitives/diff.rs::test_diff_line_keeps_left_indent_not_flush_left` 覆盖，选中后保留原 fg 由 `selection_overlay.rs::test_overlay_sets_bg_keeps_fg`（唯一上色路径，只设 bg）覆盖。接线：Edit 工具结果以 `---DIFF---` 标记携带 old/new 文本，新增 `blocks/edit_diff.rs` 解析并经 `primitives::diff::diff(old,new,ext,width)` 渲染（行号 + 加减语义色 + 语法高亮 + 两空格缩进），在 `blocks/tool_call.rs::render_tool_call` 中检测 result_summary 的 diff 标记后路由；diff 行作为普通 RenderedLine 流经统一 selection overlay，自动获得「选中保留 fg」。端到端回归：`tool_call.rs::test_tool_call_edit_result_renders_diff_with_numbers_signs_indent_color`、`edit_diff.rs` 8 个单测。Write 工具结果不含 diff（仅 "wrote N bytes"），无需接线；assistant ```diff fence 来源为 unified diff 文本而非 old/new 对，本期未处理（见 concerns）。
 
 **症状**：
 1. TUI output area 渲染 unified diff 时，新增的 old/new 行号区域顶到了最左边，没有保留输出区原有的左侧缩进/边距，导致 diff 块视觉上“贴边”，破坏整体缩进层级。

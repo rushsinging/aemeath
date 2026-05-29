@@ -6,6 +6,7 @@ use crate::tui::view_model::output::OutputBlockKind;
 pub mod ask_user;
 pub mod assistant_message;
 pub mod diagnostic;
+pub mod edit_diff;
 pub mod queued_submission;
 pub mod separator;
 pub mod thinking;

@@ -1,4 +1,5 @@
 use crate::tui::render::output::blocks::diagnostic::semantic_color;
+use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::output_area::INDENT;
@@ -10,7 +11,7 @@ use ratatui::text::Span;
 pub fn render_tool_call(
     block_id: &str,
     view: &ToolCallBlockView,
-    _ctx: &RenderCtx,
+    ctx: &RenderCtx,
 ) -> RenderedBlock {
     let (header_text, detail_lines) = view
         .summary
@@ -40,6 +41,11 @@ pub fn render_tool_call(
         .into_iter()
         .flatten()
     {
+        // Edit 工具结果含 ---DIFF--- 标记时，渲染为带行号/语义色/语法高亮的 diff。
+        if let Some(diff_lines) = render_edit_diff(&view.title, detail, ctx.width) {
+            lines.extend(diff_lines);
+            continue;
+        }
         let color = if detail == view.result_summary.as_ref().unwrap_or(detail) {
             theme::TEXT_DIM
         } else {
@@ -170,5 +176,55 @@ mod tests {
             .iter()
             .any(|line| line.plain.contains("done: 3 matches"));
         assert!(has_result, "result_summary 应渲染为结果行");
+    }
+
+    #[test]
+    fn test_tool_call_edit_result_renders_diff_with_numbers_signs_indent_color() {
+        // #61 端到端：Edit 结果含 ---DIFF--- 标记，应渲染为带行号 + 加减语义色 +
+        // 缩进 + 语法高亮的 diff 行，而非原始标记纯文本。
+        let mut view = tool(ToolSemanticStatus::Success);
+        view.title = "Edit(src/lib.rs)".into();
+        view.result_summary = Some(
+            "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;"
+                .into(),
+        );
+
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+
+        // 不残留原始标记
+        assert!(
+            block.lines.iter().all(|line| !line.plain.contains("---DIFF---")),
+            "不应残留 ---DIFF--- 标记"
+        );
+        // 删除/新增行带加减语义
+        assert!(
+            block
+                .lines
+                .iter()
+                .any(|line| line.plain.contains("- ") && line.plain.contains("1;")),
+            "应含删除行"
+        );
+        assert!(
+            block
+                .lines
+                .iter()
+                .any(|line| line.plain.contains("+ ") && line.plain.contains("2;")),
+            "应含新增行"
+        );
+        // diff 行带前景色（选中叠加保留 fg 的前提，bug #61）
+        let diff_line = block
+            .lines
+            .iter()
+            .find(|line| line.plain.contains("2;"))
+            .expect("新增行存在");
+        assert!(
+            diff_line.spans.iter().any(|span| span.style.fg.is_some()),
+            "diff 行应带前景色 span，供选中叠加保留"
+        );
+        // 行号缩进
+        assert!(
+            diff_line.plain.starts_with("  "),
+            "diff 行应保留两空格缩进"
+        );
     }
 }
