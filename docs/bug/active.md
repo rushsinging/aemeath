@@ -19,6 +19,9 @@
 | 78 | input area 粘贴后按空格清空粘贴内容 | 中 | 修复中 | 未确认 | 2026-05 | 同 #77 根因：handle_paste_event 和 processing 模式 paste 均直接调用 input_area.input(ch) 修改 textarea，未走模型。后续空格触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本覆盖 textarea 中的粘贴内容。修复：两处 paste 循环后添加 model.input.document.clear() + insert_text() 同步 |
 | 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 待确认（随 #58 渲染管线重构修复） | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
 | 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
+| 82 | TUI 渲染 tool call 时丢失 theme 颜色 | 中 | 活动中 | 未确认 | 2026-05 | #58 渲染管线重构后，tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器在 TUI 中以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等）；疑似渲染管线从 legacy OutputArea 迁移到 ConversationModel 全量替换后，ToolDisplay 组件的样式/颜色信息未正确传递或被覆盖 |
+| 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 活动中 | 未确认 | 2026-05 | 所有工具（Read/Grep/Bash 等）的 tool result 在 TUI 中同时展示 summary 行和完整 tool result 内容，导致重复且刷屏；例如 Read 工具先显示 `✓ Read(...)` + 文件路径详情行，紧接着又把整个文件内容原样输出一遍。`ToolDisplay` trait 已有 `result_max_lines()`/`format_result_summary()` 但从未被调用，`find_tool_view` 用 `result_summary: call.result.clone()` 塞完整结果作为 summary，`ToolResult` block 又 `output.clone()` 再输出一次完整内容，两处重复 |
+| 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 活动中 | 未确认 | 2026-05 | LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈，用户看不到 task list 的创建过程和结果；`ToolDisplay` registry 中可能未注册 TaskListCreate 的 display 实现，或 `OutputViewAssembler` 对该工具名的 lookup 返回 None 后静默跳过渲染 |
 
 ### #81 TUI 输出区中文按单字竖排显示
 
@@ -37,6 +40,66 @@
 **涉及路径**：
 - `apps/cli/src/tui/adapter/output_widget.rs`
 - `apps/cli/src/tui/render/output/blocks/assistant_message.rs`
+
+### #82 TUI 渲染 tool call 时丢失 theme 颜色
+
+**状态**：活动中
+
+**症状**：#58 渲染管线重构后，TUI 中 tool call（如 Bash/Grep/Read 等）的标题、参数、状态指示器以默认前景色显示，缺少原有的 theme 颜色（如工具名高亮色、运行态动画色、完成态颜色等），所有工具调用看起来像纯文本，无视觉区分。
+
+**根因假设**：
+1. 渲染管线从 legacy `OutputArea` 直接写入迁移到 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换后，`ToolDisplay` 组件的 `LineStyle`/`Color` 信息未在新路径中正确传递。
+2. `OutputViewAssembler` 构建 `RenderedLine` 时未应用 theme 中的工具样式映射，或 ViewModel 输出路径丢失了 `Span` 样式信息。
+3. 新管线输出的行可能只携带文本内容，而颜色/样式需要通过 `RenderedLine` 的样式字段或 `Span` 序列传递到 `OutputArea` 渲染层。
+
+**涉及路径（预计）**：
+- `apps/cli/src/tui/view_model/`（ViewModel 渲染输出是否携带样式）
+- `apps/cli/src/tui/view_assembler/`（Assembler 是否为 tool call 行应用 theme 颜色）
+- `apps/cli/src/tui/render/output/tool_display/`（ToolDisplay 组件的样式定义）
+- `apps/cli/src/tui/adapter/output_widget.rs`（全量替换时是否保留样式）
+
+### #83 TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏
+
+**状态**：活动中
+
+**症状**：所有工具（Read/Grep/Bash/Edit 等）的 tool result 在 TUI 中同时展示 summary 和完整内容，导致重复且刷屏。例如 Read 工具先显示 `✓ Read(...)` + `Read <path>` 详情行，紧接着又把整个文件内容原样输出一遍。
+
+**根因（已确认）**：
+1. `ToolDisplay` trait 已定义 `result_max_lines()`（默认 5 行）和 `format_result_summary()`，但 `OutputViewAssembler` 从未调用这些方法。
+2. `find_tool_view()` 直接把完整 tool result 塞入 `ToolCallBlockView.result_summary`，这会渲染为 summary 区域。
+3. 同时 `ToolResult` block（`tool_result_is_embedded` 返回 false 时）又以 `DiagnosticNotice` 形式再输出完整内容，两处重复。
+4. embedded 检测只处理了已绑定 tool call 的 result，但非 embedded 路径仍会双写。
+
+**修复方向**：
+1. `find_tool_view()` 中改用 `lookup_display(name)` 获取 `ToolDisplay`，调用 `format_result_summary()` 替代完整 `call.result` 生成 `result_summary`。
+2. `ToolResult` block（非 embedded）调用 `result_max_lines()` 截断后再生成 `DiagnosticNotice`，或对已 embedded 的完全跳过。
+3. 确保完整 tool result 只发送给 LLM，TUI 只展示截断摘要。
+
+**涉及路径**：
+- `apps/cli/src/tui/view_assembler/output.rs`（`find_tool_view`、`ToolResult` block 处理）
+- `apps/cli/src/tui/render/output/tool_display/mod.rs`（`ToolDisplay` trait、`result_max_lines`、`format_result_summary`）
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`（各工具的 Display 实现）
+
+### #84 TUI 未渲染 TaskListCreate 工具调用
+
+**状态**：活动中
+
+**症状**：LLM 调用 TaskListCreate 时，TUI 输出区无任何可视化反馈（无 spinner、无标题、无结果），用户完全看不到 task list 的创建过程和结果内容。
+
+**根因假设**：
+1. `ToolDisplay` registry（`tool_impls.rs`）中可能未注册 TaskListCreate 的 display 实现，`lookup_display("TaskListCreate")` 返回 `None` 后 `find_tool_view` 静默跳过渲染。
+2. TaskListCreate/TaskCreate/TaskUpdate 等 task 管理工具可能属于 SDK 层定义的虚拟工具，不经过标准 tool call 渲染路径，需要单独处理。
+3. 类似地，其他 task 管理工具（TaskCreate、TaskUpdate、TaskList、TaskGet、TaskStop 等）可能也未被渲染。
+
+**修复方向**：
+1. 在 `tool_impls.rs` 中为 TaskListCreate 注册 `ToolDisplayEntry`，实现标题格式和结果摘要（如显示 task list subject、task 数量等）。
+2. 检查并补全其他 task 管理工具的 display 注册。
+3. 或在 `OutputViewAssembler` 中为未注册工具提供 fallback 渲染（显示工具名 + 简短结果）。
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`（TaskListCreate display 注册）
+- `apps/cli/src/tui/render/output/tool_display/task_impls.rs`（已有 task 工具 display 实现？）
+- `apps/cli/src/tui/view_assembler/output.rs`（fallback 渲染逻辑）
 
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 

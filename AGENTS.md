@@ -142,6 +142,7 @@ aemeath/                    # workspace root
 
 ## Bug/Feature 追踪联动
 
+- **Bug 修复 MUST 使用 git worktree**：修复 bug 或实现 feature 时，**MUST** 在独立 git worktree 中执行所有修改，NEVER 直接在 `main` 工作区修改。worktree 分支完成验证并提交后合并回 `main`，在 `main` 上运行对应验证后清理已完成的 worktree。详见上方工作流约束。
 - **Bug 状态流程**：`活动中` → `修复中` → `待确认` → 用户确认后归档。
 - **修改涉及已知 bug 时 MUST**：
   1. 在 `docs/bug/active.md` 的对应行更新状态。
@@ -149,7 +150,7 @@ aemeath/                    # workspace root
   3. 修复后将 commit hash 更新到归档文件的"修复"字段。
 - **新增 bug 发现时 MUST**：在 `docs/bug/active.md` 表格中添加行（状态"活动中"），并在详情区域记录症状、根因、修复方向。
 - **实现 feature 时 MUST**：在 `docs/feature/active.md` 登记，完成后归档。
-- **归档门禁**：bug 修复或 feature 完成后，**MUST** 等待用户确认，确认后从 `active.md` 移除并将详情总结到 `archived/`。
+- **归档门禁**：bug 修复或 feature 完成后，**MUST** 等待用户确认，确认后从 `active.md` 移除并将详情总结到 `archived/`。在 `main` 上更新文档后 **MUST** 立即提交，不与其他改动混入同一 commit。
 
 ## 开放决策
 
