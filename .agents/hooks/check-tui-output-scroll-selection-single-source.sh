@@ -37,8 +37,12 @@ report_matches() {
 #    通过 perl 负向过滤排除 `view_state.output.<field>`（避免误伤 `app.view_state.output.x =`）。
 #  - render/output_area/ 目录：OutputArea 自身内部方法（reset_runtime_state 清镜像、
 #    clear_selection 等保留的合法方法，及 #[cfg(test)] 测试脚手架）。
-#  - render/input_area、render/display 目录：InputArea / StatusBar 等其它 widget 复用同名字段，
-#    与 OutputArea 镜像无关。
+#  - render/input/input_area/selection.rs、render/display/status_bar_selection.rs：
+#    InputArea / StatusBar 复用同名 is_selecting/selection_start/selection_end 字段，
+#    其 `self.<field> =` 是 input/status 选区镜像 setter（apply_selection_mirror）+ clear_selection，
+#    与 OutputArea 镜像无关、由 check-tui-selection-single-source.sh 专管。#59 S4 收紧：
+#    原先豁免整个 /input_area/、/display/ 目录，迁移后两目录仅这两文件写自身选区镜像，
+#    其余文件不再写任何选区字段，故收紧为精确文件豁免。
 #  - adapter/output_view_widget.rs：唯一镜像写回路径。
 #  - *_tests.rs：测试文件按 spec 允许直填镜像 + set_selection_for_test。
 #  - 其余生产文件里的 #[cfg(test)] mod 测试块由 scan_nontest 剥离，业务代码仍受守卫。
@@ -76,7 +80,9 @@ scan_nontest() {
 # 兼容 macOS 自带 bash 3.2：不使用 mapfile，改用换行分隔（.rs 路径不含换行）。
 list_scan_files() {
   find "$ROOT/apps/cli/src/tui" -type f -name '*.rs' \
-    | grep -vE '/view_state/|/output_area/|/input_area/|/display/' \
+    | grep -vE '/view_state/|/output_area/' \
+    | grep -vE '/input/input_area/selection\.rs$' \
+    | grep -vE '/display/status_bar_selection\.rs$' \
     | grep -vE '/output_view_widget\.rs$' \
     | grep -vE '_tests\.rs$'
 }
