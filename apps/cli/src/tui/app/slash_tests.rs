@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{oneshot, watch};
 
-struct BlockingReflectionClient {
-    started_tx: Mutex<Option<oneshot::Sender<()>>>,
-    finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
+pub(super) struct BlockingReflectionClient {
+    pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
+    pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 #[async_trait]
@@ -189,7 +189,8 @@ impl sdk::AgentClient for BlockingReflectionClient {
     }
 }
 
-fn app_with_blocking_reflection_client() -> (App, oneshot::Receiver<()>, oneshot::Sender<()>) {
+pub(super) fn app_with_blocking_reflection_client(
+) -> (App, oneshot::Receiver<()>, oneshot::Sender<()>) {
     let (started_tx, started_rx) = oneshot::channel();
     let (finish_tx, finish_rx) = oneshot::channel();
     let client = Arc::new(BlockingReflectionClient {

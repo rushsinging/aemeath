@@ -17,20 +17,17 @@ impl App {
             Effect::QuitApplication => self.layout.request_exit(),
             Effect::SpawnAgentChat { .. } => {}
             Effect::CancelAgentChat => self.cancel_agent_chat(),
-            Effect::SaveSession => self.save_session_effect().await,
+            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx).await,
             Effect::RunHook { message, name } => self.run_hook_effect(message, name).await,
             Effect::ReadClipboardImage => self.read_clipboard_image_effect().await,
             Effect::ProcessImageFile { path } => self.process_image_file_effect(path).await,
             Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx).await,
-            Effect::RunReflection { foreground } => {
-                self.run_reflection_effect(foreground, ui_tx)
-            }
+            Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx).await,
+            Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
             Effect::ApplyReflection { output } => self.apply_reflection_effect(output),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
-            Effect::FetchTaskStatus
-            | Effect::StartTimer { .. }
-            | Effect::StopTimer { .. } => {}
+            Effect::FetchTaskStatus | Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
         }
     }
 
@@ -40,16 +37,64 @@ impl App {
         }
     }
 
-    async fn save_session_effect(&mut self) {
-        if self.chat.messages.is_empty() {
+    /// 保存当前会话（/save 与 MessagesSync 共用）。当 `notify=true`（来自 /save）时，
+    /// 经 UiEvent 回灌成功/失败反馈行，保持原 `[session saved: id]` / `Failed` 体验；
+    /// 后台自动保存（MessagesSync）静默。
+    async fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
+        // 后台自动保存（notify=false）在无消息时静默跳过，避免空会话写盘与噪声。
+        if !notify && self.chat.messages.is_empty() {
             return;
         }
-        if let Some(ref ac) = self.agent_client {
-            if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
-                log::warn!("sync failed: {e}");
+        let Some(ac) = self.agent_client.clone() else {
+            if notify {
+                let _ = ui_tx
+                    .send(UiEvent::SlashCommandFailed {
+                        message: "Failed to save session: SDK agent client is unavailable"
+                            .to_string(),
+                    })
+                    .await;
             }
-            if let Err(e) = ac.save_current_session().await {
+            return;
+        };
+        if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
+            log::warn!("sync failed: {e}");
+        }
+        match ac.save_current_session().await {
+            Ok(()) => {
+                if notify {
+                    let _ = ui_tx
+                        .send(UiEvent::SessionSaved {
+                            id: self.session.session_id().to_string(),
+                        })
+                        .await;
+                }
+            }
+            Err(e) => {
                 log::warn!("save failed: {e}");
+                if notify {
+                    let _ = ui_tx
+                        .send(UiEvent::SlashCommandFailed {
+                            message: format!("Failed to save session: {e}"),
+                        })
+                        .await;
+                }
+            }
+        }
+    }
+
+    async fn fetch_memory_list_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        if let Some(ref ac) = self.agent_client {
+            match ac.list_reminders().await {
+                Ok(reminders) => {
+                    let _ = ui_tx.send(UiEvent::MemoryList(reminders)).await;
+                }
+                Err(e) => {
+                    let _ = ui_tx
+                        .send(UiEvent::SlashCommandFailed {
+                            message: format!("获取 reminders 失败: {e}"),
+                        })
+                        .await;
+                }
             }
         }
     }

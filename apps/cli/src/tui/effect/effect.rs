@@ -11,23 +11,49 @@ pub enum Effect {
     None,
     QuitApplication,
     RequestRender,
-    SpawnAgentChat { chat_id: String, prompt: String },
+    SpawnAgentChat {
+        chat_id: String,
+        prompt: String,
+    },
     CancelAgentChat,
-    SaveSession,
+    /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
+    /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
+    SaveSession {
+        notify: bool,
+    },
     FetchReminderRecap,
+    /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
+    FetchMemoryList,
     FetchTaskStatus,
-    CopyToClipboard { text: String },
+    CopyToClipboard {
+        text: String,
+    },
     ReadClipboardImage,
-    ProcessImageFile { path: String },
+    ProcessImageFile {
+        path: String,
+    },
     /// 触发 LLM reflection。`foreground=true` 时由前台 /reflect 发起（会推送
     /// ReflectionStarted 事件），`false` 时由 maybe_auto_reflect 后台发起。
-    RunReflection { foreground: bool },
+    RunReflection {
+        foreground: bool,
+    },
     /// 将 reflection 输出应用到 SDK memory 能力。
-    ApplyReflection { output: sdk::ReflectionOutputView },
-    RunHook { name: String, message: String },
-    SetCurrentTurn { turn: usize },
-    StartTimer { id: String },
-    StopTimer { id: String },
+    ApplyReflection {
+        output: sdk::ReflectionOutputView,
+    },
+    RunHook {
+        name: String,
+        message: String,
+    },
+    SetCurrentTurn {
+        turn: usize,
+    },
+    StartTimer {
+        id: String,
+    },
+    StopTimer {
+        id: String,
+    },
 }
 
 impl Effect {

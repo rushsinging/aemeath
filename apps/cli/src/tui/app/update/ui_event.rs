@@ -125,7 +125,7 @@ impl App {
             }
             UiEvent::MessagesSync(msgs) => {
                 self.chat.messages = msgs;
-                return UpdateResult::one(Effect::SaveSession);
+                return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
                 let count = self.chat.add_pending_image(img);
@@ -147,6 +147,12 @@ impl App {
             }
             UiEvent::MemoryList(reminders) => {
                 self.handle_memory_list(&reminders);
+            }
+            UiEvent::SessionSaved { id } => {
+                self.append_system_notice(format!("[session saved: {id}]"));
+            }
+            UiEvent::SlashCommandFailed { message } => {
+                self.append_error_notice(message);
             }
             UiEvent::ReflectionStarted => {
                 self.spinner_phase(SpinnerPhase::Reflecting);

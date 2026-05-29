@@ -1,12 +1,11 @@
 mod dialog;
 mod help;
 mod help_display;
-mod memory;
 mod reflection;
-mod save;
 mod suggestions;
 
 use crate::tui::app::UiEvent;
+use crate::tui::effect::effect::Effect;
 
 /// 内置命令名常量（不再依赖 runtime::api）
 mod cmd {
@@ -91,7 +90,12 @@ impl super::App {
                     sdk::format_tokens(total)
                 ));
             }
-            "/save" => self.handle_save_command().await,
+            "/save" => {
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::SaveSession { notify: true }, &tx)
+                        .await;
+                }
+            }
             "/context" => {
                 if let Some(ref ac) = self.agent_client {
                     match ac
@@ -135,36 +139,13 @@ impl super::App {
                     Some("remind" | "reminder" | "reminders")
                 ) =>
             {
-                self.handle_memory_command(ui_tx).await;
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::FetchMemoryList, &tx).await;
+                }
             }
             "/paste" => {
-                let result = if let Some(agent_client) = self.agent_client.clone() {
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(agent_client.read_clipboard_image())
-                    })
-                } else {
-                    Err(sdk::SdkError::Internal(
-                        "missing SDK agent client".to_string(),
-                    ))
-                };
-                match result {
-                    Ok(img) => {
-                        let size = img.final_size;
-                        let count = self.chat.add_pending_image(img);
-                        self.handle_input_intent(
-                            crate::tui::model::input::intent::InputIntent::SetAttachmentCount(
-                                count,
-                            ),
-                        );
-                        self.append_system_notice(format!(
-                            "[clipboard image added ({} bytes)]",
-                            size
-                        ));
-                    }
-                    Err(e) => {
-                        self.append_error_notice(format!("Failed to read clipboard: {e}"));
-                    }
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::ReadClipboardImage, &tx).await;
                 }
             }
             "/images" => {

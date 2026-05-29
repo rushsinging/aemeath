@@ -57,6 +57,14 @@ pub enum AppEvent {
     ReminderRecap(String),
     /// /memory 命令的 reminder 列表回传。
     MemoryList(Vec<sdk::ReminderView>),
+    /// /save 命令保存成功后回传（携带 session id），用于推送 `[session saved: id]` 反馈行。
+    SessionSaved {
+        id: String,
+    },
+    /// slash 命令副作用失败的反馈（如 /save、/memory），推送错误提示行。
+    SlashCommandFailed {
+        message: String,
+    },
     ReflectionStarted,
     ReflectionUsage {
         input: u32,

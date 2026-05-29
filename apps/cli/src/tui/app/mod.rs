@@ -236,6 +236,8 @@ impl App {
 }
 pub mod slash;
 #[cfg(test)]
+mod slash_effect_tests;
+#[cfg(test)]
 mod slash_tests;
 pub mod update;
 pub mod util;
