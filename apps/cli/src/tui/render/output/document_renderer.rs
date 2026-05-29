@@ -1,7 +1,6 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
-use crate::tui::render::output::blocks::render_block;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument};
 use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::view_model::output::OutputViewModel;
@@ -30,7 +29,7 @@ impl OutputDocumentRenderer {
             let rendered = self.cache.get_or_render(&block.block_id, key, |ctx| {
                 #[cfg(test)]
                 self.render_count.set(self.render_count.get() + 1);
-                render_block(&block.kind, &block.block_id, ctx)
+                block.kind.component().render_self(&block.block_id, ctx)
             });
             blocks.push(rendered);
         }

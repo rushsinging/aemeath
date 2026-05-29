@@ -7,8 +7,6 @@ use crate::tui::view_model::{
     AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
     TextBlockView, ToolCallBlockView, ToolSemanticStatus,
 };
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 pub struct OutputViewAssembler;
 
@@ -192,9 +190,7 @@ fn output_block(block_id: String, kind: OutputBlockKind) -> OutputBlockView {
 }
 
 fn semantic_version(kind: &OutputBlockKind) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    kind.hash(&mut hasher);
-    hasher.finish()
+    kind.cache_version()
 }
 
 fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {
