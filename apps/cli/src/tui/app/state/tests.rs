@@ -281,7 +281,9 @@ mod tests {
             .map(|line| line.content.clone())
             .collect::<Vec<_>>();
 
-        assert_eq!(rendered[0], "> search bug 76");
+        // 启动横幅现纳入 ConversationModel，用户消息不再是首行。
+        assert!(rendered.iter().any(|line| line == "> search bug 76"));
+        assert!(rendered.iter().any(|line| line == "Aemeath - AI Agent"));
         assert!(rendered.iter().any(|line| line == "💭 thinking"));
         assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
         assert!(rendered

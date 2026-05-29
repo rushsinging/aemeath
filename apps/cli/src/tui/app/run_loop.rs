@@ -24,6 +24,10 @@ impl App {
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
+        self.draw(terminal)?;
+        self.refresh_output_widget_from_model();
+
         loop {
             // Update task status lines
             self.update_task_status(self.chat.is_processing).await;

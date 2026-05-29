@@ -97,13 +97,6 @@ impl OutputArea {
         &self.document
     }
 
-    /// 显示欢迎横幅。
-    pub fn init(&mut self) {
-        self.push_system("Aemeath - AI Agent");
-        self.push_system("");
-        self.push_system("Type /help for available commands");
-        self.push_system("");
-    }
 }
 
 #[cfg(test)]

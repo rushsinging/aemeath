@@ -1,4 +1,3 @@
-use sdk::AgentToolCallProgressView;
 
 use crate::tui::render::display::safe_text;
 
@@ -58,45 +57,4 @@ pub(super) fn format_todowrite_value(input: &serde_json::Value) -> Option<(Strin
     }
 
     Some((format!("● TodoWrite ({count} items)"), details))
-}
-
-pub(super) fn format_agent_tool_calls(calls: &[AgentToolCallProgressView]) -> String {
-    let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();
-    for call in calls {
-        if let Some((_, summaries)) = grouped.iter_mut().find(|(name, _)| *name == call.name) {
-            summaries.push(call.summary.as_str());
-        } else {
-            grouped.push((call.name.as_str(), vec![call.summary.as_str()]));
-        }
-    }
-
-    grouped
-        .into_iter()
-        .map(|(name, summaries)| format_tool_group(name, &summaries))
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
-fn format_tool_group(name: &str, summaries: &[&str]) -> String {
-    let count = summaries.len();
-    let visible = summaries
-        .iter()
-        .filter(|summary| !summary.is_empty())
-        .take(3)
-        .copied()
-        .collect::<Vec<_>>();
-    let suffix = if visible.is_empty() {
-        String::new()
-    } else {
-        let mut text = visible.join(", ");
-        if count > 3 {
-            text.push_str(&format!(" +{} more", count - 3));
-        }
-        format!(": {text}")
-    };
-    if count > 1 {
-        format!("{name} ×{count}{suffix}")
-    } else {
-        format!("{name}{suffix}")
-    }
 }

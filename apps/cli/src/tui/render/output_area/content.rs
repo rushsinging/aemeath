@@ -68,14 +68,6 @@ impl super::OutputArea {
         }
     }
 
-    /// 添加取消消息
-    pub fn push_cancelled(&mut self) {
-        self.push_line(OutputLine {
-            content: "Cancelled".to_string(),
-            style: LineStyle::Error,
-            ..Default::default()
-        });
-    }
 
     /// 添加 AskUserQuestion 确认界面
     /// 添加 AskUserQuestion 界面，返回选项行在 lines 中的起始索引（无选项返回 None）
@@ -210,24 +202,6 @@ impl super::OutputArea {
         }
     }
 
-    /// 添加系统消息
-    pub fn push_system(&mut self, msg: &str) {
-        if msg.is_empty() {
-            self.push_line(OutputLine {
-                content: String::new(),
-                style: LineStyle::System,
-                ..Default::default()
-            });
-            return;
-        }
-        for line in msg.lines() {
-            self.push_line(OutputLine {
-                content: line.to_string(),
-                style: LineStyle::System,
-                ..Default::default()
-            });
-        }
-    }
 
     /// 添加带有随机烹饪动词和耗时的"完成"消息
     pub fn push_done(&mut self, elapsed: std::time::Duration) {

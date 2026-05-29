@@ -81,6 +81,8 @@ mod tests {
                 created_at: 0,
         }];
         app.handle_memory_list(&reminders);
-        assert_eq!(system_texts(&app).len(), 1);
+        // 启动横幅占用 BANNER_LINES.len() 个 System block，reminder 再追加一个。
+        let banner = crate::tui::model::conversation::notice::BANNER_LINES.len();
+        assert_eq!(system_texts(&app).len(), banner + 1);
     }
 }

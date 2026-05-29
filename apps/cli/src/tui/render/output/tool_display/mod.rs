@@ -3,7 +3,6 @@ use std::sync::LazyLock;
 
 use crate::tui::render::output_area::LineStyle;
 
-mod agent;
 mod common;
 mod task_impls;
 mod tool_impls;
@@ -107,6 +106,3 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     (format!("● {name}"), vec![truncated])
 }
 
-#[cfg(test)]
-#[path = "agent_tests.rs"]
-mod agent_tests;

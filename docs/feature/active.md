@@ -116,6 +116,21 @@
 
 **TDD/验证**：保留 document 渲染回归 `render.rs::test_render_document_paints_spans_and_overlays_selection`（改用无 cache 参数的 `render`）；`resize.rs` 两个断言旧 cache dirty 的测试改为断言 `term_width` 行为（缓存已删，行为不变由 document 渲染覆盖）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
 
+### #58 Phase 5 · T6a：迁移 agent_progress / cancelled / init 横幅到 ConversationModel
+
+**状态**：进行中（T6a 完成，AskUser 命令式路径留 T6b、`lines` 镜像/`OutputLine`/`LineStyle`/legacy 类型留 T6c）
+
+**判别结论**：三类内容此前由 `update/ui_event.rs` 命令式直写 `output_area.lines`，但 `update_agent_event` 在 `update_ui` 之后立即 `refresh_output_widget_from_model()`（内部 `lines.clear()` 重建），这些写入当帧即被镜像清空 → 死写。其中 agent_progress / SystemMessage / Cancelled 均已由 `adapter/agent_event.rs::map_agent_event` 映射为对应 intent 并注入 ConversationModel。
+
+**改法**：
+- **agent_progress**：复用既有 `RecordAgentProgress` intent / `AgentProgress` block（已映射 DiagnosticNotice(Running)）。`ui_event.rs` 删除命令式 `push_agent_progress` 调用，仅保留 spinner。删除 `render/output/tool_display/agent.rs`（`push_agent_progress`/`push_agent_tool_calls`/`push_tool_progress`/`tool_insert_position`）及其 `agent_tests.rs`、`common.rs` 中仅服务它的 `format_agent_tool_calls`/`format_tool_group`。
+- **cancelled**：`map_agent_event` 将 `Cancelled` 映射为 `CompleteChat`（不产生可见提示）。`ui_event.rs` 把 `push_cancelled()` 改为 `append_system_notice("已取消")`，经 System block 渲染。删除 `OutputArea::push_cancelled`。
+- **init 横幅**：新增 `ConversationModel::seed_banner()`，在 `App::new()` 注入 4 行 System block（横幅纳入单一真相源，`/clear` reset 会清除，已确认接受）。删除 `OutputArea::init()` 及无调用者的 `OutputArea::push_system`。`run_loop` 增加首帧 `draw + refresh_output_widget_from_model`，让横幅按真实宽度渲染。
+
+**model.rs 拆分**：因 model.rs 已 398/400 行，先把 `append_system_message`/`append_error` 迁入新 `model/conversation/notice.rs`（含 `seed_banner` 与 `BANNER_LINES` 常量），model.rs 降至 373 行、notice.rs 120 行。
+
+**TDD/验证**：notice.rs 新增 seed_banner / append_system_message / append_error 单测；修正 `state/tests.rs`（用户消息不再是首行，改 `.any` 断言并校验横幅）与 `update/reminder.rs`（System block 计数加上 `BANNER_LINES.len()` 偏移）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认
