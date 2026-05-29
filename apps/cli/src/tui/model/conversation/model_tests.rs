@@ -107,3 +107,48 @@ fn test_conversation_keeps_tool_args_preview() {
             if args_preview.contains("src/main.rs")
     )));
 }
+
+#[test]
+fn test_conversation_reset_clears_all_blocks() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "hello".to_string(),
+    });
+    model.apply(ConversationIntent::AppendSystemMessage {
+        text: "note".to_string(),
+    });
+    assert!(!model.blocks.is_empty());
+    assert!(model.active_chat_id.is_some());
+
+    model.reset();
+
+    assert!(model.blocks.is_empty());
+    assert!(model.chats.is_empty());
+    assert!(model.active_chat_id.is_none());
+    assert!(model.queued_submissions.is_empty());
+}
+
+#[test]
+fn test_conversation_reset_on_empty_is_noop() {
+    let mut model = ConversationModel::default();
+    model.reset();
+    assert!(model.blocks.is_empty());
+    assert!(model.active_chat_id.is_none());
+}
+
+#[test]
+fn test_conversation_reset_allows_fresh_chat_afterwards() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "first".to_string(),
+    });
+    model.reset();
+    model.apply(ConversationIntent::AppendSystemMessage {
+        text: "[conversation cleared]".to_string(),
+    });
+    assert_eq!(model.blocks.len(), 1);
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::System { text, .. } if text == "[conversation cleared]"
+    )));
+}

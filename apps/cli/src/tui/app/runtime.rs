@@ -5,6 +5,9 @@ impl App {
     pub(crate) async fn reset_runtime_state(&mut self) {
         self.chat.reset_runtime_state();
         self.input.clear_queue();
+        // 单一真相源：清空 ConversationModel，使输出文档随之回到空状态。
+        self.model.conversation.reset();
+        self.refresh_output_widget_from_model();
         self.output_area.reset_runtime_state();
         self.status_bar.reset_runtime_state();
         self.input.ask_user_reply_tx = None;

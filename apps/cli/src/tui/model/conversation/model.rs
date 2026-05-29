@@ -21,6 +21,11 @@ pub struct ConversationModel {
 }
 
 impl ConversationModel {
+    /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     pub fn apply(&mut self, intent: ConversationIntent) -> Vec<ConversationChange> {
         match intent {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
