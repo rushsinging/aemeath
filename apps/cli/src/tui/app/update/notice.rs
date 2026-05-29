@@ -211,16 +211,18 @@ mod tests {
     fn test_append_user_echo_renders_gt_prefix_into_document() {
         let mut app = make_app();
         app.append_user_echo("回显检查");
-        let plain = app
-            .output_area
-            .document()
-            .iter_lines()
-            .map(|line| line.plain.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // `> ` marker 现由 gutter 注入到行首 span（plain 仅含内容）；断言渲染文档中
+        // 存在「行首 gutter span == `> ` 且内容为回显文本」的行，验证回显仍带 `> ` 前缀。
+        let has_echo = app.output_area.document().iter_lines().any(|line| {
+            line.plain == "回显检查"
+                && line
+                    .spans
+                    .first()
+                    .is_some_and(|s| s.content.as_ref() == "> ")
+        });
         assert!(
-            plain.contains("> 回显检查"),
-            "用户回显应以 \"> \" 前缀经 document 渲染，实际: {plain:?}"
+            has_echo,
+            "用户回显应以 gutter 注入的 \"> \" 前缀 span 渲染（plain 为内容原文）"
         );
     }
 

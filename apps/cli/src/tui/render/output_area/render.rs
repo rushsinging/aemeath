@@ -225,4 +225,63 @@ mod tests {
         assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG);
         assert_ne!(buf[(3, 0)].bg, theme::SELECTION_BG);
     }
+
+    #[test]
+    fn test_render_document_with_gutter_offsets_selection_and_skips_gutter() {
+        // 带 gutter（"✓ "，宽 2）的行，plain="hello"。
+        let mut line =
+            RenderedLine::with_plain(vec![Span::raw("✓ "), Span::raw("hello")], "hello".into());
+        line.gutter_cols = 2;
+        let mut area = OutputArea::new();
+        area.set_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![line],
+            }],
+        });
+        // 选中 plain 字符 [0,3) = "hel"
+        area.set_selection_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
+        let area_rect = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area_rect);
+        area.render(area_rect, &mut buf);
+
+        // gutter 占屏幕列 0..2，绝不高亮。
+        assert_ne!(buf[(0, 0)].bg, theme::SELECTION_BG, "gutter 列不选中");
+        assert_ne!(buf[(1, 0)].bg, theme::SELECTION_BG, "gutter 列不选中");
+        // 内容从屏幕列 2 起，"hel" 高亮 → 列 2,3,4。
+        assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG, "内容首字符 h 高亮");
+        assert_eq!(buf[(4, 0)].bg, theme::SELECTION_BG, "内容第三字符 l 高亮");
+        assert_ne!(buf[(5, 0)].bg, theme::SELECTION_BG, "第四字符 l 不在选区");
+    }
+
+    #[test]
+    fn test_click_on_gutter_line_maps_to_content_char() {
+        let mut line =
+            RenderedLine::with_plain(vec![Span::raw("✓ "), Span::raw("hello")], "hello".into());
+        line.gutter_cols = 2;
+        let mut area = OutputArea::new();
+        area.set_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![line],
+            }],
+        });
+        let area_rect = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area_rect);
+        area.render(area_rect, &mut buf);
+
+        // 点击屏幕列 2（内容 "h"）→ plain 字符 0；拖到列 5（内容 "l" 之后）→ plain 3。
+        area.start_selection(0, 2, &area_rect);
+        area.update_selection(0, 5, &area_rect);
+        assert_eq!(area.get_selected_text().as_deref(), Some("hel"));
+
+        // 点击 gutter 区间（列 0）→ 映射到 plain 字符 0，不偏移。
+        area.start_selection(0, 0, &area_rect);
+        area.update_selection(0, 4, &area_rect);
+        assert_eq!(
+            area.get_selected_text().as_deref(),
+            Some("he"),
+            "点击 gutter 钳到 plain 0，拖到列 4 选到内容字符 2"
+        );
+    }
 }

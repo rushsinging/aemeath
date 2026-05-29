@@ -2,13 +2,12 @@ use crate::tui::model::conversation::block::ConversationBlock;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
 use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
-    AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, SemanticStyle,
-    TextBlockView, ToolCallBlockView, ToolSemanticStatus,
+    AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView,
+    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 pub struct OutputViewAssembler;
 
@@ -17,11 +16,11 @@ impl OutputViewAssembler {
         conversation: &ConversationModel,
         version: u64,
     ) -> OutputViewModel {
-        let mut blocks = Vec::new();
+        let mut roots: Vec<BlockNode> = Vec::new();
         for conversation_block in &conversation.blocks {
             match conversation_block {
                 ConversationBlock::UserMessage { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::UserMessage(TextBlockView {
                             key: id.clone(),
@@ -31,7 +30,7 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::AssistantText { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::AssistantMessage(TextBlockView {
                             key: id.clone(),
@@ -41,7 +40,7 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::Thinking { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::ThinkingMessage(TextBlockView {
                             key: id.clone(),
@@ -52,10 +51,23 @@ impl OutputViewAssembler {
                 }
                 ConversationBlock::ToolCall { id, .. } => {
                     if let Some(tool) = find_tool_view(conversation, id.as_ref()) {
-                        blocks.push(output_block(
-                            tool.key.clone(),
-                            OutputBlockKind::ToolCall(tool),
-                        ));
+                        let mut parent =
+                            leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
+                        // 工具结果升为子块：取 result_summary 同源文本，附加为 depth-1 子节点。
+                        if let Some(result_text) = tool.result_summary.clone() {
+                            let result_id = format!("{}-result", id.as_ref());
+                            let child = leaf(
+                                result_id.clone(),
+                                OutputBlockKind::ToolResult(ToolResultBlockView {
+                                    key: result_id,
+                                    tool_title: tool.title.clone(),
+                                    summary: tool.summary.clone(),
+                                    result_text,
+                                }),
+                            );
+                            push_child_checked(&mut parent, child, 1);
+                        }
+                        roots.push(parent);
                     }
                 }
                 ConversationBlock::ToolResult {
@@ -71,7 +83,7 @@ impl OutputViewAssembler {
                     if *image_count > 0 {
                         text.push_str(&format!("\n[图片: {image_count}]").to_string());
                     }
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         format!("{}-result", id.as_ref()),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: format!("{}-result", id.as_ref()),
@@ -85,7 +97,7 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::System { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::SystemNotice(TextBlockView {
                             key: id.clone(),
@@ -95,7 +107,7 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::Error { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: id.clone(),
@@ -105,7 +117,7 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::QueuedUserMessage { id, text } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::QueuedSubmission(TextBlockView {
                             key: id.clone(),
@@ -119,7 +131,7 @@ impl OutputViewAssembler {
                     tool_id,
                     message,
                 } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: id.clone(),
@@ -139,7 +151,7 @@ impl OutputViewAssembler {
                     chat_input_active,
                     default,
                 } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::AskUser(AskUserBlockView {
                             key: id.clone(),
@@ -159,7 +171,7 @@ impl OutputViewAssembler {
                     output,
                     is_error,
                 } => {
-                    blocks.push(output_block(
+                    roots.push(leaf(
                         format!("orphan-{id}"),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: format!("orphan-{id}"),
@@ -175,26 +187,36 @@ impl OutputViewAssembler {
             }
         }
         OutputViewModel {
-            blocks,
+            roots,
             version,
             follow_tail_hint: true,
         }
     }
 }
 
-fn output_block(block_id: String, kind: OutputBlockKind) -> OutputBlockView {
-    let block_version = semantic_version(&kind);
-    OutputBlockView {
+/// 构造无子的叶子 BlockNode（block_version 取 kind 语义指纹）。
+fn leaf(block_id: String, kind: OutputBlockKind) -> BlockNode {
+    let block_version = kind.cache_version();
+    BlockNode {
         block_id,
         block_version,
         kind,
+        children: Vec::new(),
     }
 }
 
-fn semantic_version(kind: &OutputBlockKind) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    kind.hash(&mut hasher);
-    hasher.finish()
+/// 按嵌套规则表 + 深度上限校验后将 child 挂到 parent 下；不合法则记日志并丢弃（debug 断言失败）。
+fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
+    if !allowed_child(&parent.kind, &child.kind) || depth >= MAX_BLOCK_DEPTH {
+        log::warn!(
+            "drop illegal child block: parent={} child={} depth={depth}",
+            parent.block_id,
+            child.block_id
+        );
+        debug_assert!(false, "非法子块嵌套被丢弃，违反 nesting 规则");
+        return;
+    }
+    parent.children.push(child);
 }
 
 fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {

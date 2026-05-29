@@ -1,8 +1,5 @@
 //! 顶层 block 级渲染组件。每个组件 fn(view, ctx) -> RenderedBlock。
 
-use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
-use crate::tui::view_model::output::OutputBlockKind;
-
 pub mod ask_user;
 pub mod assistant_message;
 pub mod diagnostic;
@@ -11,33 +8,14 @@ pub mod queued_submission;
 pub mod separator;
 pub mod thinking;
 pub mod tool_call;
+pub mod tool_result;
 pub mod user_message;
-
-pub fn render_block(kind: &OutputBlockKind, block_id: &str, ctx: &RenderCtx) -> RenderedBlock {
-    match kind {
-        OutputBlockKind::AssistantMessage(text) => {
-            assistant_message::render_assistant_message(block_id, text, ctx)
-        }
-        OutputBlockKind::ToolCall(tool) => tool_call::render_tool_call(block_id, tool, ctx),
-        OutputBlockKind::ThinkingMessage(text) => thinking::render_thinking(block_id, text, ctx),
-        OutputBlockKind::QueuedSubmission(text) => {
-            queued_submission::render_queued_submission(block_id, text, ctx)
-        }
-        OutputBlockKind::UserMessage(text) => {
-            user_message::render_user_message(block_id, text, ctx)
-        }
-        OutputBlockKind::AskUser(ask) => ask_user::render_ask_user(block_id, ask, ctx),
-        OutputBlockKind::Separator => separator::render_separator(block_id),
-        OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
-            diagnostic::render_diagnostic(block_id, text, ctx)
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tui::view_model::output::TextBlockView;
+    use crate::tui::render::output::block_component::BlockComponent;
+    use crate::tui::render::output::rendered::RenderCtx;
+    use crate::tui::view_model::output::{OutputBlockKind, TextBlockView};
     use crate::tui::view_model::style::SemanticStyle;
 
     #[test]
@@ -45,24 +23,20 @@ mod tests {
         // #74 回归：System 样式 block（Muted）后渲染 Assistant block 时，
         // 每个 block 独立从自身 kind/style 派生颜色，Assistant 不继承前一 block 的暗色。
         let ctx = RenderCtx { width: 80 };
-        let _system = render_block(
-            &OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "system muted".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-            &ctx,
-        );
-        let assistant = render_block(
-            &OutputBlockKind::AssistantMessage(TextBlockView {
-                key: "a".into(),
-                text: "assistant reply".into(),
-                style: SemanticStyle::Normal,
-            }),
-            "a",
-            &ctx,
-        );
+        let _system = OutputBlockKind::SystemNotice(TextBlockView {
+            key: "s".into(),
+            text: "system muted".into(),
+            style: SemanticStyle::Muted,
+        })
+        .component()
+        .render_self("s", &ctx);
+        let assistant = OutputBlockKind::AssistantMessage(TextBlockView {
+            key: "a".into(),
+            text: "assistant reply".into(),
+            style: SemanticStyle::Normal,
+        })
+        .component()
+        .render_self("a", &ctx);
 
         use crate::tui::render::theme;
         assert_eq!(
@@ -74,15 +48,13 @@ mod tests {
 
     #[test]
     fn test_render_block_system_notice_routes_to_component() {
-        let block = render_block(
-            &OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "ok".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-            &RenderCtx { width: 80 },
-        );
+        let block = OutputBlockKind::SystemNotice(TextBlockView {
+            key: "s".into(),
+            text: "ok".into(),
+            style: SemanticStyle::Muted,
+        })
+        .component()
+        .render_self("s", &RenderCtx { width: 80 });
 
         assert_eq!(block.block_id, "s");
         assert_eq!(block.lines[0].plain, "ok");

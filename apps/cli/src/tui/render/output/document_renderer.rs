@@ -1,10 +1,9 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
-use crate::tui::render::output::blocks::render_block;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument};
 use crate::tui::render::output_area::types::MAX_LINES;
-use crate::tui::view_model::output::OutputViewModel;
+use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
@@ -14,88 +13,123 @@ pub struct OutputDocumentRenderer {
 }
 
 impl OutputDocumentRenderer {
-    pub fn render(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
-        let mut blocks = Vec::with_capacity(view_model.blocks.len());
-        let live_ids = view_model
-            .blocks
-            .iter()
-            .map(|block| block.block_id.clone())
-            .collect::<Vec<_>>();
-
-        for block in &view_model.blocks {
-            let key = CacheKey {
-                version: block.block_version,
-                width,
-            };
-            let rendered = self.cache.get_or_render(&block.block_id, key, |ctx| {
-                #[cfg(test)]
-                self.render_count.set(self.render_count.get() + 1);
-                render_block(&block.kind, &block.block_id, ctx)
-            });
-            blocks.push(rendered);
+    /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
+    /// gutter（depth 缩进 + marker）在组合期注入。
+    pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
+        // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
+        // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
+        let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
+        let mut live_ids = Vec::new();
+        for root in &view_model.roots {
+            let mut group = Vec::new();
+            self.render_node(root, width, 0, &mut group, &mut live_ids);
+            groups.push(group);
         }
         self.cache.retain(&live_ids);
         RenderedDocument {
-            blocks: trim_blocks_to_max_lines(blocks, MAX_LINES),
+            blocks: trim_root_groups_to_max_lines(groups, MAX_LINES),
         }
     }
+
+    fn render_node(
+        &mut self,
+        node: &BlockNode,
+        width: u16,
+        depth: usize,
+        out: &mut Vec<RenderedBlock>,
+        live_ids: &mut Vec<String>,
+    ) {
+        let key = CacheKey {
+            version: node.block_version,
+            width,
+        };
+        let rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
+            #[cfg(test)]
+            self.render_count.set(self.render_count.get() + 1);
+            node.kind.component().render_self(&node.block_id, ctx)
+        });
+        live_ids.push(node.block_id.clone());
+        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
+        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
+        let gutted =
+            crate::tui::render::output::gutter::apply_gutter(&node.kind, depth, rendered.lines);
+        out.push(RenderedBlock {
+            block_id: rendered.block_id,
+            lines: gutted,
+        });
+        for child in &node.children {
+            self.render_node(child, width, depth + 1, out, live_ids);
+        }
+    }
+
     #[cfg(test)]
     pub fn render_count(&self) -> usize {
         self.render_count.get()
     }
 }
 
-fn trim_blocks_to_max_lines(blocks: Vec<RenderedBlock>, max_lines: usize) -> Vec<RenderedBlock> {
+/// 按 root 子树整组裁剪：从尾部（最新）向前累计每个 group 的总行数，
+/// 仅当加入该 group 不超过 `max_lines` 时保留整组；NEVER 拆分 group
+/// （即父块与其后代要么整体保留、要么整体丢弃）。
+/// 边界语义与旧的 per-block 裁剪一致：最新一组即便单独超限也始终保留
+/// （首组跳过超限判断），避免输出为空。
+fn trim_root_groups_to_max_lines(
+    groups: Vec<Vec<RenderedBlock>>,
+    max_lines: usize,
+) -> Vec<RenderedBlock> {
     if max_lines == 0 {
         return Vec::new();
     }
 
-    let mut kept = Vec::new();
+    let mut kept: Vec<Vec<RenderedBlock>> = Vec::new();
     let mut used = 0usize;
-    for block in blocks.into_iter().rev() {
-        let line_count = block.lines.len();
-        if used > 0 && used.saturating_add(line_count) > max_lines {
+    for group in groups.into_iter().rev() {
+        let group_lines: usize = group.iter().map(|b| b.lines.len()).sum();
+        if used > 0 && used.saturating_add(group_lines) > max_lines {
             break;
         }
-        used = used.saturating_add(line_count);
-        kept.push(block);
+        used = used.saturating_add(group_lines);
+        kept.push(group);
     }
     kept.reverse();
-    kept
+    kept.into_iter().flatten().collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tui::view_model::output::{
-        OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
+        BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     };
     use crate::tui::view_model::style::SemanticStyle;
 
-    fn vm_with(kind: OutputBlockKind, id: &str) -> OutputViewModel {
+    fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
+        let kind = OutputBlockKind::SystemNotice(TextBlockView {
+            key: id.into(),
+            text: text.into(),
+            style: SemanticStyle::Muted,
+        });
+        BlockNode {
+            block_id: id.into(),
+            block_version: kind.cache_version(),
+            kind,
+            children,
+        }
+    }
+
+    fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
         OutputViewModel {
-            blocks: vec![OutputBlockView {
-                block_id: id.into(),
-                block_version: 1,
-                kind,
-            }],
+            roots,
             version: 1,
             follow_tail_hint: true,
         }
     }
 
     #[test]
-    fn test_renderer_emits_one_block_per_view() {
+    fn test_renderer_emits_one_block_per_root() {
         let mut renderer = OutputDocumentRenderer::default();
-        let vm = vm_with(
-            OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "ok".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-        );
-        let doc = renderer.render(&vm, 80);
+        let vm = vm_with_roots(vec![node("s", "ok", vec![])]);
+        let doc = renderer.render_tree(&vm, 80);
 
         assert_eq!(doc.blocks.len(), 1);
         assert_eq!(doc.blocks[0].block_id, "s");
@@ -104,16 +138,9 @@ mod tests {
     #[test]
     fn test_renderer_caches_unchanged_block() {
         let mut renderer = OutputDocumentRenderer::default();
-        let vm = vm_with(
-            OutputBlockKind::SystemNotice(TextBlockView {
-                key: "s".into(),
-                text: "ok".into(),
-                style: SemanticStyle::Muted,
-            }),
-            "s",
-        );
-        let _ = renderer.render(&vm, 80);
-        let _ = renderer.render(&vm, 80);
+        let vm = vm_with_roots(vec![node("s", "ok", vec![])]);
+        let _ = renderer.render_tree(&vm, 80);
+        let _ = renderer.render_tree(&vm, 80);
 
         assert_eq!(
             renderer.render_count(),
@@ -123,24 +150,180 @@ mod tests {
     }
 
     #[test]
-    fn test_document_drops_oldest_block_when_over_max_lines() {
-        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
-        use ratatui::text::Span;
+    fn test_render_tree_dfs_flattens_parent_then_children() {
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
 
-        let blocks = vec![
-            RenderedBlock {
-                block_id: "old".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("old")]); 2],
-            },
-            RenderedBlock {
-                block_id: "new".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("new")]); 2],
-            },
-        ];
-        let trimmed = trim_blocks_to_max_lines(blocks, 3);
+        assert_eq!(doc.blocks.len(), 2);
+        assert_eq!(doc.blocks[0].block_id, "p");
+        assert_eq!(doc.blocks[1].block_id, "c");
+    }
+
+    #[test]
+    fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
+        // #65 结构回归：ToolResult 子块含完整 ```fenced``` 代码块，其后兄弟
+        // AssistantMessage root 的首行不应残留 CODE 色——每个 block 经独立组件渲染，
+        // fence 状态机随 block 销毁，结构上隔离泄漏（不依赖行内顺序补偿）。
+        use crate::tui::render::theme;
+        use crate::tui::view_model::output::{
+            ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+        };
+
+        let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+            key: "tool".into(),
+            chat_id: None,
+            turn_id: None,
+            tool_call_id: Some("tool".into()),
+            title: "Bash".into(),
+            icon: "✓".into(),
+            semantic_status: ToolSemanticStatus::Success,
+            style: SemanticStyle::Success,
+            args_preview: None,
+            summary: None,
+            activity_summary: None,
+            result_summary: Some("```\ncode\n```".into()),
+            collapsible: false,
+            collapsed: false,
+        });
+        let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+            key: "tool-result".into(),
+            tool_title: "Bash".into(),
+            summary: None,
+            result_text: "```\ncode\n```".into(),
+        });
+        let tool_node = BlockNode {
+            block_id: "tool".into(),
+            block_version: tool_kind.cache_version(),
+            kind: tool_kind,
+            children: vec![BlockNode {
+                block_id: "tool-result".into(),
+                block_version: result_kind.cache_version(),
+                kind: result_kind,
+                children: Vec::new(),
+            }],
+        };
+        let assistant_kind = OutputBlockKind::AssistantMessage(TextBlockView {
+            key: "a".into(),
+            text: "plain assistant line".into(),
+            style: SemanticStyle::Normal,
+        });
+        let assistant_node = BlockNode {
+            block_id: "a".into(),
+            block_version: assistant_kind.cache_version(),
+            kind: assistant_kind,
+            children: Vec::new(),
+        };
+
+        let vm = vm_with_roots(vec![tool_node, assistant_node]);
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
+
+        let assistant_block = doc
+            .blocks
+            .iter()
+            .find(|b| b.block_id == "a")
+            .expect("assistant block 存在");
+        assert!(
+            assistant_block.lines[0]
+                .spans
+                .iter()
+                .all(|s| s.style.fg != Some(theme::CODE)),
+            "兄弟 AssistantMessage 首行不应残留工具结果 fence 的 CODE 色（#65）"
+        );
+    }
+
+    fn rb(id: &str, lines: usize) -> RenderedBlock {
+        use crate::tui::render::output::rendered::RenderedLine;
+        use ratatui::text::Span;
+        RenderedBlock {
+            block_id: id.into(),
+            lines: vec![RenderedLine::new(vec![Span::raw(id.to_string())]); lines],
+        }
+    }
+
+    #[test]
+    fn test_trim_root_groups_drops_oldest_group_when_over_max_lines() {
+        // 每个 root 子树自成一组（单块）；总 4 行，max=3，最新组（2 行）保留，最旧组丢弃。
+        let groups = vec![vec![rb("old", 2)], vec![rb("new", 2)]];
+        let trimmed = trim_root_groups_to_max_lines(groups, 3);
 
         assert_eq!(trimmed.len(), 1);
         assert_eq!(trimmed[0].block_id, "new");
         assert_eq!(trimmed[0].lines.len(), 2);
+    }
+
+    #[test]
+    fn test_trim_root_groups_never_splits_subtree() {
+        // 两个 root 子树，各 = parent(1) + child(1) = 2 行，共 4 行；max=3 只容得下最新整组。
+        let old_group = vec![rb("p-old", 1), rb("c-old", 1)];
+        let new_group = vec![rb("p-new", 1), rb("c-new", 1)];
+        let trimmed = trim_root_groups_to_max_lines(vec![old_group, new_group], 3);
+
+        let ids: Vec<&str> = trimmed.iter().map(|b| b.block_id.as_str()).collect();
+        // 最新子树的父与子都在；最旧子树的父与子都不在——子树从不被拆开。
+        assert_eq!(
+            ids,
+            vec!["p-new", "c-new"],
+            "裁剪必须以整棵 root 子树为单位，NEVER 拆分父/子块"
+        );
+    }
+
+    #[test]
+    fn test_trim_root_groups_keeps_newest_even_if_over_max() {
+        // 边界：最新组单独超限也始终保留（与旧 per-block 裁剪一致），避免输出为空。
+        let groups = vec![vec![rb("old", 5)], vec![rb("new", 10)]];
+        let trimmed = trim_root_groups_to_max_lines(groups, 3);
+
+        assert_eq!(trimmed.len(), 1);
+        assert_eq!(trimmed[0].block_id, "new");
+    }
+
+    #[test]
+    fn test_trim_root_groups_zero_max_returns_empty() {
+        let trimmed = trim_root_groups_to_max_lines(vec![vec![rb("a", 1)]], 0);
+        assert!(trimmed.is_empty());
+    }
+
+    #[test]
+    fn test_child_version_change_only_rerenders_child() {
+        let mut renderer = OutputDocumentRenderer::default();
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
+        let _ = renderer.render_tree(&vm, 80);
+        assert_eq!(renderer.render_count(), 2, "首次渲染 parent + child = 2 次");
+
+        // 仅改子块 version，父块 version/width 不变 → 父命中缓存，仅子块重渲。
+        let mut child = node("c", "child", vec![]);
+        child.block_version += 1;
+        let vm2 = vm_with_roots(vec![node("p", "parent", vec![child])]);
+        let _ = renderer.render_tree(&vm2, 80);
+
+        assert_eq!(
+            renderer.render_count(),
+            3,
+            "仅子块 version 变 → 父命中缓存，只重渲子块（+1）"
+        );
+    }
+
+    #[test]
+    fn test_retain_keeps_all_tree_block_ids() {
+        let mut renderer = OutputDocumentRenderer::default();
+        let vm = vm_with_roots(vec![node("p", "parent", vec![node("c", "child", vec![])])]);
+        let _ = renderer.render_tree(&vm, 80);
+        assert!(renderer.cache.contains("p"), "渲染后父块在缓存中");
+        assert!(
+            renderer.cache.contains("c"),
+            "渲染后子块也在缓存中（全树 retain）"
+        );
+
+        // 再渲染只剩父块的树：子块从 ViewModel 消失 → retain 应清除其缓存条目。
+        let vm2 = vm_with_roots(vec![node("p", "parent", vec![])]);
+        let _ = renderer.render_tree(&vm2, 80);
+
+        assert!(renderer.cache.contains("p"), "父块仍存活");
+        assert!(
+            !renderer.cache.contains("c"),
+            "子块已从树中移除 → retain 清除缓存防泄漏"
+        );
     }
 }

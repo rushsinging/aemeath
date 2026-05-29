@@ -9,7 +9,7 @@ pub(crate) fn render_document_from_view_model(
     let render_width = effective_render_width(output_area, width);
     let document = output_area
         .document_renderer
-        .render(view_model, render_width);
+        .render_tree(view_model, render_width);
     output_area.set_document(document);
     clamp_scroll_state(output_area);
 }
@@ -36,23 +36,31 @@ fn clamp_scroll_state(output_area: &mut OutputArea) {
 mod tests {
     use super::*;
     use crate::tui::view_model::output::{
-        OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
+        BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     };
     use crate::tui::view_model::style::SemanticStyle;
 
+    /// 构造一个 SystemNotice 叶子 BlockNode（生产路径走 render_tree(roots)）。
+    fn leaf(id: &str, text: &str) -> BlockNode {
+        let kind = OutputBlockKind::SystemNotice(TextBlockView {
+            key: id.into(),
+            text: text.into(),
+            style: SemanticStyle::Muted,
+        });
+        BlockNode {
+            block_id: id.into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: Vec::new(),
+        }
+    }
+
     fn vm(lines: usize) -> OutputViewModel {
+        let roots: Vec<BlockNode> = (0..lines)
+            .map(|i| leaf(&format!("b-{i}"), &format!("line {i}")))
+            .collect();
         OutputViewModel {
-            blocks: (0..lines)
-                .map(|i| OutputBlockView {
-                    block_id: format!("b-{i}"),
-                    block_version: 1,
-                    kind: OutputBlockKind::SystemNotice(TextBlockView {
-                        key: format!("b-{i}"),
-                        text: format!("line {i}"),
-                        style: SemanticStyle::Muted,
-                    }),
-                })
-                .collect(),
+            roots,
             version: 1,
             follow_tail_hint: true,
         }
@@ -62,15 +70,17 @@ mod tests {
     fn test_render_document_from_view_model_uses_known_term_width_when_layout_width_unready() {
         let mut output_area = OutputArea::new();
         output_area.handle_resize(80, 20);
+        let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+            key: "a".into(),
+            text: "整理一轮，不改代码。".into(),
+            style: SemanticStyle::Normal,
+        });
         let view_model = OutputViewModel {
-            blocks: vec![OutputBlockView {
+            roots: vec![BlockNode {
                 block_id: "a".into(),
-                block_version: 1,
-                kind: OutputBlockKind::AssistantMessage(TextBlockView {
-                    key: "a".into(),
-                    text: "整理一轮，不改代码。".into(),
-                    style: SemanticStyle::Normal,
-                }),
+                block_version: kind.cache_version(),
+                kind,
+                children: Vec::new(),
             }],
             version: 1,
             follow_tail_hint: true,
