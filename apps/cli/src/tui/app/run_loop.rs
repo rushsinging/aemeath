@@ -38,6 +38,8 @@ impl App {
 
             // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
             self.refresh_live_status_from_model();
+            // 每帧据 view_state 滚动真相写回 widget 镜像（last_visible_height 反喂 + 钳制）。
+            self.refresh_output_scroll_from_view_state();
 
             // Draw UI
             self.draw(terminal)?;

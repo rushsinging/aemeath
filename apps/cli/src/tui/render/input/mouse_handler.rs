@@ -20,13 +20,15 @@ impl crate::tui::app::App {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if point_in_rect(row, col, &output_area) {
-                    self.output_area.scroll_up(3);
+                    // 滚动真相归 view_state；widget 镜像每帧由 adapter 写回。
+                    let total_lines = self.output_area.document().total_lines();
+                    self.view_state.output.scroll_up(3, total_lines);
                 }
                 return Vec::new();
             }
             MouseEventKind::ScrollDown => {
                 if point_in_rect(row, col, &output_area) {
-                    self.output_area.scroll_down(3);
+                    self.view_state.output.scroll_down(3);
                 }
                 return Vec::new();
             }
@@ -53,15 +55,24 @@ impl crate::tui::app::App {
                         .unwrap_or(false);
 
                     if is_double {
+                        // 输出区选区真相归 view_state；input/status clear 暂留（S4 统一）。
                         self.input_area.clear_selection();
                         self.status_bar.clear_selection();
-                        self.output_area.select_word(row, col, &output_area);
+                        if let Some((line, ws, we)) =
+                            self.output_area.word_bounds_at(row, col, &output_area)
+                        {
+                            self.view_state.output.select_word(line, ws, we);
+                        }
                         self.input.last_click = None;
                     } else {
                         // 清除其他区域的选中
                         self.input_area.clear_selection();
                         self.status_bar.clear_selection();
-                        self.output_area.start_selection(row, col, &output_area);
+                        if let Some((line, anchor)) =
+                            self.output_area.screen_to_anchor(row, col, &output_area)
+                        {
+                            self.view_state.output.begin_selection(line, anchor);
+                        }
                         self.input.last_click = Some((now, row, col));
                     }
                 } else if point_in_rect(row, col, &input_area) {
@@ -87,8 +98,16 @@ impl crate::tui::app::App {
                 }
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
-                if self.output_area.is_selecting() {
-                    self.output_area.update_selection(row, col, &output_area);
+                if self.view_state.output.is_selecting() {
+                    // 屏幕坐标 → 锚点折算只读借 widget（依赖 render 期 screen_line_map），
+                    // 选区真相写入 view_state；行超界时兜底到末尾锚点。
+                    if let Some((line, anchor)) =
+                        self.output_area.screen_to_anchor(row, col, &output_area)
+                    {
+                        self.view_state.output.update_selection(line, anchor);
+                    } else if let Some((line, anchor)) = self.output_area.last_visible_anchor() {
+                        self.view_state.output.update_selection(line, anchor);
+                    }
                 } else if self.input_area.is_selecting() {
                     let inner = self.input_area.get_inner_area(&input_area);
                     self.input_area.update_selection(row, col, &inner);
@@ -98,8 +117,20 @@ impl crate::tui::app::App {
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
-                let text = if self.output_area.is_selecting() {
-                    self.output_area.end_selection()
+                let text = if self.view_state.output.is_selecting() {
+                    // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
+                    self.view_state.output.end_selection();
+                    // 复制时序关键：取文本前先把 view_state 最新选区同步到 widget 镜像，
+                    // 否则 widget 镜像滞后一帧会丢失最后一段选区。
+                    crate::tui::adapter::output_view_widget::apply_output_selection_to_widget(
+                        &self.view_state.output,
+                        &mut self.output_area,
+                    );
+                    // 取 plain 文本（读 widget 选区镜像 + document，#63 gutter 不进 plain）。
+                    let text = self.output_area.get_selected_text();
+                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                    self.view_state.output.clear_selection();
+                    text
                 } else if self.input_area.is_selecting() {
                     self.input_area.end_selection()
                 } else if self.status_bar.is_selecting() {
