@@ -3,11 +3,48 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::model::RuntimeModel;
 use crate::tui::model::runtime::processing_job::ProcessingStatus;
 use crate::tui::model::runtime::session_model::SessionModel;
-use crate::tui::view_model::{SemanticStyle, StatusLineViewModel, StatusSegment, StatusSeverity};
+use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
+use crate::tui::view_model::{
+    SemanticStyle, StatusContextViewModel, StatusLineViewModel, StatusRuntimeViewModel,
+    StatusSegment, StatusSeverity, StatusWorktreeKind,
+};
 
 pub struct StatusViewAssembler;
 
 impl StatusViewAssembler {
+    /// 由 `RuntimeModel`/`SessionModel` 单向派生 StatusBar 运行态视图模型
+    /// （model/session/tps/工作目录上下文）。
+    ///
+    /// 这是上述镜像字段的唯一派生路径：adapter 据此写回 widget，update 业务路径
+    /// 不得再直接调用 `status_bar.set_model/set_session_id/set_tps/set_context_paths/set_git_context`。
+    /// token/api 总量为渲染期缓存（由 `StatusBar::draw` 从 `ChatState` 快照写入），
+    /// context_size/permission_mode 为启动期一次性配置，均不在本派生范围内。
+    pub fn assemble_runtime_view(
+        runtime: &RuntimeModel,
+        session: Option<&SessionModel>,
+    ) -> StatusRuntimeViewModel {
+        StatusRuntimeViewModel {
+            model: runtime.model_id.clone(),
+            session_id: session.and_then(|s| s.current_session_id.clone()),
+            tps: runtime.live_tps.unwrap_or(0.0),
+            context: StatusContextViewModel {
+                path_base: runtime.workspace.path_base.clone().unwrap_or_default(),
+                working_root: runtime.workspace.working_root.clone().unwrap_or_default(),
+                branch: runtime
+                    .workspace
+                    .branch
+                    .clone()
+                    .filter(|branch| !branch.trim().is_empty()),
+                kind: match runtime.workspace.kind {
+                    ModelWorktreeKind::LinkedWorktree => StatusWorktreeKind::Worktree,
+                    _ => StatusWorktreeKind::Main,
+                },
+            },
+            // token/api/context_size 为渲染缓存与启动配置，不由本派生承载（adapter 合并时保留）。
+            ..StatusRuntimeViewModel::default()
+        }
+    }
+
     pub fn assemble_basic(model_id: Option<&str>, cwd: Option<&str>) -> StatusLineViewModel {
         let mut vm = StatusLineViewModel::default();
         if let Some(model_id) = model_id {
@@ -176,6 +213,71 @@ mod tests {
     use crate::tui::model::runtime::model::RuntimeModel;
 
     use super::StatusViewAssembler;
+    use crate::tui::model::runtime::session_intent::SessionIntent;
+    use crate::tui::model::runtime::session_model::SessionModel;
+    use crate::tui::model::runtime::workspace::WorktreeKind;
+
+    #[test]
+    fn test_assemble_runtime_view_normal_path_derives_all_fields() {
+        let mut runtime = RuntimeModel {
+            model_id: Some("glm-5.1".to_string()),
+            ..Default::default()
+        };
+        runtime.apply(RuntimeIntent::RecordLiveTps { tps: 42.0 });
+        runtime.apply(RuntimeIntent::WorkspaceSnapshotReceived {
+            path_base: Some("~/repo/cli".to_string()),
+            working_root: Some("~/repo".to_string()),
+            branch: Some("feature/x".to_string()),
+            kind: WorktreeKind::LinkedWorktree,
+        });
+        let mut session = SessionModel::default();
+        session.apply(SessionIntent::SetCurrentSession {
+            id: "s-1".to_string(),
+        });
+
+        let vm = StatusViewAssembler::assemble_runtime_view(&runtime, Some(&session));
+
+        assert_eq!(vm.model.as_deref(), Some("glm-5.1"));
+        assert_eq!(vm.session_id.as_deref(), Some("s-1"));
+        assert_eq!(vm.tps, 42.0);
+        assert_eq!(vm.context.path_base, "~/repo/cli");
+        assert_eq!(vm.context.branch.as_deref(), Some("feature/x"));
+        assert_eq!(
+            vm.context.kind,
+            crate::tui::view_model::StatusWorktreeKind::Worktree
+        );
+    }
+
+    #[test]
+    fn test_assemble_runtime_view_boundary_empty_branch_becomes_none() {
+        let mut runtime = RuntimeModel::default();
+        runtime.apply(RuntimeIntent::WorkspaceSnapshotReceived {
+            path_base: Some("/repo".to_string()),
+            working_root: Some("/repo".to_string()),
+            branch: Some("   ".to_string()),
+            kind: WorktreeKind::MainCheckout,
+        });
+
+        let vm = StatusViewAssembler::assemble_runtime_view(&runtime, None);
+
+        assert!(vm.context.branch.is_none());
+        assert_eq!(
+            vm.context.kind,
+            crate::tui::view_model::StatusWorktreeKind::Main
+        );
+    }
+
+    #[test]
+    fn test_assemble_runtime_view_error_path_missing_model_and_session() {
+        let runtime = RuntimeModel::default();
+
+        let vm = StatusViewAssembler::assemble_runtime_view(&runtime, None);
+
+        assert!(vm.model.is_none());
+        assert!(vm.session_id.is_none());
+        assert_eq!(vm.tps, 0.0);
+        assert!(vm.context.path_base.is_empty());
+    }
 
     #[test]
     fn test_status_assembler_reads_runtime_and_diagnostic() {

@@ -92,19 +92,17 @@ impl App {
                 input,
                 output,
                 last_input,
-                elapsed_secs,
+                elapsed_secs: _,
             } => {
+                // token 总量真相在 ChatState（渲染期由 StatusBar::draw 写回 widget）；
+                // tps 由 map_agent_event -> RuntimeIntent::RecordLiveTps 注入 RuntimeModel，
+                // 经 adapter 单向写回，此处不再直写 status_bar。
                 self.chat
                     .record_usage(input as u64, output as u64, last_input as u64);
-                let tps = if elapsed_secs > 0.0 {
-                    output as f64 / elapsed_secs
-                } else {
-                    0.0
-                };
-                self.status_bar.set_tps(tps);
             }
-            UiEvent::LiveTps(tps) => {
-                self.status_bar.set_tps(tps);
+            UiEvent::LiveTps(_tps) => {
+                // tps 已由 map_agent_event -> RuntimeIntent::RecordLiveTps 注入 RuntimeModel，
+                // 经 adapter 单向写回 status_bar。
             }
             UiEvent::AgentProgress { .. } => {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
@@ -163,13 +161,10 @@ impl App {
                 self.chat.start_processing();
             }
             UiEvent::ReflectionUsage { input, output } => {
+                // token 总量真相在 ChatState，渲染期由 StatusBar::draw 从快照写回 widget，
+                // 此处不再直写 status_bar.set_tokens。
                 self.chat
                     .record_usage(input as u64, output as u64, input as u64);
-                self.status_bar.set_tokens(
-                    self.chat.total_input_tokens,
-                    self.chat.total_output_tokens,
-                    self.chat.last_input_tokens,
-                );
             }
             UiEvent::ReflectionDone { output } => {
                 self.append_system_notice(output.content.clone());
@@ -295,14 +290,9 @@ impl App {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
+                // 工作目录上下文已由 map_agent_event -> RuntimeIntent::WorkspaceSnapshotReceived
+                // 注入 RuntimeModel，经 adapter 单向写回 status_bar，此处仅同步会话 cwd。
                 self.session.cwd = ctx.raw_path_base.clone();
-                self.status_bar
-                    .set_context_paths(ctx.path_base, ctx.working_root);
-                if let Some(branch) = ctx.branch {
-                    self.status_bar.set_git_context(ctx.kind, branch);
-                } else {
-                    self.status_bar.set_git_context(ctx.kind, "");
-                }
             }
             UiEvent::Done => {
                 log::debug!(

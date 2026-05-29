@@ -12,7 +12,10 @@ pub use output::{
     AskUserBlockView, OutputBlockKind, OutputBlockView, OutputViewModel, TextBlockView,
     ToolCallBlockView, ToolSemanticStatus,
 };
-pub use status::{StatusLineViewModel, StatusSegment, StatusSeverity};
+pub use status::{
+    StatusContextViewModel, StatusLineViewModel, StatusRuntimeViewModel, StatusSegment,
+    StatusSeverity, StatusWorktreeKind,
+};
 pub use style::SemanticStyle;
 
 #[cfg(test)]

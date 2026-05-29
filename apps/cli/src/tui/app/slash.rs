@@ -317,7 +317,17 @@ impl super::App {
                                     .set_context_size(result.context_window as u64);
                             }
                             self.session.current_model_display = result.display_name.clone();
-                            self.status_bar.set_model(&result.display_name);
+                            // model 真相归 RuntimeModel，经 adapter 单向写回 status_bar。
+                            self.model.runtime.apply(
+                                crate::tui::model::runtime::intent::RuntimeIntent::SetProviderModel {
+                                    provider: self.model.runtime.provider.clone(),
+                                    model_id: Some(result.display_name.clone()),
+                                },
+                            );
+                            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
+                                &self.model,
+                                &mut self.status_bar,
+                            );
                             if let Some(ra) = result.reasoning_active {
                                 self.status_bar.set_thinking(ra);
                             }

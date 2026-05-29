@@ -18,7 +18,23 @@
 | 56 | 输入单一真相约束：禁止直接改 input_area 并加架构 guard | 中 | 待确认 | 未确认 | 强制"输入 text/cursor 真相只在 model.input.document，input_area 仅 View、由 model 单向派生"。本轮已完成：键盘、AskUserQuestion、粘贴、补全、图片 pending count 等输入修改路径改为 InputIntent → InputModel::apply → adapter/input_widget.rs；app/update 不再读取 input_area text/cursor 作为业务真相；新增 check-tui-input-single-source.sh 并接入架构 guard；InputArea text/cursor 可变方法收紧为内部/测试可见。 |
 | 57 | TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim | 低 | 待确认 | 未确认 | #55 后剩余顶层目录已物理收口：删除 `core/` 空 shim；`output_area/`、`input/`、`display/` 并入 `render/`；`completion/` 按架构文档拆入 `model/input/completion`（纯解析/状态）与 `effect/completion`（文件系统候选 IO）；`session/` 拆入 `effect/session`（spawn/load/save/resume 副作用编排），状态继续归 `model/runtime`；新增并接入 `.agents/hooks/check-tui-toplevel-layout.sh`，白名单锁定 TUI 顶层目录为 spec 9 层并禁止旧顶层模块路径回归。 |
 | 58 | TUI 输出区渲染管线统一重构 | 高 | 待确认 | 未确认 | 统一为单一 ViewModel→Render 管线，恢复 markdown+theme，消除有损桥/双表示；详见 [plan](../superpowers/plans/2026-05-29-tui-output-render-pipeline.md) 与 [spec](../superpowers/specs/2026-05-29-tui-output-render-pipeline-design.md) |
-| 59 | TUI Model/View 单源迁移收口（伞型 roadmap） | 中 | 规划中 | 未确认 | 对账 #53/#55/#56/#57/#58 已有迁移成果与 6 个现存 guard，列出真正未被守护的剩余单源缺口，定义收口顺序。采用单写入者/单向 + guard 范式（非"状态零留 widget"）。子项：S1 OutputArea live tail（spinner+task window 入 Model）、S2 OutputArea 滚动/follow-tail/选区入 Model、S3 StatusBar 去镜像+单写入者、S4 选区统一+mouse_handler 走 intent、S5 Effect 化 tea-purity 豁免名单内副作用。每子项各走独立 spec→plan→实施并加对应 guard。详见 [roadmap](../superpowers/specs/2026-05-29-tui-single-source-completion-roadmap.md) |
+| 59 | TUI Model/View 单源迁移收口（伞型 roadmap） | 中 | S3 待确认 | 未确认 | 对账 #53/#55/#56/#57/#58 已有迁移成果与 6 个现存 guard，列出真正未被守护的剩余单源缺口，定义收口顺序。采用单写入者/单向 + guard 范式（非"状态零留 widget"）。子项：S1 OutputArea live tail（spinner+task window 入 Model）、S2 OutputArea 滚动/follow-tail/选区入 Model、S3 StatusBar 去镜像+单写入者（✅ 完成）、S4 选区统一+mouse_handler 走 intent、S5 Effect 化 tea-purity 豁免名单内副作用。每子项各走独立 spec→plan→实施并加对应 guard。详见 [roadmap](../superpowers/specs/2026-05-29-tui-single-source-completion-roadmap.md) |
+
+### #59 S3 · StatusBar 去镜像 + 单写入者
+
+**状态**：待确认
+
+**问题**：`StatusBar` widget 自持 `input_tokens/output_tokens/last_input_tokens/session_id/api_calls/model/context_size/tps/context` 等字段，全是 `RuntimeModel`/`SessionModel` 的镜像；存在双写入者——`adapter/status_widget.rs` 从 Model 拷入的同时，`app/update/ui_event.rs`、`effect/session/{resume,session_lifecycle}.rs`、`app/slash.rs` 又直接 `status_bar.set_tps/set_tokens/set_model/set_session_id/set_context_paths/set_git_context(...)`，分歧风险；`view_assembler/status.rs` 已有 assembler 但闲置，`StatusBar::render` 读自身镜像字段而非 ViewModel。
+
+**解决思路**：
+1. 新增 `StatusRuntimeViewModel`/`StatusContextViewModel`（`view_model/status.rs`，自带视图层 `StatusWorktreeKind` 避免依赖 model 内部类型），`StatusBar` 把 model/session/tps + 工作目录上下文镜像收敛到内嵌 `vm`，`render` 改读 `vm`。
+2. 启用闲置 assembler：新增 `StatusViewAssembler::assemble_runtime_view(runtime, session)` 单向派生 ViewModel；adapter `apply_runtime_status_to_widget` 经唯一写入口 `StatusBar::apply_runtime_view` 落地 widget。
+3. 删除 `ui_event.rs`（Usage/LiveTps/ReflectionUsage/WorkingDirectoryChanged）、`resume.rs`、`session_lifecycle.rs`、`slash.rs` 对镜像 `set_*` 的直写；`UiEvent::Usage` 的 elapsed→tps 改在 `map_agent_event` 注入 `RuntimeIntent::RecordLiveTps`；resume/lifecycle/model-switch 改为 apply `SessionIntent::SetCurrentSession`/`RuntimeIntent::{WorkspaceSnapshotReceived,SetProviderModel}` 后调 adapter。
+4. 镜像 `set_*` 收紧为 `pub(crate)`；新增 `.agents/hooks/check-tui-status-single-source.sh` 禁止 adapter 之外出现 `status_bar.set_model/set_session_id/set_tps/set_tokens/set_context_paths/set_git_context`，接入 `check-architecture-guards.sh`。
+
+**边界**：token/api 总量真相仍在 `ChatState`（渲染期由 `StatusBar::draw` 从快照写回，作为 widget 渲染缓存）；`context_size`/`permission_mode` 为启动期一次性配置；status 文案（`set_success`/`set_warning`）、`set_thinking`、selection 不在本子项范围（选区属 S4），行为保持不变。
+
+**TDD/验证**：assembler 三路径单测（正常/空 branch 边界/缺 model+session 错误）+ adapter 三测；443 cli 测试全绿；`cargo build/clippy -p cli -D warnings` 全绿；全部架构 guard（含新增）通过。
 
 ### #58 Phase 5 · T1：迁移 push_system/push_error 到单一真相源
 

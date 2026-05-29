@@ -4,6 +4,7 @@ mod status_bar_format;
 mod status_bar_selection;
 
 use crate::tui::render::theme;
+use crate::tui::view_model::StatusRuntimeViewModel;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -20,18 +21,15 @@ pub enum StatusBarRow {
     Context,
 }
 
-/// The status bar at the bottom of the screen
+/// The status bar at the bottom of the screen.
+///
+/// 运行态镜像（token/tps/model/session/context）统一收敛到 `vm`，唯一写入路径为
+/// `apply_runtime_view`（由 `adapter/status_widget.rs` 调用，源自 `StatusViewAssembler`）。
+/// 渲染只读 `vm`，update 业务路径禁止直接调用 `set_*`。
 pub struct StatusBar {
     status: String,
     status_type: StatusType,
-    input_tokens: u64,
-    output_tokens: u64,
-    last_input_tokens: u64,
-    session_id: Option<String>,
-    api_calls: u64,
-    model: Option<String>,
-    context_size: u64,
-    tps: f64,
+    vm: StatusRuntimeViewModel,
     is_selecting: bool,
     selection_start: Option<usize>,
     selection_end: Option<usize>,
@@ -69,14 +67,7 @@ impl StatusBar {
         Self {
             status: "Ready".to_string(),
             status_type: StatusType::Normal,
-            input_tokens: 0,
-            output_tokens: 0,
-            last_input_tokens: 0,
-            session_id: None,
-            api_calls: 0,
-            model: None,
-            context_size: 0,
-            tps: 0.0,
+            vm: StatusRuntimeViewModel::default(),
             is_selecting: false,
             selection_start: None,
             selection_end: None,
@@ -101,40 +92,60 @@ impl StatusBar {
         log::debug!("[STATUS] reset_runtime_state()");
         self.status = "Ready".to_string();
         self.status_type = StatusType::Normal;
-        self.input_tokens = 0;
-        self.output_tokens = 0;
-        self.last_input_tokens = 0;
-        self.api_calls = 0;
-        self.tps = 0.0;
+        self.vm.input_tokens = 0;
+        self.vm.output_tokens = 0;
+        self.vm.last_input_tokens = 0;
+        self.vm.api_calls = 0;
+        self.vm.tps = 0.0;
         self.clear_selection();
     }
 
-    pub fn set_tokens(&mut self, input: u64, output: u64, last_input: u64) {
-        self.input_tokens = input;
-        self.output_tokens = output;
-        self.last_input_tokens = last_input;
+    /// 由 adapter 依据 `StatusViewAssembler` 派生结果单向写回 widget 镜像
+    /// （model/session/tps/工作目录上下文）。
+    ///
+    /// 这是上述镜像的**唯一**生产写入路径；update 业务路径禁止直接调用对应 `set_*`
+    /// （由 `check-tui-status-single-source.sh` guard 焊死）。token/api/context_size/
+    /// permission_mode 为渲染缓存与启动配置，在此保留不被覆盖。
+    pub(crate) fn apply_runtime_view(&mut self, view: StatusRuntimeViewModel) {
+        self.vm.model = view.model;
+        self.vm.session_id = view.session_id.clone();
+        self.vm.tps = view.tps;
+        self.context.path_base = view.context.path_base;
+        self.context.working_root = view.context.working_root;
+        self.context.worktree_kind = match view.context.kind {
+            crate::tui::view_model::StatusWorktreeKind::Worktree => WorktreeKind::Worktree,
+            crate::tui::view_model::StatusWorktreeKind::Main => WorktreeKind::Main,
+        };
+        self.context.branch = view.context.branch;
+        self.context.session_id = view.session_id;
     }
 
-    pub fn set_session_id(&mut self, id: &str) {
+    pub(crate) fn set_tokens(&mut self, input: u64, output: u64, last_input: u64) {
+        self.vm.input_tokens = input;
+        self.vm.output_tokens = output;
+        self.vm.last_input_tokens = last_input;
+    }
+
+    pub(crate) fn set_session_id(&mut self, id: &str) {
         let id = id.to_string();
-        self.session_id = Some(id.clone());
+        self.vm.session_id = Some(id.clone());
         self.context.session_id = Some(id);
     }
 
-    pub fn set_model(&mut self, model: &str) {
-        self.model = Some(model.to_string());
+    pub(crate) fn set_model(&mut self, model: &str) {
+        self.vm.model = Some(model.to_string());
     }
 
-    pub fn set_context_size(&mut self, size: u64) {
-        self.context_size = size;
+    pub(crate) fn set_context_size(&mut self, size: u64) {
+        self.vm.context_size = size;
     }
 
-    pub fn set_api_calls(&mut self, count: u64) {
-        self.api_calls = count;
+    pub(crate) fn set_api_calls(&mut self, count: u64) {
+        self.vm.api_calls = count;
     }
 
-    pub fn set_tps(&mut self, tps: f64) {
-        self.tps = tps;
+    pub(crate) fn set_tps(&mut self, tps: f64) {
+        self.vm.tps = tps;
     }
 
     pub fn set_thinking(&mut self, enabled: bool) {
@@ -244,25 +255,28 @@ impl StatusBar {
             format!(" {} ", self.status),
             RuntimeSegmentStyle::Status(self.status_type),
         ));
-        if let Some(ref model) = self.model {
+        if let Some(ref model) = self.vm.model {
             segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((format!(" {} ", model), RuntimeSegmentStyle::Model));
         }
         segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
         segments.push((
-            format!(" in {} ", sdk::format_tokens(self.input_tokens)),
+            format!(" in {} ", sdk::format_tokens(self.vm.input_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
         segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
         segments.push((
-            format!(" out {} ", sdk::format_tokens(self.output_tokens)),
+            format!(" out {} ", sdk::format_tokens(self.vm.output_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
-        if self.tps > 0.0 {
+        if self.vm.tps > 0.0 {
             segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-            segments.push((format!(" {:.0} t/s ", self.tps), RuntimeSegmentStyle::Muted));
+            segments.push((
+                format!(" {:.0} t/s ", self.vm.tps),
+                RuntimeSegmentStyle::Muted,
+            ));
         }
-        if self.context_size > 0 {
+        if self.vm.context_size > 0 {
             let pct = self.context_pct();
             segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((
@@ -270,10 +284,10 @@ impl StatusBar {
                 RuntimeSegmentStyle::ContextPct(pct),
             ));
         }
-        if self.api_calls > 0 {
+        if self.vm.api_calls > 0 {
             segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
             segments.push((
-                format!(" api {} ", self.api_calls),
+                format!(" api {} ", self.vm.api_calls),
                 RuntimeSegmentStyle::Muted,
             ));
         }
@@ -281,8 +295,8 @@ impl StatusBar {
     }
 
     fn context_pct(&self) -> u64 {
-        if self.last_input_tokens > 0 {
-            self.last_input_tokens * 100 / self.context_size
+        if self.vm.last_input_tokens > 0 {
+            self.vm.last_input_tokens * 100 / self.vm.context_size
         } else {
             0
         }

@@ -152,11 +152,7 @@ impl App {
         };
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
         self.refresh_output_widget_from_model();
-        apply_runtime_status_to_widget(
-            &self.model,
-            self.chat.last_input_tokens,
-            &mut self.status_bar,
-        );
+        apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
         apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
         result.effects.extend(model_result.effects);
         result

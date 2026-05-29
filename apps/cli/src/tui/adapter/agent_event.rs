@@ -64,11 +64,24 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             is_error: *is_error,
             image_count: images.len(),
         }),
-        UiEvent::Usage { input, output, .. } => runtime(RuntimeIntent::RecordUsage {
-            input_tokens: u64::from(*input),
-            output_tokens: u64::from(*output),
-            cost_usd: 0.0,
-        }),
+        UiEvent::Usage {
+            input,
+            output,
+            elapsed_secs,
+            ..
+        } => {
+            let mut mapping = runtime(RuntimeIntent::RecordUsage {
+                input_tokens: u64::from(*input),
+                output_tokens: u64::from(*output),
+                cost_usd: 0.0,
+            });
+            if *elapsed_secs > 0.0 {
+                mapping.runtime.push(RuntimeIntent::RecordLiveTps {
+                    tps: f64::from(*output) / elapsed_secs,
+                });
+            }
+            mapping
+        }
         UiEvent::LiveTps(tps) => runtime(RuntimeIntent::RecordLiveTps { tps: *tps }),
         UiEvent::Error(message) => {
             let mut mapping = conversation(ConversationIntent::AppendError {

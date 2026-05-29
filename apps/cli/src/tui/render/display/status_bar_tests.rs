@@ -5,14 +5,7 @@ use crate::tui::render::theme;
 pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {
     bar.status = status.to_string();
     bar.status_type = StatusType::Normal;
-    bar.input_tokens = 0;
-    bar.output_tokens = 0;
-    bar.last_input_tokens = 0;
-    bar.session_id = None;
-    bar.api_calls = 0;
-    bar.model = None;
-    bar.context_size = 0;
-    bar.tps = 0.0;
+    bar.vm = crate::tui::view_model::StatusRuntimeViewModel::default();
     bar.thinking = false;
 }
 

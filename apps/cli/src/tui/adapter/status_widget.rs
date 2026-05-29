@@ -1,38 +1,14 @@
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::root::TuiModel;
-use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
-use crate::tui::render::status::WorktreeKind as StatusWorktreeKind;
+use crate::tui::view_assembler::status::StatusViewAssembler;
 use crate::tui::StatusBar;
 
-pub(crate) fn apply_runtime_status_to_widget(
-    model: &TuiModel,
-    last_input_tokens: u64,
-    status_bar: &mut StatusBar,
-) {
-    status_bar.set_tokens(
-        model.runtime.usage.input_tokens,
-        model.runtime.usage.output_tokens,
-        last_input_tokens,
-    );
-    if let Some(tps) = model.runtime.live_tps {
-        status_bar.set_tps(tps);
-    }
-    if let Some(model_id) = &model.runtime.model_id {
-        status_bar.set_model(model_id);
-    }
-    if let Some(session_id) = &model.session.current_session_id {
-        status_bar.set_session_id(session_id);
-    }
-    if let (Some(path_base), Some(working_root)) = (
-        model.runtime.workspace.path_base.clone(),
-        model.runtime.workspace.working_root.clone(),
-    ) {
-        status_bar.set_context_paths(path_base, working_root);
-    }
-    status_bar.set_git_context(
-        status_worktree_kind(model.runtime.workspace.kind),
-        model.runtime.workspace.branch.clone().unwrap_or_default(),
-    );
+/// 单向写回 StatusBar 运行态镜像：由 `StatusViewAssembler` 从 Model 派生 ViewModel，
+/// 再经唯一写入口 `apply_runtime_view` 落地 widget。这是 model/session/tps/工作目录上下文
+/// 的唯一生产写入路径。
+pub(crate) fn apply_runtime_status_to_widget(model: &TuiModel, status_bar: &mut StatusBar) {
+    let view = StatusViewAssembler::assemble_runtime_view(&model.runtime, Some(&model.session));
+    status_bar.apply_runtime_view(view);
 }
 
 pub(crate) fn apply_diagnostic_status_to_widget(model: &TuiModel, status_bar: &mut StatusBar) {
@@ -43,40 +19,64 @@ pub(crate) fn apply_diagnostic_status_to_widget(model: &TuiModel, status_bar: &m
     }
 }
 
-fn status_worktree_kind(kind: ModelWorktreeKind) -> StatusWorktreeKind {
-    match kind {
-        ModelWorktreeKind::MainCheckout => StatusWorktreeKind::Main,
-        ModelWorktreeKind::LinkedWorktree => StatusWorktreeKind::Worktree,
-        ModelWorktreeKind::Unknown => StatusWorktreeKind::Main,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::model::runtime::intent::RuntimeIntent;
+    use crate::tui::model::runtime::session_intent::SessionIntent;
     use crate::tui::model::runtime::workspace::WorktreeKind;
 
     #[test]
-    fn test_status_worktree_kind_maps_main() {
-        assert_eq!(
-            status_worktree_kind(WorktreeKind::MainCheckout),
-            StatusWorktreeKind::Main
-        );
+    fn test_apply_runtime_status_writes_model_and_context() {
+        let mut model = TuiModel::default();
+        model.runtime.apply(RuntimeIntent::SetProviderModel {
+            provider: None,
+            model_id: Some("glm-5.1".to_string()),
+        });
+        model.runtime.apply(RuntimeIntent::WorkspaceSnapshotReceived {
+            path_base: Some("~/repo".to_string()),
+            working_root: Some("~/repo".to_string()),
+            branch: Some("main".to_string()),
+            kind: WorktreeKind::MainCheckout,
+        });
+        model.session.apply(SessionIntent::SetCurrentSession {
+            id: "s-1".to_string(),
+        });
+        let mut status_bar = StatusBar::new();
+
+        apply_runtime_status_to_widget(&model, &mut status_bar);
+
+        let row = status_bar.build_full_text();
+        assert!(row.contains("glm-5.1"));
+        let context = status_bar.context_row_text(120);
+        assert!(context.contains("~/repo"));
+        assert!(context.contains("session s-1"));
     }
 
     #[test]
-    fn test_status_worktree_kind_maps_linked_worktree() {
-        assert_eq!(
-            status_worktree_kind(WorktreeKind::LinkedWorktree),
-            StatusWorktreeKind::Worktree
-        );
+    fn test_apply_runtime_status_empty_model_keeps_defaults() {
+        let model = TuiModel::default();
+        let mut status_bar = StatusBar::new();
+
+        apply_runtime_status_to_widget(&model, &mut status_bar);
+
+        let row = status_bar.build_full_text();
+        assert!(row.contains("Ready"));
     }
 
     #[test]
-    fn test_status_worktree_kind_maps_unknown_to_main() {
-        assert_eq!(
-            status_worktree_kind(WorktreeKind::Unknown),
-            StatusWorktreeKind::Main
-        );
+    fn test_apply_diagnostic_status_sets_warning_on_error() {
+        let mut model = TuiModel::default();
+        model
+            .diagnostic
+            .apply(crate::tui::model::diagnostic::intent::DiagnosticIntent::RecordNotice {
+                severity: DiagnosticSeverity::Error,
+                message: "boom".to_string(),
+            });
+        let mut status_bar = StatusBar::new();
+
+        apply_diagnostic_status_to_widget(&model, &mut status_bar);
+
+        assert!(status_bar.build_full_text().contains("Error"));
     }
 }
