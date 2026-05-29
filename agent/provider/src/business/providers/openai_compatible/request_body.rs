@@ -5,8 +5,8 @@ use std::error::Error as StdError;
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::{LlmProvider, StreamHandler};
-use crate::types::SystemBlock;
+use crate::core::provider::{LlmProvider, StreamHandler};
+use crate::business::types::SystemBlock;
 
 use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
 
@@ -67,7 +67,7 @@ impl LlmProvider for OpenAICompatibleProvider {
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
-    ) -> Result<crate::types::StreamResponse, crate::LlmError> {
+    ) -> Result<crate::business::types::StreamResponse, crate::LlmError> {
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 

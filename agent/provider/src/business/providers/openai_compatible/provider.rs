@@ -1,4 +1,4 @@
-use crate::client::OpenAIProviderConfig;
+use crate::core::client::OpenAIProviderConfig;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 

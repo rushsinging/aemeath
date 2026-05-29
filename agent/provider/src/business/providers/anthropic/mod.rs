@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::{LlmProvider, StreamHandler};
-use crate::stream::parse_stream;
-use crate::types::{CreateMessageRequest, StreamResponse, SystemBlock};
+use crate::core::provider::{LlmProvider, StreamHandler};
+use crate::business::stream::parse_stream;
+use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 
 use message_conversion::{send_message_non_stream, RequestParams, TrackingHandler};
 
@@ -315,7 +315,7 @@ impl LlmProvider for AnthropicProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::CreateMessageRequest;
+    use crate::business::types::CreateMessageRequest;
 
     #[test]
     fn anthropic_request_serializes_thinking_budget() {

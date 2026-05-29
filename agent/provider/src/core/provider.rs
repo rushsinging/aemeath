@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::types::{StreamResponse, SystemBlock};
+use crate::business::types::{StreamResponse, SystemBlock};
 
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {

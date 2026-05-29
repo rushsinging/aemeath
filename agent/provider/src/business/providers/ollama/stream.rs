@@ -8,8 +8,8 @@ use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
 use super::STREAM_IDLE_TIMEOUT;
-use crate::provider::StreamHandler;
-use crate::types::StreamResponse;
+use crate::core::provider::StreamHandler;
+use crate::business::types::StreamResponse;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -24,11 +24,11 @@ pub(crate) async fn parse_ollama_stream(
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
     let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
-    let mut usage = crate::types::Usage {
+    let mut usage = crate::business::types::Usage {
         input_tokens: 0,
         output_tokens: 0,
     };
-    let mut stop_reason = crate::types::StopReason::EndTurn;
+    let mut stop_reason = crate::business::types::StopReason::EndTurn;
 
     let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
@@ -124,9 +124,9 @@ pub(crate) async fn parse_ollama_stream(
         if chunk.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
             if let Some(reason) = chunk.get("done_reason").and_then(|v| v.as_str()) {
                 stop_reason = match reason {
-                    "stop" => crate::types::StopReason::EndTurn,
-                    "length" => crate::types::StopReason::MaxTokens,
-                    _ => crate::types::StopReason::EndTurn,
+                    "stop" => crate::business::types::StopReason::EndTurn,
+                    "length" => crate::business::types::StopReason::MaxTokens,
+                    _ => crate::business::types::StopReason::EndTurn,
                 };
             }
             if let Some(n) = chunk.get("prompt_eval_count").and_then(|v| v.as_u64()) {
@@ -137,7 +137,7 @@ pub(crate) async fn parse_ollama_stream(
             }
             // Tool calls override the stop reason
             if !final_tool_calls.is_empty() {
-                stop_reason = crate::types::StopReason::ToolUse;
+                stop_reason = crate::business::types::StopReason::ToolUse;
             }
             break;
         }

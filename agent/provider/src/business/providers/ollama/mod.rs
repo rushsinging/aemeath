@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::{LlmProvider, StreamHandler};
-use crate::types::{StreamResponse, SystemBlock};
+use crate::core::provider::{LlmProvider, StreamHandler};
+use crate::business::types::{StreamResponse, SystemBlock};
 
 mod conversion;
 mod non_stream;

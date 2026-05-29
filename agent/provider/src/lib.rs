@@ -5,12 +5,8 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod api;
-mod client;
-mod pool;
-mod provider;
-mod providers;
-mod stream;
-mod types;
+mod business;
+mod core;
 
 pub use api::ApiDriverKind;
 

@@ -1,5 +1,5 @@
 use super::{OpenAICompatibleProvider, ReasoningConfig};
-use crate::client::OpenAIProviderConfig;
+use crate::core::client::OpenAIProviderConfig;
 use crate::ApiDriverKind;
 use share::message::{ContentBlock, Message, Role};
 

@@ -3,8 +3,8 @@
 use reqwest::header::HeaderMap;
 use share::message::{ContentBlock, Message, Role};
 
-use crate::provider::StreamHandler;
-use crate::types::{CreateMessageRequest, StopReason, StreamResponse, SystemBlock, Usage};
+use crate::core::provider::StreamHandler;
+use crate::business::types::{CreateMessageRequest, StopReason, StreamResponse, SystemBlock, Usage};
 
 // ---------------------------------------------------------------------------
 // TrackingHandler – wraps a StreamHandler to detect if any user-visible

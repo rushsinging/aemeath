@@ -4,9 +4,9 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 
 use crate::api::ApiDriverKind;
-use crate::provider::{CallbackHandler, LlmProvider, StreamHandler};
-use crate::providers::openai_compatible::ReasoningConfig;
-use crate::types::{StreamResponse, SystemBlock};
+use crate::core::provider::{CallbackHandler, LlmProvider, StreamHandler};
+use crate::business::providers::openai_compatible::ReasoningConfig;
+use crate::business::types::{StreamResponse, SystemBlock};
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -149,14 +149,14 @@ impl LlmClient {
 
     pub fn with_provider(options: LlmProviderOptions) -> Self {
         let provider_impl: Arc<dyn LlmProvider> = match options.api {
-            ApiDriverKind::Anthropic => Arc::new(crate::providers::AnthropicProvider::new(
+            ApiDriverKind::Anthropic => Arc::new(crate::business::providers::AnthropicProvider::new(
                 options.api_key,
                 options.base_url,
                 options.model,
                 options.max_tokens,
                 options.thinking_max_tokens,
             )),
-            ApiDriverKind::Ollama => Arc::new(crate::providers::OllamaProvider::new(
+            ApiDriverKind::Ollama => Arc::new(crate::business::providers::OllamaProvider::new(
                 options.api_key,
                 options.base_url,
                 options.model,
@@ -169,7 +169,7 @@ impl LlmClient {
             | ApiDriverKind::Volcengine => {
                 let config =
                     OpenAIProviderConfig::from_api_driver(options.api, options.api.as_str());
-                Arc::new(crate::providers::OpenAICompatibleProvider::new(
+                Arc::new(crate::business::providers::OpenAICompatibleProvider::new(
                     config,
                     options.api_key,
                     options.base_url,
@@ -195,7 +195,7 @@ impl LlmClient {
         reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> =
-            Arc::new(crate::providers::OpenAICompatibleProvider::new(
+            Arc::new(crate::business::providers::OpenAICompatibleProvider::new(
                 config,
                 api_key,
                 base_url,

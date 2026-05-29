@@ -1,6 +1,6 @@
 //! Stream parsing utilities for Anthropic API format
 
-use crate::types::*;
+use crate::business::types::*;
 use futures_util::StreamExt;
 use reqwest::Response;
 use share::message::{ContentBlock, Message, Role};
@@ -10,7 +10,7 @@ use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
 // Re-export StreamHandler from provider module
-pub use crate::provider::StreamHandler;
+pub use crate::core::provider::StreamHandler;
 
 /// Parse Anthropic-style SSE stream
 pub async fn parse_stream(

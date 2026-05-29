@@ -1,7 +1,7 @@
 //! 消息格式转换：将 Anthropic 风格转换为 Ollama 原生 /api/chat 格式。
 
 use super::OllamaProvider;
-use crate::types::SystemBlock;
+use crate::business::types::SystemBlock;
 use share::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。

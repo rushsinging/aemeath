@@ -1,6 +1,6 @@
 use super::*;
-use crate::client::OpenAIProviderConfig;
-use crate::provider::LlmProvider;
+use crate::core::client::OpenAIProviderConfig;
+use crate::core::provider::LlmProvider;
 use serde_json::json;
 
 fn base_body() -> serde_json::Value {

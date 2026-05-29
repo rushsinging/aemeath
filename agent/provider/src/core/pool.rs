@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::api::ApiDriverKind;
 use share::config::ModelsConfig;
 
-use crate::client::{LlmClient, OpenAIProviderConfig};
+use crate::core::client::{LlmClient, OpenAIProviderConfig};
 
 /// A pool of `LlmClient` instances keyed by model spec (`"provider/model_id"`).
 ///
@@ -165,7 +165,7 @@ impl LlmClientPool {
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
-        Ok(LlmClient::from_config(crate::client::LlmConfigOptions {
+        Ok(LlmClient::from_config(crate::core::client::LlmConfigOptions {
             api,
             api_key,
             base_url,

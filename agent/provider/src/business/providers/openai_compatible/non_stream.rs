@@ -1,8 +1,8 @@
 //! 非流式请求：发送消息并等待完整响应
 
 use super::OpenAICompatibleProvider;
-use crate::provider::StreamHandler;
-use crate::types::{StreamResponse, SystemBlock};
+use crate::core::provider::StreamHandler;
+use crate::business::types::{StreamResponse, SystemBlock};
 use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
@@ -53,7 +53,7 @@ impl OpenAICompatibleProvider {
         let mut content_blocks = Vec::new();
         let mut input_tokens = 0u32;
         let mut output_tokens = 0u32;
-        let mut stop_reason = crate::types::StopReason::EndTurn;
+        let mut stop_reason = crate::business::types::StopReason::EndTurn;
 
         // 提取 usage
         if let Some(usage) = body.get("usage") {
@@ -73,10 +73,10 @@ impl OpenAICompatibleProvider {
                 // 检查 finish_reason
                 if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
                     stop_reason = match finish {
-                        "stop" => crate::types::StopReason::EndTurn,
-                        "tool_calls" => crate::types::StopReason::ToolUse,
-                        "length" => crate::types::StopReason::MaxTokens,
-                        _ => crate::types::StopReason::EndTurn,
+                        "stop" => crate::business::types::StopReason::EndTurn,
+                        "tool_calls" => crate::business::types::StopReason::ToolUse,
+                        "length" => crate::business::types::StopReason::MaxTokens,
+                        _ => crate::business::types::StopReason::EndTurn,
                     };
                 }
 
@@ -144,7 +144,7 @@ impl OpenAICompatibleProvider {
                 role: Role::Assistant,
                 content: content_blocks,
             },
-            usage: crate::types::Usage {
+            usage: crate::business::types::Usage {
                 input_tokens,
                 output_tokens,
             },

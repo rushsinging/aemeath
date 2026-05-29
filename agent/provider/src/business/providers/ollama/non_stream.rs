@@ -2,8 +2,8 @@
 
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
-use crate::provider::StreamHandler;
-use crate::types::{StreamResponse, SystemBlock};
+use crate::core::provider::StreamHandler;
+use crate::business::types::{StreamResponse, SystemBlock};
 use share::message::{ContentBlock, Message, Role};
 
 pub(crate) trait OllamaProviderNonStream {
@@ -89,13 +89,13 @@ impl OllamaProviderNonStream for OllamaProvider {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32;
         let output_tokens = body.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-        let mut stop_reason = crate::types::StopReason::EndTurn;
+        let mut stop_reason = crate::business::types::StopReason::EndTurn;
 
         if let Some(done_reason) = body.get("done_reason").and_then(|v| v.as_str()) {
             stop_reason = match done_reason {
-                "stop" => crate::types::StopReason::EndTurn,
-                "length" => crate::types::StopReason::MaxTokens,
-                _ => crate::types::StopReason::EndTurn,
+                "stop" => crate::business::types::StopReason::EndTurn,
+                "length" => crate::business::types::StopReason::MaxTokens,
+                _ => crate::business::types::StopReason::EndTurn,
             };
         }
 
@@ -119,7 +119,7 @@ impl OllamaProviderNonStream for OllamaProvider {
 
             if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
                 if !tool_calls.is_empty() {
-                    stop_reason = crate::types::StopReason::ToolUse;
+                    stop_reason = crate::business::types::StopReason::ToolUse;
                 }
                 for (idx, tool_call) in tool_calls.iter().enumerate() {
                     if let Some(function) = tool_call.get("function") {
@@ -157,7 +157,7 @@ impl OllamaProviderNonStream for OllamaProvider {
                 role: Role::Assistant,
                 content: content_blocks,
             },
-            usage: crate::types::Usage {
+            usage: crate::business::types::Usage {
                 input_tokens,
                 output_tokens,
             },

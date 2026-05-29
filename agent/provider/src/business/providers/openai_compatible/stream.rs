@@ -1,7 +1,7 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
-use crate::provider::StreamHandler;
-use crate::types::StreamResponse;
+use crate::core::provider::StreamHandler;
+use crate::business::types::StreamResponse;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -26,11 +26,11 @@ pub(crate) async fn parse_openai_stream(
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
     let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
         std::collections::HashMap::new();
-    let mut usage = crate::types::Usage {
+    let mut usage = crate::business::types::Usage {
         input_tokens: 0,
         output_tokens: 0,
     };
-    let mut stop_reason = crate::types::StopReason::EndTurn;
+    let mut stop_reason = crate::business::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
 
     let byte_stream = response.bytes_stream().map(|r| {
@@ -138,10 +138,10 @@ pub(crate) async fn parse_openai_stream(
                 // 检查 finish_reason
                 if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
                     stop_reason = match finish {
-                        "stop" => crate::types::StopReason::EndTurn,
-                        "tool_calls" => crate::types::StopReason::ToolUse,
-                        "length" => crate::types::StopReason::MaxTokens,
-                        _ => crate::types::StopReason::EndTurn,
+                        "stop" => crate::business::types::StopReason::EndTurn,
+                        "tool_calls" => crate::business::types::StopReason::ToolUse,
+                        "length" => crate::business::types::StopReason::MaxTokens,
+                        _ => crate::business::types::StopReason::EndTurn,
                     };
                 }
 
