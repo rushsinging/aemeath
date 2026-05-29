@@ -24,7 +24,6 @@ pub mod types;
 mod content_tests;
 
 // 重新导出核心类型，方便外部使用
-pub use crate::tui::render::output::diff::build_diff_lines;
 pub use crate::tui::render::output::markdown;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
 

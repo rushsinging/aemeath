@@ -137,4 +137,39 @@ mod tests {
 
         assert!(block.lines[0].plain.contains("Grep"));
     }
+
+    #[test]
+    fn test_tool_call_renders_args_detail_from_summary() {
+        // summary 提供工具入参 JSON，经 format_tool_call 产出 header + detail，
+        // 验证参数预览作为 detail 行渲染（取代旧 OutputArea 命令式 push）。
+        let mut view = tool(ToolSemanticStatus::Running);
+        view.title = "Read".into();
+        view.summary = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+
+        // header 含工具名
+        assert!(block.lines[0].plain.contains("Read"));
+        // detail 行含文件路径参数
+        let has_path = block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("src/lib.rs"));
+        assert!(has_path, "参数预览应作为 detail 行渲染");
+    }
+
+    #[test]
+    fn test_tool_call_renders_result_summary_lines() {
+        // result_summary 应作为结果行渲染，验证结果展示已迁移到新组件。
+        let mut view = tool(ToolSemanticStatus::Success);
+        view.result_summary = Some("done: 3 matches".into());
+
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+
+        let has_result = block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("done: 3 matches"));
+        assert!(has_result, "result_summary 应渲染为结果行");
+    }
 }
