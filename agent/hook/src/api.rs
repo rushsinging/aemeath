@@ -2,7 +2,7 @@
 //!
 //! 仅暴露 runtime 实际消费的类型，内部模块（data/result/runner/events）保持私有。
 
-pub use crate::hook::{
+pub use crate::business::hook::{
     CompactHookData, HookData, HookJsonOutput, HookResult, HookRunner, PermissionHookData,
     StopHookData, ToolHookData,
 };

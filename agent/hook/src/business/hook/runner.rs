@@ -1,7 +1,7 @@
 //! Hook 运行器 — 核心执行引擎
 
-use crate::hook::data::{HookData, HookInput};
-use crate::hook::result::{HookJsonOutput, HookResult};
+use crate::business::hook::data::{HookData, HookInput};
+use crate::business::hook::result::{HookJsonOutput, HookResult};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

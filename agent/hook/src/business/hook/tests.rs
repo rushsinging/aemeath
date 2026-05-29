@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod hook_tests {
-    use crate::hook::data::*;
-    use crate::hook::runner::HookRunner;
+    use crate::business::hook::data::*;
+    use crate::business::hook::runner::HookRunner;
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::HashMap;
 

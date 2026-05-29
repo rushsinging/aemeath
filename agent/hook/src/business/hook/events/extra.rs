@@ -1,6 +1,6 @@
-use crate::hook::data::*;
-use crate::hook::result::HookResult;
-use crate::hook::runner::HookRunner;
+use crate::business::hook::data::*;
+use crate::business::hook::result::HookResult;
+use crate::business::hook::runner::HookRunner;
 use share::config::hooks::HookEvent;
 
 impl HookRunner {
