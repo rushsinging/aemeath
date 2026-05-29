@@ -181,16 +181,12 @@ impl OutputViewAssembler {
 }
 
 fn output_block(block_id: String, kind: OutputBlockKind) -> OutputBlockView {
-    let block_version = semantic_version(&kind);
+    let block_version = kind.cache_version();
     OutputBlockView {
         block_id,
         block_version,
         kind,
     }
-}
-
-fn semantic_version(kind: &OutputBlockKind) -> u64 {
-    kind.cache_version()
 }
 
 fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {

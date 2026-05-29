@@ -21,7 +21,7 @@ impl OutputBlockKind {
         self
     }
 
-    /// 自身语义指纹（不含子）。取代 view_assembler::semantic_version。
+    /// block 自身语义指纹（block 缓存 key 的 version 分量）。
     pub fn cache_version(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.hash(&mut hasher);
