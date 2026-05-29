@@ -249,7 +249,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
 
     let mut agents_md = parts.join("\n\n");
 
-    let warnings = crate::api::policy::security::scan_content("AGENTS.md", &agents_md);
+    let warnings = crate::api::policy::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(
@@ -260,7 +260,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
                 w.matched_text
             );
         }
-        if let Some(prefix) = crate::api::policy::security::format_warnings(&warnings) {
+        if let Some(prefix) = crate::api::policy::format_warnings(&warnings) {
             agents_md = format!("{}\n\n{}", prefix, agents_md);
         }
     }

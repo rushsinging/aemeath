@@ -27,7 +27,7 @@ pub mod hook {
 }
 
 pub mod policy {
-    pub use ::policy::security;
+    pub use ::policy::api::{format_warnings, scan_content, SecurityWarning};
 }
 
 pub mod project {
