@@ -2,8 +2,6 @@ use std::collections::{HashMap, VecDeque};
 
 use sdk::CharIdx;
 
-use ratatui::{buffer::Buffer, layout::Rect};
-
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
@@ -22,10 +20,7 @@ pub mod types;
 mod content_tests;
 
 // 重新导出核心类型，方便外部使用
-pub use crate::tui::render::output::markdown;
 pub use types::{LineStyle, OutputLine, SpanPart, SpinnerState, INDENT, MAX_LINES};
-
-use crate::tui::view_state::cache::OutputRenderCacheState;
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
@@ -54,8 +49,6 @@ pub struct OutputArea {
     pub task_status_lines: Vec<String>,
     /// AskUserQuestion 互动块在 lines 中的起始索引，用于提交后折叠
     pub ask_user_block_start: Option<usize>,
-    /// 渲染缓存（滑动窗口）
-    pub(crate) rendered_cache: OutputRenderCacheState,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
     /// 新输出渲染管线的 block 级缓存渲染器。
@@ -91,7 +84,6 @@ impl OutputArea {
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
             ask_user_block_start: None,
-            rendered_cache: OutputRenderCacheState::default(),
             document: RenderedDocument::default(),
             document_renderer: OutputDocumentRenderer::default(),
         }
@@ -111,12 +103,6 @@ impl OutputArea {
         self.push_system("");
         self.push_system("Type /help for available commands");
         self.push_system("");
-    }
-
-    /// 绘制输出区域。
-    #[allow(dead_code)]
-    pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
-        self.render(area, buf);
     }
 }
 

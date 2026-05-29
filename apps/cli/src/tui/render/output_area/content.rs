@@ -61,9 +61,6 @@ impl super::OutputArea {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
         }
-        self.rendered_cache
-            .line_cache
-            .content_changed(self.lines.len() + 1);
         self.document = Default::default();
         self.lines.push_back(line);
         if !self.auto_scroll {
@@ -211,9 +208,6 @@ impl super::OutputArea {
                 }
             }
         }
-        self.rendered_cache
-            .line_cache
-            .content_changed(self.lines.len());
     }
 
     /// 添加系统消息
@@ -286,7 +280,6 @@ impl super::OutputArea {
     /// 清空所有内容
     pub fn clear(&mut self) {
         self.lines.clear();
-        self.rendered_cache.line_cache.content_changed(0);
         self.reset_runtime_state();
     }
 
@@ -299,9 +292,6 @@ impl super::OutputArea {
             for _ in 0..drain_count {
                 self.lines.pop_back();
             }
-            self.rendered_cache
-                .line_cache
-                .content_changed(self.lines.len());
         }
     }
 

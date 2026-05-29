@@ -95,6 +95,27 @@
 **TDD/验证**：复用已有 streaming 回归（`model_tests.rs::test_conversation_streams_text_and_thinking_into_blocks`）与 QueuedSubmission 渲染测试（`blocks/queued_submission.rs`）；新增 `model_tests.rs` 队列 block 回归（QueueSubmission 落 `QueuedUserMessage` 块、ClearQueuedSubmissions 清空、空队列清理 noop）。`cargo build / test(-p cli 381 passed) / clippy(-D warnings)` 与 `check-architecture-guards.sh` 全绿。
 
 
+### #58 Phase 5 · T5：删除旧「行级渲染链」及其缓存
+
+**状态**：进行中（T5 完成，`lines` 字段/`OutputLine`/`LineStyle`/legacy 垫片仍待 T6 删除）
+
+**判别结论**：
+- 主渲染（`output_area/render.rs`）只画 `self.document.iter_lines()` + `apply_selection_overlay`，**不再读** line_cache：`ensure_rendered` 无任何活跃调用，`RenderedCache.get` 无调用者。`render.rs`/`content.rs`/`resize.rs` 中所有 `line_cache.invalidate/content_changed/mark_clean` 都是「维护一个不被读的缓存」→ 死维护，随链删除。
+- `ViewRenderCache` 的 `dirty_blocks`/`mark_output_dirty`/`mark_block_dirty`/`clear_dirty_blocks` 仅被自身单测引用，无生产调用者；`OutputRenderCacheState.line_cache` 同为死维护。故 `render_with_cache(area, buf, cache)` 的 `cache` 参数整体为死代码 → 删除参数，方法重命名为 `render(area, buf)`。
+
+**删除**：
+- 文件 `render/output/{line.rs,block.rs,span.rs,cache.rs,block_tests.rs}`（旧行级链 `render_range`/`collect_table_ranges`/`scan_code_blocks`/`scan_table_blocks`/`CodeBlockInfo`/`slice_spans`/旧 `RenderedCache`/旧 `RenderedLine{line,screen_entries,rendered_text}`）。
+- 文件 `view_state/cache.rs`（`OutputRenderCacheState`、`ViewRenderCache`）；`view_state/mod.rs` 的 `pub mod cache`/`pub use ViewRenderCache` 及 `AppViewState.cache` 字段。
+- `OutputArea.rendered_cache` 字段及 `content.rs`（4 处）/`resize.rs`（1 处）对 `line_cache` 的维护调用；`mod.rs` 的 legacy `draw()`（仅转调旧 `render`）；`render.rs` 的 legacy `render()` 方法（仅 swap line_cache）与 `wrap_output_line`（仅旧链使用）。
+- `render_with_cache` → `render`，去掉 `cache` 参数；`app/mod.rs` 调用点同步；`output_area/mod.rs` 去掉随之失效的 `markdown` 顶层 re-export。
+- `output/mod.rs` 删 `pub use cache::{RenderedCache, RenderedLine}` 与 `pub mod {line,block,span,cache}`、`mod block_tests`。
+
+**RenderedLine 提升**：`output/mod.rs` 新增 `pub use rendered::{RenderCtx, RenderedBlock, RenderedDocument, RenderedLine}`；全仓对 `RenderedLine` 的引用均指向新 `rendered::RenderedLine{spans, plain}`，无命名歧义。
+
+**保留（留 T6）**：`OutputLine`/`LineStyle` 类型本体、`lines` 字段、legacy 垫片 `sync_document_from_legacy_lines`/`legacy_lines_to_rendered`；`document` 为空时仍经垫片渲染。
+
+**TDD/验证**：保留 document 渲染回归 `render.rs::test_render_document_paints_spans_and_overlays_selection`（改用无 cache 参数的 `render`）；`resize.rs` 两个断言旧 cache dirty 的测试改为断言 `term_width` 行为（缓存已删，行为不变由 document 渲染覆盖）。`cargo build -p cli`、`cargo test -p cli`（362 passed）、`cargo clippy -p cli -- -D warnings`、`check-architecture-guards.sh` 全绿。
+
 ### #57 TUI 目录物理收口：并入剩余 widget/service 目录、删 core shim
 
 **状态**：待确认

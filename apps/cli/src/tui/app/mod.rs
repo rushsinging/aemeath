@@ -204,8 +204,7 @@ impl App {
 
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.output_area
-                    .render_with_cache(chunks[0], buf, &mut self.view_state.cache);
+                self.output_area.render(chunks[0], buf);
             }))
             .is_err()
             {

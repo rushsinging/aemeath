@@ -6,19 +6,12 @@ use ratatui::{
 
 use sdk::CharIdx;
 
-use super::display::wrap_line;
 use super::OutputArea;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
-use crate::tui::view_state::cache::ViewRenderCache;
 
 impl OutputArea {
     /// 渲染输出区域
-    pub fn render_with_cache(
-        &mut self,
-        area: Rect,
-        buf: &mut ratatui::buffer::Buffer,
-        cache: &mut ViewRenderCache,
-    ) {
+    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         if area.height == 0 {
             return;
         }
@@ -27,7 +20,6 @@ impl OutputArea {
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
             self.term_width = new_width;
-            cache.output.line_cache.invalidate();
         }
 
         let spinner_line = self.build_spinner_line();
@@ -163,16 +155,6 @@ impl OutputArea {
         };
         (start < end).then_some(SelRange { start, end })
     }
-
-    /// Legacy render entry point. New code should pass `AppViewState.cache`
-    /// through `render_with_cache` so render cache lives in view_state.
-    #[allow(dead_code)]
-    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        let mut view_cache = ViewRenderCache::default();
-        view_cache.output.line_cache = std::mem::take(&mut self.rendered_cache.line_cache);
-        self.render_with_cache(area, buf, &mut view_cache);
-        self.rendered_cache.line_cache = view_cache.output.line_cache;
-    }
 }
 
 fn normalize_rendered_table_plain(plain: &str) -> String {
@@ -272,13 +254,6 @@ fn render_scrollbar(
     StatefulWidget::render(scrollbar, scrollbar_area, buf, &mut scrollbar_state);
 }
 
-/// 供 rendered_cache.rs 使用
-pub fn wrap_output_line(content: &str, max_width: usize) -> Vec<String> {
-    wrap_line(content, max_width)
-}
-
-/// 将含 \n 的 Line 拆分为不含 \n 的多个子 Line。
-/// 每个 \n 分隔的片段成为独立的 Line，与 screen_entries 一一对应。
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,8 +273,7 @@ mod tests {
         area.set_selection_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
         let area_rect = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area_rect);
-        let mut cache = ViewRenderCache::default();
-        area.render_with_cache(area_rect, &mut buf, &mut cache);
+        area.render(area_rect, &mut buf);
 
         assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
         assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG);
