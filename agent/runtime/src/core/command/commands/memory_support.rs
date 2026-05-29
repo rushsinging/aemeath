@@ -1,4 +1,4 @@
-use storage::memory::{memory_base_dir, project_hash, MemoryStore};
+use storage::api::{memory_base_dir, project_hash, MemoryStore};
 
 pub fn open_memory_store(
     ctx: &crate::core::command::CommandContext,

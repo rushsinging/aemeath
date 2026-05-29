@@ -1,7 +1,7 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
 
 use crate::api::reflection::ReflectionEngine;
-use crate::api::storage::memory::MemoryStore;
+use crate::api::storage::MemoryStore;
 use std::path::{Path, PathBuf};
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
@@ -23,7 +23,7 @@ pub async fn run_reflection(
         cwd,
         client,
         system_prompt_text,
-        crate::api::storage::memory::memory_base_dir(),
+        crate::api::storage::memory_base_dir(),
     )
     .await
 }
@@ -46,7 +46,7 @@ async fn run_reflection_with_base_dir(
 
     let mut store = MemoryStore::new(
         base_dir.clone(),
-        crate::api::storage::memory::project_hash_from_path(cwd),
+        crate::api::storage::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
@@ -185,7 +185,7 @@ async fn lightweight_reflection_text_with_base_dir(
 
     let store = MemoryStore::new(
         base_dir,
-        crate::api::storage::memory::project_hash_from_path(cwd),
+        crate::api::storage::project_hash_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
@@ -306,7 +306,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            crate::api::storage::memory::project_hash_from_path(&cwd),
+            crate::api::storage::project_hash_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )
@@ -356,7 +356,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            crate::api::storage::memory::project_hash_from_path(&cwd),
+            crate::api::storage::project_hash_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )

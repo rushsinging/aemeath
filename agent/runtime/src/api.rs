@@ -52,8 +52,10 @@ pub mod provider {
 }
 
 pub mod storage {
-    pub use ::storage::memory;
-    pub use ::storage::tool_result_storage;
+    pub use ::storage::api::{
+        memory_base_dir, persist_oversized_results, project_hash, project_hash_from_path,
+        MemoryStore,
+    };
 }
 
 pub mod tools {

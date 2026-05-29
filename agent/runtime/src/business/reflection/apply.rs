@@ -1,6 +1,6 @@
 use super::types::{MemorySuggestion, ReflectionApplyResult, ReflectionOutput, ReflectionResult};
 use share::memory::{MemoryEntry, MemoryLayer, MemorySource};
-use storage::memory::MemoryStore;
+use storage::api::MemoryStore;
 
 pub fn apply_suggestions(
     suggestions: &[MemorySuggestion],

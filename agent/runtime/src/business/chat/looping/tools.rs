@@ -254,7 +254,7 @@ pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
 ) -> crate::api::core::message::Message {
-    crate::api::storage::tool_result_storage::persist_oversized_results(session_id, &mut results);
+    crate::api::storage::persist_oversized_results(session_id, &mut results);
     crate::api::core::message::Message::tool_results_rich(results)
 }
 
