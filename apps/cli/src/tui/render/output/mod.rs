@@ -3,6 +3,7 @@ pub mod block_component;
 pub mod blocks;
 pub mod diff;
 pub mod document_renderer;
+pub mod gutter;
 pub mod markdown;
 pub mod primitives;
 pub mod rendered;
