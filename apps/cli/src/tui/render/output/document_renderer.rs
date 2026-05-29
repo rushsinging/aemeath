@@ -78,6 +78,7 @@ mod tests {
                 block_version: 1,
                 kind,
             }],
+            roots: Vec::new(),
             version: 1,
             follow_tail_hint: true,
         }

@@ -174,6 +174,7 @@ impl OutputViewAssembler {
         }
         OutputViewModel {
             blocks,
+            roots: Vec::new(),
             version,
             follow_tail_hint: true,
         }

@@ -53,6 +53,7 @@ mod tests {
                     }),
                 })
                 .collect(),
+            roots: Vec::new(),
             version: 1,
             follow_tail_hint: true,
         }
@@ -72,6 +73,7 @@ mod tests {
                     style: SemanticStyle::Normal,
                 }),
             }],
+            roots: Vec::new(),
             version: 1,
             follow_tail_hint: true,
         };
