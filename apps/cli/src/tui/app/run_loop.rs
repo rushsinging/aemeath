@@ -2,6 +2,7 @@ use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -88,11 +89,7 @@ impl App {
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));
                     interrupted.store(false, Ordering::Relaxed);
-                    self.model.runtime.apply(
-                        crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(
-                            crate::tui::model::runtime::spinner::SpinnerPhase::Thinking,
-                        ),
-                    );
+                    self.spinner_phase(SpinnerPhase::Thinking);
                     self.chat.start_processing();
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
                         processing::spawn_processing(spawn_ctx);

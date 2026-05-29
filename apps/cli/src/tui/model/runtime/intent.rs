@@ -38,7 +38,6 @@ pub enum RuntimeIntent {
         id: String,
         success: bool,
     },
-    StartSpinner,
     SetSpinnerPhase(SpinnerPhase),
     StopSpinner,
     UpdateTaskLines(Vec<String>),

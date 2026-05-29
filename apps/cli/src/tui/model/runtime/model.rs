@@ -101,10 +101,6 @@ impl RuntimeModel {
                 }
                 vec![RuntimeChange::ProcessingJobChanged { id }]
             }
-            RuntimeIntent::StartSpinner => {
-                self.spinner.active = true;
-                vec![RuntimeChange::SpinnerStarted]
-            }
             RuntimeIntent::SetSpinnerPhase(phase) => {
                 self.spinner.active = true;
                 self.spinner.phase = Some(phase);
@@ -154,17 +150,6 @@ mod tests {
     }
 
     #[test]
-    fn test_runtime_start_spinner_sets_active() {
-        let mut model = RuntimeModel::default();
-        let changes = model.apply(RuntimeIntent::StartSpinner);
-        assert!(model.spinner.active);
-        assert!(matches!(
-            changes.first(),
-            Some(RuntimeChange::SpinnerStarted)
-        ));
-    }
-
-    #[test]
     fn test_runtime_set_spinner_phase_activates_and_sets() {
         use crate::tui::model::runtime::spinner::SpinnerPhase;
         let mut model = RuntimeModel::default();
@@ -180,8 +165,9 @@ mod tests {
 
     #[test]
     fn test_runtime_stop_spinner_idempotent() {
+        use crate::tui::model::runtime::spinner::SpinnerPhase;
         let mut model = RuntimeModel::default();
-        model.apply(RuntimeIntent::StartSpinner);
+        model.apply(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
         model.apply(RuntimeIntent::StopSpinner);
         let changes = model.apply(RuntimeIntent::StopSpinner);
         assert!(!model.spinner.active);

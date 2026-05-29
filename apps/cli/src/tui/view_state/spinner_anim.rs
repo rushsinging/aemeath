@@ -6,8 +6,8 @@
 
 use rand::prelude::IndexedRandom;
 
-/// 装饰性动词池（与 `render/output_area/spinner.rs::SPINNER_VERBS` 同一来源池，
-/// 此处保留 DRY 引用：verb 选定移入 view_state 后，渲染层 verb 池仅在接线阶段退役）。
+/// 装饰性动词池。verb 选定移入 view_state 后，此处为该池的唯一真相来源
+/// （Task 4.1 已删除原 `render/output_area/spinner.rs::SPINNER_VERBS`）。
 const SPINNER_VERBS: &[&str] = &[
     "Thinking",
     "Pondering",

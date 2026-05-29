@@ -33,7 +33,6 @@ pub enum RuntimeChange {
     ProcessingJobChanged {
         id: String,
     },
-    SpinnerStarted,
     SpinnerPhaseChanged,
     SpinnerStopped,
     TaskLinesChanged,
