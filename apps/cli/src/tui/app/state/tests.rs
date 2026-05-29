@@ -289,10 +289,11 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "  in docs/bug/active.md"));
-        assert!(rendered
+        assert!(rendered.iter().any(|line| line == "  ✓ Grep completed"));
+        assert!(!rendered
             .iter()
             .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));
-        assert!(rendered
+        assert!(!rendered
             .iter()
             .any(|line| line == "  ... (1 lines omitted)"));
         assert!(!rendered.iter().any(|line| line.starts_with("You:")));
