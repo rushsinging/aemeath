@@ -9,8 +9,8 @@
 //!   无语言信息时按 CODE 单色。
 //! - fence 外：表格走 table 原语，普通行走 inline markdown。
 //!
-//! `indent` 前缀加在每行最前（assistant 传 ""，工具结果传 INDENT），
-//! 用于缩进对齐，且保证 `plain` 与可见 spans 一致。
+//! 产出 depth=0、无缩进的行（spans 与 plain 均不含前导缩进）。
+//! 缩进 / gutter 由上层渲染器（Phase 4）统一注入，#60 决策。
 
 use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
 use crate::tui::render::output::primitives::{
@@ -26,14 +26,8 @@ use ratatui::text::Span;
 ///
 /// - `text`：多行原始文本。
 /// - `base_style`：fence 外普通文本的基色（assistant 用 ASSISTANT，工具结果用结果色）。
-/// - `indent`：每行前缀（缩进），空串表示不缩进。
 /// - `width`：可用宽度，传给 markdown / table 做换行。
-pub fn render_fenced_markdown(
-    text: &str,
-    base_style: Style,
-    indent: &str,
-    width: u16,
-) -> Vec<RenderedLine> {
+pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<RenderedLine> {
     let src = text.lines().collect::<Vec<_>>();
     let mut lines: Vec<RenderedLine> = Vec::new();
     let mut idx = 0;
@@ -52,14 +46,10 @@ pub fn render_fenced_markdown(
                 in_fence = true;
                 fence_lang = Some(trimmed.trim_start_matches('`').trim().to_string());
             }
-            lines.push(prefix_line(
-                indent,
-                base_style,
-                vec![Span::styled(
-                    line.to_string(),
-                    Style::default().fg(theme::TEXT_DIM),
-                )],
-            ));
+            lines.push(RenderedLine::new(vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(theme::TEXT_DIM),
+            )]));
             idx += 1;
             continue;
         }
@@ -67,9 +57,7 @@ pub fn render_fenced_markdown(
         if in_fence {
             // ` ```diff ` 代码块走 unified diff 渲染（行号信息来自 @@ 原文）。
             if fence_lang.as_deref() == Some("diff") {
-                for rl in render_unified_diff(line, None, width) {
-                    lines.push(prepend_indent(indent, base_style, rl));
-                }
+                lines.extend(render_unified_diff(line, None, width));
                 idx += 1;
                 continue;
             }
@@ -77,20 +65,12 @@ pub fn render_fenced_markdown(
                 .as_deref()
                 .and_then(syntax::language_by_extension);
             if let Some(parts) = syntax::highlight_line(line, syntax_ref.as_ref()) {
-                lines.push(prepend_indent(
-                    indent,
-                    base_style,
-                    rendered_line_from_spanparts(&parts),
-                ));
+                lines.push(rendered_line_from_spanparts(&parts));
             } else {
-                lines.push(prefix_line(
-                    indent,
-                    base_style,
-                    vec![Span::styled(
-                        line.to_string(),
-                        Style::default().fg(theme::CODE),
-                    )],
-                ));
+                lines.push(RenderedLine::new(vec![Span::styled(
+                    line.to_string(),
+                    Style::default().fg(theme::CODE),
+                )]));
             }
             idx += 1;
             continue;
@@ -102,40 +82,16 @@ pub fn render_fenced_markdown(
                 end += 1;
             }
             let block_src: Vec<&str> = src.iter().skip(idx).take(end - idx).copied().collect();
-            for rl in table(&block_src, base_style, width) {
-                lines.push(prepend_indent(indent, base_style, rl));
-            }
+            lines.extend(table(&block_src, base_style, width));
             idx = end;
             continue;
         }
 
-        for rl in markdown(line, base_style, width) {
-            lines.push(prepend_indent(indent, base_style, rl));
-        }
+        lines.extend(markdown(line, base_style, width));
         idx += 1;
     }
 
     lines
-}
-
-/// 用 indent 前缀（着 base_style）包裹一组 spans 为一行。
-fn prefix_line(indent: &str, base_style: Style, spans: Vec<Span<'static>>) -> RenderedLine {
-    if indent.is_empty() {
-        return RenderedLine::new(spans);
-    }
-    let mut out = vec![Span::styled(indent.to_string(), base_style)];
-    out.extend(spans);
-    RenderedLine::new(out)
-}
-
-/// 在已渲染行前补 indent 前缀，保持其 plain 与 spans 一致。
-fn prepend_indent(indent: &str, base_style: Style, line: RenderedLine) -> RenderedLine {
-    if indent.is_empty() {
-        return line;
-    }
-    let mut spans = vec![Span::styled(indent.to_string(), base_style)];
-    spans.extend(line.spans);
-    RenderedLine::with_plain(spans, format!("{indent}{}", line.plain))
 }
 
 #[cfg(test)]
@@ -143,7 +99,7 @@ mod tests {
     use super::*;
 
     fn render(text: &str) -> Vec<RenderedLine> {
-        render_fenced_markdown(text, Style::default().fg(theme::TEXT), "", 80)
+        render_fenced_markdown(text, Style::default().fg(theme::TEXT), 80)
     }
 
     #[test]
@@ -214,14 +170,12 @@ mod tests {
     }
 
     #[test]
-    fn test_fenced_indent_prepended_and_plain_consistent() {
-        // 边界：indent 前缀加在行首，且 plain 与可见 spans 一致。
-        let lines = render_fenced_markdown("text", Style::default().fg(theme::TEXT), "  ", 80);
-
-        assert!(lines[0].plain.starts_with("  "));
-        let visible: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
-        // markdown 行 plain 去标记后可能与 visible 不同，但普通文本两者一致。
-        assert!(visible.starts_with("  "));
+    fn test_render_fenced_markdown_no_indent_in_plain_or_spans() {
+        // #60：原语产出 depth=0、无缩进行——plain 与可见 spans 均不含前导缩进。
+        let lines = render_fenced_markdown("hello\nworld", Style::default(), 80);
+        assert!(!lines[0].plain.starts_with(' '), "plain 不应含前导缩进");
+        let first_span = lines[0].spans[0].content.as_ref();
+        assert!(!first_span.starts_with(' '), "spans 不应含前导缩进");
     }
 
     #[test]

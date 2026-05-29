@@ -81,7 +81,16 @@ fn format_result_lines(
     }
     let max_lines = result_max_lines(tool_name);
     let base = Style::default().fg(color);
-    let rendered = render_fenced_markdown(result, base, INDENT, width);
+    // render_fenced_markdown 现产无缩进行（#60）；此处自拼 INDENT 保持当前视觉（过渡，
+    // Phase 6 子块化后这段连同 INDENT 一并删除，改由 gutter 注入）。
+    let rendered: Vec<RenderedLine> = render_fenced_markdown(result, base, width)
+        .into_iter()
+        .map(|l| {
+            let mut spans = vec![Span::styled(INDENT.to_string(), base)];
+            spans.extend(l.spans);
+            RenderedLine::with_plain(spans, format!("{INDENT}{}", l.plain))
+        })
+        .collect();
     let total = rendered.len();
     let mut out: Vec<RenderedLine> = rendered.into_iter().take(max_lines).collect();
     if total > max_lines {
