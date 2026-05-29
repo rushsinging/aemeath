@@ -18,6 +18,26 @@
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致；真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，index 丢失会进一步导致工具块绑定失败。修复：历史输出统一从 ConversationModel 渲染，格式参照 resume（用户 `> ...`、thinking `💭 ...`、tool call 复用 ToolDisplay），runtime/sdk/CLI 透传 ToolCall index；resume 也改为加载模型后通过 ViewModel 渲染，符合新架构。 |
 | 78 | input area 粘贴后按空格清空粘贴内容 | 中 | 修复中 | 未确认 | 2026-05 | 同 #77 根因：handle_paste_event 和 processing 模式 paste 均直接调用 input_area.input(ch) 修改 textarea，未走模型。后续空格触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本覆盖 textarea 中的粘贴内容。修复：两处 paste 循环后添加 model.input.document.clear() + insert_text() 同步 |
 | 80 | 滚动条不跟随最新内容（全量替换时 scroll_offset 累加） | 中 | 待确认（随 #58 渲染管线重构修复） | 待确认 | 2026-05 | 根因：replace_lines_from_view_model 清空全行后逐行 push_line 重建，push_line 在 auto_scroll=false 时每行 scroll_offset+=1，导致 scroll_offset 被累加到异常值，clamp 后变成 max_offset 而非 0，auto_scroll 无法恢复。修复：全量替换期间临时启用 auto_scroll=true 阻止 push_line 逐行递增 |
+| 81 | TUI 输出区中文按单字竖排显示 | 高 | 待确认 | 未确认 | 2026-05 | 根因：#58 后 `refresh_output_widget_from_model` 在首次布局 rect 未就绪时用 `output_area_rect.width.saturating_sub(2).max(1)` 得到 width=1 并立即渲染文档，CJK 宽字符在 markdown wrap 中被逐字符折行。修复：ViewModel 渲染宽度在 layout width 未就绪（<=1）时回退到 OutputArea 已知 `term_width`，并补充 CJK 回归测试 |
+
+### #81 TUI 输出区中文按单字竖排显示
+
+**状态**：待确认
+
+**症状**：进入/恢复 TUI 后，上一条 assistant 中文内容被按单字拆成多行显示，例如“理 / 一 / 轮 / ， / 不 / 改 / 代 / 码 / 。”；同屏后续 `system-reminder` 和工具输出仍能正常横向显示。
+
+**根因（已确认）**：#58 输出区渲染管线切到 `ConversationModel -> OutputViewModel -> OutputDocumentRenderer` 后，`refresh_output_widget_from_model` 使用 `layout.output_area_rect.width.saturating_sub(2).max(1)` 作为渲染宽度。首次进入/恢复会话时，frame 尚未 draw，`output_area_rect` 仍是默认 `Rect::default()`，于是渲染宽度变成 1；中文 CJK 字符显示宽度为 2，markdown wrap 在 width=1 下每个字符都会独立成行，形成逐字竖排。
+
+**修复**：`render_document_from_view_model` 在传入 layout width 未就绪（<=1）时，不再直接用 1 渲染，而是回退到 `OutputArea` 已知的 `term_width`。这样 resize 已提供终端宽度但首帧 layout rect 尚未更新时，assistant 中文文本仍按正常宽度渲染。
+
+**回归测试**：
+1. `test_assistant_cjk_text_does_not_wrap_per_character_at_normal_width`：正常 80 宽下，`整理一轮，不改代码。` 不应逐字折行。
+2. `test_render_document_from_view_model_uses_known_term_width_when_layout_width_unready`：先 `handle_resize(80, ...)`，再模拟 layout width=1 刷新 ViewModel，断言中文 assistant 文档仍只有一行。
+
+**涉及路径**：
+- `apps/cli/src/tui/adapter/output_widget.rs`
+- `apps/cli/src/tui/render/output/blocks/assistant_message.rs`
+
 ### #76 reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
 
 **状态**：修复中（待确认）

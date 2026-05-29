@@ -6,9 +6,19 @@ pub(crate) fn render_document_from_view_model(
     view_model: &OutputViewModel,
     width: u16,
 ) {
-    let document = output_area.document_renderer.render(view_model, width);
+    let render_width = effective_render_width(output_area, width);
+    let document = output_area
+        .document_renderer
+        .render(view_model, render_width);
     output_area.set_document(document);
     clamp_scroll_state(output_area);
+}
+
+fn effective_render_width(output_area: &OutputArea, width: u16) -> u16 {
+    if width > 1 {
+        return width;
+    }
+    u16::try_from(output_area.term_width.max(1)).unwrap_or(u16::MAX)
 }
 
 fn clamp_scroll_state(output_area: &mut OutputArea) {
@@ -46,6 +56,33 @@ mod tests {
             version: 1,
             follow_tail_hint: true,
         }
+    }
+
+    #[test]
+    fn test_render_document_from_view_model_uses_known_term_width_when_layout_width_unready() {
+        let mut output_area = OutputArea::new();
+        output_area.handle_resize(80, 20);
+        let view_model = OutputViewModel {
+            blocks: vec![OutputBlockView {
+                block_id: "a".into(),
+                block_version: 1,
+                kind: OutputBlockKind::AssistantMessage(TextBlockView {
+                    key: "a".into(),
+                    text: "整理一轮，不改代码。".into(),
+                    style: SemanticStyle::Normal,
+                }),
+            }],
+            version: 1,
+            follow_tail_hint: true,
+        };
+
+        render_document_from_view_model(&mut output_area, &view_model, 1);
+
+        assert_eq!(output_area.document().total_lines(), 1);
+        assert_eq!(
+            output_area.document().iter_lines().next().unwrap().plain,
+            "整理一轮，不改代码。"
+        );
     }
 
     #[test]
