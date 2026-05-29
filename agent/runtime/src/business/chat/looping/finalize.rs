@@ -1,7 +1,7 @@
 use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::task::{BatchStatus, TaskStore};
-use crate::api::hook::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
+use crate::api::hook::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::path::PathBuf;

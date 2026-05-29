@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::api::core::task::TaskStore;
 use crate::api::core::tool::{AgentRunner, ToolRegistry};
-use crate::api::hook::hook::HookRunner;
+use crate::api::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::api::provider::types::SystemBlock;
 use logging::JsonLogger;

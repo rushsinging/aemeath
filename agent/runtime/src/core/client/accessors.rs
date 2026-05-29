@@ -46,7 +46,7 @@ pub struct RuntimeHandle {
 
     // ─── SDK 业务对象 ───
     /// HookRunner（clone，供 SDK 通知 hook）
-    pub(crate) hook_runner: Option<crate::api::hook::hook::HookRunner>,
+    pub(crate) hook_runner: Option<crate::api::hook::HookRunner>,
     /// TaskStore（Arc，供 SDK 恢复任务）
     pub(crate) task_store: Option<std::sync::Arc<TaskStore>>,
     /// Session reminders（供 SDK 增删改查）

@@ -1,6 +1,6 @@
 use crate::api::agent::{Agent, ToolCall};
 use crate::api::core::config::hooks::HookEvent;
-use crate::api::hook::hook::{HookData, ToolHookData};
+use crate::api::hook::{HookData, ToolHookData};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use logging::JsonLogger;
@@ -15,7 +15,7 @@ pub(super) async fn execute_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::hook::HookRunner,
+    hook_runner: &crate::api::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -65,7 +65,7 @@ async fn execute_multiple_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::hook::HookRunner,
+    hook_runner: &crate::api::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -165,7 +165,7 @@ async fn execute_one_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::hook::HookRunner,
+    hook_runner: &crate::api::hook::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -179,7 +179,7 @@ where
             hook_runner,
             HookEvent::PermissionRequest,
             Some(&call.name),
-            HookData::Permission(crate::api::hook::hook::PermissionHookData {
+            HookData::Permission(crate::api::hook::PermissionHookData {
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
@@ -248,7 +248,7 @@ where
 async fn run_task_hooks<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::hook::HookRunner,
+    hook_runner: &crate::api::hook::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,

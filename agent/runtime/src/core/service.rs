@@ -46,7 +46,7 @@ mod tests {
     use crate::api::core::config::MemoryConfig;
     use crate::api::core::task::TaskStore;
     use crate::api::core::tool::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
-    use crate::api::hook::hook::HookRunner;
+    use crate::api::hook::HookRunner;
     use crate::api::provider::client::LlmClient;
     use crate::business::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;

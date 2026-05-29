@@ -1,6 +1,6 @@
 use crate::api::agent_runner;
 use crate::api::core::config::Config;
-use crate::api::hook::hook::HookRunner;
+use crate::api::hook::HookRunner;
 use crate::api::provider::client::LlmClient;
 use crate::utils::bootstrap::config_paths;
 use logging::JsonLogger;

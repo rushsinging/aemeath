@@ -6,10 +6,10 @@
 use crate::core::port::HookNotificationPort;
 
 /// HookRunner 的 newtype 适配器，封装 hook::HookRunner 的通知发送方法。
-pub struct HookRunnerAdapter(pub crate::api::hook::hook::HookRunner);
+pub struct HookRunnerAdapter(pub crate::api::hook::HookRunner);
 
 impl HookRunnerAdapter {
-    pub fn new(runner: crate::api::hook::hook::HookRunner) -> Self {
+    pub fn new(runner: crate::api::hook::HookRunner) -> Self {
         Self(runner)
     }
 }

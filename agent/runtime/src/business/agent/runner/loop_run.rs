@@ -21,7 +21,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx: &'a ToolContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
-    pub hook_runner: crate::api::hook::hook::HookRunner,
+    pub hook_runner: crate::api::hook::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
     pub handler: SilentHandler,

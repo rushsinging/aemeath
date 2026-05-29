@@ -70,7 +70,7 @@ pub struct LegacyChatBootstrapArgs {
 
 pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 
-pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::hook::HookRunner);
+pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::HookRunner);
 
 #[async_trait::async_trait(?Send)]
 impl crate::api::prompt::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {

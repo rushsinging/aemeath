@@ -50,7 +50,7 @@ where
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: crate::api::hook::hook::HookRunner,
+    pub hook_runner: crate::api::hook::HookRunner,
     pub memory_config: crate::api::core::config::MemoryConfig,
     pub json_logger: Option<Arc<std::sync::Mutex<logging::JsonLogger>>>,
 }
@@ -410,7 +410,7 @@ where
 mod tests {
     use super::*;
     use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
-    use crate::api::hook::hook::HookRunner;
+    use crate::api::hook::HookRunner;
     use crate::api::provider::provider::{LlmProvider, StreamHandler};
     use crate::api::provider::types::{StopReason, StreamResponse, SystemBlock, Usage};
     use async_trait::async_trait;

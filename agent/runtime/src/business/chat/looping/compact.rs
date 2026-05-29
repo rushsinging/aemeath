@@ -1,6 +1,6 @@
 use crate::api::core::config::hooks::HookEvent;
 use crate::api::core::message::Message;
-use crate::api::hook::hook::{CompactHookData, HookData, HookRunner};
+use crate::api::hook::{CompactHookData, HookData, HookRunner};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use std::sync::Arc;

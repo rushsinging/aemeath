@@ -23,7 +23,7 @@ pub use crate::utils::image;
 // `audit` 当前无任何消费点，已移除整体转发。
 
 pub mod hook {
-    pub use ::hook::hook;
+    pub use ::hook::api::*;
 }
 
 pub mod policy {
