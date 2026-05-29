@@ -25,10 +25,8 @@ EXEMPT_FILES=(
   "apps/cli/src/tui/app/run_loop.rs"
   "apps/cli/src/tui/app/runtime.rs"
   "apps/cli/src/tui/app/slash.rs"
-  "apps/cli/src/tui/app/slash/dialog.rs"
   "apps/cli/src/tui/app/slash/memory.rs"
   "apps/cli/src/tui/app/slash/save.rs"
-  "apps/cli/src/tui/app/slash/suggestions.rs"
   "apps/cli/src/tui/app/slash_tests.rs"
 )
 

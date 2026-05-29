@@ -151,6 +151,7 @@ impl App {
                 cwd,
                 session_created_at: None,
                 cached_sessions: Vec::new(),
+                cached_models: Vec::new(),
                 current_model_display: model,
                 memory_config: sdk::MemoryConfigView::default(),
             },

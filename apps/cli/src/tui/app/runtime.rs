@@ -75,6 +75,18 @@ impl App {
             }
         }
     }
+
+    /// Refresh the cached model list for /model dialog and completion suggestions.
+    ///
+    /// 模型列表为配置派生、会话期内基本不变的静态数据，启动期预取后由 UI 同步读取，
+    /// 消除 dialog/suggestions 在纯路径内的 block_on。
+    pub async fn refresh_model_cache(&mut self) {
+        if let Some(agent_client) = &self.agent_client {
+            if let Ok(models) = agent_client.list_models().await {
+                self.session.cache_models(models);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

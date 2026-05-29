@@ -92,6 +92,8 @@ impl App {
 
         // Pre-load session list for /resume autocomplete
         self.refresh_session_cache().await;
+        // Pre-load model list for /model dialog + completion suggestions（消除纯路径 block_on）
+        self.refresh_model_cache().await;
 
         enable_raw_mode()?;
         let mut stdout = io::stdout();

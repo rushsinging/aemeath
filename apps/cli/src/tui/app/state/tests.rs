@@ -89,6 +89,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
             cached_sessions: vec![],
+            cached_models: vec![],
             current_model_display: "gpt-4".into(),
             memory_config: make_memory_config(),
         };
@@ -103,6 +104,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
             cached_sessions: vec![],
+            cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
         };
@@ -116,6 +118,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
             cached_sessions: vec![],
+            cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
         };
@@ -133,6 +136,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
             cached_sessions: vec![],
+            cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
         };

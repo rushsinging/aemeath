@@ -7,18 +7,22 @@ impl super::super::App {
         let input = self.model.input.document.buffer.clone();
         let cursor_offset = self.model.input.document.cursor;
 
-        let models: Vec<(String, String)> = if let Some(agent_client) = &self.agent_client {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(agent_client.list_models())
-                    .unwrap_or_default()
+        // 读取启动期预取的模型缓存（refresh_model_cache），保持纯路径、避免每次按键 block_on。
+        let models: Vec<(String, String)> = self
+            .session
+            .cached_models()
+            .iter()
+            .map(|m| {
+                (
+                    m.provider.clone(),
+                    if m.name.is_empty() {
+                        m.id.clone()
+                    } else {
+                        m.name.clone()
+                    },
+                )
             })
-            .into_iter()
-            .map(|m| (m.provider, if m.name.is_empty() { m.id } else { m.name }))
-            .collect()
-        } else {
-            Vec::new()
-        };
+            .collect();
 
         let skills: Vec<(String, String, Vec<String>)> = self
             .skills
