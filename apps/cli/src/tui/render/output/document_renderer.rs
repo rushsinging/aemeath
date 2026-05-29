@@ -64,13 +64,9 @@ impl OutputDocumentRenderer {
             version: node.block_version,
             width,
         };
-        // 借用拆分：闭包仅捕获 render_count（不可变）与 node，避免与 get_or_render 的 &mut cache 冲突。
-        let cache = &mut self.cache;
-        #[cfg(test)]
-        let render_count = &self.render_count;
-        let rendered = cache.get_or_render(&node.block_id, key, |ctx| {
+        let rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
-            render_count.set(render_count.get() + 1);
+            self.render_count.set(self.render_count.get() + 1);
             node.kind.component().render_self(&node.block_id, ctx)
         });
         live_ids.push(node.block_id.clone());
