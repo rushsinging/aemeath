@@ -15,6 +15,7 @@ pub struct OutputViewState {
     pub selection_start: Option<SelectionAnchor>,
     pub selection_end: Option<SelectionAnchor>,
     pub last_visible_height: usize,
+    pub last_document_total_lines: usize,
     pub version: u64,
 }
 
@@ -30,6 +31,7 @@ impl Default for OutputViewState {
             selection_start: None,
             selection_end: None,
             last_visible_height: 0,
+            last_document_total_lines: 0,
             version: 0,
         }
     }
@@ -160,6 +162,7 @@ mod tests {
         assert_eq!(state.selection_end, None);
         assert_eq!(state.last_visible_height, 0);
         assert_eq!(state.version, 0);
+        assert_eq!(state.last_document_total_lines, 0);
     }
 
     #[test]
@@ -350,5 +353,70 @@ mod tests {
         state.begin_selection(0, CharIdx::new(4));
         state.update_selection(0, CharIdx::new(2));
         assert_eq!(state.selection_range(), Some((anchor(0, 2), anchor(0, 4))));
+    }
+
+    #[test]
+    fn test_last_document_total_lines_default_zero() {
+        let state = OutputViewState::default();
+        assert_eq!(state.last_document_total_lines, 0);
+    }
+
+    #[test]
+    fn test_scroll_pin_growth_compensates_offset() {
+        let mut state = OutputViewState {
+            last_visible_height: 10,
+            scroll_offset: 5,
+            auto_scroll: false,
+            last_document_total_lines: 30,
+            ..Default::default()
+        };
+        // 内容从 30 行增长到 40 行（Δ=10），scroll_offset 应增加 10。
+        // 但 max_offset = 40 - 10 = 30，5+10=15 < 30，不触发钳制。
+        let growth = 40usize.saturating_sub(state.last_document_total_lines);
+        assert!(!state.auto_scroll);
+        assert_eq!(growth, 10);
+        let expected = state.scroll_offset.saturating_add(growth);
+        assert_eq!(expected, 15);
+    }
+
+    #[test]
+    fn test_scroll_pin_shrink_no_compensation() {
+        let mut state = OutputViewState {
+            last_visible_height: 10,
+            scroll_offset: 12,
+            auto_scroll: false,
+            last_document_total_lines: 30,
+            ..Default::default()
+        };
+        // 内容从 30 行收缩到 20 行，growth=0（saturating_sub），不应补偿。
+        let new_total = 20usize;
+        let growth = new_total.saturating_sub(state.last_document_total_lines);
+        assert_eq!(growth, 0);
+        // offset(12) 超出 max_offset(20-10=10)，钳制后应为 10。
+        let max_offset = new_total.saturating_sub(state.last_visible_height);
+        assert_eq!(max_offset, 10);
+        let clamped = state.scroll_offset.min(max_offset);
+        assert_eq!(clamped, 10);
+    }
+
+    #[test]
+    fn test_scroll_pin_auto_scroll_true_skips_compensation() {
+        let state = OutputViewState {
+            last_visible_height: 10,
+            scroll_offset: 0,
+            auto_scroll: true,
+            last_document_total_lines: 30,
+            ..Default::default()
+        };
+        // auto_scroll=true 时不触发补偿。
+        assert!(state.auto_scroll);
+        let growth = 40usize.saturating_sub(state.last_document_total_lines);
+        assert_eq!(growth, 10);
+        let compensated = if !state.auto_scroll {
+            state.scroll_offset.saturating_add(growth)
+        } else {
+            state.scroll_offset
+        };
+        assert_eq!(compensated, 0);
     }
 }

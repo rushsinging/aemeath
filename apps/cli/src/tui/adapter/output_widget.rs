@@ -104,6 +104,8 @@ mod tests {
         };
 
         render_document_from_view_model(&mut output_area, &vm(1), 80);
+        // 初始化 last_document_total_lines，避免首帧触发补偿
+        view.last_document_total_lines = output_area.document().total_lines();
         apply_output_scroll_to_widget(&mut view, &mut output_area);
 
         assert_eq!(output_area.scroll_offset, 0);
@@ -124,6 +126,8 @@ mod tests {
         };
 
         render_document_from_view_model(&mut output_area, &vm(100), 80);
+        // 初始化 last_document_total_lines，避免首帧触发补偿
+        view.last_document_total_lines = output_area.document().total_lines();
         apply_output_scroll_to_widget(&mut view, &mut output_area);
 
         assert_eq!(output_area.scroll_offset, 5);
