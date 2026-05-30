@@ -2,6 +2,7 @@ use crate::tui::model::conversation::block::ConversationBlock;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::render::output::blocks::edit_diff::DIFF_MARKER;
 use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
 use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
@@ -327,6 +328,12 @@ fn tool_result_summary(
     let result = result?;
     if result.is_empty() {
         return None;
+    }
+    // Edit 类结果含 ---DIFF--- 标记时透传原文：嵌入式 ToolResult 子块经
+    // render_tool_result → render_edit_diff 渲染为加减色 diff（标记被消费，不外泄）。
+    // 否则按工具摘要收敛（#87：避免 Read 等大输出刷出正文）。
+    if result.contains(DIFF_MARKER) {
+        return Some(result.to_string());
     }
     let is_error = matches!(status, ToolCallStatus::Error);
     let lines = lookup_display(tool_name)

@@ -7,7 +7,7 @@ use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::syntax::extension_from_path;
 
 /// Edit 工具结果中包裹 old/new 文本的标记。
-const DIFF_MARKER: &str = "---DIFF---";
+pub(crate) const DIFF_MARKER: &str = "---DIFF---";
 
 /// 解析后的 Edit diff 数据：变更前/后文本。
 pub struct EditDiff {
