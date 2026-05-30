@@ -15,7 +15,7 @@ pub struct ConversationModel {
     pub agent_progress: Vec<AgentProgressEntry>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
-    pub(super) active_text_block_id: Option<String>,
+    active_text_block_id: Option<String>,
     active_thinking_block_id: Option<String>,
 }
 
@@ -359,3 +359,5 @@ impl ConversationModel {
         self.chats.iter_mut().find(|chat| chat.id == active)
     }
 }
+
+include!("tool_order.rs");

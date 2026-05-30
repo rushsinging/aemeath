@@ -1,8 +1,5 @@
-//! Tool call 在 blocks 中的位置管理（插入、排序）。
-
-use super::block::ConversationBlock;
-use super::ids::ToolCallId;
-use super::model::ConversationModel;
+// Tool call 在 blocks 中的位置管理（插入、排序）。
+// 通过 include! 纳入 model.rs，可访问私有字段。
 
 impl ConversationModel {
     pub(super) fn insert_tool_call_block_before_active_text(

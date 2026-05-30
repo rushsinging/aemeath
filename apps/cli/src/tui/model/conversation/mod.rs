@@ -16,4 +16,3 @@ pub mod queued_submission;
 pub mod stream;
 pub mod tool_call;
 mod tool_flow;
-mod tool_order;
