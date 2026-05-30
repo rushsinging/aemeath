@@ -83,13 +83,13 @@ impl App {
                             .filter_map(|(i, _)| state.options.get(i).map(|o| o.as_str()))
                             .collect();
                         if chosen.is_empty() {
-                            state.options[cursor].clone()
+                            state.options.get(cursor).cloned().unwrap_or_default()
                         } else {
                             chosen.join(", ")
                         }
                     } else if options_count > 0 {
                         // Single select: return cursor item
-                        state.options[cursor].clone()
+                        state.options.get(cursor).cloned().unwrap_or_default()
                     } else {
                         let text = self.model.input.document.buffer.clone();
                         if text.is_empty() {

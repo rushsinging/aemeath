@@ -19,16 +19,15 @@ impl OutputDocumentRenderer {
         // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
         // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
         let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
-        let mut live_ids = Vec::new();
         for root in &view_model.roots {
             let mut group = Vec::new();
-            self.render_node(root, width, 0, &mut group, &mut live_ids);
+            self.render_node(root, width, 0, &mut group);
             groups.push(group);
         }
+        let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
+        let live_ids = collect_rendered_block_ids(&blocks);
         self.cache.retain(&live_ids);
-        RenderedDocument {
-            blocks: trim_root_groups_to_max_lines(groups, MAX_LINES),
-        }
+        RenderedDocument { blocks }
     }
 
     fn render_node(
@@ -37,7 +36,6 @@ impl OutputDocumentRenderer {
         width: u16,
         depth: usize,
         out: &mut Vec<RenderedBlock>,
-        live_ids: &mut Vec<String>,
     ) {
         let key = CacheKey {
             version: node.block_version,
@@ -48,7 +46,6 @@ impl OutputDocumentRenderer {
             self.render_count.set(self.render_count.get() + 1);
             node.kind.component().render_self(&node.block_id, ctx)
         });
-        live_ids.push(node.block_id.clone());
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
         let mut gutted =
@@ -63,7 +60,7 @@ impl OutputDocumentRenderer {
             lines: gutted,
         });
         for child in &node.children {
-            self.render_node(child, width, depth + 1, out, live_ids);
+            self.render_node(child, width, depth + 1, out);
         }
     }
 
@@ -71,6 +68,10 @@ impl OutputDocumentRenderer {
     pub fn render_count(&self) -> usize {
         self.render_count.get()
     }
+}
+
+fn collect_rendered_block_ids(blocks: &[RenderedBlock]) -> Vec<String> {
+    blocks.iter().map(|block| block.block_id.clone()).collect()
 }
 
 /// 按 root 子树整组裁剪：从尾部（最新）向前累计每个 group 的总行数，
@@ -192,12 +193,12 @@ mod tests {
             collapsed: false,
         });
         let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
-              key: "tool-result".into(),
-              tool_title: "Bash".into(),
-              summary: None,
-              result_text: "```\ncode\n```".into(),
-              style: SemanticStyle::Success,
-          });
+            key: "tool-result".into(),
+            tool_title: "Bash".into(),
+            summary: None,
+            result_text: "```\ncode\n```".into(),
+            style: SemanticStyle::Success,
+        });
         let tool_node = BlockNode {
             block_id: "tool".into(),
             block_version: tool_kind.cache_version(),
@@ -283,6 +284,30 @@ mod tests {
 
         assert_eq!(trimmed.len(), 1);
         assert_eq!(trimmed[0].block_id, "new");
+    }
+
+    #[test]
+    fn test_render_tree_retains_only_trimmed_live_blocks() {
+        let mut renderer = OutputDocumentRenderer::default();
+        let roots = (0..6)
+            .map(|idx| node(&format!("root-{idx}"), &"x\n".repeat(2_000), vec![]))
+            .collect();
+        let vm = vm_with_roots(roots);
+
+        let doc = renderer.render_tree(&vm, 80);
+
+        assert!(
+            doc.total_lines() <= MAX_LINES,
+            "渲染文档应被裁剪到 MAX_LINES 以内"
+        );
+        assert!(
+            !renderer.cache.contains("root-0"),
+            "已被 MAX_LINES 裁剪掉的旧 block 不应继续留在缓存中"
+        );
+        assert!(
+            renderer.cache.contains("root-5"),
+            "最新保留 block 应继续留在缓存中"
+        );
     }
 
     #[test]

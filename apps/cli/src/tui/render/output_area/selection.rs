@@ -49,7 +49,7 @@ impl super::OutputArea {
         if rel_row >= self.screen_line_map.len() {
             return None;
         }
-        let (logic_idx, char_start, _char_end) = self.screen_line_map[rel_row];
+        let (logic_idx, char_start, _char_end) = self.screen_line_map.get(rel_row).copied()?;
         // 减去 gutter 显示列：gutter 不进 plain，点击 gutter 区间映射到 plain 字符 0。
         let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
         let line = self.get_line_content(logic_idx)?;

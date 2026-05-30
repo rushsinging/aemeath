@@ -35,9 +35,10 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
     let mut fence_lang: Option<String> = None;
 
     while idx < src.len() {
-        let line = src[idx];
+        let Some(line) = src.get(idx) else {
+            break;
+        };
         let trimmed = line.trim_start();
-
         if trimmed.starts_with("```") {
             if in_fence {
                 in_fence = false;
@@ -76,11 +77,21 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
             continue;
         }
 
-        if is_table_row(line) && idx + 1 < src.len() && is_table_separator(src[idx + 1]) {
+        if is_table_row(line)
+            && src
+                .get(idx + 1)
+                .map(|next| is_table_separator(next))
+                .unwrap_or(false)
+        {
             // 表格块含表头、分隔行与全部数据行：分隔行不是 is_table_row（被排除），
             // 故收集时需同时容纳 is_table_separator，否则块只含表头、其余行原样泄漏。
             let mut end = idx;
-            while end < src.len() && (is_table_row(src[end]) || is_table_separator(src[end])) {
+            while end < src.len()
+                && src
+                    .get(end)
+                    .map(|candidate| is_table_row(candidate) || is_table_separator(candidate))
+                    .unwrap_or(false)
+            {
                 end += 1;
             }
             let block_src: Vec<&str> = src.iter().skip(idx).take(end - idx).copied().collect();
