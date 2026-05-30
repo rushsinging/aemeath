@@ -43,8 +43,26 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
-| 86 | TUI 中先展示结论再展示 tool call，顺序颠倒 | 中 | 活动中 | 未确认 | 2026-05 | LLM 响应流中先输出 text block（结论/总结），随后再输出 tool_use block；TUI 按流式到达顺序渲染，导致用户先看到结论文本，再看到 tool call 执行过程，视觉上不符合"先执行工具、再给结论"的因果顺序。疑似 ConversationModel / OutputViewAssembler 按流式事件追加块而非按语义因果排序；需确认是否应延迟渲染 text block 直到后续无 tool_use、或在流结束后重排块的显示顺序 |
+| 86 | TUI 中先展示结论再展示 tool call，顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：模型可能先流式输出未完成 assistant text block，随后才发送 tool_use；ConversationModel 过去按事件到达顺序 append ToolCall block，导致 pending 结论文本显示在工具调用前。修复：绑定 ToolCall 时若存在未完成 assistant text block，将 ToolCall 插入该 active text block 之前；已完成文本块不重排，避免破坏正常流式显示 |
 | 87 | tool call result 渲染格式错误且不受最大行数限制 | 中 | 活动中 | 未确认 | 2026-05 | tool call result 渲染时直接展示了工具返回的原始 diff 内容（如 Edit 的 ---DIFF--- 全文），而非格式化的摘要（如 `✓ replaced 1 occurrence(s) in ...`）；同时 tool result 内容不受最大行数输出制约，大文件操作的完整 diff 会全部刷屏，导致输出区被极长内容淹没。疑似 #58 渲染管线重构后 tool result 走了原始文本渲染路径而非 ToolResultBlockView 的格式化摘要路径，且缺少 max_lines 截断 |
+
+### #86 TUI 中先展示结论再展示 tool call，顺序颠倒
+
+**状态**：待确认
+
+**症状**：LLM 响应流中先输出 assistant text block（结论/总结），随后再输出 tool_use block；TUI 按事件到达顺序渲染时，用户会先看到结论文本，再看到 tool call 执行过程，视觉上不符合“先执行工具、再给结论”的因果顺序。
+
+**根因（已确认）**：`ConversationModel::append_or_extend_text_block()` 会立即把流式 assistant 文本追加为 `AssistantText` block，并记录 `active_text_block_id`；后续 `ObserveToolCall` 绑定正式 tool call 时，旧逻辑总是 `blocks.push(ToolCall)`，因此未完成的 assistant 文本会固定排在后到达的工具调用之前。
+
+**修复**：`ObserveToolCall` 绑定时改为通过 `insert_tool_call_block_before_active_text()` 插入 block：若当前存在未完成 assistant text block，则把 ToolCall 插入该 active text block 之前；若文本块已通过 `CompleteTextBlock` 完成，保持原有 append 行为，避免破坏正常已经完成的文本输出顺序。
+
+**回归测试**：
+1. `test_conversation_places_late_tool_call_before_pending_assistant_text`：先收到 assistant 文本、后收到 ToolCall 时，ToolCall block 应显示在未完成文本之前。
+2. `test_conversation_keeps_tool_after_completed_assistant_text`：已完成 assistant 文本后再收到 ToolCall，不应重排到文本之前。
+
+**涉及路径**：
+- `apps/cli/src/tui/model/conversation/model.rs`
+- `apps/cli/src/tui/model/conversation/model_tests.rs`
 
 ### #81 TUI 输出区中文按单字竖排显示
 

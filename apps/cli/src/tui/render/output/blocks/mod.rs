@@ -13,7 +13,6 @@ pub mod user_message;
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::render::output::block_component::BlockComponent;
     use crate::tui::render::output::rendered::RenderCtx;
     use crate::tui::view_model::output::{OutputBlockKind, TextBlockView};
     use crate::tui::view_model::style::SemanticStyle;

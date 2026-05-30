@@ -163,18 +163,42 @@ impl ConversationModel {
                 ConversationBlock::ToolCall { id: block_id, .. } if block_id.as_ref() == id
             )
         }) {
-            self.blocks.push(ConversationBlock::ToolCall {
-                id: ToolCallId::new(id.clone()),
-                name: name.clone(),
-                summary: summary.clone(),
+            self.insert_tool_call_block_before_active_text(
+                ToolCallId::new(id.clone()),
+                name.clone(),
+                summary.clone(),
                 args_preview,
-            });
+            );
         }
         vec![
             ConversationChange::ToolCallBound { id, name },
             ConversationChange::OutputDirty,
         ]
     }
+
+    fn insert_tool_call_block_before_active_text(
+        &mut self,
+        id: ToolCallId,
+        name: String,
+        summary: String,
+        args_preview: String,
+    ) {
+        let block = ConversationBlock::ToolCall {
+            id,
+            name,
+            summary,
+            args_preview,
+        };
+        let active_text_id = self.active_text_block_id.as_deref();
+        let Some(position) = active_text_id
+            .and_then(|text_id| self.blocks.iter().position(|block| block.id() == text_id))
+        else {
+            self.blocks.push(block);
+            return;
+        };
+        self.blocks.insert(position, block);
+    }
+
     fn complete_chat(&mut self) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
         self.active_thinking_block_id = None;
