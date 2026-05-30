@@ -53,8 +53,9 @@ aemeath/                    # workspace root
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
 ├── mcp.json                 # MCP 工具配置
-├── cost_history.json        # 成本追踪历史
-└── session_counter.json     # 会话计数器
+├── history.json               # 用户输入历史
+├── cost_history.json          # 成本追踪历史
+└── settings.json              # 全局设置
 ```
 
 ## 工作流约束
