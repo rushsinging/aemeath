@@ -13,5 +13,5 @@ mod types;
 pub use types::*;
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "message/tests.rs"]
 mod tests;

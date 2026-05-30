@@ -21,5 +21,5 @@ pub use error::ModelResolveError;
 pub use reasoning::{supports_reasoning_effort, validate_reasoning_effort};
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "models/tests.rs"]
 mod tests;
