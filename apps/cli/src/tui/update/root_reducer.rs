@@ -55,6 +55,7 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
 
     let mut result = TuiUpdateResult::default();
     for intent in mapping.input {
+        let intent = rewrite_history_to_completion(&model.input, intent);
         let changes = model.input.apply(intent);
         apply_input_changes(&mut result, &changes);
     }
@@ -154,6 +155,22 @@ fn reduce_effect_result(model: &mut TuiModel, mapping: EffectResultMapping) -> T
         result.dirty.mark_status();
     }
     result
+}
+
+/// 补全弹窗可见时，将 Up/Down 历史导航重写为补全选择。
+fn rewrite_history_to_completion(
+    input: &crate::tui::model::input::model::InputModel,
+    intent: InputIntent,
+) -> InputIntent {
+    if input.completion.visible {
+        match intent {
+            InputIntent::MoveHistoryPrevious => InputIntent::SelectCompletionPrevious,
+            InputIntent::MoveHistoryNext => InputIntent::SelectCompletionNext,
+            other => other,
+        }
+    } else {
+        intent
+    }
 }
 
 fn apply_input_changes(result: &mut TuiUpdateResult, changes: &[InputChange]) {
@@ -276,9 +293,58 @@ mod tests {
         );
 
         assert!(model.conversation.blocks.iter().any(|block| matches!(
-            block,
-            crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
-                if id.as_ref() == "tool-1"
-        )));
-    }
+                block,
+                crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
+                    if id.as_ref() == "tool-1"
+            )));
+        }
+
+        #[test]
+        fn test_up_key_selects_completion_when_visible() {
+            use crate::tui::model::input::completion_item::CompletionItem;
+
+            let mut model = TuiModel::default();
+            model.input.apply(InputIntent::InsertChar('/'));
+            model.input.apply(InputIntent::SetCompletions {
+                query: "/".to_string(),
+                items: vec![
+                    CompletionItem::new("/help", "/help"),
+                    CompletionItem::new("/exit", "/exit"),
+                ],
+            });
+            assert!(model.input.completion.visible);
+            assert_eq!(model.input.completion.selected_index, Some(0));
+
+            let mut view_state = AppViewState::default();
+            update(&mut model, &mut view_state, key(KeyCode::Down));
+            assert_eq!(
+                model.input.completion.selected_index,
+                Some(1),
+                "Down 在补全可见时应选择下一项"
+            );
+
+            update(&mut model, &mut view_state, key(KeyCode::Up));
+            assert_eq!(
+                model.input.completion.selected_index,
+                Some(0),
+                "Up 在补全可见时应选择上一项"
+            );
+        }
+
+        #[test]
+        fn test_up_down_history_when_completion_hidden() {
+            let mut model = TuiModel::default();
+            model.input.apply(InputIntent::ReplaceHistory(vec![
+                "first".to_string(),
+                "second".to_string(),
+            ]));
+            assert!(!model.input.completion.visible);
+
+            let mut view_state = AppViewState::default();
+            update(&mut model, &mut view_state, key(KeyCode::Up));
+            assert_eq!(
+                model.input.document.buffer, "second",
+                "Up 在补全不可见时应翻历史"
+            );
+        }
 }

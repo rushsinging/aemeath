@@ -192,10 +192,18 @@ impl App {
                 self.handle_input_intent(InputIntent::MoveCursorRight);
             }
             (KeyModifiers::NONE, KeyCode::Up) => {
-                self.handle_input_intent(InputIntent::MoveHistoryPrevious);
+                if self.input_area.is_showing_suggestions() {
+                    self.handle_input_intent(InputIntent::SelectCompletionPrevious);
+                } else {
+                    self.handle_input_intent(InputIntent::MoveHistoryPrevious);
+                }
             }
             (KeyModifiers::NONE, KeyCode::Down) => {
-                self.handle_input_intent(InputIntent::MoveHistoryNext);
+                if self.input_area.is_showing_suggestions() {
+                    self.handle_input_intent(InputIntent::SelectCompletionNext);
+                } else {
+                    self.handle_input_intent(InputIntent::MoveHistoryNext);
+                }
             }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
                 self.handle_input_intent(InputIntent::MoveCursorHome);

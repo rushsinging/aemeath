@@ -21,6 +21,13 @@ impl InputArea {
         self.show_suggestions = false;
     }
 
+    /// Set selected suggestion index from model
+    pub(crate) fn set_selected_suggestion(&mut self, index: usize) {
+        if index < self.suggestions.len() {
+            self.selected_suggestion = index as i32;
+        }
+    }
+
     /// Move selection up in suggestions
     #[cfg(test)]
     pub(crate) fn select_previous(&mut self) -> bool {
