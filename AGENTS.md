@@ -34,6 +34,29 @@ aemeath/                    # workspace root
 └── AGENTS.md               # 本文件
 ```
 
+## 运行时目录（`~/.agents`）
+
+```
+~/.agents/                   # 运行时根目录
+├── aemeath.json             # 全局配置
+├── AGENTS.md                # 全局指令
+├── guidance/                # 模型 Guidance 文件
+│   ├── _default.md          #   所有模型通用
+│   ├── _reasoning.md        #   reasoning 开启时附加
+│   └── {prefix}.md          #   按 model id 前缀匹配（最长优先）
+├── hooks/                   # 全局 Hook 脚本
+├── logs/                    # 日志文件
+│   ├── aemeath.log          #   应用主日志（追加模式）
+│   ├── panic.log            #   Panic 日志
+│   └── agent.log            #   审计日志（已废弃）
+├── memory/                  # 持久化记忆存储
+├── sessions/                # 会话持久化
+├── skills/                  # 全局 Skills
+├── mcp.json                 # MCP 工具配置
+├── cost_history.json        # 成本追踪历史
+└── session_counter.json     # 会话计数器
+```
+
 ## 工作流约束
 
 - **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
