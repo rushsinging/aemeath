@@ -297,13 +297,15 @@ mod tests {
             .iter()
             .any(|line| line == "  in docs/bug/active.md"));
         // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(空白 marker 槽) = 4 列前导。
-        assert!(rendered.iter().any(|line| line == "    ✓ Grep completed"));
-        assert!(!rendered
+        // result 子块展示工具 output 前 N 行预览（Grep result_max_lines=5；6 行 output →
+        // 前 5 行 + "1 lines omitted"），不再退化为纯 "✓ Grep completed" 摘要。
+        assert!(rendered
             .iter()
-            .any(|line| line == "  /tmp/docs/bug/active.md:18:match"));
-        assert!(!rendered
+            .any(|line| line == "    /tmp/docs/bug/active.md:18:match"));
+        assert!(rendered
             .iter()
-            .any(|line| line == "  ... (1 lines omitted)"));
+            .any(|line| line == "    ... (1 lines omitted)"));
+        assert!(!rendered.iter().any(|line| line.contains("Grep completed")));
         assert!(!rendered.iter().any(|line| line.contains("You:")));
         assert!(!rendered
             .iter()

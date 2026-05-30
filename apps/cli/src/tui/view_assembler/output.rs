@@ -305,11 +305,14 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                         .then(|| call.args_preview.clone()),
                     summary: call.summary.clone(),
                     activity_summary: call.activities.last().cloned(),
-                    result_summary: tool_result_summary(
-                        &call.name,
-                        call.result.as_deref(),
-                        call.status,
-                    ),
+                    // result 子块展示实际工具 output（供渲染层 format_result_lines 按
+                    // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
+                    // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
+                    result_summary: call
+                        .result
+                        .as_deref()
+                        .filter(|result| !result.is_empty())
+                        .map(str::to_string),
                     collapsible: true,
                     collapsed: false,
                 });
@@ -317,23 +320,6 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
         }
     }
     None
-}
-
-fn tool_result_summary(
-    tool_name: &str,
-    result: Option<&str>,
-    status: ToolCallStatus,
-) -> Option<String> {
-    let result = result?;
-    if result.is_empty() {
-        return None;
-    }
-    let is_error = matches!(status, ToolCallStatus::Error);
-    let lines = lookup_display(tool_name)
-        .map(|display| display.format_result_summary(result, is_error))
-        .filter(|lines| !lines.is_empty())
-        .unwrap_or_else(|| default_tool_result_summary(tool_name, is_error));
-    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {

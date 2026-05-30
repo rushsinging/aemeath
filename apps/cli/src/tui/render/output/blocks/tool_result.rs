@@ -56,6 +56,11 @@ fn format_result_lines(
         return Vec::new();
     }
     let max_lines = result_max_lines(tool_name);
+    // max_lines==0 的工具（如 AskUserQuestion，答案已 echo）不展示任何结果内容，
+    // 也不显示 "lines omitted" 提示——result 子块整体为空。
+    if max_lines == 0 {
+        return Vec::new();
+    }
     let base = Style::default().fg(color);
     // render_fenced_markdown 现产无缩进行（#60）；块级缩进由 gutter 在组合期注入，
     // 此处不再自拼 INDENT（结果作为 tool_call 的子块，gutter 给等宽空白）。
@@ -144,24 +149,14 @@ mod tests {
     }
 
     #[test]
-    fn test_render_tool_result_max_lines_uses_tool_display_zero() {
-        // 边界：result_max_lines==0 的工具（TaskListComplete）结果不渲染内容行，
-        // 仅出现 "lines omitted" 提示。验证截断行数取自 ToolDisplay 而非硬编码。
+    fn test_render_tool_result_max_lines_zero_renders_nothing() {
+        // 边界：result_max_lines==0 的工具（TaskListComplete/AskUserQuestion）result 子块
+        // 整体为空——既不渲染内容行，也不显示 "lines omitted" 提示。
         let view = result("TaskListComplete", "a\nb\nc");
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 
-        assert!(
-            block.lines.iter().all(|l| l.plain != "a"),
-            "max_lines=0 时不应渲染结果内容行"
-        );
-        assert!(
-            block
-                .lines
-                .iter()
-                .any(|l| l.plain.contains("lines omitted")),
-            "应出现省略提示"
-        );
+        assert!(block.lines.is_empty(), "max_lines=0 时 result 子块应为空");
     }
 
     #[test]
