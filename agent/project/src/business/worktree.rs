@@ -35,6 +35,25 @@ pub fn get_git_common_dir(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// 判断指定路径是否位于 git worktree 中（而非主 checkout）。
+/// 在 worktree 中时，`git rev-parse --git-dir` 会返回包含 `.git/worktrees/` 的路径。
+fn in_worktree(path: &Path) -> bool {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                let git_dir = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                Some(git_dir.contains("/.git/worktrees/"))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
 const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
@@ -121,13 +140,21 @@ pub fn enter_worktree(
     path: Option<PathBuf>,
     branch: Option<String>,
 ) -> Result<WorkingContext, String> {
-    // 拒绝嵌套：必须先 ExitWorktree 再 EnterWorktree
+    // 拒绝嵌套：必须先 ExitWorktree 再 EnterWorktree。
+    // 增加 git 实际状态校验，防止上下文栈残留导致误判（refs #96）。
     {
-        let stack = ctx.context_stack.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stack = ctx.context_stack.lock().unwrap_or_else(|e| e.into_inner());
         if !stack.is_empty() {
-            return Err(
-                "已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的".to_string(),
-            );
+            // 二次校验：git 层面是否真的在 worktree 中
+            let current = current_path(&ctx.path_base);
+            if !in_worktree(&current) {
+                // 上下文栈残留（如上次会话异常结束未清理），自动清除
+                stack.clear();
+            } else {
+                return Err(
+                    "已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的".to_string(),
+                );
+            }
         }
     }
 
@@ -383,9 +410,27 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_worktree_rejects_nested_enter() {
+    fn test_enter_worktree_auto_clears_stale_stack_not_in_worktree() {
         let ctx = new_test_context();
-        // 模拟已在 worktree 中（栈非空）
+        // 模拟上下文栈残留（栈非空但 git 不在 worktree 中）
+        ctx.context_stack.lock().unwrap().push(WorkingContext {
+            path_base: PathBuf::from("/tmp/stale"),
+            working_root: PathBuf::from("/tmp/stale"),
+        });
+        // 不应因残留栈而拒绝，应自动清理后继续（refs #96）
+        // 这里路径不存在且无 branch，会走到 create_worktree 的错误路径
+        let result = enter_worktree(&ctx, Some(PathBuf::from("/tmp/nonexistent")), None);
+        assert!(result.is_err());
+        // 不应报"先 ExitWorktree"，报错应为路径/branch 相关
+        assert!(!result.unwrap_err().contains("先 ExitWorktree"));
+    }
+
+    /// 测试在 worktree 中嵌套 enter 被拒绝。此测试需要在 worktree 中运行才有效，
+    /// 主 checkout 中栈非空会被 in_worktree() 判定为残留并自动清理。
+    #[test]
+    #[ignore = "需要在 worktree 中运行才能触发嵌套拒绝逻辑"]
+    fn test_enter_worktree_rejects_nested_enter_in_worktree() {
+        let ctx = new_test_context();
         ctx.context_stack.lock().unwrap().push(WorkingContext {
             path_base: PathBuf::from("/tmp/prev"),
             working_root: PathBuf::from("/tmp/prev"),

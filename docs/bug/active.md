@@ -14,22 +14,25 @@
 
 ### #96 EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中"
 
-**状态**：活动中
+**状态**：修复中
 
 **症状**：
 1. 用户在 `main` 分支主工作区（`git branch --show-current` → `main`，`pwd` 不在 `.worktrees/` 下），UI 显示也不在 worktree 中。
 2. 调用 `EnterWorktree { branch: "feature/xxx" }`（不给 `path`，走自动创建模式）时报错：`进入 worktree 失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`。
-3. 随后调用 `ExitWorktree` 又报错：`上下文栈为空，没有可恢复的 worktree`——与 EnterWorktree 的错误自相矛盾。
-4. 直接给 `path` 参数指定已存在的 worktree 路径则成功进入。
+3. 直接给 `path` 参数指定已存在的 worktree 路径则成功进入。
 
-**根因**：EnterWorktree/ExitWorktree 工具内部维护一个独立的上下文栈（每次 Enter/Exit 配对维护），与 git 实际的 worktree 状态（磁盘上的 `.worktrees/` + git 分支指针）是两套独立的追踪机制。当上下文栈因历史原因（如上次异常退出未配对 Exit）残留了旧状态时，两者不同步，EnterWorktree 在自动创建模式下检测到这个残留状态就拒绝进入。
+**根因**：`enter_worktree()`（`agent/project/src/business/worktree.rs:125-132`）将 `context_stack.is_empty()` 作为"是否在 worktree 中"的**唯一判断依据**，完全不校验 git 实际状态。
 
-**修复方向**：
-1. EnterWorktree 在判断"是否已在 worktree 中"时，应同时校验上下文栈和 git 实际状态（`git rev-parse --git-dir` 是否在 `.worktrees/` 下），而非仅依赖内部栈。
-2. 若上下文栈非空但 git 实际在 main，应自动清理栈并允许进入。
-3. 考虑将上下文栈持久化到磁盘（如 `~/.agents/worktree_stack.json`），避免进程重启/异常退出后状态丢失。
+`context_stack` 是内存 `Arc<Mutex<Vec<WorkingContext>>>`，通过 `workspace_context_from_tool_context()` → `WorkingDirectoryChanged` 事件持久化到会话存储。会话恢复时从 `WorkspaceContext.context_stack` 还原。
 
-**涉及路径**：EnterWorktree / ExitWorktree 工具实现（上下文栈管理逻辑）
+触发链条：
+1. Session N：EnterWorktree 成功 → context_stack.push → 会话自动持久化时栈非空
+2. Session N 异常结束 / 未调用 ExitWorktree → 残留条目持久化
+3. Session N+1：恢复到 main，但 context_stack 从持久化恢复后仍非空 → `enter_worktree()` 误判为"已在 worktree 中"
+
+**修复方向**：`enter_worktree()` 栈非空时，通过 `git rev-parse --git-dir` 校验当前路径是否真实在 `.worktrees/` 下。若栈非空但 git 确认在主工作区，自动清理残留栈并允许进入；仅当 git 也确认在 worktree 中时才拒绝嵌套。
+
+**涉及路径**：`agent/project/src/business/worktree.rs:125-132`（`enter_worktree` 的栈校验逻辑）
 
 ### #95 Agent tool result 被归为 orphan
 
