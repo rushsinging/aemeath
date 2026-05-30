@@ -9,6 +9,26 @@
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
 | 95 | Agent tool result 被归为 orphan | 中 | 修复中 | 未确认 | 2026-05 | 根因：`observe_tool_call` 中 `bind_tool` 找不到未绑定占位时直接返回空（不创建 ToolCall block），导致后续 `ToolResult` 在 `complete_active_tool` 中找不到匹配 id → orphan。触发场景：provider 未发送 `ToolCallStart`（如非 streaming 模式）或 index 错位导致 fallback 也失败。修复：`bind_tool` 失败时自动调用 `observe_tool_start` 创建占位后重试绑定 |
+| 96 | `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到 | 高 | 活动中 | 未确认 | 2026-05 | 根因：`feature/66-remove-mod-rs` 将 `config/models/mod.rs` 迁移为 `config/models.rs` 时，`#[path = "tests.rs"]` 未同步更新，仍指向 `config/tests.rs`（不存在），应改为 `#[path = "models/tests.rs"]` 或去掉显式 path 让 Rust 自动解析 |
+
+### #96 `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到
+
+**状态**：活动中
+
+**症状**：`cargo test -p share --lib` 编译失败：
+```
+error: couldn't read `agent/share/src/config/tests.rs`: No such file or directory (os error 2)
+  --> agent/share/src/config/models.rs:25:1
+   |
+25 | mod tests;
+   | ^^^^^^^^^^
+```
+
+**根因**：`feature/66-remove-mod-rs` 工作分支将 `agent/share/src/config/models/mod.rs` 迁移为 `agent/share/src/config/models.rs`，但第 24 行的 `#[path = "tests.rs"]` 未更新。旧布局下此路径指向 `config/models/tests.rs`（存在），新布局下指向 `config/tests.rs`（不存在，实际文件在 `config/models/tests.rs`）。
+
+**修复方向**：将 `#[path = "tests.rs"]` 改为 `#[path = "models/tests.rs"]`，或去掉显式 `#[path]` 让 Rust 按模块规则自动解析。
+
+**涉及路径**：`agent/share/src/config/models.rs` 第 24 行
 
 ### #95 Agent tool result 被归为 orphan
 
