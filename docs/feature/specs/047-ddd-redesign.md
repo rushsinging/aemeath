@@ -18,6 +18,9 @@
 | 2026-05-24 | DeepSeek review | 合并 GLM 与 DeepSeek review 修正意见。 |
 | 2026-05-23 | GLM review | 合并 review-by-glm 的修正意见。 |
 | 2026-05-22 | 初稿 | DDD 架构设计初稿完成。 |
+| 2026-05-27 | P16-P18 实施归档 | P16：core/ 层端口隔离，消除外部 crate 直接引用。P17：share/core 瘦身（63→55 文件），业务逻辑迁入对应 domain。P18：架构守卫固化（8 守卫）+#47 完成归档。 |
+| 2026-05-29 | 现状校订 | 对齐实现态并消除文档脱节：①最小共享内核 crate 实际命名为 `share`（替换原计划的 `core`，`core` crate 不存在），share 当前臃肿过界、瘦身列为显式技术债；②顶层目录为 `agent/`（非 `crates/`）；③COLA crate 内部分层命名统一为 `core/business/utils`（对齐 `agent/runtime` 现状）；④`audit`、`policy` 当前**未实现**完整职责，仅需支撑 allow-all 模式，相关章节降级标注；⑤guard 清单同步为实际接入的 6 个；⑥重排 §6.5/§6.6 重复编号、清理 packages/sdk 自相矛盾句。 |
+| 2026-05-30 | Agent 目录 feature-boundary 重设计 | 采用 Wanaka 风格 `features/` + `shared/` + `composition/`：feature 内部以 `contract`/`gateway` 表达 Published Language 与 OHS，`shared` 承载横切基础设施、横切 port 与外部 adapter，`composition` 作为唯一生产组合根。 |
 
 ## 1. 设计目标
 
@@ -142,9 +145,9 @@ Session
 
 职责：
 
-- 管理 ToolCatalog。
-- 将 ToolCall 转换为 ToolInvocation。
-- 执行 schema 校验、上下文解析、权限 gate、hook gate、工具 adapter 调用、输出截断和 ToolResult 归一化。
+- 管理 ToolCatalog、SkillCatalog 与 Slash Command catalog。
+- 将 ToolCall / SkillInvocation / CommandInvocation 转换为受控执行。
+- 执行 schema 校验、上下文解析、权限 gate、hook gate、能力 adapter 调用、输出截断和结果归一化。
 
 #### Project Context
 
@@ -193,11 +196,11 @@ Session
 
 职责：
 
-- 管理 SkillCatalog、GuidanceProfile、PromptContract。
-- 处理内置、项目、全局 skill 的优先级和覆盖。
+- 管理 GuidanceProfile、PromptContract 和 PromptMaterial。
+- 读取并合并 AGENTS.md / CLAUDE.md / global AGENTS.md / guidance / system prompt fragments。
 - 处理 model guidance、reasoning guidance、项目 instruction 和 system prompt 组合规则。
 
-关键原则：Prompt 独立于 Config；Config 提供来源和配置视图，Prompt 负责行为规则解析。
+关键原则：Prompt 只负责模型指令材料加载、合并和裁剪；Skill / Slash Command 的注册、发现与执行归 Tools。
 
 ### 4.3 ACL / Infrastructure Domains
 
@@ -332,7 +335,9 @@ Agent Runtime 和相关上下文应输出协议无关事件，例如：
 
 TUI 渲染、CLI stdout、HTTP SSE/WebSocket 都只是这些事件的不同 projection。
 
-### 6.4 上下文驱动包边界
+### 6.4 上下文驱动包边界（现行 crate 约束）
+
+> **2026-05-30 说明**：本节记录当前已落地的 `agent/<crate>` 形态和既有 guard 约束，用于解释现状与迁移前门禁。后续目标结构以 §6.5 的 `agent/features` + `agent/shared` + `agent/composition` 为准；迁移完成后，本节的 `share` 最小共享内核表述应由 §6.5 的 Wanaka 风格 `shared` 基础设施语义替代。
 
 包或模块边界应该逐步靠近 Bounded Context：
 
@@ -507,83 +512,270 @@ check-share-minimal-kernel.sh       # share 不得回归 store/IO/行为（#61 D
 
 这些脚本必须在 Stop hook 中执行；任何依赖图违规、import 违规、`share` 上游依赖、绕过 `<crate>::api`、`share` 回归 store/IO 或 `apps/cli` 直接依赖 support/share 都应阻止完成。**清单随实现演进**——当前实际接入的完整集合以 `check-architecture-guards.sh` 为准（见附录 A）。
 
-### 6.5 目标 workspace 目录结构
+### 6.5 Agent 目录 feature-boundary 目标结构
 
-目录结构调整采用一次性目标设计、分 checkpoint 实施的方式。最终 workspace 应让目录和 crate 名直接表达产品语义与 Bounded Context，同时避免 `contexts` / `shared` 这类顶层抽象词造成理解成本。
+> **2026-05-30 修订**：后续 `agent/` 目录采用 Wanaka 风格 feature-boundary，而不是继续把每个 bounded context 直接铺在 `agent/` 顶层。DDD feature boundary 决定外部边界；COLA 只负责每个 feature 内部的工程分层。
 
 目标结构：
 
 ```text
-apps/
-  cli/                 # 薄入口：参数解析、TUI/REPL 事件适配、启动 runtime
-
-agent/                 # crate 顶层目录（落地态，非 crates/）
-  runtime/             # 核心域：Agent Runtime，编排 Chat / Turn / Tool / Model / Task
-  project/             # Project Context：cwd、path_base、worktree、项目配置和指令来源发现
-  policy/              # Permission / capability / risk / approval（完整权限模型属 #62）
-  prompt/              # guidance、skills、system prompt、prompt bundle
-  provider/            # LLM provider 防腐层
-  tools/               # tool catalog、tool execution、MCP tool adapter
-  storage/             # session history、memory、cost history、task persistence
-  hook/                # hook event、runner、decision
-  audit/               # audit event、correlation id、审计日志（属 #62）
-  share/               # 最小共享内核：错误、基础消息/value object、ConfigurationSnapshot 等数据契约（原计划命名 core）
+agent/
+  features/             # 业务 feature boundary，按能力纵向切分
+    runtime/            # Agent Loop / turn / session state / compact / cost
+    tools/              # Tool + Skill + Slash Command 能力注册与执行
+    provider/           # LLM provider gateway
+    prompt/             # AGENTS.md / CLAUDE.md / guidance / system prompt material
+    project/            # cwd / paths / worktree / git facts
+    storage/            # session / memory / task / history 持久化投影
+    policy/             # permission / risk；当前只实现 AllowAll
+    audit/              # 审计事件 / 操作轨迹；独立 feature
+  shared/               # 横切基础设施、横切 port、外部 adapter
+  composition/          # 组合根，负责生产依赖装配
 
 packages/
-  sdk/                 # AgentClient trait + 公共类型（CLI 与 Runtime 唯一通信契约）
-  global/
-    logging/           # 日志 projection 适配
+  sdk/                  # AgentClient trait + 公共类型（CLI 与 Runtime 通信契约）
+  gloabal/
+    logging/           # 日志 projection 适配（现有拼写保持不动）
 ```
 
-> 注：`packages/global/` 在磁盘上当前误拼为 `gloabal/`，正文以正确拼写 `global` 为目标；改名待单独小 PR（涉及 workspace path 与 guard 路径，见附录 A）。
+语义：
 
-crate 名与目录名保持一致，不再添加 `aemeath-` 前缀：
+1. `features/` 是业务 feature boundary。每个 feature 拥有自己的对外语言、对外服务入口、内部编排与领域规则。
+2. `shared/` 不是 Minimal Shared Kernel；它是跨 feature 共享的基础设施、横切能力 port 与外部系统 adapter 层。
+3. `composition/` 是 composition root，负责把 `features/*`、`shared/*`、`shared/adapter/*` 装配成可运行应用。
+4. `packages/sdk` 仍保留为入口层与 Runtime 的外部通信契约；它不是业务 feature。
+
+#### 6.5.1 Feature 内部模板
+
+每个 feature 内部统一使用：
+
+```text
+agent/features/<feature>/src/
+  contract/             # Published Language：DTO / Event / Command / Query
+  gateway/              # Open Host Service：该 feature 对外服务入口
+  core/                 # 内部编排 / use case / port
+  business/             # 内部规则 / 领域模型 / 状态机
+  utils/                # feature 私有工具
+  api.rs                # 只 re-export contract + gateway
+  lib.rs
+```
+
+约束：
+
+1. `contract` 是 Published Language。
+2. `gateway` 是 Open Host Service（OHS），即 feature 对外开放的稳定服务入口。
+3. `api.rs` 是跨 feature 的统一出口，只允许 re-export `contract` 与 `gateway`。
+4. 跨 feature 禁止直接依赖对方的 `core`、`business`、`utils`，也禁止绕过 `api.rs` 直接访问对方 `contract` 或 `gateway` 路径。
+5. Feature 内部不设置 `acl/` 目录；外部协议、旧模型和第三方系统适配统一进入 `shared/adapter/*`。
+
+允许：
+
+```text
+runtime -> tools::api::{ToolGateway, ToolCall}
+tools   -> policy::api::{PermissionGateway, PermissionRequest}
+prompt  -> project::api::{ProjectGateway, ProjectContext}
+```
+
+禁止：
+
+```text
+runtime -> tools::core::Dispatcher
+runtime -> tools::business::BuiltinTool
+runtime -> tools::utils::PathSecurity
+runtime -> tools::gateway::ToolGateway   # 必须统一经 tools::api
+```
+
+#### 6.5.2 Feature 边界职责
 
 ```text
 runtime
-project
-policy
-prompt
-provider
+  负责 Agent Loop / Chat Loop / turn 编排 / session state / context window / compact / cost / reflection / interrupt / resume。
+  不负责 tool、skill、command 注册，不负责 provider 协议适配，不负责 prompt 文件扫描。
+
 tools
+  负责 built-in tools、MCP tools、skills、slash commands 的注册、发现、metadata 与执行。
+  执行前调用 policy gateway，执行后写 audit gateway。
+
+provider
+  负责 LLM provider 访问、streaming response 解析、model profile、provider pool / fallback / retry、usage 解析。
+  不负责 Agent Loop、Prompt 组装、Tool 执行或最终成本规则。
+
+prompt
+  负责 AGENTS.md / CLAUDE.md / global AGENTS.md / guidance / model-specific guidance / reasoning guidance / system prompt fragments 的加载、合并和裁剪。
+  不负责 skill 或 slash command 注册执行。
+
+project
+  负责 cwd、workspace root、project root、worktree、branch、git facts、路径安全基础事实和项目级配置路径发现。
+  不读取 prompt 内容，不执行工具，不做权限判断。
+
 storage
-hook
+  负责 session、memory、task、history、cost_history、tool result 等持久化投影。
+  不拥有 Agent Runtime 的 task 状态机、memory 召回策略或成本规则。
+
+policy
+  负责 PermissionRequest -> PermissionDecision。当前阶段只实现 AllowAll；后续再扩展 risk / confirmation / deny / inherited permission。
+  不执行 tool，不写 audit，不修改 runtime 状态。
+
 audit
-share        # 原计划命名为 core
+  负责记录操作事实、permission decision、tool/command/skill 执行事件。当前先实现最小事件模型。
+  不判断 allow/deny，不执行工具，不修改 runtime 状态。
 ```
 
-命名约束：
+#### 6.5.3 Shared 语义
 
-1. `apps/cli` 是唯一当前可执行入口，保持薄入口；不设置 `agent/interface`，TUI/REPL adapter 暂留 `apps/cli`，后续如需多入口共享 projection，再从 runtime API 抽公共 adapter 类型。
-2. `runtime` 表达核心域 Agent Runtime；不使用 `agent-runtime`，避免 crate 名过长。
-3. `project` 表达项目上下文；不使用 `project-context`，避免目录名重复 context 概念。
-4. `provider` 表达模型 provider 防腐层；不使用 `model-gateway`。
-5. `tools` 使用复数，表达工具集合、执行管线和 MCP adapter；不使用 `tool-execution`。
-6. `prompt` 统一承载 skills、guidance、CLAUDE/AGENTS instruction 与 system prompt 组合规则。
-7. `storage` 统一承载 session history、memory、cost history、task persistence 等持久化投影；不再拆 `session-history` / `memory` 顶层 crate。
-8. `hook` 使用短名；不使用 `hook-automation`。
-9. `audit` 独立记录运行事实和 correlation id。
-10. `share`（原计划命名 `core`）必须保持小而稳定，只放数据契约（含 `ConfigurationSnapshot`），禁止变成行为/IO 的大杂烩。由 `check-share-minimal-kernel.sh` 守护。
+`shared/` 是跨 feature 共享的基础设施层，包含横切基础能力 port 与所有外部 adapter：
+
+```text
+agent/shared/src/
+  adapter/
+    provider/
+    mcp/
+    filesystem/
+    process/
+    git/
+    storage/
+    hook/
+    telemetry/
+  logger/
+  telemetry/
+  config/
+  filesystem/
+  process/
+  git/
+  http/
+  json/
+  ids.rs
+  errors.rs
+  types.rs
+  lib.rs
+```
+
+规则：
+
+1. 横切能力 port 放 `shared/<capability>/`。
+2. 具体 adapter 一律放 `shared/adapter/<capability>/`。
+3. 除 `shared/adapter/**` 和必要的 `shared/types.rs` 例外外，`shared` 不反向依赖 `features/**`。
+4. Feature 代码不能直接 import `shared/adapter/**`。
+5. 生产代码中只有 `composition` 可以 import `shared/adapter/**`；测试可按需使用 fake 或 test adapter。
+
+Port 放置标准：
+
+| 类型 | port 位置 | adapter 位置 |
+|---|---|---|
+| 横切基础能力 | `shared/<capability>/` | `shared/adapter/<capability>/` |
+| 聚合自有能力 | `features/<feature>/src/core/` 或 `features/<feature>/src/context/` | `shared/adapter/<capability>/` |
+
+判断标准：这个能力属于某个业务聚合吗？是，则 port 归该 feature；否，若它是日志、配置、文件系统、进程、git、HTTP、clock、id generator 等横切基础能力，则 port 归 `shared/<capability>/`。
+
+#### 6.5.4 Composition Root
+
+`composition/` 负责生产依赖装配：
+
+```text
+agent/composition/src/
+  app.rs
+  runtime.rs
+  tools.rs
+  provider.rs
+  prompt.rs
+  project.rs
+  storage.rs
+  policy.rs
+  audit.rs
+  context.rs
+  lib.rs
+```
+
+职责：
+
+1. 创建 shared 基础设施实现。
+2. 创建 shared adapter。
+3. 创建各 feature gateway / service。
+4. 注入依赖并组装 AppContext / RuntimeContext。
+5. 为 CLI/TUI/server 等入口暴露启动入口。
+
+`composition` 不承载业务规则、provider 协议转换细节、工具执行细节、权限判断规则或 prompt 合并规则。
+
+启动方向：
+
+```text
+apps/cli
+  -> agent/composition
+      -> features/*/api
+      -> shared/*
+      -> shared/adapter/*
+```
+
+#### 6.5.5 依赖规则
+
+```text
+features/* 可以依赖 shared 横切 port。
+features/* 可以单向依赖其他 feature 的 api.rs，但禁止循环依赖。
+features/* 不能直接依赖其他 feature 的 core / business / utils / gateway / contract 路径。
+features/* 不能直接依赖 shared/adapter/**。
+shared/<capability> 原则上不依赖 features/**。
+shared/adapter/** 可以依赖它实现的 feature-owned port。
+composition 可以依赖 features/*/api、shared/*、shared/adapter/*。
+features/* 和 shared/* 都不能依赖 composition。
+```
+
+推荐 feature 依赖层级：
+
+```text
+runtime
+  -> tools::api
+  -> provider::api
+  -> prompt::api
+  -> project::api
+  -> storage::api
+  -> policy::api
+  -> audit::api
+
+tools
+  -> project::api
+  -> storage::api
+  -> policy::api
+  -> audit::api
+
+prompt
+  -> project::api
+  -> storage::api
+
+provider
+  -> shared only
+
+project / storage / policy / audit
+  -> shared only
+```
+
+#### 6.5.6 架构守卫
+
+后续架构守卫应逐步覆盖：
+
+1. `api.rs` 只允许 re-export `contract` + `gateway`。
+2. 跨 feature 禁止访问对方 `core` / `business` / `utils` / `gateway` / `contract` 直接路径，只能访问 `<feature>::api::*`。
+3. 禁止 feature dependency cycle。
+4. 禁止 feature 直接 import `shared/adapter/**`。
+5. `shared` 除 `shared/adapter/**` 和必要 `shared/types.rs` 例外外，禁止 import `features/**`。
+6. `composition` 是唯一生产装配入口，生产代码中只有它可以 import `shared/adapter/**`。
+
+#### 6.5.7 迁移计划
+
+采用渐进迁移，不一次性搬完：
+
+1. **P1 skeleton**：建立 `agent/features/`、`agent/shared/`、`agent/composition/` 骨架与最小 re-export，不迁移业务逻辑。
+2. **P2 shared**：迁移横切能力，如 errors、ids、logger、config、filesystem、process、git、json、telemetry；横切 port 进入 `shared/<capability>/`，adapter 进入 `shared/adapter/<capability>/`。
+3. **P3 support features**：优先迁移低依赖 feature：audit、policy、project、storage、prompt。
+4. **P4 capability features**：迁移 provider、tools。
+5. **P5 runtime**：最后迁移 runtime，让其通过其他 feature gateway 编排完整 Agent Loop。
+6. **P6 guard**：补齐 feature API、dependency cycle、shared adapter、composition root 等架构守卫。
 
 迁移约束：
 
-1. 不恢复 #36：不创建 `apps/server`、`apps/agents`、`packages/proto`、`infra`。但 `packages/sdk`（AgentClient 契约桥接层）与 `packages/global/logging` 是本设计的组成部分，保留并创建。
-2. 已完成：原 `shared/kernel`、`contexts/provider`、`contexts/tool` 过渡结构已收束到 `agent/share`、`agent/provider`、`agent/tools`，并创建其余 `agent/*` 目标 crate；`contexts/`、`shared/` 顶层目录已移除。
-3. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
-4. 每个 crate 内部按 COLA 分层组织，层名取自 `core`（编排+端口）/`business`（领域规则）/`utils`（bootstrap/adapter/IO）；**按职责分层，不强制凑满三层**（§6.4.3）；顶层只表达产品/领域语义。
-5. `apps/cli` 只能依赖 `agent/runtime`（composition root）+ `packages/sdk` 和纯技术库；不能直接依赖 supporting domains 或 `share`。（已在首轮实施中通过 Cargo 依赖收束和 architecture guards 固化）
-6. supporting domains 之间依赖必须按 Context Map 方向收敛，禁止 domain 反向依赖 `apps/cli`、TUI 或 REPL。
-7. 实施必须按 checkpoint 保持可编译：每个 checkpoint 至少运行 `cargo check`，最终运行完整验收门禁。
-
-建议 checkpoint：
-
-1. 建立 `agent/share`（最小共享内核）和 `agent/runtime`，先由 `runtime::api` re-export 或包装 CLI 当前需要的启动 DTO，使 `apps/cli` 依赖逐步收束到 runtime。
-2. 将 `contexts/provider` 迁移为 `agent/provider`，保持 provider API、streaming、pricing、model pool 行为不变。
-3. 将 `contexts/tool` 迁移为 `agent/tools`，保持 tool schema、registry、MCP 生命周期、权限/hook gate 行为不变。
-4. 从 `shared/kernel` 拆出 `agent/project`、`agent/policy`、`agent/prompt`、`agent/storage`、`agent/hook`、`agent/audit` 的低耦合类型和端口；剩余稳定共享类型进入 `agent/share`。
-5. 让 `agent/runtime` 成为唯一编排者，逐步接管 Chat、Turn、Task、Tool batch、Model invocation、Permission prompt、Hook、Audit 的 use case 编排。（本 checkpoint 的迁移进展见附录 A）
-6. 增加 architecture guard：禁止 `apps/cli` 直接依赖 `share` 和 supporting domain crate；禁止 supporting domain 反向依赖 `runtime` / `apps/cli`。
-7. 移除 `contexts/`、`shared/` 过渡目录，更新 `.agents/aemeath.json` 与 `.agents/hooks/*` 中的旧路径、旧 package 名和架构守卫，再运行完整验收。（首轮实施已完成，后续继续拆分 support domain 内部职责）
+1. 不恢复 #36：不创建 `apps/server`、`apps/agents`、`packages/proto`、`infra`。
+2. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
+3. 每个 checkpoint 必须保持可编译，至少运行 `cargo check`；最终运行完整验收门禁。
+4. 目录迁移和 `.agents/hooks/*` 架构守卫更新必须处于同一 checkpoint，避免 hook 与源码结构脱节。
 
 `.agents` 迁移要求：
 
