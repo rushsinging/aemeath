@@ -29,6 +29,21 @@
 | 90 | TUI Edit 工具结果不渲染为 diff（只显示 ✓ Edit completed 摘要） | 高 | 待确认 | 未确认 | 2026-05 | 根因：`render_edit_diff`（解析 `---DIFF---` 出加减色 diff）只在 `render_tool_result` 里被调用，但 assembler 的 `tool_result_summary` 对 Edit 走默认 `format_result_summary` 返回 `✓ Edit completed`，使嵌入式 ToolResult 子块的 `result_text` 不含 `---DIFF---`，`render_edit_diff` 解析失败回退普通文本——`render_edit_diff` 在生产里从未拿到原文（单测喂原文故绿、生产坏）。与 #87 不冲突：#87 反对的是 orphan/非嵌入结果以原样文本泄漏到块外（仍走摘要抑制）；本修复仅对**嵌入式**且含 `---DIFF---` 的结果透传原文，由 `render_tool_result` 消费标记渲成 diff。修复：`tool_result_summary` 在 `result.contains(DIFF_MARKER)` 时透传原文（`DIFF_MARKER` 提为 `pub(crate)` 复用，DRY）。回归：`test_output_assembler_late_bound_tool_result_stays_inside_tool_block` 改为端到端断言子块渲染出 `- old`/`+ new` diff 行、无 `---DIFF---` 残留、无 `Edit completed` |
 | 91 | TUI 渲染缩进/类型三问题：thinking 云朵未顶格、diff 行重复缩进、Read result 误按 diff 渲染 | 中 | 待确认 | 未确认 | 2026-05 | #63 gutter 改造遗留 + #64×#90 交互：①thinking 的 `💭 ` 是文本前缀，经 gutter 注入 2 列空白后被推到第 2 列（未顶格）——改为 `💭` 作 ThinkingMessage 的 gutter marker（`apply_gutter` 按显示宽度补白支持宽字符，💭 占满 2 列槽、gutter_cols 取字符数、内容与窄 marker 同列对齐）；②`build_diff_lines` 每行行首自拼 `INDENT` 与 gutter 块缩进重复——去掉行首 INDENT（保留 context 行对齐 +/- 的内部 INDENT）；③#64 后 Read result 携带文件原文，文件内容巧含 `---DIFF---`（如描述 diff 格式的文档/源码）被 `render_tool_result` 误解析为 diff——架构修正：result 渲染类型由 `ToolDisplay::renders_result_as_diff()` **工具显式声明**（Edit=true），渲染层据声明分发，不再按字符/硬编码工具名猜测。回归：gutter 宽 marker、diff 无行首块缩进、Read 含 `---DIFF---` 保留原文、`result_renders_as_diff` 工具声明。**延续修复（2026-05-30）**：④Read result 预览缩进/颜色仍不对——根因是 `format_result_lines` 用 `render_fenced_markdown` 把文件内容里的 markdown（表格分隔行→`├──┼` 边框）重渲染变形，且用 `semantic_color`（状态绿）着色。修复：把 `renders_result_as_diff(bool)` 升级为 `ToolDisplay::result_render() -> ResultRender { Plain, Diff }`（默认 Plain，Edit override Diff，`result_render_kind` 查询）；Plain 路径改**纯文本原样**逐行（不 markdown 重渲染、保留文件行号/缩进）+ 暗色 `TEXT_DIM`（不跟随状态色，状态绿/红只在 header marker）。⑤每个 root block 前加 1 空行（`document_renderer` depth==0 插入），分隔相邻对话块。注：`queued_submission` 的 `⏳` 前缀有同类问题，待后续统一 |
 | 92 | Feature #65 Resume 输入历史在 `--resume` 启动路径未生效 | 高 | 修复中 | 未确认 | 2026-05 | 根因：feature #65 只在 `/resume` slash 命令路径 `resume_session_messages()` 中注入 `InputModel.history`，但 CLI `--resume` 启动路径在 `session_lifecycle.rs` 中手动恢复消息，未复用该逻辑，导致用户实际从 Resume 模式进入时上下键没有历史输入。修复：抽取 `apply_resume_input_history()` 并同时接入 `/resume` 与 `--resume` 路径，补充 App history 写入回归测试。 |
+| 93 | 全局 skills 路径误指向项目相对 .agents，导致 ~/.agents/skills/superpowers 不进 / 补全 | 高 | 修复中 | 未确认 | 2026-05 | 根因：prompt skill loader 复用 share::config::paths::global_skills_dir()，该共享契约返回相对 .agents/skills，导致没有扫描 ~/.agents/skills；修复：loader 在 prompt domain 内基于 home 解析 ~/.agents/skills，保留项目 .agents/skills 与 extra skills.dirs 加载 |
+
+### #93 全局 skills 路径误指向项目相对 .agents
+
+**状态**：修复中
+
+**症状**：用户已在 `~/.agents/skills/superpowers` 安装 superpowers，但 TUI `/` 补全中看不到对应 skill。
+
+**根因**：prompt skill loader 复用 `share::config::paths::global_skills_dir()`，该共享契约返回相对路径 `.agents/skills`，导致实际扫描当前项目的 `./.agents/skills`，没有扫描文档约定的 `~/.agents/skills`。
+
+**修复**：在 prompt skill loader 内基于 `dirs::home_dir()` 解析 `~/.agents/skills`，保留无 home 时回退共享相对路径；补充路径单测与 loader 覆盖，确认 `load_all_skills()` 扫描项目 `.agents/skills`、全局 `~/.agents/skills` 和额外配置 skills 路径。
+
+**涉及路径**：
+- `agent/prompt/src/business/skill/loader.rs`
+- `agent/prompt/src/business/skill/loader_tests.rs`
 
 ### #85 Ollama provider 声明但工厂未接线（整模块死代码）
 
