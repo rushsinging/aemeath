@@ -20,5 +20,5 @@ pub use restore_files::{
 pub use sanitize_pairs::sanitize_tool_pairs;
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "restore/tests.rs"]
 mod tests;

@@ -19,5 +19,5 @@ pub use types::{
 };
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "session/tests.rs"]
 mod tests;
