@@ -136,35 +136,6 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
 // ── 辅助函数单元测试 ──────────────────────────────────────────────
 
 #[test]
-fn test_truncate_output_lines_short() {
-    use super::truncate_output_lines;
-    let result = truncate_output_lines("a\nb\nc", "Read");
-    assert_eq!(result, "a\nb\nc");
-}
-
-#[test]
-fn test_truncate_output_lines_long() {
-    use super::truncate_output_lines;
-    let long: String = (1..=20)
-        .map(|i| format!("line {i}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let result = truncate_output_lines(&long, "Read");
-    assert!(result.contains("lines omitted"), "应包含省略提示");
-    assert!(result.contains("line 1"), "应包含前几行");
-    assert!(!result.contains("line 20"), "不应包含最后一行");
-}
-
-#[test]
-fn test_truncate_output_lines_exact() {
-    use super::truncate_output_lines;
-    let exact = "a\nb\nc\nd\ne";
-    let result = truncate_output_lines(exact, "Read");
-    assert_eq!(result, exact);
-    assert!(!result.contains("lines omitted"));
-}
-
-#[test]
 fn test_summarize_non_embedded_with_known_tool() {
     use super::summarize_non_embedded_result;
     let result = summarize_non_embedded_result(Some("Read"), "anything", false);
@@ -179,18 +150,75 @@ fn test_summarize_non_embedded_with_error() {
 }
 
 #[test]
-fn test_summarize_non_embedded_unknown_tool_truncates() {
+fn test_summarize_non_embedded_unknown_tool_uses_generic_summary() {
     use super::summarize_non_embedded_result;
+    // #87 残留根因：tool_name 未知（id 错位导致 find_tool_name_by_id=None）时，
+    // 旧逻辑走 truncate 把完整原始 output 当摘要刷出（带行号正文 + "lines omitted"）。
+    // 修复后即使无工具名也只显示通用完成摘要，绝不泄漏正文。
     let long: String = (1..=20)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
     let result = summarize_non_embedded_result(None, &long, false);
-    assert!(result.contains("lines omitted"), "未知工具应走截断路径");
+    assert!(
+        !result.contains("line 10"),
+        "未知工具不应刷出原始 output 行，实际: {result}"
+    );
+    assert!(
+        !result.contains("lines omitted"),
+        "未知工具不应截断刷出原始内容，实际: {result}"
+    );
+    assert!(result.starts_with('✓'), "应为通用完成摘要，实际: {result}");
 }
 
 #[test]
 fn test_summarize_non_embedded_empty() {
     use super::summarize_non_embedded_result;
     assert_eq!(summarize_non_embedded_result(Some("Read"), "", false), "");
+}
+
+#[test]
+fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
+    // 复现 #87 实测 bug（LEAK-TRACE 日志确认）：ConversationBlock::ToolResult 的 id
+    // 在 chats.turns.tool_calls 中找不到（find_tool_name_by_id=None），旧逻辑经
+    // truncate 把完整带行号 output 当摘要逐行刷出（正文刷屏）。修复后只显示通用完成摘要。
+    use crate::tui::model::conversation::block::ConversationBlock;
+    use crate::tui::model::conversation::ids::ToolCallId;
+
+    let mut conversation = ConversationModel::default();
+    // chats 为空 → 没有任何 tool_call 与该 ToolResult id 匹配（模拟 id 错位）。
+    conversation.blocks.push(ConversationBlock::ToolResult {
+        id: ToolCallId::new("call_orphaned"),
+        output: (1..=1295)
+            .map(|i| format!("{i}\t# 活动中 Bug 行"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let block = vm
+        .roots
+        .iter()
+        .find(|block| block.block_id.contains("call_orphaned"))
+        .expect("应有该 ToolResult 对应的块");
+    let OutputBlockKind::DiagnosticNotice(text_view) = &block.kind else {
+        panic!("应为 DiagnosticNotice");
+    };
+    assert!(
+        !text_view.text.contains("活动中 Bug 行"),
+        "不应刷出原始 output 正文，实际: {}",
+        text_view.text
+    );
+    assert!(
+        !text_view.text.contains("lines omitted"),
+        "不应截断刷出原始内容，实际: {}",
+        text_view.text
+    );
+    assert!(
+        text_view.text.starts_with('✓'),
+        "应为通用完成摘要，实际: {}",
+        text_view.text
+    );
 }

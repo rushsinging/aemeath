@@ -22,7 +22,7 @@
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 二次根因：ToolResult 事件可能先于正式 ToolCall 绑定到达，ConversationModel 会先创建 OrphanToolResult；后续 ToolCall 绑定时未提升该 orphan result，导致完整结果作为块外 DiagnosticNotice 泄漏。修复：ToolCall 绑定时按 id 提升 orphan result 为 ToolResult 并完成 ToolCall；assembler 继续跳过已嵌入结果，仅保留短摘要 |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
-| 86 | TUI tool call 顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：①模型可能先流式输出未完成 assistant text，随后才发送 tool_use；旧逻辑 append ToolCall 导致结论文本在工具调用前。②ToolResult 事件可能早于正式 ToolCall 绑定；提升 orphan result 时旧逻辑 append ToolResult，导致结果在标题前。修复：ToolCall 绑定时插入未完成 assistant text 前；ToolResult 始终插入对应 ToolCall 后；已完成文本块不重排 |
+| 86 | TUI tool call 顺序颠倒 | 中 | 修复中 | 未确认 | 2026-05 | 根因：①模型可能先流式输出未完成 assistant text，随后才发送 tool_use；旧逻辑 append ToolCall 导致结论文本在工具调用前。②ToolResult 事件可能早于正式 ToolCall 绑定；提升 orphan result 时旧逻辑 append ToolResult，导致结果在标题前。修复：ToolCall 绑定时插入未完成 assistant text 前；ToolResult 始终插入对应 ToolCall 后；已完成文本块不重排 |
 | 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 待确认 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）曾将完整 tool result 内容输出到工具块下方，看起来像 LLM 正文从 tool call result 中刷出。修复：ToolResult 子块只展示 `ToolDisplay::format_result_summary()` 的短摘要（如 `✓ Read completed`），完整 Read 内容不进入渲染文本；assistant 正文保持独立 `AssistantMessage` block；补充回归测试覆盖 Read 完整 active.md 结果不泄漏到 ToolResult。残留（2026-05-30 修复）：嵌入/非嵌入路径已收敛，但 **OrphanToolResult 路径**（结果早于 ToolCall 绑定且未被提升）仍按 `summarize_orphan_result` 截断透传原始带行号 output，并以 `Warning`（橙）色整段刷出——表现为像正文刷屏且颜色不对。修复：`OrphanToolResult` 携带 `tool_name`，assembler 统一走 `summarize_non_embedded_result` 工具摘要，颜色随 Success/Error；删除 `summarize_orphan_result` |
 | 88 | TUI Read tool call 头部下重复显示一行 `Read /path` | 中 | 待确认 | 未确认 | 2026-05 | 根因：`ReadDisplay::format_header` 已输出 `Read({path})`，`format_details` 又输出 `Read {path}`，路径在工具块重复成两行。修复：`format_details` 不再重复路径，仅在带 offset/limit 时输出 `offset: N, limit: M`（无则返回空）。回归：`test_format_tool_call_read_details_does_not_duplicate_path` 等 3 个测试 |
 
@@ -1224,7 +1224,7 @@ Tool Bash timed out after 120s
 
 ### #86 TUI 中先展示结论再展示 tool call，顺序颠倒
 
-**状态**：活动中
+**状态**：修复中
 
 **症状**：LLM 响应流中先输出 text block（结论/总结文本），随后再输出 tool_use block；TUI 按流式到达顺序渲染，导致用户先看到结论文本，再看到 tool call 执行过程，视觉上不符合"先执行工具、再给结论"的因果顺序。
 
@@ -1235,9 +1235,19 @@ Tool Bash timed out after 120s
 2. 流结束后重排：在 assistant turn 完成时，将 tool_use block 移到 text block 之前重新排列
 3. 仅调整视觉顺序，不改变消息实际存储顺序（避免影响 conversation history）
 
+**精确根因 + bind 修复（2026-05-30，实机 IDTRACE 日志定位）**：实机排查 #87 泄漏时定位到 id 绑定链路的两个数据层根因，与本 bug「前置 text/thinking」同源：
+- **根因 A（index 语义错位）**：`ToolCallStart` 用「工具序号」(0,1)，而 `ObserveToolCall` 用「content-block 序号」。当 assistant 回复前面有 thinking/text block 时，content 序号整体 +1，两者错位（实测 `start 0,1` vs `bind 1,2`）→ `bind_tool` 的 `(name,index)` 精确匹配失败 → 该工具成 orphan、且首个占位永不绑定。
+- **根因 B（跨轮占位覆盖）**：整个 Chat 只有一个 `turn-1`（`chat.rs` 无任何 `turns.push`），agent loop 每轮都往同一 turn 追加占位，`index` 跨轮重复（0,1,0,1）→ `bind_tool` 的 find-first 命中**前一轮已绑定**的占位并覆盖它 → 前轮 tool_call 的 id 被冲掉 → 其结果在 assemble 时 `find_tool_name_by_id`=None → 直接导致 #87 第二处泄漏。
+
+**修复**：`bind_tool` 改为**只绑未绑定占位**——优先 `(name,index)` 精确匹配的未绑定占位，否则回退同名首个未绑定占位，**绝不覆盖已绑定占位**。一处修复同时根治 A（index 错位不再 orphan）与 B（跨轮不再覆盖丢 id），并消除 #87 第二处泄漏的数据层成因。
+
+**回归测试**（`chat_turn::tests`）：`test_bind_tool_exact_match_binds_correct_placeholder`、`test_bind_tool_falls_back_to_unbound_when_index_mismatched`、`test_bind_tool_never_overwrites_already_bound_placeholder`。
+
+**说明**：本次根治的是 id 绑定/泄漏；本条目原描述的「视觉上 text 先于 tool 的排序」若仍存在，属独立的渲染排序问题，仍需下方「修复方向」的重排，待实机确认。
+
 **涉及文件**：
-- `apps/cli/src/tui/model/output/conversation_model.rs`（block 追加逻辑）
-- `apps/cli/src/tui/model/output/assembler.rs`（OutputViewAssembler 块排序）
+- `apps/cli/src/tui/model/conversation/chat_turn.rs`（`bind_tool` 只绑未绑定占位）
+- `apps/cli/src/tui/model/conversation/model.rs` / `tool_flow.rs`（id 绑定链路）
 - `apps/cli/src/tui/render/output/`（渲染管线）
 
 ### #87 TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误
@@ -1273,6 +1283,12 @@ Tool Bash timed out after 120s
 - `apps/cli/src/tui/render/output/blocks/tool_result.rs`
 - `apps/cli/src/tui/model/conversation/block.rs`
 - `apps/cli/src/tui/model/conversation/tool_flow.rs`
+
+**第二处泄漏 + 治本（2026-05-30，实机 IDTRACE 日志定位）**：上述残留修复后实机仍复现刷正文。加 `LEAK-TRACE`/`IDTRACE` 日志定位到第二条泄漏路径与数据层根因：
+- **表层第二处泄漏**：`ConversationBlock::ToolResult` 臂在 `find_tool_name_by_id`=None（工具名未知）时，`summarize_non_embedded_result(None, ..)` 走 `truncate_output_lines` 把完整带行号 `output` 当摘要刷出（5 行 + `N lines omitted`）。修复：`summarize_non_embedded_result` 永不截断原始 output——`tool_name=None` 也走通用完成摘要（占位名 `Tool`）；删除 `truncate_output_lines`。
+- **数据层根因（详见 #86）**：`find_tool_name_by_id`=None 的成因是 `bind_tool` 跨轮覆盖/错位导致 tool_call 的 id 丢失/未绑定，已由 #86 的 `bind_tool`「只绑未绑定占位」根治。
+
+新增回归：`test_summarize_non_embedded_unknown_tool_uses_generic_summary`、`test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output`。
 
 ### #88 TUI Read tool call 头部下重复显示一行 `Read /path`
 

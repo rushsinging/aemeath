@@ -3,7 +3,7 @@ use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
-use crate::tui::render::output::tool_display::{lookup_display, result_max_lines};
+use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
     AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView,
     ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
@@ -262,7 +262,11 @@ fn find_tool_name_by_id(conversation: &ConversationModel, tool_id: &ToolCallId) 
     None
 }
 
-/// 对非嵌入的 ToolResult 生成摘要文本：优先用 `format_result_summary`，否则截断行数。
+/// 对非嵌入/孤儿 ToolResult 生成摘要文本：优先用工具的 `format_result_summary`，
+/// 工具名未知（id 错位导致 `find_tool_name_by_id`=None）时回退通用完成摘要。
+///
+/// **绝不**把完整原始 output 当文本刷出——这是 #87 的泄漏源（旧逻辑在工具名未知时
+/// 截断原始 output 当摘要，导致带行号正文 + "lines omitted" 刷屏）。
 fn summarize_non_embedded_result(
     tool_name: Option<&str>,
     output: &str,
@@ -271,31 +275,13 @@ fn summarize_non_embedded_result(
     if output.is_empty() {
         return String::new();
     }
-    if let Some(name) = tool_name {
-        let summary_lines = lookup_display(name)
-            .map(|display| display.format_result_summary(output, is_error))
-            .filter(|lines| !lines.is_empty())
-            .unwrap_or_else(|| default_tool_result_summary(name, is_error));
-        let summary = summary_lines.join("\n");
-        if !summary.is_empty() {
-            return summary;
-        }
-    }
-    // 找不到 tool name 或摘要为空时，按行截断原始 output。
-    truncate_output_lines(output, tool_name.unwrap_or("Unknown"))
-}
-
-
-/// 按 `result_max_lines` 截断 output 行，超限追加省略提示。
-fn truncate_output_lines(output: &str, tool_name: &str) -> String {
-    let max = result_max_lines(tool_name);
-    let lines: Vec<&str> = output.lines().collect();
-    if lines.len() <= max {
-        return output.to_string();
-    }
-    let mut truncated: String = lines[..max].join("\n");
-    truncated.push_str(&format!("\n... ({} lines omitted)", lines.len() - max));
-    truncated
+    // 无工具名时用占位名走通用完成摘要（如 `✓ Tool completed`），仍不泄漏正文。
+    let name = tool_name.unwrap_or("Tool");
+    let lines = lookup_display(name)
+        .map(|display| display.format_result_summary(output, is_error))
+        .filter(|lines| !lines.is_empty())
+        .unwrap_or_else(|| default_tool_result_summary(name, is_error));
+    lines.join("\n")
 }
 
 fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<ToolCallBlockView> {
