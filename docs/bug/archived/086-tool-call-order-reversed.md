@@ -1,0 +1,57 @@
+# Bug #86：TUI tool call 顺序颠倒
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-05-30 |
+| 状态 | 已确认修复 |
+| 根因类别 | TUI 渲染 / Conversation block 排序 + tool id 绑定 |
+
+## 症状
+
+TUI 中 tool call 渲染顺序颠倒，两类表现：
+
+1. LLM 响应流中先输出 assistant text block（结论/总结），随后才输出 tool_use block，用户先看到结论文本，再看到 tool call。
+2. ToolResult 事件先于正式 ToolCall 绑定到达时，先看到工具执行结果，再看到 `✓ Read(...)` 等 tool call 标题。
+
+## 根因
+
+### 排序根因
+
+1. `ConversationModel::append_or_extend_text_block()` 立即把流式 assistant 文本追加为 `AssistantText` block，并记录 `active_text_block_id`；后续 `ObserveToolCall` 绑定正式 tool call 时，旧逻辑总是 `blocks.push(ToolCall)`，未完成的 assistant 文本固定排在后到达的工具调用之前。
+2. `ToolResult` 事件可能早于正式 `ToolCall` 绑定到达，旧逻辑先创建 `OrphanToolResult`；后续提升 orphan result 时直接 append `ToolResult`，导致结果块显示在工具标题之前。
+
+### bind 数据层根因（2026-05-30 IDTRACE 日志定位）
+
+实机排查 #87 泄漏时定位到 id 绑定链路的两个数据层根因，与"前置 text/thinking"同源：
+
+- **根因 A（index 语义错位）**：`ToolCallStart` 用"工具序号"(0,1)，而 `ObserveToolCall` 用"content-block 序号"。当 assistant 回复前面有 thinking/text block 时，content 序号整体 +1，两者错位（实测 `start 0,1` vs `bind 1,2`）→ `bind_tool` 的 `(name,index)` 精确匹配失败 → 该工具成 orphan、且首个占位永不绑定。
+- **根因 B（跨轮占位覆盖）**：整个 Chat 只有一个 `turn-1`，agent loop 每轮都往同一 turn 追加占位，`index` 跨轮重复（0,1,0,1）→ `bind_tool` 的 find-first 命中**前一轮已绑定**的占位并覆盖它 → 前轮 tool_call 的 id 被冲掉 → 其结果在 assemble 时 `find_tool_name_by_id`=None → 直接导致 #87 第二处泄漏。
+
+## 修复
+
+1. `ObserveToolCall` 绑定时通过 `insert_tool_call_block_before_active_text()` 插入 block：若当前存在未完成 assistant text block，则把 ToolCall 插入该 active text block 之前；若文本块已通过 `CompleteTextBlock` 完成，保持原有 append 行为。
+2. `ToolResult` 统一通过 `insert_tool_result_after_tool_call()` 插入：若对应 ToolCall block 已存在，则结果块紧跟标题之后；否则才 append/orphan。
+3. `bind_tool` 改为**只绑未绑定占位**——优先 `(name,index)` 精确匹配的未绑定占位，否则回退同名首个未绑定占位，**绝不覆盖已绑定占位**。一处修复同时根治 A（index 错位不再 orphan）与 B（跨轮不再覆盖丢 id），并消除 #87 第二处泄漏的数据层成因。
+
+## 回归测试
+
+- `test_conversation_places_late_tool_call_before_pending_assistant_text`
+- `test_conversation_keeps_tool_after_completed_assistant_text`
+- `test_conversation_places_tool_result_after_late_bound_tool_call`
+- `test_conversation_keeps_tool_result_after_existing_tool_call`
+- `chat_turn::tests::test_bind_tool_exact_match_binds_correct_placeholder`
+- `chat_turn::tests::test_bind_tool_falls_back_to_unbound_when_index_mismatched`
+- `chat_turn::tests::test_bind_tool_never_overwrites_already_bound_placeholder`
+
+## 相关提交
+
+- `58857c7` fix(tui): 修复 tool call 显示顺序颠倒 (refs #86)
+- `004f36b` fix(tui): 修复 tool result 显示在标题前 (refs #86)
+- `07eefb1` fix(tui): bind_tool 只绑未绑定占位 + 非嵌入结果永不刷原始 output (refs #87 #86)
+- `f2afc59` feat(tui): tool call result 子块展示 output 前 N 行预览 (#64, refs #87 #86)
+
+## 验证
+
+2026-05-30 用户确认 bug #86 已修复。

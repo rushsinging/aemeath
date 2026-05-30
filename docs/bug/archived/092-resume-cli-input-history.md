@@ -1,0 +1,31 @@
+# Bug #92：--resume CLI 路径未为 Resume 模式加载 InputModel 输入历史
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-05-30 |
+| 状态 | 已确认修复 |
+| 根因类别 | CLI Resume 路径 / InputModel.history 加载 |
+
+## 症状
+
+通过 `--resume <sid>` 启动 TUI 恢复历史会话后，`InputModel.history` 仍为空，用户按上/下键无法翻阅该会话中之前发送过的用户输入条目。Feature #65 应已实现该能力，但 --resume CLI 入口未生效。
+
+## 根因
+
+Feature #65 在 TUI 侧 SessionPicker 选中 resume 时为 InputModel 加载历史，但 `--resume <sid>` 经 CLI 入口启动的代码路径未走该加载分支，遗漏了从已 load 的 session messages 中提取 user 输入并写入 `InputModel.history` 的步骤。
+
+## 修复
+
+- 在 CLI `--resume` 路径同步执行 InputModel 输入历史加载：从 resume 的 session messages 中按顺序提取 user 文本消息，调用 `ReplaceHistory` intent 写入 `InputModel.history`。
+- 与 SessionPicker 路径共用同一历史提取/写入逻辑（DRY）。
+
+## 相关提交
+
+- `06fd085` fix(tui): 修复 --resume 未加载输入历史 (refs #92 #65)
+- `4daee99` Merge bug/feature-65-not-effective
+
+## 验证
+
+2026-05-30 用户确认 bug #92 已修复。

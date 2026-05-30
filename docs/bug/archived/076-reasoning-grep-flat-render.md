@@ -1,0 +1,45 @@
+# Bug #76：reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-05-30 |
+| 状态 | 已确认修复 |
+| 根因类别 | TUI 渲染管线 / ToolCall index 透传 |
+
+## 症状
+
+使用 reasoning 模型（如 DeepSeek-V4-Pro）时，模型输出 thinking 块后紧随的 Grep 工具结果在 TUI 中显示异常：
+
+1. Grep 结果渲染成**扁平的原始文本行**，每行带完整绝对路径前缀（`/Users/.../docs/bug/active.md:N:内容`），无 `● Grep` 工具调用头和缩进。
+2. 输出区上方混入上一次 Read 工具输出的 `24` / `25` / `26` 行号碎片，未被清理/分隔。
+3. **问题出现时滚动条失效**，无法滚动查看输出区。
+
+## 根因
+
+1. spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致。
+2. resume 视觉格式本身正确（用户 `> ...`、tool call 复用 `ToolDisplay`），但旧 resume 仍直接写 `OutputArea`，不符新架构，易与 live path 分裂。
+3. 真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，但 runtime/sdk/CLI 传递正式 `ToolCall` 事件时丢失 index，CLI mapper 只能硬编码 index=0，正式 ToolCall 绑定不到 spinner 上方的 pending 工具块，后续 ToolResult 变成 orphan/扁平诊断行。
+4. `ToolResult` 同时嵌入 `ToolCall.result_summary` 并作为独立 block 存在，若 assembler 不去重，会额外生成 `DiagnosticNotice`。
+5. ViewModel 全量替换 `OutputArea` 时若不清理 `screen_line_map`/selection/rendered cache 并 clamp `scroll_offset`，旧渲染窗口会残留，表现为滚动条失效或前序碎片混入。
+
+## 修复
+
+1. spinner 上方历史输出统一由 `ConversationModel -> OutputViewModel -> OutputArea` 生成，live path 不再对用户输入、assistant/thinking streaming、tool call/result 同时做 legacy OutputArea 双写。
+2. ViewModel 渲染格式参照 resume：用户 `> ...`、thinking `💭 ...`、tool call 复用 `ToolDisplay`。
+3. runtime/sdk/CLI 全链透传 `ToolCall.index`，CLI mapper 不再硬编码 index=0。
+4. assembler 跳过已嵌入结果，避免独立 ToolResult 重复刷屏。
+5. 全量替换路径清理 cache + clamp scroll，恢复滚动条。
+
+## 相关提交
+
+- `467c0c8` fix: 修复 reasoning 后工具结果渲染错乱 (refs #76)
+- `41e..1c2` / `41e1d2c` fix: 修复 ViewModel 工具结果渲染路径 (refs #76)
+- `d0a6d28` fix: 启动 TUI 模型对话以修复工具渲染 (refs #76)
+- `a638315` fix: 透传工具调用索引修复 TUI 渲染 (refs #76)
+- `5f22965` fix: 统一 spinner 上方历史渲染 (refs #76)
+
+## 验证
+
+2026-05-30 用户确认 bug #76 已修复。
