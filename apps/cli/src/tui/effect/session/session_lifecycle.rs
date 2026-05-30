@@ -1,4 +1,5 @@
 use crate::tui::app::App;
+use crate::tui::effect::session::resume::apply_resume_input_history;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -64,6 +65,7 @@ impl App {
                         self.render_history_message(&msgs[i], subsequent);
                     }
                     self.chat.messages = msgs;
+                    apply_resume_input_history(self, &self.chat.messages.clone());
                     self.append_system_notice(format!(
                         "[resumed session {} ({} messages)]",
                         id, msg_count
