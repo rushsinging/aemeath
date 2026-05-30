@@ -38,6 +38,8 @@ pub(crate) fn apply_output_scroll_to_widget(
     // ③ 钳制 stale offset（迁自旧 clamp_scroll_state，真相归 view_state）。
     let max_offset = new_total.saturating_sub(view.last_visible_height);
     view.scroll_offset = view.scroll_offset.min(max_offset);
+    // offset 归零即回到底部：与 scroll_down 一致（被动调整），
+    // 区别于 scroll_up 用 max_offset==0（主动操作）。
     if view.scroll_offset == 0 {
         view.auto_scroll = true;
     }
@@ -203,6 +205,30 @@ mod tests {
         assert_eq!(view.scroll_offset, 0);
         assert!(view.auto_scroll);
         assert_eq!(view.last_document_total_lines, 70);
+        assert_eq!(output.scroll_offset, 0);
+        assert!(output.auto_scroll);
+    }
+
+    #[test]
+    fn test_apply_clamps_small_offset_to_zero_when_content_shrinks() {
+        // 内容收缩到不足可见高度：小 offset 被钳到 0 并恢复 auto_scroll。
+        let mut view = OutputViewState {
+            scroll_offset: 3,
+            auto_scroll: false,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+        let mut output = OutputArea::new();
+        output.last_visible_height = 10;
+        // 内容从 50 收缩到 5 行（不足一屏）
+        output.set_plain_document_lines(5);
+
+        apply_output_scroll_to_widget(&mut view, &mut output);
+
+        // max_offset=0（内容不足可见高度），offset 被钳到 0，auto_scroll 恢复。
+        assert_eq!(view.scroll_offset, 0);
+        assert!(view.auto_scroll);
+        assert_eq!(view.last_document_total_lines, 5);
         assert_eq!(output.scroll_offset, 0);
         assert!(output.auto_scroll);
     }
