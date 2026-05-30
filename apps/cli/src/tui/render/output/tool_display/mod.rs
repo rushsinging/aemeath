@@ -160,4 +160,42 @@ mod tests {
         // 不应 panic，应 fallback
         assert!(header.contains("TaskListCreate"));
     }
+
+    #[test]
+    fn test_format_tool_call_read_details_does_not_duplicate_path() {
+        // 问题 #88：header 已是 `Read(/a/b.md)`，details 不得再重复完整路径，
+        // 否则工具块下方多出一行 `Read /a/b.md`。
+        let (header, details) = format_tool_call("Read", r#"{"file_path":"/a/b.md"}"#);
+        assert!(header.contains("/a/b.md"), "header 应含路径: {header}");
+        assert!(
+            details.iter().all(|detail| !detail.contains("/a/b.md")),
+            "details 不应重复 header 已有的路径，实际: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_no_offset_yields_no_detail_line() {
+        // 边界：无 offset/limit 时不应产生任何 detail 行（避免冗余第二行）。
+        let (_header, details) = format_tool_call("Read", r#"{"file_path":"/a/b.md"}"#);
+        assert!(
+            details.is_empty(),
+            "无 offset/limit 时 Read 不应有 detail 行，实际: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_offset_limit_shown_without_path() {
+        // 正常路径：有 offset/limit 时仍展示该信息，但不重复路径。
+        let (_header, details) =
+            format_tool_call("Read", r#"{"file_path":"/a/b.md","offset":10,"limit":5}"#);
+        let joined = details.join(" ");
+        assert!(
+            joined.contains("10") && joined.contains('5'),
+            "应展示 offset/limit，实际: {details:?}"
+        );
+        assert!(
+            !joined.contains("/a/b.md"),
+            "offset/limit detail 不应重复路径，实际: {details:?}"
+        );
+    }
 }

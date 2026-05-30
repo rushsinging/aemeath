@@ -16,6 +16,7 @@ impl ConversationModel {
         };
         let ConversationBlock::OrphanToolResult {
             id: _,
+            tool_name: _,
             output,
             is_error,
         } = self.blocks.remove(position)
@@ -38,7 +39,7 @@ impl ConversationModel {
     pub(super) fn observe_tool_result(
         &mut self,
         id: String,
-        _tool_name: String,
+        tool_name: String,
         output: String,
         is_error: bool,
         image_count: usize,
@@ -58,6 +59,7 @@ impl ConversationModel {
         }
         self.blocks.push(ConversationBlock::OrphanToolResult {
             id: id.clone(),
+            tool_name,
             output,
             is_error,
         });

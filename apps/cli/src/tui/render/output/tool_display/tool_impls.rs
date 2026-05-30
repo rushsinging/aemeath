@@ -40,16 +40,15 @@ impl ToolDisplay for ReadDisplay {
         format!("● Read({path})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let path = file_path(input);
-        let offset = u64_arg(input, "offset");
+        // 路径已在 header `Read({path})` 展示，detail 不再重复（避免冗余第二行，#88）；
+        // 仅当带 offset/limit 时输出该范围信息。
+        let Some(offset) = u64_arg(input, "offset") else {
+            return vec![];
+        };
         let limit = u64_arg(input, "limit");
-        let mut detail = format!("Read {path}");
-        if let Some(o) = offset {
-            detail.push_str(&format!(" (offset: {o}"));
-            if let Some(l) = limit {
-                detail.push_str(&format!(", limit: {l}"));
-            }
-            detail.push(')');
+        let mut detail = format!("offset: {offset}");
+        if let Some(l) = limit {
+            detail.push_str(&format!(", limit: {l}"));
         }
         vec![detail]
     }

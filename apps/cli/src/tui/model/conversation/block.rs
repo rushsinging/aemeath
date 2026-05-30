@@ -45,6 +45,9 @@ pub enum ConversationBlock {
     },
     OrphanToolResult {
         id: String,
+        /// 产生该结果的工具名（结果早于 ToolCall 绑定到达）。用于渲染工具摘要，
+        /// 避免把完整原始 output 当正文刷出（#87 残留）。
+        tool_name: String,
         output: String,
         is_error: bool,
     },
@@ -119,6 +122,7 @@ mod tests {
     fn test_conversation_block_distinguishes_orphan_result() {
         let block = ConversationBlock::OrphanToolResult {
             id: "missing".to_string(),
+            tool_name: "Read".to_string(),
             output: "late".to_string(),
             is_error: false,
         };

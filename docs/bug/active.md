@@ -23,7 +23,8 @@
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
 | 86 | TUI tool call 顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：①模型可能先流式输出未完成 assistant text，随后才发送 tool_use；旧逻辑 append ToolCall 导致结论文本在工具调用前。②ToolResult 事件可能早于正式 ToolCall 绑定；提升 orphan result 时旧逻辑 append ToolResult，导致结果在标题前。修复：ToolCall 绑定时插入未完成 assistant text 前；ToolResult 始终插入对应 ToolCall 后；已完成文本块不重排 |
-| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 待确认 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）曾将完整 tool result 内容输出到工具块下方，看起来像 LLM 正文从 tool call result 中刷出。修复：ToolResult 子块只展示 `ToolDisplay::format_result_summary()` 的短摘要（如 `✓ Read completed`），完整 Read 内容不进入渲染文本；assistant 正文保持独立 `AssistantMessage` block；补充回归测试覆盖 Read 完整 active.md 结果不泄漏到 ToolResult |
+| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 待确认 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）曾将完整 tool result 内容输出到工具块下方，看起来像 LLM 正文从 tool call result 中刷出。修复：ToolResult 子块只展示 `ToolDisplay::format_result_summary()` 的短摘要（如 `✓ Read completed`），完整 Read 内容不进入渲染文本；assistant 正文保持独立 `AssistantMessage` block；补充回归测试覆盖 Read 完整 active.md 结果不泄漏到 ToolResult。残留（2026-05-30 修复）：嵌入/非嵌入路径已收敛，但 **OrphanToolResult 路径**（结果早于 ToolCall 绑定且未被提升）仍按 `summarize_orphan_result` 截断透传原始带行号 output，并以 `Warning`（橙）色整段刷出——表现为像正文刷屏且颜色不对。修复：`OrphanToolResult` 携带 `tool_name`，assembler 统一走 `summarize_non_embedded_result` 工具摘要，颜色随 Success/Error；删除 `summarize_orphan_result` |
+| 88 | TUI Read tool call 头部下重复显示一行 `Read /path` | 中 | 待确认 | 未确认 | 2026-05 | 根因：`ReadDisplay::format_header` 已输出 `Read({path})`，`format_details` 又输出 `Read {path}`，路径在工具块重复成两行。修复：`format_details` 不再重复路径，仅在带 offset/limit 时输出 `offset: N, limit: M`（无则返回空）。回归：`test_format_tool_call_read_details_does_not_duplicate_path` 等 3 个测试 |
 
 ### #85 Ollama provider 声明但工厂未接线（整模块死代码）
 
@@ -1252,16 +1253,43 @@ Tool Bash timed out after 120s
 **修复**：
 1. ToolResult 子块只展示短摘要（例如 `✓ Read completed`），完整 Read 内容不进入渲染文本。
 2. assistant 正文保持独立 `AssistantMessage` block，不混入 ToolResult。
-3. 非嵌入 ToolResult 使用工具 display 摘要，OrphanToolResult 走截断显示。
+3. 非嵌入与 Orphan ToolResult 均使用工具 display 摘要（不再透传/截断原始 output）。
+
+**残留修复（2026-05-30）**：上一轮仅收敛了嵌入/非嵌入路径，OrphanToolResult 路径（结果早于 ToolCall 绑定且未提升）仍走 `summarize_orphan_result` 截断透传原始带行号 `output`，并以 `Warning`（橙）色整段刷出——表现为"正文刷屏 + 颜色不对"。本次：
+- `ConversationBlock::OrphanToolResult` 新增 `tool_name` 字段，`observe_tool_result` push 时写入（此前 `_tool_name` 被丢弃）。
+- assembler 的 orphan 臂改走 `summarize_non_embedded_result(Some(tool_name), ..)`，与非嵌入路径统一（DRY）；颜色随 Success/Error 而非 Warning。
+- 删除冗余的 `summarize_orphan_result`。
 
 **回归测试**：
 1. `test_output_assembler_summarizes_embedded_tool_result_without_full_output`：Read 完整输出不会进入 ToolResult 子块。
 2. `test_output_assembler_keeps_assistant_text_outside_read_result`：Read 完整 active.md 内容不泄漏到 ToolResult，后续 LLM 正文保持独立 AssistantMessage。
-3. `test_non_embedded_tool_result_uses_summary` / `test_orphan_tool_result_is_truncated`：非嵌入和 orphan 路径不会完整刷屏。
+3. `test_non_embedded_tool_result_uses_summary`：非嵌入路径走摘要不刷屏。
+4. `test_orphan_read_result_shows_summary_not_full_content` / `test_orphan_tool_result_shows_summary_not_raw_output`：orphan 路径只显示工具摘要、颜色为 Success，不刷原始内容。
 
 **涉及文件**：
 - `apps/cli/src/tui/view_assembler/output.rs`
 - `apps/cli/src/tui/view_assembler/output_tests.rs`
 - `apps/cli/src/tui/view_assembler/output_unit_tests.rs`
 - `apps/cli/src/tui/render/output/blocks/tool_result.rs`
+- `apps/cli/src/tui/model/conversation/block.rs`
+- `apps/cli/src/tui/model/conversation/tool_flow.rs`
+
+### #88 TUI Read tool call 头部下重复显示一行 `Read /path`
+
+**状态**：待确认
+
+**症状**：Read 工具调用渲染时，头部 `✓ Read(/path)` 下方多出一行冗余的 `Read /path`，路径重复显示。
+
+**根因（已确认）**：`ReadDisplay::format_header` 输出 `Read({path})`（含路径），`format_details` 又输出 `Read {path}`（再次含路径）；`render_tool_call` 把 header 作首行、每条 detail 作后续行，于是路径出现两次。对照 `Glob`/`WebFetch` 的 `format_details` 已是空 `vec![]`，Read 属漏改。
+
+**修复**：`ReadDisplay::format_details` 不再重复路径——无 offset/limit 时返回空 `vec![]`，仅在带 offset 时输出 `offset: N`（含 limit 时追加 `, limit: M`）。
+
+**回归测试**（`tool_display::tests`）：
+1. `test_format_tool_call_read_details_does_not_duplicate_path`：details 不含 header 已有的路径。
+2. `test_format_tool_call_read_no_offset_yields_no_detail_line`：无 offset/limit 时 details 为空。
+3. `test_format_tool_call_read_offset_limit_shown_without_path`：有 offset/limit 时展示该信息且不重复路径。
+
+**涉及文件**：
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
+- `apps/cli/src/tui/render/output/tool_display/mod.rs`
 

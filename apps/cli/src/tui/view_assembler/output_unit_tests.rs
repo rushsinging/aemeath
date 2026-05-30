@@ -3,7 +3,50 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
-use crate::tui::view_model::OutputBlockKind;
+use crate::tui::view_model::{OutputBlockKind, SemanticStyle};
+
+#[test]
+fn test_orphan_read_result_shows_summary_not_full_content() {
+    // 问题 #87 残留：orphan Read result（结果早于 ToolCall 绑定且未被提升）
+    // 不应把完整带行号文件内容刷出（看起来像 LLM 正文），应显示工具摘要，
+    // 且颜色为 Success（绿）而非 Warning（橙）。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "x".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-orphan".to_string(),
+        tool_name: "Read".to_string(),
+        output: "1\t# 活动中 Feature\n2\t\n3\t|#|标题|\n4\t---\n5\t|8|Memory|".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let orphan = vm
+        .roots
+        .iter()
+        .find(|block| block.block_id.starts_with("orphan-"))
+        .expect("应有 orphan block");
+    let OutputBlockKind::DiagnosticNotice(text_view) = &orphan.kind else {
+        panic!("orphan 应为 DiagnosticNotice");
+    };
+    assert!(
+        !text_view.text.contains("活动中 Feature"),
+        "orphan 不应刷出原始文件正文内容，实际: {}",
+        text_view.text
+    );
+    assert!(
+        text_view.text.contains("Read"),
+        "orphan 应显示工具摘要（含 Read），实际: {}",
+        text_view.text
+    );
+    assert_eq!(
+        text_view.style,
+        SemanticStyle::Success,
+        "非错误 orphan 摘要应为 Success 色而非 Warning"
+    );
+}
 
 #[test]
 fn test_non_embedded_tool_result_uses_summary() {
@@ -43,9 +86,9 @@ fn test_non_embedded_tool_result_uses_summary() {
 }
 
 #[test]
-fn test_orphan_tool_result_is_truncated() {
+fn test_orphan_tool_result_shows_summary_not_raw_output() {
     // OrphanToolResult 路径：tool result 在 tool call 之前到达。
-    // 验证完整 output 不被原样透传，而是截断。
+    // 验证完整 output 不被原样透传/截断刷出，而是走工具摘要（#87）。
     let mut conversation = ConversationModel::default();
     conversation.apply(ConversationIntent::StartChat {
         submission: "search".to_string(),
@@ -72,15 +115,20 @@ fn test_orphan_tool_result_is_truncated() {
         .expect("应有 orphan DiagnosticNotice block");
 
     if let OutputBlockKind::DiagnosticNotice(text_view) = &orphan.kind {
-        let line_count = text_view.text.lines().count();
-        assert!(
-            line_count <= 10,
-            "orphan result 应被截断，实际有 {line_count} 行"
+        assert_eq!(
+            text_view.text, "✓ Bash completed",
+            "orphan 应显示工具摘要而非原始 output，实际: {}",
+            text_view.text
         );
         assert!(
-            text_view.text.contains("lines omitted"),
-            "orphan result 应包含省略提示，实际内容: {}",
+            !text_view.text.contains("line 50"),
+            "orphan 不应刷出原始 output 行，实际: {}",
             text_view.text
+        );
+        assert_eq!(
+            text_view.style,
+            SemanticStyle::Success,
+            "非错误 orphan 摘要应为 Success 色"
         );
     }
 }
@@ -114,23 +162,6 @@ fn test_truncate_output_lines_exact() {
     let result = truncate_output_lines(exact, "Read");
     assert_eq!(result, exact);
     assert!(!result.contains("lines omitted"));
-}
-
-#[test]
-fn test_summarize_orphan_result_empty() {
-    use super::summarize_orphan_result;
-    assert_eq!(summarize_orphan_result(""), "");
-}
-
-#[test]
-fn test_summarize_orphan_result_long_truncates() {
-    use super::summarize_orphan_result;
-    let long: String = (1..=20)
-        .map(|i| format!("line {i}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let result = summarize_orphan_result(&long);
-    assert!(result.contains("lines omitted"), "orphan 长文本应被截断");
 }
 
 #[test]

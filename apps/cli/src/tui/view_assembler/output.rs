@@ -176,10 +176,16 @@ impl OutputViewAssembler {
                 }
                 ConversationBlock::OrphanToolResult {
                     id,
+                    tool_name,
                     output,
                     is_error,
                 } => {
-                    let text = summarize_orphan_result(output);
+                    // 与非嵌入路径一致（DRY）：只展示工具摘要（如 `✓ Read completed`），
+                    // 绝不把完整原始 output 当正文逐行刷出；颜色随成功/失败而非 Warning（#87）。
+                    let text = summarize_non_embedded_result(Some(tool_name), output, *is_error);
+                    if text.is_empty() {
+                        continue;
+                    }
                     roots.push(leaf(
                         format!("orphan-{id}"),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -188,7 +194,7 @@ impl OutputViewAssembler {
                             style: if *is_error {
                                 SemanticStyle::Error
                             } else {
-                                SemanticStyle::Warning
+                                SemanticStyle::Success
                             },
                         }),
                     ));
@@ -279,13 +285,6 @@ fn summarize_non_embedded_result(
     truncate_output_lines(output, tool_name.unwrap_or("Unknown"))
 }
 
-/// 对孤儿 ToolResult 截断行数（无法确定 tool name，使用默认行数）。
-fn summarize_orphan_result(output: &str) -> String {
-    if output.is_empty() {
-        return String::new();
-    }
-    truncate_output_lines(output, "Unknown")
-}
 
 /// 按 `result_max_lines` 截断 output 行，超限追加省略提示。
 fn truncate_output_lines(output: &str, tool_name: &str) -> String {
