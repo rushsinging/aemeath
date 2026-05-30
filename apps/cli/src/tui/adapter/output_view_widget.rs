@@ -4,14 +4,22 @@
 //! 时序（每帧渲染前）：
 //! 1. 把上一帧 render 回填的 `output_area.last_visible_height` 反喂回 view_state，
 //!    供滚动钳制使用（view_state 不持有 document/可见高度，由 render 期回填）；
-//! 2. 据 document 总行数与可见高度钳制 view_state.scroll_offset（迁自旧
+//! 2. 检测文档行数增长量，`auto_scroll=false` 时补偿 `view_state.scroll_offset`，
+//!    保持用户视窗内容固定（不受底部新增内容影响）；
+//! 3. 据 document 总行数与可见高度钳制 view_state.scroll_offset（迁自旧
 //!    `output_widget.rs::clamp_scroll_state`，真相归 view_state）；
-//! 3. 把钳制后的 view_state 滚动态写回 widget 镜像。
+//! 4. 把钳制后的 view_state 滚动态写回 widget 镜像。
 
 use crate::tui::render::output_area::OutputArea;
 use crate::tui::view_state::output::OutputViewState;
 
-/// 据 view_state 滚动真相写回 widget 镜像（含 last_visible_height 反喂 + 钳制）。
+/// 据 view_state 滚动真相写回 widget 镜像（含 last_visible_height 反喂 + 内容增长补偿 + 钳制）。
+///
+/// 时序（每帧渲染前）：
+/// 1. 把上一帧 render 回填的可见高度反喂回 view_state；
+/// 2. 检测文档行数增长，auto_scroll=false 时补偿 scroll_offset，保持视窗内容固定；
+/// 3. 钳制 scroll_offset 到 max_offset；
+/// 4. 把钳制后的 view_state 滚动态写回 widget 镜像。
 pub(crate) fn apply_output_scroll_to_widget(
     view: &mut OutputViewState,
     output_area: &mut OutputArea,
@@ -19,17 +27,22 @@ pub(crate) fn apply_output_scroll_to_widget(
     // ① 反喂上一帧渲染回填的可见高度。
     view.last_visible_height = output_area.last_visible_height;
 
-    // ② 钳制 stale offset（迁自旧 clamp_scroll_state，真相归 view_state）。
-    let max_offset = output_area
-        .document()
-        .total_lines()
-        .saturating_sub(view.last_visible_height);
+    // ② 内容增长补偿：auto_scroll=false 时保持视窗顶部行号不变。
+    let new_total = output_area.document().total_lines();
+    if !view.auto_scroll {
+        let growth = new_total.saturating_sub(view.last_document_total_lines);
+        view.scroll_offset = view.scroll_offset.saturating_add(growth);
+    }
+    view.last_document_total_lines = new_total;
+
+    // ③ 钳制 stale offset（迁自旧 clamp_scroll_state，真相归 view_state）。
+    let max_offset = new_total.saturating_sub(view.last_visible_height);
     view.scroll_offset = view.scroll_offset.min(max_offset);
     if view.scroll_offset == 0 {
         view.auto_scroll = true;
     }
 
-    // ③ 单向写回 widget 镜像。
+    // ④ 单向写回 widget 镜像。
     output_area.scroll_offset = view.scroll_offset;
     output_area.auto_scroll = view.auto_scroll;
 }
@@ -58,6 +71,7 @@ mod tests {
         let mut view = OutputViewState {
             scroll_offset: 5,
             auto_scroll: false,
+            last_document_total_lines: 100,
             ..Default::default()
         };
         let mut output = OutputArea::new();
@@ -144,5 +158,52 @@ mod tests {
         assert!(!output.is_selecting);
         assert_eq!(output.selection_start, None);
         assert_eq!(output.selection_end, None);
+    }
+
+    #[test]
+    fn test_apply_compensates_for_content_growth_when_not_auto_scroll() {
+        let mut view = OutputViewState {
+            scroll_offset: 5,
+            auto_scroll: false,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+        let mut output = OutputArea::new();
+        output.last_visible_height = 20;
+        // 内容 60 行（比上一帧多 10 行）
+        output.set_plain_document_lines(60);
+
+        apply_output_scroll_to_widget(&mut view, &mut output);
+
+        // 正常路径：内容增长 10 行，offset 应从 5 补偿到 15（保持视窗内容固定）。
+        // max_offset = 60 - 20 = 40，15 < 40 不触发钳制，auto_scroll 保持 false。
+        assert_eq!(view.scroll_offset, 15);
+        assert!(!view.auto_scroll);
+        assert_eq!(view.last_document_total_lines, 60);
+        assert_eq!(output.scroll_offset, 15);
+        assert!(!output.auto_scroll);
+    }
+
+    #[test]
+    fn test_apply_no_compensation_when_auto_scroll() {
+        let mut view = OutputViewState {
+            scroll_offset: 0,
+            auto_scroll: true,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+        let mut output = OutputArea::new();
+        output.last_visible_height = 20;
+        // 内容从 50 → 70（增长 20 行），但 auto_scroll=true 不补偿
+        output.set_plain_document_lines(70);
+
+        apply_output_scroll_to_widget(&mut view, &mut output);
+
+        // auto_scroll=true：scroll_offset 保持 0（贴尾），不受增长影响。
+        assert_eq!(view.scroll_offset, 0);
+        assert!(view.auto_scroll);
+        assert_eq!(view.last_document_total_lines, 70);
+        assert_eq!(output.scroll_offset, 0);
+        assert!(output.auto_scroll);
     }
 }
