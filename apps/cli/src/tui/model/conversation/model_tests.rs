@@ -122,6 +122,96 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
 }
 
 #[test]
+fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "check docs".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveAssistantText {
+        text: "结论先到".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: "Read docs".to_string(),
+    });
+
+    let tool_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
+            )
+        })
+        .expect("tool block");
+    let text_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::AssistantText { text, .. } if text == "结论先到"
+            )
+        })
+        .expect("assistant text block");
+
+    assert!(
+        tool_pos < text_pos,
+        "后到达的 tool call 应显示在待完成文本块之前"
+    );
+}
+
+#[test]
+fn test_conversation_keeps_tool_after_completed_assistant_text() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "check docs".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveAssistantText {
+        text: "已经完成的文字".to_string(),
+    });
+    model.apply(ConversationIntent::CompleteTextBlock);
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: "Read docs".to_string(),
+    });
+
+    let text_pos = model
+        .blocks
+        .iter()
+        .position(|block| matches!(
+            block,
+            super::block::ConversationBlock::AssistantText { text, .. } if text == "已经完成的文字"
+        ))
+        .expect("assistant text block");
+    let tool_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
+            )
+        })
+        .expect("tool block");
+
+    assert!(text_pos < tool_pos, "已完成文本块不应被后续工具调用重排");
+}
+
+#[test]
 fn test_queue_submission_pushes_queued_user_message_block() {
     // 正常路径：排队提交经 ConversationModel 进入 QueuedUserMessage 块（取代旧
     // OutputArea::queued_messages 命令式显示路径）。
