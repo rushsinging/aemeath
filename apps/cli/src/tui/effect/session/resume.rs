@@ -1,5 +1,6 @@
 use crate::tui::adapter::status_widget::apply_runtime_status_to_widget;
 use crate::tui::app::App;
+use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 
 impl App {
@@ -28,9 +29,80 @@ impl App {
             self.render_history_message(&messages[i], subsequent);
         }
         self.chat.messages = messages;
+        self.model
+            .input
+            .apply(InputIntent::ReplaceHistory(extract_user_input_history(
+                &self.chat.messages,
+            )));
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
         ));
+    }
+}
+
+fn extract_user_input_history(messages: &[sdk::ChatMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .filter_map(extract_user_input_text)
+        .filter(|text| !text.is_empty())
+        .collect()
+}
+
+fn extract_user_input_text(message: &sdk::ChatMessage) -> Option<String> {
+    let text = message.text_content();
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_user_input_history_keeps_user_text_in_order() {
+        let messages = vec![
+            sdk::ChatMessage::user_text("first"),
+            sdk::ChatMessage::assistant_text("answer"),
+            sdk::ChatMessage::user_text("second"),
+        ];
+
+        let history = extract_user_input_history(&messages);
+
+        assert_eq!(history, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_user_input_history_skips_empty_user_text() {
+        let messages = vec![
+            sdk::ChatMessage::user_text(""),
+            sdk::ChatMessage::user_text("   "),
+            sdk::ChatMessage::user_text("keep"),
+        ];
+
+        let history = extract_user_input_history(&messages);
+
+        assert_eq!(history, vec!["keep".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_user_input_history_joins_text_blocks_only() {
+        let messages = vec![sdk::ChatMessage {
+            role: "user".to_string(),
+            content: json!([
+                { "type": "text", "text": "hello " },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "abc" } },
+                { "type": "text", "text": "world" }
+            ]),
+        }];
+
+        let history = extract_user_input_history(&messages);
+
+        assert_eq!(history, vec!["hello world".to_string()]);
     }
 }

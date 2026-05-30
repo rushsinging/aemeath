@@ -70,6 +70,12 @@ impl InputModel {
             }
             InputIntent::MoveHistoryPrevious => self.history_previous(),
             InputIntent::MoveHistoryNext => self.history_next(),
+            InputIntent::ReplaceHistory(entries) => {
+                self.history.entries = entries;
+                self.history.selected_index = None;
+                self.history.saved_input.clear();
+                Vec::new()
+            }
             InputIntent::SetCompletions { query, items } => {
                 self.completion.set_items(items, query);
                 self.mode = if self.completion.visible {
@@ -267,5 +273,50 @@ mod tests {
             changes.first(),
             Some(InputChange::TextChanged { text, cursor }) if text.is_empty() && *cursor == 0
         ));
+    }
+
+    #[test]
+    fn test_input_model_replace_history_allows_previous_navigation() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::ReplaceHistory(vec![
+            "first".to_string(),
+            "second".to_string(),
+        ]));
+
+        let changes = model.apply(InputIntent::MoveHistoryPrevious);
+
+        assert_eq!(model.document.buffer, "second");
+        assert_eq!(model.history.selected_index, Some(1));
+        assert!(changes.iter().any(|change| matches!(
+            change,
+            InputChange::HistorySelected { text, cursor } if text == "second" && *cursor == 6
+        )));
+    }
+
+    #[test]
+    fn test_input_model_history_next_restores_saved_draft() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::ReplaceHistory(vec!["past".to_string()]));
+        model.apply(InputIntent::InsertText("draft".to_string()));
+        model.apply(InputIntent::MoveHistoryPrevious);
+
+        model.apply(InputIntent::MoveHistoryNext);
+
+        assert_eq!(model.document.buffer, "draft");
+        assert_eq!(model.history.selected_index, None);
+    }
+
+    #[test]
+    fn test_input_model_replace_history_clears_active_selection() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::ReplaceHistory(vec!["old".to_string()]));
+        model.apply(InputIntent::MoveHistoryPrevious);
+
+        model.apply(InputIntent::ReplaceHistory(vec!["new".to_string()]));
+
+        assert_eq!(model.history.entries, vec!["new".to_string()]);
+        assert_eq!(model.history.selected_index, None);
+        assert_eq!(model.history.saved_input, "");
+        assert_eq!(model.document.buffer, "old");
     }
 }
