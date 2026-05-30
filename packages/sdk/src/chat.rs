@@ -35,6 +35,12 @@ pub struct AgentToolCallProgressView {
     pub summary: String,
 }
 
+impl std::fmt::Display for AgentToolCallProgressView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.name, self.summary)
+    }
+}
+
 /// Sub-agent 进度类型。
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentProgressKindView {
@@ -46,11 +52,34 @@ pub enum AgentProgressKindView {
     },
 }
 
+impl std::fmt::Display for AgentProgressKindView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message { text } => write!(f, "{text}"),
+            Self::ToolCalls { calls } => {
+                for (i, call) in calls.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{call}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Sub-agent 进度事件。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentProgressEventView {
     pub sequence: usize,
     pub kind: AgentProgressKindView,
+}
+
+impl std::fmt::Display for AgentProgressEventView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)
+    }
 }
 
 /// workspace 栈条目视图。
@@ -261,6 +290,41 @@ mod tests {
             }
             other => panic!("unexpected kind: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_agent_progress_display_tool_calls() {
+        let event = AgentProgressEventView {
+            sequence: 1,
+            kind: AgentProgressKindView::ToolCalls {
+                calls: vec![
+                    AgentToolCallProgressView {
+                        id: "c1".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "ls"}),
+                        summary: "ls -la /project".to_string(),
+                    },
+                    AgentToolCallProgressView {
+                        id: "c2".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "TODO.md"}),
+                        summary: "project/TODO.md".to_string(),
+                    },
+                ],
+            },
+        };
+        assert_eq!(format!("{event}"), "Bash ls -la /project, Read project/TODO.md");
+    }
+
+    #[test]
+    fn test_agent_progress_display_message() {
+        let event = AgentProgressEventView {
+            sequence: 2,
+            kind: AgentProgressKindView::Message {
+                text: "分析完成".to_string(),
+            },
+        };
+        assert_eq!(format!("{event}"), "分析完成");
     }
 
     #[test]

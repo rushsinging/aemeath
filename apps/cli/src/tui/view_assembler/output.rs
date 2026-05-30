@@ -143,7 +143,7 @@ impl OutputViewAssembler {
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: id.clone(),
-                            text: format!("{tool_id}: {message}"),
+                            text: message.clone(),
                             style: SemanticStyle::Running,
                         }),
                     ));

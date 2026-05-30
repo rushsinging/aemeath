@@ -110,7 +110,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::AgentProgress { tool_id, event } => {
             conversation(ConversationIntent::RecordAgentProgress {
                 tool_id: tool_id.clone(),
-                message: format!("{event:?}"),
+                message: format!("{event}"),
             })
         }
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
