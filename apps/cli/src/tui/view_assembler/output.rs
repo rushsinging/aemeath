@@ -373,3 +373,7 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
 #[cfg(test)]
 #[path = "output_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "output_unit_tests.rs"]
+mod unit_tests;
