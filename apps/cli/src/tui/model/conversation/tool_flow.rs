@@ -26,12 +26,12 @@ impl ConversationModel {
             .complete_active_tool(id, output.clone(), is_error)
             .is_some()
         {
-            self.blocks.push(ConversationBlock::ToolResult {
-                id: ToolCallId::new(id.to_string()),
+            self.insert_tool_result_after_tool_call(
+                ToolCallId::new(id.to_string()),
                 output,
                 is_error,
-                image_count: 0,
-            });
+                0,
+            );
         }
     }
 
@@ -44,12 +44,12 @@ impl ConversationModel {
         image_count: usize,
     ) -> Vec<ConversationChange> {
         if let Some(status) = self.complete_active_tool(&id, output.clone(), is_error) {
-            self.blocks.push(ConversationBlock::ToolResult {
-                id: ToolCallId::new(id.clone()),
+            self.insert_tool_result_after_tool_call(
+                ToolCallId::new(id.clone()),
                 output,
                 is_error,
                 image_count,
-            });
+            );
             return vec![
                 ConversationChange::ToolCallCompleted { id, status },
                 ConversationChange::StyleBoundaryResetRequired,

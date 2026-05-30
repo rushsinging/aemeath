@@ -22,6 +22,8 @@
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | 中 | 待确认 | 未确认 | 2026-05 | 二次根因：ToolResult 事件可能先于正式 ToolCall 绑定到达，ConversationModel 会先创建 OrphanToolResult；后续 ToolCall 绑定时未提升该 orphan result，导致完整结果作为块外 DiagnosticNotice 泄漏。修复：ToolCall 绑定时按 id 提升 orphan result 为 ToolResult 并完成 ToolCall；assembler 继续跳过已嵌入结果，仅保留短摘要 |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
+| 86 | TUI tool call 顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：①模型可能先流式输出未完成 assistant text，随后才发送 tool_use；旧逻辑 append ToolCall 导致结论文本在工具调用前。②ToolResult 事件可能早于正式 ToolCall 绑定；提升 orphan result 时旧逻辑 append ToolResult，导致结果在标题前。修复：ToolCall 绑定时插入未完成 assistant text 前；ToolResult 始终插入对应 ToolCall 后；已完成文本块不重排 |
+| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 活动中 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）将完整 tool result 内容全部输出，不受 `result_max_lines`/`TOOL_RESULT_MAX_LINES` 限制；同时 tool result 渲染格式不正确——原始 tool result 文本（含行号标注等）被当作纯文本逐行显示，未走 ToolDisplay 的 `format_result_summary` 截断/格式化。实测示例：`✓ Read completed` 后紧接整个文件的逐行带行号内容全部输出。与 #82/#83 同族：`ToolDisplay` 的 `result_max_lines()`/`format_result_summary()` 已定义但未被 assembler 接入，完整 result 文本直接透传到渲染层 |
 
 ### #85 Ollama provider 声明但工厂未接线（整模块死代码）
 
@@ -43,25 +45,33 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
-| 86 | TUI 中先展示结论再展示 tool call，顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：模型可能先流式输出未完成 assistant text block，随后才发送 tool_use；ConversationModel 过去按事件到达顺序 append ToolCall block，导致 pending 结论文本显示在工具调用前。修复：绑定 ToolCall 时若存在未完成 assistant text block，将 ToolCall 插入该 active text block 之前；已完成文本块不重排，避免破坏正常流式显示 |
 | 87 | tool call result 渲染格式错误且不受最大行数限制 | 中 | 活动中 | 未确认 | 2026-05 | tool call result 渲染时直接展示了工具返回的原始 diff 内容（如 Edit 的 ---DIFF--- 全文），而非格式化的摘要（如 `✓ replaced 1 occurrence(s) in ...`）；同时 tool result 内容不受最大行数输出制约，大文件操作的完整 diff 会全部刷屏，导致输出区被极长内容淹没。疑似 #58 渲染管线重构后 tool result 走了原始文本渲染路径而非 ToolResultBlockView 的格式化摘要路径，且缺少 max_lines 截断 |
 
-### #86 TUI 中先展示结论再展示 tool call，顺序颠倒
+### #86 TUI tool call 顺序颠倒
 
 **状态**：待确认
 
-**症状**：LLM 响应流中先输出 assistant text block（结论/总结），随后再输出 tool_use block；TUI 按事件到达顺序渲染时，用户会先看到结论文本，再看到 tool call 执行过程，视觉上不符合“先执行工具、再给结论”的因果顺序。
+**症状**：TUI 中 tool call 渲染顺序颠倒，表现包含两类：
+1. LLM 响应流中先输出 assistant text block（结论/总结），随后才输出 tool_use block，用户会先看到结论文本，再看到 tool call 执行过程。
+2. ToolResult 事件先于正式 ToolCall 绑定到达时，用户会先看到工具执行结果，再看到 `✓ Read(...)` 等 tool call 标题行。
 
-**根因（已确认）**：`ConversationModel::append_or_extend_text_block()` 会立即把流式 assistant 文本追加为 `AssistantText` block，并记录 `active_text_block_id`；后续 `ObserveToolCall` 绑定正式 tool call 时，旧逻辑总是 `blocks.push(ToolCall)`，因此未完成的 assistant 文本会固定排在后到达的工具调用之前。
+**根因（已确认）**：
+1. `ConversationModel::append_or_extend_text_block()` 会立即把流式 assistant 文本追加为 `AssistantText` block，并记录 `active_text_block_id`；后续 `ObserveToolCall` 绑定正式 tool call 时，旧逻辑总是 `blocks.push(ToolCall)`，因此未完成的 assistant 文本会固定排在后到达的工具调用之前。
+2. `ToolResult` 事件可能早于正式 `ToolCall` 绑定到达，旧逻辑先创建 `OrphanToolResult`；后续提升 orphan result 时直接 append `ToolResult`，而 `ToolCall` 已按 active text 规则插入到更靠前位置，导致结果块显示在工具标题之前。
 
-**修复**：`ObserveToolCall` 绑定时改为通过 `insert_tool_call_block_before_active_text()` 插入 block：若当前存在未完成 assistant text block，则把 ToolCall 插入该 active text block 之前；若文本块已通过 `CompleteTextBlock` 完成，保持原有 append 行为，避免破坏正常已经完成的文本输出顺序。
+**修复**：
+1. `ObserveToolCall` 绑定时通过 `insert_tool_call_block_before_active_text()` 插入 block：若当前存在未完成 assistant text block，则把 ToolCall 插入该 active text block 之前；若文本块已通过 `CompleteTextBlock` 完成，保持原有 append 行为。
+2. `ToolResult` 统一通过 `insert_tool_result_after_tool_call()` 插入：若对应 ToolCall block 已存在，则结果块紧跟标题之后；否则才 append/orphan，避免结果先于标题显示。
 
 **回归测试**：
 1. `test_conversation_places_late_tool_call_before_pending_assistant_text`：先收到 assistant 文本、后收到 ToolCall 时，ToolCall block 应显示在未完成文本之前。
 2. `test_conversation_keeps_tool_after_completed_assistant_text`：已完成 assistant 文本后再收到 ToolCall，不应重排到文本之前。
+3. `test_conversation_places_tool_result_after_late_bound_tool_call`：ToolResult 先到、ToolCall 后绑定时，结果仍显示在标题之后。
+4. `test_conversation_keeps_tool_result_after_existing_tool_call`：正常 ToolCall 后再收到 ToolResult 时，结果紧跟标题之后。
 
 **涉及路径**：
 - `apps/cli/src/tui/model/conversation/model.rs`
+- `apps/cli/src/tui/model/conversation/tool_flow.rs`
 - `apps/cli/src/tui/model/conversation/model_tests.rs`
 
 ### #81 TUI 输出区中文按单字竖排显示
@@ -1212,7 +1222,7 @@ Tool Bash timed out after 120s
 - `apps/cli/src/tui/output_area/scroll.rs`（`scroll_up`/`scroll_down`）
 - `apps/cli/src/tui/app/update.rs`（`refresh_output_widget_from_model`）
 
-### #85 TUI 中先展示结论再展示 tool call，顺序颠倒
+### #86 TUI 中先展示结论再展示 tool call，顺序颠倒
 
 **状态**：活动中
 
@@ -1230,7 +1240,7 @@ Tool Bash timed out after 120s
 - `apps/cli/src/tui/model/output/assembler.rs`（OutputViewAssembler 块排序）
 - `apps/cli/src/tui/render/output/`（渲染管线）
 
-### #86 tool call result 渲染格式错误且不受最大行数限制
+### #87 TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误
 
 **状态**：活动中
 

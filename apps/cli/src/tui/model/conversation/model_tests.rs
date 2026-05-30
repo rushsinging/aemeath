@@ -212,6 +212,97 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
 }
 
 #[test]
+fn test_conversation_places_tool_result_after_late_bound_tool_call() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "read docs".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-1".to_string(),
+        tool_name: "Read".to_string(),
+        output: "file contents".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: "Read docs".to_string(),
+    });
+
+    let tool_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
+            )
+        })
+        .expect("tool block");
+    let result_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::ToolResult { id, .. } if id.as_ref() == "tool-1"
+            )
+        })
+        .expect("tool result block");
+
+    assert!(tool_pos < result_pos, "工具结果不应显示在工具标题之前");
+}
+
+#[test]
+fn test_conversation_keeps_tool_result_after_existing_tool_call() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "read docs".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: "Read docs".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-1".to_string(),
+        tool_name: "Read".to_string(),
+        output: "file contents".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let positions: Vec<_> = model
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, block)| match block {
+            super::block::ConversationBlock::ToolCall { id, .. }
+            | super::block::ConversationBlock::ToolResult { id, .. }
+                if id.as_ref() == "tool-1" =>
+            {
+                Some(index)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(positions.len(), 2);
+    assert!(positions[0] < positions[1]);
+}
+
+#[test]
 fn test_queue_submission_pushes_queued_user_message_block() {
     // 正常路径：排队提交经 ConversationModel 进入 QueuedUserMessage 块（取代旧
     // OutputArea::queued_messages 命令式显示路径）。
