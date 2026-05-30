@@ -1,10 +1,10 @@
-use crate::api::core::tool::ToolRegistry;
-use crate::api::tools::McpConnectionManager;
-use crate::api::tools::McpServerConfig;
 use crate::utils::bootstrap::config_paths as paths;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use tools::api::McpConnectionManager;
+use tools::api::McpServerConfig;
+use tools::api::ToolRegistry;
 
 pub fn parse_mcp_servers_config(
     config: &serde_json::Value,
@@ -112,9 +112,9 @@ pub async fn spawn_mcp_connect(
 #[cfg(test)]
 mod tests {
     use super::{merge_mcp_servers, parse_mcp_servers_config};
-    use crate::api::tools::McpServerConfig;
     use serde_json::json;
     use std::collections::HashMap;
+    use tools::api::McpServerConfig;
 
     #[test]
     fn test_parse_mcp_servers_config_reads_mcp_servers() {

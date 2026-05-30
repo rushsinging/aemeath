@@ -4,7 +4,7 @@ use sdk::{ChangeSet, CostInfo, ProjectContext, SdkError, SessionSnapshot, TaskSt
 use tokio::sync::watch;
 
 use super::accessors::AgentClientImpl;
-use crate::api::core::task::TaskStatus;
+use storage::api::TaskStatus;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -43,7 +43,7 @@ pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusV
     }
 
     let display_map = me.inner.context.task_store.get_batch_display_map().await;
-    let max_lines = crate::api::core::config::TaskListConfig::default().max_lines;
+    let max_lines = share::config::TaskListConfig::default().max_lines;
     let lines = super::mapping::task_status_lines(&active, &display_map, max_lines);
     Ok(TaskStatusView { lines })
 }

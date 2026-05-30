@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::TaskStore;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::TaskStore;
 
 pub struct TaskStopTool {
     pub store: Arc<TaskStore>,
@@ -51,13 +51,13 @@ impl Tool for TaskStopTool {
 
         // Check if task can be stopped
         match task.status {
-            share::task_ops::TaskStatus::Completed => {
+            storage::api::TaskStatus::Completed => {
                 return ToolResult::error(format!(
                     "Task #{} is already completed and cannot be stopped",
                     task_id
                 ));
             }
-            share::task_ops::TaskStatus::Deleted => {
+            storage::api::TaskStatus::Deleted => {
                 return ToolResult::error(format!("Task #{} is already deleted", task_id));
             }
             _ => {}
@@ -66,7 +66,7 @@ impl Tool for TaskStopTool {
         // Mark task as deleted
         self.store
             .update(task_id, |t| {
-                t.status = share::task_ops::TaskStatus::Deleted;
+                t.status = storage::api::TaskStatus::Deleted;
             })
             .await;
 

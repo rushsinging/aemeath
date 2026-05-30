@@ -4,9 +4,9 @@
 //! while maintaining a context stack for nested worktree navigation.
 
 use async_trait::async_trait;
+use project::api as worktree_ops;
 use serde::Deserialize;
 use serde_json::Value;
-use project::api as worktree_ops;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::path::{Path, PathBuf};
 
@@ -116,8 +116,8 @@ impl Tool for EnterWorktreeTool {
             args.branch.clone(),
         ) {
             Ok(_snapshot) => {
-                let path_base = ctx.current_path_base();
-                let working_root = ctx.current_working_root();
+                let path_base = project::api::current_path(&ctx.path_base);
+                let working_root = project::api::current_path(&ctx.working_root);
                 let branch = get_current_branch(&working_root);
                 ToolResult::success(format_workspace_context_result(
                     &format!("已进入 worktree：{}", display_target),
@@ -176,8 +176,8 @@ impl Tool for ExitWorktreeTool {
             match worktree_ops::enter_worktree(ctx, Some(PathBuf::from(&path)), None) {
                 Ok(_) => {
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
-                    let path_base = ctx.current_path_base();
-                    let working_root = ctx.current_working_root();
+                    let path_base = project::api::current_path(&ctx.path_base);
+                    let working_root = project::api::current_path(&ctx.working_root);
                     let branch = get_current_branch(&working_root);
                     ToolResult::success(format_workspace_context_result(
                         &format!("已切换到：{}", path),
@@ -192,8 +192,8 @@ impl Tool for ExitWorktreeTool {
             // 恢复上一上下文
             match worktree_ops::exit_worktree(ctx) {
                 Ok(prev) => {
-                    let path_base = ctx.current_path_base();
-                    let working_root = ctx.current_working_root();
+                    let path_base = project::api::current_path(&ctx.path_base);
+                    let working_root = project::api::current_path(&ctx.working_root);
                     let branch = get_current_branch(&working_root);
                     ToolResult::success(format_workspace_context_result(
                         &format!("已退出 worktree，恢复到：{}", prev.path_base.display()),

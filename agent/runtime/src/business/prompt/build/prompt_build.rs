@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::api::core::config::{paths, MemoryConfig};
-use crate::api::core::memory::MemoryEntry;
-use crate::api::hook::HookRunner;
-use crate::api::storage::{memory_base_dir, project_hash_from_path, MemoryStore};
+use hook::api::HookRunner;
+use share::config::{paths, MemoryConfig};
+use share::memory::MemoryEntry;
+use storage::api::{memory_base_dir, project_hash_from_path, MemoryStore};
 
 use super::git_context::{collect_git_context, is_git_repo};
 
@@ -249,7 +249,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
 
     let mut agents_md = parts.join("\n\n");
 
-    let warnings = crate::api::policy::scan_content("AGENTS.md", &agents_md);
+    let warnings = policy::api::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(
@@ -260,7 +260,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
                 w.matched_text
             );
         }
-        if let Some(prefix) = crate::api::policy::format_warnings(&warnings) {
+        if let Some(prefix) = policy::api::format_warnings(&warnings) {
             agents_md = format!("{}\n\n{}", prefix, agents_md);
         }
     }

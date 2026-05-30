@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::TaskStore;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::TaskStore;
 
 /// TaskOutputTool manages task outputs and results.
 /// Provides access to task execution results and output history.
@@ -63,10 +63,10 @@ impl Tool for TaskOutputTool {
             for task in tasks.iter().take(count) {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
-                    share::task_ops::TaskStatus::Pending => "pending",
-                    share::task_ops::TaskStatus::InProgress => "in_progress",
-                    share::task_ops::TaskStatus::Completed => "completed",
-                    share::task_ops::TaskStatus::Deleted => "deleted",
+                    storage::api::TaskStatus::Pending => "pending",
+                    storage::api::TaskStatus::InProgress => "in_progress",
+                    storage::api::TaskStatus::Completed => "completed",
+                    storage::api::TaskStatus::Deleted => "deleted",
                 };
 
                 output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
@@ -108,10 +108,10 @@ impl Tool for TaskOutputTool {
                 Some(task) => {
                     let display_id = self.store.format_display_id(&task.id).await;
                     let status = match task.status {
-                        share::task_ops::TaskStatus::Pending => "pending",
-                        share::task_ops::TaskStatus::InProgress => "in_progress",
-                        share::task_ops::TaskStatus::Completed => "completed",
-                        share::task_ops::TaskStatus::Deleted => "deleted",
+                        storage::api::TaskStatus::Pending => "pending",
+                        storage::api::TaskStatus::InProgress => "in_progress",
+                        storage::api::TaskStatus::Completed => "completed",
+                        storage::api::TaskStatus::Deleted => "deleted",
                     };
 
                     let mut output = String::new();
@@ -155,10 +155,10 @@ impl Tool for TaskOutputTool {
             for task in tasks.iter().take(count) {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = match task.status {
-                    share::task_ops::TaskStatus::Pending => "pending",
-                    share::task_ops::TaskStatus::InProgress => "in_progress",
-                    share::task_ops::TaskStatus::Completed => "completed",
-                    share::task_ops::TaskStatus::Deleted => "deleted",
+                    storage::api::TaskStatus::Pending => "pending",
+                    storage::api::TaskStatus::InProgress => "in_progress",
+                    storage::api::TaskStatus::Completed => "completed",
+                    storage::api::TaskStatus::Deleted => "deleted",
                 };
 
                 output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));

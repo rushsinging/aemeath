@@ -1,5 +1,5 @@
 use crate::api::agent::ToolCall;
-use crate::api::core::tool::ToolRegistry;
+use tools::api::ToolRegistry;
 
 pub(crate) fn split_approved_calls<'a>(
     tool_calls: &'a [ToolCall],
@@ -21,7 +21,7 @@ fn is_auto_approved(call: &ToolCall, registry: &ToolRegistry) -> bool {
             .input
             .get("command")
             .and_then(|v| v.as_str())
-            .map(crate::api::tools::is_readonly_command)
+            .map(tools::api::is_readonly_command)
             .unwrap_or(false);
     }
 
@@ -34,8 +34,8 @@ fn is_auto_approved(call: &ToolCall, registry: &ToolRegistry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::tool::ToolRegistry;
     use serde_json::json;
+    use tools::api::ToolRegistry;
 
     fn call(name: &str, input: serde_json::Value) -> ToolCall {
         ToolCall {

@@ -1,9 +1,9 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
-use crate::api::core::config::Config;
-use crate::api::hook::HookRunner;
-use crate::api::prompt::skill::Skill;
 use crate::utils::bootstrap;
+use hook::api::HookRunner;
+use prompt::api::skill::Skill;
+use share::config::Config;
 
 pub async fn build_static_prompt(
     _cwd: &std::path::Path,
@@ -19,7 +19,7 @@ pub async fn build_static_prompt(
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner(hook_runner);
-    let model_guidance = crate::api::prompt::guidance::resolve_guidance_async(
+    let model_guidance = prompt::api::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
@@ -28,7 +28,7 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(crate::api::prompt::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+    prompt.push_str(prompt::api::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
     append_skills(&mut prompt, &skills_guard);
     append_agent_roles(&mut prompt, config_file);
     if !model_guidance.is_empty() {

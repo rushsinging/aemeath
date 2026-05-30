@@ -1,21 +1,21 @@
 use crate::api::agent::ToolCall;
-use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::tool::ToolRegistry;
-use crate::api::hook::{HookData, ToolHookData};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use hook::api::{HookData, ToolHookData};
+use share::config::hooks::HookEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tools::api::ToolRegistry;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
     agent_approved: &[&ToolCall],
     registry: &Arc<ToolRegistry>,
-    agent_ctx: &crate::api::core::tool::ToolContext,
+    agent_ctx: &share::tool::ToolContext,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
     interrupted: &Arc<AtomicBool>,
 ) -> Vec<UiToolResult>
@@ -58,9 +58,9 @@ async fn execute_one_agent<S>(
     call: ToolCall,
     sink: S,
     hook_ui: HookUi<S>,
-    hook_runner: crate::api::hook::HookRunner,
+    hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
-    ag_ctx: &mut crate::api::core::tool::ToolContext,
+    ag_ctx: &mut share::tool::ToolContext,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -89,8 +89,7 @@ where
         return vec![result];
     }
 
-    let (prog_tx, mut prog_rx) =
-        tokio::sync::mpsc::channel::<crate::api::core::tool::AgentProgressEvent>(32);
+    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);
     let call_id = call.id.clone();
     let ui_sink = sink.clone();
@@ -109,9 +108,9 @@ where
         .get("Agent")
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
-    let working_root = ag_ctx.current_working_root();
+    let working_root = project::api::current_path(&ag_ctx.working_root);
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = crate::api::project::workspace_context_from_tool_context(ag_ctx);
+    let workspace = project::api::workspace_context_from_tool_context(ag_ctx);
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),

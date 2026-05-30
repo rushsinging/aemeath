@@ -3,12 +3,10 @@ use sdk::{
     ReflectionOutputView, SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
-use crate::api::core::task::TaskStatus;
-use crate::api::prompt::skill::Skill;
+use prompt::api::skill::Skill;
+use storage::api::TaskStatus;
 
-pub(crate) fn memory_config_to_sdk(
-    config: crate::api::core::config::MemoryConfig,
-) -> MemoryConfigView {
+pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {
     MemoryConfigView {
         enabled: config.enabled,
         max_entries: config.max_entries,
@@ -71,7 +69,7 @@ pub(crate) fn session_summary_from_runtime(
     let preview = session
         .messages
         .iter()
-        .find(|m| m.role == crate::api::core::message::Role::User)
+        .find(|m| m.role == share::message::Role::User)
         .map(|m| m.text_content())
         .and_then(|text| {
             let first_line = text.lines().next().unwrap_or("").trim();
@@ -96,7 +94,7 @@ pub(crate) fn session_summary_from_runtime(
 }
 
 pub(crate) fn task_status_lines(
-    tasks: &[crate::api::core::task::Task],
+    tasks: &[storage::api::Task],
     display_map: &std::collections::HashMap<String, usize>,
     max_lines: usize,
 ) -> Vec<String> {
@@ -111,9 +109,9 @@ pub(crate) fn task_status_lines(
         .count();
     let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed_count, total)];
 
-    let mut completed: Vec<&crate::api::core::task::Task> = Vec::new();
-    let mut in_progress: Vec<&crate::api::core::task::Task> = Vec::new();
-    let mut pending: Vec<&crate::api::core::task::Task> = Vec::new();
+    let mut completed: Vec<&storage::api::Task> = Vec::new();
+    let mut in_progress: Vec<&storage::api::Task> = Vec::new();
+    let mut pending: Vec<&storage::api::Task> = Vec::new();
     for task in tasks {
         match task.status {
             TaskStatus::Completed => completed.push(task),
@@ -143,7 +141,7 @@ pub(crate) fn task_status_lines(
 }
 
 fn format_task_status_line(
-    task: &crate::api::core::task::Task,
+    task: &storage::api::Task,
     display_map: &std::collections::HashMap<String, usize>,
 ) -> String {
     let icon = match task.status {
@@ -178,27 +176,27 @@ pub(super) fn workspace_context_to_sdk(
     }
 }
 
-pub(crate) fn message_to_sdk(message: crate::api::core::message::Message) -> sdk::ChatMessage {
+pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessage {
     sdk::ChatMessage {
         role: match message.role {
-            crate::api::core::message::Role::User => "user".to_string(),
-            crate::api::core::message::Role::Assistant => "assistant".to_string(),
+            share::message::Role::User => "user".to_string(),
+            share::message::Role::Assistant => "assistant".to_string(),
         },
         content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
     }
 }
 
-pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> crate::api::core::message::Message {
+pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Message {
     let role = match message.role.as_str() {
-        "assistant" => crate::api::core::message::Role::Assistant,
-        _ => crate::api::core::message::Role::User,
+        "assistant" => share::message::Role::Assistant,
+        _ => share::message::Role::User,
     };
     let content = serde_json::from_value(message.content).unwrap_or_else(|_| {
-        vec![crate::api::core::message::ContentBlock::Text {
+        vec![share::message::ContentBlock::Text {
             text: String::new(),
         }]
     });
-    crate::api::core::message::Message { role, content }
+    share::message::Message { role, content }
 }
 
 /// 将 runtime CommandResult 映射为 SDK 版本。

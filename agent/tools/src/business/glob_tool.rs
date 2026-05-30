@@ -36,8 +36,8 @@ impl Tool for GlobTool {
             None => return ToolResult::error("missing required parameter: pattern"),
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let path_base = ctx.current_path_base();
-        let working_root = ctx.current_working_root();
+        let path_base = project::api::current_path(&ctx.path_base);
+        let working_root = project::api::current_path(&ctx.working_root);
         let base_dir = match validate_search_path_from_base(path_str, &path_base, &working_root) {
             Ok(p) => p,
             Err(e) => return ToolResult::error(e),

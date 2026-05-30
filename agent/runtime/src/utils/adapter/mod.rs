@@ -10,8 +10,8 @@ pub use hook_adapter::HookRunnerAdapter;
 pub use provider_adapter::LlmClientAdapter;
 
 use crate::core::port::TaskStorePort;
-use share::task::{Task, TaskSnapshot, TaskStore};
 use std::collections::HashMap;
+use storage::api::{Task, TaskSnapshot, TaskStore};
 
 // TaskStore 在 share（共享内核）中，runtime 可直接为其实现 port trait
 #[async_trait::async_trait]

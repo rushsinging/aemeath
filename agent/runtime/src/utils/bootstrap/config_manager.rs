@@ -1,6 +1,8 @@
 //! Runtime configuration manager — load, merge, and persist shared config DTOs.
 
-use crate::api::core::config::{
+use crate::utils::bootstrap::claude_settings_adapter::ClaudeSettingsAdapter;
+use crate::utils::bootstrap::config_paths as paths;
+use share::config::{
     hooks::{self, HooksConfig},
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -13,8 +15,6 @@ use crate::api::core::config::{
     ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
     Config,
 };
-use crate::utils::bootstrap::claude_settings_adapter::ClaudeSettingsAdapter;
-use crate::utils::bootstrap::config_paths as paths;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 

@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
 use share::tool::{Tool, ToolContext, ToolResult};
 
+use project::api::{current_path, set_working_directory};
 pub use safety::is_readonly_command;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -74,7 +75,7 @@ impl Tool for BashTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(120_000);
 
-        let path_base = ctx.current_path_base();
+        let path_base = current_path(&ctx.path_base);
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut child = match Command::new("bash")
@@ -154,7 +155,7 @@ impl Tool for BashTool {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
-                    ctx.set_working_directory(new_path_base);
+                    set_working_directory(&ctx.working_root, &ctx.path_base, new_path_base);
                 }
                 let stderr = String::from_utf8_lossy(&stderr);
                 let mut out = String::new();

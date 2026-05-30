@@ -4,9 +4,9 @@ use super::logging::{
 };
 use super::progress::{build_tool_calls_progress_event, format_grouped_tool_summaries};
 use super::*;
-use crate::api::core::config::AgentRoleConfig;
-use crate::api::core::message::Message;
-use crate::api::core::tool::AgentProgressKind;
+use share::config::AgentRoleConfig;
+use share::message::Message;
+use share::tool::AgentProgressKind;
 
 #[test]
 fn test_role_max_tokens_override() {

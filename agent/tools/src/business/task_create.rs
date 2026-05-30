@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::{TaskPriority, TaskStore};
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::{TaskPriority, TaskStore};
 
 pub struct TaskCreateTool {
     pub store: Arc<TaskStore>,

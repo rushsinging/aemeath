@@ -1,4 +1,4 @@
-use crate::api::core::tool::ToolContext;
+use share::tool::ToolContext;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -9,15 +9,15 @@ pub(crate) struct ToolContextParts {
     pub(crate) path_base: Arc<Mutex<PathBuf>>,
     pub(crate) cancel: CancellationToken,
     pub(crate) read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub(crate) agent_runner: Option<Arc<dyn crate::api::core::tool::AgentRunner>>,
-    pub(crate) session_reminders: Arc<Mutex<crate::api::core::tool::SessionReminders>>,
-    pub(crate) memory_config: crate::api::core::config::MemoryConfig,
+    pub(crate) agent_runner: Option<Arc<dyn share::tool::AgentRunner>>,
+    pub(crate) session_reminders: Arc<Mutex<share::tool::SessionReminders>>,
+    pub(crate) memory_config: share::config::MemoryConfig,
     pub(crate) allow_all: bool,
     pub(crate) max_tool_concurrency: usize,
     pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) session_id: String,
-    pub(crate) context_stack: Arc<Mutex<Vec<crate::api::core::tool::WorkingContext>>>,
+    pub(crate) context_stack: Arc<Mutex<Vec<share::tool::WorkingContext>>>,
 }
 
 pub(crate) fn build_tool_context(parts: ToolContextParts) -> ToolContext {

@@ -11,7 +11,10 @@ pub mod guidance {
 }
 
 pub mod skill {
-    pub use crate::business::skill::{load_all_skills, Skill};
+    pub use crate::business::skill::{
+        builtin_commit_skill, load_all_skills, load_all_skills_cached, load_and_filter_skills,
+        load_skills_from_dir, parse_skill, read_skill_content, Skill,
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

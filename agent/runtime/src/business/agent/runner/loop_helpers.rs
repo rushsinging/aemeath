@@ -1,5 +1,5 @@
 use crate::api::compact::safe_slice;
-use crate::api::core::message::Message;
+use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
@@ -117,7 +117,7 @@ pub(super) fn append_tool_results(
     mut results: Vec<crate::api::agent::ToolResultTuple>,
     session_id: &str,
 ) {
-    crate::api::storage::persist_oversized_results(session_id, &mut results);
+    storage::api::persist_oversized_results(session_id, &mut results);
     let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
         messages.push(Message::tool_results_rich(results));
@@ -134,7 +134,7 @@ pub(super) fn append_tool_results(
 mod tests {
     use super::*;
     use crate::api::compact::MAX_TOOL_RESULT_CHARS;
-    use crate::api::core::message::ContentBlock;
+    use share::message::ContentBlock;
 
     #[test]
     fn test_append_tool_results_persists_oversized_sub_agent_result() {

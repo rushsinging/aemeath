@@ -2150,17 +2150,7 @@ name = "share"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bytes",
- "chrono",
- "dirs",
- "futures",
- "futures-util",
- "inventory",
  "log",
- "parking_lot",
- "rand",
- "regex",
- "reqwest",
  "serde",
  "serde_json",
  "serde_yml",
@@ -2168,7 +2158,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "unicode-width 0.2.0",
- "url",
  "uuid",
 ]
 
@@ -2265,6 +2254,7 @@ dependencies = [
  "serde",
  "serde_json",
  "share",
+ "tokio",
  "uuid",
 ]
 
@@ -2530,6 +2520,7 @@ dependencies = [
  "futures-util",
  "glob",
  "log",
+ "parking_lot",
  "percent-encoding",
  "project",
  "reqwest",

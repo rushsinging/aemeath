@@ -1,8 +1,5 @@
 use crate::api::agent::Agent;
 use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-use crate::api::core::message::Message;
-use crate::api::core::tool::{ToolContext, ToolRegistry};
-use crate::api::provider::StopReason;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
@@ -18,10 +15,13 @@ use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for
 use crate::business::chat::looping::{
     ChatEventSink, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
 };
+use provider::api::StopReason;
+use share::message::Message;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
+use tools::api::ToolRegistry;
 
 pub struct ChatLoopContext<S, Q>
 where
@@ -30,9 +30,9 @@ where
 {
     pub sink: S,
     pub queue: Q,
-    pub client: Arc<crate::api::provider::LlmClient>,
+    pub client: Arc<provider::api::LlmClient>,
     pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<crate::api::provider::SystemBlock>,
+    pub system_blocks: Vec<provider::api::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     pub messages: Vec<Message>,
@@ -41,17 +41,17 @@ where
     pub workspace_context: Option<crate::api::session::WorkspaceContext>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<crate::api::core::tool::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn crate::api::core::tool::AgentRunner>>,
+    pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
+    pub agent_runner: Option<Arc<dyn share::tool::AgentRunner>>,
     pub allow_all: bool,
     pub interrupted: Arc<AtomicBool>,
     pub cancel: CancellationToken,
-    pub task_store: Arc<crate::api::core::task::TaskStore>,
+    pub task_store: Arc<storage::api::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: crate::api::hook::HookRunner,
-    pub memory_config: crate::api::core::config::MemoryConfig,
+    pub hook_runner: hook::api::HookRunner,
+    pub memory_config: share::config::MemoryConfig,
     pub json_logger: Option<Arc<std::sync::Mutex<logging::JsonLogger>>>,
 }
 
@@ -99,7 +99,7 @@ where
                 workspace
                     .context_stack
                     .into_iter()
-                    .map(|entry| crate::api::core::tool::WorkingContext {
+                    .map(|entry| share::tool::WorkingContext {
                         path_base: PathBuf::from(entry.path_base),
                         working_root: PathBuf::from(entry.working_root),
                     })
@@ -107,7 +107,7 @@ where
             )),
         )
     } else {
-        let (cwd, working_root, path_base) = ToolContext::new_working_paths(cwd.clone());
+        let (cwd, working_root, path_base) = project::api::new_working_paths(cwd.clone());
         (
             cwd,
             working_root,
@@ -409,11 +409,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
-    use crate::api::hook::HookRunner;
-    use crate::api::provider::{LlmProvider, StreamHandler};
-    use crate::api::provider::{StopReason, StreamResponse, SystemBlock, Usage};
     use async_trait::async_trait;
+    use hook::api::HookRunner;
+    use provider::api::{LlmProvider, StreamHandler};
+    use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
+    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::AtomicBool;
     use tokio_util::sync::CancellationToken;
@@ -510,7 +510,7 @@ mod tests {
             _tool_schemas: &[serde_json::Value],
             handler: &mut dyn StreamHandler,
             _cancel: &CancellationToken,
-        ) -> Result<StreamResponse, crate::api::provider::LlmError> {
+        ) -> Result<StreamResponse, provider::LlmError> {
             let text = if messages
                 .iter()
                 .any(|message| message.text_content() == "stop-hook input")
@@ -522,8 +522,8 @@ mod tests {
             handler.on_text(text);
             Ok(StreamResponse {
                 assistant_message: Message {
-                    role: crate::api::core::message::Role::Assistant,
-                    content: vec![crate::api::core::message::ContentBlock::Text {
+                    role: share::message::Role::Assistant,
+                    content: vec![share::message::ContentBlock::Text {
                         text: text.to_string(),
                     }],
                 },
@@ -576,9 +576,9 @@ mod tests {
         process_chat_loop(ChatLoopContext {
             sink: sink.clone(),
             queue,
-            client: Arc::new(crate::api::provider::LlmClient::from_provider(
-                Arc::new(TwoTurnProvider),
-            )),
+            client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+                TwoTurnProvider,
+            ))),
             registry: Arc::new(ToolRegistry::new()),
             system_blocks: Vec::new(),
             system_prompt_text: String::new(),
@@ -589,19 +589,19 @@ mod tests {
             workspace_context: None,
             session_id: "test-session".to_string(),
             read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            session_reminders: Arc::new(std::sync::Mutex::new(
-                crate::api::core::tool::SessionReminders::new(),
-            )),
+            session_reminders: Arc::new(
+                std::sync::Mutex::new(share::tool::SessionReminders::new()),
+            ),
             agent_runner: None,
             allow_all: false,
             interrupted: Arc::new(AtomicBool::new(false)),
             cancel: CancellationToken::new(),
-            task_store: Arc::new(crate::api::core::task::TaskStore::new()),
+            task_store: Arc::new(storage::api::TaskStore::new()),
             max_tool_concurrency: 1,
             max_agent_concurrency: 1,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: test_hook_runner(),
-            memory_config: crate::api::core::config::MemoryConfig::default(),
+            memory_config: share::config::MemoryConfig::default(),
             json_logger: None,
         })
         .await;

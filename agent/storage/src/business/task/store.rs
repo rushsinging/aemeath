@@ -100,6 +100,46 @@ impl TaskStore {
         tasks.retain(|_, t| t.status != TaskStatus::Deleted);
     }
 
+    pub async fn is_blocked(&self, task: &Task) -> bool {
+        let tasks_snapshot = self.tasks.lock().await.clone();
+        for id in &task.blocked_by {
+            if let Some(t) = tasks_snapshot.get(id) {
+                if t.status != TaskStatus::Completed {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub async fn would_create_cycle(&self, task: &Task, blocked_by_id: &str) -> bool {
+        if task.id == blocked_by_id {
+            return true;
+        }
+
+        let tasks_snapshot = self.tasks.lock().await.clone();
+        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut stack: Vec<&str> = vec![blocked_by_id];
+
+        while let Some(current_id) = stack.pop() {
+            if current_id == task.id {
+                return true;
+            }
+            if visited.contains(current_id) {
+                continue;
+            }
+            visited.insert(current_id);
+
+            if let Some(current_task) = tasks_snapshot.get(current_id) {
+                for dep_id in &current_task.blocked_by {
+                    stack.push(dep_id.as_str());
+                }
+            }
+        }
+
+        false
+    }
+
     /// Get statistics (async)
     pub async fn stats(&self) -> TaskStoreStats {
         let tasks = self.tasks.lock().await;
@@ -143,7 +183,7 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::BatchStatus;
+    use crate::business::task::BatchStatus;
 
     #[tokio::test]
     async fn test_create_list_resets_task_ids_for_new_batch() {

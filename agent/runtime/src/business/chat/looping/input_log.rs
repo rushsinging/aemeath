@@ -1,4 +1,4 @@
-use crate::api::core::message::Message;
+use share::message::Message;
 
 /// Extract the messages that were injected by the system (not from the session history)
 /// plus the last persisted message for input logging purposes.
@@ -29,7 +29,7 @@ pub fn logged_input_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::message::Message;
+    use share::message::Message;
 
     #[test]
     fn test_logged_input_messages_happy_path_includes_latest_user_message() {

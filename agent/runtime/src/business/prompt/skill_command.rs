@@ -6,7 +6,7 @@ use crate::core::command::{
     Command, CommandAction, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
 };
 
-use crate::api::prompt::skill;
+use prompt::api::skill;
 
 inventory::submit! {
     CommandDescriptor::new(|| {

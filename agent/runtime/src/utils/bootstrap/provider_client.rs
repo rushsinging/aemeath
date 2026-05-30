@@ -1,8 +1,8 @@
 use super::model_runtime::ModelRuntimeSettings;
-use crate::api::core::config::models::ResolvedModel;
-use crate::api::provider::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
-use crate::api::provider::openai_compatible::ReasoningConfig;
-use crate::api::provider::ApiDriverKind;
+use provider::api::openai_compatible::ReasoningConfig;
+use provider::api::ApiDriverKind;
+use provider::api::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use share::config::models::ResolvedModel;
 use std::env;
 
 type EnvReader<'a> = Option<&'a dyn Fn(&str) -> Option<String>>;
@@ -116,7 +116,7 @@ fn reasoning_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::models::{ModelEntryConfig, ProviderModelsConfig};
+    use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 
     fn resolved_model(
         api: ApiDriverKind,

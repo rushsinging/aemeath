@@ -1,14 +1,14 @@
 use crate::api::agent::ToolCall;
-use crate::api::core::config::hooks::HookEvent;
-use crate::api::hook::HookData;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use hook::api::HookData;
+use share::config::hooks::HookEvent;
 
 pub(crate) async fn ask_user<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
 ) -> Vec<UiToolResult>
 where
@@ -25,7 +25,7 @@ where
                 hook_runner,
                 HookEvent::PermissionRequest,
                 Some(&call.name),
-                HookData::Permission(crate::api::hook::PermissionHookData {
+                HookData::Permission(hook::api::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),

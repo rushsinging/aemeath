@@ -8,7 +8,7 @@ use sdk::{
 #[derive(Clone)]
 pub(crate) struct SdkChatEventSink {
     pub(super) tx: tokio::sync::mpsc::UnboundedSender<ChatEvent>,
-    pub(super) current_messages: Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    pub(super) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
     pub(super) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
 }
 
@@ -111,7 +111,7 @@ mod tests {
 
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
-    current_messages: &Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
     workspace_context: &Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
 ) -> ChatEvent {
     match event {
@@ -256,26 +256,20 @@ pub(crate) fn runtime_event_to_sdk_event(
     }
 }
 
-fn agent_progress_event_to_sdk(
-    event: crate::api::core::tool::AgentProgressEvent,
-) -> AgentProgressEventView {
+fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentProgressEventView {
     let kind = match event.kind {
-        crate::api::core::tool::AgentProgressKind::ToolCalls { calls } => {
-            AgentProgressKindView::ToolCalls {
-                calls: calls
-                    .into_iter()
-                    .map(|call| AgentToolCallProgressView {
-                        id: call.id,
-                        name: call.name,
-                        input: call.input,
-                        summary: call.summary,
-                    })
-                    .collect(),
-            }
-        }
-        crate::api::core::tool::AgentProgressKind::Message { text } => {
-            AgentProgressKindView::Message { text }
-        }
+        share::tool::AgentProgressKind::ToolCalls { calls } => AgentProgressKindView::ToolCalls {
+            calls: calls
+                .into_iter()
+                .map(|call| AgentToolCallProgressView {
+                    id: call.id,
+                    name: call.name,
+                    input: call.input,
+                    summary: call.summary,
+                })
+                .collect(),
+        },
+        share::tool::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
     };
     AgentProgressEventView {
         sequence: event.sequence,

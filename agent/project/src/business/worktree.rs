@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
 use share::tool::{ToolContext, WorkingContext};
 
+use super::working_paths::{current_path, set_working_directory};
+
 /// 检查两个路径是否属于同一 git 仓库
 pub fn is_same_git_repo(a: &Path, b: &Path) -> Result<bool, String> {
     let git_common_dir_a = get_git_common_dir(a)?;
@@ -60,8 +62,7 @@ fn sanitize_branch_for_path(branch: &str) -> Result<String, String> {
 }
 
 fn derive_path_from_branch(ctx: &ToolContext, branch: &str) -> Result<PathBuf, String> {
-    Ok(ctx
-        .current_path_base()
+    Ok(current_path(&ctx.path_base)
         .join(DEFAULT_WORKTREE_DIR)
         .join(sanitize_branch_for_path(branch)?))
 }
@@ -73,7 +74,7 @@ fn resolve_worktree_path(
 ) -> Result<PathBuf, String> {
     match path {
         Some(path) if path.is_absolute() => Ok(path),
-        Some(path) => Ok(ctx.current_path_base().join(path)),
+        Some(path) => Ok(current_path(&ctx.path_base).join(path)),
         None => match branch {
             Some(branch) if !branch.trim().is_empty() => derive_path_from_branch(ctx, branch),
             _ => Err("进入或创建 worktree 时必须提供 path 或 branch".to_string()),
@@ -82,7 +83,7 @@ fn resolve_worktree_path(
 }
 
 fn create_worktree(ctx: &ToolContext, path: &Path, branch: Option<String>) -> Result<(), String> {
-    let repo_root = ctx.current_working_root();
+    let repo_root = current_path(&ctx.working_root);
     let branch = branch
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "创建新 worktree 时必须提供 branch".to_string())?;
@@ -158,7 +159,7 @@ pub fn enter_worktree(
     let worktree_root = PathBuf::from(&worktree_root);
 
     // 校验是否与当前 repo 同源（同一 git common dir）
-    let current_root = ctx.current_working_root();
+    let current_root = current_path(&ctx.working_root);
     if let Ok(same) = is_same_git_repo(&current_root, &worktree_root) {
         if !same {
             return Err(format!(
@@ -171,8 +172,8 @@ pub fn enter_worktree(
 
     // 保存当前上下文
     let snapshot = WorkingContext {
-        path_base: ctx.current_path_base(),
-        working_root: ctx.current_working_root(),
+        path_base: current_path(&ctx.path_base),
+        working_root: current_path(&ctx.working_root),
     };
     ctx.context_stack
         .lock()
@@ -180,7 +181,7 @@ pub fn enter_worktree(
         .unwrap_or_else(|e| e.into_inner().push(snapshot.clone()));
 
     // 切换到新 worktree
-    ctx.set_working_directory(canonical);
+    set_working_directory(&ctx.working_root, &ctx.path_base, canonical);
 
     Ok(snapshot)
 }
@@ -219,8 +220,8 @@ pub fn workspace_context_from_tool_context(ctx: &ToolContext) -> WorkspaceContex
         .collect();
 
     WorkspaceContext {
-        path_base: ctx.current_path_base().display().to_string(),
-        working_root: ctx.current_working_root().display().to_string(),
+        path_base: current_path(&ctx.path_base).display().to_string(),
+        working_root: current_path(&ctx.working_root).display().to_string(),
         context_stack: stack,
     }
 }
@@ -281,7 +282,7 @@ mod tests {
 
     fn new_test_context() -> ToolContext {
         let cwd = std::env::current_dir().unwrap();
-        let (_, working_root, path_base) = ToolContext::new_working_paths(cwd);
+        let (_, working_root, path_base) = crate::api::new_working_paths(cwd);
         ToolContext {
             cwd: PathBuf::from("/tmp/test"),
             working_root,
@@ -316,7 +317,7 @@ mod tests {
         });
         let result = exit_worktree(&ctx).unwrap();
         assert_eq!(result.path_base, PathBuf::from("/tmp/prev"));
-        assert_eq!(ctx.current_path_base(), PathBuf::from("/tmp/prev"));
+        assert_eq!(current_path(&ctx.path_base), PathBuf::from("/tmp/prev"));
     }
 
     #[test]
@@ -337,7 +338,7 @@ mod tests {
     #[test]
     fn test_enter_worktree_derives_path_from_branch() {
         let ctx = new_test_context();
-        let repo_root = ctx.current_working_root();
+        let repo_root = current_path(&ctx.working_root);
         let branch = format!(
             "test/derive-path-{}",
             std::time::SystemTime::now()
@@ -350,7 +351,7 @@ mod tests {
         let result = enter_worktree(&ctx, None, Some(branch.clone()));
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let expected_path_base = expected_path.canonicalize().unwrap();
-        let actual_path_base = ctx.current_path_base();
+        let actual_path_base = current_path(&ctx.path_base);
 
         let _ = exit_worktree(&ctx);
         let _ = std::process::Command::new("git")
@@ -397,7 +398,7 @@ mod tests {
     #[test]
     fn test_enter_worktree_creates_missing_path_with_branch() {
         let ctx = new_test_context();
-        let repo_root = ctx.current_working_root();
+        let repo_root = current_path(&ctx.working_root);
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -407,7 +408,7 @@ mod tests {
 
         let result = enter_worktree(&ctx, Some(worktree_root.clone()), Some(branch.clone()));
         let expected_path_base = worktree_root.canonicalize().unwrap();
-        let actual_path_base = ctx.current_path_base();
+        let actual_path_base = current_path(&ctx.path_base);
 
         let _ = exit_worktree(&ctx);
         let _ = std::process::Command::new("git")

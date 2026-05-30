@@ -1,15 +1,16 @@
 use crate::api::agent::{Agent, ToolCall};
-use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::tool::{ImageData, ToolRegistry};
-use crate::api::hook::{HookData, ToolHookData};
 use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::split_approved_calls;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use hook::api::{HookData, ToolHookData};
 use logging::JsonLogger;
+use share::config::hooks::HookEvent;
+use share::tool::ImageData;
 use std::sync::Arc;
+use tools::api::ToolRegistry;
 
 pub(crate) type UiToolResult = (String, String, bool, Vec<ImageData>);
 
@@ -21,7 +22,7 @@ pub(crate) async fn execute_tool_round<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -94,7 +95,7 @@ async fn deny_tool_calls<S>(
     denied: &[&ToolCall],
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -106,7 +107,7 @@ where
                 hook_runner,
                 HookEvent::PermissionDenied,
                 Some(&call.name),
-                HookData::Permission(crate::api::hook::PermissionHookData {
+                HookData::Permission(hook::api::PermissionHookData {
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
@@ -140,7 +141,7 @@ where
 pub(crate) async fn run_post_tool_hooks<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,
@@ -188,9 +189,9 @@ pub(crate) async fn run_post_tool_hooks<S>(
 pub(crate) async fn emit_json_hook_context<S>(
     sink: &S,
     hook_results: Vec<(
-        crate::api::core::config::hooks::HookEntry,
-        crate::api::hook::HookResult,
-        Option<crate::api::hook::HookJsonOutput>,
+        share::config::hooks::HookEntry,
+        hook::api::HookResult,
+        Option<hook::api::HookJsonOutput>,
     )>,
 ) where
     S: ChatEventSink,
@@ -230,7 +231,7 @@ where
 mod tests {
     use super::tool_results_for_api;
     use crate::api::compact::MAX_TOOL_RESULT_CHARS;
-    use crate::api::core::message::ContentBlock;
+    use share::message::ContentBlock;
 
     #[test]
     fn test_tool_results_for_api_persists_oversized_tui_result() {
@@ -253,9 +254,9 @@ mod tests {
 pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
-) -> crate::api::core::message::Message {
-    crate::api::storage::persist_oversized_results(session_id, &mut results);
-    crate::api::core::message::Message::tool_results_rich(results)
+) -> share::message::Message {
+    storage::api::persist_oversized_results(session_id, &mut results);
+    share::message::Message::tool_results_rich(results)
 }
 
 pub(crate) fn log_tool_result(

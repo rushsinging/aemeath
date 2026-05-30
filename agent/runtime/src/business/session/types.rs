@@ -5,8 +5,8 @@ use crate::utils::bootstrap::config_paths as paths;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
-use share::task::TaskSnapshot;
 use std::path::PathBuf;
+use storage::api::TaskSnapshot;
 
 /// Validate a session ID — delegates to state::validate_session_id
 pub fn validate_session_id(id: &str) -> Result<(), String> {

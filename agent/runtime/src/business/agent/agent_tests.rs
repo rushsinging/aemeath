@@ -1,10 +1,11 @@
 use crate::business::agent::{Agent, ToolCall};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolRegistry, ToolResult};
+use share::tool::{Tool, ToolContext, ToolResult};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use tools::api::ToolRegistry;
 
 /// A tool that records the start time and sleeps briefly.
 /// Marked as concurrency-safe or not depending on constructor.

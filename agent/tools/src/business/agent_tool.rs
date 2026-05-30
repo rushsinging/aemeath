@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::{TaskStatus, TaskStore};
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::path::Path;
 use std::sync::Arc;
+use storage::api::{TaskStatus, TaskStore};
 
 const DEFAULT_AGENT_MAX_TURNS: u32 = 200;
 const AGENT_MAX_TURNS_CAP: u32 = 200;
@@ -85,7 +85,7 @@ impl Tool for AgentTool {
         // We deliberately do NOT route these through `log::*` because that
         // would either corrupt the TUI (if stderr) or go to a file nobody
         // reads. Advisory UI messages belong in the UI channel.
-        let cwd = ctx.current_path_base();
+        let cwd = project::api::current_path(&ctx.path_base);
         let scope = analyze_task_scope(prompt, &cwd);
 
         // Scope analysis may produce warnings but never blocks — the calling
@@ -178,8 +178,6 @@ Instructions:- Complete the task described in the user message
             .run_agent(share::tool::AgentRunRequest {
                 prompt,
                 system: &system,
-                tool_schemas: &[],
-                registry: &share::tool::ToolRegistry::new(),
                 ctx,
                 max_turns,
                 model_spec,

@@ -10,3 +10,4 @@ pub use crate::{
 pub use crate::business::bash::is_readonly_command;
 pub use crate::business::mcp::McpServerConfig;
 pub use crate::business::mcp_manager::McpConnectionManager;
+pub use crate::core::tool_registry::ToolRegistry;

@@ -9,9 +9,6 @@ pub mod permissions;
 pub mod provider_client;
 pub mod runtime_support;
 
-use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::config::Config;
-use crate::api::tools::McpConnectionManager;
 use crate::core::port::ChatRuntimeContext;
 pub use concurrency::resolve_concurrency_limits;
 pub use logging_setup::{init_logging, set_current_turn, set_session_id};
@@ -24,7 +21,10 @@ pub use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 pub use runtime_support::{
     build_agent_runner, build_hook_runner, build_json_logger, start_session,
 };
+use share::config::models::ResolvedModel;
+use share::config::Config;
 use std::sync::Arc;
+use tools::api::McpConnectionManager;
 
 /// 合并 context_size（优先级：CLI > env > config > 默认 128000）。
 pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config>) -> usize {
@@ -70,10 +70,10 @@ pub struct LegacyChatBootstrapArgs {
 
 pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 
-pub struct InstructionsLoadedHookRunner<'a>(pub &'a crate::api::hook::HookRunner);
+pub struct InstructionsLoadedHookRunner<'a>(pub &'a hook::api::HookRunner);
 
 #[async_trait::async_trait(?Send)]
-impl crate::api::prompt::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
+impl prompt::api::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
         let _ = self
             .0

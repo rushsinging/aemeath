@@ -4,8 +4,8 @@
 //! user message every N turns. This lets the LLM perceive progress without
 //! actively calling `TaskList`.
 
-use crate::api::core::message::{ContentBlock, Message, Role};
-use crate::api::core::task::{TaskStatus, TaskStore};
+use share::message::{ContentBlock, Message, Role};
+use storage::api::{TaskStatus, TaskStore};
 
 /// How many turns since last TaskCreate/TaskUpdate before injecting a reminder.
 const TURNS_SINCE_WRITE: u64 = 5;
@@ -139,7 +139,7 @@ impl Default for TaskReminderState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::task::TaskStatus;
+    use storage::api::TaskStatus;
 
     fn reminder_text(message: &Message) -> String {
         message.text_content()

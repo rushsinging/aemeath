@@ -7,8 +7,8 @@
 use crate::core::command::{
     Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
 };
-use share::task::{BatchStatus, TaskStore};
 use std::sync::Arc;
+use storage::api::{BatchStatus, TaskStore};
 
 inventory::submit! {
     CommandDescriptor::new(|| {
@@ -165,9 +165,9 @@ async fn task_execute(args: String, task_store: Option<Arc<TaskStore>>) -> Comma
                     .tasks_in_batch(
                         batch.id,
                         &[
-                            share::task::TaskStatus::Pending,
-                            share::task::TaskStatus::InProgress,
-                            share::task::TaskStatus::Completed,
+                            storage::api::TaskStatus::Pending,
+                            storage::api::TaskStatus::InProgress,
+                            storage::api::TaskStatus::Completed,
                         ],
                     )
                     .await;

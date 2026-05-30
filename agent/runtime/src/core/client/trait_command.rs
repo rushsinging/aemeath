@@ -16,9 +16,9 @@ pub(super) async fn execute_command_impl(
     sdk_ctx: sdk::CommandContext,
 ) -> Result<sdk::CommandResult> {
     use crate::api::command::CommandContext as RtCmdCtx;
-    use crate::api::core::config::Config;
     use crate::api::cost::CostTracker;
     use crate::business::state::AppState;
+    use share::config::Config;
 
     // Build runtime command context
     let state = Arc::new(AppState::default());
@@ -73,7 +73,7 @@ pub(super) async fn estimate_context_impl(
     messages: &[sdk::ChatMessage],
     system_prompt: &str,
 ) -> Result<sdk::ContextEstimate> {
-    let runtime_messages: Vec<crate::api::core::message::Message> = messages
+    let runtime_messages: Vec<share::message::Message> = messages
         .iter()
         .map(|msg| super::mapping::message_from_sdk(msg.clone()))
         .collect();
@@ -97,9 +97,9 @@ pub(super) async fn switch_model_impl(
     me: &AgentClientImpl,
     params: sdk::ModelSwitchParams,
 ) -> Result<sdk::ModelSwitchResult> {
-    use crate::api::provider::OpenAIProviderConfig;
-    use crate::api::provider::openai_compatible::ReasoningConfig;
-    use crate::api::provider::ApiDriverKind;
+    use provider::api::openai_compatible::ReasoningConfig;
+    use provider::api::ApiDriverKind;
+    use provider::api::OpenAIProviderConfig;
 
     let api_type = ApiDriverKind::parse(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
 
@@ -115,19 +115,17 @@ pub(super) async fn switch_model_impl(
     let reasoning = params.reasoning.unwrap_or(true);
     let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
 
-    let new_client = crate::api::provider::LlmClient::from_config(
-        crate::api::provider::LlmConfigOptions {
-            api: api_type,
-            api_key: params.api_key,
-            base_url: Some(params.base_url),
-            model: params.model_id.clone(),
-            max_tokens: params.max_tokens,
-            thinking_max_tokens: 0,
-            reasoning,
-            reasoning_config,
-            openai_config,
-        },
-    );
+    let new_client = provider::api::LlmClient::from_config(provider::api::LlmConfigOptions {
+        api: api_type,
+        api_key: params.api_key,
+        base_url: Some(params.base_url),
+        model: params.model_id.clone(),
+        max_tokens: params.max_tokens,
+        thinking_max_tokens: 0,
+        reasoning,
+        reasoning_config,
+        openai_config,
+    });
 
     let display_name = if params.model_name.is_empty() {
         &params.model_id
@@ -160,11 +158,16 @@ pub(super) async fn compact_messages_impl(
     system_prompt: &str,
     context_size: usize,
 ) -> Result<(Vec<sdk::ChatMessage>, bool)> {
-    let runtime_messages: Vec<crate::api::core::message::Message> = messages
+    let runtime_messages: Vec<share::message::Message> = messages
         .into_iter()
         .map(super::mapping::message_from_sdk)
         .collect();
-    let client = me.inner.current_client.read().ok().map(|guard| (*guard).clone());
+    let client = me
+        .inner
+        .current_client
+        .read()
+        .ok()
+        .map(|guard| (*guard).clone());
     let (compacted, was_compacted) = crate::business::compact::compact_messages_with_llm(
         &runtime_messages,
         system_prompt,

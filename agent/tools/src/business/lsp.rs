@@ -73,8 +73,8 @@ impl Tool for LspTool {
             .map(|s| s.to_string())
             .unwrap_or_else(|| detect_language(file_path));
 
-        let path_base = ctx.current_path_base();
-        let working_root = ctx.current_working_root();
+        let path_base = project::api::current_path(&ctx.path_base);
+        let working_root = project::api::current_path(&ctx.working_root);
         let file_path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,

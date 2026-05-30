@@ -1,5 +1,5 @@
-use crate::api::core::config::{Config, HooksConfig};
 use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry};
+use share::config::{Config, HooksConfig};
 use std::collections::HashMap;
 
 pub trait ClaudeSettingsAdapter {

@@ -1,14 +1,15 @@
 use super::loop_run::SubAgentRun;
 use super::{CliAgentRunner, SilentHandler};
 use crate::api::agent::Agent;
-use crate::api::core::message::Message;
-use crate::api::core::task::TaskStore;
-use crate::api::core::tool::{
-    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner, ToolContext, ToolRegistry,
-};
-use crate::api::provider::SystemBlock;
 use async_trait::async_trait;
+use provider::api::SystemBlock;
+use share::message::Message;
+use share::tool::{
+    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner, ToolContext,
+};
 use std::sync::{Arc, Mutex};
+use storage::api::TaskStore;
+use tools::api::ToolRegistry;
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -127,7 +128,7 @@ impl AgentRunner for CliAgentRunner {
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        crate::api::tools::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
+        tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
         let sub_schemas = sub_registry.schemas();
         let messages = vec![Message::user(prompt)];
         let handler = SilentHandler;
