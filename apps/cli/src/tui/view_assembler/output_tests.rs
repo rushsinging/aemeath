@@ -1,6 +1,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::render::output::rendered::RenderCtx;
 use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
 
 #[test]
@@ -158,27 +159,43 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         .iter()
         .filter(|block| matches!(&block.kind, OutputBlockKind::DiagnosticNotice(_)))
         .count();
-    let tool = vm
+    let tool_root = vm
         .roots
         .iter()
-        .find_map(|block| match &block.kind {
-            OutputBlockKind::ToolCall(tool) => Some(tool),
-            _ => None,
-        })
+        .find(|block| matches!(&block.kind, OutputBlockKind::ToolCall(_)))
         .expect("tool block");
 
     assert_eq!(diagnostics, 0, "已绑定工具结果不应泄漏成块外诊断文本");
-    assert_eq!(tool.title, "Edit");
-    assert!(tool
-        .result_summary
-        .as_deref()
-        .unwrap_or_default()
-        .contains("Edit completed"));
-    assert!(!tool
-        .result_summary
-        .as_deref()
-        .unwrap_or_default()
-        .contains("---DIFF---"));
+
+    // 嵌入式 Edit ToolResult 子块应渲染为加减色 diff：含 ---DIFF--- 时透传原文，
+    // render_tool_result → render_edit_diff 消费标记，输出 old/new diff 行（refs #90）。
+    let result_child = tool_root
+        .children
+        .iter()
+        .find(|child| matches!(&child.kind, OutputBlockKind::ToolResult(_)))
+        .expect("ToolResult 子块存在");
+    let rendered = result_child
+        .kind
+        .component()
+        .render_self(&result_child.block_id, &RenderCtx { width: 80 });
+    let plains: Vec<&str> = rendered.lines.iter().map(|l| l.plain.as_str()).collect();
+
+    assert!(
+        !plains.iter().any(|p| p.contains("---DIFF---")),
+        "diff 渲染后不应残留原始 ---DIFF--- 标记, got: {plains:?}"
+    );
+    assert!(
+        !plains.iter().any(|p| p.contains("Edit completed")),
+        "Edit 结果应渲染为 diff 而非 ✓ Edit completed 摘要, got: {plains:?}"
+    );
+    assert!(
+        plains.iter().any(|p| p.contains("- ") && p.contains("old")),
+        "应含删除行（- old）, got: {plains:?}"
+    );
+    assert!(
+        plains.iter().any(|p| p.contains("+ ") && p.contains("new")),
+        "应含新增行（+ new）, got: {plains:?}"
+    );
 }
 
 #[test]
