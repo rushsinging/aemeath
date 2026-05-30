@@ -6,7 +6,6 @@
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
-| 74 | ~~TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）~~ | ~~中~~ | ~~已修复~~ | ~~已确认~~ | ~~2026-05~~ | ~~已归档 #74~~ |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致；真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，index 丢失会进一步导致工具块绑定失败。修复：历史输出统一从 ConversationModel 渲染，格式参照 resume（用户 `> ...`、thinking `💭 ...`、tool call 复用 ToolDisplay），runtime/sdk/CLI 透传 ToolCall index；resume 也改为加载模型后通过 ViewModel 渲染，符合新架构。 |
@@ -439,33 +438,6 @@
 - `.agents/hooks/check-unsafe-text-ops.sh`（TARGET 范围、perl 正则、豁免列表）
 - `.agents/aemeath.json`（hook 注册：是否新增 PreToolUse/PostToolUse）
 - `agent/share/src/string_idx/`（统一安全字符串/索引模块）
-
-### #74 TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
-
-**状态**：待确认（随 #58 渲染管线重构结构性修复）。每个 block 独立从自身 kind/style 派生颜色，不存在跨 block 共享可变样式状态；System(Muted) block 后 Assistant block 仍用 ASSISTANT 色。回归测试 `blocks/mod.rs::test_render_block_assistant_after_system_does_not_inherit_dark`。
-
-**症状**：在 TUI 中执行 `/reflect` 后，reflection 输出及其**后续的普通/assistant 文本**全部呈现暗灰蓝色（System 样式），而非正常的 assistant 前景色。截图中 `[User]:` / `[Assistant]:` 会话转录、`## 第一版 DDD 边界建议`、`### 1. TUI App Shell`、`负责组合所有上下文...` 等内容均为统一暗色。
-
-**根因（假设）**：
-1. `ReflectionDone`（`apps/cli/src/tui/core/update/ui_event.rs:210`）通过 `self.output_area.push_system(&output.content)` 把整段 reflection 输出以 `LineStyle::System` 推入输出区；`output.content` 内含会话转录和多段 markdown，全部按 System（暗色）渲染。
-2. System 也属于 `is_markdown_style`（`rendered_lines.rs:393`），其内若含 fenced code block / 特殊 markdown，可能令渲染缓存的 fence/style 状态跨 block 泄漏到后续行（与 #65、#2 同族）。
-3. reflection 结束后，后续 assistant 文本可能未显式复位样式，继续沿用 System 暗色；或渲染缓存未在 reflection block 后正确 invalidate/分隔。
-
-**复现**：
-1. 在 TUI 会话中执行 `/reflect`。
-2. 等待 reflection 输出完成。
-3. 观察 reflection 输出本身及其后续文本是否都变为暗灰蓝色。
-
-**修复方向**：
-1. 明确 reflection 输出的样式语义：若仅 reflection 摘要应为 System，则其后续 assistant/普通文本必须复位为对应样式，不得继承 System。
-2. 排查 `push_system` 推送多行 markdown 时渲染缓存 block state 是否泄漏（复用 #65 的 fence/style 复位修复）。
-3. 考虑 reflection 输出与普通对话内容用不同 block 边界分隔，渲染时各自独立初始化样式状态。
-4. 补充回归：push 一段 System 样式 markdown 后，下一条 Assistant 文本不应使用 System 前景色。
-
-**涉及路径**：
-- `apps/cli/src/tui/core/update/ui_event.rs`（`ReflectionDone` → `push_system`）
-- `apps/cli/src/tui/output_area/`（`push_system` 行样式、markdown 渲染缓存 block state）
-- 关联 #65（工具结果 fenced code block 样式泄漏）、#41（/reflect 异步化）
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 
