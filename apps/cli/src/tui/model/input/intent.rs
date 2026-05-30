@@ -17,6 +17,7 @@ pub enum InputIntent {
     DeleteForward,
     MoveHistoryPrevious,
     MoveHistoryNext,
+    ReplaceHistory(Vec<String>),
     SetCompletions {
         query: String,
         items: Vec<CompletionItem>,
