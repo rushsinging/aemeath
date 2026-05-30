@@ -1,5 +1,6 @@
 use super::UpdateResult;
 use crate::tui::app::App;
+use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -53,21 +54,29 @@ impl App {
                     let state = self.input.ask_user_state.take().unwrap();
                     let selected = snapshot.map(|s| s.selected).unwrap_or_default();
                     let llm_count = state.llm_option_count;
-                    let builtin_all_idx = llm_count;
-                    let builtin_chat_idx = llm_count + 1;
+                    let cursor_title = state
+                        .options
+                        .get(cursor)
+                        .map(|o| o.title.as_str())
+                        .unwrap_or("");
 
-                    let answer = if cursor == builtin_all_idx
-                        && state.options.len() > builtin_all_idx
-                    {
-                        // "All of the above": return numbered list of LLM options
+                    let answer = if cursor_title == crate::tui::app::state::BUILTIN_OPTION_ALL {
+                        // "All of the above": return numbered list of LLM option titles
                         let all_opts: Vec<String> = state.options[..llm_count]
                             .iter()
                             .enumerate()
-                            .map(|(i, opt)| format!("{}. {}", i + 1, opt))
+                            .map(|(i, opt)| format!("{}. {}", i + 1, opt.title))
                             .collect();
                         all_opts.join("\n")
-                    } else if cursor == builtin_chat_idx && state.options.len() > builtin_chat_idx {
-                        // "Chat about this...": switch to chat input sub-mode
+                    } else if cursor_title
+                        == crate::tui::app::state::BUILTIN_OPTION_NONE
+                    {
+                        // "None of the above": return empty string
+                        String::new()
+                    } else if cursor_title
+                        == crate::tui::app::state::BUILTIN_OPTION_CHAT
+                    {
+                        // "Type something...": switch to chat input sub-mode
                         self.input.ask_user_state = Some(state);
                         self.set_ask_user_chat_input(true);
                         self.handle_input_intent(
@@ -76,20 +85,30 @@ impl App {
                         return Some(UpdateResult::none());
                     } else if multi_select {
                         // Multi-select: return selected items, comma-separated
-                        let chosen: Vec<&str> = selected
+                        let chosen: Vec<String> = selected
                             .iter()
                             .enumerate()
                             .filter(|(_, s)| **s)
-                            .filter_map(|(i, _)| state.options.get(i).map(|o| o.as_str()))
+                            .filter_map(|(i, _)| {
+                                state.options.get(i).map(|o| o.title.clone())
+                            })
                             .collect();
                         if chosen.is_empty() {
-                            state.options.get(cursor).cloned().unwrap_or_default()
+                            state
+                                .options
+                                .get(cursor)
+                                .map(|o| o.title.clone())
+                                .unwrap_or_default()
                         } else {
                             chosen.join(", ")
                         }
                     } else if options_count > 0 {
-                        // Single select: return cursor item
-                        state.options.get(cursor).cloned().unwrap_or_default()
+                        // Single select: return cursor item title
+                        state
+                            .options
+                            .get(cursor)
+                            .map(|o| o.title.clone())
+                            .unwrap_or_default()
                     } else {
                         let text = self.model.input.document.buffer.clone();
                         if text.is_empty() {
@@ -115,8 +134,7 @@ impl App {
                     self.spinner_phase(SpinnerPhase::Generating);
                 }
                 _ => {
-                    // 普通按键传递给 input_area（用于自由输入模式）
-                    self.update_ask_user_input_key(key);
+                    // 选项模式下忽略其他按键
                 }
             }
             return Some(UpdateResult::none());
@@ -162,31 +180,52 @@ impl App {
         None
     }
 
-    /// Handle keys in the "Chat about this..." free-text sub-mode.
+    /// Handle keys in the "Type something..." free-text sub-mode.
     fn update_ask_user_chat_input_key(
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Option<UpdateResult> {
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                let text = self.model.input.document.buffer.clone();
+                let text = self
+                    .model
+                    .conversation
+                    .ask_user_chat_text()
+                    .unwrap_or_default();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
                     self.dismiss_ask_user_block();
                     self.append_user_echo(text.clone());
-                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(text);
                     self.spinner_phase(SpinnerPhase::Generating);
                 }
             }
             KeyCode::Esc => {
                 // Return to option list without submitting
-                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.set_ask_user_chat_input(false);
             }
-            _ => {
-                self.update_ask_user_input_key(key);
+            KeyCode::Backspace => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::DeleteAskUserChatChar);
             }
+            KeyCode::Char(c) => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::AppendAskUserChatChar { ch: c });
+            }
+            KeyCode::Up => {
+                // Move cursor back to last option
+                let snapshot = self.model.conversation.ask_user_snapshot();
+                if let Some(snap) = snapshot {
+                    let options_count = snap.cursor;
+                    if options_count > 0 {
+                        self.set_ask_user_chat_input(false);
+                        self.set_ask_user_cursor(options_count - 1);
+                    }
+                }
+            }
+            _ => {}
         }
         Some(UpdateResult::none())
     }

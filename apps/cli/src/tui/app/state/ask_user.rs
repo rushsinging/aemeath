@@ -6,13 +6,14 @@
 
 /// Built-in options appended after LLM options in AskUserQuestion.
 pub(crate) const BUILTIN_OPTION_ALL: &str = "All of the above";
-pub(crate) const BUILTIN_OPTION_CHAT: &str = "Chat about this...";
+pub(crate) const BUILTIN_OPTION_NONE: &str = "None of the above";
+pub(crate) const BUILTIN_OPTION_CHAT: &str = "Type something...";
 
 /// State for interactive AskUserQuestion option selection
 pub(crate) struct AskUserState {
     pub reply_tx: tokio::sync::oneshot::Sender<String>,
     /// All options shown to user: LLM options + built-in options.
-    pub options: Vec<String>,
+    pub options: Vec<sdk::OptionItem>,
     /// Number of LLM-provided options (built-in options start at this index).
     pub llm_option_count: usize,
     pub multi_select: bool,

@@ -136,7 +136,7 @@ impl OutputViewAssembler {
                 }
                 ConversationBlock::AgentProgress {
                     id,
-                    tool_id,
+                    tool_id: _,
                     message,
                 } => {
                     roots.push(leaf(
@@ -157,6 +157,7 @@ impl OutputViewAssembler {
                     cursor,
                     selected,
                     chat_input_active,
+                    chat_input_text,
                     default,
                 } => {
                     roots.push(leaf(
@@ -170,6 +171,7 @@ impl OutputViewAssembler {
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
+                            chat_input_text: chat_input_text.clone(),
                             default: default.clone(),
                         }),
                     ));

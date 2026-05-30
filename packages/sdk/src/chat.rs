@@ -1,8 +1,62 @@
 //! Chat 输入 / 事件 / 流 / 结果。
 
 use crate::{ChatMessage, QueueDrainPort};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
+
+/// AskUserQuestion 选项项：简要 title + 详细 description。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash)]
+pub struct OptionItem {
+    /// 简要标题（必填）。
+    pub title: String,
+    /// 详细描述（可选）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for OptionItem {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        #[derive(Deserialize)]
+        struct Obj {
+            title: String,
+            #[serde(default)]
+            description: Option<String>,
+        }
+
+        // 先尝试按对象反序列化
+        let value = serde_json::Value::deserialize(de)?;
+        if value.is_string() {
+            Ok(OptionItem::title_only(value.as_str().unwrap().to_string()))
+        } else if value.is_object() {
+            let obj: Obj =
+                serde_json::from_value(value).map_err(|e| de::Error::custom(e.to_string()))?;
+            Ok(OptionItem {
+                title: obj.title,
+                description: obj.description,
+            })
+        } else {
+            Err(de::Error::custom("expected string or object { title, description }"))
+        }
+    }
+}
+
+impl OptionItem {
+    pub fn title_only(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            description: None,
+        }
+    }
+
+    pub fn new(title: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            description: Some(description.into()),
+        }
+    }
+}
 
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]
@@ -163,7 +217,7 @@ pub enum ChatEvent {
     AskUser {
         id: String,
         question: String,
-        options: Vec<String>,
+        options: Vec<OptionItem>,
         allow_free_input: bool,
         multi_select: bool,
         default: Option<String>,
@@ -362,5 +416,44 @@ mod tests {
         assert_eq!(request.messages[0].role, "user");
         assert_eq!(request.messages[1].role, "assistant");
         assert!(request.queue_drain.is_none());
+    }
+
+    #[test]
+    fn test_option_item_title_only() {
+        let item = OptionItem::title_only("Yes".to_string());
+        assert_eq!(item.title, "Yes");
+        assert!(item.description.is_none());
+    }
+
+    #[test]
+    fn test_option_item_with_description() {
+        let item = OptionItem::new("Deploy", "Push to production");
+        assert_eq!(item.title, "Deploy");
+        assert_eq!(item.description.as_deref(), Some("Push to production"));
+    }
+
+    #[test]
+    fn test_option_item_serialize_deserialize_string_compat() {
+        // 向后兼容：纯字符串应反序列化为 title_only
+        let json = serde_json::json!("Simple option");
+        let item: OptionItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.title, "Simple option");
+        assert!(item.description.is_none());
+    }
+
+    #[test]
+    fn test_option_item_serialize_deserialize_object() {
+        let json = serde_json::json!({"title": "Go", "description": "Proceed"});
+        let item: OptionItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.title, "Go");
+        assert_eq!(item.description, Some("Proceed".to_string()));
+    }
+
+    #[test]
+    fn test_option_item_serialize_outputs_object() {
+        let item = OptionItem::new("Test", "Desc");
+        let val = serde_json::to_value(&item).unwrap();
+        assert_eq!(val["title"], "Test");
+        assert_eq!(val["description"], "Desc");
     }
 }

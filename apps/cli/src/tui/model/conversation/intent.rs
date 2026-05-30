@@ -54,15 +54,15 @@ pub enum ConversationIntent {
         message: String,
     },
     /// 显示 AskUserQuestion 交互块（问题 + 选项），替换已有的 AskUser 块（若有）。
-    ShowAskUser {
-        question: String,
-        options: Vec<String>,
-        llm_option_count: usize,
-        multi_select: bool,
-        cursor: usize,
-        /// 无选项自由输入模式下的默认值提示。
-        default: Option<String>,
-    },
+        ShowAskUser {
+            question: String,
+            options: Vec<sdk::OptionItem>,
+            llm_option_count: usize,
+            multi_select: bool,
+            cursor: usize,
+            /// 无选项自由输入模式下的默认值提示。
+            default: Option<String>,
+        },
     /// 更新 AskUser 块的光标位置（选项导航高亮的单一真相）。
     SetAskUserCursor {
         cursor: usize,
@@ -75,6 +75,12 @@ pub enum ConversationIntent {
     SetAskUserChatInput {
         active: bool,
     },
+    /// 追加字符到 Type something 输入框。
+    AppendAskUserChatChar {
+        ch: char,
+    },
+    /// 删除 Type something 输入框末尾字符。
+    DeleteAskUserChatChar,
     /// 移除 AskUser 交互块（用户提交答案或取消后折叠）。
     DismissAskUser,
     CompleteChat,

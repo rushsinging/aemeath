@@ -68,7 +68,7 @@ impl App {
     pub(crate) fn show_ask_user_block(
         &mut self,
         question: String,
-        options: Vec<String>,
+        options: Vec<sdk::OptionItem>,
         llm_option_count: usize,
         multi_select: bool,
         cursor: usize,

@@ -45,7 +45,7 @@ impl ConversationModel {
     pub(super) fn show_ask_user(
         &mut self,
         question: String,
-        options: Vec<String>,
+        options: Vec<sdk::OptionItem>,
         llm_option_count: usize,
         multi_select: bool,
         cursor: usize,
@@ -63,6 +63,7 @@ impl ConversationModel {
             cursor,
             selected: vec![false; total],
             chat_input_active: false,
+            chat_input_text: String::new(),
             default,
         });
         vec![
@@ -112,13 +113,66 @@ impl ConversationModel {
     /// 设置 AskUser 块是否处于自由输入子态。
     pub(super) fn set_ask_user_chat_input(&mut self, active: bool) -> Vec<ConversationChange> {
         if let Some(ConversationBlock::AskUser {
-            chat_input_active, ..
+            chat_input_active,
+            chat_input_text,
+            ..
         }) = self.ask_user_block_mut()
         {
             *chat_input_active = active;
+            if !active {
+                chat_input_text.clear();
+            }
             return Self::ask_user_updated();
         }
         Vec::new()
+    }
+
+    /// 追加字符到 Type something 输入框。
+    pub(super) fn append_ask_user_chat_char(&mut self, ch: char) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUser {
+            chat_input_active,
+            chat_input_text,
+            ..
+        }) = self.ask_user_block_mut()
+        {
+            if *chat_input_active {
+                chat_input_text.push(ch);
+                return Self::ask_user_updated();
+            }
+        }
+        Vec::new()
+    }
+
+    /// 删除 Type something 输入框末尾字符。
+    pub(super) fn delete_ask_user_chat_char(&mut self) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUser {
+            chat_input_active,
+            chat_input_text,
+            ..
+        }) = self.ask_user_block_mut()
+        {
+            if *chat_input_active {
+                chat_input_text.pop();
+                return Self::ask_user_updated();
+            }
+        }
+        Vec::new()
+    }
+
+    /// 获取 Type something 输入框文本。
+    pub fn ask_user_chat_text(&self) -> Option<String> {
+        self.blocks.iter().find_map(|block| {
+            if let ConversationBlock::AskUser {
+                chat_input_active: true,
+                chat_input_text,
+                ..
+            } = block
+            {
+                Some(chat_input_text.clone())
+            } else {
+                None
+            }
+        })
     }
 
     /// 移除 AskUser 交互块。
@@ -164,7 +218,10 @@ mod tests {
     fn show(model: &mut ConversationModel, options: &[&str], llm: usize, multi: bool) {
         model.apply(ConversationIntent::ShowAskUser {
             question: "选哪个?".to_string(),
-            options: options.iter().map(|s| s.to_string()).collect(),
+            options: options
+                .iter()
+                .map(|s| sdk::OptionItem::title_only(s.to_string()))
+                .collect(),
             llm_option_count: llm,
             multi_select: multi,
             cursor: 0,
@@ -193,7 +250,7 @@ mod tests {
             .count();
         assert_eq!(count, 1);
         if let ConversationBlock::AskUser { options, .. } = ask_block(&model) {
-            assert_eq!(options, &vec!["C".to_string()]);
+            assert_eq!(options[0].title, "C");
         }
     }
 

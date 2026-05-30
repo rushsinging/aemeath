@@ -206,12 +206,29 @@ impl App {
                 self.chat.finish_tool_call(&id);
                 self.spinner_stop();
 
-                // Append built-in options when LLM provides ≥ 1 option
+                // 智能构建内建选项：
+                // - ≥2 LLM 选项：All + None + Type something
+                // - 1 个 LLM 选项：None + Type something
+                // - 0 个选项：无内建选项（纯自由输入）
                 let llm_option_count = options.len();
                 let mut all_options = options.clone();
-                if llm_option_count > 0 {
-                    all_options.push(crate::tui::app::state::BUILTIN_OPTION_ALL.to_string());
-                    all_options.push(crate::tui::app::state::BUILTIN_OPTION_CHAT.to_string());
+                if llm_option_count >= 2 {
+                    all_options.push(sdk::OptionItem::title_only(
+                        crate::tui::app::state::BUILTIN_OPTION_ALL,
+                    ));
+                    all_options.push(sdk::OptionItem::title_only(
+                        crate::tui::app::state::BUILTIN_OPTION_NONE,
+                    ));
+                    all_options.push(sdk::OptionItem::title_only(
+                        crate::tui::app::state::BUILTIN_OPTION_CHAT,
+                    ));
+                } else if llm_option_count == 1 {
+                    all_options.push(sdk::OptionItem::title_only(
+                        crate::tui::app::state::BUILTIN_OPTION_NONE,
+                    ));
+                    all_options.push(sdk::OptionItem::title_only(
+                        crate::tui::app::state::BUILTIN_OPTION_CHAT,
+                    ));
                 }
 
                 if all_options.is_empty() {
@@ -222,7 +239,11 @@ impl App {
                 } else {
                     let cursor = default
                         .as_ref()
-                        .and_then(|d| all_options.iter().position(|o| o == d))
+                        .and_then(|d| {
+                            all_options
+                                .iter()
+                                .position(|o| o.title == *d)
+                        })
                         .unwrap_or(0);
                     self.show_ask_user_block(
                         question,

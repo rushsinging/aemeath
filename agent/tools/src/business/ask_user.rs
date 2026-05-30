@@ -22,8 +22,20 @@ impl Tool for AskUserQuestionTool {
                 },
                 "options": {
                     "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional list of predefined answer choices. For multiple-choice questions, each choice MUST be one separate array item. Do not combine choices into one string or embed them in question."
+                    "items": {
+                        "oneOf": [
+                            { "type": "string" },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "title": { "type": "string", "description": "Short label shown as the main choice text" },
+                                    "description": { "type": "string", "description": "Optional longer explanation shown below the title" }
+                                },
+                                "required": ["title"]
+                            }
+                        ]
+                    },
+                    "description": "Optional list of predefined answer choices. Each choice MUST be one separate array item — either a plain string or an object { title, description }. Do not combine choices into one string or embed them in question."
                 },
                 "allow_free_input": {
                     "type": "boolean",
@@ -140,8 +152,20 @@ mod tests {
             .as_str()
             .expect("options description should be a string");
 
-        assert!(description.contains("each choice MUST be one separate array item"));
+        assert!(description.contains("Each choice MUST be one separate array item"));
         assert!(description.contains("Do not combine choices into one string"));
-        assert!(description.contains("embed them in question"));
+        assert!(description.contains("either a plain string or an object"));
+    }
+
+    #[test]
+    fn test_input_schema_options_supports_object_format() {
+        let tool = AskUserQuestionTool;
+        let schema = tool.input_schema();
+        let items = &schema["properties"]["options"]["items"];
+        // oneOf 包含 string 和 object 两种格式
+        assert!(items.get("oneOf").is_some());
+        let one_of = items["oneOf"].as_array().unwrap();
+        assert!(one_of.iter().any(|s| s["type"] == "string"));
+        assert!(one_of.iter().any(|s| s["type"] == "object"));
     }
 }

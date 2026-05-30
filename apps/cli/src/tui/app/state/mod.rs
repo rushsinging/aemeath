@@ -8,7 +8,7 @@ pub(crate) mod input;
 pub(crate) mod layout;
 pub(crate) mod session;
 
-pub(crate) use ask_user::{AskUserState, BUILTIN_OPTION_ALL, BUILTIN_OPTION_CHAT};
+pub(crate) use ask_user::{AskUserState, BUILTIN_OPTION_ALL, BUILTIN_OPTION_CHAT, BUILTIN_OPTION_NONE};
 pub(crate) use chat::ChatState;
 pub(crate) use input::InputState;
 pub(crate) use layout::UiLayout;

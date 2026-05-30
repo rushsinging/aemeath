@@ -8,9 +8,10 @@ use crate::tui::render::theme;
 use crate::tui::view_model::output::AskUserBlockView;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+use sdk::OptionItem;
 
-/// 渲染单个选项的行（支持多行选项文本）。
-fn option_lines(index: usize, option: &str, active: bool, multi_select: bool) -> Vec<String> {
+/// 渲染单个选项的行（title 加粗 + description 灰色）。
+fn option_lines(index: usize, option: &OptionItem, active: bool, multi_select: bool) -> Vec<(String, Option<Style>)> {
     let prefix = if multi_select {
         let check = if active { "✓" } else { " " };
         format!("  [{check}] {}. ", index + 1)
@@ -19,21 +20,23 @@ fn option_lines(index: usize, option: &str, active: bool, multi_select: bool) ->
         format!("  {marker} {}. ", index + 1)
     };
     let continuation = " ".repeat(prefix.chars().count());
-    let parts: Vec<&str> = option.lines().collect();
-    if parts.is_empty() {
-        return vec![prefix];
+    let mut lines = Vec::new();
+
+    // Title line
+    let title_line = format!("{prefix}{}", option.title);
+    lines.push((title_line, None)); // Style 由调用者根据 active 设置
+
+    // Description line(s) — 灰色缩进
+    if let Some(desc) = &option.description {
+        for line in desc.lines() {
+            lines.push((format!("{continuation}{line}"), Some(Style::default().fg(theme::TEXT_DIM))));
+        }
     }
-    parts
-        .iter()
-        .enumerate()
-        .map(|(line_idx, part)| {
-            if line_idx == 0 {
-                format!("{prefix}{part}")
-            } else {
-                format!("{continuation}{part}")
-            }
-        })
-        .collect()
+
+    if lines.is_empty() {
+        lines.push((prefix, None));
+    }
+    lines
 }
 
 pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx) -> RenderedBlock {
@@ -91,17 +94,26 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx
         let is_cursor = !view.chat_input_active && i == view.cursor;
         let is_checked = view.multi_select && view.selected.get(i).copied().unwrap_or(false);
         let active = is_cursor || is_checked;
-        for (line_idx, content) in option_lines(i, option, active, view.multi_select)
-            .into_iter()
-            .enumerate()
+        for (line_idx, (content, override_style)) in
+            option_lines(i, option, active, view.multi_select).into_iter().enumerate()
         {
-            let style = if active && line_idx == 0 {
-                header_style
-            } else {
-                normal_style
-            };
+            let style = override_style.unwrap_or_else(|| {
+                if active && line_idx == 0 {
+                    header_style
+                } else {
+                    normal_style
+                }
+            });
             lines.push(RenderedLine::new(vec![Span::styled(content, style)]));
         }
+    }
+
+    // "Type something..." 输入行（仅当处于自由输入子态时显示）
+    if view.chat_input_active {
+        lines.push(RenderedLine::new(vec![Span::raw("")]));
+        let input_text = &view.chat_input_text;
+        let prompt = format!("  ❯ Type something: {input_text}");
+        lines.push(RenderedLine::new(vec![Span::styled(prompt, header_style)]));
     }
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
@@ -120,12 +132,16 @@ mod tests {
         AskUserBlockView {
             key: "ask".into(),
             question: "选哪个?".into(),
-            options: options.iter().map(|s| s.to_string()).collect(),
+            options: options
+                .iter()
+                .map(|s| sdk::OptionItem::title_only(s.to_string()))
+                .collect(),
             llm_option_count: options.len(),
             multi_select: multi,
             cursor,
             selected: vec![false; options.len()],
             chat_input_active: false,
+            chat_input_text: String::new(),
             default: None,
         }
     }
@@ -223,19 +239,45 @@ mod tests {
     }
 
     #[test]
-    fn test_render_ask_user_chat_input_active_suppresses_highlight() {
+    fn test_render_ask_user_chat_input_active_suppresses_option_highlight() {
         let mut v = view(&["A", "B"], 0, false);
         v.chat_input_active = true;
         let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        // chat 子态下无任何 ❯ 高亮
-        assert!(!block.lines.iter().any(|line| line.plain.contains('❯')));
+        // chat 子态下选项列表中无 ❯ 高亮
+        let option_lines: Vec<_> = block
+            .lines
+            .iter()
+            .filter(|line| line.plain.contains("1. ") || line.plain.contains("2. "))
+            .collect();
+        assert!(!option_lines
+            .iter()
+            .any(|line| line.plain.contains('❯')));
+        // Type something 输入框有 ❯
+        assert!(block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("Type something")));
     }
 
     #[test]
-    fn test_option_lines_multiline_indents_continuation() {
-        let rendered = option_lines(0, "first\nsecond", false, false);
+    fn test_option_lines_with_description() {
+        let item = sdk::OptionItem::new("Title", "Description line");
+        let rendered = option_lines(0, &item, false, false);
+        // title line + description line
         assert_eq!(rendered.len(), 2);
-        assert!(rendered[0].contains("1. first"));
-        assert!(rendered[1].trim() == "second");
+        assert!(rendered[0].0.contains("1. Title"));
+        assert!(rendered[1].0.contains("Description line"));
+        // description 有覆盖样式
+        assert!(rendered[1].1.is_some());
+    }
+
+    #[test]
+    fn test_option_lines_title_only() {
+        let item = sdk::OptionItem::title_only("Simple");
+        let rendered = option_lines(0, &item, true, true);
+        assert_eq!(rendered.len(), 1);
+        assert!(rendered[0].0.contains("1. Simple"));
+        // 无覆盖样式（由 active 控制）
+        assert!(rendered[0].0.contains("[✓]"));
     }
 }

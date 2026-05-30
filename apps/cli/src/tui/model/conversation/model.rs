@@ -83,6 +83,10 @@ impl ConversationModel {
             ConversationIntent::SetAskUserChatInput { active } => {
                 self.set_ask_user_chat_input(active)
             }
+            ConversationIntent::AppendAskUserChatChar { ch } => {
+                self.append_ask_user_chat_char(ch)
+            }
+            ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
             ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
         }
     }

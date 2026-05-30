@@ -59,7 +59,7 @@ pub enum ConversationBlock {
         id: String,
         question: String,
         /// 全部选项（LLM 选项 + 内建选项）。
-        options: Vec<String>,
+        options: Vec<sdk::OptionItem>,
         /// LLM 提供的选项数量（内建选项从该索引开始，不可在 multi_select 下勾选）。
         llm_option_count: usize,
         multi_select: bool,
@@ -67,8 +67,10 @@ pub enum ConversationBlock {
         cursor: usize,
         /// multi_select 下各选项是否已勾选。
         selected: Vec<bool>,
-        /// 是否处于「Chat about this...」自由输入子态（此时不高亮选项）。
+        /// 是否处于自由输入态（光标在 Type something 位置）。
         chat_input_active: bool,
+        /// Type something 输入框中的文本。
+        chat_input_text: String,
         /// 无选项自由输入模式下的默认值提示。
         default: Option<String>,
     },

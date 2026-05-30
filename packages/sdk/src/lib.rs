@@ -19,7 +19,7 @@ pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent, ChatInput,
-    ChatRequest, ChatResult, ChatStream, ToolResultImage, WorkspaceContextView,
+    ChatRequest, ChatResult, ChatStream, OptionItem, ToolResultImage, WorkspaceContextView,
     WorkspaceStackEntryView,
 };
 pub use client::AgentClient;

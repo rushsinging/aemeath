@@ -47,17 +47,19 @@ pub enum OutputBlockKind {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AskUserBlockView {
     pub key: String,
-    pub question: String,
-    pub options: Vec<String>,
-    /// LLM 选项数量（内建项从该索引开始，不显示勾选框）。
-    pub llm_option_count: usize,
+        pub question: String,
+        pub options: Vec<sdk::OptionItem>,
+        /// LLM 选项数量（内建项从该索引开始，不显示勾选框）。
+        pub llm_option_count: usize,
     pub multi_select: bool,
     /// 当前光标所在选项索引（高亮行）。
     pub cursor: usize,
     /// multi_select 下各选项勾选状态。
     pub selected: Vec<bool>,
-    /// 处于「Chat about this...」自由输入子态时不高亮选项。
+    /// 处于自由输入态（光标在 Type something 位置）。
     pub chat_input_active: bool,
+    /// Type something 输入框中的文本。
+    pub chat_input_text: String,
     /// 无选项自由输入模式下的默认值提示（渲染 `(default: ...)` 行）。
     pub default: Option<String>,
 }

@@ -3,6 +3,7 @@ use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use hook::api::HookData;
+use sdk::OptionItem;
 use share::config::hooks::HookEvent;
 
 pub(crate) async fn ask_user<S>(
@@ -37,13 +38,27 @@ where
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let options: Vec<String> = call
+        let options: Vec<OptionItem> = call
             .input
             .get("options")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .filter_map(|v| {
+                        // 新格式：{ "title": "...", "description": "..." }
+                        if v.is_object() {
+                            let title = v.get("title").and_then(|t| t.as_str())?;
+                            let description = v.get("description").and_then(|d| d.as_str());
+                            Some(OptionItem {
+                                title: title.to_string(),
+                                description: description.map(|d| d.to_string()),
+                            })
+                        } else {
+                            // 兼容旧格式：纯字符串
+                            v.as_str()
+                                .map(|s| OptionItem::title_only(s.to_string()))
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();

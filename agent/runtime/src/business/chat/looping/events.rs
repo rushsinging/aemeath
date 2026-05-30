@@ -54,7 +54,7 @@ pub enum RuntimeStreamEvent {
     AskUser {
         id: String,
         question: String,
-        options: Vec<String>,
+        options: Vec<sdk::OptionItem>,
         allow_free_input: bool,
         multi_select: bool,
         default: Option<String>,
