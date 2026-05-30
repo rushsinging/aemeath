@@ -23,7 +23,7 @@
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | 中 | 待确认 | 未确认 | 2026-05 | 经验证渲染链完整：task_impls.rs 中 TaskListCreate/TaskCreate/TaskUpdate 等 display 均已注册，lookup_display 返回正确实现，format_tool_call 产出正确 header+details，OutputViewAssembler 正确创建 ToolCallBlockView 并渲染。新增 10 个测试覆盖 display lookup、format_tool_call、端到端 assembler 渲染三条路径。若问题仍存在，可能为事件流层（provider 未发送 ToolCallStart）或 timing 相关问题，需实际运行复现确认。修复 commit: 2de88a1 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
 | 86 | TUI tool call 顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：①模型可能先流式输出未完成 assistant text，随后才发送 tool_use；旧逻辑 append ToolCall 导致结论文本在工具调用前。②ToolResult 事件可能早于正式 ToolCall 绑定；提升 orphan result 时旧逻辑 append ToolResult，导致结果在标题前。修复：ToolCall 绑定时插入未完成 assistant text 前；ToolResult 始终插入对应 ToolCall 后；已完成文本块不重排 |
-| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 活动中 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）将完整 tool result 内容全部输出，不受 `result_max_lines`/`TOOL_RESULT_MAX_LINES` 限制；同时 tool result 渲染格式不正确——原始 tool result 文本（含行号标注等）被当作纯文本逐行显示，未走 ToolDisplay 的 `format_result_summary` 截断/格式化。实测示例：`✓ Read completed` 后紧接整个文件的逐行带行号内容全部输出。与 #82/#83 同族：`ToolDisplay` 的 `result_max_lines()`/`format_result_summary()` 已定义但未被 assembler 接入，完整 result 文本直接透传到渲染层 |
+| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 待确认 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）曾将完整 tool result 内容输出到工具块下方，看起来像 LLM 正文从 tool call result 中刷出。修复：ToolResult 子块只展示 `ToolDisplay::format_result_summary()` 的短摘要（如 `✓ Read completed`），完整 Read 内容不进入渲染文本；assistant 正文保持独立 `AssistantMessage` block；补充回归测试覆盖 Read 完整 active.md 结果不泄漏到 ToolResult |
 
 ### #85 Ollama provider 声明但工厂未接线（整模块死代码）
 
@@ -45,8 +45,6 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
-| 86 | TUI 中先展示结论再展示 tool call，顺序颠倒 | 中 | 待确认 | 未确认 | 2026-05 | 根因：模型可能先流式输出未完成 assistant text block，随后才发送 tool_use；ConversationModel 过去按事件到达顺序 append ToolCall block，导致 pending 结论文本显示在工具调用前。修复：绑定 ToolCall 时若存在未完成 assistant text block，将 ToolCall 插入该 active text block 之前；已完成文本块不重排，避免破坏正常流式显示 |
-| 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | 高 | 修复中 | 未确认 | 2026-05 | TUI 中 tool call（如 Read）将完整 tool result 内容全部输出，不受 `result_max_lines`/`TOOL_RESULT_MAX_LINES` 限制；同时 tool result 渲染格式不正确——原始 tool result 文本（含行号标注等）被当作纯文本逐行显示，未走 ToolDisplay 的 `format_result_summary` 截断/格式化。实测示例：`✓ Read completed` 后紧接整个文件的逐行带行号内容全部输出。与 #82/#83 同族：`ToolDisplay` 的 `result_max_lines()`/`format_result_summary()` 已定义但未被 assembler 接入，完整 result 文本直接透传到渲染层 |
 
 ### #86 TUI tool call 顺序颠倒
 
@@ -1243,44 +1241,27 @@ Tool Bash timed out after 120s
 
 ### #87 TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误
 
-**状态**：活动中
+**状态**：待确认
 
-**症状**：tool call result 在 TUI 中渲染时存在两个问题：
-1. **格式错误**：直接展示工具返回的原始 diff 内容（如 Edit 工具的 `---DIFF---` 全文、Read 工具的 `cat -n` 格式完整输出），而非格式化的摘要视图（如 `✓ replaced 1 occurrence(s) in ...` 短摘要）
-2. **不受最大行数限制**：tool result 内容不受 max_lines 输出制约，大文件操作（如 Read 大文件、Edit 多处替换）的完整内容会全部刷屏，导致输出区被极长内容淹没
+**症状**：tool call result 在 TUI 中渲染时曾存在两个问题：
+1. **格式错误**：直接展示工具返回的原始 diff 内容或 Read 完整输出，而非格式化的摘要视图。
+2. **不受最大行数限制**：大文件操作的完整内容会全部刷屏，看起来像 LLM 正文从 tool call result 中刷出。
 
-**根因（待确认）**：#58 渲染管线重构后，tool result 可能走了原始文本渲染路径而非 ToolResultBlockView 的格式化摘要路径；同时 tool result block 缺少 max_lines 截断逻辑，或在全量替换时绕过了行数限制。
+**根因（已确认）**：嵌入 ToolResult 路径需要只展示 `ToolDisplay::format_result_summary()` 生成的短摘要；非嵌入/Orphan ToolResult 路径若直接透传 `output`，会被 `DiagnosticNotice` 逐行渲染完整内容。
 
-**修复方向**：
-1. 确认 tool result 事件走 ToolResultBlockView 格式化渲染路径，显示短摘要而非原始输出
-2. 为 tool result block 添加 max_lines 截断，超出部分折叠为 `... (N lines truncated)`
-3. 仅保留 diff 关键行（文件名、变更摘要），完整内容通过展开交互查看
+**修复**：
+1. ToolResult 子块只展示短摘要（例如 `✓ Read completed`），完整 Read 内容不进入渲染文本。
+2. assistant 正文保持独立 `AssistantMessage` block，不混入 ToolResult。
+3. 非嵌入 ToolResult 使用工具 display 摘要，OrphanToolResult 走截断显示。
+
+**回归测试**：
+1. `test_output_assembler_summarizes_embedded_tool_result_without_full_output`：Read 完整输出不会进入 ToolResult 子块。
+2. `test_output_assembler_keeps_assistant_text_outside_read_result`：Read 完整 active.md 内容不泄漏到 ToolResult，后续 LLM 正文保持独立 AssistantMessage。
+3. `test_non_embedded_tool_result_uses_summary` / `test_orphan_tool_result_is_truncated`：非嵌入和 orphan 路径不会完整刷屏。
 
 **涉及文件**：
-- `apps/cli/src/tui/model/output/assembler.rs`（tool result 块绑定与格式化）
-- `apps/cli/src/tui/render/output/blocks/tool_result.rs`（tool result 渲染）
-- `apps/cli/src/tui/adapter/output_widget.rs`（max_lines 截断逻辑）
+- `apps/cli/src/tui/view_assembler/output.rs`
+- `apps/cli/src/tui/view_assembler/output_tests.rs`
+- `apps/cli/src/tui/view_assembler/output_unit_tests.rs`
+- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
 
-### #87 TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误
-
-**状态**：修复中
-
-**症状**：
-1. TUI 中 tool call（如 Read）将完整 tool result 内容全部输出到输出区，不受 `result_max_lines`/`TOOL_RESULT_MAX_LINES` 限制，大文件刷屏。
-2. Tool result 渲染格式不正确——原始 result 文本被当作纯文本逐行显示，未走 `ToolDisplay::format_result_summary()` 做截断和格式化。
-3. 实测示例：`✓ Read completed` 后紧接整个文件的逐行带行号内容全部输出，无截断、无折叠。
-
-**根因（已确认）**：
-1. assembler 的 `find_tool_view` 中 `tool_result_summary` 已正确调用 `format_result_summary` 生成摘要——嵌入路径正常。
-2. 但非嵌入 ToolResult 路径（`tool_result_is_embedded` 返回 false 时）和 OrphanToolResult 路径直接 `output.clone()` 透传完整内容到 `DiagnosticNotice`。
-3. `DiagnosticNotice` 由 `render_diagnostic` 渲染，逐行渲染所有内容无截断。
-
-**修复方向**：
-1. 非嵌入 ToolResult：使用 `lookup_display(tool_name).format_result_summary()` 生成摘要替代完整 output。
-2. OrphanToolResult：限制显示行数（取 `result_max_lines`）。
-3. 需要从 conversation 中查找匹配 tool call 获取 tool_name。
-
-**涉及路径**：
-- `apps/cli/src/tui/view_assembler/output.rs`（`ToolResult` 块处理、`OrphanToolResult` 块处理）
-- `apps/cli/src/tui/render/output/tool_display/mod.rs`（`format_result_summary`、`result_max_lines`）
-- `apps/cli/src/tui/render/output/blocks/tool_result.rs`（tool result 子块渲染、截断逻辑）
