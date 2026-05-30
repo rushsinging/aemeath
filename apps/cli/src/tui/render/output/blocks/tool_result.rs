@@ -3,11 +3,13 @@
 //! 作为 ToolCall 的 depth-1 子节点，结果行不再自拼缩进/marker——块级缩进由
 //! gutter 在组合期注入（续行等宽空白），结构上隔离 #65 的 fence 状态机泄漏。
 
+use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::{result_max_lines, result_render_kind, ResultRender};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolResultBlockView;
+use crate::tui::view_model::style::SemanticStyle;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -18,7 +20,7 @@ pub fn render_tool_result(
 ) -> RenderedBlock {
     // result 渲染类型由工具显式声明（`ToolDisplay::result_render`），渲染层据此分发——
     // 不按 `---DIFF---` 字符或硬编码工具名猜测。
-    let lines = match result_render_kind(&view.tool_title) {
+    let mut lines = match result_render_kind(&view.tool_title) {
         // Edit：解析 `---DIFF---` 渲染加减色 diff；解析失败回退纯文本预览。
         ResultRender::Diff => {
             render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width)
@@ -27,11 +29,41 @@ pub fn render_tool_result(
         // Plain：纯文本原样预览（Read/Bash 等）。
         ResultRender::Plain => format_result_lines(&view.tool_title, &view.result_text),
     };
+    // result 子块底部附加状态行：成功/失败/执行中 + 工具名（失败附首行原因），用状态色。
+    lines.push(status_line(view));
 
     RenderedBlock {
         block_id: block_id.to_string(),
         lines,
     }
+}
+
+/// result 子块底部的状态行：成功/失败/执行中 + 工具名（失败时附首行原因），用状态色
+/// （绿/红/橙）——与内容预览的暗色区分，明确 tool call 结局。
+fn status_line(view: &ToolResultBlockView) -> RenderedLine {
+    let color = semantic_color(view.style);
+    let text = match view.style {
+        SemanticStyle::Success => format!("✓ {} 成功", view.tool_title),
+        SemanticStyle::Error => {
+            let reason = view
+                .result_text
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("");
+            if reason.is_empty() {
+                format!("✗ {} 失败", view.tool_title)
+            } else {
+                format!("✗ {} 失败：{reason}", view.tool_title)
+            }
+        }
+        SemanticStyle::Running => format!("● {} 执行中", view.tool_title),
+        SemanticStyle::Warning => format!("? {} 警告", view.tool_title),
+        SemanticStyle::Normal | SemanticStyle::Muted | SemanticStyle::Accent => {
+            format!("{} 完成", view.tool_title)
+        }
+    };
+    RenderedLine::new(vec![Span::styled(text, Style::default().fg(color))])
 }
 
 /// 渲染 Plain 工具结果：**纯文本原样**逐行，按 `result_max_lines` 截断。
@@ -123,12 +155,17 @@ mod tests {
         );
         assert!(block.lines.iter().any(|l| l.plain == "code"));
         assert!(block.lines.iter().any(|l| l.plain == "after"));
+        // 内容预览行（fence/code/after）用暗色；末尾状态行用状态色（与内容区分）。
+        let content_lines = &block.lines[..block.lines.len() - 1];
         assert!(
-            block
-                .lines
+            content_lines
                 .iter()
                 .all(|l| l.spans.iter().all(|s| s.style.fg == Some(theme::TEXT_DIM))),
-            "Plain 预览整体用暗色 TEXT_DIM，不渲染 fence CODE 色、不跟随状态色"
+            "Plain 预览内容行用暗色 TEXT_DIM，不渲染 fence CODE 色"
+        );
+        assert!(
+            block.lines.last().unwrap().plain.contains("Bash"),
+            "末尾为状态行（含工具名）"
         );
     }
 
@@ -144,24 +181,56 @@ mod tests {
     }
 
     #[test]
-    fn test_render_tool_result_max_lines_zero_renders_nothing() {
-        // 边界：result_max_lines==0 的工具（TaskListComplete/AskUserQuestion）result 子块
-        // 整体为空——既不渲染内容行，也不显示 "lines omitted" 提示。
+    fn test_render_tool_result_max_lines_zero_renders_only_status_line() {
+        // 边界：result_max_lines==0 的工具（TaskListComplete/AskUserQuestion）不渲染内容
+        // 预览，仅底部状态行。
         let view = result("TaskListComplete", "a\nb\nc");
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 
-        assert!(block.lines.is_empty(), "max_lines=0 时 result 子块应为空");
+        assert!(
+            block.lines.iter().all(|l| l.plain != "a"),
+            "max=0 不渲染内容预览行"
+        );
+        assert_eq!(block.lines.len(), 1, "仅底部状态行");
     }
 
     #[test]
-    fn test_render_tool_result_empty_result_renders_no_lines() {
-        // 错误/空路径：空白结果不产出任何行。
+    fn test_render_tool_result_empty_result_only_status_line() {
+        // 空白结果：无内容预览行，仅底部状态行。
         let view = result("Bash", "   \n  ");
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 
-        assert!(block.lines.is_empty(), "空结果不应产出结果行");
+        assert_eq!(block.lines.len(), 1, "空 result 只剩底部状态行");
+        assert!(block.lines[0].plain.contains("Bash"));
+    }
+
+    #[test]
+    fn test_render_tool_result_appends_status_line_success_and_error() {
+        // result 底部附加状态行：成功 "✓ {tool} 成功"（绿）；失败 "✗ {tool} 失败：原因"（红）。
+        let mut ok = result("Read", "file content");
+        ok.style = SemanticStyle::Success;
+        let block = render_tool_result("t-ok", &ok, &RenderCtx { width: 80 });
+        let last = block.lines.last().unwrap();
+        assert!(
+            last.plain.contains('✓') && last.plain.contains("Read") && last.plain.contains("成功"),
+            "成功状态行: {}",
+            last.plain
+        );
+        assert!(last.spans.iter().any(|s| s.style.fg == Some(theme::SUCCESS)));
+
+        let mut err = result("Bash", "command not found: foo");
+        err.style = SemanticStyle::Error;
+        let block = render_tool_result("t-err", &err, &RenderCtx { width: 80 });
+        let last = block.lines.last().unwrap();
+        assert!(last.plain.contains('✗') && last.plain.contains("失败"));
+        assert!(
+            last.plain.contains("command not found"),
+            "失败状态行应附首行原因: {}",
+            last.plain
+        );
+        assert!(last.spans.iter().any(|s| s.style.fg == Some(theme::ERROR)));
     }
 
     #[test]
