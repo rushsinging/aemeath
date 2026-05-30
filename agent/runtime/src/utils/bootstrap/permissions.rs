@@ -1,5 +1,5 @@
 use super::ChatBootstrapArgs;
-use crate::api::core::config::{Config, PermissionModeConfig};
+use share::config::{Config, PermissionModeConfig};
 
 pub fn apply_config_permission_mode(args: &mut ChatBootstrapArgs, config_file: Option<&Config>) {
     if args.allow_all {
@@ -20,7 +20,7 @@ fn config_allows_all(config_file: Option<&Config>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::PermissionConfig;
+    use share::config::PermissionConfig;
 
     fn args_with_allow_all(allow_all: bool) -> ChatBootstrapArgs {
         ChatBootstrapArgs {

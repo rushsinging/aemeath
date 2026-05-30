@@ -7,11 +7,12 @@ use crate::business::{
     web_fetch, web_search, worktree,
 };
 use share::skill_ops::Skill;
-use share::task_ops::TaskStore;
-use share::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
+use storage::api::TaskStore;
 use tokio::sync::Mutex;
+
+use super::tool_registry::ToolRegistry;
 
 pub fn register_all_tools(
     registry: &ToolRegistry,

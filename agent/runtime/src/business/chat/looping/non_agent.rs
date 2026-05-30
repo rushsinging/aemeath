@@ -1,9 +1,9 @@
 use crate::api::agent::{Agent, ToolCall};
-use crate::api::core::config::hooks::HookEvent;
-use crate::api::hook::{HookData, ToolHookData};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use hook::api::{HookData, ToolHookData};
 use logging::JsonLogger;
+use share::config::hooks::HookEvent;
 use std::sync::Arc;
 
 use super::tools::{
@@ -15,7 +15,7 @@ pub(super) async fn execute_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -65,7 +65,7 @@ async fn execute_multiple_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -165,7 +165,7 @@ async fn execute_one_non_agent<S>(
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
     turn_count: usize,
     client_model: &str,
@@ -179,7 +179,7 @@ where
             hook_runner,
             HookEvent::PermissionRequest,
             Some(&call.name),
-            HookData::Permission(crate::api::hook::PermissionHookData {
+            HookData::Permission(hook::api::PermissionHookData {
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
@@ -215,9 +215,9 @@ where
         return vec![result];
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
-    let working_root = agent.ctx.current_working_root();
+    let working_root = project::api::current_path(&agent.ctx.working_root);
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = crate::api::project::workspace_context_from_tool_context(&agent.ctx);
+    let workspace = project::api::workspace_context_from_tool_context(&agent.ctx);
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
@@ -248,7 +248,7 @@ where
 async fn run_task_hooks<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
-    hook_runner: &crate::api::hook::HookRunner,
+    hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
     output: &str,
     is_error: bool,

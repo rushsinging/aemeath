@@ -7,10 +7,10 @@ use super::progress::build_tool_calls_progress_event;
 use super::{CliAgentRunner, SilentHandler};
 use crate::api::agent::Agent;
 use crate::api::compact::safe_slice;
-use crate::api::core::message::Message;
-use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
-use crate::api::provider::LlmClient;
-use crate::api::provider::{StopReason, SystemBlock};
+use provider::api::LlmClient;
+use provider::api::{StopReason, SystemBlock};
+use share::message::Message;
+use share::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
 use std::sync::Arc;
 
 #[allow(clippy::type_complexity)]
@@ -21,7 +21,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx: &'a ToolContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
-    pub hook_runner: crate::api::hook::HookRunner,
+    pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
     pub handler: SilentHandler,
@@ -201,11 +201,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn progress_api_ok(
-        &self,
-        turn_number: usize,
-        resp: &crate::api::provider::StreamResponse,
-    ) {
+    fn progress_api_ok(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -215,7 +211,7 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, turn_number: usize, resp: &crate::api::provider::StreamResponse) {
+    fn log_output(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
         if let Some(ref jl) = self.runner.json_logger {
             let data = build_json_logger_output_data(
                 resp,
@@ -231,7 +227,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn send_text_progress(&self, turn: usize, resp: &crate::api::provider::StreamResponse) {
+    fn send_text_progress(&self, turn: usize, resp: &provider::api::StreamResponse) {
         if let Some(ref tx) = self.progress_tx {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();

@@ -7,10 +7,10 @@ use crate::core::port::ProviderInfoPort;
 use std::sync::Arc;
 
 /// LlmClient 的 newtype 适配器，封装 provider::LlmClient 的元数据查询方法。
-pub struct LlmClientAdapter(pub Arc<crate::api::provider::LlmClient>);
+pub struct LlmClientAdapter(pub Arc<provider::api::LlmClient>);
 
 impl LlmClientAdapter {
-    pub fn new(client: Arc<crate::api::provider::LlmClient>) -> Self {
+    pub fn new(client: Arc<provider::api::LlmClient>) -> Self {
         Self(client)
     }
 }

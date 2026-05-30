@@ -18,11 +18,11 @@ pub mod persistence;
 pub mod types;
 pub use types::*;
 
-use share::task::{TaskStatus, TaskStore};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use storage::api::{TaskStatus, TaskStore};
 use tokio::sync::{Mutex, Notify};
 
 /// Background task scheduler

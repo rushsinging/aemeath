@@ -2,7 +2,7 @@
 
 use super::types::SchedulerState;
 use super::TaskScheduler;
-use share::task::TaskStatus;
+use storage::api::TaskStatus;
 
 impl TaskScheduler {
     /// Persist state to disk

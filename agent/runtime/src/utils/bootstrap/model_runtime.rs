@@ -1,5 +1,5 @@
-use crate::api::core::config::models::ModelEntryConfig;
-use crate::api::core::config::{models::validate_reasoning_effort, Config};
+use share::config::models::ModelEntryConfig;
+use share::config::{models::validate_reasoning_effort, Config};
 
 pub struct ModelRuntimeSettings {
     pub max_tokens: u32,
@@ -56,8 +56,8 @@ pub fn resolve_model_runtime_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::models::ModelEntryConfig;
-    use crate::api::core::config::{Config, ModelConfig};
+    use share::config::models::ModelEntryConfig;
+    use share::config::{Config, ModelConfig};
 
     fn model_entry(max_tokens: u32) -> ModelEntryConfig {
         ModelEntryConfig {

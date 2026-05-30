@@ -1,6 +1,6 @@
 use crate::api::agent::ToolCall;
-use crate::api::core::message::Message;
 use serde_json::json;
+use share::message::Message;
 
 pub(crate) fn build_json_logger_input_data(
     messages: &[Message],
@@ -33,7 +33,7 @@ pub(crate) fn build_json_logger_input_data(
 }
 
 pub(crate) fn build_json_logger_output_data(
-    resp: &crate::api::provider::StreamResponse,
+    resp: &provider::api::StreamResponse,
     elapsed_secs: f64,
     provider: &str,
 ) -> serde_json::Value {

@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use sdk::ChangeSet;
 use tokio::sync::watch;
 
-use crate::api::core::config::models::ResolvedModel;
-use crate::api::core::task::TaskStore;
-use crate::api::tools::McpConnectionManager;
 use crate::core::port::ChatRuntimeContext;
+use share::config::models::ResolvedModel;
+use storage::api::TaskStore;
+use tools::api::McpConnectionManager;
 
 // ─── 结构体定义 ───
 
@@ -34,19 +34,19 @@ pub struct RuntimeHandle {
     pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
-    pub(crate) current_client: std::sync::RwLock<Arc<crate::api::provider::LlmClient>>,
+    pub(crate) current_client: std::sync::RwLock<Arc<provider::api::LlmClient>>,
 
     // ─── SDK 状态 ───
     pub(crate) cancel_token: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
-    pub(crate) current_messages: Arc<Mutex<Vec<crate::api::core::message::Message>>>,
+    pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
     pub(crate) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
     pub(crate) change_rx: watch::Receiver<ChangeSet>,
 
     // ─── SDK 业务对象 ───
     /// HookRunner（clone，供 SDK 通知 hook）
-    pub(crate) hook_runner: Option<crate::api::hook::HookRunner>,
+    pub(crate) hook_runner: Option<hook::api::HookRunner>,
     /// TaskStore（Arc，供 SDK 恢复任务）
     pub(crate) task_store: Option<std::sync::Arc<TaskStore>>,
     /// Session reminders（供 SDK 增删改查）
@@ -122,9 +122,9 @@ impl AgentClientImpl {
                 .collect(),
             hook_runner: ctx.hook_runner,
             json_logger: ctx.json_logger,
-            session_reminders: Arc::new(std::sync::Mutex::new(
-                crate::api::core::tool::SessionReminders::new(),
-            )),
+            session_reminders: Arc::new(
+                std::sync::Mutex::new(share::tool::SessionReminders::new()),
+            ),
         }
     }
 }

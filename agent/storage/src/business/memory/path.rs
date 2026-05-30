@@ -3,8 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 pub fn memory_base_dir() -> PathBuf {
-    PathBuf::from(share::config::paths::AGENTS_DIR_NAME)
-        .join(share::config::paths::MEMORY_DIR_NAME)
+    PathBuf::from(share::config::paths::AGENTS_DIR_NAME).join(share::config::paths::MEMORY_DIR_NAME)
 }
 
 pub fn project_hash(cwd: &str) -> String {

@@ -1,9 +1,9 @@
 use crate::api::agent_runner;
-use crate::api::core::config::Config;
-use crate::api::hook::HookRunner;
-use crate::api::provider::LlmClient;
 use crate::utils::bootstrap::config_paths;
+use hook::api::HookRunner;
 use logging::JsonLogger;
+use provider::api::LlmClient;
+use share::config::Config;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -84,13 +84,13 @@ pub fn build_agent_runner(
 fn build_llm_client_pool(
     config_file: Option<&Config>,
     client: Arc<LlmClient>,
-    models_config: Arc<crate::api::core::config::ModelsConfig>,
-) -> Option<Arc<crate::api::provider::LlmClientPool>> {
+    models_config: Arc<share::config::ModelsConfig>,
+) -> Option<Arc<provider::api::LlmClientPool>> {
     if !has_multi_provider_or_agent_roles(config_file, &models_config) {
         return None;
     }
 
-    Some(Arc::new(crate::api::provider::LlmClientPool::new(
+    Some(Arc::new(provider::api::LlmClientPool::new(
         client,
         models_config,
     )))
@@ -98,7 +98,7 @@ fn build_llm_client_pool(
 
 fn has_multi_provider_or_agent_roles(
     config_file: Option<&Config>,
-    models_config: &crate::api::core::config::ModelsConfig,
+    models_config: &share::config::ModelsConfig,
 ) -> bool {
     models_config.providers.len() > 1
         || !config_file
@@ -125,9 +125,9 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::hooks::{HookEntry, HookEvent, HooksConfig};
-    use crate::api::core::config::models::ProviderModelsConfig;
-    use crate::api::core::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
+    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use share::config::models::ProviderModelsConfig;
+    use share::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
     use std::collections::HashMap;
 
     fn config_with_logging(role_logs_enabled: bool, logs_dir: Option<&str>) -> Config {

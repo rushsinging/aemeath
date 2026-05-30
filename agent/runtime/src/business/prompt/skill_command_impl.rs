@@ -25,7 +25,7 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     let arg = args.trim();
     if arg.is_empty() || arg == "list" {
         let cwd = std::env::current_dir().unwrap_or_default();
-        let skills = crate::api::prompt::skill::load_all_skills(&cwd, &[]);
+        let skills = prompt::api::skill::load_all_skills(&cwd, &[]);
         if skills.is_empty() {
             return CommandResult::Success("No skills available.\n\nSkills are loaded from:\n  - .aemeath/skills/\n  - ~/.aemeath/skills/\n  - ~/.agents/skills/".to_string());
         }
@@ -55,7 +55,7 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
             return CommandResult::Error("Usage: /skills run <name>".to_string());
         }
         let cwd = std::env::current_dir().unwrap_or_default();
-        let skills = crate::api::prompt::skill::load_all_skills(&cwd, &[]);
+        let skills = prompt::api::skill::load_all_skills(&cwd, &[]);
         // Look up by name or alias
         let skill = skills.get(name).or_else(|| {
             skills
@@ -86,7 +86,7 @@ fn skills_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     } else {
         // Treat bare name as "run" for convenience
         let cwd = std::env::current_dir().unwrap_or_default();
-        let skills = crate::api::prompt::skill::load_all_skills(&cwd, &[]);
+        let skills = prompt::api::skill::load_all_skills(&cwd, &[]);
         let skill = skills
             .get(arg)
             .or_else(|| skills.values().find(|s| s.aliases.iter().any(|a| a == arg)));

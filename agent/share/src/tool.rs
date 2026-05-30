@@ -1,7 +1,6 @@
 use async_trait::async_trait;
-use parking_lot::RwLock;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -75,8 +74,6 @@ pub struct AgentToolCallProgress {
 pub struct AgentRunRequest<'a> {
     pub prompt: &'a str,
     pub system: &'a str,
-    pub tool_schemas: &'a [serde_json::Value],
-    pub registry: &'a ToolRegistry,
     pub ctx: &'a ToolContext,
     pub max_turns: Option<u32>,
     pub model_spec: Option<&'a str>,
@@ -200,53 +197,6 @@ pub struct ToolContext {
     pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
 }
 
-impl ToolContext {
-    pub fn new_working_paths(cwd: PathBuf) -> (PathBuf, Arc<Mutex<PathBuf>>, Arc<Mutex<PathBuf>>) {
-        let working_root = Arc::new(Mutex::new(cwd.clone()));
-        let path_base = Arc::new(Mutex::new(cwd.clone()));
-        (cwd, working_root, path_base)
-    }
-
-    pub fn current_working_root(&self) -> PathBuf {
-        self.working_root
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone())
-    }
-
-    pub fn current_path_base(&self) -> PathBuf {
-        self.path_base
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone())
-    }
-
-    pub fn set_working_directory(&self, path: PathBuf) {
-        let working_root = detect_working_root(&path);
-        match self.working_root.lock() {
-            Ok(mut current) => *current = working_root,
-            Err(poisoned) => *poisoned.into_inner() = working_root,
-        }
-        match self.path_base.lock() {
-            Ok(mut path_base) => *path_base = path,
-            Err(poisoned) => *poisoned.into_inner() = path,
-        }
-    }
-}
-
-fn detect_working_root(path: &std::path::Path) -> PathBuf {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|stdout| PathBuf::from(stdout.trim()))
-        .filter(|root| !root.as_os_str().is_empty())
-        .unwrap_or_else(|| path.to_path_buf())
-}
-
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
@@ -267,134 +217,4 @@ pub trait Tool: Send + Sync {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult;
-}
-
-pub struct ToolRegistry {
-    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
-}
-
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ToolRegistry {
-    pub fn new() -> Self {
-        Self {
-            tools: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn register(&self, tool: Box<dyn Tool>) {
-        self.tools
-            .write()
-            .insert(tool.name().to_string(), Arc::from(tool));
-    }
-
-    pub fn unregister(&self, name: &str) -> bool {
-        self.tools.write().remove(name).is_some()
-    }
-
-    pub fn contains(&self, name: &str) -> bool {
-        self.tools.read().contains_key(name)
-    }
-
-    pub fn len(&self) -> usize {
-        self.tools.read().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tools.read().is_empty()
-    }
-
-    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.read().get(name).cloned()
-    }
-
-    pub fn schemas(&self) -> Vec<Value> {
-        self.tools
-            .read()
-            .values()
-            .map(|tool| {
-                serde_json::json!({
-                    "name": tool.name(),
-                    "description": tool.description(),
-                    "input_schema": tool.input_schema(),
-                })
-            })
-            .collect()
-    }
-
-    pub fn names(&self) -> Vec<String> {
-        self.tools.read().keys().cloned().collect()
-    }
-}
-
-#[cfg(test)]
-mod tool_registry_tests {
-    use super::*;
-
-    struct DummyTool {
-        name: String,
-        description: String,
-    }
-
-    impl DummyTool {
-        fn new(name: &str, description: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                description: description.to_string(),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl Tool for DummyTool {
-        fn name(&self) -> &str {
-            &self.name
-        }
-
-        fn description(&self) -> &str {
-            &self.description
-        }
-
-        fn input_schema(&self) -> Value {
-            serde_json::json!({"type": "object"})
-        }
-
-        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
-            ToolResult::success("ok")
-        }
-    }
-
-    #[test]
-    fn test_tool_registry_unregister_existing_tool() {
-        let registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool::new("dummy", "first")));
-
-        assert!(registry.contains("dummy"));
-        assert_eq!(registry.len(), 1);
-        assert!(registry.unregister("dummy"));
-        assert!(!registry.contains("dummy"));
-        assert!(registry.is_empty());
-    }
-
-    #[test]
-    fn test_tool_registry_unregister_missing_tool() {
-        let registry = ToolRegistry::new();
-
-        assert!(!registry.unregister("missing"));
-        assert!(registry.is_empty());
-    }
-
-    #[test]
-    fn test_tool_registry_register_overwrites_existing_tool() {
-        let registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool::new("dummy", "first")));
-        registry.register(Box::new(DummyTool::new("dummy", "second")));
-
-        assert_eq!(registry.len(), 1);
-        assert_eq!(registry.get("dummy").unwrap().description(), "second");
-    }
 }

@@ -1,15 +1,16 @@
 //! Skill Prompt domain.
 //!
-//! Loader（目录遍历 fs IO）的 canonical 实现位于本域 [`loader`]（refs #61 D2）。
-//! `Skill` DTO 与单文件 parser（被 tools/runtime/prompt 多 crate 依赖的契约）
-//! 仍由共享内核 `share::skill_ops` 承载，此处 re-export 以保持调用方接口一致。
+//! Loader（目录遍历 fs IO）与 parser（单文件 fs IO）的 canonical 实现位于本域（refs #61 D2）。
+//! `Skill` DTO 仍由共享内核 `share::skill_ops` 承载，此处 re-export 以保持调用方接口一致。
 
 mod loader;
+mod parser;
 
 pub use loader::{
     load_all_skills, load_all_skills_cached, load_and_filter_skills, load_skills_from_dir,
 };
-pub use share::skill_ops::{builtin_commit_skill, parse_skill, read_skill_content, Skill};
+pub use parser::{builtin_commit_skill, parse_skill, read_skill_content};
+pub use share::skill_ops::Skill;
 
 #[cfg(test)]
 mod tests {
@@ -28,6 +29,7 @@ mod tests {
         let skill = parse_skill(&path).unwrap();
 
         assert_eq!(skill.name, "cm");
+        assert_eq!(skill.content, "content here");
         assert_eq!(read_skill_content(&skill), "content here");
         std::fs::remove_dir_all(&base).unwrap();
     }

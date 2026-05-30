@@ -1,12 +1,12 @@
 //! Skill 加载器（prompt domain，canonical）。
 //!
 //! 负责从文件系统目录扫描并装配 [`Skill`]（含 `std::fs` 目录遍历 IO）。
-//! `Skill` DTO 与单文件 parser（`parse_skill`/`read_skill_content`）仍由
-//! 共享内核 `share::skill_ops` 提供（被 tools/runtime/prompt 多 crate 依赖的契约）；
-//! 目录遍历 IO 归位 prompt domain（refs #61 D2）。
+//! `Skill` DTO 由共享内核 `share::skill_ops` 提供；parser 与目录遍历 IO
+//! 归位 prompt domain（refs #61 D2）。
 
+use super::parser::{builtin_commit_skill, parse_skill};
 use share::config::paths;
-use share::skill_ops::{builtin_commit_skill, parse_skill, Skill};
+use share::skill_ops::Skill;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

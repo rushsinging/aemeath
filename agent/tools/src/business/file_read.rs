@@ -39,8 +39,8 @@ impl Tool for FileReadTool {
         };
 
         // Validate path is within workspace boundary
-        let path_base = ctx.current_path_base();
-        let working_root = ctx.current_working_root();
+        let path_base = project::api::current_path(&ctx.path_base);
+        let working_root = project::api::current_path(&ctx.working_root);
         let path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,

@@ -1,16 +1,17 @@
-use crate::api::core::config::MemoryConfig;
-use crate::api::core::task::TaskStore;
-use crate::api::core::tool::{AgentRunner, ToolRegistry};
-use crate::api::hook::HookRunner;
-use crate::api::prompt::skill::Skill;
-use crate::api::provider::LlmClient;
-use crate::api::provider::SystemBlock;
 use crate::business::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
 use async_trait::async_trait;
+use hook::api::HookRunner;
 use logging::JsonLogger;
-use share::task::{Task, TaskSnapshot};
+use prompt::api::skill::Skill;
+use provider::api::LlmClient;
+use provider::api::SystemBlock;
+use share::config::MemoryConfig;
+use share::tool::AgentRunner;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use storage::api::TaskStore;
+use storage::api::{Task, TaskSnapshot};
+use tools::api::ToolRegistry;
 
 #[derive(Clone)]
 pub struct ChatRuntimeContext {
@@ -54,7 +55,7 @@ pub trait ChatRuntimePort {
 
 // ─── 细粒度 Port Trait（P16 新增） ───
 
-/// 任务持久化端口——core/ 层通过此 trait 访问任务存储，不直接依赖 share::task::TaskStore 方法。
+/// 任务持久化端口——core/ 层通过此 trait 访问任务存储，不直接依赖 storage::api::TaskStore 方法。
 #[async_trait]
 pub trait TaskStorePort: Send + Sync {
     async fn snapshot(&self) -> TaskSnapshot;

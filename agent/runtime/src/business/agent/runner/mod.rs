@@ -1,9 +1,9 @@
-use crate::api::core::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
-use crate::api::hook::HookRunner;
-use crate::api::provider::LlmClient;
-use crate::api::provider::LlmClientPool;
-use crate::api::provider::StreamHandler;
 use ::logging::JsonLogger;
+use hook::api::HookRunner;
+use provider::api::LlmClient;
+use provider::api::LlmClientPool;
+use provider::api::StreamHandler;
+use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
 
 mod finalize;

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::{TaskStatus, TaskStore};
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::{TaskStatus, TaskStore};
 
 pub struct TaskGetTool {
     pub store: Arc<TaskStore>,
@@ -109,7 +109,7 @@ impl Tool for TaskGetTool {
                 .map(|id| format!("#{}", id))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let blocked_status = if task.is_blocked(&self.store).await {
+            let blocked_status = if self.store.is_blocked(&task).await {
                 " (currently blocked)"
             } else {
                 ""

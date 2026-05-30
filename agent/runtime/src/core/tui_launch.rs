@@ -7,12 +7,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::api::core::task::TaskStore;
-use crate::api::core::tool::{AgentRunner, ToolRegistry};
-use crate::api::hook::HookRunner;
-use crate::api::provider::LlmClient;
-use crate::api::provider::SystemBlock;
+use hook::api::HookRunner;
 use logging::JsonLogger;
+use provider::api::LlmClient;
+use provider::api::SystemBlock;
+use share::tool::AgentRunner;
+use storage::api::TaskStore;
+use tools::api::ToolRegistry;
 
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
@@ -37,5 +38,5 @@ pub struct TuiLaunchContext {
     pub hook_runner: HookRunner,
     pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
     /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
-    pub session_reminders: Arc<std::sync::Mutex<crate::api::core::tool::SessionReminders>>,
+    pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
 }

@@ -14,17 +14,7 @@ serde_yml = "0.0.12"
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tokio-util = { workspace = true }
-dirs = "6"
-rand = "0.9"
-uuid = { version = "1", features = ["v4", "v7"] }
-futures = "0.3"
+uuid = { version = "1", features = ["v7"] }
 log = "0.4"
-parking_lot = "0.12"
-regex = "1"
-chrono = "0.4"
 unicode-width = "0.2"
-inventory = { workspace = true }
-url = "2"
-reqwest = { workspace = true }
-bytes = "1"
-futures-util = { workspace = true }
+

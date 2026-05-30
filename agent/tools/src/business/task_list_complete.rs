@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::TaskStore;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::TaskStore;
 
 pub struct TaskListCompleteTool {
     pub store: Arc<TaskStore>,
@@ -41,7 +41,7 @@ impl Tool for TaskListCompleteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::task_ops::BatchStatus;
+    use storage::api::BatchStatus;
 
     fn test_ctx() -> ToolContext {
         ToolContext {

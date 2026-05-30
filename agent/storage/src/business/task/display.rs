@@ -154,7 +154,7 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Batch, Task, TaskPriority};
+    use crate::business::task::{Batch, Task, TaskPriority};
 
     async fn setup_store_with_batches() -> TaskStore {
         TaskStore::new()

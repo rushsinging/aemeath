@@ -1,5 +1,5 @@
 use crate::api::agent::ToolCall;
-use crate::api::core::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
+use share::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 pub(crate) fn build_tool_calls_progress_event(
     sequence: usize,

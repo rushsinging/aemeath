@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::task_ops::{TaskPriority, TaskStatus, TaskStore};
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
+use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
 pub struct TaskListTool {
     pub store: Arc<TaskStore>,
@@ -153,7 +153,7 @@ impl Tool for TaskListTool {
             } else {
                 "".to_string()
             };
-            let blocked = if task.is_blocked(&self.store).await {
+            let blocked = if self.store.is_blocked(task).await {
                 " blocked"
             } else if !task.blocked_by.is_empty() {
                 " waiting"

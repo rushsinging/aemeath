@@ -32,7 +32,8 @@ pub mod policy {
 
 pub mod project {
     pub use ::project::api::{
-        enter_worktree, exit_worktree, workspace_context_from_tool_context,
+        current_path, enter_worktree, exit_worktree, new_working_paths,
+        workspace_context_from_tool_context,
     };
 }
 
@@ -48,15 +49,16 @@ pub mod provider {
 
 pub mod storage {
     pub use ::storage::api::{
-        memory_base_dir, persist_oversized_results, project_hash, project_hash_from_path,
-        MemoryStore,
+        memory_base_dir, persist_oversized_results, project_hash, project_hash_from_path, Batch,
+        BatchStatus, MemoryStore, Task, TaskPriority, TaskSnapshot, TaskStatus, TaskStore,
+        TaskStoreStats,
     };
 }
 
 pub mod tools {
     pub use ::tools::api::{
         is_readonly_command, register_all_tools, register_subagent_tools, McpConnectionManager,
-        McpServerConfig,
+        McpServerConfig, ToolRegistry,
     };
 }
 
@@ -66,6 +68,5 @@ pub mod core {
     pub use share::config;
     pub use share::memory;
     pub use share::message;
-    pub use share::task;
     pub use share::tool;
 }

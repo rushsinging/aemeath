@@ -1,4 +1,4 @@
-use crate::api::core::config::Config;
+use share::config::Config;
 
 pub fn resolve_concurrency_limits(
     cli_max_tool_concurrency: Option<usize>,
@@ -28,7 +28,7 @@ pub fn resolve_concurrency_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::{AgentsConfig, Config, ToolsConfig};
+    use share::config::{AgentsConfig, Config, ToolsConfig};
 
     fn config_with_concurrency(tool: usize, agent: usize) -> Config {
         Config {

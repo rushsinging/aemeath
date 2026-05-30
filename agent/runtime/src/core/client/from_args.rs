@@ -4,12 +4,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChangeSet, SdkError};
 use tokio::sync::watch;
 
-use crate::api::core::task::TaskStore;
-use crate::api::core::tool::ToolRegistry;
-use crate::api::prompt::skill::{load_all_skills, Skill};
 use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
-use crate::api::provider::SystemBlock;
-use crate::api::provider::ApiDriverKind;
 use crate::api::tools as tools_crate;
 use crate::core::port::ChatRuntimeContext;
 use crate::core::port::ProviderInfoPort;
@@ -21,6 +16,11 @@ use crate::utils::bootstrap::{
     resolve_context_size, resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
+use prompt::api::skill::{load_all_skills, Skill};
+use provider::api::ApiDriverKind;
+use provider::api::SystemBlock;
+use storage::api::TaskStore;
+use tools::api::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -32,7 +32,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     crate::core::command::commands::init_all();
 
     // 1. Guidance 目录初始化
-    crate::api::prompt::guidance::init_guidance_dir();
+    prompt::api::guidance::init_guidance_dir();
 
     // 2. 解析 cwd
     let cwd = args
@@ -49,7 +49,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         config_file
             .as_ref()
             .map(|c| &c.logging)
-            .unwrap_or(&crate::api::core::config::LoggingConfig::default()),
+            .unwrap_or(&share::config::LoggingConfig::default()),
     );
 
     // 5. 权限模式
@@ -251,7 +251,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
 fn load_configured_skills(
     cwd: &std::path::Path,
-    skills_config: Option<&crate::api::core::config::SkillsConfig>,
+    skills_config: Option<&share::config::SkillsConfig>,
 ) -> std::collections::HashMap<String, Skill> {
     let dirs = skills_config.map(|c| c.dirs.clone()).unwrap_or_default();
     load_all_skills(cwd, &dirs)

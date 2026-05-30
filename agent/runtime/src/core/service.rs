@@ -43,17 +43,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::core::config::MemoryConfig;
-    use crate::api::core::task::TaskStore;
-    use crate::api::core::tool::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
-    use crate::api::hook::HookRunner;
-    use crate::api::provider::LlmClient;
     use crate::business::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
+    use hook::api::HookRunner;
+    use provider::api::LlmClient;
+    use share::config::MemoryConfig;
+    use share::tool::{AgentRunRequest, AgentRunner, ToolContext};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use storage::api::TaskStore;
+    use tools::api::ToolRegistry;
 
     #[derive(Default)]
     struct RecordingRuntimePort {

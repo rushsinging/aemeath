@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::skill_ops::{read_skill_content, Skill};
+use share::skill_ops::Skill;
 use share::tool::{Tool, ToolContext, ToolResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,8 +71,8 @@ impl Tool for SkillTool {
         };
         drop(skills);
 
-        // Lazily load the full skill content from disk on first invocation
-        let mut content = read_skill_content(&skill);
+        // Skill content is materialized by prompt domain before registration.
+        let mut content = skill.content.clone();
         if !args.is_empty() {
             content = format!("{content}\n\nArguments: {args}");
         }

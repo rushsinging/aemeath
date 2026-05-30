@@ -80,8 +80,8 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::types::{Batch, BatchStatus};
-    use crate::task::TaskStore;
+    use crate::business::task::types::{Batch, BatchStatus};
+    use crate::business::task::TaskStore;
 
     async fn store_with_batch(id: u64, status: BatchStatus) -> TaskStore {
         let store = TaskStore::new();
