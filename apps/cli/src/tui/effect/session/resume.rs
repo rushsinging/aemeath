@@ -20,13 +20,9 @@ impl App {
         apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
         self.chat.messages.clear();
         self.chat.clear_pending_images();
-        for i in 0..messages.len() {
-            let subsequent = if i + 1 < messages.len() {
-                Some(&messages[i + 1])
-            } else {
-                None
-            };
-            self.render_history_message(&messages[i], subsequent);
+        for (i, message) in messages.iter().enumerate() {
+            let subsequent = messages.get(i + 1);
+            self.render_history_message(message, subsequent);
         }
         self.chat.messages = messages;
         apply_resume_input_history(self, &self.chat.messages.clone());

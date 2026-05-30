@@ -56,13 +56,9 @@ impl App {
                     }
                     // 渲染已恢复的消息（已由 runtime 完成清洗）
                     let msgs = s.messages;
-                    for i in 0..msgs.len() {
-                        let subsequent = if i + 1 < msgs.len() {
-                            Some(&msgs[i + 1])
-                        } else {
-                            None
-                        };
-                        self.render_history_message(&msgs[i], subsequent);
+                    for (i, message) in msgs.iter().enumerate() {
+                        let subsequent = msgs.get(i + 1);
+                        self.render_history_message(message, subsequent);
                     }
                     self.chat.messages = msgs;
                     apply_resume_input_history(self, &self.chat.messages.clone());

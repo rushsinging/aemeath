@@ -34,8 +34,7 @@ fn done_notice(elapsed: std::time::Duration) -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let idx = COUNTER.fetch_add(1, Ordering::Relaxed) % DONE_VERBS.len();
-    let verb = DONE_VERBS[idx];
-
+    let verb = DONE_VERBS.get(idx).copied().unwrap_or(DONE_VERBS[0]);
     let secs = elapsed.as_secs();
     let duration = if secs >= 60 {
         format!("{}m {}s", secs / 60, secs % 60)

@@ -4,7 +4,7 @@
 |---|------|--------|------|----------|----------|----------|
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
-| 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
+| 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认 | 未确认 | 2026-05 | #58 新渲染管线已移除旧 `rendered_lines`/`render_range` 行下标缓存路径；本轮补充 MAX_LINES 裁剪后缓存 retain 回归，修正裁剪旧 block 缓存滞留，并把 TUI 中相关裸下标改为 `.get()` 防御访问；`check-unsafe-text-ops.sh` 当前确保 TUI unsafe text/index operations 为 0 |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
@@ -378,7 +378,7 @@
 
 ### #71 TUI 渲染缓存越界 panic（len 10000 / index 10000）
 
-**状态**：待确认（随 #58 渲染管线重构结构性修复）。新管线消除了 `render_range`/`rendered_lines` 行下标越界路径，输出区只剩 `document: RenderedDocument`，滚动夹取由 `adapter/output_widget.rs::clamp_scroll_state` 用 `total_lines().saturating_sub(visible_height)` 完成；全仓 `render_range`/`OutputLine`/`LineStyle` 零残留。unsafe guard 覆盖问题另行评估。
+**状态**：待确认。#58 新管线已消除旧 `render_range`/`rendered_lines` 行下标越界路径；本轮补充回归 `test_render_tree_retains_only_trimmed_live_blocks`，确保超过 `MAX_LINES` 后只保留裁剪后的 block 缓存，旧 block 不再滞留；同时将 TUI 内 `src[idx]` / `screen_line_map[rel_row]` 改为 `.get()` 防御访问，并扩展 `check-unsafe-text-ops.sh` 对带显式 allow 的裸单下标进行拦截，当前架构 guard 报告 unsafe TUI text/index operations 为 0。
 
 **症状**：长会话中 TUI 直接崩溃，panic 信息：
 
