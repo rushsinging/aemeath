@@ -30,6 +30,16 @@
 | 91 | TUI 渲染缩进/类型三问题：thinking 云朵未顶格、diff 行重复缩进、Read result 误按 diff 渲染 | 中 | 待确认 | 未确认 | 2026-05 | #63 gutter 改造遗留 + #64×#90 交互：①thinking 的 `💭 ` 是文本前缀，经 gutter 注入 2 列空白后被推到第 2 列（未顶格）——改为 `💭` 作 ThinkingMessage 的 gutter marker（`apply_gutter` 按显示宽度补白支持宽字符，💭 占满 2 列槽、gutter_cols 取字符数、内容与窄 marker 同列对齐）；②`build_diff_lines` 每行行首自拼 `INDENT` 与 gutter 块缩进重复——去掉行首 INDENT（保留 context 行对齐 +/- 的内部 INDENT）；③#64 后 Read result 携带文件原文，文件内容巧含 `---DIFF---`（如描述 diff 格式的文档/源码）被 `render_tool_result` 误解析为 diff——架构修正：result 渲染类型由 `ToolDisplay::renders_result_as_diff()` **工具显式声明**（Edit=true），渲染层据声明分发，不再按字符/硬编码工具名猜测。回归：gutter 宽 marker、diff 无行首块缩进、Read 含 `---DIFF---` 保留原文、`result_renders_as_diff` 工具声明。**延续修复（2026-05-30）**：④Read result 预览缩进/颜色仍不对——根因是 `format_result_lines` 用 `render_fenced_markdown` 把文件内容里的 markdown（表格分隔行→`├──┼` 边框）重渲染变形，且用 `semantic_color`（状态绿）着色。修复：把 `renders_result_as_diff(bool)` 升级为 `ToolDisplay::result_render() -> ResultRender { Plain, Diff }`（默认 Plain，Edit override Diff，`result_render_kind` 查询）；Plain 路径改**纯文本原样**逐行（不 markdown 重渲染、保留文件行号/缩进）+ 暗色 `TEXT_DIM`（不跟随状态色，状态绿/红只在 header marker）。⑤每个 root block 前加 1 空行（`document_renderer` depth==0 插入），分隔相邻对话块。注：`queued_submission` 的 `⏳` 前缀有同类问题，待后续统一 |
 | 92 | Feature #65 Resume 输入历史在 `--resume` 启动路径未生效 | 高 | 修复中 | 未确认 | 2026-05 | 根因：feature #65 只在 `/resume` slash 命令路径 `resume_session_messages()` 中注入 `InputModel.history`，但 CLI `--resume` 启动路径在 `session_lifecycle.rs` 中手动恢复消息，未复用该逻辑，导致用户实际从 Resume 模式进入时上下键没有历史输入。修复：抽取 `apply_resume_input_history()` 并同时接入 `/resume` 与 `--resume` 路径，补充 App history 写入回归测试。 |
 | 93 | 全局 skills 路径误指向项目相对 .agents，导致 ~/.agents/skills/superpowers 不进 / 补全 | 高 | 修复中 | 未确认 | 2026-05 | 根因：prompt skill loader 复用 share::config::paths::global_skills_dir()，该共享契约返回相对 .agents/skills，导致没有扫描 ~/.agents/skills；修复：loader 在 prompt domain 内基于 home 解析 ~/.agents/skills，保留项目 .agents/skills 与 extra skills.dirs 加载 |
+| 94 | @ 和 slash 补全中上下键无法移动选中项 | 中 | 已修复 | 已确认 | 2026-05 | 根因双重：①`app/update/key.rs` 中 Up/Down 固定映射为 `MoveHistoryPrevious/Next`，不检查补全状态；②`apply_input_changes_to_widget` 处理 `CompletionChanged` 时只同步 `visible/items` 不同步 `selected_index`，导致 model 的选中变化不反映到渲染 widget。修复：①Up/Down 在补全可见时改发 `SelectCompletionPrevious/Next`；②同步 `selected_index` 到 widget |
+
+### #94 @ 和 slash 补全中上下键无法移动选中项
+
+**状态**：已修复（用户已确认）
+**修复**：
+- `apps/cli/src/tui/app/update/key.rs`：Up/Down 键在 `input_area.is_showing_suggestions()` 时改发 `SelectCompletionPrevious/Next`
+- `apps/cli/src/tui/adapter/input_widget.rs`：`CompletionChanged` 同步 `selected_index` 到 widget
+- `apps/cli/src/tui/render/input/input_area/suggestions.rs`：新增 `set_selected_suggestion` 方法
+- `apps/cli/src/tui/update/root_reducer.rs`：新架构路径添加 `rewrite_history_to_completion` 转换 + 测试
 
 ### #93 全局 skills 路径误指向项目相对 .agents
 
