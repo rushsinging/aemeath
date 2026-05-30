@@ -29,16 +29,17 @@ impl App {
             self.render_history_message(&messages[i], subsequent);
         }
         self.chat.messages = messages;
-        self.model
-            .input
-            .apply(InputIntent::ReplaceHistory(extract_user_input_history(
-                &self.chat.messages,
-            )));
+        apply_resume_input_history(self, &self.chat.messages.clone());
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
         ));
     }
+}
+
+pub(crate) fn apply_resume_input_history(app: &mut App, messages: &[sdk::ChatMessage]) {
+    let history = extract_user_input_history(messages);
+    app.model.input.apply(InputIntent::ReplaceHistory(history));
 }
 
 fn extract_user_input_history(messages: &[sdk::ChatMessage]) -> Vec<String> {
@@ -63,6 +64,7 @@ fn extract_user_input_text(message: &sdk::ChatMessage) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn test_extract_user_input_history_keeps_user_text_in_order() {
@@ -104,5 +106,28 @@ mod tests {
         let history = extract_user_input_history(&messages);
 
         assert_eq!(history, vec!["hello world".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_resume_input_history_populates_app_history() {
+        let mut app = App::new(
+            "new-session".to_string(),
+            PathBuf::from("/tmp/aemeath"),
+            "test-model".to_string(),
+        );
+        let messages = vec![
+            sdk::ChatMessage::user_text("first"),
+            sdk::ChatMessage::assistant_text("answer"),
+            sdk::ChatMessage::user_text("second"),
+        ];
+
+        apply_resume_input_history(&mut app, &messages);
+
+        assert_eq!(
+            app.model.input.history.entries,
+            vec!["first".to_string(), "second".to_string()]
+        );
+        assert_eq!(app.model.input.history.selected_index, None);
+        assert_eq!(app.model.input.history.saved_input, "");
     }
 }
