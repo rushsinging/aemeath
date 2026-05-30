@@ -165,19 +165,29 @@ impl App {
                     .record_usage(input as u64, output as u64, input as u64);
             }
             UiEvent::ReflectionDone { output } => {
-                self.append_system_notice(output.content.clone());
+                // 只推送摘要（建议数 + 过时数），不把完整 reflection 输出
+                // （含会话转录）以 System(Muted) 暗色刷出——完整内容对用户无直接价值，
+                // 且大段暗色文本会让后续 assistant 回复在视觉上"看起来也暗了"（#74）。
+                let suggestion_count = output.suggested_memories.len();
+                let outdated_count = output.outdated_memories.len();
+                let summary = if suggestion_count > 0 || outdated_count > 0 {
+                    format!(
+                        "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记]"
+                    )
+                } else {
+                    "[reflection: 无新发现]".to_string()
+                };
+                self.append_system_notice(summary);
                 if self.session.memory_config.reflection.auto_apply_suggestions {
                     if let Some(effect) = self.apply_reflection_output(output) {
                         effects.push(effect);
                     }
                 } else {
-                    let suggestion_count = output.suggested_memories.len();
-                    let outdated_count = output.outdated_memories.len();
                     self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
-                        self.append_system_notice(format!(
-                            "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记待应用；运行 /reflect apply]"
-                        ));
+                        self.append_system_notice(
+                            "[运行 /reflect apply 应用建议]",
+                        );
                     }
                 }
                 self.spinner_stop();

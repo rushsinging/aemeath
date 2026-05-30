@@ -7,6 +7,7 @@
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认 | 未确认 | 2026-05 | #58 新渲染管线已移除旧 `rendered_lines`/`render_range` 行下标缓存路径；本轮补充 MAX_LINES 裁剪后缓存 retain 回归，修正裁剪旧 block 缓存滞留，并把 TUI 中相关裸下标改为 `.get()` 防御访问；`check-unsafe-text-ops.sh` 当前确保 TUI unsafe text/index operations 为 0 |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
+| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致；真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，index 丢失会进一步导致工具块绑定失败。修复：历史输出统一从 ConversationModel 渲染，格式参照 resume（用户 `> ...`、thinking `💭 ...`、tool call 复用 ToolDisplay），runtime/sdk/CLI 透传 ToolCall index；resume 也改为加载模型后通过 ViewModel 渲染，符合新架构。 |
 | 78 | input area 粘贴后按空格清空粘贴内容 | 中 | 修复中 | 未确认 | 2026-05 | 同 #77 根因：handle_paste_event 和 processing 模式 paste 均直接调用 input_area.input(ch) 修改 textarea，未走模型。后续空格触发 model.apply(InsertChar) → TextChanged → set_text，用旧文本覆盖 textarea 中的粘贴内容。修复：两处 paste 循环后添加 model.input.document.clear() + insert_text() 同步 |
@@ -34,6 +35,18 @@
 - `apps/cli/src/tui/adapter/input_widget.rs`：`CompletionChanged` 同步 `selected_index` 到 widget
 - `apps/cli/src/tui/render/input/input_area/suggestions.rs`：新增 `set_selected_suggestion` 方法
 - `apps/cli/src/tui/update/root_reducer.rs`：新架构路径添加 `rewrite_history_to_completion` 转换 + 测试
+
+### #74 TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
+
+**状态**：修复中
+
+**症状**：在 TUI 中执行 `/reflect` 后，reflection 输出及其**后续的普通/assistant 文本**全部呈现暗灰蓝色（System 样式）。
+
+**根因**：`ReflectionDone` 在 `ui_event.rs:168` 将 `output.content`（包含完整会话转录 `[User]:`/`[Assistant]:`、markdown 等内容）以 `append_system_notice` → `System(Muted)` 暗色推入输出区。大段暗色文本占据输出区大部分可见区域，视觉上后续 assistant 回复也"看起来暗了"。渲染管线本身无颜色泄漏（每个 block 独立渲染，ASSISTANT 色与 MUTED 色不同），但 reflection 完整内容中的 `[Assistant]:` 转录以 Muted 暗色渲染，混淆了用户对"assistant 回复变暗"的判断。
+
+**修复方向 / 当前状态**：修复中。只推送简短摘要（建议数 + 过时数），不推送完整 reflection 内容。完整内容保留在 `pending_reflection` 中，用户可通过 `/reflect apply` 查看。回归测试覆盖 System block 后 Assistant block 颜色正确性。
+
+**涉及路径**：`apps/cli/src/tui/app/update/ui_event.rs`（`ReflectionDone` 处理）
 
 ### #93 全局 skills 路径误指向项目相对 .agents
 

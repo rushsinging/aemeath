@@ -328,4 +328,99 @@ mod tests {
         );
         assert!(app.model.conversation.queued_submissions.is_empty());
     }
+
+    #[test]
+    fn test_assistant_after_system_notice_uses_assistant_color() {
+        // #74 回归端到端测试：System block（Muted 暗色）后追加 AssistantText block，
+        // 验证 document 渲染中 assistant 行使用 ASSISTANT 色而非继承 System 的 Muted 色。
+        use crate::tui::model::conversation::intent::ConversationIntent;
+        use crate::tui::render::theme;
+
+        let mut app = make_app();
+        // 模拟 reflection 输出（System block）
+        app.append_system_notice("reflection 输出内容");
+        // 模拟后续 LLM 回复（Assistant block）
+        app.model
+            .conversation
+            .apply(ConversationIntent::ObserveAssistantText {
+                text: "后续回复".to_string(),
+            });
+        app.refresh_output_widget_from_model();
+
+        // 在 document 中找到包含"后续回复"的行
+        let assistant_line = app
+            .output_area
+            .document()
+            .iter_lines()
+            .find(|line| line.plain.contains("后续回复"))
+            .expect("应渲染 assistant 文本");
+
+        let fg = assistant_line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().contains("后续回复"))
+            .map(|s| s.style.fg)
+            .expect("应找到 assistant span");
+
+        assert_eq!(
+            fg,
+            Some(theme::ASSISTANT),
+            "System block 后的 Assistant block 应使用 ASSISTANT 色 ({:?})，而非 Muted ({:?})",
+            theme::ASSISTANT,
+            theme::TEXT_MUTED
+        );
+    }
+
+    #[test]
+    fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
+        // #74 场景：streaming assistant text 被 System notice 中断后，
+        // 后续 streaming text 仍应使用 ASSISTANT 色。
+        use crate::tui::model::conversation::intent::ConversationIntent;
+        use crate::tui::render::theme;
+
+        let mut app = make_app();
+        // 模拟用户提问
+        app.model
+            .conversation
+            .apply(ConversationIntent::StartChat {
+                submission: "hello".to_string(),
+            });
+        // 模拟 LLM streaming
+        app.model
+            .conversation
+            .apply(ConversationIntent::ObserveAssistantText {
+                text: "你好".to_string(),
+            });
+        app.refresh_output_widget_from_model();
+        // 模拟 System notice 中断（如自动 reflection）
+        app.append_system_notice("[reflection: ...]");
+        // 模拟 LLM streaming 继续
+        app.model
+            .conversation
+            .apply(ConversationIntent::ObserveAssistantText {
+                text: "世界".to_string(),
+            });
+        app.refresh_output_widget_from_model();
+
+        // 验证"你好"和"世界"都在 document 中且使用 ASSISTANT 色
+        for needle in &["你好", "世界"] {
+            let line = app
+                .output_area
+                .document()
+                .iter_lines()
+                .find(|line| line.plain.contains(needle))
+                .unwrap_or_else(|| panic!("应渲染文本: {needle}"));
+            let fg = line
+                .spans
+                .iter()
+                .find(|s| s.content.as_ref().contains(needle))
+                .map(|s| s.style.fg)
+                .unwrap_or_else(|| panic!("应找到 span: {needle}"));
+            assert_eq!(
+                fg,
+                Some(theme::ASSISTANT),
+                "\"{needle}\" 应使用 ASSISTANT 色，实际: {fg:?}"
+            );
+        }
+    }
 }
