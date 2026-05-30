@@ -365,7 +365,7 @@ agent/runtime → packages/sdk (implements)
     → agent/storage
     → agent/hook
     → agent/audit
-    （+ packages/logging）
+    （+ packages/gloabal/logging）
 上述每个 supporting domain 均只依赖 → agent/share（最小共享内核）
 ```
 
@@ -511,7 +511,8 @@ agent/                 # crate 顶层目录（落地态，非 crates/）
 
 packages/
   sdk/                 # AgentClient trait + 公共类型（CLI 与 Runtime 唯一通信契约）
-  logging/             # 日志 projection 适配
+  gloabal/
+    logging/          # 日志 projection 适配
 ```
 
 crate 名与目录名保持一致，不再添加 `aemeath-` 前缀：
@@ -544,7 +545,7 @@ share        # 原计划命名为 core
 
 迁移约束：
 
-1. 不恢复 #36：不创建 `apps/server`、`apps/agents`、`packages/proto`、`infra`。（修正：`packages/sdk` 作为 AgentClient 契约桥接层**保留并已创建**，见 §6.7；同时新增 `packages/logging`。早期"不创建 packages/sdk"的表述源于已回退的 #50/#51 合并，此处更正。）
+1. 不恢复 #36：不创建 `apps/server`、`apps/agents`、`packages/proto`、`infra`。（修正：`packages/sdk` 作为 AgentClient 契约桥接层**保留并已创建**，见 §6.7；同时新增 `packages/gloabal/logging`。早期"不创建 packages/sdk"的表述源于已回退的 #50/#51 合并，此处更正。）
 2. 已完成：原 `shared/kernel`、`contexts/provider`、`contexts/tool` 过渡结构已收束到 `agent/share`、`agent/provider`、`agent/tools`，并创建其余 `agent/*` 目标 crate；`contexts/`、`shared/` 顶层目录已移除。
 3. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
 4. 每个 crate 内部再按 COLA 分层组织，命名统一为 `core`（编排+端口）、`business`（领域规则）、`utils`（bootstrap/adapter/IO）；但顶层只表达产品/领域语义。
