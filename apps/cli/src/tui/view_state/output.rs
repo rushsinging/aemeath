@@ -15,6 +15,7 @@ pub struct OutputViewState {
     pub selection_start: Option<SelectionAnchor>,
     pub selection_end: Option<SelectionAnchor>,
     pub last_visible_height: usize,
+    pub last_document_total_lines: usize,
     pub version: u64,
 }
 
@@ -30,6 +31,7 @@ impl Default for OutputViewState {
             selection_start: None,
             selection_end: None,
             last_visible_height: 0,
+            last_document_total_lines: 0,
             version: 0,
         }
     }
@@ -350,5 +352,11 @@ mod tests {
         state.begin_selection(0, CharIdx::new(4));
         state.update_selection(0, CharIdx::new(2));
         assert_eq!(state.selection_range(), Some((anchor(0, 2), anchor(0, 4))));
+        }
+
+        #[test]
+        fn test_last_document_total_lines_default_zero() {
+            let state = OutputViewState::default();
+            assert_eq!(state.last_document_total_lines, 0);
+        }
     }
-}
