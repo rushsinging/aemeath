@@ -187,11 +187,12 @@ mod tests {
             collapsed: false,
         });
         let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
-            key: "tool-result".into(),
-            tool_title: "Bash".into(),
-            summary: None,
-            result_text: "```\ncode\n```".into(),
-        });
+              key: "tool-result".into(),
+              tool_title: "Bash".into(),
+              summary: None,
+              result_text: "```\ncode\n```".into(),
+              style: SemanticStyle::Success,
+          });
         let tool_node = BlockNode {
             block_id: "tool".into(),
             block_version: tool_kind.cache_version(),

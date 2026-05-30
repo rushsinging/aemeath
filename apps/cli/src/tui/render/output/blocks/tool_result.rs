@@ -7,7 +7,7 @@ use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::primitives::fenced::render_fenced_markdown;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::result_max_lines;
-use crate::tui::render::theme;
+use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::view_model::output::ToolResultBlockView;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
@@ -19,16 +19,17 @@ pub fn render_tool_result(
 ) -> RenderedBlock {
     // Edit 工具结果含 ---DIFF--- 标记时，渲染为带行号/语义色/语法高亮的 diff。
     // ext 从 summary（入参 JSON 含 file_path）推断，而非裸 tool_title="Edit"（M1）。
+    let result_color = semantic_color(view.style);
     let lines = if let Some(diff_lines) =
         render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width)
     {
         diff_lines
     } else {
-        // 结果行使用 TEXT_DIM 色（与迁移前 result_summary 分支一致）。
+        // 结果行颜色跟随 tool call 状态（Success=绿, Error=红, Running=橙）。
         format_result_lines(
             &view.tool_title,
             &view.result_text,
-            theme::TEXT_DIM,
+            result_color,
             ctx.width,
         )
     };
@@ -73,7 +74,10 @@ fn format_result_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::render::theme;
     use crate::tui::view_model::output::ToolResultBlockView;
+
+    use crate::tui::view_model::style::SemanticStyle;
 
     fn result(tool_title: &str, result_text: &str) -> ToolResultBlockView {
         ToolResultBlockView {
@@ -81,6 +85,7 @@ mod tests {
             tool_title: tool_title.into(),
             summary: None,
             result_text: result_text.into(),
+            style: SemanticStyle::Success,
         }
     }
 
