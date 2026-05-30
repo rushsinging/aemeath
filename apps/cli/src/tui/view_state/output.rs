@@ -162,6 +162,7 @@ mod tests {
         assert_eq!(state.selection_end, None);
         assert_eq!(state.last_visible_height, 0);
         assert_eq!(state.version, 0);
+        assert_eq!(state.last_document_total_lines, 0);
     }
 
     #[test]
@@ -352,11 +353,11 @@ mod tests {
         state.begin_selection(0, CharIdx::new(4));
         state.update_selection(0, CharIdx::new(2));
         assert_eq!(state.selection_range(), Some((anchor(0, 2), anchor(0, 4))));
-        }
-
-        #[test]
-        fn test_last_document_total_lines_default_zero() {
-            let state = OutputViewState::default();
-            assert_eq!(state.last_document_total_lines, 0);
-        }
     }
+
+    #[test]
+    fn test_last_document_total_lines_default_zero() {
+        let state = OutputViewState::default();
+        assert_eq!(state.last_document_total_lines, 0);
+    }
+}
