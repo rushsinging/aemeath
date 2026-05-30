@@ -58,19 +58,20 @@ commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa1781
 
 **关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）；#85（Ollama 接线，已修）。
 
-### #49 AskUserQuestion 增加「以上全是」与「chat about this」选项
+### #49 AskUserQuestion 增强——title+description 选项、智能 All/None、Type something 输入框
 
-**状态**：已完成（02e8986），显示修复待确认
+**状态**：已完成（c98c26c），待确认
 
-**背景**：当前 AskUserQuestion 选择模式只允许选择 LLM 给出的某一个 option，或在允许 free_input 时手动输入；无法批量同意「以上全是」，也无法在保持原问题上下文的前提下补充自定义说明。当 LLM 给出多个可选项且用户想同时表达「这些都同意 + 我还想补一句」时，只能多轮往返，影响交互效率。
+**背景**：AskUserQuestion 选项只支持纯字符串，无法为每个选项附带说明文字；内建选项缺乏"以上全不"选项；自定义输入需要先进入子态再切换，操作不直观。
 
-**目标**：在 AskUserQuestion options 末尾追加两个内建选项：
-1. 「以上全是」：用户选中后，回传内容为前面所有 LLM 提供 option 的集合（按显示顺序），让 LLM 知道用户认可全部选项。
-2. 「chat about this」：用户选中后，进入自定义输入态，提交内容为用户输入的自由文本。该选项不要求原问题开启 free_input，是 options 模式下也可用的统一补充入口。
+**实现**：
+1. **OptionItem 类型**：sdk 层新增 `OptionItem { title, description }` 结构体，支持 LLM 返回 `{ title, description }` 对象格式，向后兼容纯字符串反序列化
+2. **智能内建选项**：≥2 LLM 选项时追加 All/None/Type something；1 个选项时追加 None/Type something；0 个选项时纯自由输入
+3. **Type something 输入框**：选中后进入行内编辑态，Up 返回选项列表，Enter 提交，Esc 取消
+4. **选项渲染**：title 加粗 + description 灰色缩进双行布局
+5. **工具 schema 更新**：options 支持 `oneOf(string, object { title, description })`
 
-**核心要求**：
-1. 两个内建选项**必须**显示在 LLM 提供的 options 之后，并与原 options 视觉一致，但要让用户清楚这是工具内建项。
-2. 两个内建选项**必须**在 options 数量 ≥ 1 时才出现；options 为空（仅 free_input）时不出现「以上全是」，但「chat about this」可考虑保留以承担补充语义（待 spec 讨论）。
+**变更范围**：sdk, runtime, tools, TUI 全链路（18 files, +404 -96）
 3. 「以上全是」回传给 LLM 的内容**必须**是结构化的全部选项集合，不能只回传字面字符串「以上全是」，否则 LLM 无法判断到底选了哪些。
 4. 「chat about this」**必须**进入与 free_input 等价的输入态：输入区获得焦点、Enter 提交、Esc 取消回到选择态；不应直接把字面「chat about this」当作回答提交。
 5. 两个内建选项**不得**与 LLM 提供的 option label 冲突；如果发生重名，**必须**有明确的去重或避让策略。
