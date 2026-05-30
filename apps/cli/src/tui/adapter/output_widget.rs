@@ -79,11 +79,12 @@ mod tests {
 
         render_document_from_view_model(&mut output_area, &view_model, 1);
 
-        assert_eq!(output_area.document().total_lines(), 1);
-        assert_eq!(
-            output_area.document().iter_lines().next().unwrap().plain,
-            "整理一轮，不改代码。"
-        );
+        // 每个 root block 前有 1 空行（视觉分隔），故 assistant block = 空行 + 内容 = 2 行。
+        assert_eq!(output_area.document().total_lines(), 2);
+        assert!(output_area
+            .document()
+            .iter_lines()
+            .any(|l| l.plain == "整理一轮，不改代码。"));
     }
 
     /// 钳制真相已迁至 `output_view_widget::apply_output_scroll_to_widget`（操作 view_state）。

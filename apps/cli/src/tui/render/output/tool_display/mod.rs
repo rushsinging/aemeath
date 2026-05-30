@@ -10,6 +10,17 @@ use common::{format_todowrite_value, truncate_json};
 /// TUI 中 tool call 结果最多显示的行数。
 pub(crate) const TOOL_RESULT_MAX_LINES: usize = 5;
 
+/// 工具 result 的渲染类型。由工具**显式声明**（`ToolDisplay::result_render`），渲染层据此
+/// 分发，不按 `---DIFF---` 字符或硬编码工具名猜测。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultRender {
+    /// 纯文本原样预览：保留文件/命令输出原文（含行号/缩进），不做 markdown 重渲染。
+    /// 适用于 Read/Bash/Grep 等——避免文件内容里的 markdown（表格/标题）被渲染变形。
+    Plain,
+    /// unified diff：解析 Edit 结果的 `---DIFF---` 渲染为加减色 diff。
+    Diff,
+}
+
 // ── ToolDisplay trait ──────────────────────────────────────────────
 
 /// Trait for customizing how a tool call is displayed in the TUI output area.
@@ -37,11 +48,10 @@ pub trait ToolDisplay: Send + Sync {
         }
     }
 
-    /// 该工具的 result 是否按 unified diff 渲染（如 Edit 的 `---DIFF---` 结果）。默认 false。
-    /// 由工具**显式声明**渲染类型，渲染层据此分发——避免渲染层按 `---DIFF---` 字符或硬编码
-    /// 工具名猜测（其它工具如 Read 的内容可能巧含 `---DIFF---` 文本）。
-    fn renders_result_as_diff(&self) -> bool {
-        false
+    /// 该工具 result 的渲染类型。默认 `Plain`（纯文本原样预览）。由工具**显式声明**，
+    /// 渲染层据此分发——不按 `---DIFF---` 字符或硬编码工具名猜测。
+    fn result_render(&self) -> ResultRender {
+        ResultRender::Plain
     }
 }
 
@@ -76,12 +86,12 @@ pub fn result_max_lines(name: &str) -> usize {
         .unwrap_or(TOOL_RESULT_MAX_LINES)
 }
 
-/// 该工具结果是否按 diff 渲染（取自 `ToolDisplay::renders_result_as_diff`，未注册回退 false）。
-/// 渲染层据此决定走 diff 还是普通预览，避免按 `---DIFF---` 字符或硬编码工具名猜测渲染类型。
-pub fn result_renders_as_diff(name: &str) -> bool {
+/// 该工具 result 的渲染类型（取自 `ToolDisplay::result_render`，未注册回退 `Plain`）。
+/// 渲染层据此分发，不按 `---DIFF---` 字符或硬编码工具名猜测渲染类型。
+pub fn result_render_kind(name: &str) -> ResultRender {
     lookup_display(name)
-        .map(|display| display.renders_result_as_diff())
-        .unwrap_or(false)
+        .map(|display| display.result_render())
+        .unwrap_or(ResultRender::Plain)
 }
 
 /// Format a tool call for human-friendly display.
@@ -215,13 +225,10 @@ mod tests {
     }
 
     #[test]
-    fn test_result_renders_as_diff_only_for_edit() {
-        // 渲染类型由工具声明：Edit 按 diff，其它工具与未注册工具按普通预览（防 ---DIFF--- 误判）。
-        assert!(result_renders_as_diff("Edit"), "Edit 结果应按 diff 渲染");
-        assert!(!result_renders_as_diff("Read"), "Read 结果不应按 diff 渲染");
-        assert!(
-            !result_renders_as_diff("UnknownTool"),
-            "未注册工具应回退 false"
-        );
+    fn test_result_render_kind_diff_only_for_edit() {
+        // 渲染类型由工具声明：Edit→Diff，其它工具与未注册工具→Plain（防 ---DIFF--- 误判）。
+        assert_eq!(result_render_kind("Edit"), ResultRender::Diff);
+        assert_eq!(result_render_kind("Read"), ResultRender::Plain);
+        assert_eq!(result_render_kind("UnknownTool"), ResultRender::Plain);
     }
 }

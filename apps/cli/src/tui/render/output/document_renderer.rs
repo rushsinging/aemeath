@@ -1,7 +1,7 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
-use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument};
+use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
 use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 
@@ -51,8 +51,13 @@ impl OutputDocumentRenderer {
         live_ids.push(node.block_id.clone());
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
-        let gutted =
+        let mut gutted =
             crate::tui::render::output::gutter::apply_gutter(&node.kind, depth, rendered.lines);
+        // 每个 root block（depth 0）前加一个空行，分隔相邻对话块（视觉呼吸）；
+        // 子块（depth>0，如 tool result）紧贴父块、不额外空行。
+        if depth == 0 {
+            gutted.insert(0, RenderedLine::default());
+        }
         out.push(RenderedBlock {
             block_id: rendered.block_id,
             lines: gutted,

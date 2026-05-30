@@ -1,7 +1,7 @@
 use crate::tui::render::output_area::{display, INDENT};
 
 use super::common::{file_path, str_arg, truncate_ellipsis, u64_arg};
-use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
+use super::{ResultRender, ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
 
 struct BashDisplay;
 impl ToolDisplay for BashDisplay {
@@ -110,9 +110,9 @@ impl ToolDisplay for EditDisplay {
         };
         vec![detail]
     }
-    fn renders_result_as_diff(&self) -> bool {
+    fn result_render(&self) -> ResultRender {
         // Edit 结果含 `---DIFF---` 包裹的 old/new，按 unified diff 渲染。
-        true
+        ResultRender::Diff
     }
 }
 inventory::submit!(ToolDisplayEntry {
