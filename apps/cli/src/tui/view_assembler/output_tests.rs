@@ -49,11 +49,18 @@ fn test_output_assembler_keeps_tool_result_inside_tool_after_thinking() {
 
     assert_eq!(diagnostic_results, 0);
     assert_eq!(tool.title, "Grep");
-    assert_eq!(tool.result_summary.as_deref(), Some("✓ Grep completed"));
+    // result 子块携带实际 output（供渲染层截断成预览），不再是纯摘要。
+    assert_eq!(
+        tool.result_summary.as_deref(),
+        Some("/tmp/docs/bug/active.md:18:match")
+    );
 }
 
 #[test]
-fn test_output_assembler_summarizes_embedded_tool_result_without_full_output() {
+fn test_output_assembler_embedded_result_carries_output_for_preview() {
+    // result 子块的 result_text = 实际工具 output（供渲染层 format_result_lines 按
+    // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断保证，
+    // assembler 不再退化为纯 "✓ Read completed" 摘要，且结果不泄漏为 root DiagnosticNotice。
     let mut conversation = ConversationModel::default();
     let full_output = "line1\nline2\nline3\nline4\nline5\nline6";
     add_completed_tool_after_thinking(&mut conversation, "Read", full_output);
@@ -73,14 +80,13 @@ fn test_output_assembler_summarizes_embedded_tool_result_without_full_output() {
         panic!("expected tool call");
     };
 
-    assert_eq!(diagnostic_results, 0);
-    assert_eq!(tool.result_summary.as_deref(), Some("✓ Read completed"));
+    assert_eq!(diagnostic_results, 0, "结果不应泄漏为 root DiagnosticNotice");
+    assert_eq!(tool.result_summary.as_deref(), Some(full_output));
     assert_eq!(tool_node.children.len(), 1);
     let OutputBlockKind::ToolResult(result) = &tool_node.children[0].kind else {
         panic!("expected tool result child");
     };
-    assert_eq!(result.result_text, "✓ Read completed");
-    assert!(!result.result_text.contains("line1"));
+    assert_eq!(result.result_text, full_output);
 }
 
 #[test]
@@ -119,12 +125,14 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
     let OutputBlockKind::ToolCall(tool) = &tool_node.kind else {
         panic!("expected tool call");
     };
-    assert_eq!(tool.result_summary.as_deref(), Some("✓ Read completed"));
+    let read_output =
+        "## 活跃 Bug（21 个）\n\n # │ 标题 │ 优先级 │ 状态\n|---|------|--------|------|";
+    assert_eq!(tool.result_summary.as_deref(), Some(read_output));
     let OutputBlockKind::ToolResult(result) = &tool_node.children[0].kind else {
         panic!("expected tool result child");
     };
-    assert_eq!(result.result_text, "✓ Read completed");
-    assert!(!result.result_text.contains("## 活跃 Bug"));
+    assert_eq!(result.result_text, read_output);
+    // #87 核心仍成立：assistant 正文保持独立 block，不混入 ToolResult 子块。
     assert_eq!(assistant.text, "我看到 active bug 列表，下面是分析。");
 }
 
@@ -167,8 +175,9 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
 
     assert_eq!(diagnostics, 0, "已绑定工具结果不应泄漏成块外诊断文本");
 
-    // 嵌入式 Edit ToolResult 子块应渲染为加减色 diff：含 ---DIFF--- 时透传原文，
-    // render_tool_result → render_edit_diff 消费标记，输出 old/new diff 行（refs #90）。
+    // 嵌入式 Edit ToolResult 子块应渲染为加减色 diff：result_summary 携带实际 output
+    // （含 ---DIFF--- 标记，#64），render_tool_result → render_edit_diff 消费标记，
+    // 输出 old/new diff 行（refs #90）。
     let result_child = tool_root
         .children
         .iter()
@@ -213,7 +222,9 @@ fn test_output_assembler_uses_error_summary_for_failed_tool_result() {
         })
         .expect("tool block");
 
-    assert_eq!(tool.result_summary.as_deref(), Some("✗ Read failed"));
+    // 失败工具的 result 子块也携带实际错误 output（渲染层以 Error 色截断展示），
+    // 不再退化为纯 "✗ Read failed" 摘要。
+    assert_eq!(tool.result_summary.as_deref(), Some("permission denied"));
 }
 
 #[test]
