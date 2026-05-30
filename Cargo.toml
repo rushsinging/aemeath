@@ -13,7 +13,7 @@ members = [
     "agent/hook",
     "agent/audit",
     "packages/sdk",
-    "packages/logging",
+    "packages/gloabal/logging",
 ]
 
 [workspace.dependencies]
