@@ -285,12 +285,12 @@ mod tests {
         // 故拼接 span 内容复现 gutter 后的可见行文本进行断言。
         let rendered = render_output_rows(&app.output_area);
 
-        // gutter 为每个 block 注入 2 列行首槽：UserMessage→`> `，ToolCall→状态字形 + 空格，
-        // 其余 block→2 空格。故所有可见行均带 gutter 前缀。
-        // 启动横幅现纳入 ConversationModel，用户消息不再是首行。
+        // gutter 为每个 block 注入行首 marker 槽：UserMessage→`> `，ToolCall→状态字形 + 空格，
+        // ThinkingMessage→`💭`（宽字符占满 2 列槽，顶格、内容与其它 block 同列对齐），
+        // 其余 block→2 空格。启动横幅现纳入 ConversationModel，用户消息不再是首行。
         assert!(rendered.iter().any(|line| line == "> search bug 76"));
         assert!(rendered.iter().any(|line| line == "  Aemeath - AI Agent"));
-        assert!(rendered.iter().any(|line| line == "  💭 thinking"));
+        assert!(rendered.iter().any(|line| line == "💭thinking"));
         assert!(rendered.iter().any(|line| line == "✓ Grep /76/"));
         // 工具 detail/result 行 gutter 给等宽空白（2 列），与旧 INDENT 视觉一致。
         assert!(rendered

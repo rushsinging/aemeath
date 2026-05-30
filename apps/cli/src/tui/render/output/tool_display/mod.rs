@@ -36,6 +36,13 @@ pub trait ToolDisplay: Send + Sync {
             vec![format!("✓ {} completed", self.name())]
         }
     }
+
+    /// 该工具的 result 是否按 unified diff 渲染（如 Edit 的 `---DIFF---` 结果）。默认 false。
+    /// 由工具**显式声明**渲染类型，渲染层据此分发——避免渲染层按 `---DIFF---` 字符或硬编码
+    /// 工具名猜测（其它工具如 Read 的内容可能巧含 `---DIFF---` 文本）。
+    fn renders_result_as_diff(&self) -> bool {
+        false
+    }
 }
 
 // ── Registration via inventory ─────────────────────────────────────
@@ -67,6 +74,14 @@ pub fn result_max_lines(name: &str) -> usize {
     lookup_display(name)
         .map(|display| display.result_max_lines())
         .unwrap_or(TOOL_RESULT_MAX_LINES)
+}
+
+/// 该工具结果是否按 diff 渲染（取自 `ToolDisplay::renders_result_as_diff`，未注册回退 false）。
+/// 渲染层据此决定走 diff 还是普通预览，避免按 `---DIFF---` 字符或硬编码工具名猜测渲染类型。
+pub fn result_renders_as_diff(name: &str) -> bool {
+    lookup_display(name)
+        .map(|display| display.renders_result_as_diff())
+        .unwrap_or(false)
 }
 
 /// Format a tool call for human-friendly display.
@@ -196,6 +211,17 @@ mod tests {
         assert!(
             !joined.contains("/a/b.md"),
             "offset/limit detail 不应重复路径，实际: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_result_renders_as_diff_only_for_edit() {
+        // 渲染类型由工具声明：Edit 按 diff，其它工具与未注册工具按普通预览（防 ---DIFF--- 误判）。
+        assert!(result_renders_as_diff("Edit"), "Edit 结果应按 diff 渲染");
+        assert!(!result_renders_as_diff("Read"), "Read 结果不应按 diff 渲染");
+        assert!(
+            !result_renders_as_diff("UnknownTool"),
+            "未注册工具应回退 false"
         );
     }
 }

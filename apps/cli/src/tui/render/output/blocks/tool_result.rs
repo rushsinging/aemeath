@@ -6,7 +6,7 @@
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::primitives::fenced::render_fenced_markdown;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
-use crate::tui::render::output::tool_display::result_max_lines;
+use crate::tui::render::output::tool_display::{result_max_lines, result_renders_as_diff};
 use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::view_model::output::ToolResultBlockView;
 use ratatui::style::{Color, Style};
@@ -17,21 +17,18 @@ pub fn render_tool_result(
     view: &ToolResultBlockView,
     ctx: &RenderCtx,
 ) -> RenderedBlock {
-    // Edit 工具结果含 ---DIFF--- 标记时，渲染为带行号/语义色/语法高亮的 diff。
-    // ext 从 summary（入参 JSON 含 file_path）推断，而非裸 tool_title="Edit"（M1）。
+    // result 渲染类型由工具显式声明（`ToolDisplay::renders_result_as_diff`），渲染层据此分发，
+    // 不按 `---DIFF---` 字符或硬编码工具名猜测：#64 后非 Edit 工具（如 Read）的 result 携带
+    // 文件原文，文件内容巧含 `---DIFF---`（如描述 diff 格式的文档/源码）不得被误解析为 diff。
     let result_color = semantic_color(view.style);
-    let lines = if let Some(diff_lines) =
-        render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width)
-    {
+    let diff_lines = result_renders_as_diff(&view.tool_title)
+        .then(|| render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width))
+        .flatten();
+    let lines = if let Some(diff_lines) = diff_lines {
         diff_lines
     } else {
         // 结果行颜色跟随 tool call 状态（Success=绿, Error=红, Running=橙）。
-        format_result_lines(
-            &view.tool_title,
-            &view.result_text,
-            result_color,
-            ctx.width,
-        )
+        format_result_lines(&view.tool_title, &view.result_text, result_color, ctx.width)
     };
 
     RenderedBlock {
@@ -105,6 +102,20 @@ mod tests {
             .lines
             .iter()
             .any(|line| line.plain.contains("done: 3 matches")));
+    }
+
+    #[test]
+    fn test_render_tool_result_non_edit_diff_marker_kept_as_plain_text() {
+        // #64×#90 回归：非 Edit 工具（Read）result 含 ---DIFF--- 文本（如读到描述 diff
+        // 格式的文档/源码）不得被误解析为 diff，应按普通预览保留原文。
+        let view = result("Read", "intro\n---DIFF---\nold\n---DIFF---\nnew");
+        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+
+        assert!(
+            block.lines.iter().any(|l| l.plain.contains("---DIFF---")),
+            "非 Edit 工具应保留 ---DIFF--- 原文（不渲染为 diff），got: {:?}",
+            block.lines.iter().map(|l| l.plain.as_str()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

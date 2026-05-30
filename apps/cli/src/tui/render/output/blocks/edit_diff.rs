@@ -161,10 +161,15 @@ mod tests {
             plains.iter().any(|p| p.contains("+ ") && p.contains("2;")),
             "应含新增行，got: {plains:?}"
         );
-        // 行号（两空格缩进开头）。
+        // 块缩进由 gutter 注入（#60/#63）：diff 行不再自拼行首 INDENT，删除行从行号区起。
+        let del = lines
+            .iter()
+            .find(|line| line.plain.contains("- ") && line.plain.contains("1;"))
+            .expect("删除行存在");
         assert!(
-            lines.iter().all(|line| line.plain.starts_with("  ")),
-            "每行保留两空格缩进"
+            !del.plain.starts_with("  "),
+            "删除行不应自拼行首块缩进，got: {:?}",
+            del.plain
         );
         // 至少一行带前景色 span（语义色 / 语法高亮）。
         assert!(

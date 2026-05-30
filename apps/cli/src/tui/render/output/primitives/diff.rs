@@ -46,12 +46,18 @@ mod tests {
     }
 
     #[test]
-    fn test_diff_line_keeps_left_indent_not_flush_left() {
-        let lines = diff("x\n", "y\n", None, 80);
+    fn test_diff_line_no_leading_block_indent() {
+        // 块缩进由 gutter 注入（#60/#63）：diff 行不再自拼行首 INDENT，删除行从行号区起。
+        let lines = diff("a\nb\n", "a\nc\n", Some("rs"), 80);
+        let del = lines
+            .iter()
+            .find(|line| line.plain.contains("- ") && line.plain.contains('b'))
+            .expect("删除行存在");
 
         assert!(
-            lines.iter().all(|line| line.plain.starts_with("  ")),
-            "每行应保留两空格缩进"
+            !del.plain.starts_with("  "),
+            "删除行不应自拼行首块缩进（由 gutter 注入），got: {:?}",
+            del.plain
         );
     }
 }

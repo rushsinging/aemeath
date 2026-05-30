@@ -110,6 +110,10 @@ impl ToolDisplay for EditDisplay {
         };
         vec![detail]
     }
+    fn renders_result_as_diff(&self) -> bool {
+        // Edit 结果含 `---DIFF---` 包裹的 old/new，按 unified diff 渲染。
+        true
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Edit",

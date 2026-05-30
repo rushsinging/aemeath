@@ -67,10 +67,9 @@ pub fn build_diff_lines(
     }
 }
 
-/// 构建删除行 spans：`{INDENT}{old_num}  {new_pad} | - {text}`
+/// 构建删除行 spans：`{old_num}  {new_pad} | - {text}`（块缩进由 gutter 注入，#60/#63）。
 fn build_delete_line(old_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
     let mut spans = Vec::new();
-    spans.push(SpanPart::plain(INDENT.to_string(), LINE_NUM_COLOR));
     // 行号：old_num + 空格占位
     spans.push(SpanPart::plain(
         format!("{:>width$}  {:>width$} ", old_num, "", width = width),
@@ -84,7 +83,7 @@ fn build_delete_line(old_num: usize, width: usize, text: &str) -> Vec<SpanPart> 
     spans
 }
 
-/// 构建新增行 spans：`{INDENT}{old_pad}  {new_num} | + {highlighted_text}`
+/// 构建新增行 spans：`{old_pad}  {new_num} | + {highlighted_text}`（块缩进由 gutter 注入）。
 fn build_insert_line(
     new_num: usize,
     width: usize,
@@ -92,7 +91,6 @@ fn build_insert_line(
     syntax_ref: Option<&syntect::parsing::SyntaxReference>,
 ) -> Vec<SpanPart> {
     let mut spans = Vec::new();
-    spans.push(SpanPart::plain(INDENT.to_string(), LINE_NUM_COLOR));
     // 行号：空格占位 + new_num
     spans.push(SpanPart::plain(
         format!("{:>width$}  {:>width$} ", "", new_num, width = width),
@@ -112,10 +110,10 @@ fn build_insert_line(
     spans
 }
 
-/// 构建上下文行 spans：`{INDENT}{old_num}  {new_num} | {text}`
+/// 构建上下文行 spans：`{old_num}  {new_num} | {INDENT}{text}`（行首块缩进由 gutter 注入，
+/// 内容前 INDENT 保留以与 `+ ` / `- ` 标记列对齐）。
 fn build_context_line(old_num: usize, new_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
     let mut spans = Vec::new();
-    spans.push(SpanPart::plain(INDENT.to_string(), LINE_NUM_COLOR));
     spans.push(SpanPart::plain(
         format!("{:>width$}  {:>width$} ", old_num, new_num, width = width),
         LINE_NUM_COLOR,

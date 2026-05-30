@@ -1,6 +1,7 @@
 //! 行首标志槽 gutter：depth 缩进 + marker 列。组合期注入，只进 spans 不进 plain。
 //! marker 静态（按 kind/status），仅首行画，后续行等宽空白。见 spec §6.5。
 
+use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{OutputBlockKind, ToolSemanticStatus};
@@ -11,7 +12,8 @@ use ratatui::text::Span;
 pub const GUTTER_WIDTH: usize = 2;
 const PER_DEPTH_INDENT: usize = 2;
 
-/// 按 block 类型 / 工具状态映射 marker 字形。字形均为单列显示宽度。
+/// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
+/// `apply_gutter` 按显示宽度补白填满 marker 槽。
 pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
@@ -22,6 +24,8 @@ pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
             ToolSemanticStatus::Pending | ToolSemanticStatus::Running => "●",
         },
         OutputBlockKind::UserMessage(_) => ">",
+        // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
+        OutputBlockKind::ThinkingMessage(_) => "💭",
         _ => " ",
     }
 }
@@ -37,6 +41,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
             ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
+        OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         _ => theme::TEXT_MUTED,
     }
 }
@@ -60,16 +65,21 @@ pub fn apply_gutter(
         .enumerate()
         .map(|(i, line)| {
             let gutter_text = if i == 0 {
-                format!("{}{glyph} ", " ".repeat(indent_n))
+                // marker 槽总显示宽 GUTTER_WIDTH：窄字形（✓/>）补 1 尾空格，
+                // 宽字符（💭，2 列）补 0——按显示宽度补白，保证续行等宽对齐。
+                let pad = GUTTER_WIDTH.saturating_sub(str_display_width(glyph));
+                format!("{}{glyph}{}", " ".repeat(indent_n), " ".repeat(pad))
             } else {
                 " ".repeat(indent_n + GUTTER_WIDTH)
             };
+            // gutter_cols = gutter span 实际字符数（选区按字符跳过 gutter）：窄 marker 行
+            // 字符数 == 显示列数 == gutter_width(depth)；宽字符 marker（💭）字符数更少，但其
+            // 显示宽仍占满 marker 槽，续行等宽对齐与内容起列不受影响。
+            let gutter_cols = gutter_text.chars().count();
             let mut spans = vec![Span::styled(gutter_text, Style::default().fg(color))];
             spans.extend(line.spans);
             let mut gutted = RenderedLine::with_plain(spans, line.plain);
-            // gutter 文本均为宽度 1 字符（缩进空格 + 字形 + 空格），
-            // 故 gutter_cols 同时等于前导显示列数与首 span 字符数。
-            gutted.gutter_cols = gutter_width(depth);
+            gutted.gutter_cols = gutter_cols;
             gutted
         })
         .collect()
@@ -160,5 +170,29 @@ mod tests {
         let d1 = apply_gutter(&kind, 1, lines);
         assert_eq!(d1[0].gutter_cols, gutter_width(1));
         assert_eq!(d1[0].spans[0].content.chars().count(), d1[0].gutter_cols);
+    }
+
+    #[test]
+    fn test_apply_gutter_wide_marker_fills_slot_chars_not_display_width() {
+        // 💭（宽字符 2 列）作 ThinkingMessage marker：占满 2 列 marker 槽、无尾空格；
+        // 内容与窄 marker block 同列对齐；gutter_cols = 实际字符数（1，非显示列 2）。
+        let kind = OutputBlockKind::ThinkingMessage(TextBlockView {
+            key: "t".into(),
+            text: "x".into(),
+            style: SemanticStyle::Muted,
+        });
+        let out = apply_gutter(
+            &kind,
+            0,
+            vec![
+                RenderedLine::new(vec![Span::raw("ponder")]),
+                RenderedLine::new(vec![Span::raw("more")]),
+            ],
+        );
+
+        assert_eq!(out[0].spans[0].content.as_ref(), "💭", "首行 marker = 💭，无尾空格");
+        assert_eq!(out[0].gutter_cols, 1, "gutter_cols = 字符数（💭 1 字符），非显示列 2");
+        assert_eq!(out[1].spans[0].content.as_ref(), "  ", "续行等宽空白 2 列");
+        assert_eq!(out[1].gutter_cols, 2);
     }
 }
