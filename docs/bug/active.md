@@ -8,6 +8,19 @@
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
+| 95 | Agent tool result 被归为 orphan | 中 | 修复中 | 未确认 | 2026-05 | 根因：`observe_tool_call` 中 `bind_tool` 找不到未绑定占位时直接返回空（不创建 ToolCall block），导致后续 `ToolResult` 在 `complete_active_tool` 中找不到匹配 id → orphan。触发场景：provider 未发送 `ToolCallStart`（如非 streaming 模式）或 index 错位导致 fallback 也失败。修复：`bind_tool` 失败时自动调用 `observe_tool_start` 创建占位后重试绑定 |
+
+### #95 Agent tool result 被归为 orphan
+
+**状态**：修复中
+
+**症状**：Agent tool 执行完成后，其 result（如代码审查报告）被渲染为 orphan 形式（简短摘要 `✓ Agent completed`），而非嵌入到 Agent ToolCall block 中。
+
+**根因**：`observe_tool_call` 中 `bind_tool` 查找 `(name, index)` 精确匹配的未绑定占位。当 provider 未发送 `ToolCallStart`（即 `observe_tool_start` 未被调用，无占位存在）或 index 错位导致 fallback 也失败时，`bind_tool` 返回 None，`observe_tool_call` 直接返回空 changes——ToolCall block 不被创建。后续 `ToolResult` 到达时，`complete_active_tool` 在 turn 的 `tool_calls` 中找不到匹配 id，result 变成 orphan。
+
+**修复方向 / 当前状态**：修复中。`observe_tool_call` 中 `bind_tool` 失败时，自动调用 `observe_tool_start` 创建占位后重试绑定。已添加测试覆盖无 ToolCallStart 场景。
+
+**涉及路径**：`apps/cli/src/tui/model/conversation/model.rs`（`observe_tool_call`）
 
 ### #74 TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
 

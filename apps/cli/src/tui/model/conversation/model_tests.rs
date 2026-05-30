@@ -385,3 +385,136 @@ fn test_conversation_keeps_tool_args_preview() {
             if args_preview.contains("src/main.rs")
     )));
 }
+
+#[test]
+fn test_agent_tool_result_not_orphan_with_index_mismatch() {
+    // #95 场景：LLM 返回 text + tool_use 时，ToolCallStart 用纯 tool 序号 (0)，
+    // ToolCall 用 content_block index (1)。验证 Agent tool result 不因此变成 orphan。
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "review code".to_string(),
+    });
+    // LLM 先输出 assistant text（content_block 0）
+    model.apply(ConversationIntent::ObserveAssistantText {
+        text: "让我来审查".to_string(),
+    });
+    model.apply(ConversationIntent::CompleteTextBlock);
+    // ToolCallStart 用纯 tool 序号 index=0
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    // ToolCall 用 content_block index=1（因为 text 占了 block 0）
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "call_agent_1".to_string(),
+        name: "Agent".to_string(),
+        index: 1,
+        summary: "Review code".to_string(),
+    });
+    // Agent progress（不影响绑定）
+    model.apply(ConversationIntent::RecordAgentProgress {
+        tool_id: "call_agent_1".to_string(),
+        message: "reading files...".to_string(),
+    });
+    // Agent tool result
+    let changes = model.apply(ConversationIntent::ObserveToolResult {
+        id: "call_agent_1".to_string(),
+        tool_name: "Agent".to_string(),
+        output: "审查报告".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    // result 不应是 orphan
+    assert!(
+        !changes.iter().any(|c| matches!(
+            c,
+            ConversationChange::OrphanToolResultObserved { .. }
+        )),
+        "Agent tool result 不应变成 orphan"
+    );
+    assert!(changes.iter().any(|c| matches!(
+        c,
+        ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
+    )));
+    assert!(!model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::OrphanToolResult { id, .. } if id == "call_agent_1"
+    )));
+}
+
+#[test]
+fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
+    // #95 场景 B：assistant text 还在 streaming（未 CompleteTextBlock）时，
+    // tool call 就到了。ToolCallStart index=0, ToolCall index=1（错位）。
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "review".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveAssistantText {
+        text: "让我".to_string(),
+    });
+    // 不调 CompleteTextBlock — text 还在 streaming
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "call_abc".to_string(),
+        name: "Agent".to_string(),
+        index: 1,
+        summary: "Review".to_string(),
+    });
+    let changes = model.apply(ConversationIntent::ObserveToolResult {
+        id: "call_abc".to_string(),
+        tool_name: "Agent".to_string(),
+        output: "报告".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    assert!(
+        !changes.iter().any(|c| matches!(
+            c,
+            ConversationChange::OrphanToolResultObserved { .. }
+        )),
+        "Agent result 不应因 text streaming 而变 orphan"
+    );
+}
+
+#[test]
+fn test_tool_result_not_orphan_when_no_tool_call_start() {
+    // #95 核心场景：provider 未发送 ToolCallStart，直接发送 ToolCall + ToolResult。
+    // 修复前 observe_tool_call 中 bind_tool 返回 None 导致 ToolCall block 不被创建，
+    // ToolResult 到达时 complete_active_tool 找不到匹配 id → orphan。
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "review code".to_string(),
+    });
+    // 不发送 ToolCallStart
+    model.apply(ConversationIntent::ObserveToolCall {
+        id: "call_agent_no_start".to_string(),
+        name: "Agent".to_string(),
+        index: 0,
+        summary: "Review code".to_string(),
+    });
+    let changes = model.apply(ConversationIntent::ObserveToolResult {
+        id: "call_agent_no_start".to_string(),
+        tool_name: "Agent".to_string(),
+        output: "审查报告".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+
+    assert!(
+        !changes.iter().any(|c| matches!(
+            c,
+            ConversationChange::OrphanToolResultObserved { .. }
+        )),
+        "没有 ToolCallStart 时 ToolResult 不应变 orphan（bind_tool 应自动创建占位）"
+    );
+    assert!(changes.iter().any(|c| matches!(
+        c,
+        ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
+    )));
+}

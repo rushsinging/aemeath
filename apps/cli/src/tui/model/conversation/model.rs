@@ -151,10 +151,21 @@ impl ConversationModel {
         let Some(turn) = chat.active_turn_mut() else {
             return Vec::new();
         };
-        let Some(args_preview) =
-            turn.bind_tool(ToolCallId::new(id.clone()), &name, index, summary.clone())
-        else {
-            return Vec::new();
+        let tool_call_id = ToolCallId::new(id.clone());
+        let args_preview = match turn.bind_tool(
+            tool_call_id.clone(),
+            &name,
+            index,
+            summary.clone(),
+        ) {
+            Some(preview) => preview,
+            None => {
+                // bind_tool 失败时（如 provider 未发送 ToolCallStart），自动创建占位并绑定。
+                let chat_id = ChatId::new("late-bind");
+                turn.observe_tool_start(chat_id, name.clone(), index);
+                turn.bind_tool(tool_call_id.clone(), &name, index, summary.clone())
+                    .unwrap_or_default()
+            }
         };
         self.promote_orphan_tool_result(&id);
         let existing_tool_position = self.blocks.iter().position(|block| {
