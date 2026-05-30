@@ -9,26 +9,27 @@
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
 | 95 | Agent tool result 被归为 orphan | 中 | 修复中 | 未确认 | 2026-05 | 根因：`observe_tool_call` 中 `bind_tool` 找不到未绑定占位时直接返回空（不创建 ToolCall block），导致后续 `ToolResult` 在 `complete_active_tool` 中找不到匹配 id → orphan。触发场景：provider 未发送 `ToolCallStart`（如非 streaming 模式）或 index 错位导致 fallback 也失败。修复：`bind_tool` 失败时自动调用 `observe_tool_start` 创建占位后重试绑定 |
-| 96 | `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到 | 高 | 活动中 | 未确认 | 2026-05 | 根因：`feature/66-remove-mod-rs` 将 `config/models/mod.rs` 迁移为 `config/models.rs` 时，`#[path = "tests.rs"]` 未同步更新，仍指向 `config/tests.rs`（不存在），应改为 `#[path = "models/tests.rs"]` 或去掉显式 path 让 Rust 自动解析 |
+| 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
+| 97 | `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到 | 高 | 活动中 | 未确认 | 2026-05 | 根因：`feature/66-remove-mod-rs` 将 `config/models/mod.rs` 迁移为 `config/models.rs` 时，`#[path = "tests.rs"]` 未同步更新，仍指向 `config/tests.rs`（不存在），应改为 `#[path = "models/tests.rs"]` 或去掉显式 path 让 Rust 自动解析 |
 
-### #96 `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到
+### #96 EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中"
 
 **状态**：活动中
 
-**症状**：`cargo test -p share --lib` 编译失败：
-```
-error: couldn't read `agent/share/src/config/tests.rs`: No such file or directory (os error 2)
-  --> agent/share/src/config/models.rs:25:1
-   |
-25 | mod tests;
-   | ^^^^^^^^^^
-```
+**症状**：
+1. 用户在 `main` 分支主工作区（`git branch --show-current` → `main`，`pwd` 不在 `.worktrees/` 下），UI 显示也不在 worktree 中。
+2. 调用 `EnterWorktree { branch: "feature/xxx" }`（不给 `path`，走自动创建模式）时报错：`进入 worktree 失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`。
+3. 随后调用 `ExitWorktree` 又报错：`上下文栈为空，没有可恢复的 worktree`——与 EnterWorktree 的错误自相矛盾。
+4. 直接给 `path` 参数指定已存在的 worktree 路径则成功进入。
 
-**根因**：`feature/66-remove-mod-rs` 工作分支将 `agent/share/src/config/models/mod.rs` 迁移为 `agent/share/src/config/models.rs`，但第 24 行的 `#[path = "tests.rs"]` 未更新。旧布局下此路径指向 `config/models/tests.rs`（存在），新布局下指向 `config/tests.rs`（不存在，实际文件在 `config/models/tests.rs`）。
+**根因**：EnterWorktree/ExitWorktree 工具内部维护一个独立的上下文栈（每次 Enter/Exit 配对维护），与 git 实际的 worktree 状态（磁盘上的 `.worktrees/` + git 分支指针）是两套独立的追踪机制。当上下文栈因历史原因（如上次异常退出未配对 Exit）残留了旧状态时，两者不同步，EnterWorktree 在自动创建模式下检测到这个残留状态就拒绝进入。
 
-**修复方向**：将 `#[path = "tests.rs"]` 改为 `#[path = "models/tests.rs"]`，或去掉显式 `#[path]` 让 Rust 按模块规则自动解析。
+**修复方向**：
+1. EnterWorktree 在判断"是否已在 worktree 中"时，应同时校验上下文栈和 git 实际状态（`git rev-parse --git-dir` 是否在 `.worktrees/` 下），而非仅依赖内部栈。
+2. 若上下文栈非空但 git 实际在 main，应自动清理栈并允许进入。
+3. 考虑将上下文栈持久化到磁盘（如 `~/.agents/worktree_stack.json`），避免进程重启/异常退出后状态丢失。
 
-**涉及路径**：`agent/share/src/config/models.rs` 第 24 行
+**涉及路径**：EnterWorktree / ExitWorktree 工具实现（上下文栈管理逻辑）
 
 ### #95 Agent tool result 被归为 orphan
 
@@ -834,4 +835,23 @@ Tool Bash timed out after 120s
 **关联**：
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
+
+### #97 `share` crate 编译失败：`config/tests.rs` 路径错误导致文件找不到
+
+**状态**：活动中
+
+**症状**：`cargo test -p share --lib` 编译失败：
+```
+error: couldn't read `agent/share/src/config/tests.rs`: No such file or directory (os error 2)
+  --> agent/share/src/config/models.rs:25:1
+   |
+25 | mod tests;
+   | ^^^^^^^^^^
+```
+
+**根因**：`feature/66-remove-mod-rs` 工作分支将 `agent/share/src/config/models/mod.rs` 迁移为 `agent/share/src/config/models.rs`，但第 24 行的 `#[path = "tests.rs"]` 未更新。旧布局下此路径指向 `config/models/tests.rs`（存在），新布局下指向 `config/tests.rs`（不存在，实际文件在 `config/models/tests.rs`）。
+
+**修复方向**：将 `#[path = "tests.rs"]` 改为 `#[path = "models/tests.rs"]`，或去掉显式 `#[path]` 让 Rust 按模块规则自动解析。
+
+**涉及路径**：`agent/share/src/config/models.rs` 第 24 行
 
