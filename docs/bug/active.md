@@ -3,15 +3,10 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
-| 54 | LLM 过度使用 TaskListCreate，简单任务也创建 task list | 中 | 修复中 | 未确认 | 2026-05 | 根因：TaskCreate / TaskListCreate 工具描述只强调多步任务必须使用 task 管理，缺少简单任务禁止创建 task list 的反向约束；模型为避免违反 task workflow，倾向把查看 bug、简单查询、单命令检查也包装成 task list。修复：工具描述改为仅复杂多步任务（≥3 个实质步骤、多依赖变更或并行 sub-agent 协调）使用 task 管理，并明确问答、查看文件/bug 状态、单命令、小范围修改直接执行 |
-| 62 | Grep 工具执行中标题文字不可见但复制可见 | 中 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | TUI 中 Grep 工具运行态显示 `● Grep /tui\.log/ in ...` 时，屏幕上看不到 `Grep` 字样，但选中复制能复制出来；疑似工具标题/参数文本颜色与背景色过近或被 running 状态样式覆盖，也可能是 selection/render spans 与 plain text copy 路径不一致 |
-| 64 | Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态 | 高 | 修复中 | 未确认 | 2026-05 | session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，LLM 创建 task list 并完成 Task 1 后，启动 Task 2 subagent 时漏传 `taskId`；subagent 实际执行但 TaskStore 未进入 InProgress，TaskList 只显示 done/pending。修复方向：active task batch 存在未完成任务时，Agent 必须传 `taskId`，否则拒绝启动并提示使用绑定 taskId 或显式无跟踪调用。 |
-| 65 | 工具结果 fenced code block 后续内容继续显示为 code 颜色 | 中 | 待确认（G2 已接线：工具结果走共享 fence 渲染，fence 结束后普通行恢复正常色） | 未确认 | 2026-05 | Edit/Write 等工具结果中包含 fenced code block 时，例如 `✓ replaced 1 occurrence(s) in ...` 后展示文件路径并以 ``` 收尾，但后续普通内容仍呈现 code 颜色；疑似 Markdown fence 状态未在工具结果块结束后复位，或 tool result 渲染缓存/样式 span 泄漏到后续行 |
-| 66 | ExitWorktree 带 path 参数报错"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | ExitWorktree 传入 `path` 参数时应能退出当前 worktree 再切换到指定路径，但实际报错：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`；疑似 path 路径切换逻辑在判断"当前是否在 worktree 中"时未区分"仅退出"与"退出+切换"两种语义，错误地把 path 参数直接当 EnterWorktree 处理 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | 输出区行数达到 `MAX_LINES=10000` 上限后，`rendered_lines::collect_table_ranges` / `render_range` 收到的 `end` 超过 `lines.len()`，在 `apps/cli/src/tui/output_area/rendered_lines.rs:98` 处 `lines[i]` 越界 panic 导致整个 TUI 崩溃；疑似 `RenderedLineCache::ensure_rendered` 增量分支使用陈旧 `render_start`/`render_end` 未 clamp 到 `total`。同时 `check-unsafe-text-ops.sh` guard 抓不到该类问题：①只扫 `apps/cli/src/tui`，`agent/`、`packages/` 切片不检查；②只在 Stop hook 触发，panic 时跳过；③正则漏掉裸单下标 `slice[i]`（`lines[i]` 正属此类） |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
-| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 待确认（随 #58 渲染管线重构修复） | 未确认 | 2026-05 | `/reflect` 完成后，`ReflectionDone` 通过 `output_area.push_system(&output.content)` 以 `LineStyle::System`（暗灰蓝）推送整段 reflection 输出（内含 `[User]:`/`[Assistant]:` 会话转录与 markdown），其后续普通/assistant 文本也呈现 System 暗色；疑似与 #65 同族——markdown fence/样式状态或渲染缓存 style 跨 block 泄漏，或 reflection 后未复位为 Assistant 样式 |
+| 74 | ~~TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）~~ | ~~中~~ | ~~已修复~~ | ~~已确认~~ | ~~2026-05~~ | ~~已归档 #74~~ |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | 中 | 待确认 | 用户已验证 | 2026-05 | 已由 feature #53 TUI Model/View 迁移修复：迁移把输入数据流反向为 model→widget，删除了 input_bridge.rs 及 mirror_input_area_to_model 这条 textarea col→字节位置镜像路径，InputDocument（原生按字节维护光标）成为唯一真源，原根因结构性消失。SHOULD 在新路径补 CJK 连续输入回归测试。关联 #48/#33（CJK 字符列处理） |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | 中 | 修复中 | 待确认 | 2026-05 | 根因：spinner 上方历史输出同时存在 legacy `OutputArea` 直接写入和新 `ConversationModel -> OutputViewModel -> OutputArea` 全量替换两条路径，用户输入、thinking、tool call 三类块格式/状态来源不一致；真实 reasoning/text block 后 `ToolCallStart.index` 可能不是 0，index 丢失会进一步导致工具块绑定失败。修复：历史输出统一从 ConversationModel 渲染，格式参照 resume（用户 `> ...`、thinking `💭 ...`、tool call 复用 ToolDisplay），runtime/sdk/CLI 透传 ToolCall index；resume 也改为加载模型后通过 ViewModel 渲染，符合新架构。 |
@@ -471,131 +466,6 @@
 - `apps/cli/src/tui/core/update/ui_event.rs`（`ReflectionDone` → `push_system`）
 - `apps/cli/src/tui/output_area/`（`push_system` 行样式、markdown 渲染缓存 block state）
 - 关联 #65（工具结果 fenced code block 样式泄漏）、#41（/reflect 异步化）
-
-### #66 ExitWorktree 带 path 参数报错"已在 worktree 中"
-
-**状态**：活动中
-
-**症状**：ExitWorktree 工具传入 `path` 参数时，预期行为是退出当前 worktree 后切换到指定路径，但实际报错：
-
-```text
-✗ ExitWorktree
-  {"path":"/Users/guoyuqi/Nextcloud/work/claudecode/aemeath"}
-  ✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的
-```
-
-用户正在 worktree 中，想通过 `ExitWorktree(path="/some/target")` 一步切换回目标工作区，却被告知"已在 worktree 中，请先 ExitWorktree"。先执行无参 `ExitWorktree` 退出 worktree，再用 `EnterWorktree` 或直接 cd 目标路径才能到达，操作需拆为两步。
-
-**复现**：
-1. 先通过 `EnterWorktree` 进入任意 worktree。
-2. 调用 `ExitWorktree(path="/Users/guoyuqi/Nextcloud/work/claudecode/aemeath")`（或其他绝对/相对路径）。
-3. 观察错误返回：`✗ 切换路径失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`。
-4. 先执行无参 `ExitWorktree` 成功退出 worktree，再执行同样带 path 的 ExitWorktree 或手动 cd 才能到达目标路径。
-
-**根因假设**：
-1. ExitWorktree 带 `path` 参数时内部逻辑等价于 `先 EnterWorktree(path)`，导致检查到当前已在 worktree 中时直接拒绝，没有先执行 ExitWorktree。
-2. `ExitWorktree(path)` 的处理分支未区分"仅退出"和"退出+切换"：前者应直接恢复上下文栈并 `cd`，后者应在退出后跳过"已在 worktree 中"检查再执行路径切换。
-3. 路径存在性/合法性的校验也可能触发 worktree 嵌套检查，混淆了两个操作的执行边界。
-
-**修复方向**：
-1. 梳理 `ExitWorktree(path)` 的执行分支：先执行无参 ExitWorktree 的退出逻辑（pop 上下文栈、恢复工作目录），再以恢复后的工作目录为基础执行 path 切换（等价于无条件 cd 目标路径，不再嵌套检查 worktree）。
-2. 若 `ExitWorktree(path)` 在设计上不允许从 worktree 直接切换到另一个 worktree，则必须在文档/Bash 提示中明确该限制，并提供分步指引；但从用户视角来看，提供 `path` 参数本身就意味着"我要退出并切换"。
-3. 补充回归：从任意 worktree 调用 ExitWorktree(path) 应能切换到目标路径；目标路径不存在时给出明确路径错误而非 worktree 嵌套错误。
-
-**涉及路径（预计）**：
-- `ExitWorktree` 工具实现（path 参数处理与 worktree 嵌套检查）
-- `EnterWorktree` / context stack 生命周期管理
-
-### #65 工具结果 fenced code block 后续内容继续显示为 code 颜色
-
-**状态**：待确认（G2 已接线）。把 assistant 与工具结果共用的 fence/markdown/table 状态机提取为共享原语 `primitives/fenced.rs::render_fenced_markdown`，`blocks/assistant_message.rs` 与 `blocks/tool_call.rs::format_result_lines` 均调用它（DRY，fence 渲染单一实现）。每个 block 独立渲染、状态机随调用销毁，fence 结束后普通行恢复 base 色，结构上隔离泄漏。回归：`primitives/fenced.rs::test_fenced_does_not_leak_code_color_after_close` 与 `blocks/tool_call.rs::test_tool_call_result_fence_does_not_leak_code_color_after_close`（断言 fence 内代码行为 CODE 色、fence 结束后普通行 ≠ CODE 色）。Edit 工具结果的 `---DIFF---` diff 渲染路径（G1）保持优先：`render_tool_call` 先判 Edit diff，否则才走 fence/markdown 渲染。
-
-**症状**：TUI 输出区展示工具结果时，如果结果内容包含 fenced code block，代码块结束后后续普通内容仍显示为 code 颜色。用户观察到如下片段后，后面的内容都变成 code 颜色：
-
-```text
-✓ replaced 1 occurrence(s) in ␠
-/Users/guoyuqi/Nextcloud/work/claudecode/aemeath/docs/superpowers/plans/2026-05-24-task-window-refactor.md
-```
-
-**影响**：工具结果后的普通 assistant 文本、后续 tool call 展示或文档内容被错误套用 code block 样式，降低可读性，也可能影响用户判断哪些内容属于代码块。
-
-**根因假设**：
-1. Markdown fence 状态机在处理 tool result 渲染片段时没有在片段结束后复位，导致 `in_code_block` 状态泄漏到后续输出。
-2. 工具结果的 styled spans/cache 跨 block 复用，code block foreground/background 样式没有在 fence 结束行后清空。
-3. fenced code block 结束标记被工具结果格式化、缩进或换行拆分影响，导致渲染器没有识别 closing fence。
-4. streaming/append 路径和历史渲染路径对 tool result 的 Markdown block state 初始化/收尾不一致。
-
-**修复方向**：
-1. 检查 output area Markdown fenced code block 状态机，确保每个消息/tool result block 渲染结束时不会把 code style 泄漏到下一个 block。
-2. 对 closing fence 的识别兼容工具结果中带缩进、语言标记、空白字符的情况。
-3. 明确 tool result 渲染缓存的 block state 生命周期：同一消息内可延续，跨消息/tool result 必须按设计复位或正确继承。
-4. 补充回归覆盖：工具结果包含完整 fenced code block 后，下一行普通文本不应使用 code foreground/background。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/markdown/` fenced code block 渲染逻辑
-- tool result display / output area styled span cache
-- streaming append 与历史消息 render 路径
-
-### #64 Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态
-
-**状态**：修复中
-
-**症状**：session `019e4ea6-6f8a-7049-a812-0ab60653770e` 中，主 LLM 已创建 task list 并填充多个任务。Task 1 完成后，系统提示 Task 2 已解除阻塞；随后主 LLM 启动 Task 2 subagent，subagent 实际运行并修改代码，但 task list 中 Task 2 仍保持 `pending`，界面上只看到 `done` 与 `pending`，没有 `doing / in_progress`。
-
-**日志证据**：
-1. `TaskUpdate taskId=1 status=completed` 返回 `Unblocked tasks now ready: → #2`。
-2. 后续 `Agent(description="Implement Task 2", ...)` 调用缺少结构化 `taskId` 字段。
-3. subagent 返回 `DONE_WITH_CONCERNS` 并产生文件修改，证明任务实际执行。
-4. 因 AgentTool 未绑定 task，TaskStore 未自动执行 `Pending → InProgress → Completed/Pending` 生命周期。
-
-**根因**：AgentTool 目前只在输入包含 `taskId` 时桥接 task 生命周期；当 active task batch 存在未完成任务时，未传 `taskId` 的 Agent 仍会启动。工具描述要求模型传 `taskId`，但没有工具层强制约束，LLM 遗漏参数时系统不会阻止，导致 subagent 执行和 task 状态投影脱钩。
-
-**修复方向**：
-1. 当 TaskStore 存在 active list 且有 pending/in_progress 任务时，AgentTool 缺少 `taskId` 应直接返回错误，提示传入 `taskId` 或先完成/关闭 task list。
-2. 保留无 active task list 时的自由 Agent 调用能力，避免破坏普通并行调研/review 场景。
-3. 保留已有 `taskId` 生命周期管理：绑定 task 成功时标记 InProgress，成功后 Completed，失败后 Pending。
-4. 增加回归测试覆盖 active task list + missing taskId 拒绝启动，且验证 subagent runner 未被调用。
-
-**涉及路径**：
-- `packages/tools/src/agent_tool.rs`
-- `packages/tools/src/agent_tool_tests.rs`
-- `packages/core/src/task/` TaskStore active list / batch 状态查询
-
-### #62 Grep 工具执行中标题文字不可见但复制可见
-
-**状态**：待确认（随 #58 渲染管线重构结构性修复）。ToolCall 标题在 `blocks/tool_call.rs` 用 `theme::TEXT` 前景渲染、图标用 `semantic_color`，与背景独立；回归测试 `blocks/tool_call.rs::test_tool_call_title_visible_not_background_color`（fg ≠ bg 且 ≠ SURFACE）。
-
-**症状**：TUI 中 Grep 工具运行态显示类似：
-
-```text
-● Grep /tui\.log/
-  in /Users/guoyuqi/Nextcloud/work/claudecode/aemeath
-```
-
-但屏幕上看不到 `Grep` 字样；选中复制时文本又能正常复制出来，说明逻辑文本存在，只是渲染视觉不可见或颜色不可辨。
-
-**复现**：
-1. 触发 Grep 工具执行，例如搜索 `/tui\.log/`
-2. 在 TUI output area 观察 tool call running 行
-3. `●` spinner 和路径/参数可能可见，但 `Grep` 字样不可见
-4. 选中复制该区域，粘贴后可以看到 `Grep` 文本
-
-**根因假设**：
-1. Grep 工具标题 span 的前景色与背景色过近，或被 theme 中 running/tool_name 颜色设置为透明/背景色。
-2. tool running 状态样式覆盖了 tool name span，导致 `Grep` 文本渲染为不可见颜色。
-3. 复制路径读取的是 plain text/原始文本，渲染路径使用 styled spans，因此复制可见而屏幕不可见。
-4. 仅 Grep 受影响可能与工具名/参数分段样式、regex 参数高亮或 `in ...` 第二行缩进样式有关。
-
-**修复方向**：
-1. 检查 tool display 中 tool name、running spinner、argument/path span 的 style 合并逻辑。
-2. 检查 theme 中 tool running/tool name/secondary text 的前景色是否与当前背景冲突。
-3. 确保所有 tool call running 行的 tool name 都使用可见的主文本或工具强调色。
-4. 补充视觉/快照或样式单元测试：Grep/Glob/Read/Bash 等工具运行态 tool name span 颜色不能等于背景色。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/tool_display/`
-- TUI theme/status/tool running style 定义
-- output area selection/copy 与 styled render 分离逻辑
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 
