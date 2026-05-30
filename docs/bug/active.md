@@ -4,7 +4,6 @@
 |---|------|--------|------|----------|----------|----------|
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
-| 71 | TUI 渲染缓存越界 panic + unsafe string guard 覆盖不全 | 高 | 待确认 | 未确认 | 2026-05 | #58 新渲染管线已移除旧 `rendered_lines`/`render_range` 行下标缓存路径；本轮补充 MAX_LINES 裁剪后缓存 retain 回归，修正裁剪旧 block 缓存滞留，并把 TUI 中相关裸下标改为 `.get()` 防御访问；`check-unsafe-text-ops.sh` 当前确保 TUI unsafe text/index operations 为 0 |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
@@ -163,69 +162,6 @@
 - 工具描述/项目指南中关于 worktree 工作路径的提示
 - EnterWorktree/ExitWorktree 上下文栈与 cwd 同步逻辑
 
-
-### #71 TUI 渲染缓存越界 panic（len 10000 / index 10000）
-
-**状态**：待确认。#58 新管线已消除旧 `render_range`/`rendered_lines` 行下标越界路径；本轮补充回归 `test_render_tree_retains_only_trimmed_live_blocks`，确保超过 `MAX_LINES` 后只保留裁剪后的 block 缓存，旧 block 不再滞留；同时将 TUI 内 `src[idx]` / `screen_line_map[rel_row]` 改为 `.get()` 防御访问，并扩展 `check-unsafe-text-ops.sh` 对带显式 allow 的裸单下标进行拦截，当前架构 guard 报告 unsafe TUI text/index operations 为 0。
-
-**症状**：长会话中 TUI 直接崩溃，panic 信息：
-
-```text
-[PANIC] index out of bounds: the len is 10000 but the index is 10000 at apps/cli/src/tui/output_area/rendered_lines.rs:98:21
-```
-
-`rendered_lines.rs:98` 是 `collect_table_ranges` 外层循环 `while i < end { let line = &lines[i]; ... }`。`lines.len() == 10000`（等于 `MAX_LINES`），而 `i == 10000`，说明传入的 `end` 大于 `lines.len()`。
-
-**影响**：输出区累计行数达到上限（`output_area/types.rs: MAX_LINES = 10000`）后，任意触发渲染（滚动、流式追加、resize）都可能 panic，整个 TUI 进程崩溃退出。崩溃发生在正常 agent loop 收尾之前，**Stop hook（架构守卫 / 单测 / build）也因此来不及执行**，表现为"stop hook 没有生效"。
-
-**根因（假设）**：
-1. 输出区内容是上限 10000 行的 `VecDeque`（`content.rs`：超过 `MAX_LINES` 时从头部 pop）。
-2. `RenderedLineCache`（`rendered_cache.rs`）以行下标缓存渲染结果，并维护 `render_start` / `render_end` 渲染区间。
-3. `ensure_rendered` 的 dirty 分支用 `block_start` / `block_end`（均 ≤ `total`）调用 `render_range`，是安全的；但**增量分支**直接用 `self.render_start` / `self.render_end` 作为 `render_range` 的区间端点。当 `lines` 长度因到达上限或裁剪发生变化、而 `render_start` / `render_end` 仍是旧值（> 当前 `total`）时，`render_range` 收到 `end > lines.len()`，在 `collect_table_ranges` 处越界。
-4. `content_changed` 只 `truncate` 了 `cache`，没有同步 clamp `render_start` / `render_end`。
-
-**复现方向**：
-1. 制造超过 10000 行的输出（长会话或大量工具结果），使 `VecDeque` 持续从头部裁剪。
-2. 在裁剪发生后触发滚动 / resize / 流式追加，观察是否 panic。
-
-**修复方向**：
-1. `ensure_rendered` 在使用 `render_start` / `render_end` 作为渲染端点前，统一 clamp 到当前 `lines.len()`（`total`）。
-2. `content_changed` / `truncate` 时同步收缩 `render_start` / `render_end`，避免端点滞留旧值。
-3. 在 `render_range` / `collect_table_ranges` 入口对 `end` 做 `end.min(lines.len())` 防御，杜绝越界 panic。
-4. 补充回归：构造 `lines.len()` 缩小但 `render_start`/`render_end` 仍为旧值的缓存状态，断言 `ensure_rendered` 不 panic。
-
-**涉及路径**：
-- `apps/cli/src/tui/output_area/rendered_lines.rs`（`render_range` / `collect_table_ranges` 越界点）
-- `apps/cli/src/tui/output_area/rendered_cache.rs`（`ensure_rendered` 增量分支、`content_changed` 端点同步）
-- `apps/cli/src/tui/output_area/content.rs`、`types.rs`（`MAX_LINES` 裁剪逻辑）
-
-#### 关联问题：unsafe string guard 覆盖不全，抓不到本 panic
-
-**背景**：项目用 Stop hook `check-unsafe-text-ops.sh` 强制 TUI 代码使用统一安全字符串/索引（`crate::tui::display::safe_text`），避免按字节切片 UTF-8、`chars().nth()`、区间切片等导致的 panic。目标是"每次代码修改都检查不合适的字符串用法"，但本次 panic 暴露了 guard 的覆盖缺口——它根本抓不到 `lines[i]` 这类裸下标。
-
-**现状验证（2026-05-27）**：
-- TUI 范围内脚本运行通过（0 violations），`safe_text.rs` 在 `apps/cli/src/tui/display/safe_text.rs`，TARGET 与豁免路径有效。
-- 无滥用 `allow unsafe_text_op` 逃逸注释（TUI 内 0 处）。
-- 即脚本本身在 TUI 范围内没有被绕过，问题在于"检查范围/触发时机/匹配规则"不足。
-
-**缺口**：
-1. **扫描范围只限 `apps/cli/src/tui`**：DDD 重构把大量逻辑搬到 `agent/`、`packages/`，那里的原始字节/字符切片完全不被检查，例如：
-   - `agent/runtime/src/compact/summary.rs:174` `response_text[start..end]`
-   - `agent/runtime/src/compact/summary.rs:87` `&result[head_protect..split_point]`
-   - `agent/runtime/src/chat/reflection.rs:152` `&text[start + 7..]`
-   项目已有统一安全字符串模块 `agent/share/src/string_idx`（`CharIdx`），但 guard 未在 TUI 之外强制使用。
-2. **只在 Stop hook 触发，非每次编辑触发**：无 PreToolUse/PostToolUse hook，仅在 agent loop 收尾跑；若本轮异常结束（如本 panic）则整体跳过。
-3. **正则漏掉裸单下标 `slice[i]`**：当前只匹配 `.chars().nth(`、`&x[a..b]`、`x[a..b]`（区间切片），不匹配 `v[i]`。本 panic 的 `lines[i]` 越界正属此类，guard 永远抓不到。
-
-**guard 修复方向**：
-1. 扩展扫描范围到核心 crate（`agent/`、`packages/`），并引导改用 `agent/share/src/string_idx`；保留 `allow unsafe_text_op` 逃逸应对已知安全的按字节边界切片，避免误报阻塞。
-2. 正则补充裸单下标 `ident[ident]` 检测（区分常量/已知边界场景，必要时配合 allow 注释）。
-3. 评估增加 PreToolUse/PostToolUse 或 pre-commit 级检查，使字符串用法在每次修改时即时校验，而非仅依赖 Stop 收尾。
-
-**guard 涉及路径**：
-- `.agents/hooks/check-unsafe-text-ops.sh`（TARGET 范围、perl 正则、豁免列表）
-- `.agents/aemeath.json`（hook 注册：是否新增 PreToolUse/PostToolUse）
-- `agent/share/src/string_idx/`（统一安全字符串/索引模块）
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 
