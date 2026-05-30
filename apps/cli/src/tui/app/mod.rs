@@ -6,6 +6,8 @@ pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::model::root::TuiModel;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -134,9 +136,18 @@ impl App {
         let output_area = OutputArea::new();
 
         let mut model_state = TuiModel::default();
-        model_state.session.current_session_id = Some(session_id.clone());
-        model_state.runtime.model_id = Some(model.clone());
-        model_state.runtime.workspace.cwd = Some(cwd.display().to_string());
+        // 经聚合根 apply(intent) 初始化，不直接写内部字段（保持单一变更入口）。
+        model_state.session.apply(SessionIntent::SetCurrentSession {
+            id: session_id.clone(),
+        });
+        model_state.runtime.apply(RuntimeIntent::SetProviderModel {
+            provider: None,
+            model_id: Some(model.clone()),
+        });
+        model_state.runtime.apply(RuntimeIntent::UpdateWorkspace {
+            cwd: cwd.display().to_string(),
+            worktree: None,
+        });
         // 启动横幅纳入单一真相源 ConversationModel，经 document 渲染。
         model_state.conversation.seed_banner();
 
