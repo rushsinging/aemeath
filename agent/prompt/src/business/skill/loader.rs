@@ -11,6 +11,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+fn global_skills_dir() -> PathBuf {
+    dirs::home_dir()
+        .map(|home| {
+            home.join(paths::AGENTS_DIR_NAME)
+                .join(paths::SKILLS_DIR_NAME)
+        })
+        .unwrap_or_else(paths::global_skills_dir)
+}
+
 /// Load all skills from a directory.
 ///
 /// At the top level, scans `.md` files directly and in immediate sub-directories.
@@ -107,7 +116,7 @@ pub fn load_all_skills(cwd: &Path, extra_dirs: &[PathBuf]) -> HashMap<String, Sk
 
     // Global skills
     // 3. ~/.agents/skills/
-    let agents_global = paths::global_skills_dir();
+    let agents_global = global_skills_dir();
     for skill in load_skills_from_dir(&agents_global) {
         map.entry(skill.name.clone()).or_insert(skill);
     }

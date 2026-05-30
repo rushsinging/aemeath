@@ -214,6 +214,58 @@ fn test_load_all_skills_includes_builtin_commit_skill() {
 }
 
 #[test]
+fn test_load_all_skills_scans_project_global_and_extra_dirs() {
+    let base = std::env::temp_dir().join(format!(
+        "aemeath_skill_all_dirs_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let project_skills = base.join(".agents").join("skills");
+    let extra_skills = base.join("extra-skills");
+    std::fs::create_dir_all(&project_skills).unwrap();
+    std::fs::create_dir_all(&extra_skills).unwrap();
+
+    let mut project_file = std::fs::File::create(project_skills.join("project.md")).unwrap();
+    write!(
+        project_file,
+        "---\nname: project-only\ndescription: project\n---\nproject skill"
+    )
+    .unwrap();
+    let mut extra_file = std::fs::File::create(extra_skills.join("extra.md")).unwrap();
+    write!(
+        extra_file,
+        "---\nname: extra-only\ndescription: extra\n---\nextra skill"
+    )
+    .unwrap();
+
+    let skills = load_all_skills(&base, std::slice::from_ref(&extra_skills));
+
+    assert!(skills.contains_key("project-only"));
+    assert!(skills.contains_key("extra-only"));
+    assert_eq!(
+        skills["project-only"].source_path,
+        project_skills.join("project.md")
+    );
+    assert_eq!(
+        skills["extra-only"].source_path,
+        extra_skills.join("extra.md")
+    );
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn test_global_skills_dir_points_to_home_agents_skills() {
+    let expected = dirs::home_dir()
+        .map(|home| home.join(".agents").join("skills"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".agents").join("skills"));
+
+    assert_eq!(global_skills_dir(), expected);
+}
+
+#[test]
 fn test_project_skill_can_override_builtin_commit_skill() {
     let base = std::env::temp_dir().join(format!(
         "aemeath_builtin_commit_override_{}",
