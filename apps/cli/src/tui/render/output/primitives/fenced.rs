@@ -77,8 +77,10 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
         }
 
         if is_table_row(line) && idx + 1 < src.len() && is_table_separator(src[idx + 1]) {
+            // 表格块含表头、分隔行与全部数据行：分隔行不是 is_table_row（被排除），
+            // 故收集时需同时容纳 is_table_separator，否则块只含表头、其余行原样泄漏。
             let mut end = idx;
-            while end < src.len() && is_table_row(src[end]) {
+            while end < src.len() && (is_table_row(src[end]) || is_table_separator(src[end])) {
                 end += 1;
             }
             let block_src: Vec<&str> = src.iter().skip(idx).take(end - idx).copied().collect();
@@ -176,6 +178,36 @@ mod tests {
         assert!(!lines[0].plain.starts_with(' '), "plain 不应含前导缩进");
         let first_span = lines[0].spans[0].content.as_ref();
         assert!(!first_span.starts_with(' '), "spans 不应含前导缩进");
+    }
+
+    #[test]
+    fn test_table_block_renders_separator_and_all_data_rows() {
+        // 回归（正文表格只渲染表头 bug）：表头+分隔+多数据行整块都应成表格，
+        // 不得把分隔行/数据行当普通文本原样输出。
+        let text = "## 活跃 Bug\n\n| # | 标题 | 状态 |\n|---|------|------|\n| 49 | aaa | 修复中 |\n| 54 | bbb | 待确认 |";
+        let lines = render(text);
+        let plains: Vec<String> = lines.iter().map(|l| l.plain.clone()).collect();
+
+        // 原始 ASCII 分隔行不得出现（应被表格渲染消费）。
+        assert!(
+            !plains.iter().any(|p| p.contains("|---")),
+            "分隔行不应原样输出, got: {plains:?}"
+        );
+        // 每个数据行都应被渲染进表格单元（所在行带 │），而非原样 | 文本。
+        for marker in ["49", "54"] {
+            let row = plains
+                .iter()
+                .find(|p| p.contains(marker))
+                .unwrap_or_else(|| panic!("缺数据行 {marker}, got: {plains:?}"));
+            assert!(
+                row.contains('│'),
+                "数据行 {marker} 应渲染为表格单元(带 │), got: {row:?}"
+            );
+            assert!(
+                !row.contains(" | "),
+                "数据行 {marker} 不应残留原始 ASCII | 分隔, got: {row:?}"
+            );
+        }
     }
 
     #[test]
