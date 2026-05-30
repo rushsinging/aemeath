@@ -358,6 +358,9 @@ impl ConversationModel {
         let active = self.active_chat_id.clone()?;
         self.chats.iter_mut().find(|chat| chat.id == active)
     }
-}
 
-include!("tool_order.rs");
+    /// 只读访问当前活跃文本块 id（供 tool_order 使用）。
+    pub(super) fn active_text_block_id(&self) -> Option<&str> {
+        self.active_text_block_id.as_deref()
+    }
+}

@@ -1,5 +1,8 @@
 // Tool call 在 blocks 中的位置管理（插入、排序）。
-// 通过 include! 纳入 model.rs，可访问私有字段。
+
+use super::block::ConversationBlock;
+use super::ids::ToolCallId;
+use super::model::ConversationModel;
 
 impl ConversationModel {
     pub(super) fn insert_tool_call_block_before_active_text(
@@ -15,13 +18,9 @@ impl ConversationModel {
             summary,
             args_preview,
         };
-        self.insert_tool_call_block_before_active_text_block(block);
-    }
-
-    fn insert_tool_call_block_before_active_text_block(&mut self, block: ConversationBlock) {
-        let active_text_id = self.active_text_block_id.as_deref();
-        let Some(position) = active_text_id
-            .and_then(|text_id| self.blocks.iter().position(|block| block.id() == text_id))
+        let Some(position) = self
+            .active_text_block_id()
+            .and_then(|text_id| self.blocks.iter().position(|b| b.id() == text_id))
         else {
             self.blocks.push(block);
             return;
