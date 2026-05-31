@@ -6,13 +6,9 @@ pub(crate) use runtime::api::AgentClientImpl;
 
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
-    gateways: FeatureGateways,
+    _gateways: FeatureGateways,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
-    let _ = (
-        gateways.tools.new_registry(),
-        std::sync::Arc::strong_count(&gateways.provider),
-        std::sync::Arc::strong_count(&gateways.project),
-    );
-
+    // TODO(#47): This composition-level wiring scaffold will consume gateways
+    // when the runtime bootstrap migration is ready for feature gateway injection.
     runtime::api::from_args(args).await
 }

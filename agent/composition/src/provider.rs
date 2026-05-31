@@ -12,8 +12,10 @@ mod tests {
 
     #[test]
     fn wire_provider_returns_object_safe_gateway() {
+        fn assert_send_sync<T: Send + Sync + ?Sized>(_: &T) {}
+
         let gateway: Arc<dyn LlmProviderGateway> = wire_provider();
 
-        assert_eq!(Arc::strong_count(&gateway), 1);
+        assert_send_sync(gateway.as_ref());
     }
 }

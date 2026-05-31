@@ -34,12 +34,24 @@ pub struct FeatureGateways {
 }
 
 impl FeatureGateways {
-    pub fn wire_default() -> Self {
+    pub fn new(
+        tools: Arc<dyn ToolCatalogGateway>,
+        provider: Arc<dyn LlmProviderGateway>,
+        project: Arc<dyn ProjectGateway>,
+    ) -> Self {
         Self {
-            tools: crate::tools::wire_tools(),
-            provider: crate::provider::wire_provider(),
-            project: crate::project::wire_project(),
+            tools,
+            provider,
+            project,
         }
+    }
+
+    pub fn wire_default() -> Self {
+        Self::new(
+            crate::tools::wire_tools(),
+            crate::provider::wire_provider(),
+            crate::project::wire_project(),
+        )
     }
 }
 
