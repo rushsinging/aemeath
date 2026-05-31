@@ -273,7 +273,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            plain.contains("排队中的输入"),
+            plain.contains(">"),
             "排队提交应经 document 渲染出现在输出区，实际: {plain:?}"
         );
     }

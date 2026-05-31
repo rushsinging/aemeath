@@ -9,6 +9,91 @@ use crate::tui::view_model::output::AskUserBlockView;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use sdk::OptionItem;
+use unicode_width::UnicodeWidthStr;
+
+/// 将文本按指定显示列宽自动换行，返回多行字符串。
+///
+/// 对以空格分隔的文本按词拆行；对单个过长的词（如无空格的中文）
+/// 按字符断行。
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return text.lines().map(|l| l.to_string()).collect();
+    }
+    let mut result = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            result.push(String::new());
+            continue;
+        }
+        let mut current_line = String::new();
+        let mut current_width = 0;
+        for word in paragraph.split_whitespace() {
+            let word_width = word.width();
+            let space = if current_line.is_empty() { 0 } else { 1 };
+            if current_line.is_empty() {
+                // 行首直接处理 word
+                for chunk in split_into_chunks(word, max_width) {
+                    if current_line.is_empty() {
+                        current_line = chunk;
+                        current_width = current_line.width();
+                    } else {
+                        result.push(current_line);
+                        current_line = chunk;
+                        current_width = current_line.width();
+                    }
+                }
+            } else if current_width + space + word_width <= max_width {
+                current_line.push(' ');
+                current_line.push_str(word);
+                current_width += space + word_width;
+            } else {
+                // 放不下，先提交当前行
+                result.push(current_line);
+                current_line = String::new();
+                current_width = 0;
+                // 再将 word 拆块放入
+                for chunk in split_into_chunks(word, max_width) {
+                    if current_line.is_empty() {
+                        current_line = chunk;
+                        current_width = current_line.width();
+                    } else {
+                        result.push(current_line);
+                        current_line = chunk;
+                        current_width = current_line.width();
+                    }
+                }
+            }
+        }
+        if !current_line.is_empty() {
+            result.push(current_line);
+        }
+    }
+    if result.is_empty() {
+        result.push(String::new());
+    }
+    result
+}
+
+/// 按显示宽度将字符串切分为不超过 max_width 的块。
+fn split_into_chunks(s: &str, max_width: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0;
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_w + cw > max_width && !current.is_empty() {
+            chunks.push(current);
+            current = String::new();
+            current_w = 0;
+        }
+        current.push(ch);
+        current_w += cw;
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
 
 /// 渲染单个选项的行（title 加粗 + description 灰色）。
 fn option_lines(index: usize, option: &OptionItem, active: bool, multi_select: bool) -> Vec<(String, Option<Style>)> {
@@ -39,12 +124,15 @@ fn option_lines(index: usize, option: &OptionItem, active: bool, multi_select: b
     lines
 }
 
-pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx) -> RenderedBlock {
+pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx) -> RenderedBlock {
     let header_style = Style::default()
         .fg(theme::WARNING)
         .add_modifier(Modifier::BOLD);
     let hint_style = Style::default().fg(theme::TEXT_DIM);
     let normal_style = Style::default().fg(theme::TEXT);
+
+    // 问题区域最大宽度：终端宽度的 60%，下限 40，上限 80
+    let question_max_width = (ctx.width as usize * 6 / 10).clamp(40, 80);
 
     let mut lines = Vec::new();
     lines.push(RenderedLine::new(vec![Span::styled(
@@ -52,9 +140,9 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, _ctx: &RenderCtx
         header_style,
     )]));
     lines.push(RenderedLine::new(vec![Span::raw("")]));
-    for line in view.question.lines() {
+    for line in wrap_text(&view.question, question_max_width) {
         lines.push(RenderedLine::new(vec![Span::styled(
-            line.to_string(),
+            line,
             header_style,
         )]));
     }
@@ -279,5 +367,71 @@ mod tests {
         assert!(rendered[0].0.contains("1. Simple"));
         // 无覆盖样式（由 active 控制）
         assert!(rendered[0].0.contains("[✓]"));
+      }
+
+      #[test]
+      fn test_wrap_text_short_text_no_wrap() {
+          let lines = wrap_text("hello world", 80);
+          assert_eq!(lines, vec!["hello world"]);
+      }
+
+      #[test]
+      fn test_wrap_text_long_text_wraps() {
+          let lines = wrap_text("aaa bbb ccc ddd eee fff", 11);
+          assert_eq!(lines.len(), 2);
+          assert_eq!(lines[0], "aaa bbb ccc");
+          assert_eq!(lines[1], "ddd eee fff");
+      }
+
+      #[test]
+      fn test_wrap_text_preserves_newlines() {
+          let lines = wrap_text("line1\nline2", 80);
+          assert_eq!(lines, vec!["line1", "line2"]);
+      }
+
+      #[test]
+      fn test_wrap_text_empty_paragraph() {
+          let lines = wrap_text("before\n\nafter", 80);
+          assert_eq!(lines, vec!["before", "", "after"]);
+      }
+
+      #[test]
+      fn test_wrap_text_zero_width_returns_raw_lines() {
+          let lines = wrap_text("aaa bbb\nccc", 0);
+          assert_eq!(lines, vec!["aaa bbb", "ccc"]);
+        }
+
+        #[test]
+        fn test_wrap_text_chinese_wraps_by_char() {
+            // 每个中文字符约 2 列宽，20 列放约 10 个字
+            let lines = wrap_text("这是一段很长的中文文本用来测试自动换行", 20);
+            assert!(lines.len() >= 2, "中文长文本应被拆为多行，实际: {lines:?}");
+            for line in &lines {
+                assert!(line.width() <= 20, "每行不应超过 20 列: {line:?} ({} 列)", line.width());
+            }
+        }
+
+        #[test]
+        fn test_wrap_text_mixed_cjk_and_ascii() {
+            let lines = wrap_text("hello 这是一段中文 world 更多中文内容", 20);
+            assert!(lines.len() >= 2, "混合文本应换行，实际: {lines:?}");
+        }
+
+        #[test]
+        fn test_render_ask_user_wraps_long_question() {
+          let mut v = view(&[], 0, false);
+          v.question = "这是一段很长的提问内容用于测试自动换行功能是否正常工作".to_string();
+          let block = render_ask_user("ask", &v, &RenderCtx { width: 60 });
+          // 60 * 0.6 = 36，中文每字约 2 列宽，36 列放约 18 个字，所以应拆为多行
+          let question_lines: Vec<_> = block
+              .lines
+              .iter()
+              .skip(2) // 跳过 header + 空行
+              .take_while(|l| !l.plain.contains('[') && !l.plain.is_empty())
+              .collect();
+          assert!(
+              question_lines.len() >= 2,
+              "长问题应被拆为多行，实际: {question_lines:?}"
+          );
+      }
     }
-}
