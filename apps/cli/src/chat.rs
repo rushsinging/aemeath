@@ -17,20 +17,19 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
 pub(crate) async fn agent_client_from_args(
     args: sdk::ChatBootstrapArgs,
 ) -> Result<std::sync::Arc<dyn sdk::AgentClient>, sdk::SdkError> {
-    Ok(std::sync::Arc::new(
-        ::runtime::api::client::from_args(args).await?,
-    ))
+    let runtime_client = composition::runtime::from_args(args).await?;
+    Ok(composition::app::agent_client_from_runtime(runtime_client))
 }
 
 fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
-/// 主聊天逻辑 — 瘦身入口（CLI 唯一接触 runtime::api 的装配层）。
+/// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
     let args = apply_permission_env_override(args);
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
-    let client = ::runtime::api::client::from_args(args.into())
+    let client = composition::runtime::from_args(args.into())
         .await
         .unwrap_or_else(|e| {
             eprintln!("Error: {e}");
@@ -41,8 +40,7 @@ pub(crate) async fn run_chat(args: Args) {
     let session_id = launch.session_id.clone();
 
     let mut app = crate::tui::App::new(launch.session_id.clone(), launch.cwd, launch.model_display);
-    app.agent_client =
-        Some(std::sync::Arc::new(client.clone()) as std::sync::Arc<dyn sdk::AgentClient>);
+    app.agent_client = Some(composition::app::agent_client_from_runtime(client.clone()));
     app.session.memory_config = launch.memory_config;
     app.set_skills(launch.skills_map);
 
@@ -57,7 +55,7 @@ pub(crate) async fn run_chat(args: Args) {
     app.status_bar.set_thinking(launch.client.is_reasoning());
 
     app.run(
-        std::sync::Arc::new(client) as std::sync::Arc<dyn sdk::AgentClient>,
+        composition::app::agent_client_from_runtime(client),
         initial_resume_id,
     )
     .await

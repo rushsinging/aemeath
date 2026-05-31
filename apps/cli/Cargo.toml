@@ -8,7 +8,7 @@ name = "aemeath"
 path = "src/main.rs"
 
 [dependencies]
-runtime = { path = "../../agent/runtime" }
+composition = { path = "../../agent/composition" }
 sdk = { path = "../../packages/sdk" }
 tokio = { workspace = true }
 serde_json = { workspace = true }

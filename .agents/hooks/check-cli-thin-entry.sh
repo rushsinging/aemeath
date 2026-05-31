@@ -20,11 +20,23 @@ for crate in business:
     if pattern.search(text):
         violations.append(f"apps/cli/Cargo.toml must not declare direct path dependency on {crate}")
 
-if 'runtime = { path = "../../agent/runtime" }' not in text:
-    violations.append("apps/cli/Cargo.toml must depend on runtime via ../../agent/runtime for composition root assembly")
+if 'runtime = { path = "../../agent/runtime" }' in text:
+    violations.append("apps/cli/Cargo.toml must not declare direct dependency on runtime; use composition")
+
+if 'composition = { path = "../../agent/composition" }' not in text:
+    violations.append("apps/cli/Cargo.toml must depend on composition via ../../agent/composition for composition root assembly")
 
 if 'sdk = { path = "../../packages/sdk" }' not in text:
     violations.append("apps/cli/Cargo.toml must depend on sdk via ../../packages/sdk for AgentClient contract")
+
+for path in sorted(Path("apps/cli/src").rglob("*.rs")):
+    rel = path.as_posix()
+    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        if re.search(r"\buse\s+runtime::", line) or "runtime::api" in line:
+            violations.append(f"{rel}:{lineno}: CLI must not import runtime directly; use composition: {stripped}")
 
 if violations:
     print(json.dumps({"decision": "block", "reason": "Thin CLI guard failed:\n" + "\n".join(violations)}, ensure_ascii=False))
