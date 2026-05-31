@@ -187,6 +187,8 @@ fn test_format_memory_context_empty() {
 #[test]
 fn test_format_memory_context_with_entries() {
     let entry = MemoryEntry::new(
+        "memory-1",
+        100,
         MemoryLayer::Project,
         MemoryCategory::Decision,
         "使用 JSON 存储 Memory",

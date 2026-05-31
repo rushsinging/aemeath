@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_display_id_local_number_in_current_batch() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         // Batch 1 has tasks with global ids 8, 9, 10
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::InProgress).await;
@@ -220,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_display_number_within_batch() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::InProgress).await;
         add_task(&store, "10", 1, TaskStatus::Pending).await;
@@ -242,7 +242,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_display_number_excludes_deleted() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "1", 1, TaskStatus::Pending).await;
         add_task(&store, "2", 1, TaskStatus::Deleted).await;
         add_task(&store, "3", 1, TaskStatus::InProgress).await;
@@ -259,7 +259,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_display_ids_batch() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "5", 1, TaskStatus::Pending).await;
         add_task(&store, "6", 1, TaskStatus::Pending).await;
 
@@ -272,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn test_to_display_ids_batch() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "5", 1, TaskStatus::Pending).await;
         add_task(&store, "6", 1, TaskStatus::Pending).await;
 
@@ -287,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_batch_id_archived_returns_none() {
         let store = setup_store_with_batches().await;
-        let mut batch = Batch::new(1);
+        let mut batch = Batch::new(1, 0);
         batch.status = BatchStatus::Archived;
         store.batches.lock().await.push(batch);
         add_task(&store, "1", 1, TaskStatus::Completed).await;
@@ -298,7 +298,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_batch_id_active_returns_batch() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "1", 1, TaskStatus::Pending).await;
 
         assert_eq!(store.display_batch_id().await, Some(1));
@@ -309,7 +309,7 @@ mod tests {
     #[tokio::test]
     async fn test_format_display_id_with_mapping() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "99", 1, TaskStatus::Pending).await;
 
         assert_eq!(store.format_display_id("99").await, "1");
@@ -328,14 +328,14 @@ mod tests {
     async fn test_cross_batch_display_numbers_independent() {
         let store = setup_store_with_batches().await;
         // Batch 0 (archived)
-        let mut b0 = Batch::new(0);
+        let mut b0 = Batch::new(0, 0);
         b0.status = BatchStatus::Archived;
         store.batches.lock().await.push(b0);
         add_task(&store, "1", 0, TaskStatus::Completed).await;
         add_task(&store, "2", 0, TaskStatus::Completed).await;
 
         // Batch 1 (active)
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::Pending).await;
 
@@ -360,7 +360,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch_display_map_returns_sequential_numbers() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "8", 1, TaskStatus::Pending).await;
         add_task(&store, "9", 1, TaskStatus::InProgress).await;
         add_task(&store, "10", 1, TaskStatus::Completed).await;
@@ -373,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch_display_map_excludes_deleted() {
         let store = setup_store_with_batches().await;
-        store.batches.lock().await.push(Batch::new(1));
+        store.batches.lock().await.push(Batch::new(1, 0));
         add_task(&store, "1", 1, TaskStatus::Pending).await;
         add_task(&store, "2", 1, TaskStatus::Deleted).await;
         add_task(&store, "3", 1, TaskStatus::InProgress).await;

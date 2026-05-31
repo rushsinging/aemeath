@@ -31,7 +31,16 @@ pub(super) fn add_memory(input: Value, ctx: &ToolContext) -> ToolResult {
         Err(error) => return ToolResult::error(error),
     };
 
-    let mut entry = MemoryEntry::new(layer, category, content, MemorySource::Llm).with_tags(tags);
+    let now = current_timestamp_secs();
+    let mut entry = MemoryEntry::new(
+        uuid::Uuid::now_v7().to_string(),
+        now,
+        layer,
+        category,
+        content,
+        MemorySource::Llm,
+    )
+    .with_tags(tags);
     entry.pinned = input
         .get("pinned")
         .and_then(|value| value.as_bool())

@@ -21,7 +21,7 @@ impl TaskStore {
             *current_batch
         };
 
-        let mut batch = Batch::new(batch_id);
+        let mut batch = Batch::new(batch_id, super::types::default_timestamp());
         batch.summary = Some(if summary.trim().is_empty() {
             subject
         } else {
@@ -110,7 +110,7 @@ impl TaskStore {
         if let Some(b) = batches.iter().find(|b| b.id == batch_id) {
             b.clone()
         } else {
-            let b = Batch::new(batch_id);
+            let b = Batch::new(batch_id, super::types::default_timestamp());
             batches.push(b.clone());
             b
         }

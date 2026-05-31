@@ -1,5 +1,5 @@
 use share::memory::dedup::jaccard_similarity;
-use share::memory::entry::{current_timestamp_secs, MemoryEntry, MemoryLayer};
+use share::memory::entry::{MemoryEntry, MemoryLayer};
 use share::memory::error::{MemoryError, MemoryResult};
 use share::memory::result::{AddResult, CompactResult, MemoryStats};
 use share::memory::scoring::{eviction_score, injection_score};
@@ -310,6 +310,13 @@ impl MemoryStore {
     }
 }
 
+fn current_timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 fn entry_matches(entry: &MemoryEntry, query: &str) -> bool {
     if query.trim().is_empty() {
         return true;
@@ -339,6 +346,8 @@ mod tests {
 
     fn project_entry(content: &str) -> MemoryEntry {
         MemoryEntry::new(
+            uuid::Uuid::new_v4().to_string(),
+            100,
             MemoryLayer::Project,
             MemoryCategory::Decision,
             content,

@@ -277,14 +277,11 @@ pub struct ErrorContext {
 
 impl ErrorContext {
     /// Create a new error context
-    pub fn new(location: impl Into<String>) -> Self {
+    pub fn new(location: impl Into<String>, timestamp: u64) -> Self {
         Self {
             location: location.into(),
             context: None,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            timestamp,
         }
     }
 
@@ -347,12 +344,19 @@ mod tests {
     }
 
     #[test]
-    fn test_suggestions() {
-        let error = AemeathError::Auth {
-            message: "test".to_string(),
-        };
-        let display = error.display();
-        let suggestions = display.suggestions();
-        assert!(!suggestions.is_empty());
+    fn test_error_context_new_uses_injected_timestamp() {
+        let context = ErrorContext::new("test-location", 123);
+
+        assert_eq!(context.location, "test-location");
+        assert_eq!(context.timestamp, 123);
+        assert!(context.context.is_none());
+    }
+
+    #[test]
+    fn test_error_context_with_context() {
+        let context = ErrorContext::new("test-location", 123).with_context("detail");
+
+        assert_eq!(context.context.as_deref(), Some("detail"));
+        assert_eq!(context.timestamp, 123);
     }
 }

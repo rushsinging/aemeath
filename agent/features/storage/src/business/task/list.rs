@@ -88,7 +88,7 @@ mod tests {
         store.batches.lock().await.push(Batch {
             id,
             status,
-            ..Batch::new(id)
+            ..Batch::new(id, 0)
         });
         store
     }
@@ -165,7 +165,7 @@ mod tests {
         store.batches.lock().await.push(Batch {
             id: 1,
             status: BatchStatus::Active,
-            ..Batch::new(1)
+            ..Batch::new(1, 0)
         });
         add_task(&store, "2", 1, TaskStatus::Pending).await;
         add_task(&store, "3", 1, TaskStatus::InProgress).await;

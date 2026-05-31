@@ -96,6 +96,8 @@ fn test_apply_suggestions_adds_llm_project_memory() {
 fn test_apply_output_marks_outdated_and_adds_suggestions() {
     let (mut store, dir) = temp_store(10);
     let existing = MemoryEntry::new(
+        "memory-1",
+        100,
         share::memory::MemoryLayer::Project,
         share::memory::MemoryCategory::Fact,
         "旧事实",
