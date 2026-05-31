@@ -1,4 +1,4 @@
-use crate::api::agent::ToolCall;
+use crate::business::agent::ToolCall;
 use crate::business::chat::looping::input_log::logged_input_messages;
 use logging::JsonLogger;
 use provider::api::{StreamResponse, SystemBlock};

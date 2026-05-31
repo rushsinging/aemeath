@@ -1,4 +1,4 @@
-use crate::api::agent::{Agent, ToolCall};
+use crate::business::agent::{Agent, ToolCall};
 use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
@@ -230,7 +230,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::tool_results_for_api;
-    use crate::api::compact::MAX_TOOL_RESULT_CHARS;
+    use crate::business::compact::MAX_TOOL_RESULT_CHARS;
     use share::message::ContentBlock;
 
     #[test]

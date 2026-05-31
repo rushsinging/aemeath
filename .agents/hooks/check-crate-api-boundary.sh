@@ -26,8 +26,6 @@ DOMAIN_CRATES = {
 }
 INTERNAL_SEGMENTS = {"business", "core", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
-# Runtime keeps the legacy internal re-exports until Task 9 migrates it.
-LEGACY_API_FACADE_EXEMPT_CRATES = {"runtime"}
 PUBLIC_ROOT_ALLOW = {
     "provider": {"ApiDriverKind", "LlmError"},
 }
@@ -161,8 +159,6 @@ run_sanity()
 violations = []
 for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
     current = crate_for(api_path.relative_to(root))
-    if current in LEGACY_API_FACADE_EXEMPT_CRATES:
-        continue
     rel = api_path.relative_to(root)
     for lineno, line in enumerate(api_path.read_text().splitlines(), 1):
         match = re.search(r"crate::([A-Za-z_][A-Za-z0-9_]*)", line)

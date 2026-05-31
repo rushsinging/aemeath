@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use runtime::api::client::AgentClientImpl;
+use runtime::api::AgentClientImpl;
 use sdk::AgentClient;
 
 pub type AgentClientHandle = Arc<dyn AgentClient>;

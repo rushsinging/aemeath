@@ -15,9 +15,9 @@ pub(super) async fn execute_command_impl(
     args: &str,
     sdk_ctx: sdk::CommandContext,
 ) -> Result<sdk::CommandResult> {
-    use crate::api::command::CommandContext as RtCmdCtx;
-    use crate::api::cost::CostTracker;
+    use crate::business::cost::CostTracker;
     use crate::business::state::AppState;
+    use crate::core::command::CommandContext as RtCmdCtx;
     use share::config::Config;
 
     // Build runtime command context
@@ -34,7 +34,7 @@ pub(super) async fn execute_command_impl(
     let cmd_name = name.to_string();
     let args_owned = args.to_string();
     let result = {
-        let registry = crate::api::command::CommandRegistry::global();
+        let registry = crate::core::command::CommandRegistry::global();
         registry.find(&cmd_name).map(|_cmd| {
             // Clone the name for later use in error messages
             (cmd_name.clone(), args_owned.clone())
@@ -45,7 +45,7 @@ pub(super) async fn execute_command_impl(
     match result {
         Some(_) => {
             // Re-acquire for execution (separate lock)
-            let registry = crate::api::command::CommandRegistry::global();
+            let registry = crate::core::command::CommandRegistry::global();
             if let Some(cmd) = registry.find(&cmd_name) {
                 // The cmd reference outlives the guard because execute happens
                 // within the scope. But we can't drop the guard before await.
@@ -218,7 +218,7 @@ pub(super) async fn compact_impl(_me: &AgentClientImpl) -> Result<()> {
 }
 
 pub(super) async fn read_clipboard_image_impl(_me: &AgentClientImpl) -> Result<ClipboardImageView> {
-    crate::api::image::read_clipboard_image()
+    crate::utils::image::read_clipboard_image()
         .await
         .map(super::mapping::processed_image_to_sdk)
         .map_err(|e| SdkError::Internal(e.to_string()))
@@ -228,7 +228,7 @@ pub(super) async fn process_image_file_impl(
     _me: &AgentClientImpl,
     path: String,
 ) -> Result<ClipboardImageView> {
-    crate::api::image::process_image_file(&path)
+    crate::utils::image::process_image_file(&path)
         .await
         .map(super::mapping::processed_image_to_sdk)
         .map_err(|e| SdkError::Internal(e.to_string()))
@@ -242,9 +242,11 @@ pub(super) async fn run_reflection_impl(
         .into_iter()
         .map(super::mapping::message_from_sdk)
         .collect::<Vec<_>>();
-    let recent_summary =
-        crate::api::reflection::ReflectionEngine::recent_messages_summary(&runtime_messages, 6000);
-    let output = crate::api::reflection::ReflectionOutput {
+    let recent_summary = crate::business::reflection::ReflectionEngine::recent_messages_summary(
+        &runtime_messages,
+        6000,
+    );
+    let output = crate::business::reflection::ReflectionOutput {
         deviations: vec![recent_summary],
         suggested_memories: Vec::new(),
         outdated_memories: Vec::new(),

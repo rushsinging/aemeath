@@ -1,4 +1,4 @@
-use crate::api::agent::ToolCall;
+use crate::business::agent::ToolCall;
 use share::tool::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 
 pub(crate) fn build_tool_calls_progress_event(

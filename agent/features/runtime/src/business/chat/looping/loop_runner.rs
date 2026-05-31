@@ -1,5 +1,5 @@
-use crate::api::agent::Agent;
-use crate::api::agent_runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::business::agent::Agent;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
@@ -38,7 +38,7 @@ where
     pub messages: Vec<Message>,
     pub context_size: usize,
     pub cwd: PathBuf,
-    pub workspace_context: Option<crate::api::session::WorkspaceContext>,
+    pub workspace_context: Option<crate::business::session::WorkspaceContext>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
@@ -150,7 +150,8 @@ where
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
-        let tool_schema_tokens = crate::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let tool_schema_tokens =
+            crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);

@@ -1,4 +1,4 @@
-use crate::api::session::WorkspaceContext;
+use crate::business::session::WorkspaceContext;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;

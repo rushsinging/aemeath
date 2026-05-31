@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChangeSet, SdkError};
 use tokio::sync::watch;
 
-use crate::api::prompt_build::{build_system_prompt_parts, PromptContext};
-use crate::api::tools as tools_crate;
+use crate::business::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::core::port::ChatRuntimeContext;
 use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
@@ -20,6 +19,7 @@ use prompt::api::skill::{load_all_skills, Skill};
 use provider::api::ApiDriverKind;
 use provider::api::SystemBlock;
 use storage::api::TaskStore;
+use tools::api as tools_crate;
 use tools::api::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};

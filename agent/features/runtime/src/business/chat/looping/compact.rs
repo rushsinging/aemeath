@@ -1,8 +1,8 @@
-use crate::api::core::config::hooks::HookEvent;
-use crate::api::core::message::Message;
-use crate::api::hook::{CompactHookData, HookData, HookRunner};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use hook::api::{CompactHookData, HookData, HookRunner};
+use share::config::hooks::HookEvent;
+use share::message::Message;
 use std::sync::Arc;
 
 /// Run auto-compaction if the context is approaching the limit.
@@ -18,12 +18,12 @@ pub(crate) async fn auto_compact<S>(
     context_size: usize,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
-    llm_client: &Arc<crate::api::provider::LlmClient>,
+    llm_client: &Arc<provider::api::LlmClient>,
 ) -> bool
 where
     S: ChatEventSink,
 {
-    use crate::api::compact;
+    use crate::business::compact;
 
     // PreCompact hook
     let pre_compact_results = hook_ui
@@ -91,12 +91,12 @@ where
         && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
     {
         let (compacted, was_compacted) = compact::compact_messages_with_llm(
-              messages,
-              system_prompt_text,
-              context_size,
-              Some(llm_client.as_ref()),
-          )
-          .await;
+            messages,
+            system_prompt_text,
+            context_size,
+            Some(llm_client.as_ref()),
+        )
+        .await;
         if was_compacted {
             let new_len = compacted.len();
             *messages = compacted;

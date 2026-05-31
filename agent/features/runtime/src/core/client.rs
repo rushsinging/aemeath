@@ -17,6 +17,6 @@ pub(crate) use from_args::*;
 #[allow(unused_imports)]
 pub(crate) use mapping::*;
 
-// 对外公开导出（CLI / api.rs 通过 runtime::api::client::from_args 访问）
+// 对外公开导出（gateway 通过 runtime::api::{from_args, AgentClientImpl} 公开）
 pub use accessors::AgentClientImpl;
 pub use from_args::from_args;

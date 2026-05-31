@@ -1,6 +1,6 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
 
-use crate::api::reflection::ReflectionEngine;
+use crate::business::reflection::ReflectionEngine;
 use std::path::{Path, PathBuf};
 use storage::api::MemoryStore;
 
@@ -191,7 +191,7 @@ async fn lightweight_reflection_text_with_base_dir(
     )
     .ok()?;
     let entries = store.list(Some(share::memory::MemoryLayer::Project)).ok()?;
-    let mut output = crate::api::reflection::ReflectionOutput {
+    let mut output = crate::business::reflection::ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: entries

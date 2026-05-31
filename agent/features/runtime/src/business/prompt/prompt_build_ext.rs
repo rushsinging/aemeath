@@ -11,7 +11,7 @@ pub async fn build_static_prompt(
     reasoning: bool,
     config_file: Option<&Config>,
     hook_runner: &HookRunner,
-    prompt_parts: crate::api::prompt_build::SystemPromptParts,
+    prompt_parts: crate::business::prompt::build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
     let skills_guard = skills.lock().await;

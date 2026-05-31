@@ -1,4 +1,4 @@
-use crate::api::agent::ToolCall;
+use crate::business::agent::ToolCall;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
@@ -55,8 +55,7 @@ where
                             })
                         } else {
                             // 兼容旧格式：纯字符串
-                            v.as_str()
-                                .map(|s| OptionItem::title_only(s.to_string()))
+                            v.as_str().map(|s| OptionItem::title_only(s.to_string()))
                         }
                     })
                     .collect()

@@ -1,1 +1,1 @@
-pub use runtime::api::client::{from_args, AgentClientImpl};
+pub use runtime::api::{from_args, AgentClientImpl};

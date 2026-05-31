@@ -1,6 +1,6 @@
 use super::loop_run::SubAgentRun;
 use super::{CliAgentRunner, SilentHandler};
-use crate::api::agent::Agent;
+use crate::business::agent::Agent;
 use async_trait::async_trait;
 use provider::api::SystemBlock;
 use share::message::Message;

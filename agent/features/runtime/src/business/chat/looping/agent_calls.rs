@@ -1,4 +1,4 @@
-use crate::api::agent::ToolCall;
+use crate::business::agent::ToolCall;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};

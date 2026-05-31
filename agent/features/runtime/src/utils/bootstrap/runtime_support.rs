@@ -1,4 +1,4 @@
-use crate::api::agent_runner;
+use crate::business::agent::runner as agent_runner;
 use crate::utils::bootstrap::config_paths;
 use hook::api::HookRunner;
 use logging::JsonLogger;
@@ -16,7 +16,7 @@ pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner
 }
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(crate::api::session::new_session_id);
+    let session_id = resume_session_id.unwrap_or_else(crate::business::session::new_session_id);
     log::info!("session started");
     session_id
 }

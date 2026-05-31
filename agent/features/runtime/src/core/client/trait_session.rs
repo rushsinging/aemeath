@@ -62,7 +62,7 @@ pub(super) async fn load_session_impl(
     _me: &AgentClientImpl,
     id: &str,
 ) -> Result<SessionSnapshot, SdkError> {
-    match crate::api::session::load_session(id).await {
+    match crate::business::session::load_session(id).await {
         Ok(session) => {
             let mut messages = session.messages;
             let trimmed = {

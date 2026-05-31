@@ -30,7 +30,7 @@ pub(crate) fn skill_to_sdk(skill: Skill) -> SkillView {
 }
 
 pub(crate) fn processed_image_to_sdk(
-    image: crate::api::image::ProcessedImage,
+    image: crate::utils::image::ProcessedImage,
 ) -> ClipboardImageView {
     ClipboardImageView {
         base64: image.base64,
@@ -43,12 +43,12 @@ pub(crate) fn processed_image_to_sdk(
 }
 
 pub(crate) fn reflection_output_to_sdk(
-    output: crate::api::reflection::ReflectionOutput,
+    output: crate::business::reflection::ReflectionOutput,
     input_tokens: u32,
     output_tokens: u32,
 ) -> ReflectionOutputView {
     ReflectionOutputView {
-        content: crate::api::reflection::ReflectionEngine::format_output(&output),
+        content: crate::business::reflection::ReflectionEngine::format_output(&output),
         input_tokens,
         output_tokens,
         suggested_memories: output
@@ -200,14 +200,16 @@ pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Mes
 }
 
 /// 将 runtime CommandResult 映射为 SDK 版本。
-pub(crate) fn map_command_result(result: crate::api::command::CommandResult) -> sdk::CommandResult {
+pub(crate) fn map_command_result(
+    result: crate::core::command::CommandResult,
+) -> sdk::CommandResult {
     match result {
-        crate::api::command::CommandResult::Success(msg) => sdk::CommandResult::Success(msg),
-        crate::api::command::CommandResult::Error(msg) => sdk::CommandResult::Error(msg),
-        crate::api::command::CommandResult::Action(action) => {
+        crate::core::command::CommandResult::Success(msg) => sdk::CommandResult::Success(msg),
+        crate::core::command::CommandResult::Error(msg) => sdk::CommandResult::Error(msg),
+        crate::core::command::CommandResult::Action(action) => {
             sdk::CommandResult::Action(map_command_action(action))
         }
-        crate::api::command::CommandResult::Confirm { message, action } => {
+        crate::core::command::CommandResult::Confirm { message, action } => {
             sdk::CommandResult::Confirm {
                 message,
                 action: map_confirm_action(action),
@@ -216,8 +218,8 @@ pub(crate) fn map_command_result(result: crate::api::command::CommandResult) -> 
     }
 }
 
-fn map_command_action(action: crate::api::command::CommandAction) -> sdk::CommandAction {
-    use crate::api::command::CommandAction as Rt;
+fn map_command_action(action: crate::core::command::CommandAction) -> sdk::CommandAction {
+    use crate::core::command::CommandAction as Rt;
     match action {
         Rt::Exit => sdk::CommandAction::Exit,
         Rt::Clear => sdk::CommandAction::Clear,
@@ -252,8 +254,8 @@ fn map_command_action(action: crate::api::command::CommandAction) -> sdk::Comman
     }
 }
 
-fn map_confirm_action(action: crate::api::command::ConfirmAction) -> sdk::ConfirmAction {
-    use crate::api::command::ConfirmAction as Rt;
+fn map_confirm_action(action: crate::core::command::ConfirmAction) -> sdk::ConfirmAction {
+    use crate::core::command::ConfirmAction as Rt;
     match action {
         Rt::DeleteSession(id) => sdk::ConfirmAction::DeleteSession(id),
         Rt::ClearAllHistory => sdk::ConfirmAction::ClearAllHistory,

@@ -216,7 +216,7 @@ pub async fn compact_messages_with_llm(
     messages: &[Message],
     system_prompt: &str,
     context_size: usize,
-    client: Option<&crate::api::provider::LlmClient>,
+    client: Option<&provider::api::LlmClient>,
 ) -> (Vec<Message>, bool) {
     if !needs_compaction(messages, system_prompt, context_size) {
         return (messages.to_vec(), false);
@@ -249,12 +249,10 @@ pub async fn compact_messages_with_llm(
 
     // 尝试 LLM 摘要，失败则回退到本地
     let summary = match client {
-        Some(client) => {
-            match llm_compact(client, early_messages).await {
-                Ok(text) => text,
-                Err(_) => build_summary_text(early_messages),
-            }
-        }
+        Some(client) => match llm_compact(client, early_messages).await {
+            Ok(text) => text,
+            Err(_) => build_summary_text(early_messages),
+        },
         None => build_summary_text(early_messages),
     };
 
@@ -284,7 +282,7 @@ pub async fn compact_messages_with_llm(
 
 /// 调用 LLM 生成语义化压缩摘要
 async fn llm_compact(
-    client: &crate::api::provider::LlmClient,
+    client: &provider::api::LlmClient,
     early_messages: &[Message],
 ) -> Result<String, String> {
     let mut request = build_compact_request(early_messages);
@@ -298,13 +296,11 @@ async fn llm_compact(
     let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let collected_clone = collected.clone();
     {
-        let mut handler = crate::api::provider::CallbackHandler::new(Box::new(
-            move |text: &str| {
-                if let Ok(mut guard) = collected_clone.lock() {
-                    guard.push_str(text);
-                }
-            },
-        ));
+        let mut handler = provider::api::CallbackHandler::new(Box::new(move |text: &str| {
+            if let Ok(mut guard) = collected_clone.lock() {
+                guard.push_str(text);
+            }
+        }));
 
         client
             .stream_message(&[], &request, &[], &mut handler, &cancel)
