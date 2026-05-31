@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-share = { path = "../shared" }
-project = { path = "../features/project" }
-storage = { path = "../features/storage" }
+share = { path = "../../shared" }
+project = { path = "../project" }
+storage = { path = "../storage" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

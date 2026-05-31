@@ -11,7 +11,7 @@ import sys
 
 business_allow = {
       # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
-      # Supporting feature crates live under agent/features/* but keep stable package names.
+      # Supporting/capability feature crates live under agent/features/* but keep stable package names.
       "cli": {"composition", "sdk"},
       "composition": {"runtime", "sdk"},
       "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},

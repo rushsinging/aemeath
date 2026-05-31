@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 share = { path = "../shared" }
-provider = { path = "../provider" }
-tools = { path = "../tools" }
+provider = { path = "../features/provider" }
+tools = { path = "../features/tools" }
 project = { path = "../features/project" }
 policy = { path = "../features/policy" }
 prompt = { path = "../features/prompt" }
