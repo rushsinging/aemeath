@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "apps/cli",
     "agent/composition",
-    "agent/runtime",
+    "agent/features/runtime",
     "agent/features/audit",
     "agent/features/hook",
     "agent/features/policy",

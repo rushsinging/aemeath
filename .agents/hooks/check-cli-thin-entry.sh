@@ -20,7 +20,7 @@ for crate in business:
     if pattern.search(text):
         violations.append(f"apps/cli/Cargo.toml must not declare direct path dependency on {crate}")
 
-if 'runtime = { path = "../../agent/runtime" }' in text:
+if 'runtime = { path = "../../agent/runtime" }' in text or 'runtime = { path = "../../agent/features/runtime" }' in text:
     violations.append("apps/cli/Cargo.toml must not declare direct dependency on runtime; use composition")
 
 if 'composition = { path = "../../agent/composition" }' not in text:

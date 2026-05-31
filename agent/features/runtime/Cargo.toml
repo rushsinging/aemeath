@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-share = { path = "../shared" }
-provider = { path = "../features/provider" }
-tools = { path = "../features/tools" }
-project = { path = "../features/project" }
-policy = { path = "../features/policy" }
-prompt = { path = "../features/prompt" }
-storage = { path = "../features/storage" }
-hook = { path = "../features/hook" }
-audit = { path = "../features/audit" }
+share = { path = "../../shared" }
+provider = { path = "../provider" }
+tools = { path = "../tools" }
+project = { path = "../project" }
+policy = { path = "../policy" }
+prompt = { path = "../prompt" }
+storage = { path = "../storage" }
+hook = { path = "../hook" }
+audit = { path = "../audit" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }
@@ -30,5 +30,5 @@ parking_lot = "0.12"
 rand = "0.9"
 regex = "1"
 thiserror = { workspace = true }
-sdk = { path = "../../packages/sdk" }
-logging = { path = "../../packages/global/logging" }
+sdk = { path = "../../../packages/sdk" }
+logging = { path = "../../../packages/global/logging" }
