@@ -46,6 +46,8 @@ def crate_for(path: Path) -> str | None:
     if len(parts) >= 3 and parts[0] == "agent":
         if parts[1] == "shared":
             return "share"
+        if parts[1] == "features" and len(parts) >= 4:
+            return parts[2]
         return parts[1]
     return None
 
