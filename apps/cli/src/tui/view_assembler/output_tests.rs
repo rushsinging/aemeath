@@ -80,7 +80,10 @@ fn test_output_assembler_embedded_result_carries_output_for_preview() {
         panic!("expected tool call");
     };
 
-    assert_eq!(diagnostic_results, 0, "结果不应泄漏为 root DiagnosticNotice");
+    assert_eq!(
+        diagnostic_results, 0,
+        "结果不应泄漏为 root DiagnosticNotice"
+    );
     assert_eq!(tool.result_summary.as_deref(), Some(full_output));
     assert_eq!(tool_node.children.len(), 1);
     let OutputBlockKind::ToolResult(result) = &tool_node.children[0].kind else {
@@ -314,7 +317,14 @@ fn add_tool_after_thinking(
         text: "thinking".to_string(),
     });
     conversation.apply(ConversationIntent::CompleteTextBlock);
-    add_completed_tool(conversation, "tool-1", name, "search docs", output, is_error);
+    add_completed_tool(
+        conversation,
+        "tool-1",
+        name,
+        "search docs",
+        output,
+        is_error,
+    );
 }
 
 fn add_completed_tool(

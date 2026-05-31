@@ -185,9 +185,7 @@ impl App {
                 } else {
                     self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
-                        self.append_system_notice(
-                            "[运行 /reflect apply 应用建议]",
-                        );
+                        self.append_system_notice("[运行 /reflect apply 应用建议]");
                     }
                 }
                 self.spinner_stop();
@@ -239,11 +237,7 @@ impl App {
                 } else {
                     let cursor = default
                         .as_ref()
-                        .and_then(|d| {
-                            all_options
-                                .iter()
-                                .position(|o| o.title == *d)
-                        })
+                        .and_then(|d| all_options.iter().position(|o| o.title == *d))
                         .unwrap_or(0);
                     self.show_ask_user_block(
                         question,

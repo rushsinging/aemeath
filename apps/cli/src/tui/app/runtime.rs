@@ -1,4 +1,7 @@
 use super::App;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::workspace::WorktreeKind;
+use std::path::PathBuf;
 
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
@@ -60,7 +63,33 @@ impl App {
         };
         self.model
             .runtime
-            .apply(crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(lines));
+            .apply(RuntimeIntent::UpdateTaskLines(lines));
+    }
+
+    pub(crate) async fn update_project_context(&mut self) {
+        let project = match &self.agent_client {
+            None => return,
+            Some(agent_client) => agent_client.project(),
+        };
+        let path_base = empty_to_none(project.path_base);
+        let working_root = empty_to_none(project.working_root);
+        let kind = match working_root.as_deref() {
+            Some(root) if PathBuf::from(root) != self.session.cwd => WorktreeKind::LinkedWorktree,
+            Some(_) => WorktreeKind::MainCheckout,
+            None => WorktreeKind::Unknown,
+        };
+        self.model.runtime.apply(RuntimeIntent::UpdateWorkspace {
+            cwd: project.cwd,
+            worktree: None,
+        });
+        self.model
+            .runtime
+            .apply(RuntimeIntent::WorkspaceSnapshotReceived {
+                path_base,
+                working_root,
+                branch: project.git_branch,
+                kind,
+            });
     }
 
     /// Refresh the cached session list for /resume autocomplete
@@ -91,6 +120,14 @@ impl App {
                 self.session.cache_models(models);
             }
         }
+    }
+}
+
+fn empty_to_none(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 

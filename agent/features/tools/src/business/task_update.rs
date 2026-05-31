@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
+use share::tool::{Tool, ToolChangeSet, ToolContext, ToolResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
@@ -48,7 +48,7 @@ impl Tool for TaskUpdateTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return ToolResult::error("missing required parameter: taskId"),
@@ -156,8 +156,10 @@ impl Tool for TaskUpdateTool {
 
         match result {
             Some(task) => {
+                if let Some(notifier) = &ctx.change_notifier {
+                    notifier.notify(ToolChangeSet::Tasks);
+                }
                 let display_id = self.store.format_display_id(&task.id).await;
-
                 let progress_str = if task.progress > 0 {
                     format!(
                         " ({}%{})",

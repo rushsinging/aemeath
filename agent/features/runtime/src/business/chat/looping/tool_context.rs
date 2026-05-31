@@ -18,6 +18,7 @@ pub(crate) struct ToolContextParts {
     pub(crate) agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) session_id: String,
     pub(crate) context_stack: Arc<Mutex<Vec<share::tool::WorkingContext>>>,
+    pub(crate) change_notifier: Option<share::tool::ToolChangeNotifier>,
 }
 
 pub(crate) fn build_tool_context(parts: ToolContextParts) -> ToolContext {
@@ -38,5 +39,6 @@ pub(crate) fn build_tool_context(parts: ToolContextParts) -> ToolContext {
         progress_tx: None,
         parent_session_id: Some(parts.session_id),
         context_stack: parts.context_stack,
+        change_notifier: parts.change_notifier,
     }
 }

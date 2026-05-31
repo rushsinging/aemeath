@@ -8,8 +8,8 @@ use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
 use super::STREAM_IDLE_TIMEOUT;
-use crate::core::provider::StreamHandler;
 use crate::business::types::StreamResponse;
+use crate::core::provider::StreamHandler;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///

@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 /// 保存进入 worktree 前的工作上下文快照
@@ -161,6 +162,37 @@ impl SessionReminders {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolChangeSet {
+    Tasks,
+    Project,
+}
+
+#[derive(Clone)]
+pub struct ToolChangeNotifier {
+    tx: watch::Sender<Vec<ToolChangeSet>>,
+}
+
+impl ToolChangeNotifier {
+    pub fn new(tx: watch::Sender<Vec<ToolChangeSet>>) -> Self {
+        Self { tx }
+    }
+
+    pub fn notify(&self, change: ToolChangeSet) {
+        let mut changes = self.tx.borrow().clone();
+        if !changes.contains(&change) {
+            changes.push(change);
+        }
+        let _ = self.tx.send(changes);
+    }
+
+    pub fn take_changes(&self) -> Vec<ToolChangeSet> {
+        let changes = self.tx.borrow().clone();
+        let _ = self.tx.send(Vec::new());
+        changes
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolContext {
     /// Initial workspace root, kept for compatibility with existing callers.
@@ -195,8 +227,9 @@ pub struct ToolContext {
     pub parent_session_id: Option<String>,
     /// 上下文栈：EnterWorktree push，ExitWorktree pop
     pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
+    /// Optional change notifier for runtime-owned snapshots affected by tools.
+    pub change_notifier: Option<ToolChangeNotifier>,
 }
-
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;

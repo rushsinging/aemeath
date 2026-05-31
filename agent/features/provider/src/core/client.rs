@@ -4,9 +4,9 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 
 use crate::api::ApiDriverKind;
-use crate::core::provider::{CallbackHandler, LlmProvider, StreamHandler};
 use crate::business::providers::openai_compatible::ReasoningConfig;
 use crate::business::types::{StreamResponse, SystemBlock};
+use crate::core::provider::{CallbackHandler, LlmProvider, StreamHandler};
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -149,13 +149,15 @@ impl LlmClient {
 
     pub fn with_provider(options: LlmProviderOptions) -> Self {
         let provider_impl: Arc<dyn LlmProvider> = match options.api {
-            ApiDriverKind::Anthropic => Arc::new(crate::business::providers::AnthropicProvider::new(
-                options.api_key,
-                options.base_url,
-                options.model,
-                options.max_tokens,
-                options.thinking_max_tokens,
-            )),
+            ApiDriverKind::Anthropic => {
+                Arc::new(crate::business::providers::AnthropicProvider::new(
+                    options.api_key,
+                    options.base_url,
+                    options.model,
+                    options.max_tokens,
+                    options.thinking_max_tokens,
+                ))
+            }
             ApiDriverKind::Ollama => Arc::new(crate::business::providers::OllamaProvider::new(
                 options.api_key,
                 options.base_url,

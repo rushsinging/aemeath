@@ -8,9 +8,9 @@ pub mod ids;
 pub mod intent;
 pub mod model;
 #[cfg(test)]
-mod model_tests;
-#[cfg(test)]
 mod model_extra_tests;
+#[cfg(test)]
+mod model_tests;
 pub mod notice;
 pub mod queued_submission;
 pub mod stream;

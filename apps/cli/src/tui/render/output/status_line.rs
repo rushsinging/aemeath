@@ -21,11 +21,8 @@ impl OutputArea {
             let base_idx = self.document.total_lines();
             for (i, text) in queued_lines.iter().enumerate() {
                 let char_count = text.chars().count();
-                self.screen_line_map.push((
-                    base_idx + i,
-                    CharIdx::ZERO,
-                    CharIdx::new(char_count),
-                ));
+                self.screen_line_map
+                    .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
                 let screen_idx = screen_start + i;
                 let style = Style::default().fg(theme::TEXT_DIM);
                 let line = if self.has_real_selection() {

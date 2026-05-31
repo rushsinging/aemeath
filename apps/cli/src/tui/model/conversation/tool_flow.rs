@@ -57,7 +57,10 @@ impl ConversationModel {
             self.chats.len(),
         );
         if let Some(status) = self.complete_active_tool(&id, output.clone(), is_error) {
-            log::warn!("[orphan-diag] observe_tool_result EMBEDDED id={} status={status:?}", id);
+            log::warn!(
+                "[orphan-diag] observe_tool_result EMBEDDED id={} status={status:?}",
+                id
+            );
             self.insert_tool_result_after_tool_call(
                 ToolCallId::new(id.clone()),
                 output,
@@ -96,11 +99,17 @@ impl ConversationModel {
         is_error: bool,
     ) -> Option<ToolCallStatus> {
         let Some(chat) = self.active_chat_mut() else {
-            log::warn!("[orphan-diag] complete_active_tool FAIL: no active_chat id={}", id);
+            log::warn!(
+                "[orphan-diag] complete_active_tool FAIL: no active_chat id={}",
+                id
+            );
             return None;
         };
         let Some(turn) = chat.active_turn_mut() else {
-            log::warn!("[orphan-diag] complete_active_tool FAIL: no active_turn id={}", id);
+            log::warn!(
+                "[orphan-diag] complete_active_tool FAIL: no active_turn id={}",
+                id
+            );
             return None;
         };
         log::warn!(
@@ -111,7 +120,10 @@ impl ConversationModel {
         );
         let result = turn.complete_tool(id, output, is_error);
         if result.is_none() {
-            log::warn!("[orphan-diag] complete_active_tool NOT_FOUND: id={} not in tool_calls", id);
+            log::warn!(
+                "[orphan-diag] complete_active_tool NOT_FOUND: id={} not in tool_calls",
+                id
+            );
         }
         result
     }

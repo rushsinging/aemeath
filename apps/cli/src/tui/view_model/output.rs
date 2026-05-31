@@ -46,10 +46,10 @@ pub enum OutputBlockKind {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AskUserBlockView {
     pub key: String,
-        pub question: String,
-        pub options: Vec<sdk::OptionItem>,
-        /// LLM 选项数量（内建项从该索引开始，不显示勾选框）。
-        pub llm_option_count: usize,
+    pub question: String,
+    pub options: Vec<sdk::OptionItem>,
+    /// LLM 选项数量（内建项从该索引开始，不显示勾选框）。
+    pub llm_option_count: usize,
     pub multi_select: bool,
     /// 当前光标所在选项索引（高亮行）。
     pub cursor: usize,

@@ -83,9 +83,7 @@ impl ConversationModel {
             ConversationIntent::SetAskUserChatInput { active } => {
                 self.set_ask_user_chat_input(active)
             }
-            ConversationIntent::AppendAskUserChatChar { ch } => {
-                self.append_ask_user_chat_char(ch)
-            }
+            ConversationIntent::AppendAskUserChatChar { ch } => self.append_ask_user_chat_char(ch),
             ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
             ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
         }
@@ -128,8 +126,10 @@ impl ConversationModel {
     }
 
     fn observe_tool_call_start(&mut self, name: String, index: usize) -> Vec<ConversationChange> {
-        log::warn!("[orphan-diag] observe_tool_call_start ENTRY name={name} index={index} chats={}",
-            self.chats.len());
+        log::warn!(
+            "[orphan-diag] observe_tool_call_start ENTRY name={name} index={index} chats={}",
+            self.chats.len()
+        );
         let Some(chat_id) = self.active_chat_id.clone() else {
             log::warn!("[orphan-diag] observe_tool_call_start FAIL: no active_chat_id name={name} index={index}");
             return Vec::new();
@@ -168,15 +168,13 @@ impl ConversationModel {
         };
         let tool_call_id = ToolCallId::new(id.clone());
         let used_fallback: bool;
-        let args_preview = match turn.bind_tool(
-            tool_call_id.clone(),
-            &name,
-            index,
-            summary.clone(),
-        ) {
+        let args_preview = match turn.bind_tool(tool_call_id.clone(), &name, index, summary.clone())
+        {
             Some(preview) => {
                 used_fallback = false;
-                log::warn!("[orphan-diag] observe_tool_call BIND_OK id={id} name={name} index={index}");
+                log::warn!(
+                    "[orphan-diag] observe_tool_call BIND_OK id={id} name={name} index={index}"
+                );
                 preview
             }
             None => {

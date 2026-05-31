@@ -33,6 +33,7 @@ pub(super) async fn chat_impl(
         tx,
         current_messages: me.inner.current_messages.clone(),
         workspace_context: me.inner.workspace_context.clone(),
+        change_tx: me.inner.change_tx.clone(),
     };
     let inner = me.inner.clone();
     tokio::spawn(async move {
@@ -59,6 +60,9 @@ pub(super) async fn chat_impl(
             max_tool_concurrency: inner.max_tool_concurrency,
             max_agent_concurrency: inner.max_agent_concurrency,
             agent_semaphore: inner.context.agent_semaphore.clone(),
+            change_notifier: Some(share::tool::ToolChangeNotifier::new(
+                inner.tool_change_tx.clone(),
+            )),
             hook_runner: inner.context.hook_runner.clone(),
             memory_config: inner.context.memory_config.clone(),
             json_logger: inner.context.json_logger.clone(),

@@ -83,12 +83,27 @@ where
     )
     .await;
 
+    emit_tool_changes(sink, &agent.ctx.change_notifier).await;
+
     ask_user_results
         .into_iter()
         .chain(non_agent_results.into_iter())
         .chain(agent_results.into_iter())
         .chain(denied_results.into_iter())
         .collect()
+}
+
+async fn emit_tool_changes<S>(sink: &S, change_notifier: &Option<share::tool::ToolChangeNotifier>)
+where
+    S: ChatEventSink,
+{
+    let Some(notifier) = change_notifier else {
+        return;
+    };
+    let changes = notifier.take_changes();
+    for change in changes {
+        let _ = sink.send_event(RuntimeStreamEvent::ChangeSet(change)).await;
+    }
 }
 
 async fn deny_tool_calls<S>(

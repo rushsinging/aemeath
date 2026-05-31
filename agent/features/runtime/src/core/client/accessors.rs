@@ -43,6 +43,7 @@ pub struct RuntimeHandle {
     pub(crate) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
     pub(crate) change_rx: watch::Receiver<ChangeSet>,
+    pub(crate) tool_change_tx: watch::Sender<Vec<share::tool::ToolChangeSet>>,
 
     // ─── SDK 业务对象 ───
     /// HookRunner（clone，供 SDK 通知 hook）
@@ -56,7 +57,8 @@ pub struct RuntimeHandle {
 
 impl AgentClientImpl {
     pub fn notify_change(&self, set: ChangeSet) {
-        let _ = self.inner.change_tx.send(set);
+        let previous = *self.inner.change_tx.borrow();
+        let _ = self.inner.change_tx.send(previous | set);
     }
 
     pub fn is_cancelled(&self) -> bool {
