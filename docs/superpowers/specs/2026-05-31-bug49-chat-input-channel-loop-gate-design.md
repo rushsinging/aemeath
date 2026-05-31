@@ -14,15 +14,14 @@ Bug #49 的根因不再视为某一个 hook 或退出分支漏 drain，而是 ru
 
 ### 1. drain 调用散落在具体分支
 
-`process_chat_loop` 当前约有 7 个主循环调用点直接调用 `append_queued_input`（不含 `queue.rs` 内部测试）：
+`process_chat_loop` 当前有 6 个主循环调用点直接调用 `append_queued_input`（不含 `queue.rs` 内部测试；行号以当前实现为准）：
 
-- interrupted 取消前
-- stall break 前
-- EndTurn / 无 tool call 完成前
-- Stop hook 通过后、Done 前
-- tool result sync 后
-- API error finalize 前
-- 其他 finalize/loop 分支中的兜底 drain
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:160`：interrupted 取消前
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:277`：stall break 前
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:297`：EndTurn / 无 tool call 完成前
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:337`：Stop hook 通过后、Done 前（`f26e26d` 的 #49 点修复）
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:365`：tool result sync 后
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs:378`：API error finalize 前
 
 这些补丁修复了部分窗口，但没有形成架构不变量。新增 hook、耗时边界或退出路径时，仍然容易遗漏。
 
@@ -94,7 +93,7 @@ ChatInputEvent
 
 - `UserMessage`：普通文本和图片附件；aemeath 已支持图片输入，事件类型 MUST 保留 `image_paths` 或等价图片载荷。
 - `ControlCommand`：以 `/` 开头的 slash command。
-- `Cancel`：可先映射现有 interrupted/cancel token，不要求一次性替换全部取消路径。
+- `Cancel`：可映射现有 interrupted/cancel token。`ChatInputEvent::Cancel` 与现有 cancel token / interrupted flag 任一触发时，取消处理 MUST 幂等；重复 Cancel 不得导致双重 finalize 或重复清理。
 
 ### 2. PendingInputBuffer
 
@@ -135,7 +134,7 @@ Gate 行为：
 2. 将事件追加到 `PendingInputBuffer`。
 3. 按提交顺序逐条处理 pending 事件。
 4. `Cancel` 具有最高优先级；同一批出现 Cancel 时，不再 append 后续 user message，不再启动续轮。
-5. Abort command（如 `/clear`）优先级高于 reconfigure/user message，返回 `AbortCurrentLoop`。
+5. Abort command（如 `/clear`）优先级高于 reconfigure/user message；命中 abort 后，同批后续事件全部丢弃，返回 `AbortCurrentLoop`。
 6. Reconfigure/side-effect command 通过命令路径执行，不进入 LLM messages。
 7. UserMessage append 到 `messages`，发送 `MessagesSync`。
 8. 若 append 了普通用户消息且未被 Cancel/Abort 覆盖，返回 `ContinueNextTurn`。
@@ -193,8 +192,8 @@ Gate 行为：
 决策语义：
 
 - `Proceed`：继续原流程。
-- `ContinueNextTurn`：当前边界之后若原流程本就会进入 LLM，则可继续；若原流程准备 finish，则必须转为续轮。
 - `AbortCurrentLoop` / `CancelCurrentLoop`：在安全边界终止当前 loop。
+- AfterBlockingBoundaryGate 不直接裁决 finish，也不单独产出 `ContinueNextTurn` 作为控制流跳转；若它提前 append 了 UserMessage，只记录“messages 已更新 / pending_continue”，后续由紧随其后的 BeforeLlmGate 或 BeforeFinishGate 统一决定 Proceed 还是 ContinueNextTurn。
 
 即使某个 AfterBlockingBoundaryGate 漏掉，BeforeLlmGate / BeforeFinishGate 仍作为兜底不变量。
 
@@ -202,11 +201,12 @@ Gate 行为：
 
 同一批 pending input 的处理规则：
 
-1. `Cancel` 优先级最高。只要 gate drain 到 Cancel，当前 loop MUST 取消；Cancel 之后的 user message 不得 append，也不得触发续轮。
-2. Abort command（如 `/clear`）优先级次之。它在 gate 处生效，MUST 不在 tool batch / hook / LLM streaming 中途生效。
+1. `Cancel` 优先级最高。只要 gate drain 到 Cancel，当前 loop MUST 取消；Cancel 之后的 user message 不得 append，也不得触发续轮。Cancel 事件与现有 cancel token / interrupted flag 合流，取消 finalize MUST 幂等。
+2. Abort command（如 `/clear`）优先级次之。它在 gate 处生效，MUST 不在 tool batch / hook / LLM streaming 中途生效。命中 abort 后，同批后续所有事件 MUST 丢弃（含其后的 UserMessage / command），并 SHOULD 向 TUI 发送一条 notice 说明后续排队输入已因 `/clear` 被丢弃。
 3. Reconfigure command、side-effect command 与 UserMessage 按提交顺序逐条处理。
 4. 示例 `[text1, /save, text2]` MUST 处理为：append `text1`，执行 `/save`，append `text2`。
 5. 示例 `[/model x, text]` 在 BeforeLlmGate 中 MUST 先更新模型选择，再让紧接着的本次 LLM 请求使用新模型；若发生在 LLM streaming 中，则在最近安全边界生效。
+6. 示例 `[text1, /clear, text2]` 在 gate 处命中 `/clear` 后 MUST 中断当前 loop 并清空 `/clear` 覆盖的状态；`text2` 及后续事件丢弃。若 `text1` 已按提交顺序 append，`/clear` 的清空语义 MUST 覆盖它，最终不得把 `text1` 或 `text2` 发给后续 LLM。
 
 ## Control Command 语义
 
@@ -295,20 +295,32 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 - `/clear` 等 abort command 不会撕裂 tool_use/tool_result 配对，因为只在安全边界生效。
 - 用户输入会在最近的安全边界生效。
 
+## 与 #72 现行 queue drain 通道的关系
+
+#72 已引入当前真实通道：`sdk::ChatRequest.queue_drain` + `sdk::QueueDrainPort` + runtime `RuntimeQueueDrainPort` + CLI `TuiQueueDrainPort`。这是一条 pull 模型通道：runtime 在若干 `append_queued_input` 调用点主动拉取 TUI queue。
+
+本设计的新 input event channel 是 push 模型通道。实施时 MUST 明确二者关系：
+
+1. 优先以 `ChatInputEvent` push channel 作为长期目标；`RuntimeQueueDrainPort` / `TuiQueueDrainPort` 作为迁移期兼容 adapter。
+2. 迁移期 gate 可同时从 push channel 与 #72 pull port 收集输入，但 MUST 为每批输入建立消费确认或 drain source 标记，避免同一 TUI queue 先被 push、后又被 pull 双消费。
+3. 一旦 TUI 忙碌期 Enter 稳定发送 `ChatInputEvent`，对应路径 SHOULD 停止写入会被 `TuiQueueDrainPort` 再次 drain 的同一队列；若仍保留 UI echo，echo 必须与可消费 queue 分离。
+4. #72 的 `RuntimeQueueDrainPort` 测试应保留到迁移完成，作为兼容 adapter 回归；新测试必须覆盖 push+pull 并存不双消费。
+
 ## 与现有 `append_queued_input` 的关系
 
 `append_queued_input` 不应继续作为散落补丁存在。迁移方向：
 
 1. 将其能力并入 Loop Gate 的 UserMessage append 分支。
-2. 旧 `QueueDrainPort` 可临时作为 input channel 的兼容 adapter。
-3. 任一旧 `append_queued_input` 调用点的移除 MUST 与覆盖同一边界的 gate 落地在同一改动内，避免“新 gate + 旧 drain”对同一批输入双消费。
-4. 迁移完成后，`process_chat_loop` 中不再直接调用 `append_queued_input`，而是调用命名清晰的 gate 函数。
+2. 旧 `QueueDrainPort` 可临时作为 input channel 的兼容 adapter，具体即 #72 的 `RuntimeQueueDrainPort` / `TuiQueueDrainPort`。
+3. `loop_runner.rs:337` 的 Stop-hook 后二次 drain 是 `f26e26d` 为 #49 添加的点修复；Loop Gate 落地时 MUST 删除这段临时补丁，并由 BeforeFinishGate 覆盖 Stop hook / StopFailure hook 后窗口。
+4. 任一旧 `append_queued_input` 调用点的移除 MUST 与覆盖同一边界的 gate 落地在同一改动内，避免“新 gate + 旧 drain”对同一批输入双消费。
+5. 迁移完成后，`process_chat_loop` 中不再直接调用 `append_queued_input`，而是调用命名清晰的 gate 函数。
 
 ## 错误处理
 
 - input channel 关闭：视为无新输入，Loop Gate 返回 `Proceed`。
 - control command 执行失败：发送错误事件/notice，但不把 command 文本发给 LLM。
-- user message append 后 `MessagesSync` 失败：记录日志；若 sink 无法发送，chat loop 可继续按现有错误策略处理。
+- user message append 后 `MessagesSync` 失败：记录日志；若 sink 无法发送，chat loop 可继续按现有错误策略处理；同时 MUST 给 TUI 一个 echo 清除或降级信号（例如 `QueuedInputAccepted` / `QueuedInputFailed` / system notice），避免 queued submission echo 因等不到 `MessagesSync` 永久残留。
 - `/clear` 执行中失败：必须避免半清空；至少保证当前 loop 不继续把已清空前的旧 messages 发给 LLM。
 
 ## 日志与观测
@@ -333,12 +345,13 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 2. PostToolBatch hook 期间收到 `UserMessage`，下一次 LLM 前消息已 append。
 3. auto compact 或 compact hook 期间收到 `UserMessage`，BeforeLlmGate 消费并续轮。
 4. API error 退出前收到 `UserMessage`，优先续轮，不直接 finalize。
-5. interrupted/cancel 退出前收到 `Cancel`，Cancel 优先级高于 UserMessage，不续轮。
+5. interrupted/cancel 退出前收到 `Cancel`，Cancel 优先级高于 UserMessage，不续轮，且与现有 cancel token / interrupted flag 幂等合流。
 6. queue 中只有 `/clear`，不 append 到 LLM messages，并返回 `AbortCurrentLoop`。
 7. queue 中 `[text1, /save, text2]`，按提交顺序 append/执行/append，并续轮。
-8. queue 中 `[/model xxx, text]` 在 BeforeLlmGate 中处理时，配置变更影响紧接着的 LLM 请求，普通文本进入同一次请求前的 messages。
-9. input channel 关闭时 gate 返回 `Proceed`。
-10. 旧 `QueueDrainPort` adapter 与新 input channel 不会双消费同一批输入。
+8. queue 中 `[text1, /clear, text2]`，`/clear` 在安全边界 abort，后续 `text2` 丢弃，最终不向 LLM 发送 `text1`/`text2`。
+9. queue 中 `[/model xxx, text]` 在 BeforeLlmGate 中处理时，配置变更影响紧接着的 LLM 请求，普通文本进入同一次请求前的 messages。
+10. input channel 关闭时 gate 返回 `Proceed`。
+11. 旧 `QueueDrainPort` adapter 与新 input channel 不会双消费同一批输入。
 
 ### TUI/adapter 测试
 
@@ -346,8 +359,9 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 2. 忙碌期间 slash Enter 只在 update 层产出发送 `ChatInputEvent::ControlCommand` 的 Effect/Cmd，不直接执行 send。
 3. effect/session 层实际执行 channel send。
 4. runtime `MessagesSync` 后 queued submission echo 被清除。
-5. control command 执行完成后 queued command echo 被清除。
-6. input channel 发送失败时，本地 queue 不丢失。
+5. `MessagesSync` sink 失败时，TUI 仍能收到 echo 清除或降级信号，不留下幽灵 queued bubble。
+6. control command 执行完成后 queued command echo 被清除。
+7. input channel 发送失败时，本地 queue 不丢失。
 
 ### 回归验证
 
@@ -384,12 +398,14 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 
 1. 忙碌期间普通输入在最近安全边界进入当前 Chat 的下一 Turn。
 2. 忙碌期间 slash command 不会出现在发送给 LLM 的 messages 中。
-3. `/clear` 忙碌期间可在安全边界中断当前 loop，并清空相关 UI/runtime 状态。
+3. `/clear` 忙碌期间可在安全边界中断当前 loop，并清空相关 UI/runtime 状态；同批 `/clear` 后续输入被丢弃并有用户可见反馈。
 4. `PostToolBatch`、Stop hook、compact、API error、cancel/stall 等路径不再依赖各自手写 drain。
-5. Done 前 pending input 为空；若不为空，必须有日志说明原因和处理决策。
-6. `ChatInputEvent` 与现有 `ChatInput` 不冲突。
-7. update 层保持纯函数式边界，channel send 只在 effect 层执行。
-8. 相关 runtime 与 CLI 测试通过。
+5. `f26e26d` 的 Stop-hook 后二次 drain 临时补丁已被 BeforeFinishGate 取代，不与新 gate 并存。
+6. Done 前 pending input 为空；若不为空，必须有日志说明原因和处理决策。
+7. `ChatInputEvent` 与现有 `ChatInput` 不冲突。
+8. update 层保持纯函数式边界，channel send 只在 effect 层执行。
+9. push channel 与 #72 pull queue adapter 不双消费。
+10. 相关 runtime 与 CLI 测试通过。
 
 ## 追踪归属
 
@@ -398,7 +414,7 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 ## 关联
 
 - Bug #49：last turn 用户输入留在 input queue。
-- Bug #55：忙碌状态单一真相与 TUI/runtime 边界。
+- Feature #55：TUI 架构收口 — render / adapter / app 三层落地 + 清理 legacy core。
 - Bug #72：SDK 解耦后 runtime queue drain 端口曾为空实现。
 - Feature #30：agent loop finalize 统一化。
 - Feature #47：runtime 作为核心编排者，TUI 通过 SDK 契约接入。
