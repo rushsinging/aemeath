@@ -25,6 +25,10 @@ DOMAIN_CRATES = {
     "audit",
 }
 INTERNAL_SEGMENTS = {"business", "core", "utils"}
+API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
+# Task 7 aligns supporting features only. Primary feature facades keep the legacy
+# internal re-exports until their dedicated DDD alignment tasks migrate them.
+LEGACY_API_FACADE_EXEMPT_CRATES = {"provider", "runtime", "tools"}
 PUBLIC_ROOT_ALLOW = {
     "provider": {"ApiDriverKind", "LlmError"},
 }
@@ -156,6 +160,21 @@ def run_sanity() -> None:
 
 run_sanity()
 violations = []
+for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
+    current = crate_for(api_path.relative_to(root))
+    if current in LEGACY_API_FACADE_EXEMPT_CRATES:
+        continue
+    rel = api_path.relative_to(root)
+    for lineno, line in enumerate(api_path.read_text().splitlines(), 1):
+        match = re.search(r"crate::([A-Za-z_][A-Za-z0-9_]*)", line)
+        if not match:
+            continue
+        segment = match.group(1)
+        if segment not in API_FACADE_ALLOWED_SEGMENTS:
+            violations.append(
+                f"{rel}:{lineno}: feature api.rs may only re-export crate::contract or crate::gateway: {line.strip()}"
+            )
+
 for base in [root / "agent", root / "apps", root / "packages"]:
     if not base.exists():
         continue
