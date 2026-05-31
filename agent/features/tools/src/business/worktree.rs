@@ -4,11 +4,11 @@
 //! while maintaining a context stack for nested worktree navigation.
 
 use crate::api::WorktreeContextExt;
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use project::api as worktree_ops;
 use serde::Deserialize;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory

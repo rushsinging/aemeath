@@ -1,10 +1,10 @@
 //! Read a specific MCP resource by URI
 
+use crate::api::{Tool, ToolContext, ToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

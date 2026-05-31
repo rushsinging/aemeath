@@ -1,6 +1,6 @@
+use crate::contract::Tool;
 use parking_lot::RwLock;
 use serde_json::Value;
-use share::tool::Tool;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -69,8 +69,8 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract::{ToolContext, ToolResult};
     use async_trait::async_trait;
-    use share::tool::{ToolContext, ToolResult};
 
     struct DummyTool {
         name: String,

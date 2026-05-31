@@ -5,9 +5,9 @@ mod schema;
 #[cfg(test)]
 mod tests;
 
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 
 pub struct MemoryTool;
 

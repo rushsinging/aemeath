@@ -1,6 +1,6 @@
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 
 /// BriefTool generates a brief summary of the work done in the current session.
 pub struct BriefTool;

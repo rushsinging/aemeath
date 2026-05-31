@@ -3,7 +3,10 @@
 //! This module exposes tool-domain DTOs and shared-kernel tool types without
 //! exposing tool execution internals.
 
-pub use share::tool::{AgentToolCallProgress, ImageData, Tool, ToolContext, ToolResult};
+pub mod tool;
+
+pub use share::tool::{AgentToolCallProgress, ImageData, ToolContext, ToolResult};
+pub use tool::Tool;
 
 use project::api::{self as project_api, WorktreeWorkingContext};
 use share::session_types::WorkspaceContext;

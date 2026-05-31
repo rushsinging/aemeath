@@ -1,7 +1,7 @@
-use share::tool::ToolContext;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
+use tools::api::ToolContext;
 
 pub(crate) struct ToolContextParts {
     pub(crate) cwd: PathBuf,

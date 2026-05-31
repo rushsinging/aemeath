@@ -1,7 +1,7 @@
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 
 pub struct WebSearchTool;
 

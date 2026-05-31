@@ -1,8 +1,8 @@
 mod safety;
 
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
-use share::tool::{Tool, ToolContext, ToolResult};
 
 use project::api::{current_path, set_working_directory};
 pub use safety::is_readonly_command;
@@ -212,8 +212,8 @@ fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::Tool;
     use serde_json::json;
-    use share::tool::Tool;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;

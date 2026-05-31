@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -195,26 +194,4 @@ pub struct ToolContext {
     pub parent_session_id: Option<String>,
     /// 上下文栈：EnterWorktree push，ExitWorktree pop
     pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
-}
-
-#[async_trait]
-pub trait Tool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn input_schema(&self) -> Value;
-
-    fn is_read_only(&self) -> bool {
-        false
-    }
-
-    fn is_concurrency_safe(&self) -> bool {
-        true
-    }
-
-    /// Timeout for this tool in seconds (default 120s, override for long-running tools)
-    fn timeout_secs(&self) -> u64 {
-        120
-    }
-
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult;
 }

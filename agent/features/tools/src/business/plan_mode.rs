@@ -3,9 +3,9 @@
 //! Plan mode allows the agent to create a detailed plan before executing actions.
 //! In plan mode, tool calls are only simulated and not actually executed.
 
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use share::tool::{Tool, ToolContext, ToolResult};
 
 /// Tool to enter plan mode
 pub struct EnterPlanModeTool;

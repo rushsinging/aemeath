@@ -1,6 +1,6 @@
 use share::message::{ContentBlock, Message};
-use share::tool::{ImageData, Tool, ToolContext, ToolResult};
-use tools::api::ToolRegistry;
+use share::tool::{ImageData, ToolContext, ToolResult};
+use tools::api::{Tool, ToolRegistry};
 
 /// (tool_use_id, output_text, is_error, images)
 pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);

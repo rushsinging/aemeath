@@ -9,9 +9,9 @@ fn safe_slice(s: &str, max_bytes: usize) -> &str {
     }
     &s[..end]
 }
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 use tokio::process::Command;
 
 pub struct LspTool;

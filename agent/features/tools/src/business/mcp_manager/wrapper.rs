@@ -1,8 +1,8 @@
+use crate::api::{Tool, ToolContext, ToolResult};
 use crate::business::mcp::McpClient;
 use crate::business::mcp_manager::McpConnectionManager;
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

@@ -1,7 +1,7 @@
+use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::skill_ops::Skill;
-use share::tool::{Tool, ToolContext, ToolResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
