@@ -14,6 +14,33 @@
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 60 | Auto-compact LLM 语义化压缩 | 中 | 实现中 | 未确认 | 将 auto-compact 的本地文本摘要（build_summary_text：每消息取前200字+工具名）替换为 LLM 调用（build_compact_request + COMPACT_PROMPT），生成结构化摘要（目标/进度/关键决策/相关文件/当前状态/下一步）。失败时回退到本地摘要。涉及：summary.rs 新增 compact_messages_with_llm（async + Arc<LlmClient>），looping/compact.rs 传参，trait_command.rs 走 LLM 路径 |
 | 61 | 架构债务收口（047 DDD 软约束落实） | 中 | 待确认 | 未确认 | 047 DDD spec 的硬约束与软约束债务已完成收口：D1 `runtime::api` 去整体转发、D2 share 瘦身回归最小共享内核、D3 supporting domain Public API 收窄、D4 COLA 内部分层均已落地；后续遗留 1-6 项也已结清并补 guard。原 D5 audit / D6 policy 属新功能而非债务收口，已拆出至 #62。详见 [spec](specs/047-ddd-redesign.md) 与下方详情段。 |
+| 66 | Task/project window 改为 ChangeSet 驱动刷新 | 中 | 实现中 | 未确认 | 当前 TUI 每帧轮询 `AgentClient::task_status()` 刷新 task list window，且 status bar 的 worktree_kind/branch 只在 init 设置，EnterWorktree/ExitWorktree 后不会刷新。目标：Runtime 在 TaskStore 变更路径发出 `ChangeSet::TASKS`，在 project/worktree 上下文变化路径发出 `ChangeSet::PROJECT`；TUI 监听 changes 后按需刷新 `RuntimeModel.task_status.lines` 与 workspace/status bar；`/clear` 保留本地立即清空以保证同步反馈。 |
+
+### #66 Task/project window 改为 ChangeSet 驱动刷新
+
+**状态**：实现中
+
+**背景**：task list window 当前由 TUI run loop 每帧调用 `update_task_status()` 轮询 Runtime，Runtime 再从 `TaskStore` 读取当前 batch 并格式化为 `TaskStatusView.lines`。这种方式能工作，但任务未变化时仍重复读 store，且 SDK 中已有的 `ChangeSet::TASKS` 变更通道没有发挥作用。同时 status bar 的 `worktree_kind` 和 `branch` 只在 init 阶段从 workspace snapshot 设置一次，EnterWorktree/ExitWorktree 之后没有事件驱动刷新，导致状态栏继续显示初始 checkout/branch。
+
+**目标**：
+1. Runtime 中所有会影响 task list window 的 TaskStore 写路径，在写入后发出 `ChangeSet::TASKS`。
+2. Runtime 中所有会影响 workspace/status bar 的 project/worktree 上下文变化路径，在写入后发出 `ChangeSet::PROJECT`。
+3. TUI run loop 监听 `AgentClient::changes()`，仅在收到 `TASKS` 变更时调用 `update_task_status()`，收到 `PROJECT` 变更时刷新 project snapshot 并同步 status bar。
+4. 保留启动首帧/必要兜底刷新，避免 TUI 初始状态缺失。
+5. `/clear` 继续同时清 Runtime TaskStore 与本地 `RuntimeModel.task_status.lines`，保证用户立即看到窗口清空；随后 `TASKS` change 再同步一次空快照。
+
+**明确不做**：
+1. 不让 `storage::TaskStore` 直接依赖 `sdk::ChangeSet`，避免 storage 反向依赖 runtime/sdk。
+2. 不重做 task list window 渲染样式和窗口布局。
+3. 不引入复杂缓存；本轮只把刷新触发从每帧 polling 改为 change-driven。
+
+**验收标准**：
+1. TaskCreate/TaskUpdate/TaskStop/TaskListComplete/clear/restore 等影响当前 task 状态的路径会触发 `ChangeSet::TASKS`。
+2. EnterWorktree/ExitWorktree 和 chat runtime 的 workspace context 变化路径会触发 `ChangeSet::PROJECT`。
+3. TUI 不再每帧无条件调用 `update_task_status()`；收到 `TASKS` 后刷新 `RuntimeModel.task_status.lines`。
+4. TUI 收到 `PROJECT` 后刷新 `RuntimeModel.workspace`，并立即同步 status bar 的 `worktree_kind`/`branch`。
+5. `/clear` 后 task store 与 task list window 仍同时清空。
+6. 单元测试或集成测试覆盖 Runtime 发 TASKS/PROJECT、TUI 接收 TASKS/PROJECT 后更新对应 model/widget、无 TASKS 时不重复拉取。
 
 ### #61 架构债务收口（047 DDD 软约束落实）
 

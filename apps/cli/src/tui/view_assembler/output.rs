@@ -55,19 +55,19 @@ impl OutputViewAssembler {
                             leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
                         // 工具结果升为子块：取 result_summary 同源文本，附加为 depth-1 子节点。
                         if let Some(result_text) = tool.result_summary.clone() {
-                              let result_id = format!("{}-result", id.as_ref());
-                              let child = leaf(
-                                  result_id.clone(),
-                                  OutputBlockKind::ToolResult(ToolResultBlockView {
-                                      key: result_id,
-                                      tool_title: tool.title.clone(),
-                                      summary: tool.summary.clone(),
-                                      result_text,
-                                      style: tool.style,
-                                  }),
-                              );
-                              push_child_checked(&mut parent, child, 1);
-                          }
+                            let result_id = format!("{}-result", id.as_ref());
+                            let child = leaf(
+                                result_id.clone(),
+                                OutputBlockKind::ToolResult(ToolResultBlockView {
+                                    key: result_id,
+                                    tool_title: tool.title.clone(),
+                                    summary: tool.summary.clone(),
+                                    result_text,
+                                    style: tool.style,
+                                }),
+                            );
+                            push_child_checked(&mut parent, child, 1);
+                        }
                         roots.push(parent);
                     }
                 }
@@ -81,11 +81,8 @@ impl OutputViewAssembler {
                         continue;
                     }
                     let tool_name = find_tool_name_by_id(conversation, id);
-                    let text = summarize_non_embedded_result(
-                        tool_name.as_deref(),
-                        output,
-                        *is_error,
-                    );
+                    let text =
+                        summarize_non_embedded_result(tool_name.as_deref(), output, *is_error);
                     let text = if *image_count > 0 {
                         format!("{text}\n[图片: {image_count}]")
                     } else {
@@ -262,11 +259,7 @@ fn find_tool_name_by_id(conversation: &ConversationModel, tool_id: &ToolCallId) 
 ///
 /// **绝不**把完整原始 output 当文本刷出——这是 #87 的泄漏源（旧逻辑在工具名未知时
 /// 截断原始 output 当摘要，导致带行号正文 + "lines omitted" 刷屏）。
-fn summarize_non_embedded_result(
-    tool_name: Option<&str>,
-    output: &str,
-    is_error: bool,
-) -> String {
+fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error: bool) -> String {
     if output.is_empty() {
         return String::new();
     }

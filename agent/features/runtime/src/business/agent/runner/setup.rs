@@ -183,6 +183,7 @@ impl AgentRunner for CliAgentRunner {
             progress_tx: None, // sub-agents don't stream progress (yet)
             parent_session_id: ctx.parent_session_id.clone(),
             context_stack: Arc::new(Mutex::new(Vec::new())),
+            change_notifier: None,
         };
         let agent = Agent {
             registry: &sub_registry,

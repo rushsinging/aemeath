@@ -99,8 +99,7 @@ mod tests {
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 
     fn bound_ids(turn: &ChatTurn) -> Vec<String> {
-        turn
-            .tool_calls
+        turn.tool_calls
             .iter()
             .filter_map(|call| call.id.as_ref().map(|id| id.as_ref().to_string()))
             .collect()

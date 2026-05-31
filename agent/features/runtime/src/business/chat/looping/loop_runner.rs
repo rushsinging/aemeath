@@ -50,6 +50,7 @@ where
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub change_notifier: Option<share::tool::ToolChangeNotifier>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
     pub json_logger: Option<Arc<std::sync::Mutex<logging::JsonLogger>>>,
@@ -84,6 +85,7 @@ where
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore,
+        change_notifier,
         hook_runner,
         memory_config,
         json_logger,
@@ -133,6 +135,7 @@ where
             agent_semaphore,
             session_id: session_id.clone(),
             context_stack,
+            change_notifier: change_notifier.clone(),
         }),
     };
 
@@ -358,10 +361,10 @@ where
                     .await;
 
                     // Build tool result message for API
-                    messages.push(tool_results_for_api(all_results, &session_id)); // Sync after tool execution
+                    messages.push(tool_results_for_api(all_results, &session_id));
+                    // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
-
                     if append_queued_input(&queue, &sink, &mut messages).await {
                         continue;
                     }
@@ -488,6 +491,7 @@ mod tests {
                 RuntimeStreamEvent::StopFailureHook { .. } => "StopFailureHook".to_string(),
                 RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
                 RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
+                RuntimeStreamEvent::ChangeSet(_) => "ChangeSet".to_string(),
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()
                 }
@@ -602,6 +606,7 @@ mod tests {
             max_agent_concurrency: 1,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: test_hook_runner(),
+            change_notifier: None,
             memory_config: share::config::MemoryConfig::default(),
             json_logger: None,
         })

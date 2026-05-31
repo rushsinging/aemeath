@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
+use share::tool::{Tool, ToolChangeSet, ToolContext, ToolResult};
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -41,7 +41,7 @@ impl Tool for TaskListCreateTool {
         5
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => return ToolResult::error("missing required parameter: subject"),
@@ -52,6 +52,9 @@ impl Tool for TaskListCreateTool {
         };
 
         let batch = self.store.create_list(subject, summary).await;
+        if let Some(notifier) = &ctx.change_notifier {
+            notifier.notify(ToolChangeSet::Tasks);
+        }
         ToolResult::success(format!(
             "Task list #{} created\nSummary: {}",
             batch.id,
@@ -84,6 +87,7 @@ mod tests {
             progress_tx: None,
             parent_session_id: None,
             context_stack: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            change_notifier: None,
         }
     }
 

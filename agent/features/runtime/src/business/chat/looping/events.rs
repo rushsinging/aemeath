@@ -73,6 +73,7 @@ pub enum RuntimeStreamEvent {
         blocked: bool,
         error: Option<String>,
     },
+    ChangeSet(share::tool::ToolChangeSet),
     WorkingDirectoryChanged {
         path_base: String,
         working_root: String,

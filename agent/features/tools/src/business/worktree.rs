@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use project::api as worktree_ops;
 use serde::Deserialize;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
+use share::tool::{Tool, ToolChangeSet, ToolContext, ToolResult};
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory
@@ -63,6 +63,12 @@ fn format_workspace_context_result(
     )
 }
 
+fn notify_project_change(ctx: &ToolContext) {
+    if let Some(notifier) = &ctx.change_notifier {
+        notifier.notify(ToolChangeSet::Project);
+    }
+}
+
 #[async_trait]
 impl Tool for EnterWorktreeTool {
     fn name(&self) -> &'static str {
@@ -116,6 +122,7 @@ impl Tool for EnterWorktreeTool {
             args.branch.clone(),
         ) {
             Ok(_snapshot) => {
+                notify_project_change(ctx);
                 let path_base = project::api::current_path(&ctx.path_base);
                 let working_root = project::api::current_path(&ctx.working_root);
                 let branch = get_current_branch(&working_root);
@@ -176,6 +183,7 @@ impl Tool for ExitWorktreeTool {
             match worktree_ops::enter_worktree(ctx, Some(PathBuf::from(&path)), None) {
                 Ok(_) => {
                     let _ = ctx.context_stack.lock().map(|mut s| s.pop());
+                    notify_project_change(ctx);
                     let path_base = project::api::current_path(&ctx.path_base);
                     let working_root = project::api::current_path(&ctx.working_root);
                     let branch = get_current_branch(&working_root);
@@ -192,6 +200,7 @@ impl Tool for ExitWorktreeTool {
             // 恢复上一上下文
             match worktree_ops::exit_worktree(ctx) {
                 Ok(prev) => {
+                    notify_project_change(ctx);
                     let path_base = project::api::current_path(&ctx.path_base);
                     let working_root = project::api::current_path(&ctx.working_root);
                     let branch = get_current_branch(&working_root);

@@ -165,17 +165,19 @@ impl LlmClientPool {
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
-        Ok(LlmClient::from_config(crate::core::client::LlmConfigOptions {
-            api,
-            api_key,
-            base_url,
-            model: model_entry.id,
-            max_tokens,
-            thinking_max_tokens,
-            reasoning,
-            reasoning_config: None,
-            openai_config,
-        }))
+        Ok(LlmClient::from_config(
+            crate::core::client::LlmConfigOptions {
+                api,
+                api_key,
+                base_url,
+                model: model_entry.id,
+                max_tokens,
+                thinking_max_tokens,
+                reasoning,
+                reasoning_config: None,
+                openai_config,
+            },
+        ))
     }
 
     /// Get the default client.

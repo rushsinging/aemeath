@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
+use share::tool::{Tool, ToolChangeSet, ToolContext, ToolResult};
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -30,9 +30,14 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> ToolResult {
         match self.store.complete_list().await {
-            Some(batch) => ToolResult::success(format!("Task list #{} completed", batch.id)),
+            Some(batch) => {
+                if let Some(notifier) = &ctx.change_notifier {
+                    notifier.notify(ToolChangeSet::Tasks);
+                }
+                ToolResult::success(format!("Task list #{} completed", batch.id))
+            }
             None => ToolResult::error("no active task list"),
         }
     }
@@ -63,6 +68,7 @@ mod tests {
             progress_tx: None,
             parent_session_id: None,
             context_stack: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            change_notifier: None,
         }
     }
 

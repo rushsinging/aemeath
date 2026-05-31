@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{Tool, ToolContext, ToolResult};
+use share::tool::{Tool, ToolChangeSet, ToolContext, ToolResult};
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -35,7 +35,7 @@ impl Tool for TaskStopTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let task_id = input["taskId"].as_str().unwrap_or("");
 
         if task_id.is_empty() {
@@ -70,6 +70,9 @@ impl Tool for TaskStopTool {
             })
             .await;
 
+        if let Some(notifier) = &ctx.change_notifier {
+            notifier.notify(ToolChangeSet::Tasks);
+        }
         ToolResult::success(format!("Task #{} stopped and marked as deleted", task_id))
     }
 }

@@ -6,7 +6,9 @@
 use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
-use crate::tui::render::output::tool_display::{result_max_lines, result_render_kind, ResultRender};
+use crate::tui::render::output::tool_display::{
+    result_max_lines, result_render_kind, ResultRender,
+};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolResultBlockView;
 use crate::tui::view_model::style::SemanticStyle;
@@ -138,7 +140,11 @@ mod tests {
         assert!(
             block.lines.iter().any(|l| l.plain.contains("---DIFF---")),
             "非 Edit 工具应保留 ---DIFF--- 原文（不渲染为 diff），got: {:?}",
-            block.lines.iter().map(|l| l.plain.as_str()).collect::<Vec<_>>()
+            block
+                .lines
+                .iter()
+                .map(|l| l.plain.as_str())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -218,7 +224,10 @@ mod tests {
             "成功状态行: {}",
             last.plain
         );
-        assert!(last.spans.iter().any(|s| s.style.fg == Some(theme::SUCCESS)));
+        assert!(last
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(theme::SUCCESS)));
 
         let mut err = result("Bash", "command not found: foo");
         err.style = SemanticStyle::Error;

@@ -1,7 +1,7 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
-use crate::core::provider::StreamHandler;
 use crate::business::types::StreamResponse;
+use crate::core::provider::StreamHandler;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;

@@ -293,58 +293,58 @@ mod tests {
         );
 
         assert!(model.conversation.blocks.iter().any(|block| matches!(
-                block,
-                crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
-                    if id.as_ref() == "tool-1"
-            )));
-        }
+            block,
+            crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
+                if id.as_ref() == "tool-1"
+        )));
+    }
 
-        #[test]
-        fn test_up_key_selects_completion_when_visible() {
-            use crate::tui::model::input::completion_item::CompletionItem;
+    #[test]
+    fn test_up_key_selects_completion_when_visible() {
+        use crate::tui::model::input::completion_item::CompletionItem;
 
-            let mut model = TuiModel::default();
-            model.input.apply(InputIntent::InsertChar('/'));
-            model.input.apply(InputIntent::SetCompletions {
-                query: "/".to_string(),
-                items: vec![
-                    CompletionItem::new("/help", "/help"),
-                    CompletionItem::new("/exit", "/exit"),
-                ],
-            });
-            assert!(model.input.completion.visible);
-            assert_eq!(model.input.completion.selected_index, Some(0));
+        let mut model = TuiModel::default();
+        model.input.apply(InputIntent::InsertChar('/'));
+        model.input.apply(InputIntent::SetCompletions {
+            query: "/".to_string(),
+            items: vec![
+                CompletionItem::new("/help", "/help"),
+                CompletionItem::new("/exit", "/exit"),
+            ],
+        });
+        assert!(model.input.completion.visible);
+        assert_eq!(model.input.completion.selected_index, Some(0));
 
-            let mut view_state = AppViewState::default();
-            update(&mut model, &mut view_state, key(KeyCode::Down));
-            assert_eq!(
-                model.input.completion.selected_index,
-                Some(1),
-                "Down 在补全可见时应选择下一项"
-            );
+        let mut view_state = AppViewState::default();
+        update(&mut model, &mut view_state, key(KeyCode::Down));
+        assert_eq!(
+            model.input.completion.selected_index,
+            Some(1),
+            "Down 在补全可见时应选择下一项"
+        );
 
-            update(&mut model, &mut view_state, key(KeyCode::Up));
-            assert_eq!(
-                model.input.completion.selected_index,
-                Some(0),
-                "Up 在补全可见时应选择上一项"
-            );
-        }
+        update(&mut model, &mut view_state, key(KeyCode::Up));
+        assert_eq!(
+            model.input.completion.selected_index,
+            Some(0),
+            "Up 在补全可见时应选择上一项"
+        );
+    }
 
-        #[test]
-        fn test_up_down_history_when_completion_hidden() {
-            let mut model = TuiModel::default();
-            model.input.apply(InputIntent::ReplaceHistory(vec![
-                "first".to_string(),
-                "second".to_string(),
-            ]));
-            assert!(!model.input.completion.visible);
+    #[test]
+    fn test_up_down_history_when_completion_hidden() {
+        let mut model = TuiModel::default();
+        model.input.apply(InputIntent::ReplaceHistory(vec![
+            "first".to_string(),
+            "second".to_string(),
+        ]));
+        assert!(!model.input.completion.visible);
 
-            let mut view_state = AppViewState::default();
-            update(&mut model, &mut view_state, key(KeyCode::Up));
-            assert_eq!(
-                model.input.document.buffer, "second",
-                "Up 在补全不可见时应翻历史"
-            );
-        }
+        let mut view_state = AppViewState::default();
+        update(&mut model, &mut view_state, key(KeyCode::Up));
+        assert_eq!(
+            model.input.document.buffer, "second",
+            "Up 在补全不可见时应翻历史"
+        );
+    }
 }

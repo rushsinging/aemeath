@@ -20,18 +20,22 @@ pub(crate) fn apply_input_changes_to_widget(
             InputChange::CursorMoved { cursor } => {
                 input_area.set_cursor_byte_index(*cursor);
             }
-            InputChange::CompletionChanged { visible, items, selected_index } => {
-                  if *visible {
-                      input_area.set_suggestions(
-                          items.iter().map(suggestion_from_completion_item).collect(),
-                      );
-                      if let Some(idx) = selected_index {
-                          input_area.set_selected_suggestion(*idx);
-                      }
-                  } else {
-                      input_area.clear_suggestions();
-                  }
-              }
+            InputChange::CompletionChanged {
+                visible,
+                items,
+                selected_index,
+            } => {
+                if *visible {
+                    input_area.set_suggestions(
+                        items.iter().map(suggestion_from_completion_item).collect(),
+                    );
+                    if let Some(idx) = selected_index {
+                        input_area.set_selected_suggestion(*idx);
+                    }
+                } else {
+                    input_area.clear_suggestions();
+                }
+            }
             InputChange::Submitted {
                 submission: submitted,
             } => {

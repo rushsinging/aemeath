@@ -381,11 +381,9 @@ mod tests {
 
         let mut app = make_app();
         // 模拟用户提问
-        app.model
-            .conversation
-            .apply(ConversationIntent::StartChat {
-                submission: "hello".to_string(),
-            });
+        app.model.conversation.apply(ConversationIntent::StartChat {
+            submission: "hello".to_string(),
+        });
         // 模拟 LLM streaming
         app.model
             .conversation
