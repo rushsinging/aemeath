@@ -30,7 +30,6 @@ pub struct BlockNode {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum OutputBlockKind {
     UserMessage(TextBlockView),
-    QueuedSubmission(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
     ToolCall(ToolCallBlockView),

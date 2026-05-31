@@ -12,8 +12,12 @@ use crate::tui::view_state::SpinnerAnim;
 pub struct LiveStatusAssembler;
 
 impl LiveStatusAssembler {
-    /// 由 Model 业务态 + view_state 动画态派生实时状态行视图。
-    pub fn assemble(runtime: &RuntimeModel, anim: &SpinnerAnim) -> LiveStatusViewModel {
+    /// 由 Model 业务态 + view_state 动画态 + 排队输入派生实时状态行视图。
+    pub fn assemble(
+        runtime: &RuntimeModel,
+        anim: &SpinnerAnim,
+        queued_texts: &[String],
+    ) -> LiveStatusViewModel {
         let spinner = if runtime.spinner.active {
             Some(SpinnerLineView {
                 frame: anim.frame,
@@ -23,8 +27,13 @@ impl LiveStatusAssembler {
         } else {
             None
         };
+        let queued_lines = queued_texts
+            .iter()
+            .map(|text| format!("> {text}"))
+            .collect();
         LiveStatusViewModel {
             spinner,
+            queued_lines,
             task_lines: runtime.task_status.lines.clone(),
         }
     }
@@ -74,7 +83,7 @@ mod tests {
             frame: 5,
             verb: "Brewing".to_string(),
         };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim);
+        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
         assert!(vm.spinner.is_none());
     }
 
@@ -85,7 +94,7 @@ mod tests {
             frame: 12,
             verb: "Forging".to_string(),
         };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim);
+        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
         let view = vm.spinner.expect("spinner present");
         assert_eq!(view.frame, 12);
         assert_eq!(view.verb, "Forging");
@@ -99,7 +108,7 @@ mod tests {
             "━━ Tasks: 0/1 ━━".to_string(),
             "□ #1 修复 bug".to_string(),
         ]));
-        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default());
+        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 0/1 ━━", "□ #1 修复 bug"]);
     }
 
@@ -152,10 +161,28 @@ mod tests {
     #[test]
     fn test_assemble_active_with_phase_converts_text() {
         let runtime = runtime_with_spinner(true, Some(SpinnerPhase::Generating));
-        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default());
+        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
         assert_eq!(
             vm.spinner.unwrap().phase_text.as_deref(),
             Some("Generating...")
         );
+    }
+
+    #[test]
+    fn test_assemble_queued_lines_format() {
+        let runtime = runtime_with_spinner(true, None);
+        let vm = LiveStatusAssembler::assemble(
+            &runtime,
+            &SpinnerAnim::default(),
+            &["hello".to_string(), "world".to_string()],
+        );
+        assert_eq!(vm.queued_lines, vec!["> hello", "> world"]);
+    }
+
+    #[test]
+    fn test_assemble_empty_queued_yields_no_lines() {
+        let runtime = runtime_with_spinner(true, None);
+        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
+        assert!(vm.queued_lines.is_empty());
     }
 }

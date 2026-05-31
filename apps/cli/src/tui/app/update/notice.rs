@@ -251,9 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn test_enqueue_submission_echo_renders_queued_block_into_document() {
-        // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型，
-        // 且经 document 渲染出现「排队中」即时反馈。
+    fn test_enqueue_submission_echo_renders_queued_block_into_model() {
+        // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型。
+        // 渲染不再经 document block，改为 spinner 上方的 queued_submission_lines。
         let mut app = make_app();
         app.enqueue_submission_echo("排队中的输入");
 
@@ -265,6 +265,7 @@ mod tests {
             "入队应作为 QueuedUserMessage block 进入 ConversationModel"
         );
 
+        // queued_submission 不再出现在 document 中（已移至 spinner 上方）。
         let plain = app
             .output_area
             .document()
@@ -273,8 +274,8 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            plain.contains(">"),
-            "排队提交应经 document 渲染出现在输出区，实际: {plain:?}"
+            !plain.contains(">"),
+            "排队提交不应出现在 document 渲染中，实际: {plain:?}"
         );
     }
 

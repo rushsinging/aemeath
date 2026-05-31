@@ -18,5 +18,6 @@ impl super::OutputArea {
         self.last_visible_height = 0;
         self.todo_subject_cache.clear();
         self.task_status_lines.clear();
+        self.queued_submission_lines.clear();
     }
 }

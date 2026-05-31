@@ -124,15 +124,8 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::QueuedUserMessage { id, text } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::QueuedSubmission(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Muted,
-                        }),
-                    ));
+                ConversationBlock::QueuedUserMessage { .. } => {
+                    // 排队输入不再作为 document block 渲染，改为在 spinner 上方固定显示。
                 }
                 ConversationBlock::AgentProgress {
                     id,
