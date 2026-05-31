@@ -25,6 +25,7 @@ fn test_ctx(cwd: PathBuf) -> ToolContext {
         progress_tx: None,
         parent_session_id: Some("test-session".to_string()),
         context_stack: Arc::new(Mutex::new(Vec::new())),
+        change_notifier: None,
     }
 }
 

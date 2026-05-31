@@ -59,6 +59,7 @@ fn test_ctx() -> ToolContext {
         progress_tx: None,
         parent_session_id: None,
         context_stack: Arc::new(std::sync::Mutex::new(Vec::new())),
+        change_notifier: None,
     }
 }
 

@@ -49,11 +49,48 @@ pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusV
 }
 
 pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
+    let workspace = me
+        .inner
+        .workspace_context
+        .lock()
+        .ok()
+        .and_then(|g| g.clone());
+    let cwd = workspace
+        .as_ref()
+        .map(|ctx| ctx.path_base.clone())
+        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
+    let path_base = workspace
+        .as_ref()
+        .map(|ctx| ctx.path_base.clone())
+        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
+    let working_root = workspace
+        .as_ref()
+        .map(|ctx| ctx.working_root.clone())
+        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
+    let git_branch = current_git_branch(std::path::Path::new(&path_base));
+
     ProjectContext {
-        cwd: me.inner.cwd.to_string_lossy().to_string(),
-        path_base: String::new(),    // TODO
-        working_root: String::new(), // TODO
-        git_branch: None,
+        cwd,
+        path_base,
+        working_root,
+        git_branch,
+    }
+}
+
+fn current_git_branch(dir: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        None
+    } else {
+        Some(branch)
     }
 }
 
@@ -81,6 +118,7 @@ pub(super) async fn restore_tasks_impl(
     if let Some(ref store) = me.inner.task_store {
         if let Ok(task_snapshot) = serde_json::from_value(snapshot) {
             store.restore(task_snapshot).await;
+            me.notify_change(ChangeSet::TASKS);
         }
     }
     Ok(())
@@ -89,6 +127,7 @@ pub(super) async fn restore_tasks_impl(
 pub(super) async fn clear_tasks_impl(me: &AgentClientImpl) -> Result<()> {
     if let Some(ref store) = me.inner.task_store {
         store.clear().await;
+        me.notify_change(ChangeSet::TASKS);
     }
     Ok(())
 }

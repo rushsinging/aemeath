@@ -5,8 +5,8 @@ use std::error::Error as StdError;
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 
-use crate::core::provider::{LlmProvider, StreamHandler};
 use crate::business::types::SystemBlock;
+use crate::core::provider::{LlmProvider, StreamHandler};
 
 use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
 

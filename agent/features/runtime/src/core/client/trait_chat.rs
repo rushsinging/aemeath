@@ -33,6 +33,7 @@ pub(super) async fn chat_impl(
         tx,
         current_messages: me.inner.current_messages.clone(),
         workspace_context: me.inner.workspace_context.clone(),
+        change_tx: me.inner.change_tx.clone(),
     };
     let inner = me.inner.clone();
     tokio::spawn(async move {

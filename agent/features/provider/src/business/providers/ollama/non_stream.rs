@@ -2,8 +2,8 @@
 
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
-use crate::core::provider::StreamHandler;
 use crate::business::types::{StreamResponse, SystemBlock};
+use crate::core::provider::StreamHandler;
 use share::message::{ContentBlock, Message, Role};
 
 pub(crate) trait OllamaProviderNonStream {

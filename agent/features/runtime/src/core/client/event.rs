@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use sdk::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChangeSet, ChatEvent,
     ToolResultImage,
 };
 
@@ -10,6 +10,7 @@ pub(crate) struct SdkChatEventSink {
     pub(super) tx: tokio::sync::mpsc::UnboundedSender<ChatEvent>,
     pub(super) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
     pub(super) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
+    pub(super) change_tx: tokio::sync::watch::Sender<ChangeSet>,
 }
 
 impl crate::business::chat::ChatEventSink for SdkChatEventSink {
@@ -22,6 +23,7 @@ impl crate::business::chat::ChatEventSink for SdkChatEventSink {
                 event,
                 &self.current_messages,
                 &self.workspace_context,
+                &self.change_tx,
             ));
         })
     }
@@ -31,6 +33,7 @@ impl crate::business::chat::ChatEventSink for SdkChatEventSink {
             event,
             &self.current_messages,
             &self.workspace_context,
+            &self.change_tx,
         ));
     }
 }
@@ -61,6 +64,7 @@ pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
     workspace_context: &Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
+    change_tx: &tokio::sync::watch::Sender<ChangeSet>,
 ) -> ChatEvent {
     match event {
         crate::business::chat::RuntimeStreamEvent::Text(text) => ChatEvent::Token(text),
@@ -195,6 +199,8 @@ pub(crate) fn runtime_event_to_sdk_event(
             if let Ok(mut guard) = workspace_context.lock() {
                 *guard = Some(workspace.clone());
             }
+            let previous = *change_tx.borrow();
+            let _ = change_tx.send(previous | ChangeSet::PROJECT);
             ChatEvent::WorkingDirectoryChanged {
                 path_base,
                 working_root,

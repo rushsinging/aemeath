@@ -358,10 +358,10 @@ where
                     .await;
 
                     // Build tool result message for API
-                    messages.push(tool_results_for_api(all_results, &session_id)); // Sync after tool execution
+                    messages.push(tool_results_for_api(all_results, &session_id));
+                    // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
-
                     if append_queued_input(&queue, &sink, &mut messages).await {
                         continue;
                     }
@@ -488,6 +488,7 @@ mod tests {
                 RuntimeStreamEvent::StopFailureHook { .. } => "StopFailureHook".to_string(),
                 RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
                 RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
+                RuntimeStreamEvent::ChangeSet(_) => "ChangeSet".to_string(),
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()
                 }

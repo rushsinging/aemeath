@@ -37,7 +37,9 @@ impl<'de> Deserialize<'de> for OptionItem {
                 description: obj.description,
             })
         } else {
-            Err(de::Error::custom("expected string or object { title, description }"))
+            Err(de::Error::custom(
+                "expected string or object { title, description }",
+            ))
         }
     }
 }
@@ -367,7 +369,10 @@ mod tests {
                 ],
             },
         };
-        assert_eq!(format!("{event}"), "Bash ls -la /project, Read project/TODO.md");
+        assert_eq!(
+            format!("{event}"),
+            "Bash ls -la /project, Read project/TODO.md"
+        );
     }
 
     #[test]

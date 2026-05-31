@@ -7,12 +7,26 @@ use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use sdk::ChangeSet;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 impl App {
+    async fn handle_change_set(&mut self, change: ChangeSet) {
+        if change.contains(ChangeSet::TASKS) {
+            self.update_task_status(self.chat.is_processing).await;
+        }
+        if change.contains(ChangeSet::PROJECT) {
+            self.update_project_context().await;
+            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
+                &self.model,
+                &mut self.status_bar,
+            );
+        }
+    }
+
     pub(crate) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -22,17 +36,17 @@ impl App {
         self.chat.stop_processing();
 
         let mut event_stream = EventStream::new();
+        let mut change_rx = self.agent_client.as_ref().map(|client| client.changes());
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
+        self.update_task_status(self.chat.is_processing).await;
+        self.update_project_context().await;
         self.draw(terminal)?;
         self.refresh_output_widget_from_model();
 
         loop {
-            // Update task status lines
-            self.update_task_status(self.chat.is_processing).await;
-
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();
 
@@ -52,6 +66,17 @@ impl App {
             let msg: Option<TuiMsg> = tokio::select! {
                 biased;
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
+                change = async {
+                    match change_rx.as_mut() {
+                        Some(rx) => rx.changed().await.ok().map(|_| *rx.borrow()),
+                        None => futures::future::pending().await,
+                    }
+                } => {
+                    if let Some(change) = change {
+                        self.handle_change_set(change).await;
+                    }
+                    None
+                }
                 ev = event_stream.next() => {
                     match ev {
                         Some(Ok(event)) => match event {

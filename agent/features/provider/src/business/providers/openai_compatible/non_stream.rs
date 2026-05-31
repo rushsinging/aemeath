@@ -1,8 +1,8 @@
 //! 非流式请求：发送消息并等待完整响应
 
 use super::OpenAICompatibleProvider;
-use crate::core::provider::StreamHandler;
 use crate::business::types::{StreamResponse, SystemBlock};
+use crate::core::provider::StreamHandler;
 use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {

@@ -68,14 +68,10 @@ impl App {
                             .map(|(i, opt)| format!("{}. {}", i + 1, opt.title))
                             .collect();
                         all_opts.join("\n")
-                    } else if cursor_title
-                        == crate::tui::app::state::BUILTIN_OPTION_NONE
-                    {
+                    } else if cursor_title == crate::tui::app::state::BUILTIN_OPTION_NONE {
                         // "None of the above": return empty string
                         String::new()
-                    } else if cursor_title
-                        == crate::tui::app::state::BUILTIN_OPTION_CHAT
-                    {
+                    } else if cursor_title == crate::tui::app::state::BUILTIN_OPTION_CHAT {
                         // "Type something...": switch to chat input sub-mode
                         self.input.ask_user_state = Some(state);
                         self.set_ask_user_chat_input(true);
@@ -89,9 +85,7 @@ impl App {
                             .iter()
                             .enumerate()
                             .filter(|(_, s)| **s)
-                            .filter_map(|(i, _)| {
-                                state.options.get(i).map(|o| o.title.clone())
-                            })
+                            .filter_map(|(i, _)| state.options.get(i).map(|o| o.title.clone()))
                             .collect();
                         if chosen.is_empty() {
                             state

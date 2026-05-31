@@ -190,8 +190,15 @@ mod tests {
             ],
         );
 
-        assert_eq!(out[0].spans[0].content.as_ref(), "💭", "首行 marker = 💭，无尾空格");
-        assert_eq!(out[0].gutter_cols, 1, "gutter_cols = 字符数（💭 1 字符），非显示列 2");
+        assert_eq!(
+            out[0].spans[0].content.as_ref(),
+            "💭",
+            "首行 marker = 💭，无尾空格"
+        );
+        assert_eq!(
+            out[0].gutter_cols, 1,
+            "gutter_cols = 字符数（💭 1 字符），非显示列 2"
+        );
         assert_eq!(out[1].spans[0].content.as_ref(), "  ", "续行等宽空白 2 列");
         assert_eq!(out[1].gutter_cols, 2);
     }

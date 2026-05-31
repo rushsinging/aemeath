@@ -56,7 +56,8 @@ pub struct RuntimeHandle {
 
 impl AgentClientImpl {
     pub fn notify_change(&self, set: ChangeSet) {
-        let _ = self.inner.change_tx.send(set);
+        let previous = *self.inner.change_tx.borrow();
+        let _ = self.inner.change_tx.send(previous | set);
     }
 
     pub fn is_cancelled(&self) -> bool {

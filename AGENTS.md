@@ -62,6 +62,7 @@ aemeath/                    # workspace root
 
 - **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
 - **MUST** worktree 分支完成验证并提交后合并回 `main`。
+- **MUST** worktree 分支合并回 `main` 前，先在 `main` 工作区执行 `git pull`（或等价的 fetch + fast-forward）拉取最新更新，再从 worktree 合并；若拉取后存在冲突，**MUST** 在 worktree 分支上 rebase/merge 最新 `main` 并重新通过验证后才能合并。
 - **MUST** 合并回 `main` 后在 `main` 上运行对应验证，并清理已完成的 worktree。
 
 ## 编码规范

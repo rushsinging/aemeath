@@ -427,10 +427,9 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
 
     // result 不应是 orphan
     assert!(
-        !changes.iter().any(|c| matches!(
-            c,
-            ConversationChange::OrphanToolResultObserved { .. }
-        )),
+        !changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::OrphanToolResultObserved { .. })),
         "Agent tool result 不应变成 orphan"
     );
     assert!(changes.iter().any(|c| matches!(
@@ -474,10 +473,9 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     });
 
     assert!(
-        !changes.iter().any(|c| matches!(
-            c,
-            ConversationChange::OrphanToolResultObserved { .. }
-        )),
+        !changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::OrphanToolResultObserved { .. })),
         "Agent result 不应因 text streaming 而变 orphan"
     );
 }
@@ -507,10 +505,9 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     });
 
     assert!(
-        !changes.iter().any(|c| matches!(
-            c,
-            ConversationChange::OrphanToolResultObserved { .. }
-        )),
+        !changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::OrphanToolResultObserved { .. })),
         "没有 ToolCallStart 时 ToolResult 不应变 orphan（bind_tool 应自动创建占位）"
     );
     assert!(changes.iter().any(|c| matches!(

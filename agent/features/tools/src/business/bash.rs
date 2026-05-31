@@ -244,6 +244,7 @@ mod tests {
             progress_tx: None,
             parent_session_id: None,
             context_stack: Arc::new(Mutex::new(Vec::new())),
+            change_notifier: None,
         };
 
         let result = BashTool
