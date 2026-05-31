@@ -1,7 +1,6 @@
 use super::App;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::workspace::WorktreeKind;
-use std::path::PathBuf;
 
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
@@ -74,7 +73,9 @@ impl App {
         let path_base = empty_to_none(project.path_base);
         let working_root = empty_to_none(project.working_root);
         let kind = match working_root.as_deref() {
-            Some(root) if PathBuf::from(root) != self.session.cwd => WorktreeKind::LinkedWorktree,
+            Some(root) if self.session.cwd.as_path() != std::path::Path::new(root) => {
+                WorktreeKind::LinkedWorktree
+            }
             Some(_) => WorktreeKind::MainCheckout,
             None => WorktreeKind::Unknown,
         };

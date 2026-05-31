@@ -331,7 +331,6 @@ mod tests {
             working_root,
             path_base,
             context_stack: Arc::new(Mutex::new(Vec::new())),
-            change_notifier: None,
         }
     }
 

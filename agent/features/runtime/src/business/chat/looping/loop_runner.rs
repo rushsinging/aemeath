@@ -488,7 +488,6 @@ mod tests {
                 RuntimeStreamEvent::StopFailureHook { .. } => "StopFailureHook".to_string(),
                 RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
                 RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
-                RuntimeStreamEvent::ChangeSet(_) => "ChangeSet".to_string(),
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()
                 }
