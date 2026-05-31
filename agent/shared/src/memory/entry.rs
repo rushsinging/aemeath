@@ -101,7 +101,6 @@ impl MemoryEntry {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

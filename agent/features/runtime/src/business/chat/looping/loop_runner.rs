@@ -7,13 +7,13 @@ use crate::business::chat::looping::finalize::{
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
-use crate::business::chat::looping::queue::append_queued_input;
 use crate::business::chat::looping::stall::StallDetector;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tool_context::{build_tool_context, ToolContextParts};
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
-    ChatEventSink, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
+    ChatEventSink, GateDecision, GateKind, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
+    RuntimeStreamEvent, RuntimeStreamHandler,
 };
 use provider::api::StopReason;
 use share::message::Message;
@@ -23,13 +23,15 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
-pub struct ChatLoopContext<S, Q>
+pub struct ChatLoopContext<S, Q, I>
 where
     S: ChatEventSink,
     Q: QueueDrainPort,
+    I: InputEventDrainPort,
 {
     pub sink: S,
     pub queue: Q,
+    pub input_events: I,
     pub client: Arc<provider::api::LlmClient>,
     pub registry: Arc<ToolRegistry>,
     pub system_blocks: Vec<provider::api::SystemBlock>,
@@ -56,14 +58,16 @@ where
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
-pub async fn process_chat_loop<S, Q>(ctx: ChatLoopContext<S, Q>)
+pub async fn process_chat_loop<S, Q, I>(ctx: ChatLoopContext<S, Q, I>)
 where
     S: ChatEventSink,
     Q: QueueDrainPort,
+    I: InputEventDrainPort,
 {
     let ChatLoopContext {
         sink,
         queue,
+        input_events,
         ref client,
         registry,
         system_blocks,
@@ -142,6 +146,7 @@ where
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
+    let mut pending_input = PendingInputBuffer::default();
 
     loop {
         turn_count += 1;
@@ -155,12 +160,16 @@ where
 
         if interrupted.load(Ordering::Relaxed) {
             interrupted.store(false, Ordering::Relaxed);
-            // Bug #49: drain queued input before handling cancellation,
-            // so user-submitted messages are preserved even if interrupted.
-            if append_queued_input(&queue, &sink, &mut messages).await {
-                // User queued new input — resume with it instead of cancelling.
-                sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                    .await;
+            let outcome = drain_and_apply_gate(
+                GateKind::BeforeFinish,
+                &mut pending_input,
+                &queue,
+                &input_events,
+                &sink,
+                &mut messages,
+            )
+            .await;
+            if outcome.decision == GateDecision::ContinueNextTurn {
                 continue;
             }
             messages.truncate(messages_at_start);
@@ -202,6 +211,23 @@ where
             &ctx.client,
         )
         .await;
+
+        let gate = drain_and_apply_gate(
+            GateKind::BeforeLlm,
+            &mut pending_input,
+            &queue,
+            &input_events,
+            &sink,
+            &mut messages,
+        )
+        .await;
+        match gate.decision {
+            GateDecision::Proceed | GateDecision::ContinueNextTurn => {}
+            GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
+                sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                break;
+            }
+        }
 
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
@@ -273,8 +299,16 @@ where
                         "[agent loop stopped: LLM is producing repetitive output]".to_string(),
                     ))
                     .await;
-                    // Bug #49: drain queued input before breaking on stall.
-                    if append_queued_input(&queue, &sink, &mut messages).await {
+                    let gate = drain_and_apply_gate(
+                        GateKind::BeforeFinish,
+                        &mut pending_input,
+                        &queue,
+                        &input_events,
+                        &sink,
+                        &mut messages,
+                    )
+                    .await;
+                    if gate.decision == GateDecision::ContinueNextTurn {
                         continue;
                     }
                     break;
@@ -291,10 +325,16 @@ where
                     api_elapsed,
                 );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                    // Bug #49: drain queued user input before finishing the loop.
-                    // If user submitted new messages while the last turn was running,
-                    // consume them and continue instead of exiting.
-                    if append_queued_input(&queue, &sink, &mut messages).await {
+                    let gate = drain_and_apply_gate(
+                        GateKind::BeforeFinish,
+                        &mut pending_input,
+                        &queue,
+                        &input_events,
+                        &sink,
+                        &mut messages,
+                    )
+                    .await;
+                    if gate.decision == GateDecision::ContinueNextTurn {
                         continue;
                     }
                     if let Some(text) = crate::business::chat::looping::reflection::run_reflection(
@@ -334,7 +374,16 @@ where
                             .await;
                         continue;
                     }
-                    if append_queued_input(&queue, &sink, &mut messages).await {
+                    let gate = drain_and_apply_gate(
+                        GateKind::BeforeFinish,
+                        &mut pending_input,
+                        &queue,
+                        &input_events,
+                        &sink,
+                        &mut messages,
+                    )
+                    .await;
+                    if gate.decision == GateDecision::ContinueNextTurn {
                         continue;
                     }
                     finish_completed_loop(&outcome, &sink, &task_store).await;
@@ -362,8 +411,21 @@ where
                     // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
-                    if append_queued_input(&queue, &sink, &mut messages).await {
-                        continue;
+                    let gate = drain_and_apply_gate(
+                        GateKind::AfterBlockingBoundary,
+                        &mut pending_input,
+                        &queue,
+                        &input_events,
+                        &sink,
+                        &mut messages,
+                    )
+                    .await;
+                    if matches!(
+                        gate.decision,
+                        GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
+                    ) {
+                        sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                        break;
                     }
 
                     run_post_tool_batch(&sink, &hook_ui, &hook_runner, &agent.ctx, turn_count)
@@ -374,8 +436,16 @@ where
                 let error_msg = e.to_string();
                 sink.send_event(RuntimeStreamEvent::Error(error_msg.clone()))
                     .await;
-                // Bug #49: drain queued input before handling API error.
-                if append_queued_input(&queue, &sink, &mut messages).await {
+                let gate = drain_and_apply_gate(
+                    GateKind::BeforeFinish,
+                    &mut pending_input,
+                    &queue,
+                    &input_events,
+                    &sink,
+                    &mut messages,
+                )
+                .await;
+                if gate.decision == GateDecision::ContinueNextTurn {
                     continue;
                 }
                 if let Some(outcome) = finalize_main_loop(
@@ -407,6 +477,23 @@ where
     }
 }
 
+async fn drain_and_apply_gate<Q, I, S>(
+    kind: GateKind,
+    buffer: &mut PendingInputBuffer,
+    queue: &Q,
+    input_events: &I,
+    sink: &S,
+    messages: &mut Vec<Message>,
+) -> crate::business::chat::GateOutcome
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+    S: ChatEventSink,
+{
+    crate::business::chat::looping::drain_sources(buffer, queue, input_events).await;
+    crate::business::chat::looping::apply_gate(kind, buffer, sink, messages).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,6 +522,17 @@ mod tests {
     impl QueueDrainPort for SequenceQueueDrainPort {
         fn drain_queued_input<'a>(&'a self) -> crate::business::chat::looping::QueueFuture<'a> {
             Box::pin(async move { self.responses.lock().unwrap().pop_front().flatten() })
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct EmptyInputEvents;
+
+    impl InputEventDrainPort for EmptyInputEvents {
+        fn drain_input_events<'a>(
+            &'a self,
+        ) -> crate::business::chat::looping::InputEventFuture<'a> {
+            Box::pin(async { Vec::new() })
         }
     }
 
@@ -577,6 +675,7 @@ mod tests {
         process_chat_loop(ChatLoopContext {
             sink: sink.clone(),
             queue,
+            input_events: EmptyInputEvents,
             client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
                 TwoTurnProvider,
             ))),

@@ -15,6 +15,7 @@ pub(crate) struct ChatState {
     pub active_tool_call_ids: std::collections::HashSet<String>,
     pub turn_count: usize,
     pub pending_reflection: Option<sdk::ReflectionOutputView>,
+    pub input_event_buffer: Option<std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>>,
     pub is_processing: bool,
 }
 
@@ -64,6 +65,29 @@ impl ChatState {
         self.pending_images.drain(..).collect()
     }
 
+    pub(crate) fn start_input_event_buffer(
+        &mut self,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>> {
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        self.input_event_buffer = Some(buffer.clone());
+        buffer
+    }
+
+    pub(crate) fn clear_input_event_buffer(&mut self) {
+        self.input_event_buffer = None;
+    }
+
+    pub(crate) fn push_input_event(&mut self, event: sdk::ChatInputEvent) -> usize {
+        let Some(buffer) = &self.input_event_buffer else {
+            return 0;
+        };
+        let Ok(mut events) = buffer.lock() else {
+            return 0;
+        };
+        events.push(event);
+        events.len()
+    }
+
     pub(crate) fn pending_image_count(&self) -> usize {
         self.pending_images.len()
     }
@@ -80,6 +104,7 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
         self.pending_reflection = None;
+        self.clear_input_event_buffer();
         self.turn_count = 0;
     }
 
@@ -91,7 +116,6 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
     }
-
     pub(crate) fn usage_snapshot(&self) -> ChatUsageSnapshot {
         ChatUsageSnapshot {
             total_input_tokens: self.total_input_tokens,
@@ -125,6 +149,7 @@ impl Default for ChatState {
             active_tool_call_ids: std::collections::HashSet::new(),
             turn_count: 0,
             pending_reflection: None,
+            input_event_buffer: None,
             is_processing: false,
         }
     }

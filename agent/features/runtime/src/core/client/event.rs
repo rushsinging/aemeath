@@ -60,6 +60,28 @@ impl crate::business::chat::QueueDrainPort for RuntimeQueueDrainPort {
     }
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct RuntimeInputEventDrainPort {
+    inner: Option<Arc<dyn sdk::ChatInputEventPort>>,
+}
+
+impl RuntimeInputEventDrainPort {
+    pub(crate) fn new(inner: Option<Arc<dyn sdk::ChatInputEventPort>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
+    fn drain_input_events<'a>(&'a self) -> crate::business::chat::InputEventFuture<'a> {
+        Box::pin(async move {
+            match &self.inner {
+                Some(inner) => inner.drain_input_events().await,
+                None => Vec::new(),
+            }
+        })
+    }
+}
+
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,

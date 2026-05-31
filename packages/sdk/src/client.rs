@@ -52,6 +52,7 @@ pub trait AgentClient: Send + Sync + 'static {
                 content,
             }],
             queue_drain: None,
+            input_events: None,
         })
         .await
     }

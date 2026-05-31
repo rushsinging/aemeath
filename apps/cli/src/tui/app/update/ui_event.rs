@@ -125,6 +125,8 @@ impl App {
             }
             UiEvent::MessagesSync(msgs) => {
                 self.chat.messages = msgs;
+                self.input.clear_queue();
+                self.clear_queued_submission_echo();
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {

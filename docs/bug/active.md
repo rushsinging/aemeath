@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
+| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 待用户确认 | 2026-05 | 已将 #72 pull-drain 过渡方案收口到 ChatInputEvent push channel + PendingInputBuffer + Loop Gate：TUI 忙碌期 Enter 通过 Effect 发送事件，runtime 在 BeforeLlm/BeforeFinish/AfterBlockingBoundary 安全边界统一 drain push/pull 输入并去重；普通输入追加为下一 turn，control command 不进入 LLM messages。验证：SDK/runtime gate 相关测试与 runtime/cli check 通过 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 并入 #49 | 未确认 | 2026-05 | 原 #72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 是 pull-drain 过渡修复，思路已被 #49 的 ChatInputEvent push channel + PendingInputBuffer + Loop Gate 统一方案取代；后续不再沿 #72 继续扩展 pull adapter，而是在 #49 实施中迁移并删除旧 drain 散点。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
@@ -99,15 +99,20 @@
 
 ### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 
-**状态**：修复中（待确认）
+**状态**：待确认（2026-05-31 已落地 ChatInputEvent push channel + PendingInputBuffer + Loop Gate）
 
-**本轮症状**：Stop hook 执行期间，用户提交的新输入能进入 TUI input queue，但 Stop hook 结束后 runtime 直接发送 `DoneWithDuration`，该输入不会被追加进 messages，也不会触发下一轮 LLM。
+**本轮症状**：Stop hook、tool/hook 边界、最终 Done 前等忙碌窗口期间提交的新输入可能只停留在 TUI input queue / queued echo，runtime 只有在散落的 `append_queued_input` 调用点主动 pull 时才可见，容易漏过最后一次 drain 后的输入。
 
-**根因（已确认）**：最终响应分支在进入 Stop hook 之前已经执行过一次 `append_queued_input`；但 Stop hook 本身可能耗时，用户在 hook 执行期间提交的输入发生在最后一次 drain 之后、`DoneWithDuration` 之前。原实现把 Stop hook 和 Done 发送都封装在 `finalize_main_loop` 内，Stop hook 通过后没有再给主 loop 二次 drain 的机会。
+**根因（已确认）**：#72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 只能作为 pull-drain 过渡 adapter；它依赖主循环在每个出口手写 drain，无法形成“继续 LLM 前、准备结束前、长耗时边界返回后必须统一消费输入”的架构不变量。
 
-**修复**：Completed 分支改为：Stop hook 通过后先再次调用 `append_queued_input`；如果 drain 到用户输入，则同步 messages 并 `continue` 主 LLM loop；只有二次 drain 为空时才发送 `DoneWithDuration` 并归档已完成 task batch。追加输入被处理完后仍会重新进入最终结束流程并再次触发 Stop hook。
+**修复**：
+1. SDK 新增 `ChatInputEvent`、`ChatInputEventPort`、`InputEventFuture`，`ChatRequest` 同时保留迁移期 `queue_drain` 与新 `input_events`。
+2. Runtime 新增 `PendingInputBuffer` 与 Loop Gate，在 `BeforeLlm`、`BeforeFinish`、`AfterBlockingBoundary` 统一 drain push channel 与旧 pull queue，并用 legacy text 去重避免双消费。
+3. `process_chat_loop` 移除主循环内散落的 `append_queued_input` 调用点，统一走 `drain_and_apply_gate`；普通输入追加为当前 chat 的下一 turn，`/clear` 等 control command 不进入 LLM messages，`Cancel` 与现有取消语义幂等合流。
+4. TUI 忙碌期 Enter 不再只写本地 queue，而是返回 `Effect::SendChatInputEvent`；effect 层写入 `TuiInputEventPort` buffer，启动 chat 时通过 `ChatRequest.input_events` 注入 runtime。
+5. `MessagesSync` 会清理旧 input queue 与 queued submission echo，保留 #72 pull adapter 作为迁移期兜底。
 
-**验证**：新增 `test_process_chat_loop_drains_input_after_stop_hook_before_done`，覆盖 Stop hook 通过后才出现 queued input 时应继续下一轮 LLM；`cargo test -p runtime` 通过。
+**验证**：`cargo test -p sdk chat_input_event`、`cargo test -p runtime input_gate`、`cargo test -p runtime test_process_chat_loop_drains_input_after_stop_hook_before_done`、`cargo check -p runtime -p cli` 均通过；待用户在 TUI 中确认忙碌期追加输入不再残留。
 
 ### #73 EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout
 
