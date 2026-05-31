@@ -76,6 +76,8 @@ Session
           └── Final response
 ```
 
+> **AskUser 归属说明**：`AskUser pause/resume` 由模型发起的 `AskUserQuestion` 工具调用触发——消息协议上是一次 `tool_use → tool_result`，因此可视为一种特殊 ToolExecution。但 Agent Looping **特判接管**它：跳过普通工具执行管线，改以 pause/resume 等待用户回复，再把答案作为 `tool_result` 回灌。所以它在结构上与 `ToolExecution` 平级——**触发归 Tool，pause/resume 机制归 Runtime**。注意：由 Policy 触发的权限 Ask（`PermissionPrompt`，§8）是另一条**非工具**交互路径，二者不要混为一谈。
+
 ### 3.2 跨上下文术语
 
 | 术语 | 所属上下文 | 定义 |

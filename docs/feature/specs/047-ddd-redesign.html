@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>047 · 用 DDD 重新设计 Aemeath — 图解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@300;400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#10131a; --bg-2:#161b24; --bg-3:#1c2230; --bg-4:#232b3b;
+    --line:rgba(216,226,242,.085); --line-2:rgba(216,226,242,.17);
+    --ink:#eae4d6; --ink-2:#e9e6dd; --soft:#9aa4b6; --faint:#646c7c;
+    --brass:#cfa863; --brass-2:#e6ca93; --brass-dim:rgba(207,168,99,.14);
+    --cyan:#74bccb; --cyan-dim:rgba(116,188,203,.13);
+    --violet:#9a8fc4; --violet-dim:rgba(154,143,196,.13);
+    --green:#86b46f; --rose:#cf7d6e;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--ink-2);
+    font-family:"Noto Sans SC",sans-serif; font-weight:300; line-height:1.72;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  body::before{ /* atmosphere */
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(80% 55% at 72% -8%, rgba(207,168,99,.13), transparent 60%),
+      radial-gradient(70% 50% at 8% 8%, rgba(116,188,203,.08), transparent 55%),
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:auto,auto,32px 32px,32px 32px;
+  }
+  body::after{ content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");}
+  .wrap{position:relative;z-index:1;max-width:1060px;margin:0 auto;padding:0 26px}
+
+  a{color:inherit}
+  code,.m{font-family:"IBM Plex Mono",monospace;font-weight:400}
+  code{font-size:.84em;background:rgba(207,168,99,.10);color:var(--brass-2);
+    padding:1px 6px;border-radius:4px;white-space:nowrap;border:1px solid rgba(207,168,99,.16)}
+  .serif{font-family:"Instrument Serif",serif;font-weight:400}
+  .it{font-style:italic}
+
+  /* ---------- hero ---------- */
+  header{padding:96px 0 30px}
+  .kicker{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.34em;
+    text-transform:uppercase;color:var(--brass);margin-bottom:26px;display:flex;gap:14px;align-items:center}
+  .kicker::before{content:"";width:44px;height:1px;background:var(--brass)}
+  h1{font-family:"Instrument Serif",serif;font-weight:400;font-size:clamp(46px,9vw,104px);
+    line-height:.96;letter-spacing:-.01em;color:var(--ink)}
+  h1 .n{color:var(--brass);font-style:italic}
+  h1 small{display:block;font-family:"Noto Sans SC";font-weight:900;
+    font-size:clamp(22px,3.4vw,38px);letter-spacing:.01em;margin-top:18px;color:var(--ink-2);line-height:1.2}
+  .lede{font-family:"Instrument Serif",serif;font-style:italic;font-size:clamp(20px,2.7vw,29px);
+    color:var(--soft);max-width:40ch;margin-top:26px;line-height:1.45}
+  .lede b{color:var(--brass-2);font-style:normal;font-weight:400}
+
+  /* core domain banner */
+  .core-banner{display:flex;flex-wrap:wrap;align-items:center;gap:22px;margin:46px 0 8px;
+    background:linear-gradient(100deg,var(--brass-dim),transparent 80%);
+    border:1px solid rgba(207,168,99,.3);border-left:3px solid var(--brass);
+    border-radius:5px;padding:22px 26px}
+  .core-banner .lab{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.2em;
+    color:var(--brass);text-transform:uppercase}
+  .core-banner .name{font-family:"Instrument Serif",serif;font-size:clamp(30px,5vw,46px);
+    color:var(--brass-2);line-height:1;font-style:italic}
+  .core-banner p{flex:1;min-width:240px;color:var(--soft);font-size:14.5px}
+
+  /* ---------- section scaffold ---------- */
+  section{padding:62px 0 10px}
+  .sh{display:flex;align-items:baseline;gap:18px;margin-bottom:8px}
+  .sh .no{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--brass);
+    letter-spacing:.15em;font-weight:600}
+  .sh h2{font-family:"Noto Sans SC";font-weight:900;font-size:clamp(25px,3.6vw,36px);letter-spacing:.01em}
+  .sh .ln{flex:1;height:1px;background:var(--line-2);align-self:center}
+  .sintro{color:var(--soft);font-size:15px;max-width:62ch;margin:0 0 30px}
+
+  /* 人话 callout */
+  .plain{background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--cyan);
+    border-radius:5px;padding:15px 20px;margin:20px 0;position:relative;font-size:15px;color:var(--ink-2)}
+  .plain::before{content:"人话";position:absolute;top:-10px;left:16px;background:var(--cyan);
+    color:#0c1016;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.18em;
+    font-weight:600;padding:2px 9px;border-radius:3px}
+  .plain b{color:var(--cyan);font-weight:500}
+
+  /* ---------- nested runtime tree ---------- */
+  .tree{background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:30px 32px;
+    font-family:"IBM Plex Mono",monospace;font-size:14px;position:relative;overflow:hidden}
+  .tree .glow{position:absolute;top:-40px;right:-40px;width:220px;height:220px;
+    background:radial-gradient(circle,var(--brass-dim),transparent 70%);pointer-events:none}
+  .node{display:flex;align-items:baseline;gap:14px;padding:5px 0;position:relative}
+  .node .nm{color:var(--brass-2);font-weight:500;font-size:16px}
+  .node .ds{font-family:"Noto Sans SC";font-weight:300;color:var(--soft);font-size:13px}
+  .lvl1{margin-left:0}.lvl2{margin-left:30px}.lvl3{margin-left:60px}.lvl4{margin-left:90px}
+  .lvl2 .nm,.lvl3 .nm{color:var(--cyan)}
+  .lvl4 .nm{color:var(--ink-2);font-weight:400;font-size:14px}
+  .node.sub::before{content:"└─";position:absolute;left:-22px;color:var(--faint)}
+
+  /* ---------- context map: tiers ---------- */
+  .tier{margin-bottom:26px}
+  .tier-lab{display:flex;align-items:center;gap:12px;margin-bottom:14px;
+    font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase}
+  .tier-lab .dot{width:9px;height:9px;border-radius:50%}
+  .tier-lab.core{color:var(--brass)}.tier-lab.core .dot{background:var(--brass)}
+  .tier-lab.supp{color:var(--cyan)}.tier-lab.supp .dot{background:var(--cyan)}
+  .tier-lab.infra{color:var(--violet)}.tier-lab.infra .dot{background:var(--violet)}
+  .ctxgrid{display:grid;gap:12px}
+  .ctxgrid.g1{grid-template-columns:1fr}
+  .ctxgrid.g3{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .ctx{background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:16px 18px;
+    transition:.25s;position:relative}
+  .ctx:hover{transform:translateY(-3px);border-color:var(--line-2);background:var(--bg-3)}
+  .ctx h3{font-family:"Noto Sans SC";font-weight:700;font-size:16px;margin-bottom:4px;
+    display:flex;align-items:center;gap:9px}
+  .ctx h3 .m{font-size:11px;color:var(--faint);font-weight:400}
+  .ctx p{font-size:13px;color:var(--soft);line-height:1.55}
+  .ctx.core-card{background:linear-gradient(120deg,var(--brass-dim),var(--bg-2) 70%);
+    border:1px solid rgba(207,168,99,.35);padding:24px 26px}
+  .ctx.core-card h3{font-size:21px;color:var(--brass-2)}
+  .ctx.core-card h3 .m{color:var(--brass)}
+  .ctx.supp h3{color:var(--cyan)} .ctx.infra h3{color:var(--violet)}
+
+  /* directional dependency strip */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--bg-2);
+    border:1px solid var(--line);border-radius:8px;padding:20px 22px;margin:24px 0;
+    font-family:"IBM Plex Mono",monospace;font-size:13px}
+  .flow .b{padding:7px 13px;border-radius:5px;border:1px solid var(--line-2);background:var(--bg-3);white-space:nowrap}
+  .flow .b.acc{border-color:var(--brass);color:var(--brass-2);background:var(--brass-dim)}
+  .flow .ar{color:var(--faint);font-size:16px}
+
+  /* ---------- feature box (one door) ---------- */
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  @media(max-width:760px){.twocol{grid-template-columns:1fr}}
+  .fbox{background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+  .fbox .door{background:var(--brass-dim);border-bottom:1px solid rgba(207,168,99,.3);
+    padding:12px 18px;font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--brass-2);
+    display:flex;align-items:center;gap:9px}
+  .fbox .door b{font-weight:600}
+  .fbox .door .tag{margin-left:auto;font-size:9px;letter-spacing:.15em;background:var(--brass);
+    color:#0c1016;padding:2px 7px;border-radius:3px}
+  .layer{padding:13px 18px;border-bottom:1px dashed var(--line);display:flex;gap:14px;align-items:baseline}
+  .layer:last-child{border-bottom:0}
+  .layer .lname{font-family:"IBM Plex Mono",monospace;font-size:13px;width:96px;flex-shrink:0}
+  .layer .lpub{color:var(--cyan)} .layer .lpriv{color:var(--faint)}
+  .layer .ldesc{font-size:13px;color:var(--soft)}
+  .layer.pub{background:var(--cyan-dim)}
+  .lockbar{padding:14px 18px;font-size:13px;color:var(--soft);background:var(--bg-3)}
+  .lockbar b{color:var(--ink-2);font-weight:500}
+
+  /* ---------- relationship table ---------- */
+  .rel{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--bg-2);
+    border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+  .rel th,.rel td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+  .rel th{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--brass);background:var(--bg-3);font-weight:600}
+  .rel tr:last-child td{border-bottom:0}
+  .rel td:first-child{font-weight:500;color:var(--ink-2);white-space:nowrap}
+  .rel .when{color:var(--soft)} .rel .where{color:var(--faint);font-family:"IBM Plex Mono",monospace;font-size:11.5px}
+  .rel tr:hover td{background:var(--bg-3)}
+
+  /* ---------- sdk diagram ---------- */
+  .sdk{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:0;
+    background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;padding:26px 20px;margin:6px 0 18px}
+  .sdk .pane{text-align:center;padding:0 14px}
+  .sdk .pane .t{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;
+    color:var(--faint);text-transform:uppercase;margin-bottom:8px}
+  .sdk .pane .b{font-family:"Noto Sans SC";font-weight:700;font-size:15px;line-height:1.3}
+  .sdk .pane.mid .b{color:var(--brass-2);font-family:"IBM Plex Mono";font-size:14px}
+  .sdk .pane small{display:block;color:var(--soft);font-size:12px;font-weight:300;margin-top:6px}
+  .sdk .conn{color:var(--faint);font-family:"IBM Plex Mono";font-size:12px;text-align:center;line-height:1.4}
+  .sdk .conn b{display:block;color:var(--cyan);font-size:15px}
+  @media(max-width:760px){.sdk{grid-template-columns:1fr;gap:14px}.sdk .conn{transform:rotate(90deg)}}
+
+  /* ---------- permission/hook ---------- */
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:9px;font-family:"IBM Plex Mono",monospace;
+    font-size:12.5px;margin:8px 0 4px}
+  .chain .s{padding:6px 11px;border-radius:5px;border:1px solid var(--line-2);background:var(--bg-3)}
+  .chain .s.perm{border-color:var(--cyan);color:var(--cyan)}
+  .chain .s.hook{border-color:var(--violet);color:var(--violet)}
+  .chain .s.aud{border-color:var(--brass);color:var(--brass-2)}
+  .chain .ar{color:var(--faint)}
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}
+  @media(max-width:680px){.vs{grid-template-columns:1fr}}
+  .vscard{background:var(--bg-2);border:1px solid var(--line);border-radius:7px;padding:18px 20px}
+  .vscard.perm{border-top:3px solid var(--cyan)}.vscard.hook{border-top:3px solid var(--violet)}
+  .vscard h4{font-family:"Noto Sans SC";font-weight:700;font-size:15px;margin-bottom:9px}
+  .vscard.perm h4{color:var(--cyan)}.vscard.hook h4{color:var(--violet)}
+  .vscard ul{list-style:none;font-size:13px;color:var(--soft)}
+  .vscard li{padding:3px 0 3px 15px;position:relative}
+  .vscard li::before{content:"·";position:absolute;left:3px;color:var(--faint);font-weight:700}
+
+  /* ---------- decisions chips ---------- */
+  .chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:11px}
+  .chip{background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:14px 16px;
+    display:flex;gap:13px;align-items:flex-start;transition:.2s}
+  .chip:hover{border-color:var(--brass);background:var(--bg-3)}
+  .chip .k{font-family:"Instrument Serif",serif;font-style:italic;font-size:24px;color:var(--brass);
+    line-height:1;flex-shrink:0;width:30px}
+  .chip span{font-size:13.5px;color:var(--ink-2);line-height:1.5}
+  .chip span em{color:var(--soft);font-style:normal}
+
+  footer{padding:64px 0 90px;margin-top:40px;border-top:1px solid var(--line-2);
+    font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;color:var(--faint);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  footer b{color:var(--soft)}
+
+  /* reveal is opt-in: only hides when JS marks body.anim, so no-JS/print/screenshot still shows everything */
+  body.anim .rv{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1)}
+  body.anim .rv.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){body.anim .rv{opacity:1;transform:none;transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <header>
+    <div class="kicker rv">Feature #47 · 架构基线 · 目标态</div>
+    <h1 class="rv">用 <span class="n it">DDD</span> 重新<br>设计 Aemeath
+      <small>把散落在技术分层里的领域概念，重新归位成清晰的边界</small>
+    </h1>
+    <p class="lede rv">这不是一次重构提交，而是后续<b>重构、评审、功能设计</b>都要对照的那张"图纸"。</p>
+
+    <div class="core-banner rv">
+      <div>
+        <div class="lab">核心域 · The Core Domain</div>
+        <div class="name">Agent Runtime</div>
+      </div>
+      <p>从你输入的一句话，推进成完整的 Agent 协作：构造上下文 → 调模型 → 跑工具 → 调度子代理 → 处理交互 → 判断何时停 → 产出结果。其余能力都重要，但都是为它服务的"配角"。</p>
+    </div>
+  </header>
+
+  <!-- ============ 01 统一语言 ============ -->
+  <section>
+    <div class="sh rv"><span class="no">01</span><h2>先统一说话的词</h2><span class="ln"></span></div>
+    <p class="sintro rv">很多 bug 和争论，根子是同一个词每个人理解不同。先把核心结构的"嵌套关系"钉死——谁包含谁，一目了然。</p>
+
+    <div class="tree rv">
+      <div class="glow"></div>
+      <div class="node lvl1"><span class="nm">Session</span><span class="ds">你和 Aemeath 的一整段协作容器</span></div>
+      <div class="node lvl2 sub"><span class="nm">Chat</span><span class="ds">你按一次回车触发的"一整轮"处理</span></div>
+      <div class="node lvl3 sub"><span class="nm">Agent Looping</span><span class="ds">Chat 内部那个不停转的循环</span></div>
+      <div class="node lvl4 sub"><span class="nm">Main Turn / Child Turn*</span><span class="ds">某个 Agent 为一个目标干的一段活</span></div>
+      <div class="node lvl4 sub"><span class="nm">ModelInvocation*</span><span class="ds">一次模型调用</span></div>
+      <div class="node lvl4 sub"><span class="nm">ToolExecution*</span><span class="ds">一次工具执行</span></div>
+      <div class="node lvl4 sub"><span class="nm">Task updates</span><span class="ds">待办清单推进</span></div>
+      <div class="node lvl4 sub"><span class="nm">AskUser pause/resume</span><span class="ds">由 AskUserQuestion 工具触发，Runtime 接管暂停/恢复</span></div>
+      <div class="node lvl4 sub"><span class="nm">Stop Hook · Final response</span><span class="ds">停止判断 / 产出</span></div>
+    </div>
+
+    <div class="plain rv">
+      <b>Agent</b> 是一份"配置化的执行者"——定义用哪个模型、什么角色、什么权限，<b>不是</b>模型本身、也不是一次运行。<br>
+      <b>SubAgent</b> 是父 Turn 派出去的"分身"，权限<b>不能超过</b>父。<br>
+      <b>Task</b> 是运行时的待办/规划状态，不是独立模块；它的持久化投影进 Storage。<br>
+      <b>AskUser</b> 由 <code style="background:rgba(116,188,203,.12);border-color:rgba(116,188,203,.2);color:var(--cyan)">AskUserQuestion</code> 工具触发（协议上是 tool_use→tool_result），但暂停/恢复归 <b>Runtime</b> 接管，不走普通工具管线；而权限 Ask 是另一条<b>非工具</b>路径（§07）。
+    </div>
+  </section>
+
+  <!-- ============ 02 Bounded Context ============ -->
+  <section>
+    <div class="sh rv"><span class="no">02</span><h2>边界：谁负责什么</h2><span class="ln"></span></div>
+    <p class="sintro rv">把系统切成一圈圈"有主的领域"。<span class="serif it" style="color:var(--brass-2)">核心域</span>在最中间编排一切；<span style="color:var(--cyan)">支撑域</span>各管一摊事实与规则；<span style="color:var(--violet)">防腐/基础设施</span>负责和外部世界打交道。</p>
+
+    <div class="tier rv">
+      <div class="tier-lab core"><span class="dot"></span>核心域 · 唯一编排者</div>
+      <div class="ctxgrid g1">
+        <div class="ctx core-card"><h3>Agent Runtime <span class="m">runtime</span></h3>
+          <p>维护 Agent/Session/Chat/Turn/Task，在 Chat 内跑 Agent Looping，调度 Provider·Tool·Memory·Prompt 与 SubAgent，判断完成/失败/取消/被阻止。所有其它域都由它编排。</p></div>
+      </div>
+    </div>
+
+    <div class="tier rv">
+      <div class="tier-lab supp"><span class="dot"></span>支撑域 · 各管一摊</div>
+      <div class="ctxgrid g3">
+        <div class="ctx supp"><h3>Config <span class="m">shared/config</span></h3><p>把 CLI/环境/项目/全局/默认配置，合成<b>一份不可变快照</b>，给各域消费。</p></div>
+        <div class="ctx supp"><h3>Tool <span class="m">tools</span></h3><p>把模型想调的工具、技能、斜杠命令，<b>安全地</b>校验·授权·执行·归一化。</p></div>
+        <div class="ctx supp"><h3>Project <span class="m">project</span></h3><p>提供 cwd/路径/worktree/git 这些"<b>事实</b>"——只给事实，不做授权。</p></div>
+        <div class="ctx supp"><h3>Policy <span class="m">policy</span></h3><p>判断"这个操作<b>准不准</b>"：actor/action/resource → Allow/Ask/Deny。</p></div>
+        <div class="ctx supp"><h3>Audit <span class="m">audit</span></h3><p>记录"<b>谁、在哪、做了啥、为啥</b>"，用 correlation id 串起全链路。</p></div>
+        <div class="ctx supp"><h3>Memory <span class="m">storage</span></h3><p>跨会话的长期记忆：检索·沉淀·置顶·提醒·范围隔离。</p></div>
+        <div class="ctx supp"><h3>Prompt <span class="m">prompt</span></h3><p>加载并合并 AGENTS.md/CLAUDE.md/guidance/系统提示，裁剪成材料。</p></div>
+        <div class="ctx supp"><h3>Storage <span class="m">storage</span></h3><p>把会话/记忆/任务/历史/成本<b>落盘</b>，支持恢复与查询。</p></div>
+      </div>
+    </div>
+
+    <div class="tier rv">
+      <div class="tier-lab infra"><span class="dot"></span>防腐 / 基础设施 · 对接外部</div>
+      <div class="ctxgrid g3">
+        <div class="ctx infra"><h3>Provider <span class="m">provider</span></h3><p>把各家模型协议<b>翻译</b>成统一的内部事件；具体 SDK 调用归 shared/adapter。</p></div>
+        <div class="ctx infra"><h3>Hook <span class="m">hook</span></h3><p>在生命周期点上跑你配的<b>外部脚本</b>，解析 Continue/Block 决定。</p></div>
+        <div class="ctx infra"><h3>External Adapters <span class="m">shared/adapter</span></h3><p>filesystem/git/shell/web/MCP/terminal 等所有外部系统适配的归属地。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 依赖方向 ============ -->
+  <section>
+    <div class="sh rv"><span class="no">03</span><h2>依赖只能朝一个方向</h2><span class="ln"></span></div>
+    <p class="sintro rv">入口很薄，只认 SDK 契约；Runtime 是唯一能调动支撑域的人；支撑域默认只依赖最底层的 shared。<b>箭头永不回头</b>——这就是防止双向依赖的关键。</p>
+    <div class="flow rv">
+      <span class="b">CLI / TUI</span><span class="ar">→</span>
+      <span class="b acc">packages/sdk · AgentClient</span><span class="ar">→</span>
+      <span class="b acc">runtime · 唯一编排者</span><span class="ar">→</span>
+      <span class="b">tools · provider · prompt · project · policy · hook · audit · storage</span><span class="ar">→</span>
+      <span class="b">shared</span>
+    </div>
+    <div class="plain rv"><b>已批准的少数"横向"例外</b>：<code>tools→project</code>（worktree 上下文）、<code>tools→storage</code>（复用 memory 持久化）。横向依赖必须无环、走对方 <code>api</code>、并在 spec 里登记理由——其余一律禁止。</div>
+  </section>
+
+  <!-- ============ 04 目录结构 ============ -->
+  <section>
+    <div class="sh rv"><span class="no">04</span><h2>目录怎么摆 — 一栋楼一个正门</h2><span class="ln"></span></div>
+    <p class="sintro rv">参考 <span class="m" style="color:var(--brass-2)">wanaka-platform</span> 的 feature-boundary：每个 feature 是一栋独立的楼，内部房间私有，<b>只有 <code>api.rs</code> 这一个正门</b>能让别人进。</p>
+
+    <div class="twocol">
+      <div class="rv">
+        <div class="tree" style="font-size:13px;padding:24px 26px">
+          <div class="node lvl1"><span class="nm">agent/</span></div>
+          <div class="node lvl2"><span class="nm">features/</span><span class="ds">业务边界，纵向切</span></div>
+          <div class="node lvl3"><span class="nm">runtime · tools · provider</span></div>
+          <div class="node lvl3"><span class="nm">prompt · project · storage</span></div>
+          <div class="node lvl3"><span class="nm">policy · hook · audit</span></div>
+          <div class="node lvl2"><span class="nm">shared/</span><span class="ds">横切设施 + adapter + 极小内核</span></div>
+          <div class="node lvl2"><span class="nm">composition/</span><span class="ds">唯一装配入口</span></div>
+          <div class="node lvl1" style="margin-top:10px"><span class="nm">packages/</span></div>
+          <div class="node lvl2"><span class="nm">sdk</span><span class="ds">CLI↔Runtime 通信契约</span></div>
+          <div class="node lvl2"><span class="nm">global/logging</span></div>
+        </div>
+      </div>
+
+      <div class="rv">
+        <div class="fbox">
+          <div class="door"><b>&lt;feature&gt;/src/</b> 的内部分层<span class="tag">一栋楼</span></div>
+          <div class="layer pub"><span class="lname lpub">contract/</span><span class="ldesc">对外公开的"<b style="color:var(--cyan)">数据词汇</b>"：DTO/事件/命令/查询</span></div>
+          <div class="layer pub"><span class="lname lpub">gateway/</span><span class="ldesc">对外开放的"<b style="color:var(--cyan)">服务窗口</b>"（OHS）+ wire 工厂</span></div>
+          <div class="layer"><span class="lname lpriv">core/</span><span class="ldesc">内部编排 / 用例 / 端口 <span style="color:var(--faint)">（私有）</span></span></div>
+          <div class="layer"><span class="lname lpriv">business/</span><span class="ldesc">领域规则 / 状态机 / 不变量 <span style="color:var(--faint)">（私有）</span></span></div>
+          <div class="layer"><span class="lname lpriv">utils/</span><span class="ldesc">feature 私有工具 <span style="color:var(--faint)">（私有）</span></span></div>
+          <div class="layer"><span class="lname" style="color:var(--brass-2)">api.rs</span><span class="ldesc">唯一的<b style="color:var(--brass-2)">正门</b>：只把 contract + gateway 摆出去</span></div>
+          <div class="lockbar">跨 feature 只能 <code>&lt;other&gt;::api::*</code>；<b>禁止</b>闯进对方 core/business/utils。这条由<b>架构守卫脚本</b>在 Stop hook 强制，不靠自觉。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 关系类型 ============ -->
+  <section>
+    <div class="sh rv"><span class="no">05</span><h2>两个 feature 要协作，走哪种关系</h2><span class="ln"></span></div>
+    <p class="sintro rv">DDD 给跨边界协作分了几种"正规姿势"。先想清楚是哪种，再决定代码放哪——而不是随手 import。</p>
+    <table class="rel rv">
+      <thead><tr><th>关系类型</th><th>什么时候用</th><th>落在哪</th></tr></thead>
+      <tbody>
+        <tr><td>OHS / 发布语言</td><td class="when"><b style="color:var(--cyan)">默认</b>：跨 feature 的同步查询 / 命令</td><td class="where">supplier 的 gateway + contract，经 api 调</td></tr>
+        <tr><td>防腐层 ACL</td><td class="when">consumer 想用自己的词汇，不吃 supplier 的模型</td><td class="where">consumer 内部 core/ 的包装层</td></tr>
+        <tr><td>共享内核</td><td class="when">两边都认同的<b>极小</b>通用类型</td><td class="where">shared/ids · types · errors · config</td></tr>
+        <tr><td>领域事件</td><td class="when">状态变了要通知别人（异步）</td><td class="where">contract/events + runtime 编排分发</td></tr>
+        <tr><td>Conformist</td><td class="when">必须原样接受外部系统模型</td><td class="where">仅对外部系统 · shared/adapter</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 06 AgentClient ============ -->
+  <section>
+    <div class="sh rv"><span class="no">06</span><h2>入口为什么"薄" — AgentClient 遥控器</h2><span class="ln"></span></div>
+    <p class="sintro rv">CLI/TUI 只认一个"遥控器"接口 <code>AgentClient</code>，完全不碰 Runtime 内部。要看状态拿"快照"，要知道变化听"变更通道"。</p>
+
+    <div class="sdk rv">
+      <div class="pane"><div class="t">入口</div><div class="b">CLI / TUI<small>只渲染、只转发</small></div></div>
+      <div class="conn">契约<b>↔</b>无内部细节</div>
+      <div class="pane mid"><div class="t">唯一通道</div><div class="b">AgentClient<small>trait（packages/sdk）</small></div></div>
+      <div class="conn">薄代理<b>↔</b></div>
+      <div class="pane"><div class="t">实现</div><div class="b">Runtime<small>拥有全部初始化与编排</small></div></div>
+    </div>
+
+    <div class="plain rv">
+      <b>为什么用"快照"不用引用？</b> 直接把 <code>&Session</code> 递给 TUI，会被读写锁卡住、阻塞渲染帧。所以改成：<b>拍一张快照</b>（无锁、CLI 不知道内存布局）+ 一条<b>变更通道</b>（只响个铃 <code>ChangeSet</code>，TUI 收到再去拉对应快照）。会话、成本、任务、项目各对应一个标记位，精确刷新。
+    </div>
+  </section>
+
+  <!-- ============ 07 权限/Hook/Audit ============ -->
+  <section>
+    <div class="sh rv"><span class="no">07</span><h2>权限、Hook、审计 — 三件事别混</h2><span class="ln"></span></div>
+    <p class="sintro rv">最容易混的一处：权限判定（内部安全模型）和 Hook 判定（你配的外部脚本）是<b>两回事</b>。系统要能明确表达——<span class="serif it" style="color:var(--brass-2)">"权限放行了，但 hook 把它拦下了。"</span></p>
+
+    <div class="vs rv">
+      <div class="vscard perm"><h4>PermissionDecision</h4><ul>
+        <li>来源：内部安全模型</li><li>归属：Policy</li>
+        <li>输出：Allow / Ask / Deny</li><li>影响 capability：是</li><li>用于权限继承：是</li></ul></div>
+      <div class="vscard hook"><h4>HookDecision</h4><ul>
+        <li>来源：用户配置的外部脚本</li><li>归属：Hook</li>
+        <li>输出：Continue / Block</li><li>影响 capability：否</li><li>用于权限继承：否</li></ul></div>
+    </div>
+
+    <div class="chain rv" style="margin-top:22px">
+      <span class="s">ToolCall</span><span class="ar">→</span>
+      <span class="s perm">Permission</span><span class="ar">→</span>
+      <span class="s hook">PreToolUse Hook</span><span class="ar">→</span>
+      <span class="s">ToolExecution</span><span class="ar">→</span>
+      <span class="s hook">PostToolUse Hook</span><span class="ar">→</span>
+      <span class="s aud">Audit</span>
+    </div>
+    <div class="plain rv"><b>Audit</b> 把三笔分开记：权限判定、hook 判定、最终结果——只记录事实，不参与判断、不阻止执行。例如 Stop 阶段架构检查没过，hook 仍可拦下"完成"，审计照实记。</div>
+  </section>
+
+  <!-- ============ 08 决策 ============ -->
+  <section>
+    <div class="sh rv"><span class="no">08</span><h2>几条钉死的设计决策</h2><span class="ln"></span></div>
+    <p class="sintro rv">完整 24 条见正文 §10，这里挑最影响"代码该放哪"的几条。</p>
+    <div class="chips">
+      <div class="chip rv"><span class="k">1</span><span>Runtime 是核心域，是<em>唯一编排者</em>，可依赖所有支撑域。</span></div>
+      <div class="chip rv"><span class="k">2</span><span>Agent 是<em>配置化实体</em>，不保存单次执行状态。</span></div>
+      <div class="chip rv"><span class="k">3</span><span>入口必须薄，<em>只经 AgentClient 契约</em>接入，不直连支撑域。</span></div>
+      <div class="chip rv"><span class="k">4</span><span>支撑域默认<em>只依赖 shared</em>；横向依赖须登记批准。</span></div>
+      <div class="chip rv"><span class="k">5</span><span>shared 内核<em>只放数据契约</em>，不放行为 / IO / 并发 / 时间。</span></div>
+      <div class="chip rv"><span class="k">6</span><span>PermissionDecision 与 HookDecision <em>必须分离</em>。</span></div>
+      <div class="chip rv"><span class="k">7</span><span>feature 边界由<em>架构守卫</em>强制，不靠人工约定。</span></div>
+      <div class="chip rv"><span class="k">8</span><span>DDD 定边界，<em>COLA 管内部分层</em>，不互相替代。</span></div>
+    </div>
+  </section>
+
+  <footer class="rv">
+    <span>AEMEATH · FEATURE <b>#47 / #61 / #62</b> · 目标态架构基线</span>
+    <span>图解自 <b>docs/feature/specs/047-ddd-redesign.md</b></span>
+  </footer>
+
+</div>
+<script>
+  document.body.classList.add('anim');
+  const els=[...document.querySelectorAll('.rv')];
+  const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){
+    const p=e.target.parentElement,sibs=[...p.children].filter(c=>c.classList.contains('rv'));
+    e.target.style.transitionDelay=(Math.min(sibs.indexOf(e.target),7)*55)+'ms';
+    e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.1,rootMargin:'0px 0px -7% 0px'});
+  els.forEach(el=>io.observe(el));
+  // safety net: if anything never gets observed (no scroll / odd viewport), reveal it
+  setTimeout(()=>els.forEach(el=>el.classList.add('in')),2600);
+</script>
+</body>
+</html>
