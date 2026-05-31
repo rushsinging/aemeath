@@ -36,8 +36,8 @@ def is_runtime_adapter_migration_path(path: Path) -> bool:
         rel = path.relative_to(root)
     except ValueError:
         return False
-    # Task 10 migration exception: runtime owns port impls until Task 11 moves
-    # initialization/assembly to composition. Keep this exemption narrow.
+    # Temporary narrow exception: runtime::from_args still owns shared adapter port wiring;
+    # Task 11 moves client bootstrap to composition without changing runtime behavior.
     return rel.as_posix() == "agent/features/runtime/src/utils/adapter.rs"
 
 for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
@@ -49,8 +49,8 @@ for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
             continue
         if pattern.search(line):
             violations.append(f"{rel}:{lineno}: direct business crate import/path is forbidden: {line.strip()}")
-        if forbidden_runtime_api.search(line) or forbidden_runtime_use.search(line):
-            violations.append(f"{rel}:{lineno}: CLI must not import runtime directly; use composition: {line.strip()}")
+        if forbidden_runtime_api.search(line) or forbidden_runtime_use.search(line) or "AgentClientImpl" in line or re.search(r"(?:^|[^A-Za-z0-9_])from_args(?:[^A-Za-z0-9_]|$)", line):
+            violations.append(f"{rel}:{lineno}: CLI must not import or name runtime bootstrap internals; use composition::app::build_agent_client: {line.strip()}")
 
 for base in [root / "agent", root / "apps", root / "packages"]:
     if not base.exists():

@@ -14,11 +14,10 @@ pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
 }
 
 /// 从 CLI args 创建 AgentClient（原 runtime_adapter::agent_client_from_args）。
-pub(crate) async fn agent_client_from_args(
-    args: sdk::ChatBootstrapArgs,
+pub(crate) async fn build_client_from_cli_args(
+    args: composition::runtime::AgentArgs,
 ) -> Result<std::sync::Arc<dyn sdk::AgentClient>, sdk::SdkError> {
-    let runtime_client = composition::runtime::from_args(args).await?;
-    Ok(composition::app::agent_client_from_runtime(runtime_client))
+    composition::app::build_agent_client(args).await
 }
 
 fn initial_tui_resume_id(args: &Args) -> Option<String> {
@@ -29,40 +28,37 @@ fn initial_tui_resume_id(args: &Args) -> Option<String> {
 pub(crate) async fn run_chat(args: Args) {
     let args = apply_permission_env_override(args);
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
-    let client = composition::runtime::from_args(args.into())
+    let bootstrap = composition::app::build_agent_bootstrap(args.into())
         .await
         .unwrap_or_else(|e| {
             eprintln!("Error: {e}");
             std::process::exit(1);
         });
+    let session_id = bootstrap.session_id.clone();
 
-    let launch = client.tui_launch_context();
-    let session_id = launch.session_id.clone();
-
-    let mut app = crate::tui::App::new(launch.session_id.clone(), launch.cwd, launch.model_display);
-    app.agent_client = Some(composition::app::agent_client_from_runtime(client.clone()));
-    app.session.memory_config = launch.memory_config;
-    app.set_skills(launch.skills_map);
+    let mut app =
+        crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
+    app.agent_client = Some(bootstrap.client.clone());
+    app.session.memory_config = bootstrap.memory_config;
+    app.set_skills(bootstrap.skills_map);
 
     // 在 run() 之前设置启动上下文（替代 18 参数注入）
-    app.status_bar.set_permission_mode(if launch.allow_all {
+    app.status_bar.set_permission_mode(if bootstrap.allow_all {
         "AllowAll"
     } else {
         "AskMe"
     });
-    app.chat.context_size = launch.context_size;
-    app.status_bar.set_context_size(launch.context_size as u64);
-    app.status_bar.set_thinking(launch.client.is_reasoning());
+    app.chat.context_size = bootstrap.context_size;
+    app.status_bar
+        .set_context_size(bootstrap.context_size as u64);
+    app.status_bar.set_thinking(bootstrap.thinking);
 
-    app.run(
-        composition::app::agent_client_from_runtime(client),
-        initial_resume_id,
-    )
-    .await
-    .unwrap_or_else(|e| {
-        log::error!("TUI error: {e}");
-        std::process::exit(1);
-    });
+    app.run(bootstrap.client, initial_resume_id)
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("TUI error: {e}");
+            std::process::exit(1);
+        });
     println!("aemeath --resume {}", session_id);
 }
 

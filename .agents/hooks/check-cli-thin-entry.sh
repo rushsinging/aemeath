@@ -35,8 +35,8 @@ for path in sorted(Path("apps/cli/src").rglob("*.rs")):
         stripped = line.strip()
         if stripped.startswith("//"):
             continue
-        if re.search(r"\buse\s+runtime::", line) or "runtime::api" in line:
-            violations.append(f"{rel}:{lineno}: CLI must not import runtime directly; use composition: {stripped}")
+        if re.search(r"\buse\s+runtime::", line) or "runtime::api" in line or "AgentClientImpl" in line or re.search(r"(?:^|[^A-Za-z0-9_])from_args(?:[^A-Za-z0-9_]|$)", line):
+            violations.append(f"{rel}:{lineno}: CLI must not import or name runtime bootstrap internals; use composition::app::build_agent_client: {stripped}")
 
 if violations:
     print(json.dumps({"decision": "block", "reason": "Thin CLI guard failed:\n" + "\n".join(violations)}, ensure_ascii=False))
