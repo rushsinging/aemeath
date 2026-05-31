@@ -341,18 +341,22 @@ impl ConversationModel {
         tool_id: String,
         message: String,
     ) -> Vec<ConversationChange> {
-        let block_id = self.next_block_id("agent-progress");
+        // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
+        // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        if let Some(chat) = self.active_chat_mut() {
+            if let Some(turn) = chat.active_turn_mut() {
+                if let Some(call) = turn
+                    .tool_calls
+                    .iter_mut()
+                    .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id))
+                {
+                    call.activities.push(message.clone());
+                }
+            }
+        }
         self.agent_progress
             .push(AgentProgressEntry::new(tool_id.clone(), message.clone()));
-        self.blocks.push(ConversationBlock::AgentProgress {
-            id: block_id.clone(),
-            tool_id: tool_id.clone(),
-            message,
-        });
-        vec![
-            ConversationChange::AgentProgressRecorded { block_id, tool_id },
-            ConversationChange::OutputDirty,
-        ]
+        vec![ConversationChange::OutputDirty]
     }
     fn append_or_extend_text_block(&mut self, text: String, thinking: bool) -> String {
         let active_id = if thinking {

@@ -174,7 +174,5 @@ pub trait AgentClient: Send + Sync + 'static {
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), super::SdkError>;
 
     /// 清空 Runtime 持有的 TaskStore。
-    async fn clear_tasks(&self) -> Result<(), super::SdkError> {
-        Ok(())
-    }
+    async fn clear_tasks(&self) -> Result<(), super::SdkError>;
 }

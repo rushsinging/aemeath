@@ -6,7 +6,7 @@ use crate::tui::view_model::output::ToolCallBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
-/// 渲染工具调用块：仅 header（标题）+ args detail 行。
+/// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
 ///
 /// 工具结果已升为独立子块（`ToolResult` 变体，见 `blocks/tool_result.rs`，#60），
 /// 由 assembler 作为本块的 depth-1 子节点附加，此处不再渲染结果。
@@ -33,6 +33,14 @@ pub fn render_tool_call(
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
             detail,
+            Style::default().fg(theme::TEXT_MUTED),
+        )]));
+    }
+    // 渲染 activity_summary：Agent 等长时间工具执行过程中显示当前进度（如子 agent 当前操作），
+    // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
+    if let Some(activity) = &view.activity_summary {
+        lines.push(RenderedLine::new(vec![Span::styled(
+            activity.clone(),
             Style::default().fg(theme::TEXT_MUTED),
         )]));
     }
