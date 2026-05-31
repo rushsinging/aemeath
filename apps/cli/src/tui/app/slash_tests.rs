@@ -1,11 +1,13 @@
 use super::App;
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{oneshot, watch};
 
 pub(super) struct BlockingReflectionClient {
     pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
     pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
+    pub(super) clear_tasks_calls: AtomicUsize,
 }
 
 #[async_trait]
@@ -187,25 +189,62 @@ impl sdk::AgentClient for BlockingReflectionClient {
     async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
         Ok(())
     }
+
+    async fn clear_tasks(&self) -> Result<(), sdk::SdkError> {
+        self.clear_tasks_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
 pub(super) fn app_with_blocking_reflection_client(
 ) -> (App, oneshot::Receiver<()>, oneshot::Sender<()>) {
+    let (app, started_rx, finish_tx, _) = app_with_blocking_reflection_client_handle();
+    (app, started_rx, finish_tx)
+}
+
+pub(super) fn app_with_blocking_reflection_client_handle() -> (
+    App,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
+    Arc<BlockingReflectionClient>,
+) {
     let (started_tx, started_rx) = oneshot::channel();
     let (finish_tx, finish_rx) = oneshot::channel();
     let client = Arc::new(BlockingReflectionClient {
         started_tx: Mutex::new(Some(started_tx)),
         finish_rx: Mutex::new(Some(finish_rx)),
+        clear_tasks_calls: AtomicUsize::new(0),
     });
     let mut app = App::new(
         "test-session".to_string(),
         std::env::temp_dir(),
         "test-model".to_string(),
     );
-    app.agent_client = Some(client);
+    app.agent_client = Some(client.clone());
     app.session.memory_config.enabled = true;
     app.session.memory_config.reflection.enabled = true;
-    (app, started_rx, finish_tx)
+    (app, started_rx, finish_tx, client)
+}
+
+#[tokio::test]
+async fn test_clear_command_clears_task_store_and_task_window() {
+    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+    app.model.runtime.apply(
+        crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(vec![
+            "━━ Tasks: 1/1 ━━".to_string(),
+            "□ #1 existing".to_string(),
+        ]),
+    );
+    app.refresh_live_status_from_model();
+    assert!(!app.output_area.task_status_lines.is_empty());
+
+    app.handle_slash_command_with_events("/clear", None).await;
+    app.refresh_live_status_from_model();
+
+    assert_eq!(client.clear_tasks_calls.load(Ordering::SeqCst), 1);
+    assert!(app.model.runtime.task_status.lines.is_empty());
+    assert!(app.output_area.task_status_lines.is_empty());
+    let _ = finish_tx.send(());
 }
 
 #[tokio::test]

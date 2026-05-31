@@ -132,4 +132,7 @@ impl AgentClient for AgentClientImpl {
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), SdkError> {
         super::trait_accessor::restore_tasks_impl(self, snapshot).await
     }
+    async fn clear_tasks(&self) -> Result<(), SdkError> {
+        super::trait_accessor::clear_tasks_impl(self).await
+    }
 }
