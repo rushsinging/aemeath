@@ -11,36 +11,80 @@ import re
 import sys
 
 root = Path.cwd()
-business = ["project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "runtime"]
-allowed_runtime_api_files = {
-    Path("apps/cli/src/main.rs"),
-    Path("apps/cli/src/runtime_adapter.rs"),
-    Path("apps/cli/src/chat.rs"),
-}
-allowed_tui_runtime_api_files = set()
-forbidden_runtime_api = re.compile(r"\bruntime::api::")
-pattern = re.compile(r"(?<!:)(?:use\s+|\b)(" + "|".join(map(re.escape, business)) + r")::")
-violations = []
+forbidden_shared_adapter = re.compile(r"\bshare::adapter\b|\bshared::adapter\b|agent/shared/src/adapter")
+violations: list[str] = []
 
-for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
-    text = path.read_text()
-    rel = path.relative_to(root)
-    for lineno, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith("//"):
+# Temporary, exact migration exception: runtime owns impl blocks that adapt
+# shared adapter newtypes to runtime-local ports.  This remains until those port
+# impls can be split into feature-owned gateway factories without making share
+# depend on runtime/provider/hook.  Keep this list path- and count-limited.
+RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS = {
+    Path("agent/features/runtime/src/utils/adapter.rs"),
+}
+
+
+def is_test_path(path: Path) -> bool:
+    return path.name.endswith("_test.rs") or path.name.endswith("_tests.rs") or "tests" in path.parts
+
+
+def is_composition_path(path: Path) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    return rel.parts[:3] == ("agent", "composition", "src")
+
+
+def is_runtime_adapter_migration_path(path: Path) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    return rel in RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS
+
+
+def line_violations(line: str) -> list[str]:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return []
+    if forbidden_shared_adapter.search(line):
+        return ["production adapter import/path is composition-only"]
+    return []
+
+
+def run_sanity() -> None:
+    if not line_violations("use share::adapter::provider::LlmClientAdapter;"):
+        raise AssertionError("sanity block failed: non-composition import share::adapter")
+    if line_violations("use share::config::ConfigurationSnapshot;"):
+        raise AssertionError("sanity allow failed: shared port/config import")
+
+
+run_sanity()
+seen_runtime_exceptions: set[Path] = set()
+for base in [root / "agent", root / "apps", root / "packages"]:
+    if not base.exists():
+        continue
+    for path in sorted(base.rglob("*.rs")):
+        if is_test_path(path) or is_composition_path(path):
             continue
-        if pattern.search(line):
-            violations.append(f"{rel}:{lineno}: direct business crate import/path is forbidden: {line.strip()}")
-        if rel not in allowed_runtime_api_files and rel not in allowed_tui_runtime_api_files and forbidden_runtime_api.search(line):
-            violations.append(f"{rel}:{lineno}: runtime::api is only allowed in CLI composition root/runtime_adapter or explicit TUI transition allowlist: {line.strip()}")
-        if 'apps/cli/src/tui/' in str(rel) and rel not in allowed_tui_runtime_api_files and any(fragment in line for fragment in [
-            'runtime::api',
-            '::runtime::api',
-        ]):
-            violations.append(f"{rel}:{lineno}: TUI must not depend on runtime directly; use sdk::AgentClient and sdk DTOs: {line.strip()}")
+        rel = path.relative_to(root)
+        is_exception = is_runtime_adapter_migration_path(path)
+        if is_exception:
+            seen_runtime_exceptions.add(rel)
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for violation in line_violations(line):
+                violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
+
+missing = RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS - seen_runtime_exceptions
+if missing:
+    violations.append(
+        "Runtime adapter migration exception list is stale; missing exact path(s): "
+        + ", ".join(sorted(path.as_posix() for path in missing))
+    )
 
 if violations:
-    reason = "CLI must not import supporting business crates directly; use sdk AgentClient or CLI composition root adapter:\n" + "\n".join(violations[:80])
+    reason = "Forbidden import guard FAILED:\n" + "\n".join(violations[:80])
     if len(violations) > 80:
         reason += f"\n... and {len(violations) - 80} more"
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))

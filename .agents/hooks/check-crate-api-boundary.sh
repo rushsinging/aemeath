@@ -11,9 +11,7 @@ import re
 import sys
 
 root = Path.cwd()
-# Cross-domain dependencies are allowed only through each crate's published API facade.
-# share is the shared kernel and is intentionally excluded from this facade rule.
-DOMAIN_CRATES = {
+FEATURE_CRATES = {
     "runtime",
     "project",
     "policy",
@@ -24,26 +22,36 @@ DOMAIN_CRATES = {
     "hook",
     "audit",
 }
-INTERNAL_SEGMENTS = {"business", "core", "utils"}
-PUBLIC_ROOT_ALLOW = {
-    "provider": {"ApiDriverKind", "LlmError"},
+INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
+API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
+ROOT_REEXPORT_ALLOW = {
+    "project": {"ProjectContext"},
 }
 
 path_pattern = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?("
-    + "|".join(sorted(map(re.escape, DOMAIN_CRATES)))
+    + "|".join(sorted(map(re.escape, FEATURE_CRATES)))
     + r")::([A-Za-z_][A-Za-z0-9_]*)"
 )
 braced_pattern = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?("
-    + "|".join(sorted(map(re.escape, DOMAIN_CRATES)))
+    + "|".join(sorted(map(re.escape, FEATURE_CRATES)))
     + r")::\s*\{([^}]*)"
 )
+crate_reexport_pattern = re.compile(r"crate::([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def crate_for(path: Path) -> str | None:
     parts = path.parts
     if len(parts) >= 3 and parts[0] == "agent":
+        if parts[1] == "shared":
+            return "share"
+        if parts[1] == "features" and len(parts) >= 4:
+            return parts[2]
+        return parts[1]
+    if len(parts) >= 2 and parts[0] == "packages":
+        return parts[1]
+    if len(parts) >= 2 and parts[0] == "apps":
         return parts[1]
     return None
 
@@ -71,12 +79,12 @@ def top_level_items(inner: str) -> list[str]:
     return items
 
 
-def check_line(current_crate: str | None, line: str) -> list[str]:
+def check_cross_crate_line(current_crate: str | None, line: str) -> list[str]:
     stripped = line.strip()
     if not stripped or stripped.startswith("//") or stripped.startswith("*"):
         return []
 
-    violations = []
+    violations: list[str] = []
     for match in path_pattern.finditer(line):
         prefix = line[: match.start()].rstrip()
         if "::" in prefix or "{" in prefix or (
@@ -85,21 +93,13 @@ def check_line(current_crate: str | None, line: str) -> list[str]:
         ):
             continue
         target, segment = match.groups()
-        if target == current_crate:
+        if target == current_crate or current_crate == "share":
             continue
-        if current_crate == "share":
-            continue
-        if segment in PUBLIC_ROOT_ALLOW.get(target, set()):
-            continue
-        if stripped.startswith("pub use ") and "::" not in prefix and segment != "api":
+        if segment in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
             continue
         if segment != "api":
             violations.append(
-                f"cross-crate access to {target}::{segment} is forbidden; use {target}::api"
-            )
-        elif segment in INTERNAL_SEGMENTS:
-            violations.append(
-                f"cross-crate access to {target}::{segment} is forbidden; use {target}::api"
+                f"cross-feature access to {target}::{segment} is forbidden; use {target}::api"
             )
 
     for match in braced_pattern.finditer(line):
@@ -110,21 +110,32 @@ def check_line(current_crate: str | None, line: str) -> list[str]:
         ):
             continue
         target, inner = match.groups()
-        if target == current_crate:
-            continue
-        if current_crate == "share":
+        if target == current_crate or current_crate == "share":
             continue
         for item in top_level_items(inner):
             item_name = item.split("::", 1)[0].strip()
             item_name = item_name.split(" as ", 1)[0].strip()
             if not item_name:
                 continue
-            if item_name in PUBLIC_ROOT_ALLOW.get(target, set()):
+            if item_name in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
                 continue
             if item_name != "api":
                 violations.append(
-                    f"cross-crate braced import from {target} exposes {item_name}; use {target}::api::..."
+                    f"cross-feature braced import from {target} exposes {item_name}; use {target}::api::..."
                 )
+    return violations
+
+
+def check_api_line(line: str) -> list[str]:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return []
+    violations: list[str] = []
+    for segment in crate_reexport_pattern.findall(line):
+        if segment not in API_FACADE_ALLOWED_SEGMENTS:
+            violations.append(
+                "feature api.rs may only re-export crate::contract or crate::gateway"
+            )
     return violations
 
 
@@ -133,8 +144,7 @@ def run_sanity() -> None:
         ("runtime", "use provider::api::LlmClient;"),
         ("tools", "let _ = project::api::workspace_context_from_tool_context(ctx);"),
         ("provider", "use crate::core::client::LlmClient;"),
-        ("runtime", "use provider::{ApiDriverKind, LlmError};"),
-        ("share", "pub use storage::StorageConfig;"),
+        ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
     ]
     blocked = [
@@ -143,15 +153,25 @@ def run_sanity() -> None:
         ("runtime", "use storage::{api::MemoryStore, MemoryStore as RootStore};"),
     ]
     for current, line in allowed:
-        if check_line(current, line):
+        if check_cross_crate_line(current, line):
             raise AssertionError(f"sanity allow failed: {line}")
     for current, line in blocked:
-        if not check_line(current, line):
+        if not check_cross_crate_line(current, line):
             raise AssertionError(f"sanity block failed: {line}")
+    if not check_api_line("pub use crate::business::Secret;"):
+        raise AssertionError("sanity block failed: feature api.rs re-exporting business")
+    if check_api_line("pub use crate::contract::*;") or check_api_line("pub use crate::gateway::*;"):
+        raise AssertionError("sanity allow failed: api contract/gateway re-export")
 
 
 run_sanity()
-violations = []
+violations: list[str] = []
+for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
+    rel = api_path.relative_to(root)
+    for lineno, line in enumerate(api_path.read_text().splitlines(), 1):
+        for violation in check_api_line(line):
+            violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
+
 for base in [root / "agent", root / "apps", root / "packages"]:
     if not base.exists():
         continue
@@ -161,7 +181,7 @@ for base in [root / "agent", root / "apps", root / "packages"]:
         rel = path.relative_to(root)
         current = crate_for(rel)
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            for violation in check_line(current, line):
+            for violation in check_cross_crate_line(current, line):
                 violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
 
 if violations:

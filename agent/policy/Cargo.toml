@@ -1,8 +1,0 @@
-[package]
-name = "policy"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-share = { path = "../share" }
-regex = "1"
