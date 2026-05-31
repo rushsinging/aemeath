@@ -128,13 +128,22 @@ impl ConversationModel {
     }
 
     fn observe_tool_call_start(&mut self, name: String, index: usize) -> Vec<ConversationChange> {
+        log::warn!("[orphan-diag] observe_tool_call_start ENTRY name={name} index={index} chats={}",
+            self.chats.len());
         let Some(chat_id) = self.active_chat_id.clone() else {
+            log::warn!("[orphan-diag] observe_tool_call_start FAIL: no active_chat_id name={name} index={index}");
             return Vec::new();
         };
         if let Some(chat) = self.active_chat_mut() {
             if let Some(turn) = chat.active_turn_mut() {
                 turn.observe_tool_start(chat_id, name.clone(), index);
+                log::warn!("[orphan-diag] observe_tool_call_start OK name={name} index={index} turn_tool_calls={}",
+                    turn.tool_calls.len());
+            } else {
+                log::warn!("[orphan-diag] observe_tool_call_start FAIL: no active_turn name={name} index={index}");
             }
+        } else {
+            log::warn!("[orphan-diag] observe_tool_call_start FAIL: no active_chat name={name} index={index}");
         }
         vec![
             ConversationChange::ToolCallObserved { name, index },
@@ -150,27 +159,49 @@ impl ConversationModel {
         summary: String,
     ) -> Vec<ConversationChange> {
         let Some(chat) = self.active_chat_mut() else {
+            log::warn!("[orphan-diag] observe_tool_call FAIL: no active_chat id={id} name={name} index={index}");
             return Vec::new();
         };
         let Some(turn) = chat.active_turn_mut() else {
+            log::warn!("[orphan-diag] observe_tool_call FAIL: no active_turn id={id} name={name} index={index}");
             return Vec::new();
         };
         let tool_call_id = ToolCallId::new(id.clone());
+        let used_fallback: bool;
         let args_preview = match turn.bind_tool(
             tool_call_id.clone(),
             &name,
             index,
             summary.clone(),
         ) {
-            Some(preview) => preview,
+            Some(preview) => {
+                used_fallback = false;
+                log::warn!("[orphan-diag] observe_tool_call BIND_OK id={id} name={name} index={index}");
+                preview
+            }
             None => {
                 // bind_tool 失败时（如 provider 未发送 ToolCallStart），自动创建占位并绑定。
+                used_fallback = true;
+                let unbound_count = turn.tool_calls.iter().filter(|c| c.id.is_none()).count();
+                log::warn!(
+                    "[orphan-diag] observe_tool_call BIND_FAIL id={id} name={name} index={index} total_tool_calls={} unbound={unbound_count} -> auto-creating placeholder",
+                    turn.tool_calls.len(),
+                );
                 let chat_id = ChatId::new("late-bind");
                 turn.observe_tool_start(chat_id, name.clone(), index);
-                turn.bind_tool(tool_call_id.clone(), &name, index, summary.clone())
-                    .unwrap_or_default()
+                let retry = turn.bind_tool(tool_call_id.clone(), &name, index, summary.clone());
+                if retry.is_some() {
+                    log::warn!("[orphan-diag] observe_tool_call FALLBACK_OK id={id} name={name} index={index}");
+                } else {
+                    log::warn!("[orphan-diag] observe_tool_call FALLBACK_FAIL id={id} name={name} index={index}");
+                }
+                retry.unwrap_or_default()
             }
         };
+        log::warn!(
+            "[orphan-diag] observe_tool_call DONE id={id} name={name} index={index} fallback={used_fallback} tool_calls_after={}",
+            turn.tool_calls.iter().filter(|c| c.id.is_some()).count(),
+        );
         self.promote_orphan_tool_result(&id);
         let existing_tool_position = self.blocks.iter().position(|block| {
             matches!(
