@@ -44,6 +44,8 @@ mod tests {
     #[test]
     fn test_add_result_needs_eviction_holds_candidates() {
         let entry = MemoryEntry::new(
+            "memory-1",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Fact,
             "candidate",

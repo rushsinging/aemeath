@@ -31,12 +31,7 @@ forbidden_patterns = [
     (re.compile(r"\bUuid::now_v7\b|\bUuid::new_v4\b"), "share kernel must not generate ids (inject from caller)"),
 ]
 
-per_file_exemptions = {
-    "error.rs": "existing shared clock debt outside Task 2 scope; remove when ErrorContext clock is injected",
-    "memory/entry.rs": "existing shared memory clock/uuid debt outside Task 2 scope; remove when id/time are injected",
-    "memory/session_reminder.rs": "existing shared reminder uuid debt outside Task 2 scope; remove when id is injected",
-    "task/types.rs": "existing shared task clock debt outside Task 2 scope; remove when timestamps are injected",
-}
+per_file_exemptions = {}
 
 forbidden_modules = {
     "task/batch.rs": "task batch behavior belongs to storage::api",

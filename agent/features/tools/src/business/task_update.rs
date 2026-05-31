@@ -4,6 +4,15 @@ use serde_json::Value;
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
+fn current_timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or_default()
+}
+
 pub struct TaskUpdateTool {
     pub store: Arc<TaskStore>,
 }
@@ -49,6 +58,7 @@ impl Tool for TaskUpdateTool {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+        let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return ToolResult::error("missing required parameter: taskId"),
@@ -140,14 +150,14 @@ impl Tool for TaskUpdateTool {
                 if let Some(add_tags) = input.get("addTags").and_then(|v| v.as_array()) {
                     for tag in add_tags {
                         if let Some(t) = tag.as_str() {
-                            task.add_tag(t.to_string());
+                            task.add_tag(t.to_string(), now);
                         }
                     }
                 }
                 if let Some(remove_tags) = input.get("removeTags").and_then(|v| v.as_array()) {
                     for tag in remove_tags {
                         if let Some(t) = tag.as_str() {
-                            task.remove_tag(t);
+                            task.remove_tag(t, now);
                         }
                     }
                 }

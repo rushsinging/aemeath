@@ -39,6 +39,8 @@ mod tests {
 
     fn entry() -> MemoryEntry {
         let mut entry = MemoryEntry::new(
+            "memory-1",
+            1_000_000,
             MemoryLayer::Project,
             MemoryCategory::Pattern,
             "测试",

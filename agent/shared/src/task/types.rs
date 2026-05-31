@@ -51,6 +51,21 @@ pub enum TaskStatus {
     Deleted,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskTimestamps {
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+impl TaskTimestamps {
+    pub fn new(created_at: u64, updated_at: u64) -> Self {
+        Self {
+            created_at,
+            updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
@@ -75,10 +90,10 @@ pub struct Task {
     #[serde(default)]
     pub progress_message: Option<String>,
     /// Creation timestamp (milliseconds since epoch)
-    #[serde(default = "default_timestamp")]
+    #[serde(default)]
     pub created_at: u64,
     /// Last updated timestamp
-    #[serde(default = "default_timestamp")]
+    #[serde(default)]
     pub updated_at: u64,
     /// Session ID this task belongs to
     #[serde(default)]
@@ -92,41 +107,32 @@ pub struct Task {
     pub batch: u64,
 }
 
-pub(crate) fn default_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or_default()
-}
-
 impl Task {
     /// Update progress
-    pub fn set_progress(&mut self, progress: u8, message: Option<String>) {
+    pub fn set_progress(&mut self, progress: u8, message: Option<String>, updated_at: u64) {
         self.progress = progress.min(100);
         self.progress_message = message;
-        self.updated_at = default_timestamp();
+        self.updated_at = updated_at;
     }
 
     /// Set priority
-    pub fn set_priority(&mut self, priority: TaskPriority) {
+    pub fn set_priority(&mut self, priority: TaskPriority, updated_at: u64) {
         self.priority = priority;
-        self.updated_at = default_timestamp();
+        self.updated_at = updated_at;
     }
 
     /// Add a tag
-    pub fn add_tag(&mut self, tag: String) {
+    pub fn add_tag(&mut self, tag: String, updated_at: u64) {
         if !self.tags.contains(&tag) {
             self.tags.push(tag);
-            self.updated_at = default_timestamp();
+            self.updated_at = updated_at;
         }
     }
 
     /// Remove a tag
-    pub fn remove_tag(&mut self, tag: &str) {
+    pub fn remove_tag(&mut self, tag: &str, updated_at: u64) {
         self.tags.retain(|t| t != tag);
-        self.updated_at = default_timestamp();
+        self.updated_at = updated_at;
     }
 }
 
@@ -159,13 +165,12 @@ pub struct Batch {
 }
 
 impl Batch {
-    pub fn new(id: u64) -> Self {
-        let now = default_timestamp();
+    pub fn new(id: u64, created_at: u64) -> Self {
         Self {
             id,
             summary: None,
             status: BatchStatus::Active,
-            created_at: now,
+            created_at,
             last_active_turn: 0,
             silence_turns: 0,
         }

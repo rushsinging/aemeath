@@ -1,4 +1,3 @@
-use super::entry::current_timestamp_secs;
 use super::error::{MemoryError, MemoryResult};
 use serde::{Deserialize, Serialize};
 
@@ -20,18 +19,26 @@ impl SessionReminders {
         Self::default()
     }
 
-    pub fn add(&mut self, content: impl Into<String>) -> MemoryResult<String> {
+    pub fn add(
+        &mut self,
+        id: impl Into<String>,
+        content: impl Into<String>,
+        created_at: u64,
+    ) -> MemoryResult<String> {
+        let id = id.into();
         let content = content.into();
+        if id.trim().is_empty() {
+            return Err(MemoryError::invalid_input("reminder id 不能为空"));
+        }
         if content.trim().is_empty() {
             return Err(MemoryError::invalid_input("reminder 内容不能为空"));
         }
 
-        let id = uuid::Uuid::now_v7().to_string();
         self.reminders.push(SessionReminder {
             id: id.clone(),
             content,
             done: false,
-            created_at: current_timestamp_secs(),
+            created_at,
         });
         Ok(id)
     }
@@ -77,18 +84,28 @@ mod tests {
     #[test]
     fn test_session_reminders_add() {
         let mut reminders = SessionReminders::new();
-        let id = reminders.add("处理 /clear bug").unwrap();
+        let id = reminders.add("reminder-1", "处理 /clear bug", 123).unwrap();
 
-        assert!(!id.is_empty());
+        assert_eq!(id, "reminder-1");
         assert_eq!(reminders.list().len(), 1);
         assert_eq!(reminders.list()[0].content, "处理 /clear bug");
+        assert_eq!(reminders.list()[0].created_at, 123);
         assert!(!reminders.list()[0].done);
     }
 
     #[test]
     fn test_session_reminders_add_empty_error() {
         let mut reminders = SessionReminders::new();
-        let result = reminders.add("   ");
+        let result = reminders.add("reminder-1", "   ", 123);
+
+        assert!(matches!(result, Err(MemoryError::InvalidInput { .. })));
+        assert!(reminders.list().is_empty());
+    }
+
+    #[test]
+    fn test_session_reminders_add_empty_id_error() {
+        let mut reminders = SessionReminders::new();
+        let result = reminders.add("   ", "处理 /clear bug", 123);
 
         assert!(matches!(result, Err(MemoryError::InvalidInput { .. })));
         assert!(reminders.list().is_empty());
@@ -97,7 +114,7 @@ mod tests {
     #[test]
     fn test_session_reminders_complete() {
         let mut reminders = SessionReminders::new();
-        let id = reminders.add("测试 reminder").unwrap();
+        let id = reminders.add("reminder-1", "测试 reminder", 123).unwrap();
 
         reminders.complete(&id).unwrap();
 
@@ -116,8 +133,8 @@ mod tests {
     #[test]
     fn test_session_reminders_recap_line() {
         let mut reminders = SessionReminders::new();
-        reminders.add("任务一").unwrap();
-        reminders.add("任务二").unwrap();
+        reminders.add("reminder-1", "任务一", 123).unwrap();
+        reminders.add("reminder-2", "任务二", 124).unwrap();
 
         assert_eq!(
             reminders.recap_line().as_deref(),
@@ -128,7 +145,7 @@ mod tests {
     #[test]
     fn test_session_reminders_clear() {
         let mut reminders = SessionReminders::new();
-        reminders.add("任务一").unwrap();
+        reminders.add("reminder-1", "任务一", 123).unwrap();
 
         reminders.clear();
 

@@ -102,6 +102,8 @@ mod tests {
     #[test]
     fn test_format_memory_list_with_entry() {
         let entry = MemoryEntry::new(
+            "memory-1",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Decision,
             "使用 JSON 存储",

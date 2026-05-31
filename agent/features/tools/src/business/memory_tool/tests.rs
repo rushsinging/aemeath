@@ -73,6 +73,8 @@ async fn test_memory_tool_add_and_search() {
     let ctx = test_ctx(dir.path().join("project"));
     let mut store = open_store_with_base(&ctx, dir.path().to_path_buf()).unwrap();
     let entry = MemoryEntry::new(
+        "memory-1",
+        100,
         MemoryLayer::Project,
         MemoryCategory::Decision,
         "使用 MemoryTool 管理记忆",

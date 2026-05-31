@@ -55,14 +55,15 @@ pub struct MemoryEntry {
 
 impl MemoryEntry {
     pub fn new(
+        id: impl Into<String>,
+        now: u64,
         layer: MemoryLayer,
         category: MemoryCategory,
         content: impl Into<String>,
         source: MemorySource,
     ) -> Self {
-        let now = current_timestamp_secs();
         Self {
-            id: uuid::Uuid::now_v7().to_string(),
+            id: id.into(),
             layer,
             category,
             content: content.into(),
@@ -100,12 +101,6 @@ impl MemoryEntry {
     }
 }
 
-pub fn current_timestamp_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 
 #[cfg(test)]
 mod tests {
@@ -114,23 +109,29 @@ mod tests {
     #[test]
     fn test_memory_entry_new() {
         let entry = MemoryEntry::new(
+            "memory-1",
+            123,
             MemoryLayer::Project,
             MemoryCategory::Decision,
             "使用 JSON 文件存储 memory",
             MemorySource::User,
         );
 
+        assert_eq!(entry.id, "memory-1");
+        assert_eq!(entry.created_at, 123);
+        assert_eq!(entry.accessed_at, 123);
         assert_eq!(entry.layer, MemoryLayer::Project);
         assert_eq!(entry.category, MemoryCategory::Decision);
         assert_eq!(entry.content, "使用 JSON 文件存储 memory");
         assert_eq!(entry.source, MemorySource::User);
-        assert!(!entry.id.is_empty());
         assert!(!entry.pinned);
     }
 
     #[test]
     fn test_memory_entry_touch() {
         let mut entry = MemoryEntry::new(
+            "memory-2",
+            100,
             MemoryLayer::Global,
             MemoryCategory::Preference,
             "中文回复",
@@ -146,6 +147,8 @@ mod tests {
     #[test]
     fn test_memory_entry_ttl_expired() {
         let mut entry = MemoryEntry::new(
+            "memory-3",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Fact,
             "临时事实",
@@ -161,6 +164,8 @@ mod tests {
     #[test]
     fn test_memory_entry_serde_lowercase() {
         let entry = MemoryEntry::new(
+            "memory-4",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Pitfall,
             "避免 print_stdout",

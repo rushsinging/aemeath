@@ -79,13 +79,28 @@ fn add_memory(args: &str, ctx: &CommandContext) -> CommandResult {
         Ok(store) => store,
         Err(error) => return CommandResult::Error(error),
     };
-    let entry = MemoryEntry::new(layer, category, content, MemorySource::User)
-        .with_source_ref(ctx.session_id.clone());
+    let now = current_timestamp_secs();
+    let entry = MemoryEntry::new(
+        uuid::Uuid::now_v7().to_string(),
+        now,
+        layer,
+        category,
+        content,
+        MemorySource::User,
+    )
+    .with_source_ref(ctx.session_id.clone());
 
     match store.add(entry) {
         Ok(result) => CommandResult::Success(format_add_result(result)),
         Err(error) => CommandResult::Error(error.to_string()),
     }
+}
+
+fn current_timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn delete_memory(id: &str, ctx: &CommandContext) -> CommandResult {

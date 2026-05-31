@@ -106,6 +106,8 @@ mod tests {
     #[test]
     fn test_build_lightweight_output_normal_memory() {
         let entry = MemoryEntry::new(
+            "memory-1",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Decision,
             "使用 Memory 注入系统提示",
@@ -120,6 +122,8 @@ mod tests {
     #[test]
     fn test_build_lightweight_output_does_not_delete_outdated_memory() {
         let mut entry = MemoryEntry::new(
+            "memory-2",
+            100,
             MemoryLayer::Project,
             MemoryCategory::Decision,
             "旧决策",

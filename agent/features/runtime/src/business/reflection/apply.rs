@@ -8,7 +8,10 @@ pub fn apply_suggestions(
 ) -> ReflectionResult<usize> {
     let mut added = 0;
     for suggestion in suggestions {
+        let now = current_timestamp_secs();
         let mut entry = MemoryEntry::new(
+            uuid::Uuid::now_v7().to_string(),
+            now,
             MemoryLayer::Project,
             suggestion.category,
             suggestion.content.clone(),
@@ -19,6 +22,13 @@ pub fn apply_suggestions(
         added += 1;
     }
     Ok(added)
+}
+
+fn current_timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 pub fn apply_outdated(ids: &[String], store: &mut MemoryStore) -> ReflectionResult<usize> {
