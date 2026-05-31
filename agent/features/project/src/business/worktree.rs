@@ -440,8 +440,10 @@ mod tests {
         let result = enter_worktree(&ctx, Some(isolated_root.join("nonexistent")), None);
         let _ = std::fs::remove_dir_all(&isolated_root);
         assert!(result.is_err());
+        let error = result.unwrap_err();
         // 不应报"先 ExitWorktree"，报错应为路径/branch 相关
-        assert!(!result.unwrap_err().contains("先 ExitWorktree"));
+        assert!(!error.contains("先 ExitWorktree"), "{error}");
+        assert!(error.contains("branch"), "{error}");
     }
 
     /// 测试在 worktree 中嵌套 enter 被拒绝。此测试需要在 worktree 中运行才有效，
