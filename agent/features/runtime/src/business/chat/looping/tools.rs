@@ -227,30 +227,6 @@ where
         .await;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::tool_results_for_api;
-    use crate::business::compact::MAX_TOOL_RESULT_CHARS;
-    use share::message::ContentBlock;
-
-    #[test]
-    fn test_tool_results_for_api_persists_oversized_tui_result() {
-        let session_id = format!("test-tui-{}", std::process::id());
-        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
-        let results = vec![("tool-oversized".to_string(), oversized, false, Vec::new())];
-
-        let message = tool_results_for_api(results, &session_id);
-
-        let [ContentBlock::ToolResult { content, .. }] = message.content.as_slice() else {
-            panic!("expected one tool result");
-        };
-        let text = content.as_str().expect("tool result should be string");
-        assert!(text.contains("<persisted-output>"));
-        assert!(text.len() < MAX_TOOL_RESULT_CHARS);
-        assert!(text.contains(&session_id));
-    }
-}
-
 pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
@@ -279,5 +255,29 @@ pub(crate) fn log_tool_result(
             .lock()
             .unwrap()
             .log_tool_result(turn_count, "default", client_model, tr_data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_results_for_api;
+    use crate::business::compact::MAX_TOOL_RESULT_CHARS;
+    use share::message::ContentBlock;
+
+    #[test]
+    fn test_tool_results_for_api_persists_oversized_tui_result() {
+        let session_id = format!("test-tui-{}", std::process::id());
+        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
+        let results = vec![("tool-oversized".to_string(), oversized, false, Vec::new())];
+
+        let message = tool_results_for_api(results, &session_id);
+
+        let [ContentBlock::ToolResult { content, .. }] = message.content.as_slice() else {
+            panic!("expected one tool result");
+        };
+        let text = content.as_str().expect("tool result should be string");
+        assert!(text.contains("<persisted-output>"));
+        assert!(text.len() < MAX_TOOL_RESULT_CHARS);
+        assert!(text.contains(&session_id));
     }
 }

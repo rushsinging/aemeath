@@ -14,7 +14,6 @@ pub struct OpenAICompatibleProvider {
     pub(super) user_agent: String,
     pub(super) http: reqwest::Client,
     pub(super) max_retries: u32,
-    pub(super) timeout_secs: u64,
     pub(super) reasoning: Arc<std::sync::atomic::AtomicBool>,
     pub(super) reasoning_config: Arc<Mutex<Option<ReasoningConfig>>>,
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
@@ -51,29 +50,10 @@ impl OpenAICompatibleProvider {
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
-            timeout_secs: 120,
             reasoning: Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
             reasoning_config: Arc::new(Mutex::new(reasoning_config)),
             driver,
         }
-    }
-
-    pub fn reasoning_handle(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        self.reasoning.clone()
-    }
-
-    pub fn with_max_retries(mut self, retries: u32) -> Self {
-        self.max_retries = retries;
-        self
-    }
-
-    pub fn with_timeout_secs(mut self, secs: u64) -> Self {
-        self.timeout_secs = secs;
-        self.http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(secs))
-            .build()
-            .expect("failed to create HTTP client with custom timeout");
-        self
     }
 
     pub(crate) fn chat_url(&self) -> String {

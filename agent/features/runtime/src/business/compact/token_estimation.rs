@@ -341,7 +341,7 @@ mod tests {
         let tokens = estimate_tokens("hello world");
         assert!(tokens > 0);
         // "hello world" is 11 chars, should be about 3 tokens
-        assert!(tokens >= 3 && tokens <= 5);
+        assert!((3..=5).contains(&tokens));
     }
 
     #[test]

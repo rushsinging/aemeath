@@ -57,58 +57,6 @@ impl crate::business::chat::QueueDrainPort for RuntimeQueueDrainPort {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct CountingQueueDrainPort {
-        calls: Arc<AtomicUsize>,
-        queued: Mutex<Option<Vec<String>>>,
-    }
-
-    impl CountingQueueDrainPort {
-        fn new(queued: Option<Vec<String>>) -> Self {
-            Self {
-                calls: Arc::new(AtomicUsize::new(0)),
-                queued: Mutex::new(queued),
-            }
-        }
-    }
-
-    impl sdk::QueueDrainPort for CountingQueueDrainPort {
-        fn drain_queued_input<'a>(&'a self) -> sdk::QueueFuture<'a> {
-            Box::pin(async move {
-                self.calls.fetch_add(1, Ordering::SeqCst);
-                self.queued.lock().unwrap().take()
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn test_runtime_queue_drain_port_forwards_to_sdk_queue() {
-        let sdk_queue = Arc::new(CountingQueueDrainPort::new(Some(vec![
-            "queued input".to_string()
-        ])));
-        let calls = sdk_queue.calls.clone();
-        let queue = RuntimeQueueDrainPort::new(Some(sdk_queue));
-
-        let drained = crate::business::chat::QueueDrainPort::drain_queued_input(&queue).await;
-
-        assert_eq!(drained, Some(vec!["queued input".to_string()]));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn test_runtime_queue_drain_port_without_sdk_queue_returns_none() {
-        let queue = RuntimeQueueDrainPort::new(None);
-
-        let drained = crate::business::chat::QueueDrainPort::drain_queued_input(&queue).await;
-
-        assert_eq!(drained, None);
-    }
-}
-
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
@@ -274,5 +222,57 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
     AgentProgressEventView {
         sequence: event.sequence,
         kind,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingQueueDrainPort {
+        calls: Arc<AtomicUsize>,
+        queued: Mutex<Option<Vec<String>>>,
+    }
+
+    impl CountingQueueDrainPort {
+        fn new(queued: Option<Vec<String>>) -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+                queued: Mutex::new(queued),
+            }
+        }
+    }
+
+    impl sdk::QueueDrainPort for CountingQueueDrainPort {
+        fn drain_queued_input<'a>(&'a self) -> sdk::QueueFuture<'a> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                self.queued.lock().unwrap().take()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_runtime_queue_drain_port_forwards_to_sdk_queue() {
+        let sdk_queue = Arc::new(CountingQueueDrainPort::new(Some(vec![
+            "queued input".to_string()
+        ])));
+        let calls = sdk_queue.calls.clone();
+        let queue = RuntimeQueueDrainPort::new(Some(sdk_queue));
+
+        let drained = crate::business::chat::QueueDrainPort::drain_queued_input(&queue).await;
+
+        assert_eq!(drained, Some(vec!["queued input".to_string()]));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_runtime_queue_drain_port_without_sdk_queue_returns_none() {
+        let queue = RuntimeQueueDrainPort::new(None);
+
+        let drained = crate::business::chat::QueueDrainPort::drain_queued_input(&queue).await;
+
+        assert_eq!(drained, None);
     }
 }

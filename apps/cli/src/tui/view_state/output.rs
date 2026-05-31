@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_scroll_pin_growth_compensates_offset() {
-        let mut state = OutputViewState {
+        let state = OutputViewState {
             last_visible_height: 10,
             scroll_offset: 5,
             auto_scroll: false,
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_scroll_pin_shrink_no_compensation() {
-        let mut state = OutputViewState {
+        let state = OutputViewState {
             last_visible_height: 10,
             scroll_offset: 12,
             auto_scroll: false,

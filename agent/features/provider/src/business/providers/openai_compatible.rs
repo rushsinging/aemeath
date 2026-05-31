@@ -15,11 +15,7 @@ mod stream;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use stream::parse_openai_stream;
-// Re-export driver types for tests and external use
-pub use driver::{
-    effort_from_thinking_tokens, ChatApiDriver as _, LiteLlmDriver, OpenAiDriver, VolcengineDriver,
-    ZhipuDriver,
-};
+pub(crate) use driver::effort_from_thinking_tokens;
 pub use provider::OpenAICompatibleProvider;
 pub use reasoning::ReasoningConfig;
+pub(crate) use stream::parse_openai_stream;

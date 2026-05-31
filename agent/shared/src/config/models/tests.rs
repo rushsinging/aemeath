@@ -96,8 +96,10 @@ fn test_merge_config_keeps_volcengine_builtin_without_overriding_user_default() 
     let mut user = Config::default();
     user.models.default = "Custom/custom-model".to_string();
 
-    let mut merged = Config::default();
-    merged.models = builtin.models;
+    let mut merged = Config {
+        models: builtin.models,
+        ..Default::default()
+    };
     merged.models.providers.extend(user.models.providers);
     if !user.models.default.is_empty() {
         merged.models.default = user.models.default;

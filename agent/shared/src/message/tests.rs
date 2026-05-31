@@ -17,16 +17,6 @@ fn assistant_with_tools(ids: &[&str]) -> Message {
     }
 }
 
-/// Build an assistant message that is purely text.
-fn assistant_text(text: &str) -> Message {
-    Message {
-        role: Role::Assistant,
-        content: vec![ContentBlock::Text {
-            text: text.to_string(),
-        }],
-    }
-}
-
 // ── 1. Message constructors ────────────────────────────────────
 
 #[test]

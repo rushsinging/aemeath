@@ -96,7 +96,12 @@ fn split_into_chunks(s: &str, max_width: usize) -> Vec<String> {
 }
 
 /// 渲染单个选项的行（title 加粗 + description 灰色）。
-fn option_lines(index: usize, option: &OptionItem, active: bool, multi_select: bool) -> Vec<(String, Option<Style>)> {
+fn option_lines(
+    index: usize,
+    option: &OptionItem,
+    active: bool,
+    multi_select: bool,
+) -> Vec<(String, Option<Style>)> {
     let prefix = if multi_select {
         let check = if active { "✓" } else { " " };
         format!("  [{check}] {}. ", index + 1)
@@ -114,7 +119,10 @@ fn option_lines(index: usize, option: &OptionItem, active: bool, multi_select: b
     // Description line(s) — 灰色缩进
     if let Some(desc) = &option.description {
         for line in desc.lines() {
-            lines.push((format!("{continuation}{line}"), Some(Style::default().fg(theme::TEXT_DIM))));
+            lines.push((
+                format!("{continuation}{line}"),
+                Some(Style::default().fg(theme::TEXT_DIM)),
+            ));
         }
     }
 
@@ -141,10 +149,7 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
     )]));
     lines.push(RenderedLine::new(vec![Span::raw("")]));
     for line in wrap_text(&view.question, question_max_width) {
-        lines.push(RenderedLine::new(vec![Span::styled(
-            line,
-            header_style,
-        )]));
+        lines.push(RenderedLine::new(vec![Span::styled(line, header_style)]));
     }
 
     if view.options.is_empty() {
@@ -183,14 +188,14 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
         let is_checked = view.multi_select && view.selected.get(i).copied().unwrap_or(false);
         let active = is_cursor || is_checked;
         for (line_idx, (content, override_style)) in
-            option_lines(i, option, active, view.multi_select).into_iter().enumerate()
+            option_lines(i, option, active, view.multi_select)
+                .into_iter()
+                .enumerate()
         {
-            let style = override_style.unwrap_or_else(|| {
-                if active && line_idx == 0 {
-                    header_style
-                } else {
-                    normal_style
-                }
+            let style = override_style.unwrap_or(if active && line_idx == 0 {
+                header_style
+            } else {
+                normal_style
             });
             lines.push(RenderedLine::new(vec![Span::styled(content, style)]));
         }
@@ -337,9 +342,7 @@ mod tests {
             .iter()
             .filter(|line| line.plain.contains("1. ") || line.plain.contains("2. "))
             .collect();
-        assert!(!option_lines
-            .iter()
-            .any(|line| line.plain.contains('❯')));
+        assert!(!option_lines.iter().any(|line| line.plain.contains('❯')));
         // Type something 输入框有 ❯
         assert!(block
             .lines
@@ -367,71 +370,75 @@ mod tests {
         assert!(rendered[0].0.contains("1. Simple"));
         // 无覆盖样式（由 active 控制）
         assert!(rendered[0].0.contains("[✓]"));
-      }
-
-      #[test]
-      fn test_wrap_text_short_text_no_wrap() {
-          let lines = wrap_text("hello world", 80);
-          assert_eq!(lines, vec!["hello world"]);
-      }
-
-      #[test]
-      fn test_wrap_text_long_text_wraps() {
-          let lines = wrap_text("aaa bbb ccc ddd eee fff", 11);
-          assert_eq!(lines.len(), 2);
-          assert_eq!(lines[0], "aaa bbb ccc");
-          assert_eq!(lines[1], "ddd eee fff");
-      }
-
-      #[test]
-      fn test_wrap_text_preserves_newlines() {
-          let lines = wrap_text("line1\nline2", 80);
-          assert_eq!(lines, vec!["line1", "line2"]);
-      }
-
-      #[test]
-      fn test_wrap_text_empty_paragraph() {
-          let lines = wrap_text("before\n\nafter", 80);
-          assert_eq!(lines, vec!["before", "", "after"]);
-      }
-
-      #[test]
-      fn test_wrap_text_zero_width_returns_raw_lines() {
-          let lines = wrap_text("aaa bbb\nccc", 0);
-          assert_eq!(lines, vec!["aaa bbb", "ccc"]);
-        }
-
-        #[test]
-        fn test_wrap_text_chinese_wraps_by_char() {
-            // 每个中文字符约 2 列宽，20 列放约 10 个字
-            let lines = wrap_text("这是一段很长的中文文本用来测试自动换行", 20);
-            assert!(lines.len() >= 2, "中文长文本应被拆为多行，实际: {lines:?}");
-            for line in &lines {
-                assert!(line.width() <= 20, "每行不应超过 20 列: {line:?} ({} 列)", line.width());
-            }
-        }
-
-        #[test]
-        fn test_wrap_text_mixed_cjk_and_ascii() {
-            let lines = wrap_text("hello 这是一段中文 world 更多中文内容", 20);
-            assert!(lines.len() >= 2, "混合文本应换行，实际: {lines:?}");
-        }
-
-        #[test]
-        fn test_render_ask_user_wraps_long_question() {
-          let mut v = view(&[], 0, false);
-          v.question = "这是一段很长的提问内容用于测试自动换行功能是否正常工作".to_string();
-          let block = render_ask_user("ask", &v, &RenderCtx { width: 60 });
-          // 60 * 0.6 = 36，中文每字约 2 列宽，36 列放约 18 个字，所以应拆为多行
-          let question_lines: Vec<_> = block
-              .lines
-              .iter()
-              .skip(2) // 跳过 header + 空行
-              .take_while(|l| !l.plain.contains('[') && !l.plain.is_empty())
-              .collect();
-          assert!(
-              question_lines.len() >= 2,
-              "长问题应被拆为多行，实际: {question_lines:?}"
-          );
-      }
     }
+
+    #[test]
+    fn test_wrap_text_short_text_no_wrap() {
+        let lines = wrap_text("hello world", 80);
+        assert_eq!(lines, vec!["hello world"]);
+    }
+
+    #[test]
+    fn test_wrap_text_long_text_wraps() {
+        let lines = wrap_text("aaa bbb ccc ddd eee fff", 11);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "aaa bbb ccc");
+        assert_eq!(lines[1], "ddd eee fff");
+    }
+
+    #[test]
+    fn test_wrap_text_preserves_newlines() {
+        let lines = wrap_text("line1\nline2", 80);
+        assert_eq!(lines, vec!["line1", "line2"]);
+    }
+
+    #[test]
+    fn test_wrap_text_empty_paragraph() {
+        let lines = wrap_text("before\n\nafter", 80);
+        assert_eq!(lines, vec!["before", "", "after"]);
+    }
+
+    #[test]
+    fn test_wrap_text_zero_width_returns_raw_lines() {
+        let lines = wrap_text("aaa bbb\nccc", 0);
+        assert_eq!(lines, vec!["aaa bbb", "ccc"]);
+    }
+
+    #[test]
+    fn test_wrap_text_chinese_wraps_by_char() {
+        // 每个中文字符约 2 列宽，20 列放约 10 个字
+        let lines = wrap_text("这是一段很长的中文文本用来测试自动换行", 20);
+        assert!(lines.len() >= 2, "中文长文本应被拆为多行，实际: {lines:?}");
+        for line in &lines {
+            assert!(
+                line.width() <= 20,
+                "每行不应超过 20 列: {line:?} ({} 列)",
+                line.width()
+            );
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_mixed_cjk_and_ascii() {
+        let lines = wrap_text("hello 这是一段中文 world 更多中文内容", 20);
+        assert!(lines.len() >= 2, "混合文本应换行，实际: {lines:?}");
+    }
+
+    #[test]
+    fn test_render_ask_user_wraps_long_question() {
+        let mut v = view(&[], 0, false);
+        v.question = "这是一段很长的提问内容用于测试自动换行功能是否正常工作".to_string();
+        let block = render_ask_user("ask", &v, &RenderCtx { width: 60 });
+        // 60 * 0.6 = 36，中文每字约 2 列宽，36 列放约 18 个字，所以应拆为多行
+        let question_lines: Vec<_> = block
+            .lines
+            .iter()
+            .skip(2) // 跳过 header + 空行
+            .take_while(|l| !l.plain.contains('[') && !l.plain.is_empty())
+            .collect();
+        assert!(
+            question_lines.len() >= 2,
+            "长问题应被拆为多行，实际: {question_lines:?}"
+        );
+    }
+}
