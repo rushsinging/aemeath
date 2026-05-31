@@ -2,13 +2,13 @@
 
 **日期**：2026-05-31
 **Bug**：#49
-**状态**：设计完成，已按 review 收口，待实施
+**状态**：已实施，待用户确认
 
 ## 概述
 
-Bug #49 的根因不再视为某一个 hook 或退出分支漏 drain，而是 runtime 缺少统一的用户输入事件通道和安全消费门。当前实现依赖 `append_queued_input` 在 `process_chat_loop` 的多个分支主动拉取 TUI queue；只要用户输入发生在最后一次 drain 之后、下一次 LLM 请求或 Done 之前，就可能留在 input queue 中。
+Bug #49 的根因不再视为某一个 hook 或退出分支漏 drain，而是 runtime 缺少统一的用户输入事件通道和安全消费门。旧实现依赖 `append_queued_input` 在 `process_chat_loop` 的多个分支主动拉取 TUI queue；只要用户输入发生在最后一次 drain 之后、下一次 LLM 请求或 Done 之前，就可能留在 input queue 中。
 
-本设计采用 **Chat Input Event Channel + Loop Gate**：TUI 在 agent 忙碌期间提交的输入通过 Cmd 进入 runtime 级事件通道；runtime 在安全边界通过 Loop Gate 统一消费 pending input。普通用户消息延展当前 Chat 为新的 Turn；control command 不进入 LLM，而是走命令执行语义。
+本设计已落地 **Chat Input Event Channel + Loop Gate**：TUI 在 agent 忙碌期间提交的输入通过 Cmd/Effect 进入 runtime 级事件通道；runtime 在安全边界通过 Loop Gate 统一消费 pending input。普通用户消息延展当前 Chat 为新的 Turn；control command 不进入 LLM，而是走命令执行语义。
 
 ## 当前问题
 
@@ -386,6 +386,16 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 | `agent/features/runtime/src/business/chat/looping/loop_runner.rs` | 用 Loop Gate 替换散落 `append_queued_input` 调用 |
 | `agent/features/runtime/src/business/chat/looping/finalize.rs` | finish 前接入 BeforeFinishGate 或暴露可组合 finalize 步骤 |
 | `docs/bug/active.md` | 更新 #49 根因与修复方案 |
+
+## 实施状态（2026-05-31）
+
+已落地首期实现：
+
+1. SDK 新增 `ChatInputEvent`、`ChatInputEventPort`、`InputEventFuture`，并在 `ChatRequest` 增加 `input_events`。
+2. Runtime 新增 `PendingInputBuffer`、`InputEventDrainPort`、Loop Gate 与 push/pull 合并 drain，`process_chat_loop` 的主循环消费点已统一为 `drain_and_apply_gate`。
+3. TUI 忙碌期 Enter 产出 `Effect::SendChatInputEvent`，effect 层写入 `TuiInputEventPort` buffer，`SpawnContext` 将 port 注入 `ChatRequest.input_events`。
+4. `MessagesSync` 会清理旧 input queue 与 queued submission echo；#72 的 pull queue adapter 保留为迁移期兜底。
+5. 已验证：`cargo test -p sdk chat_input_event`、`cargo test -p runtime input_gate`、`cargo test -p runtime test_process_chat_loop_drains_input_after_stop_hook_before_done`、`cargo check -p runtime -p cli`。
 
 ## 明确不做
 

@@ -16,6 +16,7 @@ impl App {
             Effect::None | Effect::RequestRender => {}
             Effect::QuitApplication => self.layout.request_exit(),
             Effect::SpawnAgentChat { .. } => {}
+            Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::CancelAgentChat => self.cancel_agent_chat(),
             Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx).await,
             Effect::RunHook { message, name } => self.run_hook_effect(message, name).await,
@@ -37,8 +38,15 @@ impl App {
         }
     }
 
-    /// 保存当前会话（/save 与 MessagesSync 共用）。当 `notify=true`（来自 /save）时，
-    /// 经 UiEvent 回灌成功/失败反馈行，保持原 `[session saved: id]` / `Failed` 体验；
+    fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
+        if self.chat.input_event_buffer.is_none() {
+            self.append_error_notice("当前 Chat 输入通道不可用，已保留在队列中等待兜底 drain");
+            return;
+        }
+        self.chat.push_input_event(event);
+    }
+
+    /// 保存当前会话（/save 与 MessagesSync 共用）。当 `notify=true`（来自 /save）时，    /// 经 UiEvent 回灌成功/失败反馈行，保持原 `[session saved: id]` / `Failed` 体验；
     /// 后台自动保存（MessagesSync）静默。
     async fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
         // 后台自动保存（notify=false）在无消息时静默跳过，避免空会话写盘与噪声。

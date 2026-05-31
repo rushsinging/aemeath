@@ -35,6 +35,30 @@ impl sdk::QueueDrainPort for TuiQueueDrainPort {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct TuiInputEventPort {
+    buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>,
+}
+
+impl TuiInputEventPort {
+    pub(crate) fn new(buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>) -> Self {
+        Self { buffer }
+    }
+
+    pub(crate) async fn drain_input_events(&self) -> Vec<sdk::ChatInputEvent> {
+        match self.buffer.lock() {
+            Ok(mut events) => events.drain(..).collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+}
+
+impl sdk::ChatInputEventPort for TuiInputEventPort {
+    fn drain_input_events<'a>(&'a self) -> sdk::InputEventFuture<'a> {
+        Box::pin(async move { self.drain_input_events().await })
+    }
+}
+
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
         sdk::ChatEvent::Token(text) => UiEvent::Text(text),
@@ -158,6 +182,7 @@ pub(crate) struct SpawnContextRefs {
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
     pub queue_request_tx: mpsc::Sender<UiEvent>,
+    pub input_event_buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>,
     pub agent_client: Arc<dyn sdk::AgentClient>,
     pub messages: Vec<sdk::ChatMessage>,
 }
@@ -170,6 +195,9 @@ pub fn spawn_processing(ctx: SpawnContext) {
                 messages: ctx.messages,
                 queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
                     ctx.queue_request_tx.clone(),
+                ))),
+                input_events: Some(Arc::new(TuiInputEventPort::new(
+                    ctx.input_event_buffer.clone(),
                 ))),
             })
             .await

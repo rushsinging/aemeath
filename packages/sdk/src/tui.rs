@@ -4,12 +4,14 @@
 //! 渲染库，也不暴露 runtime 内部的 LLM client、tool registry、task store
 //! 或取消 token。
 
+use crate::ChatInputEvent;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 pub type QueueFuture<'a> = Pin<Box<dyn Future<Output = Option<Vec<String>>> + Send + 'a>>;
+pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>> + Send + 'a>>;
 
 /// runtime 返回给 TUI 的 chat handle。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +29,11 @@ pub trait ChatEventSink<Event>: Clone + Send + Sync + 'static {
 /// runtime 请求 TUI drain 排队输入的端口。
 pub trait QueueDrainPort: Send + Sync + 'static {
     fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a>;
+}
+
+/// runtime drain 忙碌期间追加输入事件的端口。
+pub trait ChatInputEventPort: Send + Sync + 'static {
+    fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a>;
 }
 
 /// TUI 可直接渲染的任务状态视图。

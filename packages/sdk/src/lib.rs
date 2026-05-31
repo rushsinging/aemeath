@@ -19,8 +19,8 @@ pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent, ChatInput,
-    ChatRequest, ChatResult, ChatStream, OptionItem, ToolResultImage, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ChatInputEvent, ChatRequest, ChatResult, ChatStream, OptionItem, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;
@@ -33,10 +33,10 @@ pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
 pub use tui::{
-    classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ClipboardImageView,
-    MemoryConfigView, PasteKind, QueueDrainPort, QueueFuture, ReflectionConfigView,
-    ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView, SkillView, TaskStatusView,
-    TuiLaunchContext,
+    classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
+    ClipboardImageView, InputEventFuture, MemoryConfigView, PasteKind, QueueDrainPort, QueueFuture,
+    ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView,
+    SkillView, TaskStatusView, TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
