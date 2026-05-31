@@ -5,10 +5,12 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod api;
+pub mod contract;
+pub mod gateway;
 mod business;
 mod core;
 
-pub use api::ApiDriverKind;
+pub use contract::ApiDriverKind;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {

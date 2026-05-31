@@ -26,9 +26,8 @@ DOMAIN_CRATES = {
 }
 INTERNAL_SEGMENTS = {"business", "core", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
-# Task 7 aligns supporting features only. Primary feature facades keep the legacy
-# internal re-exports until their dedicated DDD alignment tasks migrate them.
-LEGACY_API_FACADE_EXEMPT_CRATES = {"provider", "runtime", "tools"}
+# Runtime keeps the legacy internal re-exports until Task 9 migrates it.
+LEGACY_API_FACADE_EXEMPT_CRATES = {"runtime"}
 PUBLIC_ROOT_ALLOW = {
     "provider": {"ApiDriverKind", "LlmError"},
 }
