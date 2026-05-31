@@ -2158,7 +2158,6 @@ dependencies = [
 name = "share"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "log",
  "serde",
  "serde_json",
@@ -2541,6 +2540,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "uuid",
 ]
 
 [[package]]

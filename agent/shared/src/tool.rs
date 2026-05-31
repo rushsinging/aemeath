@@ -83,21 +83,26 @@ impl SessionReminders {
         Self::default()
     }
 
-    pub fn add(&mut self, content: impl Into<String>) -> Result<String, String> {
+    pub fn add(
+        &mut self,
+        id: impl Into<String>,
+        content: impl Into<String>,
+        created_at: u64,
+    ) -> Result<String, String> {
+        let id = id.into();
         let content = content.into();
+        if id.trim().is_empty() {
+            return Err("reminder id 不能为空".to_string());
+        }
         if content.trim().is_empty() {
             return Err("reminder 内容不能为空".to_string());
         }
 
-        let id = uuid::Uuid::now_v7().to_string();
         self.reminders.push(SessionReminder {
             id: id.clone(),
             content,
             done: false,
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0),
+            created_at,
         });
         Ok(id)
     }

@@ -3,6 +3,7 @@ use serde_json::Value;
 use share::memory_ops::{
     format_add_result, format_memory_list, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::helpers::{
     open_store, optional_category, optional_layer, parse_tags, required_string, validate_content,
@@ -122,6 +123,13 @@ pub(super) fn list_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
+fn current_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 pub(super) fn add_reminder(input: Value, ctx: &ToolContext) -> ToolResult {
     let content = match required_string(&input, "content") {
         Ok(content) => content,
@@ -142,10 +150,13 @@ pub(super) fn add_reminder(input: Value, ctx: &ToolContext) -> ToolResult {
         return ToolResult::error("当前运行环境不支持 session reminder。");
     };
     match reminders.lock() {
-        Ok(mut reminders) => match reminders.add(content.to_string()) {
-            Ok(id) => ToolResult::success(format!("已添加会话提醒: {id}")),
-            Err(error) => ToolResult::error(error.to_string()),
-        },
+        Ok(mut reminders) => {
+            let id = uuid::Uuid::now_v7().to_string();
+            match reminders.add(id, content.to_string(), current_timestamp_secs()) {
+                Ok(id) => ToolResult::success(format!("已添加会话提醒: {id}")),
+                Err(error) => ToolResult::error(error.to_string()),
+            }
+        }
         Err(_) => ToolResult::error("session reminder 状态锁已损坏"),
     }
 }

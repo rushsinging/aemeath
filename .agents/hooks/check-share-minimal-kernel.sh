@@ -36,7 +36,6 @@ per_file_exemptions = {
     "memory/entry.rs": "existing shared memory clock/uuid debt outside Task 2 scope; remove when id/time are injected",
     "memory/session_reminder.rs": "existing shared reminder uuid debt outside Task 2 scope; remove when id is injected",
     "task/types.rs": "existing shared task clock debt outside Task 2 scope; remove when timestamps are injected",
-    "tool.rs": "P0 debt: Tool/ToolContext/AgentRunner relocate to tools, SessionReminders strips clock/uuid — tracked by 2026-05-31-047-ddd-closure Phase B; remove after Task 7",
 }
 
 forbidden_modules = {
@@ -53,7 +52,6 @@ allowed_dependencies = {
     "serde",
     "serde_json",
     "serde_yml",
-    "async-trait",
     "thiserror",
     "tokio",
     "tokio-util",
