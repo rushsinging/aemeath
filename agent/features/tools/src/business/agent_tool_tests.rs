@@ -14,8 +14,8 @@ struct StubRunner {
 }
 
 #[async_trait::async_trait]
-impl AgentRunner for StubRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
+impl AgentRunner<ToolContext> for StubRunner {
+    async fn run_agent(&self, request: AgentRunRequest<'_, ToolContext>) -> String {
         *self.captured_max_turns.lock().unwrap() = request.max_turns;
         *self.captured_system.lock().unwrap() = request.system.to_string();
         *self.run_count.lock().unwrap() += 1;
@@ -27,7 +27,7 @@ impl AgentRunner for StubRunner {
     }
 }
 
-fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
+fn test_ctx_with_runner(runner: Arc<dyn AgentRunner<ToolContext>>) -> ToolContext {
     ToolContext {
         cwd: PathBuf::from("."),
         working_root: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),

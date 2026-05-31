@@ -1,8 +1,5 @@
 use async_trait::async_trait;
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use tokio_util::sync::CancellationToken;
 
 /// 保存进入 worktree 前的工作上下文快照
 #[derive(Debug, Clone)]
@@ -70,10 +67,10 @@ pub struct AgentToolCallProgress {
 }
 
 #[derive(Clone)]
-pub struct AgentRunRequest<'a> {
+pub struct AgentRunRequest<'a, Ctx> {
     pub prompt: &'a str,
     pub system: &'a str,
-    pub ctx: &'a ToolContext,
+    pub ctx: &'a Ctx,
     pub max_turns: Option<u32>,
     pub model_spec: Option<&'a str>,
     /// Optional channel to stream per-turn progress to TUI
@@ -82,11 +79,11 @@ pub struct AgentRunRequest<'a> {
 
 /// Callback for running a sub-agent loop. Implemented by the CLI layer.
 #[async_trait]
-pub trait AgentRunner: Send + Sync {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String;
+pub trait AgentRunner<Ctx>: Send + Sync {
+    async fn run_agent(&self, request: AgentRunRequest<'_, Ctx>) -> String;
 
     /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
-    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String;
+    async fn complete(&self, prompt: &str, system: &str, ctx: &Ctx) -> String;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -158,40 +155,4 @@ impl SessionReminders {
             Some(format!("* recap: {}", active.join(" | ")))
         }
     }
-}
-
-#[derive(Clone)]
-pub struct ToolContext {
-    /// Initial workspace root, kept for compatibility with existing callers.
-    pub cwd: PathBuf,
-    /// Active workspace root used as the security boundary for file/search tools.
-    pub working_root: Arc<Mutex<PathBuf>>,
-    /// Base directory used to resolve relative file/tool paths.
-    pub path_base: Arc<Mutex<PathBuf>>,
-    pub cancel: CancellationToken,
-    pub read_files: std::sync::Arc<Mutex<HashSet<String>>>,
-    pub agent_runner: Option<std::sync::Arc<dyn AgentRunner>>,
-    /// Session-local reminders shared by MemoryTool and UI/REPL.
-    pub session_reminders: Option<Arc<Mutex<SessionReminders>>>,
-    /// Memory system configuration used by MemoryTool.
-    pub memory_config: crate::config::MemoryConfig,
-    /// Whether we're in plan mode (simulated tool execution)
-    pub plan_mode: Option<bool>,
-    /// Whether all tools are auto-approved (skip injection checks)
-    pub allow_all: bool,
-    /// Maximum number of concurrent tool executions (from tools.maxConcurrency)
-    pub max_tool_concurrency: usize,
-    /// Maximum number of concurrent sub-agent executions (from agents.maxConcurrency)
-    pub max_agent_concurrency: usize,
-    /// Semaphore to limit concurrent sub-agent executions (shared across tool calls)
-    pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
-    /// Channel to send agent progress updates to the TUI (tool_id → progress event).
-    /// Populated when an Agent tool call is in flight, so CliAgentRunner can stream
-    /// per-turn structured output back to the user.
-    pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
-    /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
-    /// back to the user-visible session.
-    pub parent_session_id: Option<String>,
-    /// 上下文栈：EnterWorktree push，ExitWorktree pop
-    pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
 }

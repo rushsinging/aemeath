@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
-use tools::api::ToolRegistry;
+use tools::api::{ToolContext, ToolRegistry};
 
 pub struct ChatLoopContext<S, Q>
 where
@@ -42,7 +42,7 @@ where
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn share::tool::AgentRunner>>,
+    pub agent_runner: Option<Arc<dyn share::tool::AgentRunner<ToolContext>>>,
     pub allow_all: bool,
     pub interrupted: Arc<AtomicBool>,
     pub cancel: CancellationToken,

@@ -4,16 +4,14 @@ use crate::business::agent::Agent;
 use async_trait::async_trait;
 use provider::api::SystemBlock;
 use share::message::Message;
-use share::tool::{
-    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner, ToolContext,
-};
+use share::tool::{AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunner};
 use std::sync::{Arc, Mutex};
 use storage::api::TaskStore;
-use tools::api::ToolRegistry;
+use tools::api::{ToolContext, ToolRegistry};
 
 #[async_trait]
-impl AgentRunner for CliAgentRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
+impl AgentRunner<ToolContext> for CliAgentRunner {
+    async fn run_agent(&self, request: AgentRunRequest<'_, ToolContext>) -> String {
         let prompt = request.prompt;
         let system = request.system;
         let ctx = request.ctx;

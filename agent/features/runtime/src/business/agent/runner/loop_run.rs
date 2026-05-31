@@ -10,8 +10,9 @@ use crate::business::compact::safe_slice;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
-use share::tool::{AgentProgressEvent, AgentProgressKind, ToolContext};
+use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
+use tools::api::ToolContext;
 
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {

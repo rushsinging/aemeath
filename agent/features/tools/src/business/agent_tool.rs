@@ -175,7 +175,7 @@ Instructions:- Complete the task described in the user message
         );
 
         let result = runner
-            .run_agent(share::tool::AgentRunRequest {
+            .run_agent(share::tool::AgentRunRequest::<ToolContext> {
                 prompt,
                 system: &system,
                 ctx,

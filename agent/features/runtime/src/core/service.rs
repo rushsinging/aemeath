@@ -48,13 +48,13 @@ mod tests {
     use hook::api::HookRunner;
     use provider::api::LlmClient;
     use share::config::MemoryConfig;
-    use share::tool::{AgentRunRequest, AgentRunner, ToolContext};
+    use share::tool::{AgentRunRequest, AgentRunner};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::api::TaskStore;
-    use tools::api::ToolRegistry;
+    use tools::api::{ToolContext, ToolRegistry};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -65,8 +65,8 @@ mod tests {
     struct NoopAgentRunner;
 
     #[async_trait]
-    impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
+    impl AgentRunner<ToolContext> for NoopAgentRunner {
+        async fn run_agent(&self, _request: AgentRunRequest<'_, ToolContext>) -> String {
             String::new()
         }
 

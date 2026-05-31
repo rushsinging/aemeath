@@ -1,6 +1,7 @@
+use super::ToolContext;
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{ToolContext, ToolResult};
+use share::tool::ToolResult;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
