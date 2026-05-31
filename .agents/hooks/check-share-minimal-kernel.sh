@@ -20,7 +20,7 @@ forbidden_patterns = [
     (re.compile(r"\bTaskStoreStats\b"), "TaskStoreStats belongs to storage::api, not share"),
     (re.compile(r"\bstd::fs::|\btokio::fs::|\bFile::|\bread_to_string\b|\bwrite\(|\bcreate_dir"), "share must not perform fs IO"),
     (re.compile(r"\bstd::process::|\btokio::process::|\bCommand::new\b"), "share must not spawn processes"),
-    (re.compile(r"\breqwest::|\bhyper::|\bureq::"), "share must not perform network IO"),
+    (re.compile(r"\breqwest::|\bhyper::|\bureq::|\bhttp::"), "share must not perform network/http IO"),
     (re.compile(r"\bparking_lot::|\bRwLock\b"), "stateful registries/stores do not belong in share"),
 ]
 
@@ -31,21 +31,55 @@ forbidden_modules = {
     "task/store.rs": "task store behavior belongs to storage::api",
 }
 
-forbidden_dependencies = {
-    "dirs",
-    "rand",
-    "futures",
-    "parking_lot",
-    "regex",
-    "chrono",
-    "inventory",
-    "url",
-    "reqwest",
-    "bytes",
-    "futures-util",
+# Current target-state dependency budget for share per Cargo reality: data/schema
+# support plus the existing tokio/tokio-util compatibility entries. Behavior use is
+# guarded in source above; adding new broad infra crates remains forbidden here.
+allowed_dependencies = {
+    "serde",
+    "serde_json",
+    "serde_yml",
+    "async-trait",
+    "thiserror",
+    "tokio",
+    "tokio-util",
+    "uuid",
+    "log",
+    "unicode-width",
 }
 
-violations = []
+
+def dependency_names(manifest: str) -> list[str]:
+    names: list[str] = []
+    in_dependencies = False
+    for line in manifest.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_dependencies = stripped == "[dependencies]"
+            continue
+        if not in_dependencies or not stripped or stripped.startswith("#"):
+            continue
+        match = re.match(r"([A-Za-z0-9_-]+)\s*=", stripped)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def run_sanity() -> None:
+    bad_lines = [
+        "let _ = std::fs::read_to_string(path);",
+        "let _ = std::process::Command::new(\"sh\");",
+        "let _ = reqwest::Client::new();",
+        "pub type Store = parking_lot::RwLock<Vec<String>>;",
+    ]
+    for line in bad_lines:
+        if not any(pattern.search(line) for pattern, _reason in forbidden_patterns):
+            raise AssertionError(f"sanity block failed: {line}")
+    if "reqwest" not in dependency_names("[dependencies]\nserde = {}\nreqwest = {}\n"):
+        raise AssertionError("sanity manifest dependency parser failed")
+
+
+run_sanity()
+violations: list[str] = []
 for rel, reason in forbidden_modules.items():
     path = share_src / rel
     if path.exists():
@@ -62,10 +96,9 @@ for path in sorted(share_src.rglob("*.rs")):
                 violations.append(f"{rel}:{lineno}: {reason}: {stripped}")
 
 if share_manifest.exists():
-    manifest = share_manifest.read_text()
-    for dep in sorted(forbidden_dependencies):
-        if re.search(rf"^\s*{re.escape(dep)}\s*=", manifest, re.MULTILINE):
-            violations.append(f"agent/shared/Cargo.toml: forbidden dependency `{dep}` for minimal share kernel")
+    for dep in dependency_names(share_manifest.read_text()):
+        if dep not in allowed_dependencies:
+            violations.append(f"agent/shared/Cargo.toml: dependency `{dep}` is outside the shared-kernel allowlist {sorted(allowed_dependencies)}")
 
 if violations:
     reason = "Share minimal kernel guard FAILED:\n" + "\n".join(violations[:100])

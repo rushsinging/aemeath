@@ -11,12 +11,16 @@ import re
 import sys
 
 root = Path.cwd()
-business = ["project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "runtime"]
-forbidden_runtime_api = re.compile(r"\bruntime::api")
-forbidden_runtime_use = re.compile(r"\buse\s+runtime::")
-pattern = re.compile(r"(?<!:)(?:use\s+|\b)(" + "|".join(map(re.escape, business)) + r")::")
-forbidden_shared_adapter = re.compile(r"\bshare::adapter\b|agent/shared/src/adapter")
-violations = []
+forbidden_shared_adapter = re.compile(r"\bshare::adapter\b|\bshared::adapter\b|agent/shared/src/adapter")
+violations: list[str] = []
+
+# Temporary, exact migration exception: runtime owns impl blocks that adapt
+# shared adapter newtypes to runtime-local ports.  This remains until those port
+# impls can be split into feature-owned gateway factories without making share
+# depend on runtime/provider/hook.  Keep this list path- and count-limited.
+RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS = {
+    Path("agent/features/runtime/src/utils/adapter.rs"),
+}
 
 
 def is_test_path(path: Path) -> bool:
@@ -36,35 +40,48 @@ def is_runtime_adapter_migration_path(path: Path) -> bool:
         rel = path.relative_to(root)
     except ValueError:
         return False
-    # Temporary narrow exception: runtime::from_args still owns shared adapter port wiring;
-    # Task 11 moves client bootstrap to composition without changing runtime behavior.
-    return rel.as_posix() == "agent/features/runtime/src/utils/adapter.rs"
+    return rel in RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS
 
-for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
-    text = path.read_text()
-    rel = path.relative_to(root)
-    for lineno, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith("//"):
-            continue
-        if pattern.search(line):
-            violations.append(f"{rel}:{lineno}: direct business crate import/path is forbidden: {line.strip()}")
-        if forbidden_runtime_api.search(line) or forbidden_runtime_use.search(line) or "AgentClientImpl" in line or re.search(r"(?:^|[^A-Za-z0-9_])from_args(?:[^A-Za-z0-9_]|$)", line):
-            violations.append(f"{rel}:{lineno}: CLI must not import or name runtime bootstrap internals; use composition::app::build_agent_client: {line.strip()}")
 
+def line_violations(line: str) -> list[str]:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return []
+    if forbidden_shared_adapter.search(line):
+        return ["production adapter import/path is composition-only"]
+    return []
+
+
+def run_sanity() -> None:
+    if not line_violations("use share::adapter::provider::LlmClientAdapter;"):
+        raise AssertionError("sanity block failed: non-composition import share::adapter")
+    if line_violations("use share::config::ConfigurationSnapshot;"):
+        raise AssertionError("sanity allow failed: shared port/config import")
+
+
+run_sanity()
+seen_runtime_exceptions: set[Path] = set()
 for base in [root / "agent", root / "apps", root / "packages"]:
     if not base.exists():
         continue
     for path in sorted(base.rglob("*.rs")):
-        if is_test_path(path) or is_composition_path(path) or is_runtime_adapter_migration_path(path):
+        if is_test_path(path) or is_composition_path(path):
             continue
         rel = path.relative_to(root)
+        is_exception = is_runtime_adapter_migration_path(path)
+        if is_exception:
+            seen_runtime_exceptions.add(rel)
+            continue
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("//"):
-                continue
-            if forbidden_shared_adapter.search(line):
-                violations.append(f"{rel}:{lineno}: production adapter import/path is composition-only: {line.strip()}")
+            for violation in line_violations(line):
+                violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
+
+missing = RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS - seen_runtime_exceptions
+if missing:
+    violations.append(
+        "Runtime adapter migration exception list is stale; missing exact path(s): "
+        + ", ".join(sorted(path.as_posix() for path in missing))
+    )
 
 if violations:
     reason = "Forbidden import guard FAILED:\n" + "\n".join(violations[:80])

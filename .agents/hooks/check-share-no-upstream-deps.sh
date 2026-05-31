@@ -12,8 +12,21 @@ import sys
 
 manifest = Path("agent/shared/Cargo.toml")
 text = manifest.read_text()
-upstream = ["runtime", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit"]
-violations = []
+upstream = [
+    "runtime",
+    "project",
+    "policy",
+    "prompt",
+    "provider",
+    "tools",
+    "storage",
+    "hook",
+    "audit",
+    "composition",
+    "cli",
+    "sdk",
+]
+violations: list[str] = []
 
 for crate in upstream:
     pattern = re.compile(rf"(?m)^\s*{re.escape(crate)}\s*=\s*\{{[^\n]*path\s*=")
