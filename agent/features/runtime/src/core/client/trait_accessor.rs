@@ -85,3 +85,10 @@ pub(super) async fn restore_tasks_impl(
     }
     Ok(())
 }
+
+pub(super) async fn clear_tasks_impl(me: &AgentClientImpl) -> Result<()> {
+    if let Some(ref store) = me.inner.task_store {
+        store.clear().await;
+    }
+    Ok(())
+}
