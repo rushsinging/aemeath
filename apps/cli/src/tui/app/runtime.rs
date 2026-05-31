@@ -22,9 +22,14 @@ impl App {
             if let Err(e) = agent_client.sync_current_messages(Vec::new()).await {
                 log::warn!("failed to reset SDK session messages: {e}");
             }
+            if let Err(e) = agent_client.clear_tasks().await {
+                log::warn!("failed to clear SDK task store: {e}");
+            }
         }
+        self.model
+            .runtime
+            .apply(crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(Vec::new()));
     }
-
     /// Set loaded skills for slash command alias lookup
     pub fn set_skills(&mut self, skills: std::collections::HashMap<String, sdk::SkillView>) {
         self.skills = skills;
