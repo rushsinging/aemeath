@@ -42,6 +42,8 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// spinner 下方显示的任务状态行
     pub task_status_lines: Vec<String>,
+    /// spinner 上方显示的排队输入预览行
+    pub queued_submission_lines: Vec<String>,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
     /// 新输出渲染管线的 block 级缓存渲染器。
@@ -75,6 +77,7 @@ impl OutputArea {
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             task_status_lines: Vec::new(),
+            queued_submission_lines: Vec::new(),
             document: RenderedDocument::default(),
             document_renderer: OutputDocumentRenderer::default(),
         }

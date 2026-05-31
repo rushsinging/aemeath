@@ -44,9 +44,6 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::ThinkingMessage(text) => {
                 blocks::thinking::render_thinking(block_id, text, ctx)
             }
-            OutputBlockKind::QueuedSubmission(text) => {
-                blocks::queued_submission::render_queued_submission(block_id, text, ctx)
-            }
             OutputBlockKind::UserMessage(text) => {
                 blocks::user_message::render_user_message(block_id, text, ctx)
             }

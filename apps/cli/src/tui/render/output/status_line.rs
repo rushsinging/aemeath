@@ -12,8 +12,35 @@ impl OutputArea {
         &mut self,
         lines: &mut Vec<Line<'static>>,
         spinner_line: &Option<Line<'static>>,
+        queued_lines: &[String],
         task_status_lines: &[String],
     ) {
+        // 排队输入预览行（固定在 spinner 上方）
+        if !queued_lines.is_empty() {
+            let screen_start = self.screen_line_map.len();
+            let base_idx = self.document.total_lines();
+            for (i, text) in queued_lines.iter().enumerate() {
+                let char_count = text.chars().count();
+                self.screen_line_map.push((
+                    base_idx + i,
+                    CharIdx::ZERO,
+                    CharIdx::new(char_count),
+                ));
+                let screen_idx = screen_start + i;
+                let style = Style::default().fg(theme::TEXT_DIM);
+                let line = if self.has_real_selection() {
+                    Line::from(self.render_line_with_selection(
+                        screen_idx,
+                        text,
+                        style,
+                        &self.screen_line_map,
+                    ))
+                } else {
+                    Line::styled(text.clone(), style)
+                };
+                lines.push(line);
+            }
+        }
         if let Some(sl) = spinner_line {
             // spinner 行也加一个不可选的 screen_map entry
             self.screen_line_map

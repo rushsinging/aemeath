@@ -194,9 +194,17 @@ impl App {
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
+        let queued_texts: Vec<String> = self
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .map(|q| q.text.clone())
+            .collect();
         let vm = crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
             &self.model.runtime,
             &self.view_state.spinner,
+            &queued_texts,
         );
         apply_live_status_to_widget(&mut self.output_area, &vm);
     }

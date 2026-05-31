@@ -15,11 +15,13 @@ pub struct SpinnerLineView {
     pub phase_text: Option<String>,
 }
 
-/// 实时状态行整体视图：spinner（可缺省）+ 预格式化 task 行。
+/// 实时状态行整体视图：spinner（可缺省）+ 排队输入预览行 + 预格式化 task 行。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LiveStatusViewModel {
     /// spinner 行；None 表示 spinner 未激活。
     pub spinner: Option<SpinnerLineView>,
+    /// 排队输入预览行（每条一行，显示在 spinner 上方）。
+    pub queued_lines: Vec<String>,
     /// task 状态预格式化显示行（透传自 Model 快照）。
     pub task_lines: Vec<String>,
 }
@@ -54,6 +56,7 @@ mod tests {
                 verb: "Brewing".to_string(),
                 phase_text: None,
             }),
+            queued_lines: vec!["> hello".to_string()],
             task_lines: vec!["□ #1".to_string()],
         };
         let b = a.clone();

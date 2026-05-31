@@ -32,6 +32,7 @@ pub(crate) fn apply_live_status_to_widget(output_area: &mut OutputArea, vm: &Liv
         }
     }
     output_area.task_status_lines = vm.task_lines.clone();
+    output_area.queued_submission_lines = vm.queued_lines.clone();
 }
 
 #[cfg(test)]
@@ -46,6 +47,7 @@ mod tests {
                 verb: verb.to_string(),
                 phase_text: phase.map(|s| s.to_string()),
             }),
+            queued_lines: Vec::new(),
             task_lines: Vec::new(),
         }
     }
@@ -99,6 +101,7 @@ mod tests {
         let mut output = OutputArea::new();
         let vm = LiveStatusViewModel {
             spinner: None,
+            queued_lines: Vec::new(),
             task_lines: vec!["━━ Tasks: 1/2 ━━".to_string(), "✓ #1 done".to_string()],
         };
 
