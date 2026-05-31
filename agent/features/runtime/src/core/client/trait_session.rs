@@ -59,7 +59,7 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
 }
 
 pub(super) async fn load_session_impl(
-    _me: &AgentClientImpl,
+    me: &AgentClientImpl,
     id: &str,
 ) -> Result<SessionSnapshot, SdkError> {
     match crate::business::session::load_session(id).await {
@@ -89,6 +89,16 @@ pub(super) async fn load_session_impl(
                     text.len() as u64 / 4
                 })
                 .sum();
+            let workspace_sdk = session
+                .workspace
+                .as_ref()
+                .map(|ws| mapping::workspace_context_to_sdk(ws.clone()));
+            // 恢复 runtime handle 的 workspace_context，使后续 chat() 调用使用正确的 worktree 路径
+            if let Some(ref ws) = session.workspace {
+                if let Ok(mut guard) = me.inner.workspace_context.lock() {
+                    *guard = Some(ws.clone());
+                }
+            }
             Ok(SessionSnapshot {
                 id: session.id,
                 message_count: count,
@@ -97,7 +107,7 @@ pub(super) async fn load_session_impl(
                 created_at: Some(session.created_at),
                 trimmed,
                 repaired,
-                workspace: None,
+                workspace: workspace_sdk,
                 tasks: session
                     .tasks
                     .map(|t| serde_json::to_value(t).unwrap_or_default()),
