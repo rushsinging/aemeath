@@ -9,7 +9,7 @@ pub(crate) struct ToolContextParts {
     pub(crate) path_base: Arc<Mutex<PathBuf>>,
     pub(crate) cancel: CancellationToken,
     pub(crate) read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub(crate) agent_runner: Option<Arc<dyn share::tool::AgentRunner<ToolContext>>>,
+    pub(crate) agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
     pub(crate) session_reminders: Arc<Mutex<share::tool::SessionReminders>>,
     pub(crate) memory_config: share::config::MemoryConfig,
     pub(crate) allow_all: bool,

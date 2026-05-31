@@ -11,9 +11,8 @@ use hook::api::HookRunner;
 use logging::JsonLogger;
 use provider::api::LlmClient;
 use provider::api::SystemBlock;
-use share::tool::AgentRunner;
 use storage::api::TaskStore;
-use tools::api::{ToolContext, ToolRegistry};
+use tools::api::{AgentRunner, ToolRegistry};
 
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
@@ -27,7 +26,7 @@ pub struct TuiLaunchContext {
     pub user_context: String,
     pub context_size: usize,
     pub verbose: bool,
-    pub agent_runner: Arc<dyn AgentRunner<ToolContext>>,
+    pub agent_runner: Arc<dyn AgentRunner>,
     pub allow_all: bool,
     pub task_store: Arc<TaskStore>,
     pub max_tool_concurrency: usize,

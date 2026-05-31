@@ -1,4 +1,5 @@
-use share::tool::{AgentProgressEvent, AgentRunner, SessionReminders, WorkingContext};
+use super::AgentRunner;
+use share::tool::{AgentProgressEvent, SessionReminders, WorkingContext};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,7 @@ pub struct ToolContext {
     pub path_base: Arc<Mutex<PathBuf>>,
     pub cancel: CancellationToken,
     pub read_files: Arc<Mutex<HashSet<String>>>,
-    pub agent_runner: Option<Arc<dyn AgentRunner<ToolContext>>>,
+    pub agent_runner: Option<Arc<dyn AgentRunner>>,
     /// Session-local reminders shared by MemoryTool and UI/REPL.
     pub session_reminders: Option<Arc<Mutex<SessionReminders>>>,
     /// Memory system configuration used by MemoryTool.

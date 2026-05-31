@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::path::PathBuf;
 
 /// 保存进入 worktree 前的工作上下文快照
@@ -64,26 +63,6 @@ pub struct AgentToolCallProgress {
     pub name: String,
     pub input: serde_json::Value,
     pub summary: String,
-}
-
-#[derive(Clone)]
-pub struct AgentRunRequest<'a, Ctx> {
-    pub prompt: &'a str,
-    pub system: &'a str,
-    pub ctx: &'a Ctx,
-    pub max_turns: Option<u32>,
-    pub model_spec: Option<&'a str>,
-    /// Optional channel to stream per-turn progress to TUI
-    pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
-}
-
-/// Callback for running a sub-agent loop. Implemented by the CLI layer.
-#[async_trait]
-pub trait AgentRunner<Ctx>: Send + Sync {
-    async fn run_agent(&self, request: AgentRunRequest<'_, Ctx>) -> String;
-
-    /// Single-turn LLM completion (no tool loop). Used for analysis/planning.
-    async fn complete(&self, prompt: &str, system: &str, ctx: &Ctx) -> String;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

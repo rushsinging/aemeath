@@ -6,12 +6,11 @@ use prompt::api::skill::Skill;
 use provider::api::LlmClient;
 use provider::api::SystemBlock;
 use share::config::MemoryConfig;
-use share::tool::AgentRunner;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use storage::api::TaskStore;
 use storage::api::{Task, TaskSnapshot};
-use tools::api::{ToolContext, ToolRegistry};
+use tools::api::{AgentRunner, ToolRegistry};
 
 #[derive(Clone)]
 pub struct ChatRuntimeContext {
@@ -20,7 +19,7 @@ pub struct ChatRuntimeContext {
     pub system_blocks: Vec<SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
-    pub agent_runner: Arc<dyn AgentRunner<ToolContext>>,
+    pub agent_runner: Arc<dyn AgentRunner>,
     pub task_store: Arc<TaskStore>,
     pub skills_map: HashMap<String, Skill>,
     pub hook_runner: HookRunner,

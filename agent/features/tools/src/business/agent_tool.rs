@@ -175,7 +175,7 @@ Instructions:- Complete the task described in the user message
         );
 
         let result = runner
-            .run_agent(share::tool::AgentRunRequest::<ToolContext> {
+            .run_agent(crate::api::AgentRunRequest {
                 prompt,
                 system: &system,
                 ctx,

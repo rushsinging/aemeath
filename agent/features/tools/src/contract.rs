@@ -3,9 +3,11 @@
 //! This module exposes tool-domain DTOs and shared-kernel tool types without
 //! exposing tool execution internals.
 
+pub mod agent_port;
 pub mod context;
 pub mod tool;
 
+pub use agent_port::{AgentRunRequest, AgentRunner};
 pub use context::ToolContext;
 pub use share::tool::{AgentToolCallProgress, ImageData, ToolResult};
 pub use tool::Tool;
