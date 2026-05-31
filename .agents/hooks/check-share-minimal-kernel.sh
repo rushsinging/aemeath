@@ -11,8 +11,8 @@ import re
 import sys
 
 root = Path.cwd()
-share_src = root / "agent" / "share" / "src"
-share_manifest = root / "agent" / "share" / "Cargo.toml"
+share_src = root / "agent" / "shared" / "src"
+share_manifest = root / "agent" / "shared" / "Cargo.toml"
 
 forbidden_patterns = [
     (re.compile(r"\bToolRegistry\b"), "ToolRegistry belongs to tools::api, not share"),
@@ -49,7 +49,7 @@ violations = []
 for rel, reason in forbidden_modules.items():
     path = share_src / rel
     if path.exists():
-        violations.append(f"agent/share/src/{rel}: {reason}")
+        violations.append(f"agent/shared/src/{rel}: {reason}")
 
 for path in sorted(share_src.rglob("*.rs")):
     rel = path.relative_to(root)
@@ -65,7 +65,7 @@ if share_manifest.exists():
     manifest = share_manifest.read_text()
     for dep in sorted(forbidden_dependencies):
         if re.search(rf"^\s*{re.escape(dep)}\s*=", manifest, re.MULTILINE):
-            violations.append(f"agent/share/Cargo.toml: forbidden dependency `{dep}` for minimal share kernel")
+            violations.append(f"agent/shared/Cargo.toml: forbidden dependency `{dep}` for minimal share kernel")
 
 if violations:
     reason = "Share minimal kernel guard FAILED:\n" + "\n".join(violations[:100])

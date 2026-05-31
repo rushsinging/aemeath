@@ -9,7 +9,7 @@ members = [
     "agent/prompt",
     "agent/provider",
     "agent/tools",
-    "agent/share",
+    "agent/shared",
     "agent/storage",
     "agent/hook",
     "agent/audit",

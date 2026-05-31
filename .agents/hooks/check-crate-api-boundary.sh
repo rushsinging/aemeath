@@ -44,6 +44,8 @@ braced_pattern = re.compile(
 def crate_for(path: Path) -> str | None:
     parts = path.parts
     if len(parts) >= 3 and parts[0] == "agent":
+        if parts[1] == "shared":
+            return "share"
         return parts[1]
     return None
 
