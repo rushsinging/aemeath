@@ -4,7 +4,7 @@
 //! while maintaining a context stack for nested worktree navigation.
 
 use async_trait::async_trait;
-use project::api as worktree_ops;
+use project::api::{self as worktree_ops, WorktreeWorkingContext};
 use serde::Deserialize;
 use serde_json::Value;
 use share::tool::{Tool, ToolContext, ToolResult};
@@ -31,6 +31,14 @@ pub struct ExitWorktreeInput {
     /// 可选：直接切回指定路径，忽略上下文栈
     #[serde(default)]
     pub path: Option<String>,
+}
+
+fn worktree_context(ctx: &ToolContext) -> WorktreeWorkingContext {
+    WorktreeWorkingContext {
+        working_root: ctx.working_root.clone(),
+        path_base: ctx.path_base.clone(),
+        context_stack: ctx.context_stack.clone(),
+    }
 }
 
 /// 用 `git rev-parse --abbrev-ref HEAD` 获取当前分支名
@@ -110,8 +118,9 @@ impl Tool for EnterWorktreeTool {
                 .unwrap_or_else(|| "未指定目标".to_string())
         });
 
+        let wc = worktree_context(ctx);
         match worktree_ops::enter_worktree(
-            ctx,
+            &wc,
             args.path.as_ref().map(PathBuf::from),
             args.branch.clone(),
         ) {
@@ -172,10 +181,11 @@ impl Tool for ExitWorktreeTool {
         };
 
         if let Some(path) = args.path {
+            let wc = worktree_context(ctx);
             // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match worktree_ops::enter_worktree(ctx, Some(PathBuf::from(&path)), None) {
+            match worktree_ops::enter_worktree(&wc, Some(PathBuf::from(&path)), None) {
                 Ok(_) => {
-                    let _ = ctx.context_stack.lock().map(|mut s| s.pop());
+                    let _ = wc.context_stack.lock().map(|mut s| s.pop());
                     let path_base = project::api::current_path(&ctx.path_base);
                     let working_root = project::api::current_path(&ctx.working_root);
                     let branch = get_current_branch(&working_root);
@@ -189,8 +199,9 @@ impl Tool for ExitWorktreeTool {
                 Err(e) => ToolResult::error(format!("切换路径失败：{}", e)),
             }
         } else {
+            let wc = worktree_context(ctx);
             // 恢复上一上下文
-            match worktree_ops::exit_worktree(ctx) {
+            match worktree_ops::exit_worktree(&wc) {
                 Ok(prev) => {
                     let path_base = project::api::current_path(&ctx.path_base);
                     let working_root = project::api::current_path(&ctx.working_root);

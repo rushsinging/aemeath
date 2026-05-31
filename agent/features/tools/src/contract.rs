@@ -5,4 +5,27 @@
 
 pub use share::tool::{AgentToolCallProgress, ImageData, Tool, ToolContext, ToolResult};
 
+use project::api::{self as project_api, WorktreeWorkingContext};
+use share::session_types::WorkspaceContext;
+
+/// Projection helpers from tools runtime context into project worktree context.
+pub trait WorktreeContextExt {
+    fn worktree_working_context(&self) -> WorktreeWorkingContext;
+
+    fn workspace_context(&self) -> WorkspaceContext {
+        let wc = self.worktree_working_context();
+        project_api::workspace_context_from_worktree_context(&wc)
+    }
+}
+
+impl WorktreeContextExt for ToolContext {
+    fn worktree_working_context(&self) -> WorktreeWorkingContext {
+        WorktreeWorkingContext {
+            working_root: self.working_root.clone(),
+            path_base: self.path_base.clone(),
+            context_stack: self.context_stack.clone(),
+        }
+    }
+}
+
 pub use crate::business::mcp::{McpServerConfig, McpToolDef, McpTransportKind};

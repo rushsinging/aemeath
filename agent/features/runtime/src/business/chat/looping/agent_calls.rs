@@ -6,7 +6,7 @@ use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tools::api::ToolRegistry;
+use tools::api::{ToolRegistry, WorktreeContextExt};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
@@ -110,7 +110,7 @@ where
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
     let working_root = project::api::current_path(&ag_ctx.working_root);
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = project::api::workspace_context_from_tool_context(ag_ctx);
+    let workspace = ag_ctx.workspace_context();
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),

@@ -1,9 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
-use share::tool::{ToolContext, WorkingContext};
+use share::tool::WorkingContext;
 
 use super::working_paths::{current_path, set_working_directory};
+
+/// worktree 操作所需的工作上下文事实（由调用方从其执行上下文投影而来）。
+#[derive(Debug, Clone)]
+pub struct WorktreeWorkingContext {
+    pub working_root: Arc<Mutex<PathBuf>>,
+    pub path_base: Arc<Mutex<PathBuf>>,
+    pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
+}
 
 /// 检查两个路径是否属于同一 git 仓库
 pub fn is_same_git_repo(a: &Path, b: &Path) -> Result<bool, String> {
@@ -80,14 +89,14 @@ fn sanitize_branch_for_path(branch: &str) -> Result<String, String> {
     Ok(sanitized)
 }
 
-fn derive_path_from_branch(ctx: &ToolContext, branch: &str) -> Result<PathBuf, String> {
+fn derive_path_from_branch(ctx: &WorktreeWorkingContext, branch: &str) -> Result<PathBuf, String> {
     Ok(current_path(&ctx.path_base)
         .join(DEFAULT_WORKTREE_DIR)
         .join(sanitize_branch_for_path(branch)?))
 }
 
 fn resolve_worktree_path(
-    ctx: &ToolContext,
+    ctx: &WorktreeWorkingContext,
     path: Option<PathBuf>,
     branch: Option<&str>,
 ) -> Result<PathBuf, String> {
@@ -101,7 +110,11 @@ fn resolve_worktree_path(
     }
 }
 
-fn create_worktree(ctx: &ToolContext, path: &Path, branch: Option<String>) -> Result<(), String> {
+fn create_worktree(
+    ctx: &WorktreeWorkingContext,
+    path: &Path,
+    branch: Option<String>,
+) -> Result<(), String> {
     let repo_root = current_path(&ctx.working_root);
     let branch = branch
         .filter(|value| !value.trim().is_empty())
@@ -136,7 +149,7 @@ fn create_worktree(ctx: &ToolContext, path: &Path, branch: Option<String>) -> Re
 
 /// 进入指定 worktree：目标不存在时自动创建，push 当前上下文，然后切换 path_base/working_root
 pub fn enter_worktree(
-    ctx: &ToolContext,
+    ctx: &WorktreeWorkingContext,
     path: Option<PathBuf>,
     branch: Option<String>,
 ) -> Result<WorkingContext, String> {
@@ -214,7 +227,7 @@ pub fn enter_worktree(
 }
 
 /// 退出当前 worktree：pop 栈恢复之前的上下文
-pub fn exit_worktree(ctx: &ToolContext) -> Result<WorkingContext, String> {
+pub fn exit_worktree(ctx: &WorktreeWorkingContext) -> Result<WorkingContext, String> {
     let mut stack = ctx.context_stack.lock().unwrap_or_else(|e| e.into_inner());
 
     match stack.pop() {
@@ -233,8 +246,8 @@ pub fn exit_worktree(ctx: &ToolContext) -> Result<WorkingContext, String> {
     }
 }
 
-/// 将当前 ToolContext 的工作上下文转换为可持久化的会话工作区上下文。
-pub fn workspace_context_from_tool_context(ctx: &ToolContext) -> WorkspaceContext {
+/// 将当前 worktree 工作上下文转换为可持久化的会话工作区上下文。
+pub fn workspace_context_from_worktree_context(ctx: &WorktreeWorkingContext) -> WorkspaceContext {
     let stack = ctx
         .context_stack
         .lock()
@@ -253,9 +266,9 @@ pub fn workspace_context_from_tool_context(ctx: &ToolContext) -> WorkspaceContex
     }
 }
 
-/// 从会话工作区上下文恢复 ToolContext 的 path_base/working_root/context_stack。
+/// 从会话工作区上下文恢复 worktree 工作上下文的 path_base/working_root/context_stack。
 pub fn restore_workspace_context(
-    ctx: &ToolContext,
+    ctx: &WorktreeWorkingContext,
     workspace: &WorkspaceContext,
 ) -> Result<(), String> {
     let path_base = PathBuf::from(&workspace.path_base);
@@ -302,12 +315,9 @@ pub fn restore_workspace_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::tool::ToolContext;
-    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
 
-    fn new_test_context() -> ToolContext {
+    fn new_test_context() -> WorktreeWorkingContext {
         let cwd = std::env::current_dir().unwrap();
         let (_, working_root, path_base) = crate::api::new_working_paths(cwd);
         new_test_context_with_paths(working_root, path_base)
@@ -316,23 +326,10 @@ mod tests {
     fn new_test_context_with_paths(
         working_root: Arc<Mutex<PathBuf>>,
         path_base: Arc<Mutex<PathBuf>>,
-    ) -> ToolContext {
-        ToolContext {
-            cwd: PathBuf::from("/tmp/test"),
+    ) -> WorktreeWorkingContext {
+        WorktreeWorkingContext {
             working_root,
             path_base,
-            cancel: CancellationToken::new(),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
-            session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
-            plan_mode: None,
-            allow_all: false,
-            max_tool_concurrency: 4,
-            max_agent_concurrency: 2,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
-            progress_tx: None,
-            parent_session_id: None,
             context_stack: Arc::new(Mutex::new(Vec::new())),
         }
     }
