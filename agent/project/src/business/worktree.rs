@@ -412,6 +412,12 @@ mod tests {
     #[test]
     fn test_enter_worktree_auto_clears_stale_stack_not_in_worktree() {
         let ctx = new_test_context();
+        let main_checkout = get_git_common_dir(&std::env::current_dir().unwrap())
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        set_working_directory(&ctx.working_root, &ctx.path_base, main_checkout);
         // 模拟上下文栈残留（栈非空但 git 不在 worktree 中）
         ctx.context_stack.lock().unwrap().push(WorkingContext {
             path_base: PathBuf::from("/tmp/stale"),
@@ -421,8 +427,10 @@ mod tests {
         // 这里路径不存在且无 branch，会走到 create_worktree 的错误路径
         let result = enter_worktree(&ctx, Some(PathBuf::from("/tmp/nonexistent")), None);
         assert!(result.is_err());
+        let error = result.unwrap_err();
         // 不应报"先 ExitWorktree"，报错应为路径/branch 相关
-        assert!(!result.unwrap_err().contains("先 ExitWorktree"));
+        assert!(!error.contains("先 ExitWorktree"), "{error}");
+        assert!(error.contains("branch"), "{error}");
     }
 
     /// 测试在 worktree 中嵌套 enter 被拒绝。此测试需要在 worktree 中运行才有效，
