@@ -297,11 +297,13 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 
 ## 与 #72 现行 queue drain 通道的关系
 
-#72 已引入当前真实通道：`sdk::ChatRequest.queue_drain` + `sdk::QueueDrainPort` + runtime `RuntimeQueueDrainPort` + CLI `TuiQueueDrainPort`。这是一条 pull 模型通道：runtime 在若干 `append_queued_input` 调用点主动拉取 TUI queue。
+#72 已引入当前过渡通道：`sdk::ChatRequest.queue_drain` + `sdk::QueueDrainPort` + runtime `RuntimeQueueDrainPort` + CLI `TuiQueueDrainPort`。这是一条 pull 模型通道：runtime 在若干 `append_queued_input` 调用点主动拉取 TUI queue。
+
+这条思路已不再作为最终方向。#72 解决的是“runtime 完全读不到 TUI queue”的直接断点，但仍保留了 pull-drain 的根本限制：runtime 只有在散落调用点主动拉取时才知道输入存在，无法建立 #49 所需的统一输入不变量。#49 的 ChatInputEvent push channel + PendingInputBuffer + Loop Gate 是 #72 的最终收口方案。
 
 本设计的新 input event channel 是 push 模型通道。实施时 MUST 明确二者关系：
 
-1. 优先以 `ChatInputEvent` push channel 作为长期目标；`RuntimeQueueDrainPort` / `TuiQueueDrainPort` 作为迁移期兼容 adapter。
+1. 以 `ChatInputEvent` push channel 作为唯一长期目标；`RuntimeQueueDrainPort` / `TuiQueueDrainPort` 只作为迁移期兼容 adapter，不再继续扩展 pull-drain 方案。
 2. 迁移期 gate 可同时从 push channel 与 #72 pull port 收集输入，但 MUST 为每批输入建立消费确认或 drain source 标记，避免同一 TUI queue 先被 push、后又被 pull 双消费。
 3. 一旦 TUI 忙碌期 Enter 稳定发送 `ChatInputEvent`，对应路径 SHOULD 停止写入会被 `TuiQueueDrainPort` 再次 drain 的同一队列；若仍保留 UI echo，echo 必须与可消费 queue 分离。
 4. #72 的 `RuntimeQueueDrainPort` 测试应保留到迁移完成，作为兼容 adapter 回归；新测试必须覆盖 push+pull 并存不双消费。
@@ -415,6 +417,6 @@ TUI 与 runtime 都会观察“忙碌”，但真相边界必须明确：
 
 - Bug #49：last turn 用户输入留在 input queue。
 - Feature #55：TUI 架构收口 — render / adapter / app 三层落地 + 清理 legacy core。
-- Bug #72：SDK 解耦后 runtime queue drain 端口曾为空实现。
+- Bug #72：旧 pull-drain 过渡方案；最终由 #49 ChatInputEvent + Loop Gate 统一解决。
 - Feature #30：agent loop finalize 统一化。
 - Feature #47：runtime 作为核心编排者，TUI 通过 SDK 契约接入。

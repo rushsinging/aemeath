@@ -4,7 +4,7 @@
 |---|------|--------|------|----------|----------|----------|
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 修复中 | 用户反馈仍存在 | 2026-05 | 用户反馈该问题仍存在；已定位新增残留窗口：LLM 最终响应前已有 drain，但 Stop hook 执行期间用户输入会发生在最后一次 drain 之后、DoneWithDuration 之前，Stop hook 通过后 runtime 直接 Done，导致输入留在 TUI input_queue。修复：Stop hook 通过后、发送 DoneWithDuration 前再次 drain queue；若 drain 到输入则 append messages 并 continue 主 LLM loop，追加输入处理完成后仍会再次触发 Stop hook |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
-| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 修复中 | 未确认 | 2026-05 | 根因：P13 SDK 解耦后，CLI TUI 的 `TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done/DoneWithDuration` 后兜底 drain；`AgentClientImpl::chat` 启动 runtime chat loop 时固定传 `EmptyQueueDrainPort`，导致 runtime 中既有的 `append_queued_input` 检查永远读不到 TUI 排队输入。修复：`ChatRequest` 携带 SDK queue drain 端口，runtime 用 `RuntimeQueueDrainPort` 转接给 `process_chat_loop`，TUI 发起 chat 时注入 `TuiQueueDrainPort`。 |
+| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 并入 #49 | 未确认 | 2026-05 | 原 #72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 是 pull-drain 过渡修复，思路已被 #49 的 ChatInputEvent push channel + PendingInputBuffer + Loop Gate 统一方案取代；后续不再沿 #72 继续扩展 pull adapter，而是在 #49 实施中迁移并删除旧 drain 散点。 |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
@@ -128,7 +128,7 @@
 
 ### #72 agent 双层循环中一轮结束后不自动读取 input queue
 
-**状态**：修复中（待确认）
+**状态**：并入 #49（待 #49 统一方案实施后一起确认）
 
 **症状**：agent 主循环由双层构成：外层 LLM loop（每次 LLM 调用为一次迭代），内层 tool execution loop（并发执行本轮所有 tool_use）。当一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue（`AgentInput::UserMessage` / 用户通过 TUI 发送的新消息），导致用户中途发送的输入被忽略或延迟到循环自然结束才被处理。
 
@@ -143,27 +143,26 @@
 3. input queue 的读取被耦合在某个更内层的位置（如 tool execution 完成后），导致只有特定时机才会消费。
 4. 双层循环结构（LLM loop + tool loop）使得「一轮结束」的定义不够明确：工具执行完到下一次 LLM 调用之间的窗口没有被用于检查 input queue。
 
-**根因（已确认）**：
+**根因（已确认，已被 #49 重新收口）**：
 1. P13 TUI/Runtime SDK 解耦后，TUI 的排队输入读取端口停留在 CLI 层：`TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done` / `DoneWithDuration` 后兜底 drain，并通过 `sync_current_messages` 写回 session。
-2. `AgentClientImpl::chat` 启动 `process_chat_loop` 时固定传入 `EmptyQueueDrainPort`，导致 runtime chat loop 内既有的 `append_queued_input` 调用（工具轮完成后、最终响应前、取消/API error 等路径）永远只能得到 `None`。
-3. 因此 bug 不在 `process_chat_loop` 的轮间检查缺失，而在 SDK 边界没有把 TUI queue drain 端口传给 runtime loop，轮间检查被空实现短路。
+2. `AgentClientImpl::chat` 启动 `process_chat_loop` 时曾固定传入 `EmptyQueueDrainPort`，导致 runtime chat loop 内既有的 `append_queued_input` 调用（工具轮完成后、最终响应前、取消/API error 等路径）永远只能得到 `None`。
+3. 后续 `ChatRequest.queue_drain` + `RuntimeQueueDrainPort` + `TuiQueueDrainPort` 修复了“runtime 读不到 TUI queue”的直接断点，但仍属于 pull-drain 过渡方案：runtime 只有在散落的 `append_queued_input` 调用点主动拉取时才知道输入存在，不能解决 #49 暴露的所有 hook/tool/finish 窗口。
 
-**修复**：
+**收口决策**：#72 不再作为独立技术方向继续扩展。最终修复统一并入 #49：用 `ChatInputEvent` push channel + `PendingInputBuffer` + Loop Gate 替代旧的 pull-drain 思路。#72 的 queue drain 端口只作为迁移期兼容 adapter；#49 落地时必须迁移并删除旧 `append_queued_input` 散点，避免新 gate 与旧 pull adapter 双消费。
+
+**过渡修复（已完成但不作为最终方向）**：
 1. `sdk::ChatRequest` 新增可选 `queue_drain` 端口，非 TUI 调用保持 `None`。
 2. `apps/cli` 发起 chat 时注入 `TuiQueueDrainPort`，并让该端口实现 `sdk::QueueDrainPort`。
 3. `agent/runtime` 新增 `RuntimeQueueDrainPort`，把 SDK queue drain 端口适配为 runtime `chat::QueueDrainPort` 后传入 `process_chat_loop`。
 4. 补充回归测试覆盖 `RuntimeQueueDrainPort` 能转发 SDK queue 读取，以及无 queue 时安全返回 `None`。
 
-**修复方向**：
-1. 在外层 LLM loop 每轮迭代开始前增加 `input_queue.try_recv()` 检查，若有新消息则注入到 messages 列表，重新进入 LLM loop。
-2. 明确「一轮结束」的定义：LLM 返回无 tool_use 的最终响应 OR 所有 tool_use 执行完成 → 应在此时 drain input queue 一次。
-3. 考虑将 input queue drain 做成一个独立函数（`drain_input_queue()`），在以下时机调用：
-   - 每轮 LLM 调用之前
-   - 所有 tool 执行完成后、下一轮 LLM 调用之前
-   - 外层 loop 的 while 条件判断中
-4. 补充回归：agent 执行多轮工具期间用户可随时插入新消息，agent 应在当前轮结束后立即处理；若 input queue 为空则继续原有逻辑。
+**最终修复方向（由 #49 承担）**：
+1. 忙碌期 TUI Enter 通过 Cmd/Effect push `ChatInputEvent` 到 runtime，而不是只写入待 pull 的 TUI queue。
+2. runtime 维护 `PendingInputBuffer`，在 BeforeLlmGate / BeforeFinishGate / AfterBlockingBoundaryGate 安全边界统一消费输入。
+3. control command（如 `/clear`、`/model`）不进入 LLM messages；普通用户输入延展当前 Chat 为下一 Turn。
+4. #72 的 `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 仅作为迁移期兼容 adapter，#49 完成后不再依赖该 pull 模型作为主路径。
 
-**涉及路径（预计）**：
+**涉及路径（最终以 #49 spec 为准）**：
 - `agent/runtime/src/agent.rs`（主循环 tick / LLM loop / tool loop 入口）
 - `agent/runtime/src/chat/`（chat 事件处理与 input queue 建立）
 - `agent/runtime/src/chat/looping/`（循环控制与迭代逻辑）
