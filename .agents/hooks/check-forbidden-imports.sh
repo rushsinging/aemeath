@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
+# 作用：守住 §6.4.5 rule5——`share::adapter` / `shared::adapter` / agent/shared/src/adapter
+#       只能在 composition 装配处引用，feature 与 cli 不得直接 import。
+# 例外：runtime/src/utils/adapter.rs 迁移期白名单（脚本会自检该例外是否 stale）。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 

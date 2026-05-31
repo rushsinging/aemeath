@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：检查 share crate 不依赖任何业务 feature。
+# 作用：share 是最底层共享内核，必须无上游依赖（§6.4.7：share→∅），
+#       防止底层反依赖上层、形成依赖环。
+# 例外：无。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 

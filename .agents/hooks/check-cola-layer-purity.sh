@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：检查每个 feature 内部 COLA 分层的依赖方向。
+# 作用：内层只能内→外、不能外→内——domain/business 不得依赖 core 编排 / gateway /
+#       contract，utils 保持叶子（§6.4.8 分层纯度）。
+# 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 

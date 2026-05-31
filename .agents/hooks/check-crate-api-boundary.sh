@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：检查跨 feature 访问只经 `<feature>::api`，且 feature 的 api.rs 只 re-export
+#       contract / gateway。
+# 作用：守住 feature 发布语言边界（§6.4.2）——禁止穿透对方 contract/gateway/core/
+#       business/utils 内部路径，禁止 api.rs 暴露内部层。
+# 例外：tools 经 `tools::contract::WorktreeContextExt` 投影访问 project worktree
+#       上下文（已登记，见脚本内 TOOLS_CONTEXT_PROJECTION_PATH）。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 

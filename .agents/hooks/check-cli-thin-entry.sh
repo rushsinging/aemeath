@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：检查 apps/cli 只直接依赖 composition + sdk + 纯技术库。
+# 作用：守住 §6.7 薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，
+#       业务能力一律经 composition 装配 + sdk::AgentClient 契约接入。
+# 例外：无。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 

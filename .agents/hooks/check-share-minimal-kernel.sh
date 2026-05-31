@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：扫描 agent/shared/src，禁止 share kernel 出现行为/IO/并发/时钟/状态容器，
+#       并把 share 的 Cargo 依赖限定在白名单内。
+# 作用：守住 §6.4.5 rule6——kernel 只放数据契约与纯函数（禁 async_trait、Arc<Mutex>、
+#       tokio::sync、CancellationToken、SystemTime::now、Uuid::now_v7、fs/process/net、
+#       ToolRegistry/TaskStore 等）。
+# 例外：per_file_exemptions——带退出条件的临时豁免（当前为空 {}）。
+#       另见脚本内 forbidden_modules（防回归禁止清单，非豁免，就近有注释）。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
@@ -31,8 +39,12 @@ forbidden_patterns = [
     (re.compile(r"\bUuid::now_v7\b|\bUuid::new_v4\b"), "share kernel must not generate ids (inject from caller)"),
 ]
 
+# per_file_exemptions：带退出条件的临时豁免（命中模式但放行某文件）。当前为空。
 per_file_exemptions = {}
 
+# forbidden_modules：防回归"禁止清单"（与 exemption 语义相反）——这些 task 行为文件
+# 已在 #61 D2 迁出到 storage::api，下列路径一旦重新出现在 agent/shared/ 即视为越界。
+# 当前 4 个文件均已不在 shared（守卫通过），保留此清单以拦截"行为爬回 kernel"。
 forbidden_modules = {
     "task/batch.rs": "task batch behavior belongs to storage::api",
     "task/display.rs": "task display behavior belongs to storage::api",

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 功能：基于 cargo 元数据校验各 crate 的业务依赖是否落在显式白名单内。
+# 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；
+#       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
+# 例外（白名单内已批准）：tools→{project,storage}（§6.4.7 横向依赖登记）；
+#       composition→全部 feature（唯一装配根）。
+
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
