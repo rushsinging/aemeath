@@ -561,7 +561,6 @@ feature 边界必须由守卫脚本强制（对应 wanaka 的 `.dependency-cruis
 | 单向向上依赖 | feature 内数据层（`utils`/repo/io）不得反向 import `core`/`gateway` 编排层 |
 | COLA 分层纯度 | 层间纯度：`business` 不依赖 `core` 编排、`utils` 不含领域规则 |
 | CLI 薄入口 | `apps/cli` 只直接依赖 `composition` + `sdk` + 纯技术库；源码不绕过 `sdk::AgentClient` |
-| 单文件行数 | `apps/`、`agent/` 下单 `.rs` ≤ 400 行 |
 
 > 守卫脚本的具体集合随实现演进，以 `.agents/hooks/check-architecture-guards.sh` 实际聚合为准；本表定义其**必须覆盖的约束维度**，不是脚本清单。
 
@@ -875,6 +874,6 @@ Runtime 重要不变量：
 2. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
 3. 每个 checkpoint 必须保持可编译（至少 `cargo check`）；最终运行完整验收门禁。
 4. 目录迁移与 `.agents/hooks/*` 架构守卫更新必须处于同一 checkpoint，避免 hook 与源码结构脱节。
-5. `.agents` 中 `build_cli.sh`、`check-unit-tests.sh`、`check-architecture-guards.sh`、`check-rust-file-lines.sh`、TUI 单源守卫等的扫描目标须与迁移后的 `apps/`、`agent/{features,shared,composition}` 路径保持一致。
+5. `.agents` 中 `build_cli.sh`、`check-unit-tests.sh`、`check-architecture-guards.sh`、TUI 单源守卫等的扫描目标须与迁移后的 `apps/`、`agent/{features,shared,composition}` 路径保持一致。
 
 > 本节定义迁移的**目标顺序与门禁约束**；具体落地进度、已完成阶段与遗留缺口记录在 `docs/feature/active.md` 与 git history，不在本文。

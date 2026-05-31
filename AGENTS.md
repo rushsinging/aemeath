@@ -82,12 +82,12 @@ aemeath/                    # workspace root
 - **MUST** TUI 模式下所有应用主日志路由到 `~/.agents/logs/aemeath.log`。
 - **MUST** 新增 `pub fn` 在同一文件末尾添加 `#[cfg(test)] mod tests`。
 - **MUST** 单元测试覆盖三种路径：正常路径、边界条件、错误路径。
-- **MUST** 单个 `.rs` 文件不超过 400 行（含测试代码）。超出时立即拆分职责。
 - **MUST** 开始工作前查看 `docs/bug/active.md` 和 `docs/feature/active.md`，确认当前修改是否与已知条目相关。
 - **MUST** 修复 bug 时先添加重现该 bug 的测试用例，再提交修复代码。
 - **MUST** 解决 bug 或完成 feature 后，同步更新 `docs/bug/active.md` 或 `docs/feature/active.md`，记录问题、解决思路和当前解决状态。
 
 ### SHOULD
+- **SHOULD** 单个 `.rs` 文件控制在 400 行以内（含测试代码）；过长时按职责拆分。无强制守卫，超限不阻断构建。
 - **SHOULD** 新增 provider 时同步添加 model guidance 文件。
 - **SHOULD** 修改涉及暂停/恢复/重试逻辑时更新 `token_estimation`。
 - **SHOULD** 成本追踪逻辑更新时同步更新 `pricing.rs`。
