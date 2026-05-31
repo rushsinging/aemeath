@@ -2,6 +2,7 @@
 
 //! agent 下所有库的共享依赖层。
 
+pub mod adapter;
 pub mod config;
 pub mod error;
 pub mod memory;

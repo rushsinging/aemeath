@@ -1,17 +1,40 @@
-//! Port trait 适配器——为 runtime 内部 port trait 提供对具体类型的实现。
+//! Port trait adapters for concrete production types.
 //!
-//! P16 目标：core/ 层不直接依赖 provider/hook 等外部 crate 的具体类型方法。
-//! 适配器封装这些调用，使 core/ 层只需依赖 port trait。
+//! Task 10 migration note: adapter type definitions moved to `share::adapter`.
+//! These runtime-local impls remain here temporarily because `share` must not
+//! depend on upstream runtime/provider/hook crates.
 
-mod hook_adapter;
-mod provider_adapter;
+pub use share::adapter::hook::HookRunnerAdapter;
+pub use share::adapter::provider::LlmClientAdapter;
 
-pub use hook_adapter::HookRunnerAdapter;
-pub use provider_adapter::LlmClientAdapter;
-
-use crate::core::port::TaskStorePort;
+use crate::core::port::{HookNotificationPort, ProviderInfoPort, TaskStorePort};
 use std::collections::HashMap;
 use storage::api::{Task, TaskSnapshot, TaskStore};
+
+impl ProviderInfoPort for LlmClientAdapter<provider::api::LlmClient> {
+    fn provider_name(&self) -> &str {
+        self.0.provider_name()
+    }
+
+    fn model_name(&self) -> &str {
+        self.0.model_name()
+    }
+
+    fn is_reasoning(&self) -> bool {
+        self.0.is_reasoning()
+    }
+
+    fn set_reasoning(&self, enabled: bool) {
+        self.0.set_reasoning(enabled)
+    }
+}
+
+#[async_trait::async_trait]
+impl HookNotificationPort for HookRunnerAdapter<hook::api::HookRunner> {
+    async fn on_notification(&self, message: &str, kind: &str) {
+        let _ = self.0.on_notification(message, kind).await;
+    }
+}
 
 // TaskStore 在 share（共享内核）中，runtime 可直接为其实现 port trait
 #[async_trait::async_trait]
