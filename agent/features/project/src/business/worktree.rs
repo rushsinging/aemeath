@@ -310,6 +310,13 @@ mod tests {
     fn new_test_context() -> ToolContext {
         let cwd = std::env::current_dir().unwrap();
         let (_, working_root, path_base) = crate::api::new_working_paths(cwd);
+        new_test_context_with_paths(working_root, path_base)
+    }
+
+    fn new_test_context_with_paths(
+        working_root: Arc<Mutex<PathBuf>>,
+        path_base: Arc<Mutex<PathBuf>>,
+    ) -> ToolContext {
         ToolContext {
             cwd: PathBuf::from("/tmp/test"),
             working_root,
@@ -411,7 +418,18 @@ mod tests {
 
     #[test]
     fn test_enter_worktree_auto_clears_stale_stack_not_in_worktree() {
-        let ctx = new_test_context();
+        let isolated_root = std::env::temp_dir().join(format!(
+            "aemeath_stale_stack_not_worktree_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&isolated_root).unwrap();
+        let isolated_root = isolated_root.canonicalize().unwrap();
+        let working_root = Arc::new(Mutex::new(isolated_root.clone()));
+        let path_base = Arc::new(Mutex::new(isolated_root.clone()));
+        let ctx = new_test_context_with_paths(working_root, path_base);
         // 模拟上下文栈残留（栈非空但 git 不在 worktree 中）
         ctx.context_stack.lock().unwrap().push(WorkingContext {
             path_base: PathBuf::from("/tmp/stale"),
@@ -419,7 +437,8 @@ mod tests {
         });
         // 不应因残留栈而拒绝，应自动清理后继续（refs #96）
         // 这里路径不存在且无 branch，会走到 create_worktree 的错误路径
-        let result = enter_worktree(&ctx, Some(PathBuf::from("/tmp/nonexistent")), None);
+        let result = enter_worktree(&ctx, Some(isolated_root.join("nonexistent")), None);
+        let _ = std::fs::remove_dir_all(&isolated_root);
         assert!(result.is_err());
         // 不应报"先 ExitWorktree"，报错应为路径/branch 相关
         assert!(!result.unwrap_err().contains("先 ExitWorktree"));
