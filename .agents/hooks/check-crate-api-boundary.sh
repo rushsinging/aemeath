@@ -27,6 +27,12 @@ API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
+TOOLS_PROJECT_CONTEXT_API_NAMES = {
+    "WorktreeWorkingContext",
+    "workspace_context_from_worktree_context",
+    "restore_workspace_context",
+}
+TOOLS_CONTEXT_PROJECTION_PATH = Path("agent/features/tools/src/contract.rs")
 
 path_pattern = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?("
@@ -139,10 +145,46 @@ def check_api_line(line: str) -> list[str]:
     return violations
 
 
+def strip_line_comment(line: str) -> str:
+    return line.split("//", 1)[0]
+
+
+def check_tools_project_context_api_line(rel: Path, line: str) -> list[str]:
+    # The tools feature must centralize ToolContext -> project worktree/workspace
+    # context projection in tools::contract::WorktreeContextExt. Business/runtime
+    # code should use that projection instead of constructing/calling project
+    # context APIs directly.
+    if not rel.as_posix().startswith("agent/features/tools/src/"):
+        return []
+    if rel == TOOLS_CONTEXT_PROJECTION_PATH:
+        return []
+
+    code = strip_line_comment(line)
+    if not code.strip():
+        return []
+
+    violations: list[str] = []
+    for name in TOOLS_PROJECT_CONTEXT_API_NAMES:
+        direct_path_pattern = rf"\bproject(?:_api)?::api::(?:[A-Za-z_][A-Za-z0-9_]*::)*{re.escape(name)}\b"
+        braced_import_pattern = rf"\buse\s+project(?:_api)?::api::\{{[^}}]*\b{re.escape(name)}\b"
+        imported_call_pattern = rf"(?<![A-Za-z0-9_:]){re.escape(name)}\s*(?:\{{|\()"
+        if (
+            re.search(direct_path_pattern, code)
+            or re.search(braced_import_pattern, code)
+            or re.search(imported_call_pattern, code)
+        ):
+            violations.append(
+                "tools must use tools::contract::WorktreeContextExt context projection "
+                "instead of direct project workspace/worktree context API access"
+            )
+            break
+    return violations
+
+
 def run_sanity() -> None:
     allowed = [
         ("runtime", "use provider::api::LlmClient;"),
-        ("tools", "let _ = project::api::workspace_context_from_tool_context(ctx);"),
+        ("tools", "let _ = ctx.worktree_working_context();"),
         ("provider", "use crate::core::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
@@ -158,6 +200,25 @@ def run_sanity() -> None:
     for current, line in blocked:
         if not check_cross_crate_line(current, line):
             raise AssertionError(f"sanity block failed: {line}")
+    tools_rel = Path("agent/features/tools/src/business/worktree.rs")
+    tools_contract_rel = TOOLS_CONTEXT_PROJECTION_PATH
+    if check_tools_project_context_api_line(tools_rel, "let _ = ctx.worktree_working_context();"):
+        raise AssertionError("sanity allow failed: tools projection extension")
+    if not check_tools_project_context_api_line(
+        tools_rel,
+        "let _ = project::api::workspace_context_from_worktree_context(&wc);",
+    ):
+        raise AssertionError("sanity block failed: direct tools workspace context API")
+    if not check_tools_project_context_api_line(
+        tools_rel,
+        "use project::api::{self as worktree_ops, WorktreeWorkingContext};",
+    ):
+        raise AssertionError("sanity block failed: direct tools worktree context import")
+    if check_tools_project_context_api_line(
+        tools_contract_rel,
+        "let wc = WorktreeWorkingContext { working_root, path_base, context_stack };",
+    ):
+        raise AssertionError("sanity allow failed: tools contract projection")
     if not check_api_line("pub use crate::business::Secret;"):
         raise AssertionError("sanity block failed: feature api.rs re-exporting business")
     if check_api_line("pub use crate::contract::*;") or check_api_line("pub use crate::gateway::*;"):
@@ -183,7 +244,8 @@ for base in [root / "agent", root / "apps", root / "packages"]:
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             for violation in check_cross_crate_line(current, line):
                 violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
-
+            for violation in check_tools_project_context_api_line(rel, line):
+                violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
 if violations:
     reason = "Crate API boundary guard FAILED:\n" + "\n".join(violations[:100])
     if len(violations) > 100:
