@@ -10,7 +10,10 @@ import subprocess
 import sys
 
 business_allow = {
-      "cli": {"runtime", "sdk"},
+      # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
+      # During Task 1 the CLI has not been migrated yet, so keep cli -> runtime allowed.
+      "cli": {"composition", "runtime", "sdk"},
+      "composition": {"runtime", "sdk"},
       "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},
       "share": set(),
       "project": {"share"},

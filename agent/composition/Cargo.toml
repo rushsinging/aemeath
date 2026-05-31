@@ -1,0 +1,9 @@
+[package]
+name = "composition"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+runtime = { path = "../runtime" }
+sdk = { path = "../../packages/sdk" }
+async-trait = { workspace = true }
