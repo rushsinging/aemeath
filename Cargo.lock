@@ -291,8 +291,11 @@ name = "composition"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "project",
+ "provider",
  "runtime",
  "sdk",
+ "tools",
 ]
 
 [[package]]

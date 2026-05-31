@@ -50,6 +50,10 @@ pub trait ToolCatalogGateway: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultToolCatalogGateway;
 
+pub fn wire_tools() -> Arc<dyn ToolCatalogGateway> {
+    Arc::new(DefaultToolCatalogGateway)
+}
+
 impl ToolCatalogGateway for DefaultToolCatalogGateway {
     fn new_registry(&self) -> ToolRegistry {
         ToolRegistry::new()

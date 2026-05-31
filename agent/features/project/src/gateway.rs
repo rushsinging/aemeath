@@ -51,6 +51,10 @@ pub trait ProjectGateway: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultProjectGateway;
 
+pub fn wire_project() -> Arc<dyn ProjectGateway> {
+    Arc::new(DefaultProjectGateway)
+}
+
 impl ProjectGateway for DefaultProjectGateway {
     fn new_working_paths(
         &self,
@@ -114,6 +118,9 @@ mod tests {
 
         assert_eq!(returned_cwd, cwd);
         assert_eq!(gateway.current_path(&working_root), cwd);
-        assert_eq!(gateway.current_path(&path_base), PathBuf::from("/tmp/aemeath"));
+        assert_eq!(
+            gateway.current_path(&path_base),
+            PathBuf::from("/tmp/aemeath")
+        );
     }
 }

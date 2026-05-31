@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use project::api::ProjectGateway;
+use provider::api::LlmProviderGateway;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
+use tools::api::ToolCatalogGateway;
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
 
@@ -24,13 +27,38 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
     Arc::new(client)
 }
 
+pub struct FeatureGateways {
+    pub tools: Arc<dyn ToolCatalogGateway>,
+    pub provider: Arc<dyn LlmProviderGateway>,
+    pub project: Arc<dyn ProjectGateway>,
+}
+
+impl FeatureGateways {
+    pub fn wire_default() -> Self {
+        Self {
+            tools: crate::tools::wire_tools(),
+            provider: crate::provider::wire_provider(),
+            project: crate::project::wire_project(),
+        }
+    }
+}
+
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
-    let runtime_client = crate::runtime::from_args(args).await?;
+    let gateways = FeatureGateways::wire_default();
+    build_agent_client_with_gateways(args, gateways).await
+}
+
+async fn build_agent_client_with_gateways(
+    args: AgentArgs,
+    gateways: FeatureGateways,
+) -> Result<AgentClientHandle, SdkError> {
+    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways).await?;
     Ok(agent_client_from_runtime(runtime_client))
 }
 
 pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstrap, SdkError> {
-    let runtime_client = crate::runtime::from_args(args).await?;
+    let gateways = FeatureGateways::wire_default();
+    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways).await?;
     let launch = runtime_client.tui_launch_context();
     let thinking = launch.client.is_reasoning();
     let client = agent_client_from_runtime(runtime_client);

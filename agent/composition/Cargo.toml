@@ -5,5 +5,8 @@ edition = "2021"
 
 [dependencies]
 runtime = { path = "../features/runtime" }
+tools = { path = "../features/tools" }
+provider = { path = "../features/provider" }
+project = { path = "../features/project" }
 sdk = { path = "../../packages/sdk" }
 async-trait = { workspace = true }

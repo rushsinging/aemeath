@@ -47,6 +47,10 @@ pub trait LlmProviderGateway: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultLlmProviderGateway;
 
+pub fn wire_provider() -> Arc<dyn LlmProviderGateway> {
+    Arc::new(DefaultLlmProviderGateway)
+}
+
 #[async_trait]
 impl LlmProviderGateway for DefaultLlmProviderGateway {
     fn client_from_provider(&self, provider: Arc<dyn LlmProvider>) -> LlmClient {
