@@ -13,7 +13,7 @@
 5. 设计 AgentClient SDK —— Agent Runtime 对外暴露的统一客户端接口
 6. 定义 RunOrchestration 的 CLI 初始化流程（CLI 自己调用 AgentClient::new()）
 7. 与 #50 CLI 目录整理形成从"物理收拢"到"逻辑边界"的衔接
-8. 为后续 UI Widget 新增、#36 Server 复用 UI 管线提供架构基线
+8. 为后续 UI Widget 新增、Server 复用 UI 管线提供架构基线
 
 非目标：
 
@@ -487,4 +487,4 @@ agent/runtime                ← AgentClient 的真实实现 + 内部 build_*
 5. **Phase 4**（UI Domain）：在 `tui/core/mod.rs`、`tui/display/mod.rs`、`tui/input/mod.rs`、`tui/session/mod.rs` 中添加 doc comment，标注所属 Context 和依赖规则
 6. **Phase 5**（UI Domain）：实现依赖守卫脚本（U1-U7）
 7. **Phase 6**（文档）：更新 #47 spec，将 UI Domain 纳入核心域，补充 AgentClient SDK 层
-8. **Phase 7**（评估）：评估 Display Context 是否为 #36 Server 复用做准备（markdown 渲染、diff 高亮可独立于 TUI）
+8. **Phase 7**（评估）：评估 Display Context 是否为 Server 复用做准备（markdown 渲染、diff 高亮可独立于 TUI）

@@ -19,16 +19,14 @@
 ```
 aemeath/                    # workspace root
 ├── apps/
-│   ├── cli/                # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
-│   ├── server/             # #36 API Server：REST/WS + gRPC
-│   └── agents/             # #36 Agent runtime 与角色配置
+│   └── cli/                # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
+├── agent/
+│   ├── features/           # 业务 feature：runtime/tools/provider/prompt/project/storage/policy/hook/audit
+│   ├── shared/             # 横切基础设施 + 外部 adapter + 最小共享内核
+│   └── composition/        # 组合根：唯一生产装配入口
 ├── packages/
-│   ├── core/               # 核心库：消息、工具、配置、会话、成本追踪、压缩
-│   ├── llm/                # LLM 客户端：provider API 调用、流式响应、模型池
-│   ├── tools/              # 工具注册：文件读写、搜索、Bash、Agent、Web 等
-│   ├── proto/              # 共享 proto 定义
-│   └── sdk/                # 外部 SDK
-├── infra/                  # MongoDB、部署与本地开发编排
+│   ├── sdk/                # AgentClient trait + 公共类型（CLI↔Runtime 通信契约）
+│   └── global/logging/     # 日志 projection 适配
 ├── docs/                   # bug / feature 追踪（active.md + archived/）
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
 └── AGENTS.md               # 本文件

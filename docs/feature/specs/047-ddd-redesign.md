@@ -22,9 +22,8 @@
 
 1. 不在本设计直接移动 crate、拆文件或改运行逻辑；目录重排另按实施计划执行。
 2. 不设计数据库 schema。
-3. 不恢复 #36 已移除的 server/agents/proto/infra 运行代码。
-4. 不把 DDD 等同于微服务化。
-5. 不替换 #42 权限管控系统设计，而是在领域边界中吸收它。
+3. 不把 DDD 等同于微服务化。
+4. 不替换 #42 权限管控系统设计，而是在领域边界中吸收它。
 
 ## 2. 核心域判断
 
@@ -846,7 +845,6 @@ Runtime 重要不变量：
 
 | Feature | 关系 |
 |---|---|
-| #36 Multi-Agent 框架 | 只参考历史 DDD 设计，不恢复已移除的分布式 server/agents/proto/infra。 |
 | #40 Claude 优先兼容 | 归入 Project、Prompt 的 source discovery / compatibility ACL；配置快照由 Runtime 通过 Project/Prompt gateway 获取。 |
 | #42 权限管控系统 | Policy feature 的主要设计来源；Audit 独立后补足审计边界。 |
 | #43 worktree cwd 同步 | 归入 Project 的 path_base / working_root / worktree 一致性规则。 |
@@ -870,10 +868,9 @@ Runtime 重要不变量：
 
 迁移约束：
 
-1. 不恢复 #36：不创建 `apps/server`、`apps/agents`、`packages/proto`、`infra`。
-2. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
-3. 每个 checkpoint 必须保持可编译（至少 `cargo check`）；最终运行完整验收门禁。
-4. 目录迁移与 `.agents/hooks/*` 架构守卫更新必须处于同一 checkpoint，避免 hook 与源码结构脱节。
-5. `.agents` 中 `build_cli.sh`、`check-unit-tests.sh`、`check-architecture-guards.sh`、TUI 单源守卫等的扫描目标须与迁移后的 `apps/`、`agent/{features,shared,composition}` 路径保持一致。
+1. 允许重命名 crate 和公开 API，但必须保持 CLI/TUI 行为不变。
+2. 每个 checkpoint 必须保持可编译（至少 `cargo check`）；最终运行完整验收门禁。
+3. 目录迁移与 `.agents/hooks/*` 架构守卫更新必须处于同一 checkpoint，避免 hook 与源码结构脱节。
+4. `.agents` 中 `build_cli.sh`、`check-unit-tests.sh`、`check-architecture-guards.sh`、TUI 单源守卫等的扫描目标须与迁移后的 `apps/`、`agent/{features,shared,composition}` 路径保持一致。
 
 > 本节定义迁移的**目标顺序与门禁约束**；具体落地进度、已完成阶段与遗留缺口记录在 `docs/feature/active.md` 与 git history，不在本文。

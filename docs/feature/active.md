@@ -6,7 +6,6 @@
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 36 | Multi-Agent 框架 | 高 | 暂停 | 未确认 | 后端分布式实现已按“server 太重”的判断从当前代码树移除：不再保留 `apps/server`、`apps/agents`、`packages/sdk`、`packages/proto`、`infra` 运行代码；仓库回到 CLI + core/llm/tools 为主。历史设计仅保留 spec 与 DDD 文档用于后续参考，不再维护 sprint plan。详见 [架构 spec](specs/036-02-spec-architecture.md) 与 [DDD](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md) |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 + audit/policy 域落地 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。**2026-05-30 并入 #62（audit/policy 域实现）**：047 DDD spec §4.2/§4.3/§8/§9 定义的 audit 域（AuditTrail / correlation id 串联 Session·Chat·Turn·Agent·Tool·Resource / policy·hook·outcome 三分记录）与 policy 域（PermissionRequest/Decision/Grant/Mode/Capability/RiskAssessment）归入本 feature 统一设计实施，不再独立拆分。详见 [spec](specs/042-permission-control-system.md)、[047 spec](specs/047-ddd-redesign.md) |
 | 47 | 以 DDD 思路重新设计 Aemeath 架构 | 高 | ✅ 已完成 | 未确认 | DDD 架构设计已写入 [spec](specs/047-ddd-redesign.md)，并按 2026-05-31 target-alignment 与 closure plan 完成目标态落地：新增 `agent/composition`，CLI 仅经 composition + SDK 接入；`agent/shared` 保持最小共享内核并隔离生产 adapter；runtime/provider/tools/supporting domains 全部迁入 `agent/features/*`；各 feature `api.rs` 收窄为 contract/gateway；shared kernel 已纯数据化（Tool/ToolContext/AgentRunner 迁入 tools，MemoryEntry/SessionReminders/Task/Batch/ErrorContext 的 id/时间均由调用方注入），kernel 守卫无 clock/uuid exemption 通过；shared/adapter 已补齐 hook/provider/mcp/fs/process/git/storage/telemetry 命名空间；tools/provider/project 提供 OHS gateway trait，composition 经 `wire_<feature>()` 装配；file-lines 检查（≤400 行）按用户裁定（2026-05-31）已移除强制：删除 `scripts/check-rust-file-lines.sh`，AGENTS.md 由 MUST 降为 SHOULD（软约定、不阻断构建），spec §6.4.8/§12 相关引用一并清理；clippy `-D warnings` 门禁已通过。storage/policy/hook/audit 的 gateway trait 化按职责暂缓为可选后续。待用户确认后归档。 |
 | 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
@@ -145,7 +144,7 @@ commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa1781
 1. Strategic DDD：用统一语言（Ubiquitous Language）和限界上下文（Bounded Context）拆分业务语义边界；不同上下文之间通过 Context Map 明确关系。
 2. Tactical DDD：在上下文内部识别实体、值对象、聚合根、领域服务、仓储与领域事件，确保业务不变量集中在聚合边界内。
 3. Anti-Corruption Layer：对外部模型或兼容层建立防腐层，避免 Claude/OpenAI/MCP/Git/终端等外部语义污染核心领域模型。
-4. 参考来源包括 Martin Fowler 对 Bounded Context 的说明、Microsoft Learn Tactical DDD 资料，以及本仓库已有 [#36 Multi-Agent DDD 设计](../superpowers/specs/2026-05-20-multi-agent-ddd-design.md)。
+4. 参考来源包括 Martin Fowler 对 Bounded Context 的说明、Microsoft Learn Tactical DDD 资料。
 
 **目标**：新增一条架构级设计 feature，后续展开为完整 DDD 重设计 spec。该 spec 应回答：Aemeath 的核心域、支撑域、通用域分别是什么；哪些概念属于同一 Bounded Context；哪些 crate/module 是当前技术实现而不是领域边界；哪些地方需要端口/适配器、防腐层或领域事件；以及如何分阶段重构而不破坏现有 CLI/TUI 行为。初版见 [spec](specs/047-ddd-redesign.md)。
 
@@ -159,20 +158,18 @@ commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa1781
 
 **明确不做**：
 1. 本条 feature 只登记设计方向，不直接移动 crate、拆文件或改运行逻辑。
-2. 不恢复 #36 已移除的 server/agents/proto/infra 运行代码；#36 DDD 只能作为参考，不能把当前 CLI 项目重新扩大成分布式平台。
-3. 不引入数据库、消息队列或微服务化作为默认目标；DDD 用于厘清模型与边界，不等同于上微服务。
-4. 不以 Clean Architecture 分层命名替代 DDD 建模；可以借鉴端口/适配器，但必须先从领域语言和上下文出发。
+2. 不引入数据库、消息队列或微服务化作为默认目标；DDD 用于厘清模型与边界，不等同于上微服务。
+3. 不以 Clean Architecture 分层命名替代 DDD 建模；可以借鉴端口/适配器，但必须先从领域语言和上下文出发。
 
 **后续 spec 验收标准**：
 1. spec 包含统一语言表，且每个术语有唯一含义和所属上下文。
 2. spec 给出当前架构到目标 DDD 架构的 Context Map，并标出防腐层和共享内核边界。
 3. spec 至少定义 3 个核心聚合及其不变量，并说明现有代码中的候选落点。
 4. spec 给出分阶段重构计划，每阶段可独立验证，不要求一次性大重写。
-5. spec 明确与 #36、#40、#42、#43、#45、#46 的关系，避免与已暂停或已完成 feature 目标冲突。
+5. spec 明确与 #40、#42、#43、#45、#46 的关系，避免与已暂停或已完成 feature 目标冲突。
 
 **涉及路径（后续预计）**：
 - `docs/feature/specs/047-ddd-redesign.md`：完整 DDD 重设计 spec。
-- `docs/superpowers/specs/2026-05-20-multi-agent-ddd-design.md`：既有 DDD 参考。
 - `shared/kernel/src/`：领域类型、会话、工具契约、权限、skill、hook、worktree 等候选边界。
 - `contexts/tool/src/`：工具执行上下文与基础设施适配器候选边界。
 - `contexts/provider/src/`：Provider Anti-Corruption Layer 候选边界。
@@ -249,12 +246,6 @@ Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is ou
 3. 旧 `~/.aemeath/config.json` / `.aemeath/config.json` / `.aemeath/skills` / `CLAUDE.md` 存在时，有清晰迁移或兼容提示，不静默丢配置。
 4. 在 linked worktree 中启动时，项目级 AGENTS.md 与 skills 读取行为稳定、可预测，且不会重复加载同一路径。
 5. 新写入的配置落到新模式，不再写回旧路径。
-
----
-
-### #36 Multi-Agent 框架
-
-详见 [设计文档](specs/036-multi-agent-framework.md)
 
 ---
 
