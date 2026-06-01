@@ -9,6 +9,8 @@ pub enum InputIntent {
     MoveCursor(usize),
     MoveCursorLeft,
     MoveCursorRight,
+    MoveCursorUp,
+    MoveCursorDown,
     MoveCursorHome,
     MoveCursorEnd,
     InsertNewline,

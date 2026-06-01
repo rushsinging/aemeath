@@ -25,8 +25,8 @@ pub fn map_key_event(key: KeyEvent) -> KeyEventMapping {
         KeyCode::Right => input(InputIntent::MoveCursorRight),
         KeyCode::Home => input(InputIntent::MoveCursorHome),
         KeyCode::End => input(InputIntent::MoveCursorEnd),
-        KeyCode::Up => input(InputIntent::MoveHistoryPrevious),
-        KeyCode::Down => input(InputIntent::MoveHistoryNext),
+        KeyCode::Up => input(InputIntent::MoveCursorUp),
+        KeyCode::Down => input(InputIntent::MoveCursorDown),
         KeyCode::Esc => input(InputIntent::Clear),
         _ => KeyEventMapping::default(),
     }
