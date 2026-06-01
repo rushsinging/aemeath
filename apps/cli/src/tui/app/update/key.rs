@@ -195,14 +195,14 @@ impl App {
                 if self.input_area.is_showing_suggestions() {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
                 } else {
-                    self.handle_input_intent(InputIntent::MoveHistoryPrevious);
+                    self.handle_input_intent(InputIntent::MoveCursorUp);
                 }
             }
             (KeyModifiers::NONE, KeyCode::Down) => {
                 if self.input_area.is_showing_suggestions() {
                     self.handle_input_intent(InputIntent::SelectCompletionNext);
                 } else {
-                    self.handle_input_intent(InputIntent::MoveHistoryNext);
+                    self.handle_input_intent(InputIntent::MoveCursorDown);
                 }
             }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => {

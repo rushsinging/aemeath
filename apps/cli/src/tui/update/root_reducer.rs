@@ -157,15 +157,19 @@ fn reduce_effect_result(model: &mut TuiModel, mapping: EffectResultMapping) -> T
     result
 }
 
-/// 补全弹窗可见时，将 Up/Down 历史导航重写为补全选择。
+/// 补全弹窗可见时，将 Up/Down 重写为补全选择。
 fn rewrite_history_to_completion(
     input: &crate::tui::model::input::model::InputModel,
     intent: InputIntent,
 ) -> InputIntent {
     if input.completion.visible {
         match intent {
-            InputIntent::MoveHistoryPrevious => InputIntent::SelectCompletionPrevious,
-            InputIntent::MoveHistoryNext => InputIntent::SelectCompletionNext,
+            InputIntent::MoveCursorUp | InputIntent::MoveHistoryPrevious => {
+                InputIntent::SelectCompletionPrevious
+            }
+            InputIntent::MoveCursorDown | InputIntent::MoveHistoryNext => {
+                InputIntent::SelectCompletionNext
+            }
             other => other,
         }
     } else {

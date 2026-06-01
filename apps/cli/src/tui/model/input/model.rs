@@ -52,6 +52,26 @@ impl InputModel {
                     cursor: self.document.cursor,
                 }]
             }
+            InputIntent::MoveCursorUp => {
+                if self.document.is_cursor_at_first_line() {
+                    self.history_previous()
+                } else {
+                    self.document.move_up();
+                    vec![InputChange::CursorMoved {
+                        cursor: self.document.cursor,
+                    }]
+                }
+            }
+            InputIntent::MoveCursorDown => {
+                if self.document.is_cursor_at_last_line() {
+                    self.history_next()
+                } else {
+                    self.document.move_down();
+                    vec![InputChange::CursorMoved {
+                        cursor: self.document.cursor,
+                    }]
+                }
+            }
             InputIntent::InsertNewline => self.insert_text("\n".to_string()),
             InputIntent::DeleteBackward => {
                 self.completion.clear();
@@ -318,5 +338,56 @@ mod tests {
         assert_eq!(model.history.selected_index, None);
         assert_eq!(model.history.saved_input, "");
         assert_eq!(model.document.buffer, "old");
+        }
+
+        // Bug #99: MoveCursorUp/Down 在多行时移动光标，在边界时翻历史
+
+        #[test]
+        fn test_move_cursor_up_multiline_moves_cursor() {
+            let mut model = InputModel::default();
+            model.apply(InputIntent::InsertText("line1\nline2".to_string()));
+            // 光标在第二行末尾
+            assert!(model.document.is_cursor_at_last_line());
+            let changes = model.apply(InputIntent::MoveCursorUp);
+            // 应移动光标到第一行，不是翻历史
+            assert!(model.document.is_cursor_at_first_line());
+            assert!(changes.iter().any(|c| matches!(c, InputChange::CursorMoved { .. })));
+        }
+
+        #[test]
+        fn test_move_cursor_up_at_first_line_triggers_history() {
+            let mut model = InputModel::default();
+            model.apply(InputIntent::ReplaceHistory(vec!["history_entry".to_string()]));
+            model.apply(InputIntent::InsertText("current".to_string()));
+            // 光标在第一行（也是唯一一行），按 Up 应翻历史
+            let changes = model.apply(InputIntent::MoveCursorUp);
+            assert_eq!(model.document.buffer, "history_entry");
+            assert!(changes.iter().any(|c| matches!(c, InputChange::HistorySelected { .. })));
+        }
+
+        #[test]
+        fn test_move_cursor_down_at_last_line_triggers_history() {
+            let mut model = InputModel::default();
+            model.apply(InputIntent::ReplaceHistory(vec!["past".to_string()]));
+            model.apply(InputIntent::InsertText("draft".to_string()));
+            // 先翻到历史
+            model.apply(InputIntent::MoveCursorUp);
+            assert_eq!(model.document.buffer, "past");
+            // 在最后一行按 Down 应翻回
+            let changes = model.apply(InputIntent::MoveCursorDown);
+            assert_eq!(model.document.buffer, "draft");
+            assert!(changes.iter().any(|c| matches!(c, InputChange::HistorySelected { .. })));
+        }
+
+        #[test]
+        fn test_move_cursor_down_multiline_moves_cursor() {
+            let mut model = InputModel::default();
+            model.apply(InputIntent::InsertText("line1\nline2".to_string()));
+            model.apply(InputIntent::MoveCursorHome); // 光标到第一行开头
+            assert!(model.document.is_cursor_at_first_line());
+            let changes = model.apply(InputIntent::MoveCursorDown);
+            // 应移动光标到第二行
+            assert!(model.document.is_cursor_at_last_line());
+            assert!(changes.iter().any(|c| matches!(c, InputChange::CursorMoved { .. })));
+        }
     }
-}

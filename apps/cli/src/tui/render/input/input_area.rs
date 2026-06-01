@@ -96,6 +96,19 @@ impl InputArea {
         self.textarea.lines().iter().all(|line| line.is_empty())
     }
 
+    /// 光标是否在第一行（Up 翻历史的前置条件）
+    pub(crate) fn cursor_is_at_first_line(&self) -> bool {
+        let (row, _) = self.textarea.cursor();
+        row == 0
+    }
+
+    /// 光标是否在最后一行（Down 翻历史的前置条件）
+    pub(crate) fn cursor_is_at_last_line(&self) -> bool {
+        let (row, _) = self.textarea.cursor();
+        let total = self.textarea.lines().len();
+        row + 1 >= total
+    }
+
     /// 获取 inner area（textarea 的实际渲染区域，去掉 border）
     pub fn get_inner_area(&self, area: &Rect) -> Rect {
         let block = Block::default().borders(Borders::ALL);
