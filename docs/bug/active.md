@@ -9,6 +9,7 @@
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
+| 104 | input queue drain 后没有在 TUI 中显示 | 中 | 活动中 | 未确认 | 2026-06 | 待排查：input queue 在 agent loop drain 时，消息被提交给 LLM 但未在 TUI output area 显示为用户输入，导致用户看不到自己之前排队的消息被处理 |
 
 
 
@@ -768,4 +769,30 @@ Tool Bash timed out after 120s
 **涉及路径**：
 - `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
 - `agent/features/hook/src/business/hook/runner.rs`
+
+### #104 input queue drain 后没有在 TUI 中显示
+
+**状态**：活动中
+
+**症状**：用户在 agent 处理期间通过 input queue 排队了多条消息（如粘贴、快速连续输入）。当 agent 完成当前轮次后，input queue 被 drain，排队的消息被提交给 LLM 处理，但 TUI output area 中没有显示这些排队消息的文本内容（即用户看不到自己排队的输入被处理了）。
+
+**复现路径**：
+1. 在 TUI 中发送一条消息，等待 agent 开始处理
+2. 处理期间继续输入文本并发送（消息进入 input queue）
+3. agent 完成当前轮次后，input queue 被逐条 drain
+4. 观察 TUI output area：agent 直接开始回复排队消息，但用户看不到自己排队的消息内容
+
+**疑似根因**：
+- `append_queued_input`（或等效的 queue drain 逻辑）将排队消息提交给 LLM 时，未同步在 TUI output area 渲染用户输入行
+- 首次正常输入时走的是 `Msg::Submit` / `Msg::Paste` 等完整路径（清空输入框 + 渲染用户消息 + 启动处理），而 queue drain 路径可能跳过了渲染用户消息的步骤
+
+**修复方向**：
+1. 排查 input queue drain 路径（`append_queued_input` 或 `drain_input_queue`），确认是否在提交 LLM 前渲染了用户消息
+2. queue drain 时应模拟与首次提交相同的 UI 流程：清空输入区 → 在 output area 追加用户消息行 → 开始处理
+3. 添加回归测试验证 drain 后 TUI output 包含对应的用户输入行
+
+**涉及路径**：
+- `aemeath-cli/src/tui/app/update/`（queue drain 入口）
+- `aemeath-cli/src/tui/app/stream/`（agent loop 与 queue 交互）
+- input queue 状态管理与 TUI 展示逻辑
 
