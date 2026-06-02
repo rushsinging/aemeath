@@ -112,16 +112,12 @@ where
     I: InputEventDrainPort,
 {
     buffer.extend(input_events.drain_input_events().await);
-    log::info!("[drain-debug] drain_sources: calling queue.drain_queued_input");
     if let Some(queued) = queue.drain_queued_input().await {
-        log::info!("[drain-debug] drain_sources: got {} queued messages from queue", queued.len());
         buffer.extend(
             queued
                 .into_iter()
                 .map(|text| ChatInputEvent::classify_text(text, Vec::new())),
         );
-    } else {
-        log::info!("[drain-debug] drain_sources: queue returned None/empty");
     }
 }
 

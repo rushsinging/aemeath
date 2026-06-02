@@ -282,7 +282,6 @@ impl App {
             }
             UiEvent::DrainQueuedInput { reply_tx } => {
                 let queued = self.input.drain_queue();
-                log::info!("[drain-debug] TUI DrainQueuedInput: queue has {} items", queued.len());
                 if !queued.is_empty() {
                     // 先清除「排队中」显示块（QueuedUserMessage），再以正式 UserMessage
                     // 回显，避免「排队块」与「已发送回显」双显示。
