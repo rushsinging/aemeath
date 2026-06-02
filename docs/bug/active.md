@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 103 | EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容 | 中 | 活动中 | 未确认 | 2026-05-31 | 工具调用展示层疑似直接渲染 tool input JSON；对无参数的 `ExitWorktree {}` 等工作区工具应展示语义化摘要，避免把 `{}` 等原始 JSON 暴露给用户 |
+| 103 | EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容 | 中 | 待确认 | 待用户确认 | 2026-05-31 | 已为 EnterWorktree/ExitWorktree 注册专用 ToolDisplay：EnterWorktree header 展示 branch/path 语义摘要，ExitWorktree 无参数时不渲染 detail，避免显示 `{}` 原始 JSON |
 | 102 | 长 Write 操作期间 TUI 画面完全不刷新、按键无响应 | 高 | 活动中 | 未确认 | 2026-06 | 初步判断不是 `tokio::fs::write` 阻塞，而是 Write 大 content/result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | 中 | 活动中 | 未确认 | 2026-06 | `hook_ui.rs` 中 `HookStart` 只在执行前发一次且只取 `hooks.first()` 的 command，`HookEnd` 循环发 N 次但无 command 字段；应在每个 hook 执行前各发一次 `HookStart` |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 待用户确认 | 2026-05 | 已将 #72 pull-drain 过渡方案收口到 ChatInputEvent push channel + PendingInputBuffer + Loop Gate：TUI 忙碌期 Enter 通过 Effect 发送事件，runtime 在 BeforeLlm/BeforeFinish/AfterBlockingBoundary 安全边界统一 drain push/pull 输入并去重；普通输入追加为下一 turn，control command 不进入 LLM messages。验证：SDK/runtime gate 相关测试与 runtime/cli check 通过 |
@@ -20,7 +20,7 @@
 
 ### #103 EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容
 
-**状态**：活动中
+**状态**：待确认
 
 **症状**：在 TUI 中触发 `EnterWorktree` / `ExitWorktree` 工具调用时，工具调用块会显示原始 JSON 参数内容；用户观察到 `ExitWorktree` 下方直接显示 `{}`。这类工具的参数对用户价值低，且 `{}` 会造成界面噪音。
 
@@ -34,15 +34,16 @@
 2. `EnterWorktree` / `ExitWorktree` 没有专用展示逻辑，导致空参数对象也被原样展示。
 3. 既有 `ToolDisplay` 或 `tool_impls` 可能只对 Read/Write/Bash 等工具做了摘要，未覆盖 worktree 工具。
 
-**修复方向**：
-1. 为 `EnterWorktree` / `ExitWorktree` 增加专用 TUI 展示摘要：显示分支、路径或“退出当前 worktree”，不直接渲染完整 JSON。
-2. 对空参数对象 `{}` 增加通用兜底：没有可展示参数时不渲染参数正文。
-3. 添加回归测试覆盖 `ExitWorktree {}` 不显示 `{}`，以及 `EnterWorktree` 显示可读摘要。
+**修复**：
+1. 为 `EnterWorktree` 注册专用 TUI 展示：header 显示 `branch`，没有 `branch` 时显示 `path`，不再渲染原始 JSON detail。
+2. 为 `ExitWorktree` 注册专用 TUI 展示：header 显示工具名，空参数 `{}` 不再渲染 detail。
+3. 添加回归测试覆盖 `ExitWorktree {}` 不显示 `{}`，以及 `EnterWorktree` 的 branch/path 两种可读摘要。
 
-**涉及路径（预计）**：
+**验证**：`cargo test -p cli worktree` 通过。
+
+**涉及路径**：
 - `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
-- `apps/cli/src/tui/render/output/blocks/tool_call.rs`
-- `apps/cli/src/tui/model/conversation/model.rs`
+- `apps/cli/src/tui/render/output/tool_display.rs`
 
 ### #102 长 Write 操作期间 TUI 画面完全不刷新、按键无响应
 
