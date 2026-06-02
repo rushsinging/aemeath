@@ -26,15 +26,6 @@ pub fn project_file_name_from_path(path: &Path) -> String {
     project_file_name(&path.to_string_lossy())
 }
 
-/// Backward-compatible aliases used by `memory/mod.rs` re-exports.
-pub fn project_hash(cwd: &str) -> String {
-    project_file_name(cwd)
-}
-
-pub fn project_hash_from_path(path: &Path) -> String {
-    project_file_name_from_path(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

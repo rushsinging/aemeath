@@ -304,7 +304,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            storage::api::project_hash_from_path(&cwd),
+            storage::api::project_file_name_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )
@@ -354,7 +354,7 @@ mod tests {
         .unwrap();
         let store = MemoryStore::new(
             &base_dir,
-            storage::api::project_hash_from_path(&cwd),
+            storage::api::project_file_name_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )
