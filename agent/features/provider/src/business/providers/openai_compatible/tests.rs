@@ -111,15 +111,49 @@ fn thinking_budget_effort_boundaries() {
 }
 
 #[test]
-fn volcengine_thinking_budget_maps_to_reasoning_effort() {
+fn volcengine_thinking_budget_sends_enabled_thinking() {
     let config = ReasoningConfig::ThinkingBudget(40000);
     let mut body = base_body();
 
     VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
-    assert_eq!(body.get("reasoning"), Some(&json!({"effort":"xhigh"})));
-    assert!(body.get("thinking").is_none());
+    // Volcengine 使用 thinking.type 字段，ThinkingBudget 表示启用。
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"enabled"})));
+    assert!(body.get("reasoning").is_none());
     assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn volcengine_bool_false_sends_disabled_thinking() {
+    let config = ReasoningConfig::Bool(false);
+    let mut body = base_body();
+
+    VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"disabled"})));
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn volcengine_bool_true_sends_enabled_thinking() {
+    let config = ReasoningConfig::Bool(true);
+    let mut body = base_body();
+
+    VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"enabled"})));
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn volcengine_object_reasoning_sends_reasoning_only() {
+    let config = ReasoningConfig::Object(json!({"effort":"medium"}));
+    let mut body = base_body();
+
+    VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("reasoning"), Some(&json!({"effort":"medium"})));
+    assert!(body.get("thinking").is_none());
 }
 
 #[test]

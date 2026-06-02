@@ -103,7 +103,12 @@ fn reasoning_config(
         .as_ref()
         .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
         .or_else(|| {
-            if runtime_settings.thinking_max_tokens > 0 {
+            // thinking_max_tokens > 0 仅当 reasoning 未显式关闭时才生效。
+            // 若 model_reasoning == Some(false)，说明用户明确关闭了 thinking，
+            // 此时 thinking_max_tokens 仅作为预算上限，不应强制开启 thinking。
+            if runtime_settings.thinking_max_tokens > 0
+                && model_reasoning != Some(false)
+            {
                 Some(ReasoningConfig::ThinkingBudget(
                     runtime_settings.thinking_max_tokens,
                 ))
@@ -299,12 +304,23 @@ mod tests {
     fn test_reasoning_config_uses_thinking_budget_before_model_reasoning() {
         let settings = runtime_settings(4096, true, None);
 
-        let result = reasoning_config(&settings, Some(false));
+        let result = reasoning_config(&settings, Some(true));
 
         assert!(matches!(
             result,
             Some(ReasoningConfig::ThinkingBudget(4096))
         ));
+    }
+
+    #[test]
+    fn test_reasoning_config_thinking_budget_respects_model_reasoning_false() {
+        // 当 model_reasoning == Some(false) 时，即使 thinking_max_tokens > 0
+        // 也不应强制开启 thinking，应返回 Bool(false)。
+        let settings = runtime_settings(8192, false, None);
+
+        let result = reasoning_config(&settings, Some(false));
+
+        assert!(matches!(result, Some(ReasoningConfig::Bool(false))));
     }
 
     #[test]
