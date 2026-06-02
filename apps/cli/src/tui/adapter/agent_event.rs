@@ -6,6 +6,7 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::workspace::WorktreeKind;
+use crate::tui::render::display::safe_text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
 
 const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
@@ -210,15 +211,11 @@ fn utf8_prefix(text: &str, limit: usize) -> &str {
     if text.len() <= limit {
         return text;
     }
-    let mut end = 0usize;
-    for (idx, ch) in text.char_indices() {
-        let next = idx + ch.len_utf8();
-        if next > limit {
-            break;
-        }
-        end = next;
-    }
-    &text[..end]
+    let char_end = text
+        .char_indices()
+        .take_while(|(idx, ch)| idx + ch.len_utf8() <= limit)
+        .count();
+    safe_str_slice_by_char(text, 0, char_end)
 }
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
