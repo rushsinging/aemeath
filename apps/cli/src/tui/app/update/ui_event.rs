@@ -124,9 +124,27 @@ impl App {
                 self.chat.stop_processing();
             }
             UiEvent::MessagesSync(msgs) => {
+                // 比较新旧 messages，提取新增的 user messages 用于回显
+                let old_len = self.chat.messages.len();
+                let new_user_texts: Vec<String> = msgs
+                    .iter()
+                    .skip(old_len)
+                    .filter_map(|m| {
+                        if m.role == "user" {
+                            let t = m.text_content();
+                            if t.is_empty() { None } else { Some(t) }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 self.chat.messages = msgs;
                 self.input.clear_queue();
                 self.clear_queued_submission_echo();
+                // 将新增的 user messages 正式回显到 conversation model
+                for text in new_user_texts {
+                    self.append_user_echo(text);
+                }
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
