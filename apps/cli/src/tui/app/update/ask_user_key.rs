@@ -186,8 +186,12 @@ impl App {
                     .unwrap_or_default();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
-                    self.dismiss_ask_user_block();
-                    self.append_user_echo(text.clone());
+                    self.model.conversation.apply(
+                        ConversationIntent::AnswerAskUser {
+                            answer: text.clone(),
+                        },
+                    );
+                    self.refresh_output_widget_from_model();
                     let _ = state.reply_tx.send(text);
                     self.spinner_phase(SpinnerPhase::Generating);
                 }
