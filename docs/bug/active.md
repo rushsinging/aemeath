@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | 中 | 活动中 | 未确认 | 2026-06 | `hook_ui.rs` 中 `HookStart` 只在执行前发一次且只取 `hooks.first()` 的 command，`HookEnd` 循环发 N 次但无 command 字段；应在每个 hook 执行前各发一次 `HookStart` |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 待用户确认 | 2026-05 | 已将 #72 pull-drain 过渡方案收口到 ChatInputEvent push channel + PendingInputBuffer + Loop Gate：TUI 忙碌期 Enter 通过 Effect 发送事件，runtime 在 BeforeLlm/BeforeFinish/AfterBlockingBoundary 安全边界统一 drain push/pull 输入并去重；普通输入追加为下一 turn，control command 不进入 LLM messages。验证：SDK/runtime gate 相关测试与 runtime/cli check 通过 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 并入 #49 | 未确认 | 2026-05 | 原 #72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 是 pull-drain 过渡修复，思路已被 #49 的 ChatInputEvent push channel + PendingInputBuffer + Loop Gate 统一方案取代；后续不再沿 #72 继续扩展 pull adapter，而是在 #49 实施中迁移并删除旧 drain 散点。 |
@@ -861,4 +862,20 @@ Tool Bash timed out after 120s
 **关联**：
 - Feature #32（TUI 选中和复制逻辑统一）
 - Bug #33（spinner 下方 task list 无法选中复制——同类问题已修复，修复模式可参考）
+
+### #101 HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令
+
+**状态**：活动中
+
+**症状**：配了多个 Stop hook 时，TUI spinner 只显示第一个 hook 的命令名，后续 hook 执行时无 UI 反馈。
+
+**根因**：`hook_ui.rs` 中 `HookStart` 事件只发一次（取 `hooks.first().command`），而 `run_hooks_with_json()` 内部串行执行所有匹配 hooks，每个 hook 执行前没有单独发 `HookStart`。
+
+**修复方向**：
+1. 将 `HookStart` 的发送移入 `HookRunner.run_hooks_with_json()` 的循环内，每个 hook 执行前各发一次
+2. 或者让 `HookUi` 不再自己发 `HookStart`，改为通过回调/sink 在 runner 循环内逐个通知
+
+**涉及路径**：
+- `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
+- `agent/features/hook/src/business/hook/runner.rs`
 
