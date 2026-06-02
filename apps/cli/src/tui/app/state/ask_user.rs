@@ -5,8 +5,6 @@
 //! 本结构仅保留应答回传所需的静态元数据与 reply_tx。
 
 /// Built-in options appended after LLM options in AskUserQuestion.
-pub(crate) const BUILTIN_OPTION_ALL: &str = "All of the above";
-pub(crate) const BUILTIN_OPTION_NONE: &str = "None of the above";
 pub(crate) const BUILTIN_OPTION_CHAT: &str = "Type something...";
 
 /// State for interactive AskUserQuestion option selection

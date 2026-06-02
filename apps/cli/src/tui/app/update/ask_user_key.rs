@@ -53,25 +53,13 @@ impl App {
                 KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                     let state = self.input.ask_user_state.take().unwrap();
                     let selected = snapshot.map(|s| s.selected).unwrap_or_default();
-                    let llm_count = state.llm_option_count;
                     let cursor_title = state
                         .options
                         .get(cursor)
                         .map(|o| o.title.as_str())
                         .unwrap_or("");
 
-                    let answer = if cursor_title == crate::tui::app::state::BUILTIN_OPTION_ALL {
-                        // "All of the above": return numbered list of LLM option titles
-                        let all_opts: Vec<String> = state.options[..llm_count]
-                            .iter()
-                            .enumerate()
-                            .map(|(i, opt)| format!("{}. {}", i + 1, opt.title))
-                            .collect();
-                        all_opts.join("\n")
-                    } else if cursor_title == crate::tui::app::state::BUILTIN_OPTION_NONE {
-                        // "None of the above": return empty string
-                        String::new()
-                    } else if cursor_title == crate::tui::app::state::BUILTIN_OPTION_CHAT {
+                    let answer = if cursor_title == crate::tui::app::state::BUILTIN_OPTION_CHAT {
                         // "Type something...": switch to chat input sub-mode
                         self.input.ask_user_state = Some(state);
                         self.set_ask_user_chat_input(true);
@@ -202,11 +190,13 @@ impl App {
                 self.model
                     .conversation
                     .apply(ConversationIntent::DeleteAskUserChatChar);
+                self.refresh_output_widget_from_model();
             }
             KeyCode::Char(c) => {
                 self.model
                     .conversation
                     .apply(ConversationIntent::AppendAskUserChatChar { ch: c });
+                self.refresh_output_widget_from_model();
             }
             KeyCode::Up => {
                 // Move cursor back to last option

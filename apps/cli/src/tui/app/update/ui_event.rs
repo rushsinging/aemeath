@@ -206,26 +206,12 @@ impl App {
                 self.chat.finish_tool_call(&id);
                 self.spinner_stop();
 
-                // 智能构建内建选项：
-                // - ≥2 LLM 选项：All + None + Type something
-                // - 1 个 LLM 选项：None + Type something
+                // 构建内建选项：始终追加 Type something
+                // - ≥1 LLM 选项：Type something
                 // - 0 个选项：无内建选项（纯自由输入）
                 let llm_option_count = options.len();
                 let mut all_options = options.clone();
-                if llm_option_count >= 2 {
-                    all_options.push(sdk::OptionItem::title_only(
-                        crate::tui::app::state::BUILTIN_OPTION_ALL,
-                    ));
-                    all_options.push(sdk::OptionItem::title_only(
-                        crate::tui::app::state::BUILTIN_OPTION_NONE,
-                    ));
-                    all_options.push(sdk::OptionItem::title_only(
-                        crate::tui::app::state::BUILTIN_OPTION_CHAT,
-                    ));
-                } else if llm_option_count == 1 {
-                    all_options.push(sdk::OptionItem::title_only(
-                        crate::tui::app::state::BUILTIN_OPTION_NONE,
-                    ));
+                if llm_option_count >= 1 {
                     all_options.push(sdk::OptionItem::title_only(
                         crate::tui::app::state::BUILTIN_OPTION_CHAT,
                     ));
