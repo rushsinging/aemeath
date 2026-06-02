@@ -11,11 +11,6 @@
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 + audit/policy 域落地 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。**2026-05-30 并入 #62（audit/policy 域实现）**：047 DDD spec §4.2/§4.3/§8/§9 定义的 audit 域（AuditTrail / correlation id 串联 Session·Chat·Turn·Agent·Tool·Resource / policy·hook·outcome 三分记录）与 policy 域（PermissionRequest/Decision/Grant/Mode/Capability/RiskAssessment）归入本 feature 统一设计实施，不再独立拆分。详见 [spec](specs/042-permission-control-system.md)、[047 spec](specs/047-ddd-redesign.md) |
 | 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
-| 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
-| 60 | Auto-compact LLM 语义化压缩 | 中 | 实现中 | 未确认 | 将 auto-compact 的本地文本摘要（build_summary_text：每消息取前200字+工具名）替换为 LLM 调用（build_compact_request + COMPACT_PROMPT），生成结构化摘要（目标/进度/关键决策/相关文件/当前状态/下一步）。失败时回退到本地摘要。涉及：summary.rs 新增 compact_messages_with_llm（async + Arc<LlmClient>），looping/compact.rs 传参，trait_command.rs 走 LLM 路径 |
-| 61 | 架构债务收口（047 DDD 软约束落实） | 中 | 待确认 | 未确认 | 047 DDD spec 的硬约束与软约束债务已完成收口：D1 `runtime::api` 去整体转发、D2 share 瘦身回归最小共享内核、D3 supporting domain Public API 收窄、D4 COLA 内部分层均已落地；后续遗留 1-6 项也已结清并补 guard。原 D5 audit / D6 policy 属新功能而非债务收口，已拆出至 #62。详见 [spec](specs/047-ddd-redesign.md) 与下方详情段。 |
-| 67 | Task/project window 改为 ChangeSet 驱动刷新 | 中 | 实现中 | 未确认 | 当前 TUI 每帧轮询 `AgentClient::task_status()` 刷新 task list window，且 status bar 的 worktree_kind/branch 只在 init 设置，EnterWorktree/ExitWorktree 后不会刷新。目标：Runtime 在 TaskStore 变更路径发出 `ChangeSet::TASKS`，在 project/worktree 上下文变化路径发出 `ChangeSet::PROJECT`；TUI 监听 changes 后按需刷新 `RuntimeModel.task_status.lines` 与 workspace/status bar；`/clear` 保留本地立即清空以保证同步反馈。 |
-| 66 | 去除 mod.rs 旧写法 + 架构 guard | 中 | ✅ 已完成 | 未确认 | 将所有 mod.rs 重命名为父目录同名文件（约 78 个），添加架构 guard 脚本检测新增 mod.rs 并拒绝 |
 
 ### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
 
@@ -56,75 +51,6 @@
 - `apps/cli/src/tui/model/conversation/*`
 - `apps/cli/src/tui/view_assembler/output.rs`
 - `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
-
-### #67 Task/project window 改为 ChangeSet 驱动刷新
-
-**状态**：实现中
-
-**背景**：task list window 当前由 TUI run loop 每帧调用 `update_task_status()` 轮询 Runtime，Runtime 再从 `TaskStore` 读取当前 batch 并格式化为 `TaskStatusView.lines`。这种方式能工作，但任务未变化时仍重复读 store，且 SDK 中已有的 `ChangeSet::TASKS` 变更通道没有发挥作用。同时 status bar 的 `worktree_kind` 和 `branch` 只在 init 阶段从 workspace snapshot 设置一次，EnterWorktree/ExitWorktree 之后没有事件驱动刷新，导致状态栏继续显示初始 checkout/branch。
-
-**目标**：
-1. Runtime 中所有会影响 task list window 的 TaskStore 写路径，在写入后发出 `ChangeSet::TASKS`。
-2. Runtime 中所有会影响 workspace/status bar 的 project/worktree 上下文变化路径，在写入后发出 `ChangeSet::PROJECT`。
-3. TUI run loop 监听 `AgentClient::changes()`，仅在收到 `TASKS` 变更时调用 `update_task_status()`，收到 `PROJECT` 变更时刷新 project snapshot 并同步 status bar。
-4. 保留启动首帧/必要兜底刷新，避免 TUI 初始状态缺失。
-5. `/clear` 继续同时清 Runtime TaskStore 与本地 `RuntimeModel.task_status.lines`，保证用户立即看到窗口清空；随后 `TASKS` change 再同步一次空快照。
-
-**明确不做**：
-1. 不让 `storage::TaskStore` 直接依赖 `sdk::ChangeSet`，避免 storage 反向依赖 runtime/sdk。
-2. 不重做 task list window 渲染样式和窗口布局。
-3. 不引入复杂缓存；本轮只把刷新触发从每帧 polling 改为 change-driven。
-
-**验收标准**：
-1. TaskCreate/TaskUpdate/TaskStop/TaskListComplete/clear/restore 等影响当前 task 状态的路径会触发 `ChangeSet::TASKS`。
-2. EnterWorktree/ExitWorktree 和 chat runtime 的 workspace context 变化路径会触发 `ChangeSet::PROJECT`。
-3. TUI 不再每帧无条件调用 `update_task_status()`；收到 `TASKS` 后刷新 `RuntimeModel.task_status.lines`。
-4. TUI 收到 `PROJECT` 后刷新 `RuntimeModel.workspace`，并立即同步 status bar 的 `worktree_kind`/`branch`。
-5. `/clear` 后 task store 与 task list window 仍同时清空。
-6. 单元测试或集成测试覆盖 Runtime 发 TASKS/PROJECT、TUI 接收 TASKS/PROJECT 后更新对应 model/widget、无 TASKS 时不重复拉取。
-
-### #61 架构债务收口（047 DDD 软约束落实）
-
-**状态**：待确认（D1-D4 + Ollama 接线 #85 全部完成，合回 main `aa9f0d3`，`cargo clean` 后 1120 测试绿、clippy --workspace + 架构 guard 含 COLA layer purity 全过）
-
-**背景**：2026-05-29 核对 047 DDD spec vs `agent/` 实现——**硬约束（6 个架构 guard：Cargo 依赖图/CLI 薄入口/share 无上游/COLA 纯度/forbidden import/行数）全部遵守且焊死**，经历 #58/#59 等大量并行开发后仍未破。但 guard 不强制的**软约束**仍停留在 spec 已标注的「技术债/未实现」状态，docs 此前未登记落实计划。本 feature 把这些债务转为可执行子项。
-
-**子项（按优先级 / 风险）**：
-1. **D1 `runtime::api` 去整体转发**（§6.4.3 rule4，**最高优先、低风险**）：`agent/runtime/src/api.rs` 当前 `pub use audit/hook/policy/project/prompt/provider/storage/tools` + `pub use share::*` 整体转发下游 crate，违反"api 只暴露 use case/DTO、不暴露内部"。改为只 re-export 业务 use case（chat/session/agent_runner 等）。
-2. **D2 share 瘦身**（§6.4.1 rule6，**工作量大**）：`agent/share`（55 文件）含 `config`(19f)/`memory`(9f)/`task`(8f)/`tool`(1f，ToolRegistry/ToolContext) 等带行为/IO 类型，超出"最小共享内核"。移出到对应 domain，保留 message/session_types/error/string_idx。
-3. **D3 supporting domain Public API 收窄**（§6.4.3）：project/prompt/storage/policy/hook 的 api.rs 仍是 `XxxApiMarker`/`pub use 内部::*`，tools/provider 无 api facade。收窄为 use case 门面、内部 crate-private。
-4. **D4 COLA 内部分层 core/business/utils**（§6.4.3/§7.2）：仅 runtime 完整分层，其余 8 个平铺。与 D3 协同。
-
-> 原 D5（audit 实现）/ D6（policy/PermissionEngine 实现）属**新功能而非债务收口**，已拆出至 **#62**。
-
-**D2 进度 · skill loader 归位（fs IO 收尾）**：`share::skill_ops_loader`（`load_all_skills`/`load_all_skills_cached`/`load_and_filter_skills`/`load_skills_from_dir`，含 `std::fs::read_dir`/`metadata` 目录遍历 IO）已移入 `prompt::skill::loader`（prompt 成为 loader canonical，符合 rule6「prompt 承载 skills」）；`agent/share/src/skill_ops_loader.rs` 删除，`lib.rs` 移除 `pub mod skill_ops_loader`。`Skill` DTO 与单文件 parser（`parse_skill`/`read_skill_content`/`builtin_commit_skill`）**保留** `share::skill_ops`——`Skill` 与 `read_skill_content` 被 `tools`/`runtime`/`prompt` 多 crate 依赖，属合理共享内核契约；保留可避免新增 `tools→prompt` 横向边（tools 仅用 DTO+parser，不用 loader）。`prompt::skill` re-export DTO/parser 保持调用方接口一致；runtime 经 `prompt::skill::load_all_skills` 调用（`runtime→prompt` 已批准边，无新增边、无环）。loader 单测随迁至 `prompt::skill::loader::loader_tests`，行为不变。
-
-**D4 进度 · supporting domain 内部 COLA 分层（待确认）**：7 个 supporting domain 已按 §6.4.3/§7.2 完成内部分层，api.rs 门面对外路径不变，纯目录/模块组织无业务逻辑改动。务实原则——只建实际有职责的层，不为凑满三层建空目录：
-- **policy** → `business/security`（仅内容安全扫描一个领域模块）。
-- **project** → `business/worktree`（仅 worktree 工作区上下文一个模块）。
-- **storage** → `business/{memory,history,tool_result_storage}`（三者均为持久化领域规则；history 的 dead_code allow 随迁）。
-- **hook** → `business/hook`（整体为单一 hook 执行引擎 data/result/runner/events；`crate::hook::` → `crate::business::hook::`）。
-- **prompt** → `business/{guidance,skill,security}`（提示词领域规则；guidance/resolver 内 `crate::security` 同步更新）。
-- **tools** → 三层：`core/registry`（register_all_tools 等注册编排，从 lib.rs 抽出）+ `business/*`（各 Tool 实现）+ `utils/path_security`（路径校验纯辅助）；内部 `crate::{bash,mcp,mcp_manager,path_security}` 改分层路径。
-- **provider** → `core/{provider(端口),client,pool}` + `business/{providers,stream,types}`；内部 6 个模块引用全部改分层路径。
-- **audit**（14 行 marker 骨架，无内部模块）：无可分层内容，免分层。
-commit：policy `01d45e6`、project `319c4f0`、storage `8157219`、hook `fa17810`、prompt `bdb8187`、tools `adb67d4`、provider `773afe0`。验证：`cargo clean && cargo test --workspace` 1120 passed / 0 failed；`cargo clippy --workspace -- -D warnings` 通过；`check-architecture-guards.sh`（含 COLA layer purity）全绿。
-
-**性质**：纯架构债务收口（D1-D4），不改业务行为。各子项 SHOULD 独立走 spec→plan→实施；D1/D2/D3 完成后 SHOULD 补对应 guard（如 api 收窄 guard）防回归。
-
-**遗留技术债（#61 后续待结清，2026-05-30 登记；2026-05-30 已结清，待确认）**：D1-D4 主体收口完成后暴露/引入的 6 项遗留已全部处理：
-1. **补 cross-crate api-boundary guard（已完成）**：新增 `.agents/hooks/check-crate-api-boundary.sh` 并接入 `check-architecture-guards.sh`，跨 domain crate 访问只允许 `<crate>::api::*`，阻断 reach into `business/core/utils` 等内部路径；脚本内置 sanity 覆盖允许/禁止样例，架构 guard 全绿。
-2. **share 回归最小共享内核（已完成）**：`ToolRegistry` 已迁入 `tools::api`，`TaskStore`/task list/display/batch/store 行为已迁入 `storage::api`，worktree working path 行为迁入 `project::api`，skill parser/content IO 迁入 `prompt::skill`，SkillTool 使用 prompt 预物化的 `Skill::content`；`share` 保留 DTO/trait/value object 契约并移除多余依赖（如 dirs/rand/futures/parking_lot/regex/chrono/inventory/url/reqwest/bytes/futures-util）。
-3. **D3/D4 暴露的 `#[allow(dead_code)]` 孤儿（已完成）**：本轮复查 `agent/` 下无 `#[allow(dead_code)]` 残留匹配；此前 Ollama 接线等已完成并记录在 #85。
-4. **provider `core↔business` 双向引用（已完成）**：复查 provider core/business 双向引用模式无残留违规匹配。
-5. **runtime 内部经 `crate::api::<crate>::` 引用下游（已完成）**：runtime 下游引用已清理为直接使用 published API，复查无 `crate::api::{audit,hook,policy,project,prompt,provider,storage,tools}::` 残留违规匹配。
-6. **补回归 guard（已完成）**：新增 `.agents/hooks/check-share-minimal-kernel.sh` 并接入总架构 guard，禁止 `share` 回归 ToolRegistry/TaskStore、fs/process/network IO、stateful registry/store 依赖及 task 行为模块；D1/D3 的 api boundary 由 `check-crate-api-boundary.sh` 守护。
-
-**本轮验证（2026-05-30）**：`cargo check -p share`、`cargo check -p prompt`、`cargo check -p project`、`cargo check -p storage`、`cargo check -p tools`、`cargo check -p runtime` 全部通过；`.agents/hooks/check-share-minimal-kernel.sh` 与 `.agents/hooks/check-architecture-guards.sh` 全部通过。
-
-> 教训记录：`cargo test --workspace` 的**增量缓存会制造 unresolved import 假错**，多次误导本次收口判断——涉及可见性/import 改动的验证必须 `cargo clean` 后重跑才是真相。
-
-**关联**：feature #47（DDD spec 基线）；#62（audit/policy 域实现，原 D5/D6）；#85（Ollama 接线，已修）。
 
 ### #49 AskUserQuestion 增强——title+description 选项、智能 All/None、Type something 输入框
 
