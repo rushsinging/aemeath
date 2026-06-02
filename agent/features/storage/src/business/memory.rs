@@ -7,5 +7,8 @@
 pub mod path;
 pub mod store;
 
-pub use path::{memory_base_dir, project_hash, project_hash_from_path};
+pub use path::{
+    memory_base_dir, project_file_name, project_file_name_from_path, project_hash,
+    project_hash_from_path,
+};
 pub use store::MemoryStore;

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use hook::api::HookRunner;
 use share::config::{paths, MemoryConfig};
 use share::memory::MemoryEntry;
-use storage::api::{memory_base_dir, project_hash_from_path, MemoryStore};
+use storage::api::{memory_base_dir, project_file_name_from_path, MemoryStore};
 
 use super::git_context::{collect_git_context, is_git_repo};
 
@@ -319,7 +319,7 @@ async fn collect_memory_context_with_options(
 
     let mut store = MemoryStore::new(
         memory_base_dir(),
-        project_hash_from_path(cwd),
+        project_file_name_from_path(cwd),
         options.max_entries,
         options.similarity_threshold,
     )

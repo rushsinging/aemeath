@@ -2,7 +2,7 @@ use crate::api::ToolContext;
 use serde_json::Value;
 use share::memory_ops::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
 use std::path::PathBuf;
-use storage::api::{memory_base_dir, project_hash_from_path, MemoryStore};
+use storage::api::{memory_base_dir, project_file_name_from_path, MemoryStore};
 
 pub(super) const MAX_CONTENT_CHARS: usize = 500;
 pub(super) const MAX_TAGS: usize = 10;
@@ -18,7 +18,7 @@ pub(super) fn open_store_with_base(
 ) -> Result<MemoryStore, String> {
     MemoryStore::new(
         base_dir,
-        project_hash_from_path(&ctx.cwd),
+        project_file_name_from_path(&ctx.cwd),
         ctx.memory_config.max_entries,
         ctx.memory_config.similarity_threshold,
     )

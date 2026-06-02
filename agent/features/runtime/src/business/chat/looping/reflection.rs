@@ -46,7 +46,7 @@ async fn run_reflection_with_base_dir(
 
     let mut store = MemoryStore::new(
         base_dir.clone(),
-        storage::api::project_hash_from_path(cwd),
+        storage::api::project_file_name_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
@@ -185,7 +185,7 @@ async fn lightweight_reflection_text_with_base_dir(
 
     let store = MemoryStore::new(
         base_dir,
-        storage::api::project_hash_from_path(cwd),
+        storage::api::project_file_name_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )

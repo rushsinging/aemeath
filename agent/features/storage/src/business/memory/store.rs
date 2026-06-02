@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub struct MemoryStore {
     base_dir: PathBuf,
-    project_hash: String,
+    project_file_name: String,
     max_entries: usize,
     similarity_threshold: f64,
 }
@@ -15,7 +15,7 @@ pub struct MemoryStore {
 impl MemoryStore {
     pub fn new(
         base_dir: impl Into<PathBuf>,
-        project_hash: impl Into<String>,
+        project_file_name: impl Into<String>,
         max_entries: usize,
         similarity_threshold: f64,
     ) -> MemoryResult<Self> {
@@ -30,7 +30,7 @@ impl MemoryStore {
 
         Ok(Self {
             base_dir: base_dir.into(),
-            project_hash: project_hash.into(),
+            project_file_name: project_file_name.into(),
             max_entries,
             similarity_threshold,
         })
@@ -296,7 +296,7 @@ impl MemoryStore {
     fn active_path(&self, layer: MemoryLayer) -> PathBuf {
         match layer {
             MemoryLayer::Global => self.base_dir.join("_global.json"),
-            MemoryLayer::Project => self.base_dir.join(format!("{}.json", self.project_hash)),
+            MemoryLayer::Project => self.base_dir.join(format!("{}.json", self.project_file_name)),
         }
     }
 
@@ -305,7 +305,7 @@ impl MemoryStore {
             MemoryLayer::Global => self.base_dir.join("_global_archive.json"),
             MemoryLayer::Project => self
                 .base_dir
-                .join(format!("{}_archive.json", self.project_hash)),
+                .join(format!("{}_archive.json", self.project_file_name)),
         }
     }
 }
