@@ -86,6 +86,7 @@ impl ConversationModel {
             ConversationIntent::AppendAskUserChatChar { ch } => self.append_ask_user_chat_char(ch),
             ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
             ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
+            ConversationIntent::AnswerAskUser { answer } => self.answer_ask_user(answer),
         }
     }
 

@@ -152,6 +152,23 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
         lines.push(RenderedLine::new(vec![Span::styled(line, header_style)]));
     }
 
+    // 已回答状态：显示回答内容，不显示选项和键盘提示
+    if let Some(answer) = &view.answer {
+        let answer_style = Style::default().fg(theme::SUCCESS);
+        lines.push(RenderedLine::new(vec![Span::raw(String::new())]));
+        for ans_line in wrap_text(answer, question_max_width) {
+            lines.push(RenderedLine::new(vec![Span::styled(
+                format!("❯ {ans_line}"),
+                answer_style,
+            )]));
+        }
+        lines.push(RenderedLine::new(vec![Span::raw(String::new())]));
+        return RenderedBlock {
+            block_id: block_id.to_string(),
+            lines,
+        };
+    }
+
     if view.options.is_empty() {
         // 自由输入模式：若携带默认值，补回 `(default: ...)` 提示行（迁移后回归）。
         if let Some(d) = &view.default {
@@ -236,6 +253,7 @@ mod tests {
             chat_input_active: false,
             chat_input_text: String::new(),
             default: None,
+            answer: None,
         }
     }
 
@@ -414,6 +432,28 @@ mod tests {
                 line.width() <= 20,
                 "每行不应超过 20 列: {line:?} ({} 列)",
                 line.width()
+            );
+        }
+
+        #[test]
+        fn test_render_ask_user_answered_shows_answer_text() {
+            let mut v = view(&["A", "B"], 0, false);
+            v.answer = Some("都不喜欢".to_string());
+            let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+            // 应包含回答文本
+            assert!(
+                block.lines.iter().any(|l| l.plain.contains("❯ 都不喜欢")),
+                "应显示回答文本: {:?}",
+                block.lines
+            );
+            // 不应显示选项列表或键盘提示
+            assert!(
+                !block.lines.iter().any(|l| l.plain.contains("1. A")),
+                "已回答时不应显示选项"
+            );
+            assert!(
+                !block.lines.iter().any(|l| l.plain.contains("[Enter]")),
+                "已回答时不应显示键盘提示"
             );
         }
     }

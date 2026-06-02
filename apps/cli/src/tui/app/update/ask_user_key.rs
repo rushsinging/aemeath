@@ -100,9 +100,15 @@ impl App {
                         }
                     };
 
-                    self.dismiss_ask_user_block();
                     if !answer.is_empty() {
-                        self.append_user_echo(answer.clone());
+                        self.model.conversation.apply(
+                            ConversationIntent::AnswerAskUser {
+                                answer: answer.clone(),
+                            },
+                        );
+                        self.refresh_output_widget_from_model();
+                    } else {
+                        self.dismiss_ask_user_block();
                     }
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     let _ = state.reply_tx.send(answer);
@@ -129,8 +135,12 @@ impl App {
                     let text = self.model.input.document.buffer.clone();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                            self.dismiss_ask_user_block();
-                            self.append_user_echo(text.clone());
+                            self.model.conversation.apply(
+                                ConversationIntent::AnswerAskUser {
+                                    answer: text.clone(),
+                                },
+                            );
+                            self.refresh_output_widget_from_model();
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );

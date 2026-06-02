@@ -149,6 +149,7 @@ impl OutputViewAssembler {
                     chat_input_active,
                     chat_input_text,
                     default,
+                    answer,
                 } => {
                     roots.push(leaf(
                         id.clone(),
@@ -163,6 +164,7 @@ impl OutputViewAssembler {
                             chat_input_active: *chat_input_active,
                             chat_input_text: chat_input_text.clone(),
                             default: default.clone(),
+                            answer: answer.clone(),
                         }),
                     ));
                 }
