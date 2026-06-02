@@ -189,10 +189,10 @@ pub(crate) struct SpawnContext {
 
 pub fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
-        let mut stream = match ctx
+        let stream = match ctx
             .agent_client
             .chat(sdk::ChatRequest {
-                messages: ctx.messages,
+                messages: ctx.messages.clone(),
                 queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
                     ctx.queue_request_tx.clone(),
                 ))),
@@ -209,27 +209,62 @@ pub fn spawn_processing(ctx: SpawnContext) {
                 return;
             }
         };
+        let queue_request_tx = ctx.queue_request_tx.clone();
         let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
-        while let Some(event) = stream.recv().await {
-            let ui_event = sdk_event_to_ui_event(event);
-            let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
-            if ctx.tx.send(ui_event).await.is_err() {
-                return;
-            }
-            if is_done {
-                if let Some(queued) = queue.drain_queued_input().await {
-                    let messages = queued
-                        .into_iter()
-                        .map(|text| sdk::ChatMessage {
-                            role: "user".to_string(),
-                            content: serde_json::json!([{ "type": "text", "text": text }]),
-                        })
-                        .collect();
-                    if let Err(e) = ctx.agent_client.sync_current_messages(messages).await {
-                        log::warn!("failed to sync drained queue messages: {e}");
+        let input_event_buffer = ctx.input_event_buffer.clone();
+        let mut current_messages = ctx.messages;
+        let mut active_stream = Some(stream);
+        while let Some(stream) = active_stream.take() {
+            let mut stream = stream;
+            while let Some(event) = stream.recv().await {
+                let ui_event = sdk_event_to_ui_event(event);
+                let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
+                if ctx.tx.send(ui_event).await.is_err() {
+                    return;
+                }
+                if is_done {
+                    if let Some(queued) = queue.drain_queued_input().await {
+                        let new_messages: Vec<sdk::ChatMessage> = queued
+                            .into_iter()
+                            .map(|text| sdk::ChatMessage {
+                                role: "user".to_string(),
+                                content: serde_json::json!([{ "type": "text", "text": text }]),
+                            })
+                            .collect();
+                        current_messages.extend(new_messages);
+                        if let Err(e) =
+                            ctx.agent_client.sync_current_messages(current_messages.clone()).await
+                        {
+                            log::warn!("failed to sync drained queue messages: {e}");
+                        }
+                        // 重新发起 chat 让 runtime loop_runner 处理排队的用户消息
+                        match ctx
+                            .agent_client
+                            .chat(sdk::ChatRequest {
+                                messages: current_messages.clone(),
+                                queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
+                                    queue_request_tx.clone(),
+                                ))),
+                                input_events: Some(Arc::new(TuiInputEventPort::new(
+                                    input_event_buffer.clone(),
+                                ))),
+                            })
+                            .await
+                        {
+                            Ok(new_stream) => {
+                                active_stream = Some(new_stream);
+                                break;
+                            }
+                            Err(e) => {
+                                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
+                                let _ = ctx.tx.send(UiEvent::Done).await;
+                                return;
+                            }
+                        }
                     }
                 }
             }
+            // stream 正常关闭（while 自然结束）→ active_stream 为 None → 外层 while 退出
         }
     });
 }
@@ -280,5 +315,58 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    /// 回归 #104：DrainQueuedInput 事件从 TUI input queue 取出排队消息后，
+    /// 回显为 UserMessage 并返回给调用方，确保 TUI 显示排队消息。
+    #[tokio::test]
+    async fn test_drain_queued_input_returns_messages_and_clears_queue() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let port = TuiQueueDrainPort::new(tx);
+
+        // 模拟 TUI 主线程收到 DrainQueuedInput 后回复排队消息
+        let replier = tokio::spawn(async move {
+            if let Some(UiEvent::DrainQueuedInput { reply_tx }) = rx.recv().await {
+                let _ = reply_tx.send(vec!["排队消息A".to_string(), "排队消息B".to_string()]);
+            }
+        });
+
+        let result = port.drain_queued_input().await;
+        replier.await.unwrap();
+
+        assert_eq!(
+            result,
+            Some(vec!["排队消息A".to_string(), "排队消息B".to_string()]),
+            "drain 应返回排队的消息列表"
+        );
+    }
+
+    /// 回归 #104：DrainQueuedInput 在队列为空时返回 None。
+    #[tokio::test]
+    async fn test_drain_queued_input_returns_none_when_empty() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let port = TuiQueueDrainPort::new(tx);
+
+        let replier = tokio::spawn(async move {
+            if let Some(UiEvent::DrainQueuedInput { reply_tx }) = rx.recv().await {
+                let _ = reply_tx.send(Vec::<String>::new());
+            }
+        });
+
+        let result = port.drain_queued_input().await;
+        replier.await.unwrap();
+
+        assert!(result.is_none(), "空队列应返回 None");
+    }
+
+    /// 回归 #104：DrainQueuedInput 在通道断开时返回 None。
+    #[tokio::test]
+    async fn test_drain_queued_input_returns_none_when_channel_dropped() {
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        drop(rx);
+        let port = TuiQueueDrainPort::new(tx);
+
+        let result = port.drain_queued_input().await;
+        assert!(result.is_none(), "通道断开应返回 None");
     }
 }
