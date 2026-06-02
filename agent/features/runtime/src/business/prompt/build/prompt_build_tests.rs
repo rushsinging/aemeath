@@ -77,6 +77,74 @@ fn test_prompt_context_new_preserves_model_metadata() {
     );
 }
 
+#[test]
+fn test_project_instruction_walk_includes_cwd_first() {
+    let tmp = std::env::temp_dir().join(format!(
+        "aemeath_test_walk_cwd_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let paths = project_instruction_walk(&tmp, 2);
+
+    assert_eq!(paths[0], tmp.join("CLAUDE.md"));
+    assert_eq!(paths[1], tmp.join("AGENTS.md"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_project_instruction_walk_includes_parent() {
+    let tmp = std::env::temp_dir().join(format!(
+        "aemeath_test_walk_parent_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let child = tmp.join("sub");
+    std::fs::create_dir_all(&child).unwrap();
+
+    let paths = project_instruction_walk(&child, 1);
+
+    assert!(paths.contains(&child.join("CLAUDE.md")));
+    assert!(paths.contains(&tmp.join("CLAUDE.md")));
+    let child_idx = paths
+        .iter()
+        .position(|p| p == &child.join("CLAUDE.md"))
+        .unwrap();
+    let parent_idx = paths
+        .iter()
+        .position(|p| p == &tmp.join("CLAUDE.md"))
+        .unwrap();
+    assert!(child_idx < parent_idx);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_project_instruction_walk_depth_zero_cwd_only() {
+    let tmp = std::env::temp_dir().join(format!(
+        "aemeath_test_walk_zero_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let paths = project_instruction_walk(&tmp, 0);
+
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], tmp.join("CLAUDE.md"));
+    assert_eq!(paths[1], tmp.join("AGENTS.md"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[tokio::test]
 async fn test_build_system_prompt_parts_includes_commit_guidance() {
     let cwd = std::env::temp_dir().join(format!(

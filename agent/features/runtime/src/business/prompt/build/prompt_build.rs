@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
+
 use hook::api::HookRunner;
 use share::config::{paths, MemoryConfig};
 use share::memory::MemoryEntry;
@@ -220,6 +222,40 @@ pub fn current_date() -> String {
     format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
 }
 
+fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut current = Some(cwd);
+
+    for _ in 0..=depth {
+        if let Some(dir) = current {
+            push_instruction_paths_for_dir(&mut paths, dir, depth);
+            current = dir.parent();
+        } else {
+            break;
+        }
+    }
+
+    paths
+}
+
+fn push_instruction_paths_for_dir(paths: &mut Vec<PathBuf>, dir: &Path, remaining: u32) {
+    paths.push(dir.join(share::config::paths::CLAUDE_MD));
+    paths.push(dir.join(share::config::paths::AGENTS_MD));
+
+    if remaining == 0 {
+        return;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                push_instruction_paths_for_dir(paths, &path, remaining - 1);
+            }
+        }
+    }
+}
+
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -242,7 +278,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     }
 
     // Project: walk up/down INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
-    for project_path in paths::project_instruction_walk(cwd, paths::INSTRUCTION_SEARCH_DEPTH) {
+    for project_path in project_instruction_walk(cwd, INSTRUCTION_SEARCH_DEPTH) {
         if project_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
                 let file_path_str = project_path.to_string_lossy().to_string();
