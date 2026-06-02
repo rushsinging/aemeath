@@ -15,6 +15,8 @@ use crate::tui::view_model::style::SemanticStyle;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
+const OMITTED_LINE_COUNT_LIMIT: usize = 10_000;
+
 pub fn render_tool_result(
     block_id: &str,
     view: &ToolResultBlockView,
@@ -83,16 +85,21 @@ fn format_result_lines(tool_name: &str, result: &str) -> Vec<RenderedLine> {
         return Vec::new();
     }
     let base = Style::default().fg(theme::TEXT_DIM);
-    let lines: Vec<&str> = result.lines().collect();
-    let total = lines.len();
-    let mut out: Vec<RenderedLine> = lines
-        .iter()
+    let mut iter = result.lines();
+    let mut out: Vec<RenderedLine> = iter
+        .by_ref()
         .take(max_lines)
-        .map(|line| RenderedLine::new(vec![Span::styled((*line).to_string(), base)]))
+        .map(|line| RenderedLine::new(vec![Span::styled(line.to_string(), base)]))
         .collect();
-    if total > max_lines {
+    let omitted = iter.by_ref().take(OMITTED_LINE_COUNT_LIMIT + 1).count();
+    if omitted > 0 {
+        let omitted_label = if omitted > OMITTED_LINE_COUNT_LIMIT {
+            format!("{OMITTED_LINE_COUNT_LIMIT}+")
+        } else {
+            omitted.to_string()
+        };
         out.push(RenderedLine::new(vec![Span::styled(
-            format!("... ({} lines omitted)", total - max_lines),
+            format!("... ({omitted_label} lines omitted)"),
             base,
         )]));
     }
@@ -210,6 +217,19 @@ mod tests {
 
         assert_eq!(block.lines.len(), 1, "空 result 只剩底部状态行");
         assert!(block.lines[0].plain.contains("Bash"));
+    }
+
+    #[test]
+    fn test_render_tool_result_omitted_line_count_is_bounded() {
+        let result_text = "line\n".repeat(OMITTED_LINE_COUNT_LIMIT + 20);
+        let view = result("Bash", &result_text);
+
+        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+
+        assert!(block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("10000+ lines omitted")));
     }
 
     #[test]
