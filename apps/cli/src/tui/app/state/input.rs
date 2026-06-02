@@ -20,11 +20,14 @@ impl InputState {
 
     pub(crate) fn push_queue(&mut self, input: String) -> usize {
         self.input_queue.push_back(input);
+        log::info!("[drain-debug] push_queue: queue now has {} items", self.input_queue.len());
         self.input_queue.len()
     }
 
     pub(crate) fn drain_queue(&mut self) -> Vec<String> {
-        self.input_queue.drain(..).collect()
+        let drained: Vec<String> = self.input_queue.drain(..).collect();
+        log::info!("[drain-debug] drain_queue: drained {} items", drained.len());
+        drained
     }
 
     pub(crate) fn queue_len(&self) -> usize {

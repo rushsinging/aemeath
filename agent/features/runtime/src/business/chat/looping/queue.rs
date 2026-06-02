@@ -14,13 +14,17 @@ where
     Q: QueueDrainPort,
     S: ChatEventSink,
 {
+    log::info!("[drain-debug] append_queued_input: calling drain_queued_input");
     let Some(queued) = queue.drain_queued_input().await else {
+        log::info!("[drain-debug] append_queued_input: drain returned None");
         return false;
     };
     if queued.is_empty() {
+        log::info!("[drain-debug] append_queued_input: drain returned empty vec");
         return false;
     }
 
+    log::info!("[drain-debug] append_queued_input: got {} queued messages, appending", queued.len());
     for input in queued {
         messages.push(Message::user(input));
     }
