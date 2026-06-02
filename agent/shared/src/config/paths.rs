@@ -117,9 +117,6 @@ pub fn old_project_skills_dir(cwd: &Path) -> PathBuf {
     cwd.join(OLD_AEMEATH_DIR_NAME).join(SKILLS_DIR_NAME)
 }
 
-/// Maximum directory depth to search up and down from cwd for project instructions.
-pub const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
-
 #[cfg(test)]
 mod tests {
     use super::*;
