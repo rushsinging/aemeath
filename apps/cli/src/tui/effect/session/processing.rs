@@ -14,29 +14,17 @@ impl TuiQueueDrainPort {
 
     pub(crate) async fn drain_queued_input(&self) -> Option<Vec<String>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        log::info!("[drain-debug] sending DrainQueuedInput to TUI event loop");
         if self
             .tx
             .send(UiEvent::DrainQueuedInput { reply_tx })
             .await
             .is_err()
         {
-            log::warn!("[drain-debug] failed to send DrainQueuedInput, channel closed");
             return None;
         }
         match reply_rx.await {
-            Ok(queued) if !queued.is_empty() => {
-                log::info!("[drain-debug] got {} queued messages from TUI", queued.len());
-                Some(queued)
-            }
-            Ok(_) => {
-                log::info!("[drain-debug] TUI returned empty queue");
-                None
-            }
-            Err(e) => {
-                log::warn!("[drain-debug] reply channel error: {e}");
-                None
-            }
+            Ok(queued) if !queued.is_empty() => Some(queued),
+            _ => None,
         }
     }
 }
@@ -201,10 +189,10 @@ pub(crate) struct SpawnContext {
 
 pub fn spawn_processing(ctx: SpawnContext) {
     tokio::spawn(async move {
-        let stream = match ctx
+        let mut stream = match ctx
             .agent_client
             .chat(sdk::ChatRequest {
-                messages: ctx.messages.clone(),
+                messages: ctx.messages,
                 queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
                     ctx.queue_request_tx.clone(),
                 ))),
@@ -221,67 +209,27 @@ pub fn spawn_processing(ctx: SpawnContext) {
                 return;
             }
         };
-        let queue_request_tx = ctx.queue_request_tx.clone();
         let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
-        let input_event_buffer = ctx.input_event_buffer.clone();
-        let mut current_messages = ctx.messages;
-        let mut active_stream = Some(stream);
-        while let Some(stream) = active_stream.take() {
-            let mut stream = stream;
-            while let Some(event) = stream.recv().await {
-                let ui_event = sdk_event_to_ui_event(event);
-                let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
-                if ctx.tx.send(ui_event).await.is_err() {
-                    return;
-                }
-                if is_done {
-                    log::info!("[drain-debug] Done received, calling drain_queued_input");
-                    if let Some(queued) = queue.drain_queued_input().await {
-                        log::info!("[drain-debug] drain returned {} queued messages", queued.len());
-                        let new_messages: Vec<sdk::ChatMessage> = queued
-                            .into_iter()
-                            .map(|text| sdk::ChatMessage {
-                                role: "user".to_string(),
-                                content: serde_json::json!([{ "type": "text", "text": text }]),
-                            })
-                            .collect();
-                        current_messages.extend(new_messages);
-                        if let Err(e) =
-                            ctx.agent_client.sync_current_messages(current_messages.clone()).await
-                        {
-                            log::warn!("failed to sync drained queue messages: {e}");
-                        }
-                        log::info!("[drain-debug] calling chat() with {} messages", current_messages.len());
-                        // 重新发起 chat 让 runtime loop_runner 处理排队的用户消息
-                        match ctx
-                            .agent_client
-                            .chat(sdk::ChatRequest {
-                                messages: current_messages.clone(),
-                                queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
-                                    queue_request_tx.clone(),
-                                ))),
-                                input_events: Some(Arc::new(TuiInputEventPort::new(
-                                    input_event_buffer.clone(),
-                                ))),
-                            })
-                            .await
-                        {
-                            Ok(new_stream) => {
-                                log::info!("[drain-debug] chat() succeeded, resuming stream loop");
-                                active_stream = Some(new_stream);
-                                break;
-                            }
-                            Err(e) => {
-                                log::error!("[drain-debug] chat() failed: {e}");
-                                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
-                                let _ = ctx.tx.send(UiEvent::Done).await;
-                                return;
-                            }
-                        }
+        while let Some(event) = stream.recv().await {
+            let ui_event = sdk_event_to_ui_event(event);
+            let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
+            if ctx.tx.send(ui_event).await.is_err() {
+                return;
+            }
+            if is_done {
+                if let Some(queued) = queue.drain_queued_input().await {
+                    let messages = queued
+                        .into_iter()
+                        .map(|text| sdk::ChatMessage {
+                            role: "user".to_string(),
+                            content: serde_json::json!([{ "type": "text", "text": text }]),
+                        })
+                        .collect();
+                    if let Err(e) = ctx.agent_client.sync_current_messages(messages).await {
+                        log::warn!("failed to sync drained queue messages: {e}");
                     }
                 }
             }
-            // stream 正常关闭（while 自然结束）→ active_stream 为 None → 外层 while 退出
         }
     });
 }
