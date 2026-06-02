@@ -194,6 +194,45 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(AgentDisplay)
 });
 
+struct EnterWorktreeDisplay;
+impl ToolDisplay for EnterWorktreeDisplay {
+    fn name(&self) -> &str {
+        "EnterWorktree"
+    }
+    fn format_header(&self, input: &serde_json::Value) -> String {
+        let target = input
+            .get("branch")
+            .and_then(|branch| branch.as_str())
+            .or_else(|| input.get("path").and_then(|path| path.as_str()))
+            .unwrap_or("worktree");
+        format!("● EnterWorktree({target})")
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "EnterWorktree",
+    display: || Box::new(EnterWorktreeDisplay)
+});
+
+struct ExitWorktreeDisplay;
+impl ToolDisplay for ExitWorktreeDisplay {
+    fn name(&self) -> &str {
+        "ExitWorktree"
+    }
+    fn format_header(&self, _input: &serde_json::Value) -> String {
+        "● ExitWorktree".to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "ExitWorktree",
+    display: || Box::new(ExitWorktreeDisplay)
+});
+
 struct WebFetchDisplay;
 impl ToolDisplay for WebFetchDisplay {
     fn name(&self) -> &str {

@@ -225,6 +225,48 @@ mod tests {
     }
 
     #[test]
+    fn test_format_tool_call_exit_worktree_empty_input_has_no_json_details() {
+        let (header, details) = format_tool_call("ExitWorktree", r#"{}"#);
+
+        assert_eq!(header, "● ExitWorktree");
+        assert!(
+            details.is_empty(),
+            "ExitWorktree 空参数不应显示原始 JSON，实际: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_enter_worktree_branch_uses_human_summary() {
+        let (header, details) = format_tool_call(
+            "EnterWorktree",
+            r#"{"branch":"bug/103-worktree-tool-display"}"#,
+        );
+
+        assert_eq!(header, "● EnterWorktree(bug/103-worktree-tool-display)");
+        assert!(
+            details.is_empty(),
+            "EnterWorktree 分支已在 header 展示，不应显示原始 JSON，实际: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_enter_worktree_path_uses_human_summary() {
+        let (header, details) = format_tool_call(
+            "EnterWorktree",
+            r#"{"path":".worktrees/bug-103-worktree-tool-display"}"#,
+        );
+
+        assert_eq!(
+            header,
+            "● EnterWorktree(.worktrees/bug-103-worktree-tool-display)"
+        );
+        assert!(
+            details.is_empty(),
+            "EnterWorktree 路径已在 header 展示，不应显示原始 JSON，实际: {details:?}"
+        );
+    }
+
+    #[test]
     fn test_result_render_kind_diff_only_for_edit() {
         // 渲染类型由工具声明：Edit→Diff，其它工具与未注册工具→Plain（防 ---DIFF--- 误判）。
         assert_eq!(result_render_kind("Edit"), ResultRender::Diff);
