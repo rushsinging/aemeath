@@ -5,6 +5,7 @@
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 68 | 项目指令搜索增强：全局 fallback ~/.claude/CLAUDE.md + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局指令优先 ~/.agents/AGENTS.md，不存在时 fallback ~/.claude/CLAUDE.md；项目指令从 cwd 向上最多 5 级祖先搜索 CLAUDE.md/AGENTS.md，每层级 Claude 优先；不再向下递归子目录，避免启动时扫描大型父目录导致 TUI 卡住 |
+| 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 产生的用户可见反馈不再混用普通 SystemMessage 展示；TUI 展示层对 `<system-reminder>` 包装脱壳，避免标签原样出现在输出区；新增 Hook 类消息，支持 Stop/StopFailure/其他 hook 后续按类型使用不同文案与样式 |
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 + audit/policy 域落地 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。**2026-05-30 并入 #62（audit/policy 域实现）**：047 DDD spec §4.2/§4.3/§8/§9 定义的 audit 域（AuditTrail / correlation id 串联 Session·Chat·Turn·Agent·Tool·Resource / policy·hook·outcome 三分记录）与 policy 域（PermissionRequest/Decision/Grant/Mode/Capability/RiskAssessment）归入本 feature 统一设计实施，不再独立拆分。详见 [spec](specs/042-permission-control-system.md)、[047 spec](specs/047-ddd-redesign.md) |
@@ -15,6 +16,46 @@
 | 61 | 架构债务收口（047 DDD 软约束落实） | 中 | 待确认 | 未确认 | 047 DDD spec 的硬约束与软约束债务已完成收口：D1 `runtime::api` 去整体转发、D2 share 瘦身回归最小共享内核、D3 supporting domain Public API 收窄、D4 COLA 内部分层均已落地；后续遗留 1-6 项也已结清并补 guard。原 D5 audit / D6 policy 属新功能而非债务收口，已拆出至 #62。详见 [spec](specs/047-ddd-redesign.md) 与下方详情段。 |
 | 67 | Task/project window 改为 ChangeSet 驱动刷新 | 中 | 实现中 | 未确认 | 当前 TUI 每帧轮询 `AgentClient::task_status()` 刷新 task list window，且 status bar 的 worktree_kind/branch 只在 init 设置，EnterWorktree/ExitWorktree 后不会刷新。目标：Runtime 在 TaskStore 变更路径发出 `ChangeSet::TASKS`，在 project/worktree 上下文变化路径发出 `ChangeSet::PROJECT`；TUI 监听 changes 后按需刷新 `RuntimeModel.task_status.lines` 与 workspace/status bar；`/clear` 保留本地立即清空以保证同步反馈。 |
 | 66 | 去除 mod.rs 旧写法 + 架构 guard | 中 | ✅ 已完成 | 未确认 | 将所有 mod.rs 重命名为父目录同名文件（约 78 个），添加架构 guard 脚本检测新增 mod.rs 并拒绝 |
+
+### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
+
+**状态**：活动中
+
+**背景**：Stop hook 阻止结束时，反馈既需要作为 `<system-reminder>` 注入下一轮 LLM 上下文，也需要在 TUI 中提示用户。但当前用户可见提示沿用普通 `SystemMessage`/`SystemNotice` 展示，视觉上接近用户输入；部分场景还可能把 `<system-reminder>` 标签原样展示，造成用户误以为系统内部标签进入了可见对话内容。后续 StopFailure 或其他 hook 也可能产生不同语义的用户可见消息，继续复用普通 SystemMessage 会让样式、文案和脱壳规则分散。
+
+**目标**：
+1. TUI 展示层对 `<system-reminder>...</system-reminder>` 包装做统一脱壳，只展示内部的人类可读内容。
+2. 新增 Hook 类用户可见消息，避免 Hook 反馈混用普通 SystemNotice；Hook 消息应能承载来源事件或语义类型，便于 Stop、StopFailure 和未来 Hook 使用不同文案/样式。
+3. 保留 LLM 上下文注入中的 `<system-reminder>` 语义，不改变模型可见系统提醒协议；脱壳仅作用于 TUI 可见展示。
+4. Hook 阻止类消息在视觉上应与用户输入明显区分，优先使用 warning/error 语义色或明确前缀。
+
+**建议实现方向**：
+1. 在 runtime/SDK 事件层为 Hook 反馈引入类型化事件或 payload，而不是仅传 `SystemMessage(String)`；短期可先兼容旧 SystemMessage。
+2. 在 TUI adapter/model 层新增 `ConversationBlock::HookNotice` 或等价 block，集中处理 Hook notice 文案、样式和脱壳。
+3. 抽出一个单一 helper 负责剥离完整包裹的 `<system-reminder>` 标签，避免在多个渲染点重复字符串处理。
+4. Stop hook blocked、StopFailure hook output、未来 hook JSON `system_message`/`additional_context` 的用户可见路径统一走 HookNotice。
+
+**验收标准**：
+1. 当用户可见消息文本为完整 `<system-reminder>...</system-reminder>` 包装时，TUI 输出区不显示开始/结束标签。
+2. Hook 反馈以 Hook notice 类型进入 conversation/view model，不再只依赖普通 SystemNotice。
+3. Stop hook blocked 提示仍会显示命令和失败详情；长输出写入文件路径等信息不丢失。
+4. LLM messages 中用于继续对话的 `<system-reminder>` 包装保持不变。
+5. 单元测试覆盖：脱壳正常路径、无标签边界、标签不完整/嵌入普通文本时不误删，以及 Hook notice 的样式/类型映射。
+
+**明确不做**：
+1. 不重做所有 SystemNotice 的视觉设计；本 feature 只处理 Hook 类消息和 system-reminder 脱壳。
+2. 不改变 Hook 执行协议、JSON schema 或阻止逻辑。
+3. 不把所有 LLM system reminder 从消息历史中移除；仅区分模型上下文与 TUI 展示。
+
+**涉及路径（预计）**：
+- `agent/features/runtime/src/business/chat/looping/finalize.rs`
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
+- `packages/sdk/src/*`（如需新增 ChatEvent 类型）
+- `apps/cli/src/tui/effect/session/processing.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/*`
+- `apps/cli/src/tui/view_assembler/output.rs`
+- `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
 
 ### #67 Task/project window 改为 ChangeSet 驱动刷新
 
