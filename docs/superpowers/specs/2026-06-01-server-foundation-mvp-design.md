@@ -15,12 +15,11 @@
 ### 1.1 目标
 
 1. CLI **双模式**：`AgentClientImpl`（本地直连，现状）/ `ServerSessionClient`（连 server，WS），靠 composition 注入切换，**TUI 不变**。
-2. 控制面进程 `aemeath serve`：管理 worker 生命周期、按 session 路由，**不碰对话内容**。
-3. worker 进程 `aemeath worker`：复用现有 runtime（`AgentClientImpl`），经 IPC 暴露 `AgentClient`，**runtime 一行不改**。
-4. worker 协议 **A（AgentClient-over-IPC）**：`Call`/`Resp` 帧 over 可换 transport（本机 uds）。
+2. 控制面进程 `aemeath serve`：管理 worker 生命周期、按 session 反向代理，**不碰对话内容**（只转发帧 + 边缘 auth/路由）。
+3. worker 进程 `aemeath worker`：复用现有 runtime（`AgentClientImpl`），**自托管一个 WS server** 暴露 `AgentClient`，**runtime 一行不改**。
+4. worker 协议 **B（worker 自托管 WS + 控制面反向代理）**：worker = AgentClient-over-WS 的 **server**；控制面 = WS **反向代理**；**前门（CLI↔控制面）与后轴（控制面↔worker）同一套 WS 协议**，只是传输分别走 TCP 与 uds。
 5. `WorkerLauncher` 端口 + `LocalProcessLauncher`（唯一实现）。
 6. `AgentClient` 契约**预留多 agent 维度**（`agent_id`），为 swarm 留位，本 MVP 跑 Single 模式。
-7. 公网 wire（WS）最小实现：session 创建/attach + chat 流。
 
 ### 1.2 非目标（defer 到后续子项目）
 
@@ -41,23 +40,24 @@
 ```
 ┌─ CLI（双模式，TUI 不变）──────────────────────────────────┐
 │  dyn AgentClient                                           │
-│   ├─ 直连:   AgentClientImpl（本地 runtime，进程内）         │
-│   └─ server: ServerSessionClient ──WebSocket──┐            │
-└────────────────────────────────────────────────┼──────────┘
-                                                  ▼
+│   ├─ 直连:   AgentClientImpl（本地 runtime，进程内直调）     │
+│   └─ server: ServerSessionClient ──WS(TCP)──┐              │
+└──────────────────────────────────────────────┼────────────┘
+                                                ▼
               ┌─ 控制面进程  aemeath serve（1 个，常驻）────────┐
-              │  WsGateway（公网 wire）                         │
-              │  SessionManager: session_id → WorkerHandle      │
-              │  WorkerLauncher（LocalProcess）                  │
-              └────────┬──── spawn 子进程 + IPC(uds) ────────────┘
+              │  WsProxy（反向代理）: 终结 client WS、做 auth/路由 │
+              │  SessionManager: session_id → WorkerHandle       │
+              │  WorkerLauncher（LocalProcess）                   │
+              └────────┬──── spawn 子进程 + 转发 WS(uds) ─────────┘
                        ├──▶ worker 进程 A  aemeath worker（会话A）
-                       │      AgentClientImpl(Single) + 文件 Storage
+                       │      WS server ← AgentClientImpl(Single) + 文件 Storage
                        ├──▶ worker 进程 B  aemeath worker（会话B）
                        └──▶ ...（一会话一进程）
 ```
 
-- **控制面 = 1 个进程**；**worker = N 个进程**（每活跃会话一个），分开的 OS 进程，靠 IPC 通信。
+- **控制面 = 1 个进程**；**worker = N 个进程**（每活跃会话一个），分开的 OS 进程，靠 WS 通信。
 - 同一个 `aemeath` 二进制，三种角色：默认（CLI）/ `serve`（控制面）/ `worker`。
+- **worker 自己是个 WS server**（监听一个 uds），控制面把 client 的 WS **代理**到对应 worker 的 WS——前后**同一套 AgentClient-over-WS 协议**。
 
 ### 2.2 六边形端口
 
@@ -65,20 +65,20 @@
 
 | 端口 | 本 MVP 的 adapter | 后续可换 |
 |---|---|---|
-| `AgentClient`（入站） | `AgentClientImpl`（本地）/ `RemoteAgentClient`（控制面→worker）/ `ServerSessionClient`（CLI→server） | — |
+| `AgentClient`（入站） | `AgentClientImpl`（本地直调）/ worker 的 AgentClient-over-WS **server** / `ServerSessionClient`（CLI WS **client**） | — |
 | `WorkerLauncher` | `LocalProcessLauncher` | Container / Remote（跨机） |
 | `Storage` | 文件式（现有） | 中心 DB adapter |
-| `Transport` | uds（本机） | TCP（跨机）/ WS（前门，本 MVP 已用） |
+| `Transport`（WS 之下） | WS-over-uds（控制面↔worker）/ WS-over-TCP（CLI↔控制面） | 跨机 worker：WS-over-TCP |
 
-`Call`/`Resp` 一套 codec 跑两种传输：**uds（控制面↔worker）** 与 **WS（CLI↔控制面，外加 auth/路由信封）**。
+**关键**：`Call`/`Resp` 是**唯一一套协议**，跑在 WS 上。worker 是 server、CLI 是 client、控制面是代理——三者共享同一套 AgentClient-over-WS；**控制面不解析帧、只转发**（auth/路由在连接边缘做）。
 
 ---
 
 ## 3. 核心决策（已锁定）
 
 1. 多租户 · **硬隔离**（每会话独立 worker 进程/沙箱）。
-2. 控制面 = 管理/路由（不碰内容）· worker = 完整 runtime（分进程）。
-3. worker 协议 **A**（AgentClient-over-IPC）。
+2. 控制面 = 反向代理/路由（不碰内容）· worker = 完整 runtime（分进程）。
+3. worker 协议 **B**（worker 自托管 AgentClient-over-WS server + 控制面反向代理；前门/后轴同一套 WS 协议）。
 4. `WorkerLauncher` 可插拔（Local 先 → remote/container 后）。
 5. session 存储 → **中心 DB**（worker 直连 + 租户作用域凭证）；**MVP 先用文件式**，DB 是后续 adapter。workspace → 卷/对象存储，不进 DB。
 6. multi-main-agent = worker 内 swarm（in-worker），**契约 (a) 单一 agent-aware 契约**，single 为退化态。
@@ -89,9 +89,9 @@
 
 ## 4. 组件设计
 
-### 4.1 worker 协议（`packages/agent-wire`，控制面与 worker 共享）
+### 4.1 AgentClient-over-WS 协议（`packages/agent-wire`，worker/控制面/CLI 共享）
 
-帧：`u32` 长度前缀 + serde body（JSON 调试期，可切 bincode）。请求-响应按 `req_id` 多路复用，流式响应多帧。
+唯一一套协议，跑在 WS 上：一条 WS 连接 = 一个 session 通道，承载 `Call`/`Resp` 消息（serde；req-resp 按 `req_id` 多路复用，流式响应多帧）。
 
 ```rust
 // 镜像 AgentClient 方法
@@ -101,9 +101,7 @@ pub enum Call {
     SaveSession, LoadSession(String), ListSessions, DeleteSession(String),
     Compact, SwitchModel(ModelSelector),
     SubscribeChanges,            // 打开 ChangeSet 订阅流
-    Shutdown,                    // 优雅关停 worker
 }
-
 pub enum Resp {
     Snapshot(SessionSnapshot), Cost(CostInfo), Tasks(Vec<TaskSummary>),
     Project(ProjectContext), Sessions(Vec<SessionSummary>),
@@ -111,130 +109,88 @@ pub enum Resp {
     ChatEvent(ChatEvent),        // 流式：多帧，Done/Error 终止
     Change(ChangeSet),           // changes 订阅流
 }
-
 pub struct Frame { pub req_id: u64, pub body: FrameBody }  // FrameBody = Call | Resp
 ```
 
-> `Call`/`Resp` 内全是**现有 serde 的 sdk 类型**（`SessionSnapshot`/`CostInfo`/`ChatEvent`/`ChangeSet`/`ChatRequest`…），**几乎不造新 DTO**。
+> `Call`/`Resp` 内全是**现有 serde 的 sdk 类型**，**几乎不造新 DTO**。**B 里这套就是唯一协议**——没有独立 IPC 层，前门和后轴都跑它。
 
-**Transport 抽象**（让协议与传输解耦）：
+**两侧复用同一份代码**：
+- **client 侧** `WireClient`（实现 `AgentClient`）：把每次方法调用序列化成 `Call` 发出、按 `req_id` 路由 `Resp`、把 `ChatEvent` 帧还原成 `ChatStream`、把 `Change` 帧桥成 `watch::Receiver`。**CLI 的 `ServerSessionClient` = `WireClient` over WS(TCP)**。
+- **server 侧** `serve_ws(client, ws)`：读 `Call` → 调真 `AgentClient` → 写 `Resp`。**worker 用它 over WS(uds)**。
 
 ```rust
-pub trait WireTransport: Send {
-    async fn send(&mut self, frame: Frame) -> io::Result<()>;
+pub trait WsConn: Send {            // 一条 WS 连接的收发抽象
+    async fn send(&mut self, f: Frame) -> io::Result<()>;
     async fn recv(&mut self) -> io::Result<Option<Frame>>;
 }
-// MVP 实现：UdsTransport（控制面↔worker）、WsTransport（CLI↔控制面）
+// MVP：TokioTungstenite over TCP（前门）/ over uds（控制面↔worker）
 ```
 
-### 4.2 worker 侧
+### 4.2 worker 侧（自托管 WS server）
 
-**`serve(client, transport)`** —— worker 请求循环：
+worker = 现有 runtime + 一个 WS server：
 
 ```rust
-pub async fn serve(client: Arc<dyn AgentClient>, mut t: impl WireTransport) {
-    while let Some(frame) = t.recv().await? {
-        match frame.body.into_call() {
-            Call::SessionSnapshot => t.send(resp(frame.req_id, Resp::Snapshot(client.session_snapshot()))).await?,
-            Call::Chat(req) => {
-                let mut stream = client.chat(req).await?;        // 真 AgentClientImpl
-                while let Some(ev) = stream.recv().await {        // ChatStream → 帧流
-                    t.send(resp(frame.req_id, Resp::ChatEvent(ev))).await?;
-                }
-            }
-            Call::SubscribeChanges => spawn_change_forwarder(client.changes(), frame.req_id, t.clone()),
-            // ... 其余方法 1:1 转发
-            Call::Shutdown => break,
-        }
-    }
-}
+// aemeath worker 入口
+let client = composition::build_agent_client(args).await?;   // AgentClientImpl(Single)，runtime 不改
+let listener = UnixListener::bind(worker_uds_path())?;        // 监听 uds，路径由控制面传入
+ws_accept_loop(listener, move |ws| {
+    let client = client.clone();
+    async move { serve_ws(client, ws).await }                // 每连接一个 serve_ws
+}).await;
 ```
 
-要点：只有 `Chat`（ChatStream）和 `SubscribeChanges`（watch）是**流式**，需逐帧转发；其余 ~12 个方法是直白 req→resp。
+- `serve_ws`：循环读 `Call` → 调真 `client` 的方法 → 写 `Resp`。`Chat`（ChatStream）与 `SubscribeChanges`（watch）**逐帧转发**；其余 ~12 方法直白 req→resp。
+- worker 只监听 **uds**（不占 TCP 端口）；控制面通过这条 uds 与它通。
 
-**`aemeath worker` 入口**：
+### 4.3 控制面侧（反向代理 + 调度，**无 RemoteAgentClient**）
 
-```rust
-// 复用现有 composition，不改 runtime
-let client = composition::build_agent_client(args).await?;   // AgentClientImpl(Single)
-let transport = UdsTransport::from_inherited_fd();           // 控制面通过 fd 传入
-serve(client, transport).await;
-```
-
-### 4.3 控制面侧
-
-**`RemoteAgentClient`（实现 `AgentClient`）** —— 唯一有技术含量的一块：
-
-```rust
-pub struct RemoteAgentClient {
-    tx: WireSender,                              // 写帧
-    pending: Mutex<HashMap<u64, oneshot::Sender<Resp>>>,  // req_id → 等待者
-    snapshot_cache: ArcSwap<SessionSnapshot>,   // 本地缓存，由 Change 刷新（无锁读）
-    changes_tx: watch::Sender<ChangeSet>,
-}
-
-#[async_trait]
-impl AgentClient for RemoteAgentClient {
-    fn session_snapshot(&self) -> SessionSnapshot { self.snapshot_cache.load_full().as_ref().clone() }
-    fn changes(&self) -> watch::Receiver<ChangeSet> { self.changes_tx.subscribe() }
-    async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
-        let req_id = self.send(Call::Chat(req)).await?;
-        let (tx, rx) = mpsc::unbounded();
-        self.route_stream(req_id, tx);          // 后台 reader 按 req_id 把 Resp::ChatEvent 推进 tx
-        Ok(ChatStream::from(rx))                 // 还原成同型 ChatStream
-    }
-    // 同步 getter：读 snapshot_cache（已由常驻 reader 经 Change 帧刷新）
-    // 写/查方法：send(Call::..).await → 等 Resp
-}
-```
-
-机关：
-- **一个常驻 reader task** 读 worker 来的所有帧：`Resp::Change` → 刷 `snapshot_cache` + `changes_tx.send`；`Resp(req_id=X)` → 唤醒 `pending[X]` 或推进对应 stream。
-- `chat()` 的 `ChatStream` 在控制面侧**还原**；`changes()` 的 watch 在控制面侧**桥接**。
-
-**`WorkerLauncher` 端口 + `LocalProcessLauncher`**：
-
-```rust
-#[async_trait]
-pub trait WorkerLauncher: Send + Sync {
-    async fn launch(&self, session: &SessionId, cfg: &WorkerConfig) -> Result<WorkerHandle>;
-}
-pub struct WorkerHandle { pub client: Arc<dyn AgentClient>, child: ChildProcess }
-
-pub struct LocalProcessLauncher;
-// launch: Command::new(current_exe).arg("worker") + socketpair(uds) 传 fd
-//         → 装出 RemoteAgentClient → WorkerHandle{client, child}
-```
-
-**`SessionManager`**：
+控制面**不持有 `dyn AgentClient`、不翻译协议**——只代理 WS：
 
 ```rust
 pub struct SessionManager {
     launcher: Arc<dyn WorkerLauncher>,
     registry: Mutex<HashMap<SessionId, WorkerHandle>>,   // MVP: 内存
 }
+pub struct WorkerHandle { pub ws_uds: PathBuf, child: ChildProcess }   // 注意：是 WS 地址，不是 AgentClient
+
 impl SessionManager {
-    // 首次用到 → launch；崩溃 → 重 launch + load_session 恢复；空闲 → 回收
-    pub async fn client_for(&self, s: &SessionId) -> Result<Arc<dyn AgentClient>>;
-    pub async fn close(&self, s: &SessionId);
+    // 首次用到 → launch（拿到 worker 的 uds）；崩溃 → 重 launch；空闲 → 回收
+    pub async fn worker_for(&self, s: &SessionId) -> Result<PathBuf /*ws_uds*/>;
+}
+
+#[async_trait]
+pub trait WorkerLauncher: Send + Sync {
+    async fn launch(&self, s: &SessionId, cfg: &WorkerConfig) -> Result<WorkerHandle>;
+}
+pub struct LocalProcessLauncher;
+// launch: 选一个 uds 路径 → Command::new(current_exe).arg("worker").env(WS_UDS=path)
+//         → 等 worker 就绪 → WorkerHandle{ ws_uds: path, child }
+```
+
+**WsProxy**（公网入口）：
+
+```rust
+// 控制面 axum WS endpoint
+async fn on_client_ws(client_ws, session_id, /* auth ctx */) {
+    let ws_uds = session_mgr.worker_for(&session_id).await?;   // 找/拉起 worker
+    let worker_ws = connect_uds_ws(&ws_uds).await?;            // 连 worker 的 WS
+    pipe_bidirectional(client_ws, worker_ws).await;           // 双向**透传帧**，不解析
 }
 ```
 
-### 4.4 公网 wire（WS）+ `ServerSessionClient`
+控制面在**连接边缘**做：auth 校验、`session_id` 路由、（后续）限流/计费按帧计数。**帧内容（Call/Resp）一律透传，不反序列化**——真正"不碰内容"。
 
-**控制面 `WsGateway`**：axum WS endpoint。每个 client 连接 = 一个 session 通道：
-- 连接时携带 `session_id`（新建或 attach）→ `SessionManager::client_for(session_id)` 取 `dyn AgentClient`。
-- 把 WS 消息 ↔ `Call`/`Resp`（复用 4.1 codec，外加最小信封 `{session_id, frame}`）。
-- ChatEvent / Change 经 WS 推回 client。
+### 4.4 公网 wire + CLI `ServerSessionClient`
 
-**CLI `ServerSessionClient`（实现 `AgentClient`）**：结构与 `RemoteAgentClient` 几乎相同，只是 transport = `WsTransport` 而非 uds，并在握手时带 `session_id`。**可与 `RemoteAgentClient` 共享大部分代码**（同一套 req_id 多路复用 + stream/watch 桥接），抽成 `WireClient<T: WireTransport>`。
+- **公网入口 = 控制面的 WsProxy**（§4.3）。`ServerSessionClient` 连它，握手带 `session_id`（新建/attach）（+ 后续 auth token）。
+- **`ServerSessionClient`（实现 `AgentClient`）= `WireClient` over WS(TCP)**——和 worker 用的是**同一套 `Call`/`Resp` 协议**，只是传输是 TCP-WS、且经控制面代理到 worker。client 侧逻辑（req_id 多路复用、stream 还原、watch 桥接）**写一次，CLI 复用**。
 
 ### 4.5 CLI 双模式（composition 分支）
 
 ```rust
-// apps/cli composition root
 let client: Arc<dyn AgentClient> = match mode {
-    Mode::Local           => composition::build_agent_client(cfg, args).await?,  // 现状
+    Mode::Local           => composition::build_agent_client(cfg, args).await?,   // 现状，进程内直调
     Mode::Server { url }  => Arc::new(ServerSessionClient::connect(url, session_id).await?),
 };
 run_tui(client).await?;   // TUI 不变
@@ -249,16 +205,13 @@ run_tui(client).await?;   // TUI 不变
 ```rust
 pub type AgentId = String;   // Single 模式恒为 "main"
 
-// 流式事件带 agent 维度
 pub enum ChatEvent {
     Token { agent: AgentId, text: String },
     ToolCallStart { agent: AgentId, name: String, index: usize },
-    // ... 其余事件同样带 agent 字段
+    // ... 其余流式事件同样带 agent 字段
     Done(ChatResult),
     Error(AemeathError),
 }
-
-// snapshot 表达多 agent（Single = 单元素）
 pub struct SessionSnapshot {
     pub agents: Vec<AgentView>,   // Single: len==1
     // ... 会话级字段
@@ -273,17 +226,17 @@ pub struct SessionSnapshot {
 
 ```
 CLI 输入回车
- → ServerSessionClient.chat(req)
- → WsTransport 发 {session_id, Call::Chat(req)}
- → 控制面 WsGateway 收 → SessionManager.client_for(session_id)
- → RemoteAgentClient.chat(req) → UdsTransport 发 Call::Chat
- → worker serve 收 → 真 AgentClientImpl.chat(req)  → 跑 Agent Loop（调模型/工具…）
- → 每个 ChatEvent → Resp::ChatEvent 帧 → uds → 控制面 RemoteAgentClient stream
- → WsGateway → WS 帧 → ServerSessionClient stream → CLI TUI 渲染（按 agent 维度）
+ → ServerSessionClient.chat(req)        [WireClient, 发 Call::Chat]
+ → WS(TCP) 到控制面 WsProxy
+ → 控制面: 按 session_id 找 worker uds → 把帧**透传**到 worker WS
+ → worker serve_ws 收 Call::Chat → 真 AgentClientImpl.chat(req) → 跑 Agent Loop（调模型/工具…）
+ → 每个 ChatEvent → Resp::ChatEvent 帧 → worker WS → 控制面**透传** → CLI WS
+ → ServerSessionClient stream → CLI TUI 渲染（按 agent 维度）
  → ChatEvent::Done 终止
 ```
 
-**本地直连模式**：`AgentClientImpl.chat()` 直调，无任何 wire——同一段 TUI 代码。
+**本地直连模式**：`AgentClientImpl.chat()` 直调，无任何 WS——同一段 TUI 代码。
+**对比 A**：控制面不再 `RemoteAgentClient` 翻译，只**透传帧**；少一层、少一套协议。
 
 ---
 
@@ -292,7 +245,7 @@ CLI 输入回车
 - **session 存储**：worker 用**现有文件式 Storage BC**，写入根设为 **per-session 目录**（如 `<server-data>/sessions/<session_id>/.agents/`）。worker 崩溃 → 目录保留 → 重启 + `load_session` 恢复。
 - **控制面注册表**：**内存**（控制面重启会丢 session 路由，MVP 可接受；持久化留后续）。
 - **workspace**：per-session 目录（本机）。
-- **中心 DB**：**不在 MVP**——是后续"storage backend"子项目（换 `shared/adapter/storage` 的 adapter，runtime 不动）。
+- **中心 DB**：**不在 MVP**——是后续"storage backend"子项目（换 `shared/adapter/storage` 的 adapter，runtime 不动）。目标 schema（session/messages/tasks/memory/cost_history + 控制面 registry/tenants/auth/quotas，workspace 只存引用）记在该子项目 spec。
 
 ---
 
@@ -300,11 +253,11 @@ CLI 输入回车
 
 | 场景 | 处理 |
 |---|---|
-| worker 崩溃（中途） | 当前 chat 流吐 `ChatEvent::Error`；SessionManager 标记会话死；下次请求**重 launch worker + `load_session(id)`** 从文件恢复 |
+| worker 崩溃（中途） | worker WS 断开 → 控制面把 client 当前 chat 流以 `ChatEvent::Error` 收尾；SessionManager 标记会话死；下次请求**重 launch worker + `load_session(id)`** 从文件恢复 |
 | worker 空闲 | SessionManager 空闲 N 分钟回收进程（会话状态在文件，可再拉起） |
-| CLI WS 断开 | `ServerSessionClient` 标记断开；重连时带同一 `session_id` re-attach（worker 仍在/或被恢复） |
+| CLI WS 断开 | `ServerSessionClient` 标记断开；重连带同一 `session_id` re-attach（控制面重新代理到仍在/被恢复的 worker） |
 | 控制面重启（MVP） | 内存注册表丢失；client 重连按 session_id 重新 launch + load_session（依赖文件存储） |
-| `Cancel` | `Call::Cancel` → worker `client.cancel()`（置 AtomicBool） |
+| `Cancel` | `Call::Cancel` 透传到 worker → `client.cancel()`（置 AtomicBool） |
 
 > 真正的健康检查、优雅迁移、控制面 HA 留后续。
 
@@ -312,12 +265,13 @@ CLI 输入回车
 
 ## 8. 测试策略
 
-1. **协议编解码单测**：`Call`/`Resp`/`Frame` round-trip（serde + 长度前缀）。
-2. **`WireClient` 单测**：用内存双工 transport（`tokio::io::duplex`）模拟两端，验证 req_id 多路复用、stream 还原、watch 桥接、错误传播。
-3. **`SessionManager` 单测**：`FakeLauncher` 返回 `client = 真 AgentClientImpl`（**in-proc，不起进程**）→ 验证 spawn-on-first-use、崩溃重启、回收。
-4. **worker `serve` 单测**：内存 transport + mock AgentClient，验证每个 `Call` 正确分发、流式逐帧。
-5. **集成测试**：起真 `aemeath worker` 子进程 + uds，一轮 chat round-trip + 崩溃重启 resume。
-6. **CLI 双模式集成**：本地直连 vs server 模式同一段对话，断言 TUI 行为一致。
+1. **协议编解码单测**：`Call`/`Resp`/`Frame` round-trip（serde + 帧）。
+2. **`WireClient` 单测**：用内存双工 `WsConn`（`tokio::io::duplex` 包一层）模拟两端，验证 req_id 多路复用、stream 还原、watch 桥接、错误传播。
+3. **`serve_ws` 单测**：内存 `WsConn` + mock AgentClient，验证每个 `Call` 正确分发、流式逐帧。
+4. **`SessionManager` 单测**：`FakeLauncher` 返回一个 in-proc 跑 `serve_ws(真 AgentClientImpl)` 的 worker（不起进程）→ 验证 launch-on-first-use、崩溃重启、回收。
+5. **WsProxy 单测**：内存双工两端，验证按 session 路由 + 双向透传 + 一端断开另一端收尾。
+6. **集成测试**：起真 `aemeath worker` 子进程（uds WS）+ 控制面代理，一轮 chat round-trip + 崩溃重启 resume。
+7. **CLI 双模式集成**：本地直连 vs server 模式同一段对话，断言 TUI 行为一致。
 
 ---
 
@@ -335,12 +289,12 @@ CLI 输入回车
 
 ## 10. crate / 二进制落点
 
-- `packages/agent-wire`（新）：`Call`/`Resp`/`Frame`/`WireTransport`/`WireClient<T>`/codec。控制面与 worker、CLI server 模式共享。
-- `apps/server`（新）：`aemeath serve` 入口、`WsGateway`、`SessionManager`、`WorkerLauncher`/`LocalProcessLauncher`、`RemoteAgentClient`。
-- `apps/cli`（改）：新增 `aemeath worker` 子命令（复用 composition）；composition root 增 `ServerSessionClient` 分支 + `--server` flag/config。
+- `packages/agent-wire`（新）：`Call`/`Resp`/`Frame`/codec + `WsConn` 抽象 + **`WireClient`（client 侧，实现 AgentClient）** + **`serve_ws`（server 侧）**。worker / CLI-server / 控制面代理共享。
+- `apps/server`（新）：`aemeath serve` 入口、`WsProxy`（反向代理）、`SessionManager`、`WorkerLauncher`/`LocalProcessLauncher`。**不含 RemoteAgentClient**（B 没这东西）。
+- `apps/cli`（改）：新增 `aemeath worker` 子命令（复用 composition + `serve_ws` over uds）；composition root 增 `ServerSessionClient`（= `WireClient`）分支 + `--server` flag/config。
 - `agent/*`、`packages/sdk`：仅 `sdk` 的 `ChatEvent`/`SessionSnapshot` 加 agent 维度（§4.6）；runtime/features **不动**。
 
-> `apps/server` 是新顶层 app（#36 旧 server 已删，本设计是全新的、薄的控制面，不复用任何历史代码）。
+> `apps/server` 是新顶层 app（#36 旧 server 已删，本设计是全新的、薄的代理控制面，不复用任何历史代码）。
 
 ---
 
@@ -348,12 +302,14 @@ CLI 输入回车
 
 | 子项目 | 内容 |
 |---|---|
-| storage-backend | 中心 DB adapter（文件→DB），租户作用域凭证 |
+| storage-backend | 中心 DB adapter（文件→DB），租户作用域凭证，目标 schema |
 | auth-tenancy | 认证、授权、多租户隔离、行级安全 |
 | sandbox-launcher | 真沙箱 `WorkerLauncher`（容器/microVM） |
-| multi-machine | 跨机 remote launcher + 传输换 TCP + 控制面 HA |
-| governance | 配额/限流/按租户成本归账 |
+| multi-machine | 跨机 remote launcher（worker WS 改 TCP 暴露）+ 控制面 HA |
+| governance | 配额/限流/按租户成本归账（控制面边缘按帧计数） |
 | swarm-feature | worker 内 multi-main-agent（coordinator + peer），填充契约 agent 维度 |
+
+> 跨机在 B 下很自然：worker 本就是 WS server，把 uds 换成 TCP 暴露、launcher 换成远程，控制面代理逻辑不变。
 
 ---
 
@@ -362,4 +318,4 @@ CLI 输入回车
 - **范围聚焦**：本 MVP 只打通管道，所有可换项以最简 adapter 占位，不夹带后续子项目。
 - **契约前瞻**：§4.6 的 agent 维度是唯一对现有 sdk 的破坏性改动，必须随 MVP 落地。
 - **行为兼容**：本地直连模式（缺省）行为与现状完全一致；server 模式为新增路径。
-- **复用最大化**：`RemoteAgentClient` 与 `ServerSessionClient` 共享 `WireClient<T>`；worker 复用 composition + runtime。
+- **复用最大化**：`WireClient`（client）+ `serve_ws`（server）一套协议，worker / CLI-server 共享；控制面是薄代理，无第二套协议、无 RemoteAgentClient；worker 复用 composition + runtime。
