@@ -73,6 +73,8 @@ pub enum ConversationBlock {
         chat_input_text: String,
         /// 无选项自由输入模式下的默认值提示。
         default: Option<String>,
+        /// 用户回答内容。设置后 block 进入已回答状态，渲染为问答对。
+        answer: Option<String>,
     },
 }
 

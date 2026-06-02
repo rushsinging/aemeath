@@ -61,8 +61,10 @@ pub enum ConversationIntent {
         multi_select: bool,
         cursor: usize,
         /// 无选项自由输入模式下的默认值提示。
-        default: Option<String>,
-    },
+            default: Option<String>,
+        },
+        /// 设置用户回答内容，AskUser block 进入已回答状态。
+        AnswerAskUser { answer: String },
     /// 更新 AskUser 块的光标位置（选项导航高亮的单一真相）。
     SetAskUserCursor {
         cursor: usize,

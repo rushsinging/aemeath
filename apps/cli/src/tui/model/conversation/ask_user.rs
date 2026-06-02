@@ -65,6 +65,7 @@ impl ConversationModel {
             chat_input_active: false,
             chat_input_text: String::new(),
             default,
+            answer: None,
         });
         vec![
             ConversationChange::AskUserShown {
@@ -182,6 +183,18 @@ impl ConversationModel {
                 ConversationChange::AskUserDismissed,
                 ConversationChange::OutputDirty,
             ];
+        }
+        Vec::new()
+    }
+
+    /// 设置用户回答内容，block 进入已回答状态（不再显示选项和键盘提示）。
+    pub(super) fn answer_ask_user(&mut self, answer: String) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUser {
+            answer: ans, ..
+        }) = self.ask_user_block_mut()
+        {
+            *ans = Some(answer);
+            return Self::ask_user_updated();
         }
         Vec::new()
     }

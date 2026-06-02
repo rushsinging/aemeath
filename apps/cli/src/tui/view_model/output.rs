@@ -61,6 +61,8 @@ pub struct AskUserBlockView {
     pub chat_input_text: String,
     /// 无选项自由输入模式下的默认值提示（渲染 `(default: ...)` 行）。
     pub default: Option<String>,
+    /// 用户回答内容。Some 表示已回答，渲染为问答对。
+    pub answer: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
