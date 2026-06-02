@@ -2,13 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 103 | EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容 | 中 | 待确认 | 待用户确认 | 2026-05-31 | 已为 EnterWorktree/ExitWorktree 注册专用 ToolDisplay：EnterWorktree header 展示 branch/path 语义摘要，ExitWorktree 无参数时不渲染 detail，避免显示 `{}` 原始 JSON |
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
-| 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | 中 | 活动中 | 未确认 | 2026-06 | `hook_ui.rs` 中 `HookStart` 只在执行前发一次且只取 `hooks.first()` 的 command，`HookEnd` 循环发 N 次但无 command 字段；应在每个 hook 执行前各发一次 `HookStart` |
-| 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 待用户确认 | 2026-05 | 已将 #72 pull-drain 过渡方案收口到 ChatInputEvent push channel + PendingInputBuffer + Loop Gate：TUI 忙碌期 Enter 通过 Effect 发送事件，runtime 在 BeforeLlm/BeforeFinish/AfterBlockingBoundary 安全边界统一 drain push/pull 输入并去重；普通输入追加为下一 turn，control command 不进入 LLM messages。验证：SDK/runtime gate 相关测试与 runtime/cli check 通过 |
-| 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
-| 72 | agent 双层循环中一轮结束后不自动读取 input queue | 中 | 并入 #49 | 未确认 | 2026-05 | 原 #72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 是 pull-drain 过渡修复，思路已被 #49 的 ChatInputEvent push channel + PendingInputBuffer + Loop Gate 统一方案取代；后续不再沿 #72 继续扩展 pull adapter，而是在 #49 实施中迁移并删除旧 drain 散点。 |
-| 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | 高 | 修复中 | 未确认 | 2026-05 | 根因：EnterWorktree 只支持进入已存在 worktree，工具描述未覆盖“开个 wt”的创建语义，LLM 在目标不存在时容易回退到 Bash 执行 `git checkout -b`，把主工作区切到 feature 分支。修复：EnterWorktree 目标路径不存在时默认基于 main 执行 `git worktree add` 创建并进入；path 可选，省略时从 branch 推导 `.worktrees/<安全分支名>`；工具描述明确禁止用 checkout/switch 代替 worktree。 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
 | 95 | Agent tool result 被归为 orphan | 中 | 修复中 | 未确认 | 2026-05 | 根因：`observe_tool_call` 中 `bind_tool` 找不到未绑定占位时直接返回空（不创建 ToolCall block），导致后续 `ToolResult` 在 `complete_active_tool` 中找不到匹配 id → orphan。触发场景：provider 未发送 `ToolCallStart`（如非 streaming 模式）或 index 错位导致 fallback 也失败。修复：`bind_tool` 失败时自动调用 `observe_tool_start` 创建占位后重试绑定 |
@@ -17,33 +11,6 @@
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 
 
-
-### #103 EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容
-
-**状态**：待确认
-
-**症状**：在 TUI 中触发 `EnterWorktree` / `ExitWorktree` 工具调用时，工具调用块会显示原始 JSON 参数内容；用户观察到 `ExitWorktree` 下方直接显示 `{}`。这类工具的参数对用户价值低，且 `{}` 会造成界面噪音。
-
-**复现**：
-1. 在 TUI 中让 LLM 调用 `EnterWorktree` 或 `ExitWorktree`。
-2. 观察输出区的工具调用块。
-3. `ExitWorktree` 无参数时仍显示 `{}` 等原始 JSON 内容。
-
-**根因假设**：
-1. 工具调用展示层对所有工具统一渲染 `input` / `arguments` JSON，缺少按工具的语义化摘要。
-2. `EnterWorktree` / `ExitWorktree` 没有专用展示逻辑，导致空参数对象也被原样展示。
-3. 既有 `ToolDisplay` 或 `tool_impls` 可能只对 Read/Write/Bash 等工具做了摘要，未覆盖 worktree 工具。
-
-**修复**：
-1. 为 `EnterWorktree` 注册专用 TUI 展示：header 显示 `branch`，没有 `branch` 时显示 `path`，不再渲染原始 JSON detail。
-2. 为 `ExitWorktree` 注册专用 TUI 展示：header 显示工具名，空参数 `{}` 不再渲染 detail。
-3. 添加回归测试覆盖 `ExitWorktree {}` 不显示 `{}`，以及 `EnterWorktree` 的 branch/path 两种可读摘要。
-
-**验证**：`cargo test -p cli worktree` 通过。
-
-**涉及路径**：
-- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
-- `apps/cli/src/tui/render/output/tool_display.rs`
 
 ### #102 长工具调用内容导致 TUI 画面完全不刷新、按键无响应
 
@@ -146,131 +113,6 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
-
-### #49 last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
-
-**状态**：待确认（2026-05-31 已落地 ChatInputEvent push channel + PendingInputBuffer + Loop Gate）
-
-**本轮症状**：Stop hook、tool/hook 边界、最终 Done 前等忙碌窗口期间提交的新输入可能只停留在 TUI input queue / queued echo，runtime 只有在散落的 `append_queued_input` 调用点主动 pull 时才可见，容易漏过最后一次 drain 后的输入。
-
-**根因（已确认）**：#72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 只能作为 pull-drain 过渡 adapter；它依赖主循环在每个出口手写 drain，无法形成“继续 LLM 前、准备结束前、长耗时边界返回后必须统一消费输入”的架构不变量。
-
-**修复**：
-1. SDK 新增 `ChatInputEvent`、`ChatInputEventPort`、`InputEventFuture`，`ChatRequest` 同时保留迁移期 `queue_drain` 与新 `input_events`。
-2. Runtime 新增 `PendingInputBuffer` 与 Loop Gate，在 `BeforeLlm`、`BeforeFinish`、`AfterBlockingBoundary` 统一 drain push channel 与旧 pull queue，并用 legacy text 去重避免双消费。
-3. `process_chat_loop` 移除主循环内散落的 `append_queued_input` 调用点，统一走 `drain_and_apply_gate`；普通输入追加为当前 chat 的下一 turn，`/clear` 等 control command 不进入 LLM messages，`Cancel` 与现有取消语义幂等合流。
-4. TUI 忙碌期 Enter 不再只写本地 queue，而是返回 `Effect::SendChatInputEvent`；effect 层写入 `TuiInputEventPort` buffer，启动 chat 时通过 `ChatRequest.input_events` 注入 runtime。
-5. `MessagesSync` 会清理旧 input queue 与 queued submission echo，保留 #72 pull adapter 作为迁移期兜底。
-
-**验证**：`cargo test -p sdk chat_input_event`、`cargo test -p runtime input_gate`、`cargo test -p runtime test_process_chat_loop_drains_input_after_stop_hook_before_done`、`cargo check -p runtime -p cli` 均通过；待用户在 TUI 中确认忙碌期追加输入不再残留。
-
-### #73 EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout
-
-**状态**：修复中（待确认）
-
-**症状**：用户要求“开个 wt”时，LLM 知道需要 worktree，但 `EnterWorktree` 只能进入已存在路径，目标不存在时模型回退到 Bash 手动执行 `git checkout -b` / `git worktree add` 组合，容易先把主工作区切到 feature 分支，后续 worktree 创建因分支已被占用失败。
-
-**根因（已确认）**：
-1. `EnterWorktree` 工具语义只覆盖“进入已有 worktree”，没有覆盖用户自然语言里的“开 worktree”。
-2. 工具描述未明确禁止在主 checkout 中用 `git checkout -b` / `git switch -c` 代替 worktree。
-3. 目标不存在时需要 LLM 自己组合 Bash 命令创建，再调用 `EnterWorktree`，增加误操作和 token 成本。
-
-**修复**：
-1. `EnterWorktree` 目标路径不存在时默认基于 `main` 创建 worktree 并进入。
-2. 移除 `base` 参数，避免 LLM 选择错误基线；`path` 改为可选，省略时从 `branch` 推导 `.worktrees/<安全分支名>`。
-3. 推导 path 时仅保留 `A-Z` / `a-z` / `0-9` / `.` / `_` / `-`，路径分隔符和敏感字符压缩替换为 `-`。
-4. 工具描述和 schema 明确：开 worktree 必须调用 `EnterWorktree`，禁止在主 checkout 用 checkout/switch 代替。
-5. 补充测试覆盖显式 path+branch 创建、branch 推导 path、敏感字符替换、缺少 path/branch 报错、嵌套进入拒绝和 schema。
-
-### #72 agent 双层循环中一轮结束后不自动读取 input queue
-
-**状态**：并入 #49（待 #49 统一方案实施后一起确认）
-
-**症状**：agent 主循环由双层构成：外层 LLM loop（每次 LLM 调用为一次迭代），内层 tool execution loop（并发执行本轮所有 tool_use）。当一轮结束后（LLM 返回最终文本 or 工具全部执行完成、准备下一轮 LLM 调用之前），agent 不会自动 drain 读取 input queue（`AgentInput::UserMessage` / 用户通过 TUI 发送的新消息），导致用户中途发送的输入被忽略或延迟到循环自然结束才被处理。
-
-**复现**：
-1. 向 agent 发送一个会触发多轮工具调用的复杂请求（如「分析整个项目结构」）。
-2. 在 agent 执行首轮工具期间，通过 TUI 发送一条新消息（如「停，只分析 src 目录」）。
-3. 观察 agent 是否在当前工具执行完成后立即处理用户新输入，还是继续原有 LLM loop 直到任务自然结束才响应。
-
-**根因假设**：
-1. 外层 LLM loop 的迭代条件只判断「是否收到 LLM 最终响应」和「是否还有 tool_use」，没有在每轮开始前主动 drain input queue。
-2. input queue 在 runtime 启动时已建立，但主循环的 tick 入口没有在每轮之间调用 `recv` / `try_recv` 来检查新消息。
-3. input queue 的读取被耦合在某个更内层的位置（如 tool execution 完成后），导致只有特定时机才会消费。
-4. 双层循环结构（LLM loop + tool loop）使得「一轮结束」的定义不够明确：工具执行完到下一次 LLM 调用之间的窗口没有被用于检查 input queue。
-
-**根因（已确认，已被 #49 重新收口）**：
-1. P13 TUI/Runtime SDK 解耦后，TUI 的排队输入读取端口停留在 CLI 层：`TuiQueueDrainPort` 只在 `spawn_processing` 收到 `Done` / `DoneWithDuration` 后兜底 drain，并通过 `sync_current_messages` 写回 session。
-2. `AgentClientImpl::chat` 启动 `process_chat_loop` 时曾固定传入 `EmptyQueueDrainPort`，导致 runtime chat loop 内既有的 `append_queued_input` 调用（工具轮完成后、最终响应前、取消/API error 等路径）永远只能得到 `None`。
-3. 后续 `ChatRequest.queue_drain` + `RuntimeQueueDrainPort` + `TuiQueueDrainPort` 修复了“runtime 读不到 TUI queue”的直接断点，但仍属于 pull-drain 过渡方案：runtime 只有在散落的 `append_queued_input` 调用点主动拉取时才知道输入存在，不能解决 #49 暴露的所有 hook/tool/finish 窗口。
-
-**收口决策**：#72 不再作为独立技术方向继续扩展。最终修复统一并入 #49：用 `ChatInputEvent` push channel + `PendingInputBuffer` + Loop Gate 替代旧的 pull-drain 思路。#72 的 queue drain 端口只作为迁移期兼容 adapter；#49 落地时必须迁移并删除旧 `append_queued_input` 散点，避免新 gate 与旧 pull adapter 双消费。
-
-**过渡修复（已完成但不作为最终方向）**：
-1. `sdk::ChatRequest` 新增可选 `queue_drain` 端口，非 TUI 调用保持 `None`。
-2. `apps/cli` 发起 chat 时注入 `TuiQueueDrainPort`，并让该端口实现 `sdk::QueueDrainPort`。
-3. `agent/runtime` 新增 `RuntimeQueueDrainPort`，把 SDK queue drain 端口适配为 runtime `chat::QueueDrainPort` 后传入 `process_chat_loop`。
-4. 补充回归测试覆盖 `RuntimeQueueDrainPort` 能转发 SDK queue 读取，以及无 queue 时安全返回 `None`。
-
-**最终修复方向（由 #49 承担）**：
-1. 忙碌期 TUI Enter 通过 Cmd/Effect push `ChatInputEvent` 到 runtime，而不是只写入待 pull 的 TUI queue。
-2. runtime 维护 `PendingInputBuffer`，在 BeforeLlmGate / BeforeFinishGate / AfterBlockingBoundaryGate 安全边界统一消费输入。
-3. control command（如 `/clear`、`/model`）不进入 LLM messages；普通用户输入延展当前 Chat 为下一 Turn。
-4. #72 的 `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 仅作为迁移期兼容 adapter，#49 完成后不再依赖该 pull 模型作为主路径。
-
-**涉及路径（最终以 #49 spec 为准）**：
-- `agent/runtime/src/agent.rs`（主循环 tick / LLM loop / tool loop 入口）
-- `agent/runtime/src/chat/`（chat 事件处理与 input queue 建立）
-- `agent/runtime/src/chat/looping/`（循环控制与迭代逻辑）
-
-### #69 worktree 中 LLM 仍尝试搜索主分支路径
-
-**状态**：修复中（待确认）
-
-**症状**：进入 worktree 后，LLM 调用 `Glob` / `Grep` / `Read` 等工具时，仍然传入 main 工作区的绝对路径作为搜索/读取目标，触发 workspace 边界保护错误：
-
-```text
-✗ Glob(docs/bug/active.md)
-  ✗ Search path '/Users/guoyuqi/Nextcloud/work/claudecode/aemeath' is outside the workspace '/Users/guoyuqi/Nextcloud/work/claudecode/aemeath/.worktrees/bug-67-resume-tui'.
-```
-
-工具被正确拦截（安全机制工作正常），但 LLM 反复重试同样的越界路径，迫使用户/agent 自行纠正路径，影响 worktree 工作流效率。
-
-**复现**：
-1. 在 `.worktrees/<branch>` 目录中启动 TUI/runtime。
-2. 触发任意需要文件搜索的工具调用（Glob/Grep/Read 相对或绝对路径）。
-3. 观察 LLM 是否会传入 main 工作区根绝对路径（而不是当前 worktree 路径）。
-4. 若传入主分支路径，工具返回 workspace 越界错误；LLM 通常需要多轮才意识到。
-
-**根因假设**：
-1. 系统提示/上下文中显示的「Working directory」仍是 main 工作区根，而 workspace 边界实际指向 worktree 路径，两者不一致导致 LLM 选错路径基准。
-2. 项目记忆/历史会话中保留了 main 路径作为常用根，LLM 偏向复用而非以当前 cwd 为准。
-3. 工具描述未明示「优先使用相对路径或当前 workspace 根」，LLM 倾向用绝对路径，且绝对路径模板取自项目根。
-4. EnterWorktree/cwd 切换后未同步更新 system reminder 中的 cwd 字段，导致 LLM 看到的 cwd 仍为外层。
-
-**根因（已确认）**：
-1. 仅在静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 `EnterWorktree` / `ExitWorktree` 后变成旧值，反而可能误导 LLM。
-2. 当前 workspace 的实时状态源是执行中的 workspace context（`path_base` / `working_root` / context stack），它会被 Enter/ExitWorktree 修改，并被文件/搜索工具用于相对路径解析和安全边界。
-3. 因此 LLM 需要通过 Enter/ExitWorktree 的 tool result 获取最新 `path_base` / `working_root`，而不是依赖 system prompt 或额外 reminder 动态注入。
-
-**修复**：
-1. 静态 system prompt 去掉具体 `Current workspace root`，只保留通用规则：工具路径优先使用相对路径；绝对路径必须位于当前 workspace；不要复用其他 checkout/main/worktree/历史会话中的绝对路径。
-2. `EnterWorktree` / `ExitWorktree` 成功结果统一输出当前 `path_base`、`working_root`、分支和后续路径使用规则，直接在 tool result 中告诉 LLM 最新 workspace context。
-3. `validate_search_path_from_base` 与文件路径越界错误继续补充恢复建议：优先使用相对路径或当前 workspace，下次不要重试同一个外部绝对路径。
-4. 新增回归测试覆盖静态 prompt 不再包含固定 workspace root、以及 worktree tool result 包含 `path_base` / `working_root` 与路径提示。
-
-**修复方向**：
-1. 在系统提示/会话上下文中明确标注当前 workspace 根与 cwd，并与工具 workspace 边界保持一致；EnterWorktree 后必须同步刷新这两个字段。
-2. 工具描述/指南补充：在 worktree 中应优先使用相对路径，或使用工具提供的 workspace 根变量，不要硬编码项目根绝对路径。
-3. 工具边界报错信息中明确给出当前 workspace 根与建议替换路径，方便 LLM 一次纠正。
-4. 评估在 LLM system context 中加入「禁止跨 workspace 越界搜索」的硬性指令，并补充正反样例。
-
-**涉及路径（预计）**：
-- worktree/cwd 切换后 system reminder/context 中 cwd 字段刷新
-- Glob/Grep/Read 等工具的 workspace 边界判定与报错文案
-- 工具描述/项目指南中关于 worktree 工作路径的提示
-- EnterWorktree/ExitWorktree 上下文栈与 cwd 同步逻辑
-
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 

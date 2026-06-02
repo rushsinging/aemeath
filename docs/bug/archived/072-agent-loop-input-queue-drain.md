@@ -1,0 +1,27 @@
+# Bug #72：agent 双层循环中一轮结束后不自动读取 input queue
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-06-02 |
+| 状态 | 已确认修复（并入 #49） |
+| 修复 | fd3d644, cfb0b98 |
+
+## 症状
+
+agent 主循环一轮结束后（LLM 返回最终文本，或工具全部执行完成准备下一轮 LLM 调用前）不会自动读取 input queue，导致用户中途发送的输入被忽略或延迟到循环自然结束才被处理。
+
+## 根因
+
+P13 TUI/Runtime SDK 解耦后，TUI 的排队输入读取端口停留在 CLI 层；runtime chat loop 内的 queue drain 曾固定接到空实现。后续 `ChatRequest.queue_drain` + `RuntimeQueueDrainPort` + `TuiQueueDrainPort` 修复了直接断点，但仍是 pull-drain 过渡方案，无法覆盖所有 hook/tool/finish 边界。
+
+## 修复
+
+本 bug 最终并入 #49：用 `ChatInputEvent` push channel + `PendingInputBuffer` + Loop Gate 替代旧 pull-drain 思路。runtime 在 `BeforeLlm`、`BeforeFinish`、`AfterBlockingBoundary` 统一消费输入；旧 `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 仅保留为迁移期兼容 adapter。
+
+## 验证
+
+- `cargo test -p runtime input_gate`
+- `cargo test -p runtime test_process_chat_loop_drains_input_after_stop_hook_before_done`
+- 用户确认 #49/#72 统一方案已修复。

@@ -1,18 +1,32 @@
-# Bug #49: last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
+# Bug #49：last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域
 
-- **发现日期**：2026-05
-- **归档日期**：2026-05-22
-- **状态**：已确认修复
-- **优先级**：高
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 高 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-06-02 |
+| 状态 | 已确认修复 |
+| 修复 | f26e26d, cfb0b98 |
 
 ## 症状
 
-用户在 LLM 处理期间提交的消息（last turn）不会被发送给 LLM，留在 input queue 区域。
+用户在 LLM 处理期间提交的消息（last turn）可能不会被发送给 LLM，而是停留在 input queue / queued echo 区域。Stop hook、tool/hook 边界、最终 Done 前等忙碌窗口尤其容易漏过最后一次 drain。
 
 ## 根因
 
-`process_in_background` 中 `tool_calls.is_empty() || stop_reason==EndTurn` 时直接 `break` 退出 loop，未消费 `input_queue` 中用户排队消息。工具轮结束后即使消费了队列也未立即 `continue`，可能先执行收尾逻辑。
+早期修复只在部分 loop 出口调用 `append_queued_input`，仍依赖 runtime 在多个分散位置主动 pull TUI queue。#72 的 `ChatRequest.queue_drain` / `RuntimeQueueDrainPort` / `TuiQueueDrainPort` 解决了 runtime 读不到 TUI queue 的直接断点，但仍是 pull-drain 过渡方案，无法形成“继续 LLM 前、准备结束前、长耗时边界返回后必须统一消费输入”的不变量。
 
 ## 修复
 
-抽取 `append_queued_input`，在 EndTurn/无工具调用和工具轮结果同步后统一 drain queued input，有消息则同步 messages 并 continue 进入下一轮。补充正常/空队列/通道关闭单元测试。
+1. 先补充 Stop hook 等结束路径的 queue drain，避免 stop hook 后排队输入丢失。
+2. 后续用 `ChatInputEvent` push channel + `PendingInputBuffer` + Loop Gate 收口：TUI 忙碌期 Enter 通过 Effect 发送输入事件，runtime 在 `BeforeLlm`、`BeforeFinish`、`AfterBlockingBoundary` 统一 drain push/pull 输入并去重。
+3. 普通输入追加为下一 turn，control command 不进入 LLM messages；`MessagesSync` 清理旧 input queue 与 queued submission echo。
+4. #72 的 pull queue adapter 保留为迁移期兜底，其最终修复并入本 bug。
+
+## 验证
+
+- `cargo test -p sdk chat_input_event`
+- `cargo test -p runtime input_gate`
+- `cargo test -p runtime test_process_chat_loop_drains_input_after_stop_hook_before_done`
+- `cargo check -p runtime -p cli`
+- 用户确认修复。
