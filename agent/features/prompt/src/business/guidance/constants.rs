@@ -62,6 +62,7 @@ pub const DEFAULT_FILES: &[(&str, &str)] = &[
 - Tool call JSON parameters must be strictly valid JSON. Double-check before sending.
 - When editing code, always show the exact old_string and new_string — never approximate.
 - When using AskUserQuestion with options, the system automatically appends "Type something..." as a built-in option for free-text input. Do NOT include similar options in your options array.
+- When using AskUserQuestion with options, prefer object format { "title": "...", "description": "..." } over plain strings. Use description to provide additional context or explanation for each choice.
 "#,
     ),
     (
