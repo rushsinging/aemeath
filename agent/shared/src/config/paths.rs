@@ -120,47 +120,6 @@ pub fn old_project_skills_dir(cwd: &Path) -> PathBuf {
 /// Maximum directory depth to search up and down from cwd for project instructions.
 pub const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
 
-/// Return all candidate paths for project-level instruction files (CLAUDE.md, AGENTS.md)
-/// by walking up to `depth` ancestor directories and down `depth` levels of subdirectories
-/// from `cwd`. Claude-first ordering is preserved at each level.
-pub fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    // 1. Walk upward from cwd (inclusive)
-    let mut current = Some(cwd);
-    for _ in 0..=depth {
-        if let Some(dir) = current {
-            push_instruction_paths_for_dir(&mut paths, dir, depth);
-            current = dir.parent();
-        } else {
-            break;
-        }
-    }
-
-    paths
-}
-
-/// For a given directory, push CLAUDE.md and AGENTS.md for the dir itself,
-/// then recurse down up to `remaining` levels into immediate subdirectories.
-fn push_instruction_paths_for_dir(paths: &mut Vec<PathBuf>, dir: &Path, remaining: u32) {
-    // Claude-first at this level
-    paths.push(dir.join(CLAUDE_MD));
-    paths.push(dir.join(AGENTS_MD));
-
-    if remaining == 0 {
-        return;
-    }
-    // Recurse into subdirectories
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                push_instruction_paths_for_dir(paths, &path, remaining - 1);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,47 +198,5 @@ mod tests {
             old_project_skills_dir(&cwd),
             PathBuf::from("/tmp/demo/.aemeath/skills")
         );
-    }
-
-    #[test]
-    fn test_project_instruction_walk_includes_cwd_first() {
-        let tmp = std::env::temp_dir().join("aemeath_test_walk_cwd");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let paths = project_instruction_walk(&tmp, 2);
-        // First two should be cwd-level CLAUDE.md and AGENTS.md
-        assert_eq!(paths[0], tmp.join("CLAUDE.md"));
-        assert_eq!(paths[1], tmp.join("AGENTS.md"));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_project_instruction_walk_includes_parent() {
-        let tmp = std::env::temp_dir().join("aemeath_test_walk_parent");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let child = tmp.join("sub");
-        std::fs::create_dir_all(&child).unwrap();
-        let paths = project_instruction_walk(&child, 1);
-        // Should include child level and parent level
-        assert!(paths.contains(&child.join("CLAUDE.md")));
-        assert!(paths.contains(&tmp.join("CLAUDE.md")));
-        // Child level comes before parent level
-        let child_idx = paths.iter().position(|p| p == &child.join("CLAUDE.md")).unwrap();
-        let parent_idx = paths.iter().position(|p| p == &tmp.join("CLAUDE.md")).unwrap();
-        assert!(child_idx < parent_idx);
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_project_instruction_walk_depth_zero_cwd_only() {
-        let tmp = std::env::temp_dir().join("aemeath_test_walk_zero");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let paths = project_instruction_walk(&tmp, 0);
-        // depth=0: only cwd level, no subdirs, no parents
-        assert_eq!(paths.len(), 2);
-        assert_eq!(paths[0], tmp.join("CLAUDE.md"));
-        assert_eq!(paths[1], tmp.join("AGENTS.md"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

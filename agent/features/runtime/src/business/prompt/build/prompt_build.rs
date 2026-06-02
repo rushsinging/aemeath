@@ -242,7 +242,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     }
 
     // Project: walk up/down INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
-    for project_path in paths::project_instruction_walk(cwd, paths::INSTRUCTION_SEARCH_DEPTH) {
+    for project_path in project_instruction_walk(cwd, paths::INSTRUCTION_SEARCH_DEPTH) {
         if project_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
                 let file_path_str = project_path.to_string_lossy().to_string();
@@ -274,6 +274,47 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     }
 
     agents_md
+}
+
+/// Return all candidate paths for project-level instruction files (CLAUDE.md, AGENTS.md)
+/// by walking up to `depth` ancestor directories and down `depth` levels of subdirectories
+/// from `cwd`. Claude-first ordering is preserved at each level.
+fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    // Walk upward from cwd (inclusive)
+    let mut current = Some(cwd);
+    for _ in 0..=depth {
+        if let Some(dir) = current {
+            push_instruction_paths_for_dir(&mut paths, dir, depth);
+            current = dir.parent();
+        } else {
+            break;
+        }
+    }
+
+    paths
+}
+
+/// For a given directory, push CLAUDE.md and AGENTS.md for the dir itself,
+/// then recurse down up to `remaining` levels into immediate subdirectories.
+fn push_instruction_paths_for_dir(paths: &mut Vec<PathBuf>, dir: &Path, remaining: u32) {
+    // Claude-first at this level
+    paths.push(dir.join("CLAUDE.md"));
+    paths.push(dir.join("AGENTS.md"));
+
+    if remaining == 0 {
+        return;
+    }
+    // Recurse into subdirectories
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                push_instruction_paths_for_dir(paths, &path, remaining - 1);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -258,3 +258,41 @@ fn test_memory_context_options_from_config_disabled_uses_zero_inject_count() {
     assert_eq!(options.max_inject_count, 0);
     assert_eq!(options.similarity_threshold, 0.7);
 }
+
+#[test]
+fn test_project_instruction_walk_includes_cwd_first() {
+    let tmp = std::env::temp_dir().join("aemeath_test_walk_cwd");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let paths = project_instruction_walk(&tmp, 2);
+    assert_eq!(paths[0], tmp.join("CLAUDE.md"));
+    assert_eq!(paths[1], tmp.join("AGENTS.md"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_project_instruction_walk_includes_parent() {
+    let tmp = std::env::temp_dir().join("aemeath_test_walk_parent");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let child = tmp.join("sub");
+    std::fs::create_dir_all(&child).unwrap();
+    let paths = project_instruction_walk(&child, 1);
+    assert!(paths.contains(&child.join("CLAUDE.md")));
+    assert!(paths.contains(&tmp.join("CLAUDE.md")));
+    let child_idx = paths.iter().position(|p| p == &child.join("CLAUDE.md")).unwrap();
+    let parent_idx = paths.iter().position(|p| p == &tmp.join("CLAUDE.md")).unwrap();
+    assert!(child_idx < parent_idx);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_project_instruction_walk_depth_zero_cwd_only() {
+    let tmp = std::env::temp_dir().join("aemeath_test_walk_zero");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let paths = project_instruction_walk(&tmp, 0);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], tmp.join("CLAUDE.md"));
+    assert_eq!(paths[1], tmp.join("AGENTS.md"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
