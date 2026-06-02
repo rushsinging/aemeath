@@ -14,17 +14,29 @@ impl TuiQueueDrainPort {
 
     pub(crate) async fn drain_queued_input(&self) -> Option<Vec<String>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        log::info!("[drain-debug] sending DrainQueuedInput to TUI event loop");
         if self
             .tx
             .send(UiEvent::DrainQueuedInput { reply_tx })
             .await
             .is_err()
         {
+            log::warn!("[drain-debug] failed to send DrainQueuedInput, channel closed");
             return None;
         }
         match reply_rx.await {
-            Ok(queued) if !queued.is_empty() => Some(queued),
-            _ => None,
+            Ok(queued) if !queued.is_empty() => {
+                log::info!("[drain-debug] got {} queued messages from TUI", queued.len());
+                Some(queued)
+            }
+            Ok(_) => {
+                log::info!("[drain-debug] TUI returned empty queue");
+                None
+            }
+            Err(e) => {
+                log::warn!("[drain-debug] reply channel error: {e}");
+                None
+            }
         }
     }
 }
@@ -223,7 +235,9 @@ pub fn spawn_processing(ctx: SpawnContext) {
                     return;
                 }
                 if is_done {
+                    log::info!("[drain-debug] Done received, calling drain_queued_input");
                     if let Some(queued) = queue.drain_queued_input().await {
+                        log::info!("[drain-debug] drain returned {} queued messages", queued.len());
                         let new_messages: Vec<sdk::ChatMessage> = queued
                             .into_iter()
                             .map(|text| sdk::ChatMessage {
@@ -237,6 +251,7 @@ pub fn spawn_processing(ctx: SpawnContext) {
                         {
                             log::warn!("failed to sync drained queue messages: {e}");
                         }
+                        log::info!("[drain-debug] calling chat() with {} messages", current_messages.len());
                         // 重新发起 chat 让 runtime loop_runner 处理排队的用户消息
                         match ctx
                             .agent_client
@@ -252,10 +267,12 @@ pub fn spawn_processing(ctx: SpawnContext) {
                             .await
                         {
                             Ok(new_stream) => {
+                                log::info!("[drain-debug] chat() succeeded, resuming stream loop");
                                 active_stream = Some(new_stream);
                                 break;
                             }
                             Err(e) => {
+                                log::error!("[drain-debug] chat() failed: {e}");
                                 let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
                                 let _ = ctx.tx.send(UiEvent::Done).await;
                                 return;
