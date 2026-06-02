@@ -6,6 +6,11 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::workspace::WorktreeKind;
+use serde_json::{Map, Value};
+
+const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
+const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
+const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
@@ -38,7 +43,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         } => conversation(ConversationIntent::ObserveToolArguments {
             name: name.clone(),
             index: *index,
-            partial_args: partial_args.clone(),
+            partial_args: sanitize_tool_arguments_delta(name, partial_args),
         }),
         UiEvent::ToolCall {
             id,
@@ -49,7 +54,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             id: id.clone(),
             name: name.clone(),
             index: index.unwrap_or(0),
-            summary: summary.clone(),
+            summary: sanitize_tool_summary(name, summary),
         }),
         UiEvent::ToolResult {
             id,
@@ -60,7 +65,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         } => conversation(ConversationIntent::ObserveToolResult {
             id: id.clone(),
             tool_name: tool_name.clone(),
-            output: output.clone(),
+            output: sanitize_tool_output(tool_name, output),
             is_error: *is_error,
             image_count: images.len(),
         }),
@@ -119,6 +124,101 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         }
         _ => AgentEventMapping::default(),
     }
+}
+
+fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
+    truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name))
+}
+
+fn sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(summary) else {
+        return truncate_large_tool_text(summary, Some(tool_name));
+    };
+    sanitize_tool_value(tool_name, value).to_string()
+}
+
+fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
+    truncate_large_tool_text(output, Some(tool_name))
+}
+
+fn sanitize_tool_value(tool_name: &str, value: Value) -> Value {
+    let Value::Object(mut object) = value else {
+        return truncate_json_value(value, tool_name, "value");
+    };
+    for field in large_fields_for_tool(tool_name) {
+        summarize_object_string_field(&mut object, tool_name, field);
+    }
+    Value::Object(object)
+}
+
+fn large_fields_for_tool(tool_name: &str) -> &'static [&'static str] {
+    match tool_name {
+        "Write" => &["content"],
+        "Edit" => &["old_string", "new_string"],
+        "Agent" => &["prompt"],
+        "Bash" => &["command"],
+        "AskUserQuestion" => &["question"],
+        _ => &[],
+    }
+}
+
+fn summarize_object_string_field(object: &mut Map<String, Value>, tool_name: &str, field: &str) {
+    let Some(value) = object.get_mut(field) else {
+        return;
+    };
+    let Some(text) = value.as_str() else {
+        return;
+    };
+    if text.len() <= TOOL_LARGE_FIELD_PREVIEW_LIMIT {
+        return;
+    }
+    *value = Value::String(format!(
+        "{}\n... ({} bytes omitted from TUI {tool_name}.{field} preview)",
+        utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT),
+        text.len()
+            .saturating_sub(utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT).len())
+    ));
+}
+
+fn truncate_json_value(value: Value, tool_name: &str, field: &str) -> Value {
+    let text = value.to_string();
+    Value::String(truncate_tool_text(
+        &text,
+        TOOL_TEXT_PREVIEW_LIMIT,
+        Some(&format!("{tool_name}.{field}")),
+    ))
+}
+
+fn truncate_large_tool_text(text: &str, context: Option<&str>) -> String {
+    truncate_tool_text(text, TOOL_TEXT_PREVIEW_LIMIT, context)
+}
+
+fn truncate_tool_text(text: &str, limit: usize, context: Option<&str>) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let prefix = utf8_prefix(text, limit);
+    let omitted = text.len().saturating_sub(prefix.len());
+    let suffix = match context {
+        Some(context) => format!("... ({omitted} bytes omitted from TUI preview for {context})"),
+        None => format!("... ({omitted} bytes omitted from TUI preview)"),
+    };
+    format!("{prefix}\n{suffix}")
+}
+
+fn utf8_prefix(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let mut end = 0usize;
+    for (idx, ch) in text.char_indices() {
+        let next = idx + ch.len_utf8();
+        if next > limit {
+            break;
+        }
+        end = next;
+    }
+    &text[..end]
 }
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
@@ -201,5 +301,115 @@ mod tests {
             mapping.effects.first(),
             Some(Effect::RunHook { .. })
         ));
+    }
+
+    #[test]
+    fn test_map_agent_event_tool_arguments_delta_truncates_large_stream() {
+        let event = UiEvent::ToolArgumentsDelta {
+            index: 0,
+            name: "Edit".to_string(),
+            partial_args: "x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2),
+        };
+
+        let mapping = map_agent_event(&event);
+
+        match mapping.conversation.first() {
+            Some(ConversationIntent::ObserveToolArguments { partial_args, .. }) => {
+                assert!(partial_args.len() < TOOL_STREAM_PREVIEW_LIMIT + 128);
+                assert!(partial_args.contains("omitted from TUI preview for Edit"));
+            }
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_agent_event_tool_call_summarizes_edit_fields() {
+        let large_old = "旧".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
+        let large_new = "新".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
+        let event = UiEvent::ToolCall {
+            id: "tool-1".to_string(),
+            name: "Edit".to_string(),
+            index: Some(0),
+            summary: serde_json::json!({
+                "file_path": "src/lib.rs",
+                "old_string": large_old,
+                "new_string": large_new,
+            })
+            .to_string(),
+        };
+
+        let mapping = map_agent_event(&event);
+
+        match mapping.conversation.first() {
+            Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
+                assert!(summary.contains("src/lib.rs"));
+                assert!(summary.contains("Edit.old_string"));
+                assert!(summary.contains("Edit.new_string"));
+                assert!(
+                    summary.len() < 1_200,
+                    "summary too large: {}",
+                    summary.len()
+                );
+            }
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_agent_event_tool_call_summarizes_agent_prompt_and_bash_command() {
+        for (tool_name, field) in [("Agent", "prompt"), ("Bash", "command")] {
+            let event = UiEvent::ToolCall {
+                id: "tool-1".to_string(),
+                name: tool_name.to_string(),
+                index: Some(0),
+                summary:
+                    serde_json::json!({ field: "x".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT * 2) })
+                        .to_string(),
+            };
+
+            let mapping = map_agent_event(&event);
+
+            match mapping.conversation.first() {
+                Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
+                    assert!(summary.contains(&format!("{tool_name}.{field}")));
+                    assert!(
+                        summary.len() < 700,
+                        "{tool_name} summary too large: {}",
+                        summary.len()
+                    );
+                }
+                other => panic!("unexpected mapping: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_map_agent_event_tool_result_truncates_large_output() {
+        let event = UiEvent::ToolResult {
+            id: "tool-1".to_string(),
+            tool_name: "Bash".to_string(),
+            output: "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2),
+            is_error: false,
+            images: Vec::new(),
+        };
+
+        let mapping = map_agent_event(&event);
+
+        match mapping.conversation.first() {
+            Some(ConversationIntent::ObserveToolResult { output, .. }) => {
+                assert!(output.len() < TOOL_TEXT_PREVIEW_LIMIT + 128);
+                assert!(output.contains("omitted from TUI preview for Bash"));
+            }
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_truncate_tool_text_preserves_utf8_boundary() {
+        let text = format!("{}😀", "你".repeat(10));
+        let truncated = truncate_tool_text(&text, 31, None);
+
+        assert!(truncated.contains("你"));
+        assert!(truncated.contains("omitted from TUI preview"));
     }
 }
