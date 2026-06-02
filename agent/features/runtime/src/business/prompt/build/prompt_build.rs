@@ -223,18 +223,26 @@ pub fn current_date() -> String {
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let mut parts: Vec<String> = Vec::new();
 
-    let global_path = paths::global_agents_md_path();
-    if global_path.exists() {
-        if let Ok(content) = tokio::fs::read_to_string(&global_path).await {
-            let file_path_str = global_path.to_string_lossy().to_string();
-            hook_runner
-                .on_instructions_loaded(&file_path_str, "agents_md")
-                .await;
-            parts.push(content);
+    // Global: ~/.agents/AGENTS.md first, then fallback to ~/.claude/CLAUDE.md
+    let global_paths = [
+        paths::global_agents_md_path(),
+        paths::old_global_claude_md_path(),
+    ];
+    for global_path in &global_paths {
+        if global_path.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(global_path).await {
+                let file_path_str = global_path.to_string_lossy().to_string();
+                hook_runner
+                    .on_instructions_loaded(&file_path_str, "agents_md")
+                    .await;
+                parts.push(content);
+            }
+            break;
         }
     }
 
-    for project_path in project_instruction_paths(cwd) {
+    // Project: walk up/down INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
+    for project_path in paths::project_instruction_walk(cwd, paths::INSTRUCTION_SEARCH_DEPTH) {
         if project_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
                 let file_path_str = project_path.to_string_lossy().to_string();
@@ -266,13 +274,6 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     }
 
     agents_md
-}
-
-fn project_instruction_paths(cwd: &Path) -> [PathBuf; 2] {
-    [
-        paths::old_project_claude_md_path(cwd),
-        paths::project_agents_md_path(cwd),
-    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
