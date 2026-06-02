@@ -1,4 +1,4 @@
 pub use crate::business::hook::{
-    CompactHookData, HookData, HookJsonOutput, HookResult, PermissionHookData, StopHookData,
-    ToolHookData,
+    CompactHookData, HookData, HookInput, HookJsonOutput, HookResult, PermissionHookData,
+    StopHookData, ToolHookData,
 };
