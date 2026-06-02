@@ -61,7 +61,7 @@ pub const DEFAULT_FILES: &[(&str, &str)] = &[
 - 除非用户明确要求，不要主动生成测试用例、说明文档（README 等）。
 - Tool call JSON parameters must be strictly valid JSON. Double-check before sending.
 - When editing code, always show the exact old_string and new_string — never approximate.
-- When using AskUserQuestion with options, the system automatically appends "All of the above" and "Chat about this..." as built-in options. Do NOT include these or similar options in your options array.
+- When using AskUserQuestion with options, the system automatically appends "Type something..." as a built-in option for free-text input. Do NOT include similar options in your options array.
 "#,
     ),
     (
