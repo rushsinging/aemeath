@@ -13,10 +13,10 @@
 | 54 | 主动压缩触发：大上下文下防止 LiteLLM 代理拒绝 | 高 | 活动中 | 未确认 | Session 019e4ea6 使用 gpt-5.5 经 LiteLLM 代理（platform.wanaka.fun）时，20+ 轮 tool calling 累积 356 tool_use + 356 tool_result、580+ 条消息、请求体 427KB+，模型返回 "I'm sorry, but I cannot assist with that request." 安全拒绝。需在上下文过大时主动触发 compaction（如消息数 / token 数超过阈值），减小请求体规模，避免触发代理端安全策略。 |
 | 60 | Auto-compact LLM 语义化压缩 | 中 | 实现中 | 未确认 | 将 auto-compact 的本地文本摘要（build_summary_text：每消息取前200字+工具名）替换为 LLM 调用（build_compact_request + COMPACT_PROMPT），生成结构化摘要（目标/进度/关键决策/相关文件/当前状态/下一步）。失败时回退到本地摘要。涉及：summary.rs 新增 compact_messages_with_llm（async + Arc<LlmClient>），looping/compact.rs 传参，trait_command.rs 走 LLM 路径 |
 | 61 | 架构债务收口（047 DDD 软约束落实） | 中 | 待确认 | 未确认 | 047 DDD spec 的硬约束与软约束债务已完成收口：D1 `runtime::api` 去整体转发、D2 share 瘦身回归最小共享内核、D3 supporting domain Public API 收窄、D4 COLA 内部分层均已落地；后续遗留 1-6 项也已结清并补 guard。原 D5 audit / D6 policy 属新功能而非债务收口，已拆出至 #62。详见 [spec](specs/047-ddd-redesign.md) 与下方详情段。 |
-| 66 | Task/project window 改为 ChangeSet 驱动刷新 | 中 | 实现中 | 未确认 | 当前 TUI 每帧轮询 `AgentClient::task_status()` 刷新 task list window，且 status bar 的 worktree_kind/branch 只在 init 设置，EnterWorktree/ExitWorktree 后不会刷新。目标：Runtime 在 TaskStore 变更路径发出 `ChangeSet::TASKS`，在 project/worktree 上下文变化路径发出 `ChangeSet::PROJECT`；TUI 监听 changes 后按需刷新 `RuntimeModel.task_status.lines` 与 workspace/status bar；`/clear` 保留本地立即清空以保证同步反馈。 |
-| 67 | 去除 mod.rs 旧写法 + 架构 guard | 中 | ✅ 已完成 | 未确认 | 将所有 mod.rs 重命名为父目录同名文件（约 78 个），添加架构 guard 脚本检测新增 mod.rs 并拒绝 |
+| 67 | Task/project window 改为 ChangeSet 驱动刷新 | 中 | 实现中 | 未确认 | 当前 TUI 每帧轮询 `AgentClient::task_status()` 刷新 task list window，且 status bar 的 worktree_kind/branch 只在 init 设置，EnterWorktree/ExitWorktree 后不会刷新。目标：Runtime 在 TaskStore 变更路径发出 `ChangeSet::TASKS`，在 project/worktree 上下文变化路径发出 `ChangeSet::PROJECT`；TUI 监听 changes 后按需刷新 `RuntimeModel.task_status.lines` 与 workspace/status bar；`/clear` 保留本地立即清空以保证同步反馈。 |
+| 66 | 去除 mod.rs 旧写法 + 架构 guard | 中 | ✅ 已完成 | 未确认 | 将所有 mod.rs 重命名为父目录同名文件（约 78 个），添加架构 guard 脚本检测新增 mod.rs 并拒绝 |
 
-### #66 Task/project window 改为 ChangeSet 驱动刷新
+### #67 Task/project window 改为 ChangeSet 驱动刷新
 
 **状态**：实现中
 
