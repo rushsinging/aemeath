@@ -228,7 +228,8 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
 
     for _ in 0..=depth {
         if let Some(dir) = current {
-            push_instruction_paths_for_dir(&mut paths, dir, depth);
+            paths.push(dir.join(share::config::paths::CLAUDE_MD));
+            paths.push(dir.join(share::config::paths::AGENTS_MD));
             current = dir.parent();
         } else {
             break;
@@ -236,24 +237,6 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
     }
 
     paths
-}
-
-fn push_instruction_paths_for_dir(paths: &mut Vec<PathBuf>, dir: &Path, remaining: u32) {
-    paths.push(dir.join(share::config::paths::CLAUDE_MD));
-    paths.push(dir.join(share::config::paths::AGENTS_MD));
-
-    if remaining == 0 {
-        return;
-    }
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                push_instruction_paths_for_dir(paths, &path, remaining - 1);
-            }
-        }
-    }
 }
 
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
