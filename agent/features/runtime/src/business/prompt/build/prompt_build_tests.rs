@@ -145,6 +145,29 @@ fn test_project_instruction_walk_depth_zero_cwd_only() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn test_project_instruction_walk_does_not_scan_descendants_when_climbing_parents() {
+    let tmp = std::env::temp_dir().join(format!(
+        "aemeath_test_walk_parent_descendants_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let child = tmp.join("child");
+    let sibling_nested = tmp.join("sibling").join("nested");
+    std::fs::create_dir_all(&child).unwrap();
+    std::fs::create_dir_all(&sibling_nested).unwrap();
+
+    let paths = project_instruction_walk(&child, 1);
+
+    assert!(paths.contains(&child.join("CLAUDE.md")));
+    assert!(paths.contains(&tmp.join("CLAUDE.md")));
+    assert!(!paths.iter().any(|p| p.starts_with(tmp.join("sibling"))));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[tokio::test]
 async fn test_build_system_prompt_parts_includes_commit_guidance() {
     let cwd = std::env::temp_dir().join(format!(
