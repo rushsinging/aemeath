@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 102 | 长 Write 操作期间 TUI 画面完全不刷新、按键无响应 | 高 | 活动中 | 未确认 | 2026-06 | 初步判断不是 `tokio::fs::write` 阻塞，而是 Write 大 content/result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | 中 | 活动中 | 未确认 | 2026-06 | `hook_ui.rs` 中 `HookStart` 只在执行前发一次且只取 `hooks.first()` 的 command，`HookEnd` 循环发 N 次但无 command 字段；应在每个 hook 执行前各发一次 `HookStart` |
 | 49 | last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域 | 高 | 待确认 | 待用户确认 | 2026-05 | 已将 #72 pull-drain 过渡方案收口到 ChatInputEvent push channel + PendingInputBuffer + Loop Gate：TUI 忙碌期 Enter 通过 Effect 发送事件，runtime 在 BeforeLlm/BeforeFinish/AfterBlockingBoundary 安全边界统一 drain push/pull 输入并去重；普通输入追加为下一 turn，control command 不进入 LLM messages。验证：SDK/runtime gate 相关测试与 runtime/cli check 通过 |
 | 69 | worktree 中 LLM 仍尝试搜索主分支路径 | 中 | 修复中 | 待确认 | 2026-05 | 根因：静态 system prompt 中写入具体 `Current workspace root` 会在会话中途 EnterWorktree 后过期；修复调整为静态 prompt 只保留通用路径规则，当前 path_base/working_root 通过 EnterWorktree/ExitWorktree 的 tool result 返回给 LLM，路径越界错误继续提供恢复建议 |
@@ -15,6 +16,24 @@
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 
 
+
+### #102 长 Write 操作期间 TUI 画面完全不刷新、按键无响应
+
+**状态**：活动中
+
+**症状**：执行包含超大 `content` 的 Write 工具调用期间，TUI 画面完全不刷新，spinner 不动，键盘输入/快捷键无响应；表现为 event loop 被同步重活堵住，而不是单纯停留在 Generating 状态。
+
+**初步判断**：Write 工具磁盘写入使用 `tokio::fs::write(...).await`，不应直接阻塞 TUI 主线程。更可疑的是 TUI 渲染/update 路径保存和处理完整 Write 参数或完整工具结果，导致每帧发生大字符串 clone、`lines()` 全量收集、宽度计算、block cache version/hash 计算或富文本渲染，从而阻塞 event loop。
+
+**修复方向**：
+1. TUI 层展示 Write 调用时只保留路径与字节数等摘要，NEVER 将完整 `content` 放入可反复 clone/render/hash 的 view model。
+2. 工具结果预览应按 `result_max_lines` streaming/take 截断，NEVER 为了显示前 N 行先 `collect()` 完整 result lines。
+3. 添加大 Write 回归测试，覆盖格式化/渲染路径不会随 content 大小线性处理完整正文。
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
+- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
+- `apps/cli/src/tui/view_assembler/output.rs`
 
 ### #97 /clear 未清空 task store 和 task list window
 
