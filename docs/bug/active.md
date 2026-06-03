@@ -11,8 +11,26 @@
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 | 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
 | 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
+| 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
 
 
+### #107 TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮
+
+**状态**：待确认
+
+**症状**：TUI 中 Markdown 代码块写成 ```` ```rust ```` 时，`fn main() { println!(...) }` 等 Rust 代码显示为单色；写成 ```` ```rs ```` 可以触发 syntect 高亮。
+
+**根因**：fenced code 解析把 info string 直接传给 `syntax::language_by_extension`。syntect 能通过扩展名 `rs` 找到 Rust 语法，但不能通过语言名 `rust` 匹配扩展名，因此回退为 `theme::CODE` 单色。
+
+**修复**：新增 `syntax::language_by_fence_info`，先解析 Markdown fence info string 的第一个 token，再将 `rust` 映射为 syntect 可识别的 `rs` 扩展名；`fenced.rs` 改用该入口，`rs` 既有高亮路径保持不变。
+
+**验证**：
+- `cargo test -p cli test_fenced_rust_language_name_uses_syntect_highlight`
+- `cargo test -p cli language_by_fence_info`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/syntax.rs`
+- `apps/cli/src/tui/render/output/primitives/fenced.rs`
 
 ### #106 TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行
 

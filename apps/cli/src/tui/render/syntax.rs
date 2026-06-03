@@ -26,6 +26,18 @@ pub fn language_by_extension(ext: &str) -> Option<syntect::parsing::SyntaxRefere
     SYNTAX_SET.find_syntax_by_extension(ext).cloned()
 }
 
+/// 从 Markdown fenced code info string 推断 syntect 语言。
+///
+/// Info string 常用语言名（如 `rust`），不一定是文件扩展名（如 `rs`）。
+pub fn language_by_fence_info(info: &str) -> Option<syntect::parsing::SyntaxReference> {
+    let lang = info.split_whitespace().next()?.to_ascii_lowercase();
+    let ext = match lang.as_str() {
+        "rust" => "rs",
+        _ => lang.as_str(),
+    };
+    language_by_extension(ext).or_else(|| SYNTAX_SET.find_syntax_by_name(&lang).cloned())
+}
+
 /// 对单行代码进行语法高亮，返回带颜色的文本段。
 ///
 /// `syntax_ref` 为 None 时返回 None（调用方回退到纯色渲染）。
@@ -73,6 +85,22 @@ mod tests {
     fn test_language_by_extension() {
         let syntax = language_by_extension("rs");
         assert!(syntax.is_some(), "Rust syntax should be found");
+    }
+
+    #[test]
+    fn test_language_by_fence_info_maps_rust_name() {
+        let by_name = language_by_fence_info("rust").expect("rust fence should resolve");
+        let by_ext = language_by_extension("rs").expect("rs extension should resolve");
+
+        assert_eq!(by_name.name, by_ext.name);
+    }
+
+    #[test]
+    fn test_language_by_fence_info_keeps_extension_path() {
+        let by_info = language_by_fence_info("rs").expect("rs fence should resolve");
+        let by_ext = language_by_extension("rs").expect("rs extension should resolve");
+
+        assert_eq!(by_info.name, by_ext.name);
     }
 
     #[test]
