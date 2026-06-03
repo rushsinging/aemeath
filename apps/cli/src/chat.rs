@@ -1,5 +1,7 @@
 use crate::args::Args;
 
+pub(crate) mod no_tui;
+
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
     matches!(mode, Some("allow_all"))
 }
@@ -24,9 +26,21 @@ fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
+fn stderr_log_env_value(verbose: bool) -> Option<&'static str> {
+    if verbose {
+        Some("1")
+    } else {
+        None
+    }
+}
+
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
+    if let Some(value) = stderr_log_env_value(args.verbose) {
+        std::env::set_var("AEMEATH_LOG_STDERR", value);
+    }
     let args = apply_permission_env_override(args);
+    let quiet = args.quiet;
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let bootstrap = composition::app::build_agent_bootstrap(args.into())
         .await
@@ -35,6 +49,16 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
     let session_id = bootstrap.session_id.clone();
+
+    if quiet {
+        crate::chat::no_tui::run_no_tui_chat(bootstrap.client, session_id)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            });
+        return;
+    }
 
     let mut app =
         crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
@@ -85,6 +109,7 @@ mod tests {
             cwd: None,
             max_tokens: None,
             verbose: false,
+            quiet: false,
             no_markdown: false,
             context_size: 128_000,
             resume: Some("session-67".to_string()),
@@ -96,5 +121,15 @@ mod tests {
         };
 
         assert_eq!(initial_tui_resume_id(&args).as_deref(), Some("session-67"));
+    }
+
+    #[test]
+    fn test_stderr_log_env_value_enables_for_verbose() {
+        assert_eq!(stderr_log_env_value(true), Some("1"));
+    }
+
+    #[test]
+    fn test_stderr_log_env_value_leaves_default_for_non_verbose() {
+        assert_eq!(stderr_log_env_value(false), None);
     }
 }

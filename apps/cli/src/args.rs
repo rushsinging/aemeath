@@ -35,9 +35,13 @@ pub struct RunArgs {
     #[arg(long)]
     pub max_tokens: Option<u32>,
 
-    /// Print raw SSE data for debugging
-    #[arg(long)]
+    /// Send application logs to stderr
+    #[arg(short = 'v', long)]
     pub verbose: bool,
+
+    /// Run without the TUI; use pipe input once or interactive text REPL
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
 
     /// Disable markdown rendering
     #[arg(long)]
@@ -112,6 +116,7 @@ pub struct Args {
     pub cwd: Option<PathBuf>,
     pub max_tokens: Option<u32>,
     pub verbose: bool,
+    pub quiet: bool,
     pub no_markdown: bool,
     pub context_size: usize,
     pub resume: Option<String>,
@@ -130,6 +135,7 @@ impl From<RunArgs> for Args {
             cwd: r.cwd,
             max_tokens: r.max_tokens,
             verbose: r.verbose,
+            quiet: r.quiet,
             no_markdown: r.no_markdown,
             context_size: r.context_size,
             resume: r.resume,
@@ -189,5 +195,34 @@ mod tests {
             args.model.as_deref(),
             Some("LiteLLM/anthropic/claude-opus-4-7")
         );
+    }
+
+    #[test]
+    fn test_cli_accepts_quiet_short_flag() {
+        let cli = Cli::try_parse_from(["aemeath", "-q"]).unwrap();
+
+        assert!(cli.run_args.quiet);
+    }
+
+    #[test]
+    fn test_cli_accepts_quiet_long_flag() {
+        let cli = Cli::try_parse_from(["aemeath", "--quiet"]).unwrap();
+
+        assert!(cli.run_args.quiet);
+    }
+
+    #[test]
+    fn test_cli_accepts_verbose_short_flag() {
+        let cli = Cli::try_parse_from(["aemeath", "-v"]).unwrap();
+
+        assert!(cli.run_args.verbose);
+    }
+
+    #[test]
+    fn test_args_from_run_args_carries_quiet_flag() {
+        let cli = Cli::try_parse_from(["aemeath", "--quiet"]).unwrap();
+        let args = Args::from(cli.run_args);
+
+        assert!(args.quiet);
     }
 }
