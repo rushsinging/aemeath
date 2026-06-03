@@ -44,7 +44,7 @@ impl super::OutputArea {
                 .add_modifier(Modifier::BOLD),
         ));
 
-        let text = format!("{}…", s.verb);
+        let text = format!("{}...", s.verb);
         let text_len = text.chars().count() as i32;
         let cycle_len = text_len + 16;
         let glimmer_pos = ((s.frame / 2) as i32) % cycle_len - 8;
@@ -76,6 +76,10 @@ impl super::OutputArea {
             spans.push(Span::styled(
                 phase.to_string(),
                 Style::default().fg(theme::WARNING),
+            ));
+            spans.push(Span::styled(
+                format!("  ⏱ {}s", elapsed),
+                Style::default().fg(theme::TEXT_DIM),
             ));
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
