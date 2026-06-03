@@ -101,12 +101,12 @@ impl App {
                     };
 
                     if !answer.is_empty() {
-                        self.model.conversation.apply(
-                            ConversationIntent::AnswerAskUser {
+                        self.model
+                            .conversation
+                            .apply(ConversationIntent::AnswerAskUser {
                                 answer: answer.clone(),
-                            },
-                        );
-                        self.refresh_output_widget_from_model();
+                            });
+                        self.mark_output_dirty();
                     } else {
                         self.dismiss_ask_user_block();
                     }
@@ -135,12 +135,12 @@ impl App {
                     let text = self.model.input.document.buffer.clone();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                            self.model.conversation.apply(
-                                ConversationIntent::AnswerAskUser {
+                            self.model
+                                .conversation
+                                .apply(ConversationIntent::AnswerAskUser {
                                     answer: text.clone(),
-                                },
-                            );
-                            self.refresh_output_widget_from_model();
+                                });
+                            self.mark_output_dirty();
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
@@ -186,12 +186,12 @@ impl App {
                     .unwrap_or_default();
                 if !text.is_empty() {
                     let state = self.input.ask_user_state.take().unwrap();
-                    self.model.conversation.apply(
-                        ConversationIntent::AnswerAskUser {
+                    self.model
+                        .conversation
+                        .apply(ConversationIntent::AnswerAskUser {
                             answer: text.clone(),
-                        },
-                    );
-                    self.refresh_output_widget_from_model();
+                        });
+                    self.mark_output_dirty();
                     let _ = state.reply_tx.send(text);
                     self.spinner_phase(SpinnerPhase::Generating);
                 }
@@ -204,13 +204,13 @@ impl App {
                 self.model
                     .conversation
                     .apply(ConversationIntent::DeleteAskUserChatChar);
-                self.refresh_output_widget_from_model();
+                self.mark_output_dirty();
             }
             KeyCode::Char(c) => {
                 self.model
                     .conversation
                     .apply(ConversationIntent::AppendAskUserChatChar { ch: c });
-                self.refresh_output_widget_from_model();
+                self.mark_output_dirty();
             }
             KeyCode::Up => {
                 // Move cursor back to last option

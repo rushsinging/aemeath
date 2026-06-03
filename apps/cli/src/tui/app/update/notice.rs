@@ -11,7 +11,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::AppendSystemMessage { text: text.into() });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 将一条用户输入回显写入单一真相源 `ConversationModel`，并刷新输出文档。
@@ -23,7 +23,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::AppendUserMessage { text: text.into() });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新 live-status 投影。
@@ -39,7 +39,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::QueueSubmission { text: text.into() });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
 
@@ -52,7 +52,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::ClearQueuedSubmissions);
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
@@ -63,7 +63,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::AppendError { text: text.into() });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 显示 AskUserQuestion 交互块（问题 + 选项），作为渲染单一真相进入 ConversationModel。
@@ -86,7 +86,7 @@ impl App {
                 cursor,
                 default,
             });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 更新 AskUser 块光标位置（选项导航高亮），并刷新文档。
@@ -94,7 +94,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::SetAskUserCursor { cursor });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 切换 AskUser 块某选项勾选状态（multi_select），并刷新文档。
@@ -102,7 +102,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::ToggleAskUserSelected { index });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 设置 AskUser 块是否处于「Chat about this...」自由输入子态，并刷新文档。
@@ -110,7 +110,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::SetAskUserChatInput { active });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     /// 移除 AskUser 交互块（用户提交/取消后折叠），并刷新文档。
@@ -118,7 +118,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::DismissAskUser);
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 }
 
@@ -169,6 +169,7 @@ mod tests {
         // 边界：banner 由 init() 写入 legacy lines，document 此时为空。
         // 派发系统消息后，document 必须经 ViewModel 派生出非空 block。
         app.append_system_notice("渲染检查");
+        app.flush_dirty_view_models();
         let plain = app
             .output_area
             .document()
@@ -213,6 +214,7 @@ mod tests {
     fn test_append_user_echo_renders_gt_prefix_into_document() {
         let mut app = make_app();
         app.append_user_echo("回显检查");
+        app.flush_dirty_view_models();
         // `> ` marker 现由 gutter 注入到行首 span（plain 仅含内容）；断言渲染文档中
         // 存在「行首 gutter span == `> ` 且内容为回显文本」的行，验证回显仍带 `> ` 前缀。
         let has_echo = app.output_area.document().iter_lines().any(|line| {
@@ -407,6 +409,7 @@ mod tests {
         app.refresh_output_widget_from_model();
         // 模拟 System notice 中断（如自动 reflection）
         app.append_system_notice("[reflection: ...]");
+        app.flush_dirty_view_models();
         // 模拟 LLM streaming 继续
         app.model
             .conversation

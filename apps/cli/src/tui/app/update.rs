@@ -162,9 +162,7 @@ impl App {
             reduce_agent_event(&mut self.model, mapping)
         };
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
-        self.refresh_output_widget_from_model();
-        apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
-        apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
+        crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
         result.effects.extend(model_result.effects);
         result
     }
@@ -176,6 +174,22 @@ impl App {
         );
         let width = self.layout.output_area_rect.width.saturating_sub(3).max(1);
         render_document_from_view_model(&mut self.output_area, &view_model, width);
+    }
+
+    pub(crate) fn flush_dirty_view_models(&mut self) {
+        if self.view_state.dirty.output {
+            self.refresh_output_widget_from_model();
+            self.view_state.dirty.clear_output();
+        }
+        if self.view_state.dirty.status {
+            apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
+            apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
+            self.view_state.dirty.clear_status();
+        }
+    }
+
+    pub(crate) fn mark_output_dirty(&mut self) {
+        self.view_state.dirty.mark_output();
     }
 
     /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
