@@ -77,6 +77,14 @@ pub fn clamp_split_index(offset: usize, len: usize) -> usize {
     offset.min(len)
 }
 
+pub fn safe_byte_prefix(s: &str, offset: usize) -> &str {
+    let mut offset = offset.min(s.len());
+    while offset > 0 && !s.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    &s[..offset]
+}
+
 fn char_display_width(ch: char) -> usize {
     ch.width().unwrap_or(0)
 }
@@ -223,6 +231,15 @@ mod tests {
     fn test_col_to_char_idx_control_and_zero_width() {
         assert_eq!(col_to_char_idx("a\u{0000}b", 1), 2);
         assert_eq!(col_to_char_idx("a\u{0301}b", 1), 2);
+    }
+
+    #[test]
+    fn test_safe_byte_prefix_clamps_to_char_boundary() {
+        assert_eq!(safe_byte_prefix("a🚀b", 0), "");
+        assert_eq!(safe_byte_prefix("a🚀b", 1), "a");
+        assert_eq!(safe_byte_prefix("a🚀b", 2), "a");
+        assert_eq!(safe_byte_prefix("a🚀b", 5), "a🚀");
+        assert_eq!(safe_byte_prefix("a🚀b", 99), "a🚀b");
     }
 
     #[test]

@@ -25,12 +25,18 @@ report_matches() {
 }
 
 # Input text/cursor truth lives in model.input.document. Completion/suggestions truth lives in
-# model.input.completion. Production paths send InputIntent -> InputModel::apply and project
-# InputChange through adapter/input_widget.rs into InputArea, which is only a textarea/render mirror.
+# model.input.completion. Phase 2 forbids InputArea from physically storing text/cursor mirror;
+# rendering must consume a model-derived projection and create any tui_textarea helper per frame.
 
 report_matches \
-  "InputArea production text/cursor mutation methods must stay crate-private; only adapter/input_widget.rs may project InputChange into the widget mirror." \
-  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/pub[[:space:]]+fn[[:space:]]+(set_text|set_cursor_byte_index|clear|set_pending_images|get_text)[[:space:]]*\\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\""
+  "InputArea must not physically store tui_textarea::TextArea/text/cursor mirror fields." \
+  grep -RInE 'textarea:[[:space:]]*TextArea|pub\(super\)[[:space:]]+(text|cursor):' \
+    "$ROOT/apps/cli/src/tui/render/input/input_area.rs" \
+    "$ROOT/apps/cli/src/tui/render/input/input_area" --include='*.rs'
+
+report_matches \
+  "InputArea must not expose production text/cursor mirror APIs." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\s*#\[cfg\(test\)\]/) { \$pending=1; next } if (/pub[[:space:]]*(\([^)]*\))?[[:space:]]*fn[[:space:]]+(set_text|set_cursor_byte_index|text_snapshot|get_text)[[:space:]]*\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\""
 
 report_matches \
   "production app/update code must not drive InputArea text/cursor directly; send InputIntent and project InputChange via adapter/input_widget.rs." \

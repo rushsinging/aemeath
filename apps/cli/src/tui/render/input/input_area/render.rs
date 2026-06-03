@@ -1,5 +1,6 @@
 use super::InputArea;
 use crate::tui::render::display::safe_text::str_display_width;
+use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
@@ -7,18 +8,22 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget},
 };
+use tui_textarea::TextArea;
 
 impl InputArea {
-    /// Render the input area
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    /// Render the input area from a model-derived projection.
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, model: &InputRenderModel) {
+        self.pending_images = model.pending_images;
+        self.focused = model.focused;
         let block = self.input_block();
         let inner_area = block.inner(area);
         self.content_width = inner_area.width;
         block.render(area, buf);
 
-        self.textarea.set_block(Block::default());
-        self.textarea.render(inner_area, buf);
-        self.render_selection(inner_area, buf);
+        let mut textarea = configured_textarea(model);
+        textarea.set_block(Block::default());
+        textarea.render(inner_area, buf);
+        self.render_selection(inner_area, buf, model);
     }
 
     fn input_block(&self) -> Block<'static> {
@@ -38,13 +43,13 @@ impl InputArea {
             .border_style(border_style)
     }
 
-    fn render_selection(&self, inner_area: Rect, buf: &mut Buffer) {
+    fn render_selection(&self, inner_area: Rect, buf: &mut Buffer, model: &InputRenderModel) {
         let Some(((start_row, start_col), (end_row, end_col))) = self.get_normalized_selection()
         else {
             return;
         };
 
-        let lines = self.textarea.lines();
+        let lines = model.lines();
         let selection_style = Style::default()
             .bg(theme::SELECTION_BG)
             .fg(theme::SELECTION_FG);
@@ -70,6 +75,26 @@ impl InputArea {
             );
         }
     }
+}
+
+fn configured_textarea(model: &InputRenderModel) -> TextArea<'static> {
+    let mut textarea = TextArea::from(model.lines());
+    if let Some(placeholder) = &model.placeholder {
+        textarea.set_placeholder_text(placeholder.clone());
+    } else {
+        textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
+    }
+    textarea.set_cursor_line_style(Style::default());
+    textarea.set_cursor_style(Style::default().bg(theme::ACCENT).fg(theme::SURFACE));
+    textarea.move_cursor(tui_textarea::CursorMove::Top);
+    textarea.move_cursor(tui_textarea::CursorMove::Head);
+    for _ in 0..model.cursor_row {
+        textarea.move_cursor(tui_textarea::CursorMove::Down);
+    }
+    for _ in 0..model.cursor_col {
+        textarea.move_cursor(tui_textarea::CursorMove::Forward);
+    }
+    textarea
 }
 
 fn highlight_selection_row(
@@ -111,13 +136,21 @@ fn char_col_to_screen_col(line_text: &str, char_col: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::model::input::document::InputDocument;
     use crate::tui::render::display::safe_text::col_to_char_idx;
+    use crate::tui::render::input::input_area::selection::text_anchor_for_screen_col;
     use ratatui::buffer::Buffer;
+
+    fn render_model(text: &str) -> InputRenderModel {
+        let mut document = InputDocument::default();
+        document.insert_text(text);
+        InputRenderModel::from_document(&document, None, 0, true)
+    }
 
     #[test]
     fn test_render_selection_highlights_cjk_to_screen_width_end() {
         let mut input = InputArea::new();
-        input.set_text("@docs/ bug 33，拖动选中后还是没有高亮");
+        let model = render_model("@docs/ bug 33，拖动选中后还是没有高亮");
         let area = Rect {
             x: 0,
             y: 0,
@@ -125,16 +158,16 @@ mod tests {
             height: 3,
         };
         let mut buf = Buffer::empty(area);
-        input.render(area, &mut buf);
+        input.render(area, &mut buf, &model);
         let inner = input.get_inner_area(&area);
 
         // 选区真相经只读折算 + 镜像写回（adapter 唯一生产写入路径）。
-        let start = input.screen_to_input_anchor(inner.y, inner.x, &inner);
-        let end = input.screen_to_input_anchor(inner.y, inner.x + 36, &inner);
+        let start = text_anchor_for_screen_col(&model.text, 0, 0);
+        let end = text_anchor_for_screen_col(&model.text, 0, 36);
         input.apply_selection_mirror(true, Some(start), Some(end));
-        input.render(area, &mut buf);
-        let selected_end = col_to_char_idx(&input.get_text(), 36);
-        let screen_col = char_col_to_screen_col(&input.get_text(), selected_end) - 1;
+        input.render(area, &mut buf, &model);
+        let selected_end = col_to_char_idx(&model.text, 36);
+        let screen_col = char_col_to_screen_col(&model.text, selected_end) - 1;
 
         assert_eq!(
             buf.cell((inner.x + screen_col as u16, inner.y))
