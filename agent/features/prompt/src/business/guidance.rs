@@ -78,48 +78,72 @@ pub fn init_guidance_dir() {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_guidance_dir_uses_agents_directory() {
-        let temp_agents_dir = std::env::temp_dir().join(format!(
-            "aemeath_guidance_dir_{}",
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "aemeath_{name}_{}_{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ));
-        let previous = std::env::var_os(AGENTS_DIR_ENV);
-        std::env::set_var(AGENTS_DIR_ENV, &temp_agents_dir);
+        ))
+    }
+
+    #[test]
+    fn test_guidance_dir_uses_agents_directory() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_agents_dir = unique_temp_dir("guidance_dir");
+        let _guard = EnvVarGuard::set_path(AGENTS_DIR_ENV, &temp_agents_dir);
 
         assert_eq!(guidance_dir(), Some(temp_agents_dir.join("guidance")));
-
-        if let Some(previous) = previous {
-            std::env::set_var(AGENTS_DIR_ENV, previous);
-        } else {
-            std::env::remove_var(AGENTS_DIR_ENV);
-        }
     }
 
     #[test]
     fn test_init_guidance_dir_creates_files() {
-        let tmp = std::env::temp_dir().join("aemeath_test_guidance_init");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_agents_dir = unique_temp_dir("guidance_init");
+        let guidance = temp_agents_dir.join("guidance");
+        let _guard = EnvVarGuard::set_path(AGENTS_DIR_ENV, &temp_agents_dir);
+        let _ = std::fs::remove_dir_all(&temp_agents_dir);
 
-        for (filename, content) in constants::DEFAULT_FILES {
-            std::fs::write(tmp.join(filename), content.trim()).unwrap();
-        }
+        init_guidance_dir();
 
-        assert!(tmp.join("_default.md").exists());
-        assert!(tmp.join("glm.md").exists());
-        assert!(tmp.join("deepseek.md").exists());
-        assert!(tmp.join("_reasoning.md").exists());
+        assert!(guidance.join("_default.md").exists());
+        assert!(guidance.join("glm.md").exists());
+        assert!(guidance.join("deepseek.md").exists());
+        assert!(guidance.join("_reasoning.md").exists());
 
-        let content = std::fs::read_to_string(tmp.join("_reasoning.md")).unwrap();
+        let content = std::fs::read_to_string(guidance.join("_reasoning.md")).unwrap();
         assert!(content.contains("think/reason in Chinese"));
 
-        let default = std::fs::read_to_string(tmp.join("_default.md")).unwrap();
+        let default = std::fs::read_to_string(guidance.join("_default.md")).unwrap();
         assert!(default.contains("strictly valid JSON"));
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::remove_dir_all(&temp_agents_dir);
     }
 }
