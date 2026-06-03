@@ -5,13 +5,13 @@ use sdk::CharIdx;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
+use crate::tui::view_state::output::OutputViewState;
 
 pub mod content;
 pub mod display;
 pub mod render;
 mod resize;
 pub mod selection;
-mod selection_render;
 pub mod spinner;
 pub mod types;
 
@@ -64,13 +64,13 @@ impl OutputArea {
             .saturating_sub(2);
 
         Self {
-            scroll_offset: 0,
-            auto_scroll: true,
+            scroll_offset: OutputViewState::default().scroll_offset,
+            auto_scroll: OutputViewState::default().auto_scroll,
             last_line_count: 0,
             term_width,
-            is_selecting: false,
-            selection_start: None,
-            selection_end: None,
+            is_selecting: OutputViewState::default().is_selecting,
+            selection_start: OutputViewState::default().selection_start,
+            selection_end: OutputViewState::default().selection_end,
             screen_line_map: Vec::new(),
             rendered_line_content: HashMap::new(),
             spinner: None,

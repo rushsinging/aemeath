@@ -103,17 +103,22 @@ impl super::OutputArea {
         Some((logic_idx, CharIdx::new(start), CharIdx::new(end + 1)))
     }
 
-    /// Get the selected text based on logic line coordinates
-    pub fn get_selected_text(&mut self) -> Option<String> {
-        let (start_logic, start_col) = self.selection_start?;
-        let (end_logic, end_col) = self.selection_end?;
+    /// Return selected text for the supplied selection state and document.
+    pub fn selected_text_for_view(
+        &mut self,
+        view: &crate::tui::view_state::output::OutputViewState,
+    ) -> Option<String> {
+        let (start, end) = view.selection_range()?;
+        self.selected_text_for_range(start, end)
+    }
 
-        let (start_logic, start_col, end_logic, end_col) =
-            if start_logic < end_logic || (start_logic == end_logic && start_col < end_col) {
-                (start_logic, start_col, end_logic, end_col)
-            } else {
-                (end_logic, end_col, start_logic, start_col)
-            };
+    fn selected_text_for_range(
+        &mut self,
+        start: crate::tui::view_state::output::SelectionAnchor,
+        end: crate::tui::view_state::output::SelectionAnchor,
+    ) -> Option<String> {
+        let (start_logic, start_col) = start;
+        let (end_logic, end_col) = end;
 
         if start_logic == end_logic && start_col == end_col {
             return None;
@@ -184,7 +189,19 @@ impl super::OutputArea {
         }
     }
 
+    /// Get the selected text based on logic line coordinates
+    #[cfg(test)]
+    pub fn get_selected_text(&mut self) -> Option<String> {
+        let view = crate::tui::view_state::output::OutputViewState {
+            selection_start: self.selection_start,
+            selection_end: self.selection_end,
+            ..Default::default()
+        };
+        self.selected_text_for_view(&view)
+    }
+
     /// Clear the current selection
+    #[cfg(test)]
     pub fn clear_selection(&mut self) {
         self.selection_start = None;
         self.selection_end = None;

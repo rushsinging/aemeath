@@ -51,10 +51,8 @@ pub(crate) fn apply_output_scroll_to_widget(
 
 /// 据 view_state 选区真相单向写回 widget 选区镜像。
 ///
-/// `view_state.output` 是输出区选区真相（锚点状态机），widget 的
-/// `is_selecting`/`selection_start`/`selection_end` 降为只读镜像，供 render 期
-/// `sel_range_for_line` 高亮与 `get_selected_text` 取 plain 文本。这是这三个镜像
-/// 字段的唯一生产写入路径，每帧渲染前调用；mouse-up 复制前亦显式调用以消除一帧滞后。
+/// 生产路径只在渲染前同步镜像，供 output rendering 高亮使用；复制取文直接读取
+/// `OutputViewState` + document，避免依赖 widget 选区镜像时序。
 pub(crate) fn apply_output_selection_to_widget(
     view: &OutputViewState,
     output_area: &mut OutputArea,
