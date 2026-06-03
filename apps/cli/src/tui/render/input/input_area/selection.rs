@@ -14,9 +14,22 @@ impl InputArea {
         self.textarea_pos(row, col, inner_area)
     }
 
-    /// 获取选中的文本
-    pub fn get_selected_text(&self) -> Option<String> {
-        let ((start_row, start_col), (end_row, end_col)) = self.get_normalized_selection()?;
+    /// 获取选中的文本。
+    ///
+    /// 生产路径必须传入 `InputSelectionViewState`，避免读取 widget 选区镜像。
+    pub fn selected_text_for_view(
+        &self,
+        view: &crate::tui::view_state::InputSelectionViewState,
+    ) -> Option<String> {
+        let ((start_row, start_col), (end_row, end_col)) = view.normalized_selection()?;
+        self.selected_text_for_range((start_row, start_col), (end_row, end_col))
+    }
+
+    fn selected_text_for_range(
+        &self,
+        (start_row, start_col): (usize, usize),
+        (end_row, end_col): (usize, usize),
+    ) -> Option<String> {
         let lines = self.textarea.lines();
         let mut result = String::new();
 
@@ -44,13 +57,20 @@ impl InputArea {
         }
     }
 
-    /// 清除选中
+    /// 获取 widget 镜像中的选中文本。
+    #[cfg(test)]
+    pub fn get_selected_text(&self) -> Option<String> {
+        let ((start_row, start_col), (end_row, end_col)) = self.get_normalized_selection()?;
+        self.selected_text_for_range((start_row, start_col), (end_row, end_col))
+    }
+
+    /// 清除选中。
+    #[cfg(test)]
     pub fn clear_selection(&mut self) {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
     }
-
     /// 由 adapter（`apply_input_selection_to_widget`）单向写回 input 选区镜像。
     ///
     /// #59 S4：选区真相在 `view_state::InputSelectionViewState`，widget 的

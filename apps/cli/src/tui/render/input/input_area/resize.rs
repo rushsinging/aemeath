@@ -3,9 +3,6 @@ use super::InputArea;
 impl InputArea {
     pub fn handle_resize(&mut self, width: u16) {
         self.content_width = width.saturating_sub(2);
-        if self.is_selecting || self.selection_start.is_some() || self.selection_end.is_some() {
-            self.clear_selection();
-        }
     }
 }
 
@@ -32,7 +29,7 @@ pub mod tests {
     }
 
     #[test]
-    fn resize_clears_active_selection() {
+    fn resize_leaves_selection_mirrors_to_view_state_adapter() {
         let mut input = InputArea::new();
         input.is_selecting = true;
         input.selection_start = Some((0, 0));
@@ -40,8 +37,8 @@ pub mod tests {
 
         input.handle_resize(80);
 
-        assert!(!input.is_selecting);
-        assert!(input.selection_start.is_none());
-        assert!(input.selection_end.is_none());
+        assert!(input.is_selecting);
+        assert_eq!(input.selection_start, Some((0, 0)));
+        assert_eq!(input.selection_end, Some((0, 4)));
     }
 }

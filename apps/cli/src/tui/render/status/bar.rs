@@ -92,7 +92,6 @@ impl StatusBar {
         log::debug!("[STATUS] reset_runtime_state()");
         self.status = "Ready".to_string();
         self.status_type = StatusType::Normal;
-        self.clear_selection();
     }
 
     /// 由 adapter 依据 `StatusViewAssembler` 派生结果单向写回 widget 镜像
