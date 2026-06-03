@@ -24,11 +24,18 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# Input text/cursor truth lives in model.input.document. App/update/effect paths must send
-# InputIntent and let adapter/input_widget.rs apply InputChange to InputArea.
+# Input text/cursor truth lives in model.input.document; completion/suggestions truth lives in
+# model.input.completion. App/update/effect paths must send InputIntent and let InputModel::apply
+# produce InputChange. InputArea must remain a textarea/render mirror and must not regain completion
+# suggestion storage or public mutation/selection APIs.
 report_matches \
-  "input_area text/cursor mutations are allowed only in input widget internals or adapter/input_widget.rs." \
-  bash -c "grep -RInE 'input_area\\.(set_text|move_left|move_right|move_up|move_down|move_home|move_end|delete_word|backspace|input\\(|enter\\(|clear\\(|clear_suggestions|set_suggestions|accept_suggestion|history_up|history_down|set_pending_images)' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='input_widget.rs' --exclude='tests.rs' --exclude-dir='input_area' --exclude-dir='model/input' | grep -v 'input_area\\.input(ch)' | grep -v 'input_area\.input(ch)'"
+  "input_area text/cursor mutations are allowed only in input widget internals or adapter/input_widget.rs; completion/suggestions must be driven by model.input.completion." \
+  bash -c "grep -RInE 'input_area\.(set_text|move_left|move_right|move_up|move_down|move_home|move_end|delete_word|backspace|input\(|enter\(|clear\(|history_up|history_down|set_pending_images)' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='input_widget.rs' --exclude='tests.rs' --exclude-dir='input_area' --exclude-dir='model/input' | grep -v 'input_area\\.input(ch)' | grep -v 'input_area\.input(ch)'"
+
+report_matches \
+  "InputArea must not regain completion/suggestions storage or mutation APIs; keep suggestions derived from model.input.completion." \
+  grep -RInE '(pub\(super\)[[:space:]]+suggestions:[[:space:]]*Vec|pub[[:space:]]+selected_suggestion|pub[[:space:]]+show_suggestions|fn[[:space:]]+(set_suggestions|clear_suggestions|set_selected_suggestion|selected_suggestion|is_showing_suggestions|accept_suggestion|select_previous|select_next)[[:space:]]*\()' \
+    "$ROOT/apps/cli/src/tui/render/input" --include='*.rs'
 
 report_matches \
   "model.input.document mutations outside InputModel are forbidden; use InputIntent -> InputModel::apply." \
@@ -41,5 +48,10 @@ report_matches \
   grep -RInE 'input_area\.(get_text\(|cursor_position\(|is_empty\()' \
     "$ROOT/apps/cli/src/tui/app" "$ROOT/apps/cli/src/tui/input" --include='*.rs' \
     --exclude-dir='input_area'
+
+report_matches \
+  "app/update should read completion visibility from model.input.completion, not from InputArea." \
+  grep -RInE 'input_area\.(is_showing_suggestions|selected_suggestion)\(' \
+    "$ROOT/apps/cli/src/tui/app" --include='*.rs'
 
 exit "$fail"

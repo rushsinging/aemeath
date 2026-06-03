@@ -118,7 +118,7 @@ impl InputModel {
             }
             InputIntent::AcceptCompletion => self.accept_completion(),
             InputIntent::AcceptCompletionValue(replacement) => {
-                self.accept_completion_value(replacement)
+                self.accept_completion_replacement(replacement)
             }
             InputIntent::SetAttachmentCount(count) => {
                 vec![InputChange::AttachmentChanged { count }]
@@ -166,17 +166,57 @@ impl InputModel {
     }
 
     fn accept_completion(&mut self) -> Vec<InputChange> {
-        let Some(replacement) = self
-            .completion
-            .selected_item()
-            .map(|item| item.replacement.clone())
-        else {
+        let Some(item) = self.completion.selected_item().cloned() else {
             return vec![self.completion_changed()];
         };
-        self.accept_completion_value(replacement)
+        self.accept_completion_item(item)
     }
 
-    fn accept_completion_value(&mut self, replacement: String) -> Vec<InputChange> {
+    fn accept_completion_item(
+        &mut self,
+        item: super::completion_item::CompletionItem,
+    ) -> Vec<InputChange> {
+        use super::completion::extract_completion_token;
+        use super::completion::TriggerType;
+
+        let current = self.document.buffer.clone();
+        let cursor_offset = self.document.cursor;
+        let replacement = item.replacement;
+        let new_text = match item.suggestion_type {
+            super::completion::SuggestionType::Session => {
+                let id = replacement.split_whitespace().next().unwrap_or("");
+                if let Some(space_pos) = current.find(' ') {
+                    let prefix = current.get(..=space_pos).unwrap_or("");
+                    format!("{}{}", prefix, id)
+                } else {
+                    format!("/resume {}", id)
+                }
+            }
+            _ => {
+                if let Some((_token, start_pos, trigger_type)) =
+                    extract_completion_token(&current, cursor_offset)
+                {
+                    let before = current.get(..start_pos).unwrap_or("");
+                    let after_end = find_token_end(&current, cursor_offset);
+                    let after = current.get(after_end..).unwrap_or("");
+                    match trigger_type {
+                        TriggerType::AtSymbol => format!("{}@{}{}", before, replacement, after),
+                        TriggerType::SlashCommand
+                        | TriggerType::ModelArg
+                        | TriggerType::ModelSubCommand
+                        | TriggerType::ResumeArg => {
+                            format!("{}{}{}", before, replacement, after)
+                        }
+                    }
+                } else {
+                    replacement
+                }
+            }
+        };
+        self.accept_completion_replacement(new_text)
+    }
+
+    fn accept_completion_replacement(&mut self, replacement: String) -> Vec<InputChange> {
         self.document.replace_text(replacement);
         self.completion.clear();
         self.mode = InputMode::Normal;
@@ -258,9 +298,20 @@ impl InputModel {
     }
 }
 
+fn find_token_end(input: &str, cursor_offset: usize) -> usize {
+    let remaining = input.get(cursor_offset..).unwrap_or("");
+    if let Some(space_pos) = remaining.find(' ') {
+        cursor_offset + space_pos
+    } else {
+        input.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::model::input::completion::SuggestionType;
+    use crate::tui::model::input::completion_item::CompletionItem;
 
     #[test]
     fn test_input_model_insert_text_emits_change() {
@@ -337,57 +388,121 @@ mod tests {
         assert_eq!(model.history.entries, vec!["new".to_string()]);
         assert_eq!(model.history.selected_index, None);
         assert_eq!(model.history.saved_input, "");
-        assert_eq!(model.document.buffer, "old");
-        }
-
-        // Bug #99: MoveCursorUp/Down 在多行时移动光标，在边界时翻历史
-
-        #[test]
-        fn test_move_cursor_up_multiline_moves_cursor() {
-            let mut model = InputModel::default();
-            model.apply(InputIntent::InsertText("line1\nline2".to_string()));
-            // 光标在第二行末尾
-            assert!(model.document.is_cursor_at_last_line());
-            let changes = model.apply(InputIntent::MoveCursorUp);
-            // 应移动光标到第一行，不是翻历史
-            assert!(model.document.is_cursor_at_first_line());
-            assert!(changes.iter().any(|c| matches!(c, InputChange::CursorMoved { .. })));
-        }
-
-        #[test]
-        fn test_move_cursor_up_at_first_line_triggers_history() {
-            let mut model = InputModel::default();
-            model.apply(InputIntent::ReplaceHistory(vec!["history_entry".to_string()]));
-            model.apply(InputIntent::InsertText("current".to_string()));
-            // 光标在第一行（也是唯一一行），按 Up 应翻历史
-            let changes = model.apply(InputIntent::MoveCursorUp);
-            assert_eq!(model.document.buffer, "history_entry");
-            assert!(changes.iter().any(|c| matches!(c, InputChange::HistorySelected { .. })));
-        }
-
-        #[test]
-        fn test_move_cursor_down_at_last_line_triggers_history() {
-            let mut model = InputModel::default();
-            model.apply(InputIntent::ReplaceHistory(vec!["past".to_string()]));
-            model.apply(InputIntent::InsertText("draft".to_string()));
-            // 先翻到历史
-            model.apply(InputIntent::MoveCursorUp);
-            assert_eq!(model.document.buffer, "past");
-            // 在最后一行按 Down 应翻回
-            let changes = model.apply(InputIntent::MoveCursorDown);
-            assert_eq!(model.document.buffer, "draft");
-            assert!(changes.iter().any(|c| matches!(c, InputChange::HistorySelected { .. })));
-        }
-
-        #[test]
-        fn test_move_cursor_down_multiline_moves_cursor() {
-            let mut model = InputModel::default();
-            model.apply(InputIntent::InsertText("line1\nline2".to_string()));
-            model.apply(InputIntent::MoveCursorHome); // 光标到第一行开头
-            assert!(model.document.is_cursor_at_first_line());
-            let changes = model.apply(InputIntent::MoveCursorDown);
-            // 应移动光标到第二行
-            assert!(model.document.is_cursor_at_last_line());
-            assert!(changes.iter().any(|c| matches!(c, InputChange::CursorMoved { .. })));
-        }
     }
+
+    #[test]
+    fn test_accept_completion_replaces_slash_token() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertText("/he now".to_string()));
+        model.apply(InputIntent::MoveCursor(3));
+        model.apply(InputIntent::SetCompletions {
+            query: "/he now".to_string(),
+            items: vec![CompletionItem::new("/help", "/help")],
+        });
+
+        model.apply(InputIntent::AcceptCompletion);
+
+        assert_eq!(model.document.buffer, "/help now");
+        assert_eq!(model.document.cursor, 9);
+        assert!(!model.completion.visible);
+    }
+
+    #[test]
+    fn test_accept_completion_replaces_at_token_with_prefix() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertText("read @src/main tail".to_string()));
+        model.apply(InputIntent::MoveCursor(14));
+        model.apply(InputIntent::SetCompletions {
+            query: "read @src/main tail".to_string(),
+            items: vec![CompletionItem::with_type(
+                "src/main.rs",
+                "src/main.rs",
+                SuggestionType::File,
+            )],
+        });
+
+        model.apply(InputIntent::AcceptCompletion);
+
+        assert_eq!(model.document.buffer, "read @src/main.rs tail");
+        assert_eq!(model.document.cursor, 22);
+    }
+
+    #[test]
+    fn test_accept_completion_rewrites_session_resume_argument() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertText("/resume old".to_string()));
+        model.apply(InputIntent::SetCompletions {
+            query: "/resume old".to_string(),
+            items: vec![CompletionItem::with_type(
+                "s-123 previous",
+                "s-123 previous",
+                SuggestionType::Session,
+            )],
+        });
+
+        model.apply(InputIntent::AcceptCompletion);
+
+        assert_eq!(model.document.buffer, "/resume s-123");
+    }
+
+    // Bug #99: MoveCursorUp/Down 在多行时移动光标，在边界时翻历史
+
+    #[test]
+    fn test_move_cursor_up_multiline_moves_cursor() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertText("line1\nline2".to_string()));
+        // 光标在第二行末尾
+        assert!(model.document.is_cursor_at_last_line());
+        let changes = model.apply(InputIntent::MoveCursorUp);
+        // 应移动光标到第一行，不是翻历史
+        assert!(model.document.is_cursor_at_first_line());
+        assert!(changes
+            .iter()
+            .any(|c| matches!(c, InputChange::CursorMoved { .. })));
+    }
+
+    #[test]
+    fn test_move_cursor_up_at_first_line_triggers_history() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::ReplaceHistory(vec![
+            "history_entry".to_string()
+        ]));
+        model.apply(InputIntent::InsertText("current".to_string()));
+        // 光标在第一行（也是唯一一行），按 Up 应翻历史
+        let changes = model.apply(InputIntent::MoveCursorUp);
+        assert_eq!(model.document.buffer, "history_entry");
+        assert!(changes
+            .iter()
+            .any(|c| matches!(c, InputChange::HistorySelected { .. })));
+    }
+
+    #[test]
+    fn test_move_cursor_down_at_last_line_triggers_history() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::ReplaceHistory(vec!["past".to_string()]));
+        model.apply(InputIntent::InsertText("draft".to_string()));
+        // 先翻到历史
+        model.apply(InputIntent::MoveCursorUp);
+        assert_eq!(model.document.buffer, "past");
+        // 在最后一行按 Down 应翻回
+        let changes = model.apply(InputIntent::MoveCursorDown);
+        assert_eq!(model.document.buffer, "draft");
+        assert!(changes
+            .iter()
+            .any(|c| matches!(c, InputChange::HistorySelected { .. })));
+    }
+
+    #[test]
+    fn test_move_cursor_down_multiline_moves_cursor() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertText("line1\nline2".to_string()));
+        model.apply(InputIntent::MoveCursorHome); // 光标到第一行开头
+        assert!(model.document.is_cursor_at_first_line());
+        let changes = model.apply(InputIntent::MoveCursorDown);
+        // 应移动光标到第二行
+        assert!(model.document.is_cursor_at_last_line());
+        assert!(changes
+            .iter()
+            .any(|c| matches!(c, InputChange::CursorMoved { .. })));
+    }
+}

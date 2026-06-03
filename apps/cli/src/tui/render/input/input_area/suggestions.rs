@@ -1,127 +1,79 @@
 use super::InputArea;
-use crate::tui::model::input::completion::{Suggestion, SuggestionType};
+use crate::tui::model::input::completion::{InputCompletion, Suggestion, SuggestionType};
 use crate::tui::render::display::safe_text::truncate_unicode_width;
 use crate::tui::render::theme;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthChar;
 
-#[cfg_attr(test, allow(dead_code))]
-impl InputArea {
-    /// Set suggestions for autocomplete
-    pub(crate) fn set_suggestions(&mut self, suggestions: Vec<Suggestion>) {
-        self.selected_suggestion = if suggestions.is_empty() { -1 } else { 0 };
-        self.show_suggestions = !suggestions.is_empty();
-        self.suggestions = suggestions;
-    }
+pub struct SuggestionViewState {
+    pub suggestions: Vec<Suggestion>,
+    pub selected: Option<usize>,
+}
 
-    /// Clear suggestions
-    pub(crate) fn clear_suggestions(&mut self) {
-        self.suggestions.clear();
-        self.selected_suggestion = -1;
-        self.show_suggestions = false;
-    }
-
-    /// Set selected suggestion index from model
-    pub(crate) fn set_selected_suggestion(&mut self, index: usize) {
-        if index < self.suggestions.len() {
-            self.selected_suggestion = index as i32;
+impl SuggestionViewState {
+    pub fn from_completion(completion: &InputCompletion) -> Self {
+        Self {
+            suggestions: completion
+                .items
+                .iter()
+                .map(|item| Suggestion {
+                    _id: item.label.clone(),
+                    display_text: item.label.clone(),
+                    _description: None,
+                    suggestion_type: item.suggestion_type.clone(),
+                })
+                .collect(),
+            selected: completion.selected_index,
         }
     }
 
-    /// Move selection up in suggestions
-    #[cfg(test)]
-    pub(crate) fn select_previous(&mut self) -> bool {
-        if self.show_suggestions && !self.suggestions.is_empty() {
-            if self.selected_suggestion > 0 {
-                self.selected_suggestion -= 1;
-            } else {
-                self.selected_suggestion = self.suggestions.len() as i32 - 1;
-            }
-            true
-        } else {
-            false
-        }
+    pub fn is_visible(&self) -> bool {
+        !self.suggestions.is_empty()
     }
 
-    /// Move selection down in suggestions
-    #[cfg(test)]
-    pub(crate) fn select_next(&mut self) -> bool {
-        if self.show_suggestions && !self.suggestions.is_empty() {
-            if self.selected_suggestion < self.suggestions.len() as i32 - 1 {
-                self.selected_suggestion += 1;
-            } else {
-                self.selected_suggestion = 0;
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Accept current suggestion
-    #[cfg(test)]
-    pub(crate) fn accept_suggestion(&mut self) -> Option<Suggestion> {
-        if self.show_suggestions && self.selected_suggestion >= 0 {
-            let idx = self.selected_suggestion as usize;
-            if idx < self.suggestions.len() {
-                let suggestion = self.suggestions[idx].clone();
-                self.clear_suggestions();
-                return Some(suggestion);
-            }
-        }
-        None
-    }
-
-    pub fn selected_suggestion(&self) -> Option<&Suggestion> {
-        if self.show_suggestions && self.selected_suggestion >= 0 {
-            self.suggestions.get(self.selected_suggestion as usize)
-        } else {
-            None
-        }
-    }
-
-    /// Check if suggestions are showing
-    pub fn is_showing_suggestions(&self) -> bool {
-        self.show_suggestions
-    }
-
-    /// 建议区域所需高度（0 表示无需渲染）。
-    pub fn suggestions_height(&self) -> u16 {
-        if self.show_suggestions && !self.suggestions.is_empty() {
-            let count = self.suggestions.len().min(5);
-            count as u16 + 1
+    pub fn height(&self) -> u16 {
+        if self.is_visible() {
+            self.suggestions.len().min(5) as u16 + 1
         } else {
             0
         }
     }
+}
+
+impl InputArea {
+    /// 建议区域所需高度（0 表示无需渲染）。
+    pub fn suggestions_height(&self, completion: &InputCompletion) -> u16 {
+        SuggestionViewState::from_completion(completion).height()
+    }
 
     /// Render the suggestions dropdown in a dedicated area (above status bar)
-    pub fn render_suggestions_in_area(&self, area: Rect, buf: &mut Buffer) {
-        if !self.show_suggestions || self.suggestions.is_empty() {
+    pub fn render_suggestions_in_area(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        suggestions: &SuggestionViewState,
+    ) {
+        if !suggestions.is_visible() {
             return;
         }
 
         let max_visible = 5;
         let max_cols = area.width as usize;
-        let selected = if self.selected_suggestion >= 0 {
-            self.selected_suggestion as usize
-        } else {
-            0
-        };
+        let selected = suggestions.selected.unwrap_or(0);
         // Compute scroll offset so the selected item is always visible
         let scroll_offset = if selected >= max_visible {
             selected - max_visible + 1
         } else {
             0
         };
-        for (i, suggestion) in self
+        for (i, suggestion) in suggestions
             .suggestions
             .iter()
             .skip(scroll_offset)
             .take(max_visible)
             .enumerate()
         {
-            let is_selected = (i + scroll_offset) as i32 == self.selected_suggestion;
+            let is_selected = i + scroll_offset == selected;
             let y = area.y + i as u16;
             let bg_color = if is_selected {
                 theme::SELECTION_BG
@@ -193,5 +145,57 @@ fn fill_row(area: Rect, buf: &mut Buffer, y: u16, from_col: usize, style: Style)
         if area.x + (c as u16) < buf.area.width {
             buf[(area.x + c as u16, y)].set_char(' ').set_style(style);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::model::input::completion_item::CompletionItem;
+
+    #[test]
+    fn test_suggestion_view_from_completion_maps_types_and_selection() {
+        let mut completion = InputCompletion::default();
+        completion.set_items(
+            vec![CompletionItem::with_type(
+                "src/main.rs",
+                "src/main.rs",
+                SuggestionType::File,
+            )],
+            "@src".to_string(),
+        );
+
+        let view = SuggestionViewState::from_completion(&completion);
+
+        assert_eq!(view.selected, Some(0));
+        assert_eq!(view.suggestions[0].display_text, "src/main.rs");
+        assert!(matches!(
+            view.suggestions[0].suggestion_type,
+            SuggestionType::File
+        ));
+    }
+
+    #[test]
+    fn test_suggestion_view_height_caps_visible_rows() {
+        let mut completion = InputCompletion::default();
+        completion.set_items(
+            (0..8)
+                .map(|i| CompletionItem::new(format!("/cmd{i}"), format!("/cmd{i}")))
+                .collect(),
+            "/".to_string(),
+        );
+
+        let view = SuggestionViewState::from_completion(&completion);
+
+        assert_eq!(view.height(), 6);
+    }
+
+    #[test]
+    fn test_suggestion_view_empty_is_hidden() {
+        let completion = InputCompletion::default();
+        let view = SuggestionViewState::from_completion(&completion);
+
+        assert!(!view.is_visible());
+        assert_eq!(view.height(), 0);
     }
 }

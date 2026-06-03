@@ -1,5 +1,5 @@
-use crate::tui::adapter::input_widget::completion_item_from_suggestion;
 use crate::tui::model::input::completion::{generate_suggestions, SuggestionContext};
+use crate::tui::model::input::completion_item::CompletionItem;
 
 impl super::super::App {
     /// Update suggestions based on current input
@@ -54,7 +54,13 @@ impl super::super::App {
                 query: ctx.input.clone(),
                 items: suggestions
                     .iter()
-                    .map(completion_item_from_suggestion)
+                    .map(|suggestion| {
+                        CompletionItem::with_type(
+                            &suggestion.display_text,
+                            &suggestion.display_text,
+                            suggestion.suggestion_type.clone(),
+                        )
+                    })
                     .collect(),
             },
         );

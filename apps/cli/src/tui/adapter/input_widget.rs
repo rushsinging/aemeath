@@ -1,6 +1,4 @@
 use crate::tui::model::input::change::InputChange;
-use crate::tui::model::input::completion::Suggestion;
-use crate::tui::model::input::completion_item::CompletionItem;
 use crate::tui::view_state::InputSelectionViewState;
 use crate::tui::{InputArea, StatusBar};
 
@@ -20,22 +18,7 @@ pub(crate) fn apply_input_changes_to_widget(
             InputChange::CursorMoved { cursor } => {
                 input_area.set_cursor_byte_index(*cursor);
             }
-            InputChange::CompletionChanged {
-                visible,
-                items,
-                selected_index,
-            } => {
-                if *visible {
-                    input_area.set_suggestions(
-                        items.iter().map(suggestion_from_completion_item).collect(),
-                    );
-                    if let Some(idx) = selected_index {
-                        input_area.set_selected_suggestion(*idx);
-                    }
-                } else {
-                    input_area.clear_suggestions();
-                }
-            }
+            InputChange::CompletionChanged { .. } => {}
             InputChange::Submitted {
                 submission: submitted,
             } => {
@@ -71,23 +54,9 @@ pub(crate) fn apply_input_selection_to_widget(
     input_area.apply_selection_mirror(view.is_selecting, view.selection_start, view.selection_end);
 }
 
-pub(crate) fn completion_item_from_suggestion(suggestion: &Suggestion) -> CompletionItem {
-    CompletionItem::new(&suggestion.display_text, &suggestion.display_text)
-}
-
-fn suggestion_from_completion_item(item: &CompletionItem) -> Suggestion {
-    Suggestion {
-        _id: item.label.clone(),
-        display_text: item.label.clone(),
-        _description: None,
-        suggestion_type: crate::tui::model::input::completion::SuggestionType::Command,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_apply_input_changes_to_widget_applies_text_change() {
         let mut input_area = InputArea::new();
@@ -100,21 +69,6 @@ mod tests {
         apply_input_changes_to_widget(&mut input_area, &mut status_bar, &changes);
 
         assert_eq!(input_area.get_text(), "abc");
-    }
-
-    #[test]
-    fn test_completion_item_from_suggestion_uses_display_text() {
-        let suggestion = Suggestion {
-            _id: "cmd".to_string(),
-            display_text: "/help".to_string(),
-            _description: None,
-            suggestion_type: crate::tui::model::input::completion::SuggestionType::Command,
-        };
-
-        let item = completion_item_from_suggestion(&suggestion);
-
-        assert_eq!(item.label, "/help");
-        assert_eq!(item.replacement, "/help");
     }
 
     #[test]

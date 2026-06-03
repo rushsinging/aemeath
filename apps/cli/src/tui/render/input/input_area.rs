@@ -1,4 +1,3 @@
-use crate::tui::model::input::completion::Suggestion;
 use crate::tui::render::theme;
 use ratatui::{
     buffer::Buffer,
@@ -13,19 +12,13 @@ mod history;
 mod render;
 mod resize;
 mod selection;
-mod suggestions;
+pub mod suggestions;
 
 /// The input area with a multi-line text editor and autocomplete
 pub struct InputArea {
     pub(super) textarea: TextArea<'static>,
     pub(super) focused: bool,
     pub(super) pending_images: usize,
-    /// Active suggestions for autocomplete
-    pub(super) suggestions: Vec<Suggestion>,
-    /// Currently selected suggestion index (-1 means none)
-    pub(super) selected_suggestion: i32,
-    /// Whether suggestions are visible
-    pub(super) show_suggestions: bool,
     /// Command history
     #[cfg(test)]
     pub(super) history: Vec<String>,
@@ -53,9 +46,6 @@ impl InputArea {
             textarea: configured_textarea(),
             focused: true,
             pending_images: 0,
-            suggestions: Vec::new(),
-            selected_suggestion: -1,
-            show_suggestions: false,
             #[cfg(test)]
             history: Vec::new(),
             history_index: None,
@@ -68,9 +58,7 @@ impl InputArea {
     }
 
     #[cfg(test)]
-    pub(super) fn hide_suggestions(&mut self) {
-        self.show_suggestions = false;
-    }
+    pub(super) fn hide_suggestions(&mut self) {}
 
     /// Get the current input text
     pub fn get_text(&self) -> String {
@@ -80,7 +68,6 @@ impl InputArea {
     /// Clear the input
     pub(crate) fn clear(&mut self) {
         self.textarea = configured_textarea();
-        self.clear_suggestions();
         self.history_index = None;
         self.saved_input.clear();
     }
@@ -122,11 +109,12 @@ impl InputArea {
         suggestions_area: Rect,
         buf: &mut Buffer,
         pending_images: usize,
+        suggestions: &suggestions::SuggestionViewState,
     ) {
         self.set_pending_images(pending_images);
         self.render(area, buf);
         if suggestions_area.height > 0 {
-            self.render_suggestions_in_area(suggestions_area, buf);
+            self.render_suggestions_in_area(suggestions_area, buf, suggestions);
         }
     }
 }
