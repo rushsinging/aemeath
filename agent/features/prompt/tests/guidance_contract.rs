@@ -15,6 +15,23 @@ fn test_prompt_guidance_resolves_config_fallback() {
 }
 
 #[test]
+fn test_prompt_guidance_mentions_task_list_updates_when_user_changes_scope() {
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("When the user asks a question"),
+        "guidance should explicitly cover user questions during active task execution"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("update the active task list"),
+        "guidance should require updating task lists when the request scope changes"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE
+            .contains("modify task descriptions, add tasks, remove tasks"),
+        "guidance should mention modifying descriptions and adding/removing tasks"
+    );
+}
+
+#[test]
 fn test_prompt_guidance_exports_universal_execution_discipline() {
     assert!(UNIVERSAL_EXECUTION_DISCIPLINE.contains("Execution Discipline"));
 }

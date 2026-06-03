@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
+| 74 | Guidance：任务执行期间用户提问时同步更新 task list | 低 | 待确认 | 待用户确认 | Universal execution discipline 新增 task list scope change 规则：当用户在活动 task list 期间提问、澄清或改变需求时，若影响计划，必须更新 active task list 和相关 task（修改描述、增删任务、调整依赖/优先级） |
 | 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | 在 Stop hook 的关键脚本输出 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，并输出解析后的 `ROOT`/`PWD`，便于排查 main/worktree 中 hook 实际运行路径与 Claude 兼容目录注入是否正确 |
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
@@ -17,6 +18,25 @@
 | 73 | AGENTS.md 渐进式披露重构：根指令瘦身 + specs/ 分片按需加载 | 中 | 进行中 | 未确认 | 将单文件全量的根 `AGENTS.md` 重构为「宪法 + 工作流 + 渐进式披露路由表」，detailed 规则下沉到 `specs/` 10 个分片，按路径/场景触发按需加载；顺带校正文档中已漂移的旧 crate 名（`aemeath-core`/`aemeath-llm`/`aemeath-tools` → `agent/features/*`、`agent/shared/*`）|
 | 72 | Edit diff 显示真实文件行号 | 中 | 待确认 | 未确认 | Edit 工具结果标记改为 `---DIFF:LINE:N---`，TUI 解析起始行号并传给 diff 渲染；旧 `---DIFF---` 仍兼容为第 1 行；局部 Edit diff 不再显示片段内相对行号 |
 | 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 活动中 | 未确认 | 这两个 tool 输出行数固定且少，不应被 `TOOL_RESULT_MAX_LINES=5` 截断显示 `... (n lines omitted)` |
+
+### #74 Guidance：任务执行期间用户提问时同步更新 task list
+
+**状态**：待确认
+
+**背景**：复杂任务执行期间，用户可能插入问题、澄清或变更需求。旧 guidance 只强调创建和维护 task 状态，但没有明确要求在用户输入改变范围时同步更新 active task list，容易导致任务描述、依赖或任务集合与最新意图不一致。
+
+**实现**：
+1. 在 universal execution discipline 中新增 `<task_list_scope_changes>` 规则。
+2. 明确当用户在活动 task list 期间提问、澄清或改变需求时，必须先判断是否影响计划。
+3. 若影响计划，必须更新 active task list 和相关 task：修改描述、增删任务、调整依赖或优先级。
+4. 若只是回答澄清且不改变范围，则保留当前 task list，但继续保持准确 task 状态。
+
+**验证**：
+- `cargo test -p prompt test_prompt_guidance_mentions_task_list_updates_when_user_changes_scope`
+
+**涉及路径**：
+- `agent/features/prompt/src/business/guidance/constants.rs`
+- `agent/features/prompt/tests/guidance_contract.rs`
 
 ### #71 Stop hook 日志输出项目目录上下文
 
