@@ -40,26 +40,27 @@ impl LiveStatusAssembler {
 }
 
 /// 将 phase 语义转换为显示文案。文案与既有 `ui_event.rs` 字面量对齐。
+/// 文案前面带 emoji 前缀，便于在 spinner 行中视觉上快速识别当前阶段。
 fn phase_text(phase: &SpinnerPhase) -> String {
     match phase {
-        SpinnerPhase::Thinking => "Thinking...".to_string(),
-        SpinnerPhase::Generating => "Generating...".to_string(),
-        SpinnerPhase::AgentWorking => "Agent working...".to_string(),
-        SpinnerPhase::Reflecting => "Reflecting...".to_string(),
-        SpinnerPhase::ThinkingQueued => "Thinking with queued input...".to_string(),
-        SpinnerPhase::CallingTool(name) => format!("Calling {name}..."),
+        SpinnerPhase::Thinking => "🧠 Thinking...".to_string(),
+        SpinnerPhase::Generating => "✍️ Generating...".to_string(),
+        SpinnerPhase::AgentWorking => "🤖 Agent working...".to_string(),
+        SpinnerPhase::Reflecting => "🧠 Reflecting...".to_string(),
+        SpinnerPhase::ThinkingQueued => "🧠 Thinking with queued input...".to_string(),
+        SpinnerPhase::CallingTool(name) => format!("🔧 Calling {name}..."),
         SpinnerPhase::CallingTools { remaining } => {
-            format!("Calling tools... ({remaining} running)")
+            format!("🔧 Calling tools... ({remaining} running)")
         }
         SpinnerPhase::Hook {
             event,
             detail,
             outcome,
         } => match outcome {
-            HookOutcome::Running => format!("Hook {event}: {detail}"),
-            HookOutcome::Blocked => format!("Hook {event} blocked"),
-            HookOutcome::Done => format!("Hook {event} done"),
-            HookOutcome::Failed => format!("Hook {event} failed: {detail}"),
+            HookOutcome::Running => format!("🪝 Hook {event}: {detail}"),
+            HookOutcome::Blocked => format!("🪝 Hook {event} blocked"),
+            HookOutcome::Done => format!("🪝 Hook {event} done"),
+            HookOutcome::Failed => format!("🪝 Hook {event} failed: {detail}"),
         },
     }
 }
@@ -114,13 +115,16 @@ mod tests {
 
     #[test]
     fn test_phase_text_simple_variants() {
-        assert_eq!(phase_text(&SpinnerPhase::Thinking), "Thinking...");
-        assert_eq!(phase_text(&SpinnerPhase::Generating), "Generating...");
-        assert_eq!(phase_text(&SpinnerPhase::AgentWorking), "Agent working...");
-        assert_eq!(phase_text(&SpinnerPhase::Reflecting), "Reflecting...");
+        assert_eq!(phase_text(&SpinnerPhase::Thinking), "🧠 Thinking...");
+        assert_eq!(phase_text(&SpinnerPhase::Generating), "✍️ Generating...");
+        assert_eq!(
+            phase_text(&SpinnerPhase::AgentWorking),
+            "🤖 Agent working..."
+        );
+        assert_eq!(phase_text(&SpinnerPhase::Reflecting), "🧠 Reflecting...");
         assert_eq!(
             phase_text(&SpinnerPhase::ThinkingQueued),
-            "Thinking with queued input..."
+            "🧠 Thinking with queued input..."
         );
     }
 
@@ -128,11 +132,11 @@ mod tests {
     fn test_phase_text_calling_tool_variants() {
         assert_eq!(
             phase_text(&SpinnerPhase::CallingTool("Read".to_string())),
-            "Calling Read..."
+            "🔧 Calling Read..."
         );
         assert_eq!(
             phase_text(&SpinnerPhase::CallingTools { remaining: 3 }),
-            "Calling tools... (3 running)"
+            "🔧 Calling tools... (3 running)"
         );
     }
 
@@ -145,16 +149,19 @@ mod tests {
         };
         assert_eq!(
             phase_text(&mk(HookOutcome::Running)),
-            "Hook PreToolUse: lint"
+            "🪝 Hook PreToolUse: lint"
         );
         assert_eq!(
             phase_text(&mk(HookOutcome::Blocked)),
-            "Hook PreToolUse blocked"
+            "🪝 Hook PreToolUse blocked"
         );
-        assert_eq!(phase_text(&mk(HookOutcome::Done)), "Hook PreToolUse done");
+        assert_eq!(
+            phase_text(&mk(HookOutcome::Done)),
+            "🪝 Hook PreToolUse done"
+        );
         assert_eq!(
             phase_text(&mk(HookOutcome::Failed)),
-            "Hook PreToolUse failed: lint"
+            "🪝 Hook PreToolUse failed: lint"
         );
     }
 
@@ -164,7 +171,7 @@ mod tests {
         let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
         assert_eq!(
             vm.spinner.unwrap().phase_text.as_deref(),
-            Some("Generating...")
+            Some("✍️ Generating...")
         );
     }
 
