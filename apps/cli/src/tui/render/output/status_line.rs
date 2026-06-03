@@ -130,6 +130,7 @@ mod tests {
             verb: "Thinking".to_string(),
             start: std::time::Instant::now(),
             phase: None,
+            phase_start: std::time::Instant::now(),
         });
         let area = Rect::new(0, 0, 40, 5);
         let mut buf = Buffer::empty(area);
@@ -163,6 +164,7 @@ mod tests {
             verb: "Thinking".to_string(),
             start: std::time::Instant::now(),
             phase: None,
+            phase_start: std::time::Instant::now(),
         });
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);

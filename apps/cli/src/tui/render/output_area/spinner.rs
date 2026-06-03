@@ -77,8 +77,9 @@ impl super::OutputArea {
                 phase.to_string(),
                 Style::default().fg(theme::WARNING),
             ));
+            let phase_elapsed = s.phase_start.elapsed().as_secs();
             spans.push(Span::styled(
-                format!("  ⏱ {}s", elapsed),
+                format!("  ⏱ {}s", phase_elapsed),
                 Style::default().fg(theme::TEXT_DIM),
             ));
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
