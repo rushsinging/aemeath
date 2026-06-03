@@ -38,7 +38,12 @@ pub fn build_diff_lines(
                 old_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                out.push(build_delete_line(old_line, width, line_text_trimmed));
+                out.push(build_delete_line(
+                    old_line,
+                    width,
+                    line_text_trimmed,
+                    syntax_ref.as_ref(),
+                ));
             }
             ChangeTag::Insert => {
                 new_line += 1;
@@ -61,14 +66,20 @@ pub fn build_diff_lines(
                     new_line,
                     width,
                     line_text_trimmed,
+                    syntax_ref.as_ref(),
                 ));
             }
         }
     }
 }
 
-/// 构建删除行 spans：`{old_num}  {new_pad} | - {text}`（块缩进由 gutter 注入，#60/#63）。
-fn build_delete_line(old_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
+/// 构建删除行 spans：`{old_num}  {new_pad} | - {highlighted_text}`（块缩进由 gutter 注入，#60/#63）。
+fn build_delete_line(
+    old_num: usize,
+    width: usize,
+    text: &str,
+    syntax_ref: Option<&syntect::parsing::SyntaxReference>,
+) -> Vec<SpanPart> {
     let mut spans = Vec::new();
     // 行号：old_num + 空格占位
     spans.push(SpanPart::plain(
@@ -78,8 +89,7 @@ fn build_delete_line(old_num: usize, width: usize, text: &str) -> Vec<SpanPart> 
     // 分隔符 + 标记
     spans.push(SpanPart::plain("| ", LINE_NUM_COLOR));
     spans.push(SpanPart::plain("- ", DIFF_REMOVE_FG));
-    // 内容
-    spans.push(SpanPart::plain(text.to_string(), DIFF_REMOVE_FG));
+    push_highlighted_text(&mut spans, text, DIFF_REMOVE_FG, syntax_ref);
     spans
 }
 
@@ -100,26 +110,40 @@ fn build_insert_line(
     spans.push(SpanPart::plain("| ", LINE_NUM_COLOR));
     spans.push(SpanPart::plain("+ ", DIFF_ADD_FG));
 
-    // 语法高亮内容
-    if let Some(highlighted) = syntax::highlight_line(text, syntax_ref) {
-        // 将高亮后的所有 span 的颜色在绿色背景上叠加：保持原始高亮颜色
-        spans.extend(highlighted);
-    } else {
-        spans.push(SpanPart::plain(text.to_string(), DIFF_ADD_FG));
-    }
+    push_highlighted_text(&mut spans, text, DIFF_ADD_FG, syntax_ref);
     spans
 }
 
-/// 构建上下文行 spans：`{old_num}  {new_num} | {INDENT}{text}`（行首块缩进由 gutter 注入，
+fn push_highlighted_text(
+    spans: &mut Vec<SpanPart>,
+    text: &str,
+    fallback: Color,
+    syntax_ref: Option<&syntect::parsing::SyntaxReference>,
+) {
+    if let Some(highlighted) = syntax::highlight_line(text, syntax_ref) {
+        spans.extend(highlighted);
+    } else {
+        spans.push(SpanPart::plain(text.to_string(), fallback));
+    }
+}
+
+/// 构建上下文行 spans：`{old_num}  {new_num} | {INDENT}{highlighted_text}`（行首块缩进由 gutter 注入，
 /// 内容前 INDENT 保留以与 `+ ` / `- ` 标记列对齐）。
-fn build_context_line(old_num: usize, new_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
+fn build_context_line(
+    old_num: usize,
+    new_num: usize,
+    width: usize,
+    text: &str,
+    syntax_ref: Option<&syntect::parsing::SyntaxReference>,
+) -> Vec<SpanPart> {
     let mut spans = Vec::new();
     spans.push(SpanPart::plain(
         format!("{:>width$}  {:>width$} ", old_num, new_num, width = width),
         LINE_NUM_COLOR,
     ));
     spans.push(SpanPart::plain("| ", LINE_NUM_COLOR));
-    spans.push(SpanPart::plain(format!("{INDENT}{text}"), LINE_NUM_COLOR));
+    spans.push(SpanPart::plain(INDENT.to_string(), LINE_NUM_COLOR));
+    push_highlighted_text(&mut spans, text, LINE_NUM_COLOR, syntax_ref);
     spans
 }
 
@@ -215,6 +239,31 @@ mod tests {
             insert_spans.len() > 2,
             "syntax highlight should produce multiple spans"
         );
+    }
+
+    #[test]
+    fn test_build_diff_lines_highlights_delete_insert_and_context_body() {
+        let old = "fn same() {}\nfn old() {}\n";
+        let new = "fn same() {}\nfn new() {}\n";
+        let mut out = Vec::new();
+        build_diff_lines(old, new, Some("rs"), &mut out);
+
+        let context = out
+            .iter()
+            .find(|spans| line_text(spans).contains("same"))
+            .unwrap();
+        let delete = out
+            .iter()
+            .find(|spans| line_text(spans).contains("old"))
+            .unwrap();
+        let insert = out
+            .iter()
+            .find(|spans| line_text(spans).contains("new"))
+            .unwrap();
+
+        assert!(context.len() > 3, "context 正文应走 syntect: {context:?}");
+        assert!(delete.len() > 3, "delete 正文应走 syntect: {delete:?}");
+        assert!(insert.len() > 3, "insert 正文应走 syntect: {insert:?}");
     }
 
     #[test]

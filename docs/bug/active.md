@@ -12,7 +12,31 @@
 | 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
 | 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
 | 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
+| 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
 
+
+### #108 TUI diff 代码块没有统一走 syntect 高亮
+
+**状态**：待确认
+
+**症状**：TUI 中 ```` ```diff ```` 代码块主要显示 diff 语义色，无法像普通代码 fence 一样对 diff 正文做 Rust/Python 等语言 token 高亮；即使 diff 内容包含 `+++ b/src/main.rs` 等文件头，渲染时也没有利用它推断语言。
+
+**根因**：`fenced.rs` 对 `diff` fence 逐行调用 `render_unified_diff(line, None, width)`，没有传入语言；`unified_diff.rs` 只在显式提供 ext 时对新增行可选高亮，删除行和上下文行始终是单色。
+
+**修复**：
+1. `render_unified_diff` 在未显式传入 ext 时，从 `+++` / `---` / `diff --git` 文件头推断扩展名。
+2. unified diff 的新增、删除、上下文正文去掉 diff 前缀后统一走 syntect；`+` / `-` 前缀、hunk、meta 行保留 diff 语义色。
+3. Edit diff 的新增、删除、上下文正文也统一走 syntect，行号和 diff 符号仍用语义色。
+
+**验证**：
+- `cargo test -p cli test_render_unified_diff_removed_and_context_lines_use_syntax_highlight`
+- `cargo test -p cli test_render_unified_diff_infers_extension_from_file_headers`
+- `cargo test -p cli test_build_diff_lines_highlights_delete_insert_and_context_body`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/primitives/fenced.rs`
+- `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
+- `apps/cli/src/tui/render/output/diff.rs`
 
 ### #107 TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮
 
