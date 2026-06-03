@@ -132,14 +132,10 @@ impl crate::tui::app::App {
                 let text = if self.view_state.output.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.output.end_selection();
-                    // 复制时序关键：取文本前先把 view_state 最新选区同步到 widget 镜像，
-                    // 否则 widget 镜像滞后一帧会丢失最后一段选区。
-                    crate::tui::adapter::output_view_widget::apply_output_selection_to_widget(
-                        &self.view_state.output,
-                        &mut self.output_area,
-                    );
-                    // 取 plain 文本（读 widget 选区镜像 + document，#63 gutter 不进 plain）。
-                    let text = self.output_area.get_selected_text();
+                    // 取 plain 文本（读 view_state 选区真相 + widget document，#63 gutter 不进 plain）。
+                    let text = self
+                        .output_area
+                        .selected_text_for_view(&self.view_state.output);
                     // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
                     self.view_state.output.clear_selection();
                     text

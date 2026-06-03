@@ -102,13 +102,17 @@ mod tests {
     fn duplicate_resize_does_not_process_again() {
         let mut app = test_app();
         app.handle_resize(80, 24);
-        app.output_area.scroll_offset = 7;
-        app.output_area.auto_scroll = false;
+        app.output_area.set_plain_document_lines(20);
+        app.view_state.output.last_visible_height = 12;
+        app.view_state.output.last_document_total_lines = 20;
+        app.view_state.output.scroll_offset = 7;
+        app.view_state.output.auto_scroll = false;
+        app.refresh_output_scroll_from_view_state();
         app.output_area.term_width = 7;
 
         app.handle_resize(80, 24);
 
-        assert_eq!(app.output_area.scroll_offset, 7);
+        assert_eq!(app.output_area.scroll_offset, 3);
         assert!(!app.output_area.auto_scroll);
         assert_eq!(app.output_area.term_width, 7);
         assert_eq!(

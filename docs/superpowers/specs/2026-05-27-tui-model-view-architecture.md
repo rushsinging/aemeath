@@ -959,6 +959,14 @@ Input completion/suggestions 已完成结构性收敛：补全列表、选中项
 
 对应地，`check-tui-input-single-source.sh` 继续保留 text/cursor 的迁移期约束，同时新增结构规则：禁止 `InputArea` 恢复 completion/suggestions 存储或补全状态 API，禁止 app/update 从 `InputArea` 读取补全可见性或选中项。input completion/suggestions 切片因此满足“状态唯一归位 + widget 纯投影”，但 input text/cursor 与 selection 仍需继续按各自切片收敛。
 
+### 已收敛切片：Output scroll/selection
+
+Output scroll/selection 已完成进一步结构性收敛：滚动态、选区锚点、选区拖拽状态继续统一归 `view_state.output`，`OutputArea` 的 `scroll_offset` / `auto_scroll` / `is_selecting` / `selection_start` / `selection_end` 降为渲染期镜像。滚动镜像只由 `adapter/output_view_widget.rs` 在渲染前写回；复制选中文本不再读取 widget 选区镜像，而是直接用 `OutputViewState` 的选区范围加 `OutputArea` 的 document/rendered line 内容计算 plain 文本。
+
+渲染侧删除了旧的 `selection_render` 旁路上色实现，document 行与虚拟 status/task 行统一复用 `render/output/selection_overlay.rs` 作为选区上色路径。`OutputArea::clear_selection` 与 `OutputArea::get_selected_text` 仅保留为测试辅助，生产路径不得使用；resize 不再直接清 widget 选区镜像，跨区清选区由 `view_state.output.clear_selection()` 表达，再由 adapter 同步。
+
+对应地，`check-tui-output-scroll-selection-single-source.sh` 从迁移期复杂扫描瘦身为结构规则：禁止业务路径直写 output widget 滚动/选区镜像，禁止生产路径调用 widget 选区取文，禁止恢复 widget 滚动方法。output scroll/selection 切片因此满足“状态唯一归位 + widget 渲染镜像 + 复制读取真相”。
+
 ### 与 AgentClient 的关系（双模式通用）
 
 TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。

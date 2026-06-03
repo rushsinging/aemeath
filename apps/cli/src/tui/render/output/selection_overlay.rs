@@ -74,6 +74,23 @@ pub fn apply_selection_overlay(
     out
 }
 
+pub fn apply_selection_overlay_with_fg(
+    line: &RenderedLine,
+    selection: Option<SelRange>,
+    selected_fg: ratatui::style::Color,
+) -> Vec<Span<'static>> {
+    apply_selection_overlay(line, selection)
+        .into_iter()
+        .map(|span| {
+            if span.style.bg == Some(theme::SELECTION_BG) {
+                Span::styled(span.content.into_owned(), span.style.fg(selected_fg))
+            } else {
+                span
+            }
+        })
+        .collect()
+}
+
 fn make_span(text: String, base: Style, selected: bool) -> Span<'static> {
     let style = if selected {
         base.bg(theme::SELECTION_BG)

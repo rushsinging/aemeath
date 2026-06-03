@@ -9,10 +9,6 @@ impl super::OutputArea {
         // `apply_output_scroll_to_widget` 重新钳制并覆盖 widget 镜像（resize 与下一次
         // 钳制之间无 draw，故此处就地钳制冗余，已删除）。
         self.last_visible_height = visible_height_hint as usize;
-
-        if self.is_selecting || self.selection_start.is_some() || self.selection_end.is_some() {
-            self.clear_selection();
-        }
     }
 }
 
@@ -63,7 +59,7 @@ pub mod tests {
     }
 
     #[test]
-    fn resize_clears_active_selection() {
+    fn resize_leaves_selection_mirrors_to_view_state_adapter() {
         let mut output = output_area_with_term_width(78);
         output.is_selecting = true;
         output.selection_start = Some((0, CharIdx::new(0)));
@@ -71,8 +67,8 @@ pub mod tests {
 
         output.handle_resize(80, 20);
 
-        assert!(!output.is_selecting);
-        assert!(output.selection_start.is_none());
-        assert!(output.selection_end.is_none());
+        assert!(output.is_selecting);
+        assert_eq!(output.selection_start, Some((0, CharIdx::new(0))));
+        assert_eq!(output.selection_end, Some((0, CharIdx::new(4))));
     }
 }
