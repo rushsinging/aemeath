@@ -120,6 +120,11 @@ where
         )
     };
     hook_runner.set_project_dir(cwd.display().to_string());
+    log::info!(
+        "chat loop hook runner ready: project_dir={} configured_events={}",
+        hook_runner.project_dir(),
+        hook_runner.hook_count()
+    );
     let agent = Agent {
         registry: &registry,
         ctx: build_tool_context(ToolContextParts {

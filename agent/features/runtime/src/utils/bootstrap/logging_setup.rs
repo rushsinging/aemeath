@@ -28,12 +28,10 @@ pub fn init_logging(logging_config: &share::config::LoggingConfig) {
     // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复 stderr 行为。
     // 日志级别由 config.json 的 logging 段控制；可通过 RUST_LOG 环境变量覆盖。
     let default_filter = logging_config.to_filter_string();
+    let use_stderr = use_stderr_log_target();
     let mut builder = env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or(&default_filter),
     );
-    let use_stderr = std::env::var("AEMEATH_LOG_STDERR")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
     if !use_stderr {
         if let Ok(file) = logging::open_append(&paths::global_logs_dir(), LogFile::Aemeath) {
             builder.target(env_logger::Target::Pipe(Box::new(file)));
@@ -55,4 +53,16 @@ pub fn init_logging(logging_config: &share::config::LoggingConfig) {
         )
     });
     builder.init();
+    log::info!(
+        "logging initialized: filter={} target={} logs_dir={}",
+        std::env::var("RUST_LOG").unwrap_or(default_filter),
+        if use_stderr { "stderr" } else { "aemeath.log" },
+        paths::global_logs_dir().display()
+    );
+}
+
+fn use_stderr_log_target() -> bool {
+    std::env::var("AEMEATH_LOG_STDERR")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }

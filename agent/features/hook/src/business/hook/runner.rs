@@ -62,7 +62,8 @@ impl HookRunner {
 
     /// 获取匹配指定事件和工具名的 hook 列表
     pub fn matching_hooks(&self, event: HookEvent, tool_name: Option<&str>) -> Vec<&HookEntry> {
-        self.config
+        let hooks = self
+            .config
             .events
             .get(&event)
             .map(|hooks| {
@@ -72,9 +73,18 @@ impl HookRunner {
                         // 空 matcher 匹配所有
                         h.matcher.is_empty() || tool_name.is_some_and(|name| name == h.matcher)
                     })
-                    .collect()
+                    .collect::<Vec<_>>()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        log::info!(
+            "hook match: event={:?} tool_name={:?} matched={} configured_events={} project_dir={}",
+            event,
+            tool_name,
+            hooks.len(),
+            self.hook_count(),
+            self.project_dir()
+        );
+        hooks
     }
 
     /// 执行单个 hook 命令

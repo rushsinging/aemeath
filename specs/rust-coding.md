@@ -40,7 +40,7 @@
 
 ## 日志规范
 
-- `env_logger` 驱动，从配置文件的 `logging` 段读取 module_levels（默认 `aemeath=debug`）。
+- `env_logger` 驱动，从配置文件的 `logging.level` 读取全局日志级别。
 - 日志文件：`~/.agents/logs/aemeath.log`（追加模式）。
 - Panic 日志：`~/.agents/logs/panic.log`。
 - Agent 审计日志：`~/.agents/logs/agent.log`（已废弃，保留兼容枚举；当前无写入点）。
