@@ -6,7 +6,6 @@
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
-| 95 | Agent tool result 被归为 orphan | 中 | 修复中 | 未确认 | 2026-05 | 根因：`observe_tool_call` 中 `bind_tool` 找不到未绑定占位时直接返回空（不创建 ToolCall block），导致后续 `ToolResult` 在 `complete_active_tool` 中找不到匹配 id → orphan。触发场景：provider 未发送 `ToolCallStart`（如非 streaming 模式）或 index 错位导致 fallback 也失败。修复：`bind_tool` 失败时自动调用 `observe_tool_start` 创建占位后重试绑定 |
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
@@ -92,18 +91,6 @@
 **修复方向**：`enter_worktree()` 栈非空时，通过 `git rev-parse --git-dir` 校验当前路径是否真实在 `.worktrees/` 下。若栈非空但 git 确认在主工作区，自动清理残留栈并允许进入；仅当 git 也确认在 worktree 中时才拒绝嵌套。
 
 **涉及路径**：`agent/project/src/business/worktree.rs:125-132`（`enter_worktree` 的栈校验逻辑）
-
-### #95 Agent tool result 被归为 orphan
-
-**状态**：修复中
-
-**症状**：Agent tool 执行完成后，其 result（如代码审查报告）被渲染为 orphan 形式（简短摘要 `✓ Agent completed`），而非嵌入到 Agent ToolCall block 中。
-
-**根因**：`observe_tool_call` 中 `bind_tool` 查找 `(name, index)` 精确匹配的未绑定占位。当 provider 未发送 `ToolCallStart`（即 `observe_tool_start` 未被调用，无占位存在）或 index 错位导致 fallback 也失败时，`bind_tool` 返回 None，`observe_tool_call` 直接返回空 changes——ToolCall block 不被创建。后续 `ToolResult` 到达时，`complete_active_tool` 在 turn 的 `tool_calls` 中找不到匹配 id，result 变成 orphan。
-
-**修复方向 / 当前状态**：修复中。`observe_tool_call` 中 `bind_tool` 失败时，自动调用 `observe_tool_start` 创建占位后重试绑定。已添加测试覆盖无 ToolCallStart 场景。
-
-**涉及路径**：`apps/cli/src/tui/model/conversation/model.rs`（`observe_tool_call`）
 
 ### #74 TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
 
