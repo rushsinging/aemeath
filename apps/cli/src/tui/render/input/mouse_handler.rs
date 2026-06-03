@@ -142,26 +142,20 @@ impl crate::tui::app::App {
                 } else if self.view_state.input_sel.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.input_sel.end_selection();
-                    // 复制时序：取文本前先把 view_state 最新选区同步到 widget 镜像，消一帧滞后。
-                    crate::tui::adapter::input_widget::apply_input_selection_to_widget(
-                        &self.view_state.input_sel,
-                        &mut self.input_area,
-                    );
-                    // 取 plain 文本（读 widget 选区镜像 + render 期 textarea.lines() 折算）。
-                    let text = self.input_area.get_selected_text();
+                    // 取 plain 文本（读 view_state 选区真相 + render 期 textarea.lines() 折算）。
+                    let text = self
+                        .input_area
+                        .selected_text_for_view(&self.view_state.input_sel);
                     // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
                     self.view_state.input_sel.clear_selection();
                     text
                 } else if self.view_state.status_sel.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.status_sel.end_selection();
-                    // 复制时序：取文本前先把 view_state 最新选区同步到 widget 镜像，消一帧滞后。
-                    crate::tui::adapter::status_widget::apply_status_selection_to_widget(
-                        &self.view_state.status_sel,
-                        &mut self.status_bar,
-                    );
-                    // 取 plain 文本（读 widget 选区镜像 + render 期 line_text 折算）。
-                    let text = self.status_bar.get_selected_text();
+                    // 取 plain 文本（读 view_state 选区真相 + render 期 line_text 折算）。
+                    let text = self
+                        .status_bar
+                        .selected_text_for_view(&self.view_state.status_sel);
                     // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
                     self.view_state.status_sel.clear_selection();
                     text

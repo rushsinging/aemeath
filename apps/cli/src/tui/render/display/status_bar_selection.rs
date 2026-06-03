@@ -4,11 +4,22 @@ use crate::tui::render::theme;
 use ratatui::{style::Style, text::Span};
 
 impl StatusBar {
-    pub fn get_selected_text(&self) -> Option<String> {
-        let start = self.selection_start?;
-        let end = self.selection_end?;
-        let (start, end) = ordered_range(start, end)?;
-        let full = self.line_text(self.selection_row, self.selection_width);
+    pub fn selected_text_for_view(
+        &self,
+        view: &crate::tui::view_state::StatusSelectionViewState,
+    ) -> Option<String> {
+        let (start, end) = view.selection_range()?;
+        self.selected_text_for_range(start, end, view.selection_row, view.selection_width)
+    }
+
+    fn selected_text_for_range(
+        &self,
+        start: usize,
+        end: usize,
+        row: StatusBarRow,
+        width: u16,
+    ) -> Option<String> {
+        let full = self.line_text(row, width);
         let chars: Vec<char> = full.chars().collect();
         let selected: String = chars[start.min(chars.len())..end.min(chars.len())]
             .iter()
@@ -18,6 +29,14 @@ impl StatusBar {
         } else {
             Some(selected)
         }
+    }
+
+    #[cfg(test)]
+    pub fn get_selected_text(&self) -> Option<String> {
+        let start = self.selection_start?;
+        let end = self.selection_end?;
+        let (start, end) = ordered_range(start, end)?;
+        self.selected_text_for_range(start, end, self.selection_row, self.selection_width)
     }
 
     pub(crate) fn spans_with_selection(
@@ -92,6 +111,7 @@ impl StatusBar {
         }
     }
 
+    #[cfg(test)]
     pub fn clear_selection(&mut self) {
         self.selection_start = None;
         self.selection_end = None;
