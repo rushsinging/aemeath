@@ -10,9 +10,37 @@
    - **SHOULD**：强烈推荐。跳过时必须有明确理由。
    - **MAY**：可选。有助于清晰度或便利性时使用。
 2. 所有新增指令 **MUST** 遵循此约定。
-3. 引入新规则或约定时，**MUST** 先征得用户同意再更新本文件。
+3. 引入新规则或约定时，**MUST** 先征得用户同意再更新本文件或任一 `specs/` 分片。
 4. **MUST** 遵循 DRY 原则。类型、辅助函数、常量、数据访问逻辑 **MUST** 定义一次、到处引用。**NEVER** 在多个文件重复相同逻辑。
 5. **MUST NOT** 手动调整代码格式。格式化由 `cargo fmt` / `rustfmt` 处理，只关注逻辑变更。
+
+## 渐进式披露（Progressive Disclosure）
+
+根指令（本文件）覆盖全仓库，始终适用。`specs/` 下的分片承载特定工作的 detailed 规则。**开始工作前**先加载匹配的分片，再动手。
+
+两种触发机制，按序应用：
+
+1. **路径触发（主，机械式）**：当工作会读、改或运行某条路径前缀下的代码时，**MUST** 加载对应分片。路径重叠即触发，无需判断。
+2. **场景触发（次，语义式）**：当工作触及某分片的范围但未碰它的路径——典型是别处在*消费*该能力（如改 provider 默认值会影响 `prompt` 的 guidance 选择）——也 **MUST** 加载。
+
+多行命中时，加载**全部**匹配分片。分片之间若冲突，停下来问用户，**NEVER** 自行取舍。
+
+### 架构地图与触发表
+
+| 分片 | 角色 / 路径（主触发） | 同时加载（次触发） |
+|---|---|---|
+| `specs/rust-coding.md` | 横切，任意 `**/*.rs`、`**/Cargo.toml` —— 编码 / 测试 / 日志 / 验证门禁 / 错误处理 | 跑验证门禁、新增任何核心逻辑、调试构建或测试失败 |
+| `specs/tui-cli.md` | `apps/cli/src/**` —— TUI（ratatui）、旧版 REPL（rustyline） | 改输入 / 渲染 / 快捷键 / 选区复制，或新增工具显示（`ToolDisplayEntry`） |
+| `specs/runtime.md` | `agent/features/runtime/**` —— Agent 循环、tool 执行编排、token budget、compact、成本、slash 命令 | 改暂停 / 恢复 / 重试（同步更新 `token_estimation`）、成本追踪（同步更新 `pricing.rs`）、新增 slash 命令 |
+| `specs/tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
+| `specs/provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `config-compat` 补默认值） |
+| `specs/prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
+| `specs/config-compat.md` | `agent/shared/src/config/**` —— 配置分层、provider 默认值 / env / base_url、Claude Code 兼容、运行时路径 | 新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级 |
+| `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
+| `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
+| `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；改 `docs/bug/**` 或 `docs/feature/**` |
+
+> `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 
 ## 项目结构
 
@@ -28,8 +56,9 @@ aemeath/                    # workspace root
 │   ├── sdk/                # AgentClient trait + 公共类型（CLI↔Runtime 通信契约）
 │   └── global/logging/     # 日志 projection 适配
 ├── docs/                   # bug / feature 追踪（active.md + archived/）
+├── specs/                  # 渐进式披露分片：按需加载的 detailed 规则
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
-└── AGENTS.md               # 本文件
+└── AGENTS.md               # 本文件（CLAUDE.md 软链指向它）
 ```
 
 ## 运行时目录（`~/.agents`）
@@ -62,120 +91,6 @@ aemeath/                    # workspace root
 - **MUST** worktree 分支完成验证并提交后合并回 `main`。
 - **MUST** worktree 分支合并回 `main` 前，先在 `main` 工作区执行 `git pull`（或等价的 fetch + fast-forward）拉取最新更新，再从 worktree 合并；若拉取后存在冲突，**MUST** 在 worktree 分支上 rebase/merge 最新 `main` 并重新通过验证后才能合并。
 - **MUST** 合并回 `main` 后在 `main` 上运行对应验证，并清理已完成的 worktree。
-
-## 编码规范
-
-### NEVER
-- **NEVER** 在 core 库中使用 `println!` / `eprintln!`（`lib.rs` 已 deny）。
-- **NEVER** 直接读取环境变量——使用配置分层。
-- **NEVER** 硬编码 API key、base URL。
-- **NEVER** 提交没有单元测试覆盖的新增核心逻辑。
-- **NEVER** 在 `update()` 中直接调用 `tokio::spawn`、hook notification、clipboard/image 等副作用——所有副作用通过 `Cmd` 描述并由 runtime 执行。
-
-### MUST
-- **MUST** 错误消息使用中文（`ErrorDisplay`）。
-- **MUST** 遵循 `AemeathError` 错误类型体系。
-- **MUST** 配置优先于硬编码默认值。
-- **MUST** 异步 trait 方法使用 `async_trait`。
-- **MUST** TUI 模式下所有应用主日志路由到 `~/.agents/logs/aemeath.log`。
-- **MUST** 新增 `pub fn` 在同一文件末尾添加 `#[cfg(test)] mod tests`。
-- **MUST** 单元测试覆盖三种路径：正常路径、边界条件、错误路径。
-- **MUST** 开始工作前查看 `docs/bug/active.md` 和 `docs/feature/active.md`，确认当前修改是否与已知条目相关。
-- **MUST** 修复 bug 时先添加重现该 bug 的测试用例，再提交修复代码。
-- **MUST** 解决 bug 或完成 feature 后，同步更新 `docs/bug/active.md` 或 `docs/feature/active.md`，记录问题、解决思路和当前解决状态。
-
-### SHOULD
-- **SHOULD** 单个 `.rs` 文件控制在 400 行以内（含测试代码）；过长时按职责拆分。无强制守卫，超限不阻断构建。
-- **SHOULD** 新增 provider 时同步添加 model guidance 文件。
-- **SHOULD** 修改涉及暂停/恢复/重试逻辑时更新 `token_estimation`。
-- **SHOULD** 成本追踪逻辑更新时同步更新 `pricing.rs`。
-- **SHOULD** 为辅助函数（`private fn`）编写测试，除非是一行委托/包装。
-- **SHOULD** 测试命名遵循 `test_<被测函数名>_<场景描述>` 模式。
-
-## 架构约定
-
-### 1. 配置分层（优先级从高到低）
-1. CLI 参数（`--provider`、`--model` 等）
-2. 环境变量（`AEMEATH_*`、`ANTHROPIC_API_KEY` 等）
-3. 项目级配置：`.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json` 的 hooks 配置
-4. 全局配置（`~/.agents/aemeath.json`）
-5. 硬编码默认值
-
-### 2. Guidance 系统
-- Guidance 文件存放在 `~/.agents/guidance/`。
-- `_default.md` — 所有模型通用。
-- `{prefix}.md` — 按 model id 前缀匹配（最长匹配优先）。
-- `_reasoning.md` — reasoning 开启时附加。
-- 首次运行自动生成默认文件，不覆盖用户编辑。
-
-### 3. 命令系统
-- Slash 命令通过 `inventory` crate + `CommandRegistry` 单例自动收集（`aemeath-core/src/command/`）。
-- 新增命令只需两步：
-  1. 在 `aemeath-core/src/command/commands/` 下创建文件，用 `inventory::submit!` 声明命令。
-  2. 在 `commands/mod.rs` 添加 `pub mod <name>;`。
-- `CommandRegistry::initialize()` 在启动时自动遍历所有 `submit!` 的命令并注册。
-- 命令自动出现在 TUI 自动补全中，无需额外修改。
-
-### 4. Provider 支持
-- Anthropic、OpenAI、OpenRouter、DeepSeek、Moonshot、Zhipu、DashScope、MiniMax、Ollama、OpenAICompatible。
-- 每个 provider 有默认 base URL、model、API key 环境变量名。
-- 新 provider 需在 `aemeath-core/src/provider.rs` 和 `aemeath-llm/src/providers/` 添加。
-
-### 5. 错误处理
-- 统一使用 `AemeathError`（`aemeath-core/src/error.rs`），`thiserror` derive。
-- `ErrorDisplay` 提供中文用户消息和建议。
-- `is_retryable()` 区分可重试/不可重试错误。
-
-### 6. 工具（Tool）系统
-- Tool 通过 `ToolRegistry` 注册（`aemeath-core/src/tool.rs`）。
-- `aemeath-tools` 中各个工具实现 `Tool` trait。
-- 执行流程：LLM 返回 tool_use → `Agent.execute_tools()` → 并发执行 → 结果注入回消息。
-- MCP 工具通过 `mcp_loader.rs` 动态加载。
-
-### 7. Claude Code 兼容
-- 项目指令读取 **MUST** Claude 优先：`{cwd}/CLAUDE.md` 优先，其次 `{cwd}/AGENTS.md`；全局指令仍读取 `~/.agents/AGENTS.md`。
-- 项目配置读取 **MUST** `.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json`；Claude Code hooks 结构需转换为 Aemeath hooks。
-- 项目 skills 读取 **MUST** `.claude/skills` 优先，其次 `.agents/skills`；同名 skill 以 Claude Code 项目 skill 为准。
-- Hook 执行环境 **MUST** 同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，兼容现有 Claude Code hook 脚本。
-
-## 验证门禁
-
-- **CLI 编译**：`cargo build` 或 `cargo build -p <crate>`
-- **完整检查**：`cargo check` / `cargo clippy`
-- **测试**：`cargo test -p <crate>`
-- 库层面 `#![deny(clippy::print_stdout, clippy::print_stderr)]`
-
-## 日志规范
-
-- `env_logger` 驱动，从配置文件的 `logging` 段读取 module_levels（默认 `aemeath=debug`）。
-- 日志文件：`~/.agents/logs/aemeath.log`（追加模式）。
-- Panic 日志：`~/.agents/logs/panic.log`。
-- Agent 审计日志：`~/.agents/logs/agent.log`（已废弃，保留兼容枚举；当前无写入点）。
-- 设置 `AEMEATH_LOG_STDERR=1` 可恢复 stderr 输出（用于 `--no-tui` 模式）。
-
-## 测试规范
-
-- **MUST** 每个包含公共函数的模块文件末尾有 `#[cfg(test)] mod tests`。
-- **MUST** 每个公共函数至少 3 个测试用例：正常路径、边界条件、错误路径。
-- **MUST** 测试使用 `assert!` / `assert_eq!` / `matches!` 显式断言，不可仅打印后人工观察。
-- **SHOULD** 私有辅助函数通过公有函数间接覆盖，或直接 `use super::*` 导入测试。
-- **MUST** 纯逻辑函数（无 I/O、无副作用）为最高优先级测试目标。UI 渲染代码、`main.rs` 入口代码可豁免。
-- 一行委托/包装函数可豁免 3 测试用例要求，但仍 SHOULD 有测试。
-- Code review 时 reviewer **MUST** 检查新增代码的测试覆盖。未覆盖核心逻辑的 PR 不应合并。
-
-## Bug/Feature 追踪联动
-
-- **编号独立**：bug 与 feature **NEVER** 共享编号序列，各自独立递增。bug 编号取 `docs/bug/active.md` 与 `docs/bug/archived/` 的最大值 +1；feature 编号取 `docs/feature/active.md` 与 `docs/feature/archived/` 的最大值 +1。新增条目前 **MUST** 在对应类别（bug 或 feature）内核对最大编号，不得跨类别取号。
-- **查找固定文档**：查询 bug / feature 时，**MUST** 优先查找固定追踪文档：活跃 bug 查 `docs/bug/active.md`，活跃 feature 查 `docs/feature/active.md`；归档条目查 `docs/bug/archived/` 或 `docs/feature/archived/`。按编号查找时 **MUST** 在对应 `active.md` 中搜索编号标题（如 `#70`）并阅读命中行附近的详细章节，NEVER 只根据顶部表格摘要下结论。
-- **Bug 修复 MUST 使用 git worktree**：修复 bug 或实现 feature 时，**MUST** 在独立 git worktree 中执行所有修改，NEVER 直接在 `main` 工作区修改。worktree 分支完成验证并提交后合并回 `main`，在 `main` 上运行对应验证后清理已完成的 worktree。详见上方工作流约束。
-- **Bug 状态流程**：`活动中` → `修复中` → `待确认` → 用户确认后归档。
-- **修改涉及已知 bug 时 MUST**：
-  1. 在 `docs/bug/active.md` 的对应行更新状态。
-  2. 在 commit message 中引用 bug 编号（如 `refs #1`）。
-  3. 修复后将 commit hash 更新到归档文件的"修复"字段。
-- **新增 bug 发现时 MUST**：在 `docs/bug/active.md` 表格中添加行（状态"活动中"），并在详情区域记录症状、根因、修复方向。
-- **实现 feature 时 MUST**：在 `docs/feature/active.md` 登记，完成后归档。
-- **归档门禁**：bug 修复或 feature 完成后，**MUST** 等待用户确认，确认后从 `active.md` 移除并将详情总结到 `archived/`。在 `main` 上更新文档后 **MUST** 立即提交，不与其他改动混入同一 commit。
 
 ## 开放决策
 
