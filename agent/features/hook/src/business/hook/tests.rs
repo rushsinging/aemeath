@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod hook_tests {
     use crate::business::hook::data::*;
-    use crate::business::hook::runner::HookRunner;
+    use crate::business::hook::runner::{hook_env_lines, HookRunner};
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::HashMap;
 
@@ -351,5 +351,13 @@ mod hook_tests {
         }
 
         let _ = std::fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn test_hook_env_lines_extracts_only_hook_env_stdout_lines() {
+        assert_eq!(
+            hook_env_lines("plain\n[hook-env] ROOT=/tmp\n  [hook-env] PWD=/tmp"),
+            vec!["[hook-env] ROOT=/tmp", "  [hook-env] PWD=/tmp"]
+        );
     }
 }

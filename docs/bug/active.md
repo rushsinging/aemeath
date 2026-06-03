@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功执行 hook 时只记录 stdout/stderr 字节数，不记录内容；已提取 stdout/stderr 中 `[hook-env]` 行并用 info 日志写入 `aemeath.log`，便于 debug 日志级别下排查 main/worktree 路径 |
 | 105 | TUI 中 ```text fenced block 被当作代码块显示而非 Markdown 渲染 | 中 | 待确认 | 待用户确认 | 2026-06 | 已将 `text` fence 作为 Markdown 文本容器处理：隐藏开闭围栏，内容按普通 Markdown 渲染；无语言 fence、其他语言 fence、`diff` fence 行为保持不变 |
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
@@ -15,6 +16,26 @@
 | 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
 | 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | 中 | 待确认 | 未确认 | 2026-06 | 修复：补齐官方 Catppuccin Macchiato palette 命名常量，并用这些常量手写 syntect Theme 构造器；`syntax.rs` 不再加载 `base16-ocean.dark`，Rust keyword 等 token 使用 Macchiato 色系 |
 
+
+### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
+
+**状态**：待确认
+
+**症状**：Stop hook 脚本已输出 `[hook-env] AEMEATH_PROJECT_DIR=...`、`CLAUDE_PROJECT_DIR=...`、`ROOT/PWD=...`，但 hook 成功通过时，这些内容只出现在 hook stdout/TUI 验证输出中，不进入 `~/.agents/logs/aemeath.log`；即使将 `logging.level` 调为 `debug`，日志中也只能看到已有 hook start/end 元信息，无法直接检索 `[hook-env]` 行。
+
+**根因**：`HookRunner::execute_hook` 成功等待子进程后只记录 stdout/stderr 字节数，没有记录 stdout/stderr 内容。为避免完整 hook 输出污染日志，需要只提取稳定的 `[hook-env]` 诊断行写入日志。
+
+**修复**：
+1. 新增 `hook_env_lines`，从 stdout/stderr 中提取以 `[hook-env]` 开头的行。
+2. `execute_hook` 在判定 blocked 前，将 stdout/stderr 中的 `[hook-env]` 行写入 `log::info!`，日志包含 event、command、stream 与 line。
+3. 不记录完整 hook stdout/stderr，避免单测和构建输出大量进入主日志。
+
+**验证**：
+- `cargo test -p hook test_hook_env_lines_extracts_only_hook_env_stdout_lines`
+
+**涉及路径**：
+- `agent/features/hook/src/business/hook/runner.rs`
+- `agent/features/hook/src/business/hook/tests.rs`
 
 ### #109 TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致
 
