@@ -82,17 +82,8 @@ impl App {
                     self.spinner_phase(SpinnerPhase::CallingTools { remaining });
                 }
             }
-            UiEvent::Usage {
-                input,
-                output,
-                last_input,
-                elapsed_secs: _,
-            } => {
-                // token 总量真相在 ChatState（渲染期由 StatusBar::draw 写回 widget）；
-                // tps 由 map_agent_event -> RuntimeIntent::RecordLiveTps 注入 RuntimeModel，
-                // 经 adapter 单向写回，此处不再直写 status_bar。
-                self.chat
-                    .record_usage(input as u64, output as u64, last_input as u64);
+            UiEvent::Usage { .. } => {
+                // token/api/tps 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::LiveTps(_tps) => {
                 // tps 已由 map_agent_event -> RuntimeIntent::RecordLiveTps 注入 RuntimeModel，
@@ -132,7 +123,11 @@ impl App {
                     .filter_map(|m| {
                         if m.role == "user" {
                             let t = m.text_content();
-                            if t.is_empty() { None } else { Some(t) }
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t)
+                            }
                         } else {
                             None
                         }
@@ -178,11 +173,8 @@ impl App {
                 self.spinner_phase(SpinnerPhase::Reflecting);
                 self.chat.start_processing();
             }
-            UiEvent::ReflectionUsage { input, output } => {
-                // token 总量真相在 ChatState，渲染期由 StatusBar::draw 从快照写回 widget，
-                // 此处不再直写 status_bar.set_tokens。
-                self.chat
-                    .record_usage(input as u64, output as u64, input as u64);
+            UiEvent::ReflectionUsage => {
+                // token/api 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::ReflectionDone { output } => {
                 // 只推送摘要（建议数 + 过时数），不把完整 reflection 输出

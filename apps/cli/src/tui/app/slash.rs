@@ -81,12 +81,13 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
-                let total = self.chat.total_input_tokens + self.chat.total_output_tokens;
+                let usage = &self.model.runtime.usage;
+                let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
-                    self.chat.total_api_calls,
-                    sdk::format_tokens(self.chat.total_input_tokens),
-                    sdk::format_tokens(self.chat.total_output_tokens),
+                    usage.api_calls,
+                    sdk::format_tokens(usage.input_tokens),
+                    sdk::format_tokens(usage.output_tokens),
                     sdk::format_tokens(total)
                 ));
             }
@@ -299,8 +300,11 @@ impl super::App {
                         Ok(result) => {
                             if result.context_window > 0 {
                                 self.chat.context_size = result.context_window;
-                                self.status_bar
-                                    .set_context_size(result.context_window as u64);
+                                self.model.runtime.apply(
+                                    crate::tui::model::runtime::intent::RuntimeIntent::SetContextSize(
+                                        result.context_window as u64,
+                                    ),
+                                );
                             }
                             self.session.current_model_display = result.display_name.clone();
                             // model 真相归 RuntimeModel，经 adapter 单向写回 status_bar。

@@ -49,8 +49,11 @@ pub(crate) async fn run_chat(args: Args) {
         "AskMe"
     });
     app.chat.context_size = bootstrap.context_size;
-    app.status_bar
-        .set_context_size(bootstrap.context_size as u64);
+    app.model.runtime.apply(
+        crate::tui::model::runtime::intent::RuntimeIntent::SetContextSize(
+            bootstrap.context_size as u64,
+        ),
+    );
     app.status_bar.set_thinking(bootstrap.thinking);
 
     app.run(bootstrap.client, initial_resume_id)

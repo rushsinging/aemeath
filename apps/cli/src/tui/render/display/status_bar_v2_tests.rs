@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::render::theme;
+use crate::tui::view_model::{StatusContextViewModel, StatusRuntimeViewModel, StatusWorktreeKind};
 
 fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
     (0..width)
@@ -7,16 +8,41 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
         .collect::<String>()
 }
 
+fn apply_runtime_context(
+    bar: &mut StatusBar,
+    path_base: &str,
+    working_root: &str,
+    kind: StatusWorktreeKind,
+    branch: &str,
+    session_id: Option<&str>,
+) {
+    bar.apply_runtime_view(StatusRuntimeViewModel {
+        session_id: session_id.map(str::to_string),
+        context: StatusContextViewModel {
+            path_base: path_base.to_string(),
+            working_root: working_root.to_string(),
+            branch: Some(branch.to_string()),
+            kind,
+        },
+        ..StatusRuntimeViewModel::default()
+    });
+}
+
 #[test]
 fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session() {
     let mut bar = StatusBar::new();
     bar.set_success("Ready");
-    bar.set_model("zhipu/glm-5.1");
-    bar.set_tokens(12_400, 1_800, 74_000);
-    bar.set_context_size(200_000);
-    bar.set_tps(42.0);
-    bar.set_session_id("019-session");
-    bar.set_api_calls(7);
+    bar.apply_runtime_view(StatusRuntimeViewModel {
+        model: Some("zhipu/glm-5.1".to_string()),
+        session_id: Some("019-session".to_string()),
+        input_tokens: 12_400,
+        output_tokens: 1_800,
+        last_input_tokens: 74_000,
+        api_calls: 7,
+        context_size: 200_000,
+        tps: 42.0,
+        context: StatusContextViewModel::default(),
+    });
 
     let text = bar.build_full_text();
 
@@ -36,13 +62,15 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
 #[test]
 fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath",
         "~/Nextcloud/work/claudecode/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Main, "main");
     bar.set_permission_mode("AskMe");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(120);
 
@@ -58,13 +86,15 @@ fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
 #[test]
 fn test_context_row_shows_root_only_when_different() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath/cli",
         "~/Nextcloud/work/claudecode/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Main, "main");
     bar.set_permission_mode("AskMe");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(140);
 
@@ -77,13 +107,15 @@ fn test_context_row_shows_root_only_when_different() {
 #[test]
 fn test_context_row_worktree_uses_worktree_branch_label() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+        StatusWorktreeKind::Worktree,
+        "redesign/46-status-line-v2",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
     bar.set_permission_mode("AskMe");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(140);
 
@@ -96,13 +128,15 @@ fn test_context_row_worktree_uses_worktree_branch_label() {
 #[test]
 fn test_context_row_narrow_preserves_path_permission_and_session() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+        StatusWorktreeKind::Worktree,
+        "redesign/46-status-line-v2",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
     bar.set_permission_mode("AllowAll");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(72);
 
@@ -114,13 +148,15 @@ fn test_context_row_narrow_preserves_path_permission_and_session() {
 #[test]
 fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath",
         "~/Nextcloud/work/claudecode/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Main, "main");
     bar.set_permission_mode("AskMe");
-    bar.set_session_id("019-session-full");
     let area = Rect::new(0, 0, 120, 2);
     let mut buf = Buffer::empty(area);
 
@@ -139,13 +175,15 @@ fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors
 #[test]
 fn test_context_row_narrow_keeps_path_prefix_without_invalid_splice() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
+        StatusWorktreeKind::Worktree,
+        "redesign/46-status-line-v2",
+        Some("019-session-full"),
     );
-    bar.set_git_context(WorktreeKind::Worktree, "redesign/46-status-line-v2");
     bar.set_permission_mode("AllowAll");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(72);
 
@@ -158,10 +196,15 @@ fn test_context_row_narrow_keeps_path_prefix_without_invalid_splice() {
 #[test]
 fn test_context_row_cjk_path_uses_display_width_budget() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths("~/项目/状态栏/aemeath", "~/项目/状态栏/aemeath");
-    bar.set_git_context(WorktreeKind::Main, "main");
+    apply_runtime_context(
+        &mut bar,
+        "~/项目/状态栏/aemeath",
+        "~/项目/状态栏/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        Some("019-session-full"),
+    );
     bar.set_permission_mode("AskMe");
-    bar.set_session_id("019-session-full");
 
     let row = bar.context_row_text(40);
 
@@ -177,8 +220,14 @@ fn test_context_row_cjk_path_uses_display_width_budget() {
 #[test]
 fn test_context_row_without_session_uses_correct_semantic_colors() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths("~/aemeath", "~/aemeath");
-    bar.set_git_context(WorktreeKind::Main, "main");
+    apply_runtime_context(
+        &mut bar,
+        "~/aemeath",
+        "~/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        None,
+    );
     bar.set_permission_mode("AskMe");
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
@@ -193,8 +242,14 @@ fn test_context_row_without_session_uses_correct_semantic_colors() {
 #[test]
 fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths("~/aemeath/cli", "~/aemeath");
-    bar.set_git_context(WorktreeKind::Main, "main");
+    apply_runtime_context(
+        &mut bar,
+        "~/aemeath/cli",
+        "~/aemeath",
+        StatusWorktreeKind::Main,
+        "main",
+        None,
+    );
     bar.set_permission_mode("AskMe");
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
@@ -213,12 +268,25 @@ fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
 #[test]
 fn test_status_bar_render_two_rows_v2() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
+        StatusWorktreeKind::Worktree,
+        "feature/46-status-line",
+        None,
     );
-    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
-    bar.set_api_calls(3);
+    bar.apply_runtime_view(StatusRuntimeViewModel {
+        api_calls: 3,
+        context: StatusContextViewModel {
+            path_base: "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui"
+                .to_string(),
+            working_root: "/workspace/projects/example/.worktrees/topic-46-status-line".to_string(),
+            branch: Some("feature/46-status-line".to_string()),
+            kind: StatusWorktreeKind::Worktree,
+        },
+        ..StatusRuntimeViewModel::default()
+    });
     let area = Rect::new(0, 0, 120, 2);
     let mut buf = Buffer::empty(area);
 

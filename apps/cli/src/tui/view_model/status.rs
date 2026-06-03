@@ -26,7 +26,7 @@ pub struct StatusRuntimeViewModel {
 }
 
 /// 工作目录上下文视图模型（StatusBar 第二行的 model 派生字段；
-/// permission_mode/context_size 为启动期配置，不由本模型承载）。
+/// permission_mode 为启动期配置，不由本模型承载）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StatusContextViewModel {
     pub path_base: String,

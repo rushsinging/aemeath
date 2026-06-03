@@ -66,10 +66,7 @@ pub enum AppEvent {
         message: String,
     },
     ReflectionStarted,
-    ReflectionUsage {
-        input: u32,
-        output: u32,
-    },
+    ReflectionUsage,
     ReflectionDone {
         output: sdk::ReflectionOutputView,
     },

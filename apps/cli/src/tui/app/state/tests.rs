@@ -59,17 +59,6 @@ mod tests {
         assert_eq!(state.pending_image_count(), 0);
     }
 
-    #[test]
-    fn test_chat_state_usage_snapshot_after_record_usage() {
-        let mut state = ChatState::default();
-        state.record_usage(10, 4, 7);
-        let usage = state.usage_snapshot();
-        assert_eq!(usage.total_input_tokens, 10);
-        assert_eq!(usage.total_output_tokens, 4);
-        assert_eq!(usage.last_input_tokens, 7);
-        assert_eq!(usage.total_api_calls, 1);
-    }
-
     // === InputState ===
 
     #[test]

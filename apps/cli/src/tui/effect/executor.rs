@@ -169,12 +169,7 @@ impl App {
             }
             match agent_client.run_reflection(messages).await {
                 Ok(output) => {
-                    let _ = tx
-                        .send(UiEvent::ReflectionUsage {
-                            input: output.input_tokens,
-                            output: output.output_tokens,
-                        })
-                        .await;
+                    let _ = tx.send(UiEvent::ReflectionUsage).await;
                     let _ = tx.send(UiEvent::ReflectionDone { output }).await;
                 }
                 Err(error) => {
