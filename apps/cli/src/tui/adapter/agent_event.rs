@@ -5,6 +5,7 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
+use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::model::runtime::workspace::WorktreeKind;
 use crate::tui::render::display::safe_text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
@@ -25,10 +26,20 @@ pub struct AgentEventMapping {
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     match event {
         UiEvent::Text(text) => {
-            conversation(ConversationIntent::ObserveAssistantText { text: text.clone() })
+            let mut mapping =
+                conversation(ConversationIntent::ObserveAssistantText { text: text.clone() });
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
+            mapping
         }
         UiEvent::Thinking(text) => {
-            conversation(ConversationIntent::ObserveThinkingText { text: text.clone() })
+            let mut mapping =
+                conversation(ConversationIntent::ObserveThinkingText { text: text.clone() });
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
+            mapping
         }
         UiEvent::TextBlockComplete(_) => conversation(ConversationIntent::CompleteTextBlock),
         UiEvent::ToolCallStart { name, index } => {
@@ -270,6 +281,34 @@ mod tests {
             mapping.conversation.first(),
             Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
         ));
+    }
+
+    #[test]
+    fn test_map_agent_event_text_sets_generating_phase_with_text_update() {
+        let mapping = map_agent_event(&UiEvent::Text("hello".to_string()));
+
+        assert!(matches!(
+            mapping.conversation.first(),
+            Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
+        ));
+        assert_eq!(
+            mapping.runtime,
+            vec![RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating)]
+        );
+    }
+
+    #[test]
+    fn test_map_agent_event_thinking_sets_thinking_phase_with_text_update() {
+        let mapping = map_agent_event(&UiEvent::Thinking("reason".to_string()));
+
+        assert!(matches!(
+            mapping.conversation.first(),
+            Some(ConversationIntent::ObserveThinkingText { text }) if text == "reason"
+        ));
+        assert_eq!(
+            mapping.runtime,
+            vec![RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking)]
+        );
     }
 
     #[test]
