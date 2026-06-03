@@ -1,13 +1,24 @@
 //! diff 原语：复用现有 build_diff_lines(产出 SpanPart) 转 RenderedLine。
 
-use crate::tui::render::output::diff::build_diff_lines;
+use crate::tui::render::output::diff::build_diff_lines_from;
 use crate::tui::render::output::primitives::spanparts_to_spans;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output_area::types::SpanPart;
 
-pub fn diff(old: &str, new: &str, ext: Option<&str>, _width: u16) -> Vec<RenderedLine> {
+pub fn diff(old: &str, new: &str, ext: Option<&str>, width: u16) -> Vec<RenderedLine> {
+    diff_from(old, new, 1, 1, ext, width)
+}
+
+pub fn diff_from(
+    old: &str,
+    new: &str,
+    old_start: usize,
+    new_start: usize,
+    ext: Option<&str>,
+    _width: u16,
+) -> Vec<RenderedLine> {
     let mut out: Vec<Vec<SpanPart>> = Vec::new();
-    build_diff_lines(old, new, ext, &mut out);
+    build_diff_lines_from(old, new, old_start, new_start, ext, &mut out);
     out.into_iter()
         .map(|parts| RenderedLine::new(spanparts_to_spans(&parts)))
         .collect()
@@ -58,6 +69,30 @@ mod tests {
             !del.plain.starts_with("  "),
             "删除行不应自拼行首块缩进（由 gutter 注入），got: {:?}",
             del.plain
+        );
+    }
+
+    #[test]
+    fn test_diff_from_uses_real_start_line_numbers() {
+        let lines = diff_from("a\nb\n", "a\nc\n", 42, 42, Some("rs"), 80);
+        let delete = lines
+            .iter()
+            .find(|line| line.plain.contains("- ") && line.plain.contains('b'))
+            .expect("删除行存在");
+        let insert = lines
+            .iter()
+            .find(|line| line.plain.contains("+ ") && line.plain.contains('c'))
+            .expect("新增行存在");
+
+        assert!(
+            delete.plain.starts_with("43"),
+            "删除行应显示真实 old 行号 43，got: {:?}",
+            delete.plain
+        );
+        assert!(
+            insert.plain.starts_with("    43"),
+            "新增行应显示真实 new 行号 43，got: {:?}",
+            insert.plain
         );
     }
 }

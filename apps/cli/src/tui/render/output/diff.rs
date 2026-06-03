@@ -20,17 +20,33 @@ pub fn build_diff_lines(
     file_ext: Option<&str>,
     out: &mut Vec<Vec<SpanPart>>,
 ) {
+    build_diff_lines_from(old_content, new_content, 1, 1, file_ext, out);
+}
+
+/// 对比 old_content 与 new_content，生成从真实文件行号开始的 diff 输出行。
+pub fn build_diff_lines_from(
+    old_content: &str,
+    new_content: &str,
+    old_start: usize,
+    new_start: usize,
+    file_ext: Option<&str>,
+    out: &mut Vec<Vec<SpanPart>>,
+) {
+    let old_start = old_start.max(1);
+    let new_start = new_start.max(1);
     let diff = TextDiff::from_lines(old_content, new_content);
     let changes: Vec<_> = diff.iter_all_changes().collect();
 
     let old_line_count = old_content.lines().count();
     let new_line_count = new_content.lines().count();
-    let width = line_num_width(old_line_count.max(new_line_count));
+    let max_old_line = old_start.saturating_add(old_line_count.saturating_sub(1));
+    let max_new_line = new_start.saturating_add(new_line_count.saturating_sub(1));
+    let width = line_num_width(max_old_line.max(max_new_line));
 
     let syntax_ref = file_ext.and_then(language_by_extension);
 
-    let mut old_line = 0usize;
-    let mut new_line = 0usize;
+    let mut old_line = old_start - 1;
+    let mut new_line = new_start - 1;
 
     for change in &changes {
         match change.tag() {
@@ -221,6 +237,26 @@ mod tests {
         assert!(
             full.contains("2"),
             "insert line should show new line number 2, got: {full}"
+        );
+    }
+
+    #[test]
+    fn test_build_diff_lines_with_real_start_line_numbers() {
+        let old = "a\nb\nc\n";
+        let new = "a\nx\nc\n";
+        let mut out = Vec::new();
+        build_diff_lines_from(old, new, 100, 100, None, &mut out);
+
+        let delete = line_text(&out[1]);
+        let insert = line_text(&out[2]);
+
+        assert!(
+            delete.starts_with("101"),
+            "delete line should show real old line 101, got: {delete:?}"
+        );
+        assert!(
+            insert.starts_with("     101"),
+            "insert line should show real new line 101 with old gutter blank, got: {insert:?}"
         );
     }
 
