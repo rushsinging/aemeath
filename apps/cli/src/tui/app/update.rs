@@ -178,8 +178,9 @@ impl App {
         render_document_from_view_model(&mut self.output_area, &view_model, width);
     }
 
-    /// 据 Model 业务态（spinner.active + phase）+ view_state 动画态（frame/verb）
-    /// 派生实时状态行，单向写回 widget 镜像。这是 spinner/task 镜像的唯一写入路径。
+    /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
+    /// + view_state 动画态（frame/verb）派生实时状态行，单向写回 widget 镜像。
+    /// 这是 spinner/task/queued live-status 镜像的唯一写入路径。
     ///
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer：

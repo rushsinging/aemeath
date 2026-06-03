@@ -26,12 +26,14 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# spinner / task_status_lines 是 OutputArea 的运行态镜像，真相归 RuntimeModel.spinner
-# (active+phase) + RuntimeModel.task_status.lines；动画 frame/verb 归 view_state.spinner。
+# spinner / task_status_lines / queued_submission_lines 是 OutputArea 的 live-status 运行态镜像。
+# 真相归 RuntimeModel.spinner (active+phase)、RuntimeModel.task_status.lines 与
+# ConversationModel.queued_submissions；动画 frame/verb 归 view_state.spinner。
 # 唯一生产写入路径为 view_assembler/live_status.rs -> adapter/live_status_widget.rs
 # (apply_live_status_to_widget)，每帧由 app/update.rs::refresh_live_status_from_model 调用。
-# 任何 update/effect/slash 业务路径都不得直接改 output(_area).spinner / .task_status_lines，
-# 也不得调用已删除的 start_spinner/stop_spinner/set_spinner_phase/tick_spinner/set_task_status。
+# 任何 update/effect/slash 业务路径都不得直接改 output(_area).spinner /
+# .task_status_lines / .queued_submission_lines，也不得调用已删除的
+# start_spinner/stop_spinner/set_spinner_phase/tick_spinner/set_task_status。
 #
 # 豁免：
 #  - adapter/live_status_widget.rs：唯一镜像写入路径。
@@ -42,8 +44,8 @@ report_matches() {
 
 # 1) 直写 OutputArea 镜像字段（receiver 限定为 output / output_area / self，避免误伤 view_state.spinner）。
 report_matches \
-  "output(_area).spinner / .task_status_lines mirror writes are allowed only in adapter/live_status_widget.rs (and OutputArea's own reset / test code); send a RuntimeIntent and let the assembler + apply_live_status_to_widget write the widget." \
-  grep -RInE '\b(output|output_area|self)\.(spinner|task_status_lines)\s*=' \
+  "output(_area).spinner / .task_status_lines / .queued_submission_lines mirror writes are allowed only in adapter/live_status_widget.rs (and OutputArea's own reset / test code); send model intents and let the assembler + apply_live_status_to_widget write the widget." \
+  grep -RInE '\b(output|output_area|self)\.(spinner|task_status_lines|queued_submission_lines)\s*=' \
     "$ROOT/apps/cli/src/tui" --include='*.rs' \
     --exclude='live_status_widget.rs' \
     --exclude='content.rs' \
@@ -57,5 +59,10 @@ report_matches \
     "$ROOT/apps/cli/src/tui" --include='*.rs' \
     --exclude='live_status_widget.rs' \
     --exclude='*_tests.rs'
+
+# 3) 排队输入预览只能来自 ConversationModel.queued_submissions，经 live-status assembler 格式化。
+report_matches \
+  "queued_submission_lines must not be read as business truth outside OutputArea rendering/selection; use ConversationModel.queued_submissions." \
+  bash -c "grep -RInE 'queued_submission_lines' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='output_area.rs' --exclude='live_status_widget.rs' --exclude='render.rs' --exclude='content.rs' --exclude='*_tests.rs' | grep -v '^[^:]*:[0-9][0-9]*:[[:space:]]*//' | grep -v '/app/update/notice.rs:'"
 
 exit "$fail"
