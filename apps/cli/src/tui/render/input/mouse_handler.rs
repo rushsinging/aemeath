@@ -152,11 +152,12 @@ impl crate::tui::app::App {
                 } else if self.view_state.input_sel.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.input_sel.end_selection();
-                    // 取 plain 文本（读 view_state 选区真相 + render 期 textarea.lines() 折算）。
+                    // 取 plain 文本（读 view_state 选区真相 + input document text）。
                     let text = self.input_area.selected_text_for_view(
                         &self.model.input.document.buffer,
                         &self.view_state.input_sel,
-                    ); // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                    );
+                    // 取完清选区：view_state 清空。
                     self.view_state.input_sel.clear_selection();
                     text
                 } else if self.view_state.status_sel.is_selecting() {

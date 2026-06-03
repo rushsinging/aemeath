@@ -23,11 +23,6 @@ pub struct InputArea {
     pub(super) history_index: Option<usize>,
     /// Saved input before browsing history (to restore when navigating back)
     pub(super) saved_input: String,
-    /// Mouse selection mirror; truth lives in `view_state.input_sel` and text is supplied by
-    /// the render model / input document.
-    pub(super) is_selecting: bool,
-    pub(super) selection_start: Option<(usize, usize)>, // (row, col) in input text
-    pub(super) selection_end: Option<(usize, usize)>,   // (row, col) in input text
     /// Input render content width cache; not a text/cursor truth.
     pub(crate) content_width: u16,
 }
@@ -47,9 +42,6 @@ impl InputArea {
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
-            is_selecting: false,
-            selection_start: None,
-            selection_end: None,
             content_width: 0,
         }
     }
@@ -81,9 +73,10 @@ impl InputArea {
         suggestions_area: Rect,
         buf: &mut Buffer,
         render_model: &crate::tui::render::input::input_render_model::InputRenderModel,
+        selection: &crate::tui::view_state::InputSelectionViewState,
         suggestions: &suggestions::SuggestionViewState,
     ) {
-        self.render(area, buf, render_model);
+        self.render(area, buf, render_model, selection);
         if suggestions_area.height > 0 {
             self.render_suggestions_in_area(suggestions_area, buf, suggestions);
         }
