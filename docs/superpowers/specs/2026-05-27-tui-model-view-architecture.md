@@ -953,6 +953,12 @@ Status 运行态镜像已先完成一轮结构性收敛：`token/api/context_siz
 
 对应地，`check-tui-status-single-source.sh` 从“禁止业务路径调用若干 setter”的迁移期守卫，瘦身为结构规则：禁止恢复这些 setter，禁止在 `ChatState` 重新引入 token/api usage 镜像。status 切片因此满足本节退役判据中的“状态唯一归位 + widget 纯投影 + 写入路径唯一”。
 
+### 已收敛切片：Input completion/suggestions
+
+Input completion/suggestions 已完成结构性收敛：补全列表、选中项、可见性统一归 `model.input.completion`，接受补全的文本改写逻辑统一归 `InputModel::apply(InputIntent::AcceptCompletion)`。`InputArea` 不再保存 `suggestions`、`selected_suggestion`、`show_suggestions` 镜像，也不再暴露 `set_suggestions`、`clear_suggestions`、`set_selected_suggestion`、`selected_suggestion`、`is_showing_suggestions`、`accept_suggestion`、`select_previous`、`select_next` 这类补全状态 API；渲染期从 `InputCompletion` 派生 `SuggestionViewState` 后只读绘制。
+
+对应地，`check-tui-input-single-source.sh` 继续保留 text/cursor 的迁移期约束，同时新增结构规则：禁止 `InputArea` 恢复 completion/suggestions 存储或补全状态 API，禁止 app/update 从 `InputArea` 读取补全可见性或选中项。input completion/suggestions 切片因此满足“状态唯一归位 + widget 纯投影”，但 input text/cursor 与 selection 仍需继续按各自切片收敛。
+
 ### 与 AgentClient 的关系（双模式通用）
 
 TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。

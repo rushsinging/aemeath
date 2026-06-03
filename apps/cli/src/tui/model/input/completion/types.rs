@@ -16,7 +16,7 @@ pub struct Suggestion {
 }
 
 /// 建议类型枚举
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SuggestionType {
     Command,
     File,

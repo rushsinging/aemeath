@@ -8,7 +8,7 @@ use crate::tui::model::input::intent::InputIntent;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
 
-/// Ctrl+C 在非 processing、非 suggestions 状态下的动作。
+/// Ctrl+C 在非 processing、非 completion 状态下的动作。
 /// 提取为纯函数以便单元测试。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum CtrlCAction {
@@ -79,6 +79,8 @@ impl App {
             return UpdateResult::none();
         }
 
+        let completion_visible = self.model.input.completion.visible;
+
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                 if self.chat.is_processing {
@@ -86,7 +88,7 @@ impl App {
                         agent_client.cancel();
                     }
                     self.status_bar.set_warning("Interrupted");
-                } else if self.input_area.is_showing_suggestions() {
+                } else if completion_visible {
                     self.handle_input_intent(InputIntent::SetCompletions {
                         query: String::new(),
                         items: Vec::new(),
@@ -111,14 +113,14 @@ impl App {
                 }
             }
             (KeyModifiers::NONE, KeyCode::Tab) if !self.chat.is_processing => {
-                if self.input_area.is_showing_suggestions() {
+                if completion_visible {
                     self.apply_current_suggestion();
                 } else {
                     self.update_suggestions();
                 }
             }
             (KeyModifiers::NONE, KeyCode::Esc) if !self.chat.is_processing => {
-                if self.input_area.is_showing_suggestions() {
+                if completion_visible {
                     self.handle_input_intent(InputIntent::SetCompletions {
                         query: String::new(),
                         items: Vec::new(),
@@ -161,7 +163,7 @@ impl App {
                 }
             }
             (_, KeyCode::Enter) if !self.chat.is_processing => {
-                if self.input_area.is_showing_suggestions() {
+                if completion_visible {
                     self.apply_current_suggestion();
                 } else if !self.model.input.document.is_empty() {
                     return self.update_enter(ui_tx, spawn_refs);
@@ -192,14 +194,14 @@ impl App {
                 self.handle_input_intent(InputIntent::MoveCursorRight);
             }
             (KeyModifiers::NONE, KeyCode::Up) => {
-                if self.input_area.is_showing_suggestions() {
+                if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
                 } else {
                     self.handle_input_intent(InputIntent::MoveCursorUp);
                 }
             }
             (KeyModifiers::NONE, KeyCode::Down) => {
-                if self.input_area.is_showing_suggestions() {
+                if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionNext);
                 } else {
                     self.handle_input_intent(InputIntent::MoveCursorDown);

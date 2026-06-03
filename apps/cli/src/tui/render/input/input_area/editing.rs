@@ -80,9 +80,6 @@ impl InputArea {
         if alt {
             self.textarea.insert_newline();
             false
-        } else if self.show_suggestions {
-            self.accept_suggestion();
-            false
         } else {
             true
         }
@@ -104,13 +101,9 @@ impl InputArea {
         self.reset_history_nav();
     }
 
-    /// Move cursor up (or select previous suggestion, or browse history)
+    /// Move cursor up (or browse history)
     #[cfg(test)]
     pub(crate) fn move_up(&mut self) {
-        if self.select_previous() {
-            return;
-        }
-
         // 历史浏览模式：始终翻历史
         if self.history_index.is_some() {
             self.history_up();
@@ -128,13 +121,9 @@ impl InputArea {
         }
     }
 
-    /// Move cursor down (or select next suggestion, or browse history)
+    /// Move cursor down (or browse history)
     #[cfg(test)]
     pub(crate) fn move_down(&mut self) {
-        if self.select_next() {
-            return;
-        }
-
         // 历史浏览模式：始终翻历史
         if self.history_index.is_some() {
             self.history_down();

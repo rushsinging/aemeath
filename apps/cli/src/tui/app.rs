@@ -8,6 +8,7 @@ use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
+use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -197,7 +198,9 @@ impl App {
                 return;
             }
 
-            let suggestions_height = self.input_area.suggestions_height();
+            let suggestions_height = self
+                .input_area
+                .suggestions_height(&self.model.input.completion);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -224,8 +227,15 @@ impl App {
                 self.status_bar.set_warning("Render error, try resizing");
             }
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.input_area
-                    .draw(chunks[1], chunks[2], buf, self.chat.pending_image_count());
+                let suggestions_view =
+                    SuggestionViewState::from_completion(&self.model.input.completion);
+                self.input_area.draw(
+                    chunks[1],
+                    chunks[2],
+                    buf,
+                    self.chat.pending_image_count(),
+                    &suggestions_view,
+                );
             }));
             self.status_bar.draw(chunks[3], buf);
             if let Some(dialog) = self.layout.active_dialog() {
