@@ -13,6 +13,7 @@
 | 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
 | 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
 | 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
+| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | LLM 原始输出中的长文本行（无换行）在 TUI 中只渲染到屏幕可视宽度，超出部分不可见（不自动换行也不可横向滚动），用户看到的文本在某个位置突然中断 |
 | 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
 | 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | 中 | 待确认 | 未确认 | 2026-06 | 修复：补齐官方 Catppuccin Macchiato palette 命名常量，并用这些常量手写 syntect Theme 构造器；`syntax.rs` 不再加载 `base16-ocean.dark`，Rust keyword 等 token 使用 Macchiato 色系 |
 
