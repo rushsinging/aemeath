@@ -915,3 +915,42 @@ check-unsafe-text-ops.sh
 - Milestone 5 完成后：启用 Effect boundary guard。
 
 架构门禁不是一次性全部打开，而是跟随迁移里程碑逐步加严。这样既能保护目标架构，也不会因为历史代码尚未迁移而阻塞正常开发。
+
+## 收敛终态：结构性单一真相 → 守卫瘦身
+
+> 本节是对上文「架构门禁」的**收敛目标补充**。上文列的是**边界**守卫（Model purity / Render isolation / ViewAssembler / ViewModel / Effect boundary 等），这些是本质、保留。本节针对的是另一类——**single-source-of-truth 守卫**（#55–#59 系列），它们偏多，根因是"单一真相"被做成了**逐块禁止**而非**结构上不可能**。收敛终态应让这批守卫**有资格退役/合并**。
+
+### 为什么这类守卫多
+
+`.agents/hooks/` 现存约 5 个 single-source 守卫——`check-tui-input-single-source`、`check-tui-status-single-source`、`check-tui-spinner-task-single-source`、`check-tui-output-scroll-selection-single-source`、`check-tui-selection-single-source`。每个**钉死一块状态**，禁止它在 **Model** 与 **ratatui 有状态 widget**（InputArea / OutputArea / StatusBar 自带的内部 buffer）之间**重复**。
+
+根因：TEA 要求"状态只在 Model"，但 ratatui 的 `StatefulWidget` 允许 widget 自存状态 → 同一块状态出现**两份真相**（如 `model.input.document` vs InputArea 内部缓冲）。**守卫数 ≈ 状态能泄漏的地方数**；逐块禁止，所以多。这是迁移过程中**逐块钉**的脚手架，不是稳定态的本质需要。
+
+### 两条结构事实（让重复不可能，而非逐块禁止）
+
+1. **domain 态不是 TUI 的真相，是 AgentClient 的**——conversation / cost / tasks / project 由 `AgentClient` 的只读快照（`session_snapshot()` / `cost()` / `task_list()` / `project()`）提供，经其**变更通道 `changes()`** 刷新；TUI **只读投影、NEVER 在 TUI 内再造一份**。→ status / spinner-task 这几个守卫的源头消失（TUI 根本不持 domain 态）。
+2. **UI 局部态只在 Model**（`model/input`、`model/runtime` 等），**widget 是纯投影**——不使用 `StatefulWidget` 承载 app 态，渲染只读 `ViewModel` / `ViewState`。→ input / scroll / selection 这几个守卫的源头消失（不存在第二份）。
+
+### 守卫合并（终态）
+
+| 现状（逐块禁止） | 收敛后 |
+|---|---|
+| input / status / spinner-task / scroll-selection / selection 五个 single-source | **合并为 1 条结构规则**：「app 态只在 `model/`；domain 态只读投影自 `AgentClient`；`render/` 与 widget 不得持有或写入任何 app/domain 态」 |
+| Model purity / Render isolation / ViewAssembler boundary / ViewModel dependency / Effect boundary / TEA purity | **保留**（本质，与状态归属正交） |
+| unsafe-text-ops | 保留（Unicode 安全，与架构无关） |
+
+### 退役判据
+
+当某块状态满足以下结构条件，其对应 single-source 守卫即可从 `check-architecture-guards.sh` 退役（或并入上面那条结构规则）：
+
+1. 该块状态**唯一定义在 `model/`**（domain 态则唯一来源是 `AgentClient` 投影），全仓**无第二处可写定义**。
+2. 对应 widget 改为**无状态 / 纯投影**，渲染只读 `ViewModel` / `ViewState`。
+3. 写入该块状态的路径**唯一**（单一 assembler / reducer），且已被现有边界守卫（ViewAssembler boundary / Model purity）覆盖。
+
+### 与 AgentClient 的关系（双模式通用）
+
+TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。
+
+### 节奏：终点是更少、更结构化的守卫
+
+延续本文"门禁随迁移里程碑加严"的原则，但**终点不是更多守卫，而是更少**：每完成一块状态的**结构性收敛**（状态唯一归位 + widget 纯投影）→ **退役 / 合并**它的 single-source 守卫，而不是新增。判断"该不该单一真相"是设计决定；守卫只锁"已决定之后的结构后果"。
