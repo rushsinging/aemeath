@@ -82,7 +82,7 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
             }
             let syntax_ref = fence_lang
                 .as_deref()
-                .and_then(syntax::language_by_extension);
+                .and_then(syntax::language_by_fence_info);
             if let Some(parts) = syntax::highlight_line(line, syntax_ref.as_ref()) {
                 lines.push(rendered_line_from_spanparts(&parts));
             } else {
@@ -166,6 +166,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(code.spans[0].style.fg, Some(theme::CODE));
+    }
+
+    #[test]
+    fn test_fenced_rust_language_name_uses_syntect_highlight() {
+        let lines = render("```rust\nfn main() {\n``` ");
+        let code = lines.iter().find(|l| l.plain.contains("fn main")).unwrap();
+
+        assert!(
+            code.spans.len() > 1,
+            "rust fence 应使用 syntect 语法高亮拆分多个 span，而不是 CODE 单色，got: {:?}",
+            code.spans
+        );
     }
 
     #[test]

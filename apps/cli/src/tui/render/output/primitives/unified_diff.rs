@@ -8,7 +8,7 @@
 use crate::tui::render::output::primitives::spanparts_to_spans;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output_area::types::{SpanPart, INDENT};
-use crate::tui::render::syntax::{self, language_by_extension};
+use crate::tui::render::syntax::{self, extension_from_path, language_by_extension};
 use crate::tui::render::theme;
 use ratatui::style::Color;
 
@@ -46,15 +46,49 @@ fn classify(line: &str) -> DiffLineKind {
     }
 }
 
-/// 渲染一段 unified diff 文本为带缩进 + 加减语义色（+ 可选语法高亮）的渲染行。
+/// 渲染一段 unified diff 文本为带缩进 + diff 语义色 + 正文语法高亮的渲染行。
 ///
-/// `ext` 用于对新增行做语法高亮（去掉前导 `+` 后高亮再补回 `+ `），None 不高亮。
+/// `ext` 用于对正文做语法高亮（去掉 diff 前导符号后高亮再补回语义符号）；None 时尝试从 diff 文件头推断。
 /// `_width` 预留参数（与 `primitives::diff::diff` 签名对齐），当前不换行。
 pub fn render_unified_diff(text: &str, ext: Option<&str>, _width: u16) -> Vec<RenderedLine> {
-    let syntax_ref = ext.and_then(language_by_extension);
+    let inferred_ext = ext
+        .map(str::to_string)
+        .or_else(|| infer_ext_from_diff(text));
+    let syntax_ref = inferred_ext.as_deref().and_then(language_by_extension);
     text.lines()
         .map(|line| render_line(line, syntax_ref.as_ref()))
         .collect()
+}
+
+fn infer_ext_from_diff(text: &str) -> Option<String> {
+    text.lines().find_map(infer_ext_from_diff_line)
+}
+
+fn infer_ext_from_diff_line(line: &str) -> Option<String> {
+    if let Some(path) = line
+        .strip_prefix("+++ ")
+        .or_else(|| line.strip_prefix("--- "))
+    {
+        return diff_path_extension(path);
+    }
+
+    if let Some(rest) = line.strip_prefix("diff --git ") {
+        return rest.split_whitespace().rev().find_map(diff_path_extension);
+    }
+
+    None
+}
+
+fn diff_path_extension(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path == "/dev/null" {
+        return None;
+    }
+    let path = path
+        .strip_prefix("a/")
+        .or_else(|| path.strip_prefix("b/"))
+        .unwrap_or(path);
+    extension_from_path(path).map(str::to_string)
 }
 
 /// 单行渲染：保持 `INDENT` 缩进（修 #61 贴最左），按类型着色。
@@ -69,7 +103,9 @@ fn render_line(line: &str, syntax_ref: Option<&syntect::parsing::SyntaxReference
             parts.push(SpanPart::plain(line.to_string(), theme::TEXT_MUTED));
         }
         DiffLineKind::Removed => {
-            parts.push(SpanPart::plain(line.to_string(), theme::DIFF_REMOVE_FG));
+            let body = line.strip_prefix('-').unwrap_or(line);
+            parts.push(SpanPart::plain("-".to_string(), theme::DIFF_REMOVE_FG));
+            push_highlighted_body(&mut parts, body, theme::DIFF_REMOVE_FG, syntax_ref);
         }
         DiffLineKind::Added => {
             // 去掉前导 '+'（单 ASCII 字节）做语法高亮，再补回 '+' 前缀语义符号。
@@ -78,7 +114,9 @@ fn render_line(line: &str, syntax_ref: Option<&syntect::parsing::SyntaxReference
             push_highlighted_body(&mut parts, body, theme::DIFF_ADD_FG, syntax_ref);
         }
         DiffLineKind::Context => {
-            parts.push(SpanPart::plain(line.to_string(), theme::TEXT));
+            let body = line.strip_prefix(' ').unwrap_or(line);
+            parts.push(SpanPart::plain(" ".to_string(), theme::TEXT_DIM));
+            push_highlighted_body(&mut parts, body, theme::TEXT, syntax_ref);
         }
     }
     RenderedLine::new(spanparts_to_spans(&parts))
@@ -152,6 +190,50 @@ mod tests {
             added.spans.len() > 2,
             "语法高亮应产生多个 span, got {}",
             added.spans.len()
+        );
+    }
+
+    #[test]
+    fn test_render_unified_diff_removed_and_context_lines_use_syntax_highlight() {
+        let lines =
+            render_unified_diff(" fn keep() {}\n-fn old() {}\n+fn new() {}", Some("rs"), 80);
+        let context = lines.iter().find(|l| l.plain.contains("keep")).unwrap();
+        let removed = lines.iter().find(|l| l.plain.contains("old")).unwrap();
+        let added = lines.iter().find(|l| l.plain.contains("new")).unwrap();
+
+        assert!(
+            context.spans.len() > 2,
+            "context 行正文应走 syntect 高亮，got: {:?}",
+            context.spans
+        );
+        assert!(
+            removed.spans.len() > 2,
+            "removed 行正文应走 syntect 高亮，got: {:?}",
+            removed.spans
+        );
+        assert!(
+            added.spans.len() > 2,
+            "added 行正文应走 syntect 高亮，got: {:?}",
+            added.spans
+        );
+    }
+
+    #[test]
+    fn test_render_unified_diff_infers_extension_from_file_headers() {
+        let text = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}";
+        let lines = render_unified_diff(text, None, 80);
+        let added = lines.iter().find(|l| l.plain.contains("new")).unwrap();
+        let removed = lines.iter().find(|l| l.plain.contains("old")).unwrap();
+
+        assert!(
+            added.spans.len() > 2,
+            "应从 diff 文件头推断 rs 并高亮新增行，got: {:?}",
+            added.spans
+        );
+        assert!(
+            removed.spans.len() > 2,
+            "应从 diff 文件头推断 rs 并高亮删除行，got: {:?}",
+            removed.spans
         );
     }
 
