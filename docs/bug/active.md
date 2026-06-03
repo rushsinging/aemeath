@@ -13,7 +13,28 @@
 | 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
 | 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
 | 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
+| 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | 中 | 待确认 | 未确认 | 2026-06 | 修复：补齐官方 Catppuccin Macchiato palette 命名常量，并用这些常量手写 syntect Theme 构造器；`syntax.rs` 不再加载 `base16-ocean.dark`，Rust keyword 等 token 使用 Macchiato 色系 |
 
+
+### #109 TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致
+
+**状态**：待确认
+
+**症状**：TUI 整体 palette 已使用 Catppuccin Macchiato 色系，但 syntect 语法高亮仍硬编码 `ThemeSet::load_defaults()` 中的 `base16-ocean.dark`，代码 token 色与 UI 主题不一致。
+
+**根因**：`syntax.rs` 没有复用 `theme/palette.rs` 的 Macchiato 颜色，也没有手写 syntect Theme；Catppuccin Sublime Text 官方主题提供的是 `.sublime-color-scheme` JSON，不是 syntect 默认主题。
+
+**对比**：当前 palette 已有 Macchiato 核心色：`text`、`subtext0`、`overlay0/1`、`surface0/1`、`base`、`blue`、`mauve`、`green`、`peach`、`yellow`、`red`、`teal`；缺少官方 token 规则中会用到的 `rosewater`、`flamingo`、`pink`、`maroon`、`sky`、`sapphire`、`lavender`、`subtext1`、`overlay2`、`surface2`、`mantle`、`crust` 等命名常量。
+
+**修复**：补齐 Catppuccin Macchiato 官方 palette 命名常量，并将既有语义色改为引用这些常量；`syntax.rs` 新增手写 `catppuccin_macchiato_theme`，用 Macchiato scope 规则构造 `syntect::highlighting::Theme`，替换 `base16-ocean.dark`。
+
+**验证**：
+- `cargo test -p cli test_highlight_line_uses_catppuccin_macchiato_keyword_color`
+- `cargo test -p cli syntax::tests`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/theme/palette.rs`
+- `apps/cli/src/tui/render/syntax.rs`
 
 ### #108 TUI diff 代码块没有统一走 syntect 高亮
 
