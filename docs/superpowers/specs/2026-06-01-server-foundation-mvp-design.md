@@ -308,12 +308,45 @@ CLI 输入回车
 | multi-machine | 跨机 remote launcher（worker WS 改 TCP 暴露）+ 控制面 HA |
 | governance | 配额/限流/按租户成本归账（控制面边缘按帧计数） |
 | swarm-feature | worker 内 multi-main-agent（coordinator + peer），填充契约 agent 维度 |
+| collaboration-domain | 账户/项目级实体（Requirement/Project/Task/团队）独立 BC + 服务 + DB；归属见 §12 |
 
 > 跨机在 B 下很自然：worker 本就是 WS server，把 uds 换成 TCP 暴露、launcher 换成远程，控制面代理逻辑不变。
 
 ---
 
-## 12. 自检（待实施前确认）
+## 12. 架构边界约定：领域服务 vs 控制面
+
+> 本节是**前瞻性边界约定**，不属于 MVP 实现，但约束后续所有"复杂协作功能"的归属——**避免把领域逻辑堆进控制面**。控制面的"薄"是设计意图，不是临时简化。
+
+随协作功能（把对话整理成需求、映射到项目与任务、团队共享…）加入，会出现一类**账户/项目级、跨会话、长生命**的实体。它们既不属于 worker（session 级、易逝、隔离），也不该进控制面（infra 代理）。三种 scope、三个家：
+
+| scope | 实体 | 归属 | 生命周期 |
+|---|---|---|---|
+| session 级 | 对话 / Turn / 活的 Agent Loop / workspace 文件 | **worker** + session 存储 | 易逝（worker 可回收） |
+| 账户/项目级 | **Requirement / Project / Task（PM）/ 团队协作** | **独立"协作域"服务（新 BC）** | 长命、跨会话、可能跨用户 |
+| 基础设施级 | session 注册表 / worker 调度 / 配额 | **控制面** | 进程级 |
+
+**约定**：
+
+1. **控制面保持薄**——只做路由 / 调度 / 隔离 / 代理，**NEVER** 承载领域实体或业务规则。复杂协作逻辑一律不进控制面（否则把基础设施扩展和领域逻辑耦死）。
+2. **账户/项目级实体归独立"协作域"BC**——自己的 `gateway`(OHS) + 自己的 DB schema，按需独立伸缩。它与控制面是**平级 peer，不是嵌套**。
+3. **分析在 worker、实体在协作域**：agent 在会话里"对话→需求"的分析是 worker 的 agent 能力；产出的实体写进协作域的 API 持久化。
+4. **worker / UI 经 outbound 端口消费协作域**——与 worker 消费 provider/storage 同一 hexagonal 范式。
+5. **命名消歧**：Runtime 的 `TaskBoard`（某 Chat 的临时待办，session 级、易逝）与协作域的 `Task`（跨会话持久的 PM 实体）**同名不同 BC**，命名上须区分（如 `PlanItem` vs `ProjectTask`），避免概念混淆。
+
+拓扑：
+
+```
+   控制面（薄代理/调度）          协作域服务（Requirement/Project/Task，自有 DB）
+        │                               ▲                ▲
+  代理 WS│                       gateway │                │ gateway
+        ▼                               │                │
+ CLI ─▶ worker（session 级 runtime）─────┘                └──── UI 直接读
+```
+
+---
+
+## 13. 自检（待实施前确认）
 
 - **范围聚焦**：本 MVP 只打通管道，所有可换项以最简 adapter 占位，不夹带后续子项目。
 - **契约前瞻**：§4.6 的 agent 维度是唯一对现有 sdk 的破坏性改动，必须随 MVP 落地。
