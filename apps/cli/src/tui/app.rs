@@ -241,6 +241,7 @@ impl App {
                     chunks[2],
                     buf,
                     &input_render_model,
+                    &self.view_state.input_sel,
                     &suggestions_view,
                 );
             }));

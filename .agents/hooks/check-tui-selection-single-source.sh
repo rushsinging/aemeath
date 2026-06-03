@@ -24,13 +24,23 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# Input/status selection truth lives in view_state.input_sel / view_state.status_sel.
-# InputArea / StatusBar keep only render-time mirrors for highlighting. Production copy paths must
-# read selected text from view_state + widget text projection, not from widget selection mirrors.
+# Input selection truth lives in view_state.input_sel and InputArea must render from that
+# projection directly; it must not physically store input selection mirrors. Status selection still
+# keeps a render mirror pending a later stateless slice.
 
 report_matches \
-  "input_area/status_bar selection mirrors must not be written outside their adapters or widget internals; write view_state.input_sel/status_sel instead." \
-  bash -c "grep -RInE '\b(input_area|status_bar|self)\.(is_selecting|selection_start|selection_end|selection_row|selection_width)\s*=' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v '/adapter/input_widget.rs' | grep -v '/adapter/status_widget.rs' | grep -v '/render/input/input_area/selection.rs' | grep -v '/render/display/status_bar_selection.rs' | grep -v '/render/output_area/' | grep -v 'view_state\.(input_sel|status_sel)\.' | grep -v '\s*=='"
+  "InputArea must not physically store input selection mirror fields; render directly from InputSelectionViewState." \
+  grep -RInE 'pub\(super\)[[:space:]]+(is_selecting|selection_start|selection_end):' \
+    "$ROOT/apps/cli/src/tui/render/input/input_area.rs" \
+    "$ROOT/apps/cli/src/tui/render/input/input_area" --include='*.rs'
+
+report_matches \
+  "input selection mirrors must not be written through input_area/self; write view_state.input_sel and render from it." \
+  bash -c "grep -RInE '\b(input_area|self)\.(is_selecting|selection_start|selection_end)\s*=' \"$ROOT/apps/cli/src/tui/render/input\" \"$ROOT/apps/cli/src/tui/adapter/input_widget.rs\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v 'view_state\.input_sel\.' | grep -v '\s*=='"
+
+report_matches \
+  "status_bar selection mirrors must not be written outside its adapter or widget internals; write view_state.status_sel instead." \
+  bash -c "grep -RInE '\b(status_bar|self)\.(is_selecting|selection_start|selection_end|selection_row|selection_width)\s*=' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v '/adapter/status_widget.rs' | grep -v '/render/display/status_bar_selection.rs' | grep -v '/render/output_area/' | grep -v 'view_state\.status_sel\.' | grep -v '\s*=='"
 
 report_matches \
   "InputArea/StatusBar must not expose production selection state mutators or selected-text getters that depend on widget mirrors; use selected_text_for_view." \

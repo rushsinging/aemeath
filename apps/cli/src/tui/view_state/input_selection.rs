@@ -1,19 +1,16 @@
-//! Input 选区 view_state（#59 S4）。
+//! Input 选区 view_state（#59 S4；#70 phase 2 去除 InputArea selection mirror）。
 //!
 //! 对齐 S2 `output.rs` / T1 `status.rs` 范式：选区真相收敛到 view_state 锚点
-//! 状态机，widget `render/input/input_area/` 的 `is_selecting`/`selection_start`/
-//! `selection_end` 降为只读镜像，由 `adapter/input_widget.rs::apply_input_selection_to_widget`
-//! 单向写回（T4 接线）。
+//! 状态机。`InputArea` 不再保存 input selection mirror；render 直接消费本 view_state。
 //!
 //! 坐标模型照搬现 `render/input/input_area/selection.rs`，无行为漂移：
 //! - 锚点为 textarea `(row, col)`（usize, usize）：`row` 为 textarea 行号，`col`
 //!   为该行 plain 文本字符索引（非屏幕列、非字节）。屏幕坐标 → `(row, col)` 的折算
 //!   （`textarea_pos`：减 inner_area 偏移 + `col_to_char_idx`）依赖 render 期
-//!   `textarea.lines()`，保留在 widget 只读借用，view_state 只持已折算的锚点
-//!   （对齐 output 的 `screen_to_anchor` / status 的 `screen_col_to_char_idx` 留 widget）。
+//!   input text 投影，保留在 `InputArea::screen_to_input_anchor` 只读折算函数中。
 
 /// 选区锚点：textarea `(row, col)`。`row` 为 textarea 行号，`col` 为该行 plain
-/// 文本字符索引。与 widget `InputArea.selection_start/end` 同型。
+/// 文本字符索引。`InputArea` render 直接消费该锚点。
 pub type InputAnchor = (usize, usize);
 
 /// Input 选区视图状态：锚点状态机，对齐 widget input 选区坐标模型。

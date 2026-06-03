@@ -2,6 +2,7 @@ use super::InputArea;
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::render::theme;
+use crate::tui::view_state::InputSelectionViewState;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -12,7 +13,13 @@ use tui_textarea::TextArea;
 
 impl InputArea {
     /// Render the input area from a model-derived projection.
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer, model: &InputRenderModel) {
+    pub fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        model: &InputRenderModel,
+        selection: &InputSelectionViewState,
+    ) {
         self.pending_images = model.pending_images;
         self.focused = model.focused;
         let block = self.input_block();
@@ -23,7 +30,7 @@ impl InputArea {
         let mut textarea = configured_textarea(model);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
-        self.render_selection(inner_area, buf, model);
+        self.render_selection(inner_area, buf, model, selection);
     }
 
     fn input_block(&self) -> Block<'static> {
@@ -43,8 +50,14 @@ impl InputArea {
             .border_style(border_style)
     }
 
-    fn render_selection(&self, inner_area: Rect, buf: &mut Buffer, model: &InputRenderModel) {
-        let Some(((start_row, start_col), (end_row, end_col))) = self.get_normalized_selection()
+    fn render_selection(
+        &self,
+        inner_area: Rect,
+        buf: &mut Buffer,
+        model: &InputRenderModel,
+        selection: &InputSelectionViewState,
+    ) {
+        let Some(((start_row, start_col), (end_row, end_col))) = selection.normalized_selection()
         else {
             return;
         };
@@ -158,14 +171,15 @@ mod tests {
             height: 3,
         };
         let mut buf = Buffer::empty(area);
-        input.render(area, &mut buf, &model);
+        input.render(area, &mut buf, &model, &InputSelectionViewState::default());
         let inner = input.get_inner_area(&area);
 
-        // 选区真相经只读折算 + 镜像写回（adapter 唯一生产写入路径）。
         let start = text_anchor_for_screen_col(&model.text, 0, 0);
         let end = text_anchor_for_screen_col(&model.text, 0, 36);
-        input.apply_selection_mirror(true, Some(start), Some(end));
-        input.render(area, &mut buf, &model);
+        let mut selection = InputSelectionViewState::default();
+        selection.begin_selection(start);
+        selection.update_selection(end);
+        input.render(area, &mut buf, &model, &selection);
         let selected_end = col_to_char_idx(&model.text, 36);
         let screen_col = char_col_to_screen_col(&model.text, selected_end) - 1;
 
