@@ -174,7 +174,7 @@ impl App {
             &self.model.conversation,
             self.view_state.output.version,
         );
-        let width = self.layout.output_area_rect.width.saturating_sub(2).max(1);
+        let width = self.layout.output_area_rect.width.saturating_sub(3).max(1);
         render_document_from_view_model(&mut self.output_area, &view_model, width);
     }
 
