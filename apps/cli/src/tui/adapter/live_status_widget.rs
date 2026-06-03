@@ -1,9 +1,11 @@
 //! 实时状态行 adapter：把 `LiveStatusViewModel` 单向写回 `OutputArea` 的
 //! `spinner` / `task_status_lines` 镜像字段。这是这两个镜像字段的唯一生产写入路径。
 //!
-//! Instant 处理：`SpinnerState.start: Instant` 无法由 ViewModel 提供（vm 用 frame
-//! 推算 elapsed）。本 adapter 在 None→Some 时新建 `SpinnerState`（start=now），
-//! Some→Some 时只更新 frame/verb/phase 并保留原 start，使 elapsed 自然增长。
+//! Instant 处理：`SpinnerState.start: Instant` / `phase_start: Instant` 无法由
+//! ViewModel 提供（vm 用 frame 推算 elapsed）。本 adapter 在 None→Some 时新建
+//! `SpinnerState`（start=phase_start=now），Some→Some 时只更新 frame/verb/phase
+//! 并保留原 start 使 elapsed 自然增长；phase 文本变化时单独重置 phase_start，
+//! 让括号内的阶段计时从 0 开始。
 
 use crate::tui::render::output_area::{OutputArea, SpinnerState};
 use crate::tui::view_model::LiveStatusViewModel;
@@ -14,16 +16,22 @@ pub(crate) fn apply_live_status_to_widget(output_area: &mut OutputArea, vm: &Liv
         Some(view) => {
             if let Some(existing) = output_area.spinner.as_mut() {
                 // Some→Some：保留 start（elapsed 持续增长），更新动画 + phase。
+                // phase 文本变化时重置 phase_start，用于括号内的阶段计时。
+                if existing.phase != view.phase_text {
+                    existing.phase_start = std::time::Instant::now();
+                }
                 existing.frame = view.frame;
                 existing.verb = view.verb.clone();
                 existing.phase = view.phase_text.clone();
             } else {
-                // None→Some：新建，start 取当前时刻。
+                // None→Some：新建，start/phase_start 同取当前时刻。
+                let now = std::time::Instant::now();
                 output_area.spinner = Some(SpinnerState {
                     frame: view.frame,
                     verb: view.verb.clone(),
-                    start: std::time::Instant::now(),
+                    start: now,
                     phase: view.phase_text.clone(),
+                    phase_start: now,
                 });
             }
         }
@@ -71,6 +79,7 @@ mod tests {
         let mut output = OutputArea::new();
         apply_live_status_to_widget(&mut output, &vm_with_spinner(1, "Forging", None));
         let original_start = output.spinner.as_ref().unwrap().start;
+        let original_phase_start = output.spinner.as_ref().unwrap().phase_start;
 
         apply_live_status_to_widget(
             &mut output,
@@ -83,6 +92,50 @@ mod tests {
         assert_eq!(s.phase.as_deref(), Some("Generating..."));
         // start 未重置
         assert_eq!(s.start, original_start);
+        // phase 文本由 None 变为 Some(...)，phase_start 应被重置
+        assert!(s.phase_start >= original_phase_start);
+        assert_ne!(s.phase_start, original_phase_start);
+    }
+
+    #[test]
+    fn test_apply_same_phase_preserves_phase_start() {
+        let mut output = OutputArea::new();
+        apply_live_status_to_widget(
+            &mut output,
+            &vm_with_spinner(1, "Forging", Some("Thinking...")),
+        );
+        let original_phase_start = output.spinner.as_ref().unwrap().phase_start;
+
+        apply_live_status_to_widget(
+            &mut output,
+            &vm_with_spinner(2, "Forging", Some("Thinking...")),
+        );
+
+        let s = output.spinner.as_ref().expect("spinner present");
+        // phase 文本未变，phase_start 应保持不变（计时持续累积）
+        assert_eq!(s.phase_start, original_phase_start);
+    }
+
+    #[test]
+    fn test_apply_phase_change_resets_phase_start() {
+        let mut output = OutputArea::new();
+        apply_live_status_to_widget(
+            &mut output,
+            &vm_with_spinner(1, "Forging", Some("Thinking...")),
+        );
+        let original_phase_start = output.spinner.as_ref().unwrap().phase_start;
+
+        // sleep 1ms 保证后续 Instant 严格大于
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        apply_live_status_to_widget(
+            &mut output,
+            &vm_with_spinner(2, "Forging", Some("Calling Read")),
+        );
+
+        let s = output.spinner.as_ref().expect("spinner present");
+        // phase 文本变化，phase_start 应重置（严格大于）
+        assert!(s.phase_start > original_phase_start);
     }
 
     #[test]
