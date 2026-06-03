@@ -81,7 +81,12 @@ impl crate::tui::app::App {
                     // 屏幕坐标 → textarea 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4 T4）。
                     let inner = self.input_area.get_inner_area(&input_area);
-                    let anchor = self.input_area.screen_to_input_anchor(row, col, &inner);
+                    let anchor = self.input_area.screen_to_input_anchor(
+                        &self.model.input.document.buffer,
+                        row,
+                        col,
+                        &inner,
+                    );
                     self.view_state.input_sel.begin_selection(anchor);
                 } else if point_in_rect(row, col, &status_bar) {
                     // 清除其他区域的选中（output/input 清 view_state）
@@ -115,7 +120,12 @@ impl crate::tui::app::App {
                 } else if self.view_state.input_sel.is_selecting() {
                     // 屏幕坐标 → textarea 锚点只读折算借 widget，写入 view_state。
                     let inner = self.input_area.get_inner_area(&input_area);
-                    let anchor = self.input_area.screen_to_input_anchor(row, col, &inner);
+                    let anchor = self.input_area.screen_to_input_anchor(
+                        &self.model.input.document.buffer,
+                        row,
+                        col,
+                        &inner,
+                    );
                     self.view_state.input_sel.update_selection(anchor);
                 } else if self.view_state.status_sel.is_selecting() {
                     // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
@@ -143,10 +153,10 @@ impl crate::tui::app::App {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.input_sel.end_selection();
                     // 取 plain 文本（读 view_state 选区真相 + render 期 textarea.lines() 折算）。
-                    let text = self
-                        .input_area
-                        .selected_text_for_view(&self.view_state.input_sel);
-                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                    let text = self.input_area.selected_text_for_view(
+                        &self.model.input.document.buffer,
+                        &self.view_state.input_sel,
+                    ); // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
                     self.view_state.input_sel.clear_selection();
                     text
                 } else if self.view_state.status_sel.is_selecting() {

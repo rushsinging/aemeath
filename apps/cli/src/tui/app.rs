@@ -9,6 +9,7 @@ use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
+use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -229,11 +230,17 @@ impl App {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let suggestions_view =
                     SuggestionViewState::from_completion(&self.model.input.completion);
+                let input_render_model = InputRenderModel::from_document(
+                    &self.model.input.document,
+                    Some("Type a message... (Enter to send, Alt+Enter for new line)".to_string()),
+                    self.chat.pending_image_count(),
+                    true,
+                );
                 self.input_area.draw(
                     chunks[1],
                     chunks[2],
                     buf,
-                    self.chat.pending_image_count(),
+                    &input_render_model,
                     &suggestions_view,
                 );
             }));
