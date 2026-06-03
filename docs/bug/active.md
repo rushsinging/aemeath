@@ -10,9 +10,32 @@
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 | 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
-| 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 活动中 | 未确认 | 2026-06 | 输出区内 Paragraph 以完整 area 宽度渲染，滚动条随后在同一 area 的最右列绘制，造成文字覆盖滚动条；同时 `term_width`（area.width-2）作为换行宽度未被 Paragraph 使用，长行不自动换行
+| 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
 
 
+
+### #106 TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行
+
+**状态**：待确认
+
+**症状**：输出区可滚动时，正文仍按完整区域宽度渲染，右侧字符会占用滚动条列；长行没有按预留滚动条后的内容宽度提前换行，视觉上表现为右侧文字与滚动条重叠或被滚动条覆盖。
+
+**根因**：`OutputArea::render` 将 `Paragraph` 渲染到完整 `area`，随后又在同一 `area` 最右列绘制 `Scrollbar`；同时输出 view model 渲染宽度只扣除左右边距，没有扣除滚动条列，导致上游 markdown/文本换行宽度大于实际内容区域。
+
+**修复**：
+1. 输出内容需要滚动条时，新增 content area：宽度为 `area.width - 1`，正文 `Paragraph` 只渲染到该区域。
+2. `Scrollbar` 继续渲染到原 `area` 最右列，独占滚动条列。
+3. `refresh_output_widget_from_model` 计算渲染宽度时同步扣除左右边距和滚动条列。
+4. 新增回归测试 `test_render_reserves_scrollbar_column_and_wraps_long_lines`，覆盖正文不会写入最右滚动条列。
+
+**验证**：
+- `cargo test -p cli test_render_reserves_scrollbar_column_and_wraps_long_lines`
+- `cargo test -p cli tui::render::output_area::render::tests`
+- `cargo check`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output_area/render.rs`
+- `apps/cli/src/tui/app/update.rs`
 
 ### #105 TUI 中 ```text fenced block 被当作代码块显示而非 Markdown 渲染
 

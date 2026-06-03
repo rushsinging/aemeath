@@ -39,6 +39,8 @@ impl OutputArea {
         let visible_lines = (area.height as usize).saturating_sub(reserved);
         self.last_visible_height = visible_lines;
         let total_lines = self.document.total_lines();
+        let needs_scrollbar = total_lines > visible_lines;
+        let content_area = content_area_for_scrollbar(area, needs_scrollbar);
         let (start, end) = visible_range(
             total_lines,
             visible_lines,
@@ -82,7 +84,7 @@ impl OutputArea {
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(display_lines);
-            paragraph.render(area, buf);
+            paragraph.render(content_area, buf);
         }));
 
         let total_rendered = self.screen_line_map.len();
@@ -157,6 +159,18 @@ fn normalize_rendered_table_plain(plain: &str) -> String {
     format!("{}  │{}", left.trim_end(), right.trim_end())
 }
 
+fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> Rect {
+    if !needs_scrollbar || area.width == 0 {
+        return area;
+    }
+    Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width.saturating_sub(1),
+        height: area.height,
+    }
+}
+
 fn visible_range(
     total_lines: usize,
     visible_lines: usize,
@@ -215,6 +229,32 @@ mod tests {
     use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
     use crate::tui::render::theme;
     use ratatui::{buffer::Buffer, layout::Rect, text::Span};
+
+    #[test]
+    fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
+        let mut area = OutputArea::new();
+        area.set_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "a".into(),
+                lines: vec![
+                    RenderedLine::new(vec![Span::raw("line 1")]),
+                    RenderedLine::new(vec![Span::raw("1234567")]),
+                    RenderedLine::new(vec![Span::raw("line 2")]),
+                ],
+            }],
+        });
+        let area_rect = Rect::new(0, 0, 6, 2);
+        let mut buf = Buffer::empty(area_rect);
+
+        area.render(area_rect, &mut buf);
+
+        assert_ne!(
+            buf[(5, 0)].symbol(),
+            "6",
+            "最右列预留给滚动条，不应渲染正文"
+        );
+        assert_eq!(buf[(0, 1)].symbol(), "l", "多行文档应继续渲染下一条逻辑行");
+    }
 
     #[test]
     fn test_render_document_paints_spans_and_overlays_selection() {
