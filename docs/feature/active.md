@@ -2,7 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 75 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除已废弃 `logging.module_levels` 字段，统一为 `logging.level` 全局过滤；补充日志初始化、hook runner 构建、chat loop hook runner、hook 匹配/分发日志，便于判断 hook 配置是否加载、Stop hook 是否实际匹配和执行 |
+| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除已废弃 `logging.module_levels` 字段，统一为 `logging.level` 全局过滤；补充日志初始化、hook runner 构建、chat loop hook runner、hook 匹配/分发日志，便于判断 hook 配置是否加载、Stop hook 是否实际匹配和执行 |
 | 74 | Guidance：任务执行期间用户提问时同步更新 task list | 低 | 待确认 | 待用户确认 | Universal execution discipline 新增 task list scope change 规则：当用户在活动 task list 期间提问、澄清或改变需求时，若影响计划，必须更新 active task list 和相关 task（修改描述、增删任务、调整依赖/优先级） |
 | 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | 在 Stop hook 的关键脚本输出 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，并输出解析后的 `ROOT`/`PWD`，便于排查 main/worktree 中 hook 实际运行路径与 Claude 兼容目录注入是否正确 |
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
