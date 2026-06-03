@@ -146,6 +146,23 @@ impl HookRunner {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let code = output.status.code().unwrap_or(-1);
 
+                for line in hook_env_lines(&stdout) {
+                    log::info!(
+                        "hook env: event={:?} command={} stream=stdout line={}",
+                        input.event,
+                        command,
+                        line.trim()
+                    );
+                }
+                for line in hook_env_lines(&stderr) {
+                    log::info!(
+                        "hook env: event={:?} command={} stream=stderr line={}",
+                        input.event,
+                        command,
+                        line.trim()
+                    );
+                }
+
                 // 任意非零退出码都表示 hook 阻止当前流程继续。
                 let blocked = code != 0;
 
@@ -302,6 +319,12 @@ impl HookRunner {
         let blocked = results.iter().any(|r| r.blocked);
         (blocked, results)
     }
+}
+
+pub(crate) fn hook_env_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| line.trim_start().starts_with("[hook-env]"))
+        .collect()
 }
 
 fn non_empty_text(text: &str) -> Option<String> {
