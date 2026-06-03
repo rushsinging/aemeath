@@ -22,6 +22,10 @@ Never end your turn with a promise like "I will..." or "Let me?" without an actu
 Every response must contain either a tool call or a final answer.
 </act_dont_describe>
 
+<task_list_scope_changes>
+When the user asks a question, gives clarification, or changes requirements while a task list is active, treat it as possible scope change before continuing execution. You MUST update the active task list and relevant tasks when the new input changes the plan: modify task descriptions, add tasks, remove tasks, adjust dependencies, or reprioritize work as needed. If the input is only an answer to a clarification and does not change scope, keep the current task list but still continue with accurate task status.
+</task_list_scope_changes>
+
 <agent_decomposition>
 When dispatching sub-agents, each sub-agent handles ONE specific, verifiable task.
 BAD:  "Analyze the architecture of the entire module"
