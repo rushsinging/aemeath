@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
+| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | 在 Stop hook 的关键脚本输出 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，并输出解析后的 `ROOT`/`PWD`，便于排查 main/worktree 中 hook 实际运行路径与 Claude 兼容目录注入是否正确 |
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 68 | 项目指令搜索增强：全局 fallback ~/.claude/CLAUDE.md + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局指令优先 ~/.agents/AGENTS.md，不存在时 fallback ~/.claude/CLAUDE.md；项目指令从 cwd 向上最多 5 级祖先搜索 CLAUDE.md/AGENTS.md，每层级 Claude 优先；不再向下递归子目录，避免启动时扫描大型父目录导致 TUI 卡住 |
@@ -13,6 +14,29 @@
 | 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
 | 71 | AGENTS.md 渐进式披露重构：根指令瘦身 + specs/ 分片按需加载 | 中 | 进行中 | 未确认 | 将单文件全量的根 `AGENTS.md` 重构为「宪法 + 工作流 + 渐进式披露路由表」，detailed 规则下沉到 `specs/` 10 个分片，按路径/场景触发按需加载；顺带校正文档中已漂移的旧 crate 名（`aemeath-core`/`aemeath-llm`/`aemeath-tools` → `agent/features/*`、`agent/shared/*`）|
+
+### #71 Stop hook 日志输出项目目录上下文
+
+**状态**：待确认
+
+**背景**：排查 Stop hook 在 main 与 git worktree 中的耗时时，需要明确 hook 实际使用的项目根目录，以及 Claude Code 兼容环境变量是否与 Aemeath 项目目录一致。当前 Stop hook 输出只显示检查结果，不直接打印 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，定位路径问题时需要额外手动执行命令。
+
+**实现**：
+1. `check-architecture-guards.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与解析后的 `ROOT`。
+2. `check-unit-tests.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、解析后的 `ROOT` 与 `PWD`。
+3. `build_cli.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与 `PWD`。
+4. 输出格式统一为 `[hook-env] KEY=value`，未设置时显示 `<unset>`。
+5. 不改变 hook 的检查语义、退出码和构建/测试目标目录策略。
+
+**验证**：
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-unit-tests.sh`
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" ./build_cli.sh`
+
+**涉及路径**：
+- `.agents/hooks/check-architecture-guards.sh`
+- `.agents/hooks/check-unit-tests.sh`
+- `build_cli.sh`
 
 ### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
 

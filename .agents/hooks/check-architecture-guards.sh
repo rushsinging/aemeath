@@ -10,6 +10,10 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 HOOKS_DIR="$ROOT/.agents/hooks"
 
+echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
+echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
+echo "[hook-env] ROOT=$ROOT"
+
 "$HOOKS_DIR/check-cargo-dependency-graph.sh"
 "$HOOKS_DIR/check-cli-thin-entry.sh"
 "$HOOKS_DIR/check-share-no-upstream-deps.sh"
