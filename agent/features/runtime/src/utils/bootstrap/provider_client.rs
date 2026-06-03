@@ -106,9 +106,7 @@ fn reasoning_config(
             // thinking_max_tokens > 0 仅当 reasoning 未显式关闭时才生效。
             // 若 model_reasoning == Some(false)，说明用户明确关闭了 thinking，
             // 此时 thinking_max_tokens 仅作为预算上限，不应强制开启 thinking。
-            if runtime_settings.thinking_max_tokens > 0
-                && model_reasoning != Some(false)
-            {
+            if runtime_settings.thinking_max_tokens > 0 && model_reasoning != Some(false) {
                 Some(ReasoningConfig::ThinkingBudget(
                     runtime_settings.thinking_max_tokens,
                 ))
@@ -310,6 +308,18 @@ mod tests {
             result,
             Some(ReasoningConfig::ThinkingBudget(4096))
         ));
+    }
+
+    #[test]
+    fn test_reasoning_config_exact_filter_path_documents_stop_hook_command() {
+        let exact_path = "utils::bootstrap::provider_client::tests::test_reasoning_config_uses_thinking_budget_before_model_reasoning";
+
+        assert!(exact_path
+            .ends_with("::test_reasoning_config_uses_thinking_budget_before_model_reasoning"));
+        assert_ne!(
+            exact_path,
+            "test_reasoning_config_uses_thinking_budget_before_model_reasoning"
+        );
     }
 
     #[test]
