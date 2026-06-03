@@ -11,6 +11,7 @@
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 | 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
+| 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 活动中 | 未确认 | 2026-06 | 输出区内 Paragraph 以完整 area 宽度渲染，滚动条随后在同一 area 的最右列绘制，造成文字覆盖滚动条；同时 `term_width`（area.width-2）作为换行宽度未被 Paragraph 使用，长行不自动换行
 
 
 
@@ -816,4 +817,26 @@ Tool Bash timed out after 120s
 **涉及路径**：
 - `apps/cli/src/tui/effect/session/processing.rs`（`spawn_processing` drain 后重发 chat）
 - input queue 状态管理与 TUI 展示逻辑
+
+### #106 TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行
+
+**状态**：活动中
+
+**症状**：
+1. 输出区文字行（尤其是长行，如表行、代码块行、长 URL 等）会铺到终端右边缘，与右侧滚动条重叠显示，视觉上文字被滚动条截断/覆盖。
+2. 长行不会自动换行，内容越过可见区域后被截断，无法查看超宽内容。
+
+**根因**：
+- `apps/cli/src/tui/render/output_area/render.rs` 第 84 行：`Paragraph::new(display_lines).render(area, buf)` 将文本渲染到输出区的完整 `area` 宽度，未扣除滚动条占用的最右列。
+- 同文件第 98-105 行：`render_scrollbar` 在 `area.right().saturating_sub(1)` 处绘制 1 列宽的滚动条，直接覆盖已渲染的文字。
+- 同文件第 19 行：`self.term_width = (area.width as usize).saturating_sub(2)` 已经计算了扣除滚动条后的换行宽度，但该值仅存储未实际用于约束 Paragraph 的渲染宽度。Paragraph 默认使用 `area.width` 作为换行宽度，未受 `term_width` 约束。
+
+**修复方向**：
+1. 将 Paragraph 渲染到扣除滚动条的窄区域：`Rect { width: area.width.saturating_sub(1), ..area }`，或使用 `.wrap(Wrap { trim: false })` 配合正确的 max width。
+2. 确保 `term_width`（或新的有效宽度）实际应用于 Paragraph wrap 行为，使长行自动换行。
+3. 滚动条区域宽度保持 1 列不变，但内容区不再扩展到该列。
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output_area/render.rs`（Paragraph 渲染宽度 + scrollbar 绘制冲突）
+- `apps/cli/src/tui/render/output/primitives/markdown.rs`（markdown 渲染宽度传入）
 
