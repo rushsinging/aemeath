@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
+| 75 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除已废弃 `logging.module_levels` 字段，统一为 `logging.level` 全局过滤；补充日志初始化、hook runner 构建、chat loop hook runner、hook 匹配/分发日志，便于判断 hook 配置是否加载、Stop hook 是否实际匹配和执行 |
 | 74 | Guidance：任务执行期间用户提问时同步更新 task list | 低 | 待确认 | 待用户确认 | Universal execution discipline 新增 task list scope change 规则：当用户在活动 task list 期间提问、澄清或改变需求时，若影响计划，必须更新 active task list 和相关 task（修改描述、增删任务、调整依赖/优先级） |
 | 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | 在 Stop hook 的关键脚本输出 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，并输出解析后的 `ROOT`/`PWD`，便于排查 main/worktree 中 hook 实际运行路径与 Claude 兼容目录注入是否正确 |
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
@@ -19,6 +20,44 @@
 | 73 | AGENTS.md 渐进式披露重构：根指令瘦身 + specs/ 分片按需加载 | 中 | 进行中 | 未确认 | 将单文件全量的根 `AGENTS.md` 重构为「宪法 + 工作流 + 渐进式披露路由表」，detailed 规则下沉到 `specs/` 10 个分片，按路径/场景触发按需加载；顺带校正文档中已漂移的旧 crate 名（`aemeath-core`/`aemeath-llm`/`aemeath-tools` → `agent/features/*`、`agent/shared/*`）|
 | 72 | Edit diff 显示真实文件行号 | 中 | 待确认 | 未确认 | Edit 工具结果标记改为 `---DIFF:LINE:N---`，TUI 解析起始行号并传给 diff 渲染；旧 `---DIFF---` 仍兼容为第 1 行；局部 Edit diff 不再显示片段内相对行号 |
 | 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 活动中 | 未确认 | 这两个 tool 输出行数固定且少，不应被 `TOOL_RESULT_MAX_LINES=5` 截断显示 `... (n lines omitted)` |
+
+### #75 日志模块整理与 hook 可观测性增强
+
+**状态**：待确认
+
+**背景**：日志配置中仍保留已废弃的 `module_levels` 字段，但运行时实际只使用 `logging.level`。同时 Stop hook 的 `[hook-env]` 行即使已在 runner 中记录，当前日志仍看不到 hook 相关信息；排查发现全局 `~/.agents/aemeath.json` 只有 `SessionStart` hook，项目 `.agents/aemeath.json` 才有 `Stop` hook，因此需要更明确的日志来区分“配置未加载/未匹配/未执行”和“已执行但 stdout 未记录”。
+
+**实现**：
+1. 从 `LoggingConfig` 移除 `module_levels` 字段，`to_filter_string()` 只返回全局 `logging.level`。
+2. 配置合并逻辑移除 `module_levels` 填充。
+3. `specs/rust-coding.md` 日志规范更新为读取 `logging.level`。
+4. `init_logging` 启动后记录日志 filter、target 与 logs_dir，便于确认配置是否生效。
+5. `build_hook_runner` 记录 hook runner 的 project_dir 与 configured_events。
+6. chat loop 设置 hook project_dir 后记录 runner 状态。
+7. `matching_hooks` 与 `HookUi::run_json` 记录 hook 匹配/分发结果，即使 matched=0 也可观测。
+
+**关于当前看不到 hook 日志的原因**：
+- 日志初始化本身是生效的，`aemeath.log` 有新会话日志。
+- 代码中的 `hook start/end/env` 只有在 `execute_hook` 被调用时才会出现。
+- 当前全局配置 `~/.agents/aemeath.json` 的 `hooks` 只有 `SessionStart`，没有 `Stop`。
+- Stop hook 配置位于项目 `.agents/aemeath.json`。如果当前运行时 cwd/project_dir 没有加载这个项目配置，或 Stop 事件没有匹配到 hook，则不会进入 `execute_hook`，因此不会有 `hook start/end/env`。
+- 本次新增的 `hook runner built`、`chat loop hook runner ready`、`hook match`、`hook ui dispatch` 会直接暴露是哪一层没走到。
+
+**验证**：
+- `cargo test -p share logging_config`
+- `cargo test -p runtime build_hook_runner`
+- `cargo test -p hook hook_env_lines`
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
+
+**涉及路径**：
+- `agent/shared/src/config/logging.rs`
+- `agent/features/runtime/src/utils/bootstrap/config_manager.rs`
+- `agent/features/runtime/src/utils/bootstrap/logging_setup.rs`
+- `agent/features/runtime/src/utils/bootstrap/runtime_support.rs`
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
+- `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
+- `agent/features/hook/src/business/hook/runner.rs`
+- `specs/rust-coding.md`
 
 ### #74 Guidance：任务执行期间用户提问时同步更新 task list
 

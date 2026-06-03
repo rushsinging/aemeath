@@ -490,7 +490,6 @@ impl ConfigManager {
                 } else {
                     base.logging.level
                 },
-                module_levels: serde_json::Value::Null,
                 max_bytes: if overlay.logging.max_bytes != default_logging_config().max_bytes {
                     overlay.logging.max_bytes
                 } else {

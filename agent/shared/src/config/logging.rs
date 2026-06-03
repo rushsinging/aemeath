@@ -40,11 +40,6 @@ pub struct LoggingConfig {
     #[serde(default = "default_level", alias = "default_level")]
     pub level: String,
 
-    /// Deprecated legacy per-module log level overrides. Accepted for compatibility only;
-    /// runtime logging uses the global `level` for every module.
-    #[serde(default, skip_serializing)]
-    pub module_levels: serde_json::Value,
-
     /// Maximum log file size in bytes
     #[serde(default = "default_max_bytes")]
     pub max_bytes: u64,
@@ -87,7 +82,6 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "warn".to_string(),
-            module_levels: serde_json::Value::Null,
             max_bytes: 10 * 1024 * 1024,
             max_backups: 5,
             retention_days: 30,
@@ -132,16 +126,6 @@ mod tests {
             .expect("legacy default_level should deserialize");
 
         assert_eq!(cfg.to_filter_string(), "debug");
-    }
-
-    #[test]
-    fn test_logging_config_ignores_legacy_module_levels() {
-        let cfg: LoggingConfig = serde_json::from_str(
-            r#"{"level":"error","module_levels":{"aemeath_cli":"debug","aemeath_core":"trace"}}"#,
-        )
-        .expect("legacy module_levels should deserialize");
-
-        assert_eq!(cfg.to_filter_string(), "error");
     }
 
     #[test]

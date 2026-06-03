@@ -26,6 +26,12 @@ where
         data: HookData,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
+        log::info!(
+            "hook ui dispatch: event={} tool_name={:?} matched={}",
+            hook_event_name(event),
+            tool_name,
+            hooks.len()
+        );
         if hooks.is_empty() {
             return Vec::new();
         }

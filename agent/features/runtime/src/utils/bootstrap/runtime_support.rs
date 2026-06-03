@@ -9,10 +9,16 @@ use std::sync::{Arc, Mutex};
 
 pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
     let cwd_str = cwd.display().to_string();
-    match config_file {
+    let runner = match config_file {
         Some(config) => HookRunner::from_config(config, cwd_str),
         None => HookRunner::empty(cwd_str),
-    }
+    };
+    log::info!(
+        "hook runner built: project_dir={} configured_events={}",
+        runner.project_dir(),
+        runner.hook_count()
+    );
+    runner
 }
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
