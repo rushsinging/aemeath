@@ -10,12 +10,12 @@
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
-| 104 | input queue drain 后没有在 TUI 中显示 | 中 | 修复中 | 未确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
-| 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 待确认 | 未确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
-| 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
+| 104 | input queue drain 后没有在 TUI 中显示 | 中 | 已修复 | 已确认 | 2026-06 | 根因：processing 期间 Enter 走 InputEventPort 而非 QueueDrainPort，runtime drain 后发 MessagesSync 只更新 chat.messages 和清除排队块，但没有将新增 user messages 渲染到 conversation model。修复：MessagesSync 中比较新旧 messages，用 append_user_echo 回显新增 user messages
+| 106 | TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行 | 中 | 已修复 | 已确认 | 2026-06 | 修复：输出区需要滚动条时，正文 Paragraph 渲染到减去 1 列的 content area，滚动条独占最右列；输出 view model 渲染宽度同步扣除边距和滚动条列，避免长行进入 Paragraph 后才被截断 |
+| 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | 中 | 已修复 | 已确认 | 2026-06 | 修复：新增 `language_by_fence_info`，将 Markdown fence 语言名 `rust` 映射到 syntect 可识别的 `rs`，同时保留 `rs` 扩展名路径；`fenced.rs` 改用 fence info 解析入口 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | LLM 原始输出中的长文本行（无换行）在 TUI 中只渲染到屏幕可视宽度，超出部分不可见（不自动换行也不可横向滚动），用户看到的文本在某个位置突然中断 |
-| 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 待确认 | 未确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
-| 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | 中 | 待确认 | 未确认 | 2026-06 | 修复：补齐官方 Catppuccin Macchiato palette 命名常量，并用这些常量手写 syntect Theme 构造器；`syntax.rs` 不再加载 `base16-ocean.dark`，Rust keyword 等 token 使用 Macchiato 色系 |
+| 108 | TUI diff 代码块没有统一走 syntect 高亮 | 中 | 已修复 | 已确认 | 2026-06 | 修复：`render_unified_diff` 可从 `+++`/`---`/`diff --git` 文件头推断扩展名；新增/删除/上下文正文均去掉 diff 前缀后走 syntect，`+`/`-`、hunk/meta 保留 diff 语义色；Edit diff 删除/新增/上下文正文也统一走 syntect |
+| 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | 中 | 已修复 | 已确认 | 2026-06 | 修复：补齐官方 Catppuccin Macchiato palette 命名常量，并用这些常量手写 syntect Theme 构造器；`syntax.rs` 不再加载 `base16-ocean.dark`，Rust keyword 等 token 使用 Macchiato 色系 |
 
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
