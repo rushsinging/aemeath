@@ -87,6 +87,17 @@ aemeath/                    # workspace root
 
 ## 工作流约束
 
+### Bug / Feature 执行流程
+
+修复 bug 或实现 feature 时 **MUST** 按以下步骤执行，**NEVER** 跳过：
+
+1. **阅读描述**：读取 `docs/bug/active.md` 或 `docs/feature/active.md` 中对应条目的完整描述（含详情区块）。
+2. **定位问题并给出修复方案**：阅读相关源码，定位根因或设计点，给出修复/实现方案。复杂改动 **SHOULD** 调用 `superpowers:writing-plans` 制定详细计划。
+3. **等待用户同意**：将方案呈现给用户，**MUST** 获得明确同意后才开始修改代码。用户可能要求调整方案。
+4. **执行与验证**：在 worktree 中实施，通过编译、测试、clippy 验证后合并回 `main`。
+
+### Git 工作流
+
 - **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
 - **MUST** worktree 分支完成验证并提交后合并回 `main`。
 - **MUST** worktree 分支合并回 `main` 前，先在 `main` 工作区执行 `git pull`（或等价的 fetch + fast-forward）拉取最新更新，再从 worktree 合并；若拉取后存在冲突，**MUST** 在 worktree 分支上 rebase/merge 最新 `main` 并重新通过验证后才能合并。
