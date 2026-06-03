@@ -136,7 +136,7 @@ async fn stop_hook_feedback(
         })?;
     let details = hook_feedback_details(result, json, session_id, &entry.command).await;
     Some(format!(
-        "Stop hook 阻止了停止，请先解决以下问题后再结束：\n命令：{}\n{}",
+        "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{}\n{}",
         entry.command, details
     ))
 }
@@ -388,6 +388,29 @@ mod tests {
 
         assert!(feedback.contains("check.sh"));
         assert!(feedback.contains("fix line count"));
+    }
+
+    #[test]
+    fn test_stop_hook_feedback_tells_llm_it_must_not_finish() {
+        let results = vec![hook_result(
+            "check-stop.sh",
+            true,
+            "fix the failing test",
+            Some("exit code 2"),
+        )];
+
+        let feedback = stop_hook_feedback_for_test(&results).unwrap();
+
+        assert!(
+            feedback.contains("不能结束") || feedback.contains("MUST NOT finish"),
+            "feedback must explicitly tell the LLM it cannot finish yet: {feedback}"
+        );
+        assert!(
+            feedback.contains("MUST") || feedback.contains("必须"),
+            "feedback must use mandatory language: {feedback}"
+        );
+        assert!(feedback.contains("check-stop.sh"));
+        assert!(feedback.contains("fix the failing test"));
     }
 
     fn hook_result_with_json_reason(

@@ -13,9 +13,33 @@
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | LLM 原始输出中的长文本行（无换行）在 TUI 中只渲染到屏幕可视宽度，超出部分不可见（不自动换行也不可横向滚动），用户看到的文本在某个位置突然中断 |
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方 | 中 | 待确认 | 未确认 | 2026-06 | **现象**：用户回答 AskUserQuestion 后，LLM 继续生成的文本出现在 AskUser 交互块的上方而非下方。**分析**：`append_assistant_text` 通过 `append_or_extend_text_block` 追加文本，如果 `active_text_block_id` 仍指向 AskUser 之前的 AssistantText 块，新文本会被 extend 到该旧块（位于 AskUser 块之前）。关键：`active_text_block_id` 只在 `TextBlockComplete`（`model.rs:262`）和 `complete_chat`（`model.rs:227`）时清除。AskUserQuestion 工具调用前如果没有收到 `TextBlockComplete` 事件，`active_text_block_id` 就不会为 None，后续文本就会 extend 到旧块。**关键代码**：`apps/cli/src/tui/model/conversation/model.rs:243,360-393`（`append_assistant_text` → `append_or_extend_text_block`），`model.rs:260-269`（`complete_text_block`） |
-| 114 | stop hook 阻止停止无意义——LLM 已发送完所有输出，hook 拦截无法中止已完成的响应 | 中 | 待确认 | 未确认 | 2026-06 | stop hook 在 LLM 完成生成后触发（stream 已结束），此时 block 停止没有实际效果，只是延迟返回给用户。stop hook 的检查应在 LLM 生成过程中（stream 消费循环内）执行，而非 stream 结束后。另外 stop hook 报告 `test_reasoning_config_uses_thinking_budget_before_model_reasoning` 测试失败是仓库已有问题，应单独登记 |
+| 114 | Stop hook blocked 缺少显式 chat loop 停止状态表达 | 中 | 修复中 | 未确认 | 2026-06 | Stop hook blocked 的语义应是阻止 chat loop 真正停止，并把 hook 要求反馈给 LLM 继续处理；现有控制流依赖隐式 `continue/break`，缺少轻量 FSM 和强约束反馈文案，容易被误解为“LLM 已完成后无意义阻止” |
 | 115 | test_reasoning_config_uses_thinking_budget_before_model_reasoning 测试失败 | 低 | 待确认 | 未确认 | 2026-06 | stop hook 持续报告该测试 FAILED，是仓库已有问题，与本次会话改动无关 |
 
+
+### #114 Stop hook blocked 缺少显式 chat loop 停止状态表达
+
+**状态**：修复中
+
+**症状**：Stop hook blocked 时，runtime 会追加 system reminder 并继续下一轮，但宏观状态依赖 `continue/break` 隐式表达。用户容易理解为“LLM 已经完成输出后，Stop hook 再阻止停止没有意义”。
+
+**修正语义**：Stop hook blocked MUST 阻止 chat loop 真正停止。LLM 已经尝试结束不等于 runtime 已经 Done；blocked 时必须把 Stop hook 要求反馈给 LLM，回到 Running，直到后续 Stop hook success 才进入 Done。
+
+**修复**：
+1. 引入轻量手写 `ChatLoopFsm`，显式表达 `Running -> ... -> Stopping -> StopHookBlocked -> Running -> Stopping -> Done`。
+2. 强化 Stop hook blocked system reminder，明确“不能结束 / MUST 先满足 Stop hook 要求”。
+3. 保持现有 HookRunner/provider/TUI 事件架构，不引入 FSM 框架，不做 stream-time Stop hook。
+
+**验证**：
+- `cargo test -p runtime chat_loop_state`
+- `cargo test -p runtime stop_hook_feedback`
+- `cargo test -p runtime test_process_chat_loop_stop_hook_blocked_continues_until_success`
+
+**涉及路径**：
+- `agent/features/runtime/src/business/chat/looping/state.rs`
+- `agent/features/runtime/src/business/chat/looping.rs`
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
+- `agent/features/runtime/src/business/chat/looping/finalize.rs`
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
 

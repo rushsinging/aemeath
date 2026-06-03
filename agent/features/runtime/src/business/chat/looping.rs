@@ -14,6 +14,7 @@ mod post_batch;
 mod queue;
 mod reflection;
 mod stall;
+mod state;
 mod stream_handler;
 mod task_reminder;
 mod tool_context;
@@ -28,4 +29,5 @@ pub use input_gate::{
 pub use input_log::logged_input_messages;
 pub use loop_runner::{process_chat_loop, ChatLoopContext};
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
+pub use state::{ChatLoopFsm, ChatLoopState, ChatLoopTransition};
 pub use stream_handler::RuntimeStreamHandler;
