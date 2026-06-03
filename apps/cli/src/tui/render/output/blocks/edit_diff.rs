@@ -2,39 +2,79 @@
 //! 复用 `primitives::diff::diff`（行号 + 加减语义色 + 语法高亮 + 缩进）渲染为
 //! `RenderedLine`，下游统一经 `apply_selection_overlay` 可选中并保留前景色（bug #61）。
 
-use crate::tui::render::output::primitives::diff::diff;
+use crate::tui::render::output::primitives::diff::diff_from;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::syntax::extension_from_path;
 
-/// Edit 工具结果中包裹 old/new 文本的标记。
-pub(crate) const DIFF_MARKER: &str = "---DIFF---";
+/// Edit 工具结果中包裹 old/new 文本的旧标记。
+pub(crate) const LEGACY_DIFF_MARKER: &str = "---DIFF---";
+const DIFF_MARKER_PREFIX: &str = "---DIFF";
+const DIFF_MARKER_SUFFIX: &str = "---";
+const DIFF_LINE_PREFIX: &str = ":LINE:";
 
-/// 解析后的 Edit diff 数据：变更前/后文本。
+/// 解析后的 Edit diff 数据：变更前/后文本与真实文件起始行号。
 pub struct EditDiff {
     pub old: String,
     pub new: String,
+    pub start_line: usize,
 }
 
 /// 从 Edit 工具结果文本中解析出 old/new 两份文本。
 ///
-/// 期望格式（见 `agent/tools/src/file_edit.rs`）：
+/// 期望格式：
 /// ```text
 /// replaced N occurrence(s) in {path}
-/// ---DIFF---
+/// ---DIFF:LINE:{start_line}---
 /// {old}
-/// ---DIFF---
+/// ---DIFF:LINE:{start_line}---
 /// {new}
 /// ```
-/// 未命中标记结构时返回 None（调用方退回纯文本渲染）。
+/// 兼容旧格式 `---DIFF---`，旧格式起始行号默认为 1。
 pub fn parse_edit_diff(result: &str) -> Option<EditDiff> {
-    let mut parts = result.splitn(3, DIFF_MARKER);
-    let _header = parts.next()?;
-    let old = parts.next()?;
-    let new = parts.next()?;
+    let first = find_diff_marker(result)?;
+    let after_first = first.end;
+    let second = find_diff_marker(&result[after_first..])?;
+    let second_start = after_first + second.start;
+    let second_end = after_first + second.end;
+
     Some(EditDiff {
-        old: strip_edge_newlines(old).to_string(),
-        new: strip_edge_newlines(new).to_string(),
+        old: strip_edge_newlines(&result[after_first..second_start]).to_string(),
+        new: strip_edge_newlines(&result[second_end..]).to_string(),
+        start_line: first.start_line,
     })
+}
+
+struct DiffMarker {
+    start: usize,
+    end: usize,
+    start_line: usize,
+}
+
+fn find_diff_marker(text: &str) -> Option<DiffMarker> {
+    let start = text.find(DIFF_MARKER_PREFIX)?;
+    let tail = &text[start + DIFF_MARKER_PREFIX.len()..];
+    let suffix_start = tail.find(DIFF_MARKER_SUFFIX)?;
+    let relative_end = DIFF_MARKER_PREFIX.len() + suffix_start + DIFF_MARKER_SUFFIX.len();
+    let marker = &text[start..start + relative_end];
+    let start_line = parse_diff_marker_start_line(marker)?;
+    Some(DiffMarker {
+        start,
+        end: start + relative_end,
+        start_line,
+    })
+}
+
+fn parse_diff_marker_start_line(marker: &str) -> Option<usize> {
+    if marker == LEGACY_DIFF_MARKER {
+        return Some(1);
+    }
+    let line = marker
+        .strip_prefix(DIFF_MARKER_PREFIX)?
+        .strip_suffix(DIFF_MARKER_SUFFIX)?
+        .strip_prefix(DIFF_LINE_PREFIX)?
+        .parse::<usize>()
+        .ok()?;
+    Some(line.max(1))
 }
 
 /// 去除标记前后插入的单个换行符，保留内部内容原样。
@@ -83,7 +123,14 @@ pub fn render_edit_diff(
 ) -> Option<Vec<RenderedLine>> {
     let parsed = parse_edit_diff(result)?;
     let ext = file_ext_for_edit(summary, result);
-    Some(diff(&parsed.old, &parsed.new, ext.as_deref(), width))
+    Some(diff_from(
+        &parsed.old,
+        &parsed.new,
+        parsed.start_line,
+        parsed.start_line,
+        ext.as_deref(),
+        width,
+    ))
 }
 
 #[cfg(test)]
@@ -100,6 +147,23 @@ mod tests {
 
         assert_eq!(parsed.old, "let a = 1;");
         assert_eq!(parsed.new, "let a = 2;");
+    }
+
+    #[test]
+    fn test_parse_edit_diff_extracts_real_start_line() {
+        let result = "replaced 1 occurrence(s) in src/lib.rs\n---DIFF:LINE:42---\nold\n---DIFF:LINE:42---\nnew";
+        let parsed = parse_edit_diff(result).unwrap();
+
+        assert_eq!(parsed.old, "old");
+        assert_eq!(parsed.new, "new");
+        assert_eq!(parsed.start_line, 42);
+    }
+
+    #[test]
+    fn test_parse_edit_diff_legacy_marker_defaults_to_line_one() {
+        let parsed = parse_edit_diff(&edit_result("old", "new")).unwrap();
+
+        assert_eq!(parsed.start_line, 1);
     }
 
     #[test]
@@ -191,7 +255,9 @@ mod tests {
         let lines = render_edit_diff(Some(r#"{"file_path":"x.rs"}"#), &result, 80).unwrap();
 
         assert!(
-            lines.iter().all(|line| !line.plain.contains("---DIFF---")),
+            lines
+                .iter()
+                .all(|line| !line.plain.contains(LEGACY_DIFF_MARKER)),
             "渲染后不应残留原始标记"
         );
     }
