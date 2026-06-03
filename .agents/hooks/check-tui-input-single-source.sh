@@ -24,18 +24,18 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# Input text/cursor truth lives in model.input.document; completion/suggestions truth lives in
-# model.input.completion. App/update/effect paths must send InputIntent and let InputModel::apply
-# produce InputChange. InputArea must remain a textarea/render mirror and must not regain completion
-# suggestion storage or public mutation/selection APIs.
-report_matches \
-  "input_area text/cursor mutations are allowed only in input widget internals or adapter/input_widget.rs; completion/suggestions must be driven by model.input.completion." \
-  bash -c "grep -RInE 'input_area\.(set_text|move_left|move_right|move_up|move_down|move_home|move_end|delete_word|backspace|input\(|enter\(|clear\(|history_up|history_down|set_pending_images)' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='input_widget.rs' --exclude='tests.rs' --exclude-dir='input_area' --exclude-dir='model/input' | grep -v 'input_area\\.input(ch)' | grep -v 'input_area\.input(ch)'"
+# Input text/cursor truth lives in model.input.document. Completion/suggestions truth lives in
+# model.input.completion. Production paths send InputIntent -> InputModel::apply and project
+# InputChange through adapter/input_widget.rs into InputArea, which is only a textarea/render mirror.
 
 report_matches \
-  "InputArea must not regain completion/suggestions storage or mutation APIs; keep suggestions derived from model.input.completion." \
-  grep -RInE '(pub\(super\)[[:space:]]+suggestions:[[:space:]]*Vec|pub[[:space:]]+selected_suggestion|pub[[:space:]]+show_suggestions|fn[[:space:]]+(set_suggestions|clear_suggestions|set_selected_suggestion|selected_suggestion|is_showing_suggestions|accept_suggestion|select_previous|select_next)[[:space:]]*\()' \
-    "$ROOT/apps/cli/src/tui/render/input" --include='*.rs'
+  "InputArea production text/cursor mutation methods must stay crate-private; only adapter/input_widget.rs may project InputChange into the widget mirror." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/pub[[:space:]]+fn[[:space:]]+(set_text|set_cursor_byte_index|clear|set_pending_images|get_text)[[:space:]]*\\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\""
+
+report_matches \
+  "production app/update code must not drive InputArea text/cursor directly; send InputIntent and project InputChange via adapter/input_widget.rs." \
+  grep -RInE '\binput_area\.(set_text|set_cursor_byte_index|clear|set_pending_images|get_text|cursor_position|is_empty)\(' \
+    "$ROOT/apps/cli/src/tui/app" "$ROOT/apps/cli/src/tui/input" --include='*.rs'
 
 report_matches \
   "model.input.document mutations outside InputModel are forbidden; use InputIntent -> InputModel::apply." \
@@ -44,10 +44,9 @@ report_matches \
     --exclude-dir='model/input'
 
 report_matches \
-  "app/update should not read input_area text/cursor as business truth; use model.input.document." \
-  grep -RInE 'input_area\.(get_text\(|cursor_position\(|is_empty\()' \
-    "$ROOT/apps/cli/src/tui/app" "$ROOT/apps/cli/src/tui/input" --include='*.rs' \
-    --exclude-dir='input_area'
+  "InputArea must not regain completion/suggestions storage or mutation APIs; keep suggestions derived from model.input.completion." \
+  grep -RInE '(pub\(super\)[[:space:]]+suggestions:[[:space:]]*Vec|pub[[:space:]]+selected_suggestion|pub[[:space:]]+show_suggestions|fn[[:space:]]+(set_suggestions|clear_suggestions|set_selected_suggestion|selected_suggestion|is_showing_suggestions|accept_suggestion|select_previous|select_next)[[:space:]]*\()' \
+    "$ROOT/apps/cli/src/tui/render/input" --include='*.rs'
 
 report_matches \
   "app/update should read completion visibility from model.input.completion, not from InputArea." \

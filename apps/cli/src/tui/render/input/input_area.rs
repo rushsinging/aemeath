@@ -60,8 +60,13 @@ impl InputArea {
     #[cfg(test)]
     pub(super) fn hide_suggestions(&mut self) {}
 
-    /// Get the current input text
+    /// Get the current input text.
+    #[cfg(test)]
     pub fn get_text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
+    pub(crate) fn text_snapshot(&self) -> String {
         self.textarea.lines().join("\n")
     }
 

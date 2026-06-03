@@ -177,7 +177,7 @@ impl InputArea {
     }
 
     pub(crate) fn set_cursor_byte_index(&mut self, cursor: usize) {
-        let text = self.get_text();
+        let text = self.text_snapshot();
         let cursor = cursor.min(text.len());
         let cursor = clamp_to_char_boundary(&text, cursor);
         let mut remaining = cursor;
