@@ -1,5 +1,6 @@
 //! 实时状态行 adapter：把 `LiveStatusViewModel` 单向写回 `OutputArea` 的
-//! `spinner` / `task_status_lines` 镜像字段。这是这两个镜像字段的唯一生产写入路径。
+//! `spinner` / `task_status_lines` / `queued_submission_lines` 镜像字段。
+//! 这是这些 live-status 镜像字段的唯一生产写入路径。
 //!
 //! Instant 处理：`SpinnerState.start: Instant` / `phase_start: Instant` 无法由
 //! ViewModel 提供（vm 用 frame 推算 elapsed）。本 adapter 在 None→Some 时新建
@@ -164,5 +165,19 @@ mod tests {
             output.task_status_lines,
             vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]
         );
+    }
+
+    #[test]
+    fn test_apply_writes_queued_lines() {
+        let mut output = OutputArea::new();
+        let vm = LiveStatusViewModel {
+            spinner: None,
+            queued_lines: vec!["> queued".to_string()],
+            task_lines: Vec::new(),
+        };
+
+        apply_live_status_to_widget(&mut output, &vm);
+
+        assert_eq!(output.queued_submission_lines, vec!["> queued"]);
     }
 }

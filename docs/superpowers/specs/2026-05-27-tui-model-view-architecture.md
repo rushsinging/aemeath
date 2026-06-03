@@ -975,6 +975,12 @@ Input/status selection 已完成进一步结构性收敛：`view_state.input_sel
 
 对应地，`check-tui-selection-single-source.sh` 从迁移期剥离测试模块的大范围扫描，瘦身为结构规则：禁止业务路径直写 input/status widget 选区镜像，禁止生产路径读取 widget 选区取文，禁止恢复 widget 选区状态方法。input/status selection 切片因此满足“状态唯一归位 + widget 渲染镜像 + 复制读取真相”。
 
+### 已收敛切片：Spinner/task/queued live status
+
+Spinner/task live status 已补齐 queued submission 预览的结构性收敛：spinner active/phase 真相归 `RuntimeModel.spinner`，task 行真相归 `RuntimeModel.task_status.lines`，排队输入预览真相归 `ConversationModel::queued_submissions`，动画 frame/verb 归 `view_state.spinner`。`OutputArea` 的 `spinner` / `task_status_lines` / `queued_submission_lines` 均只是 live-status 渲染镜像。
+
+渲染前路径统一为 `LiveStatusAssembler::assemble(...) -> apply_live_status_to_widget(...)`。排队输入入队/清空后会刷新 live-status 投影，复制/渲染只读 widget 镜像；业务路径不得把 `queued_submission_lines` 当作状态真相读取或写入。对应地，`check-tui-spinner-task-single-source.sh` 扩展为结构规则：禁止业务路径直写三类 live-status widget 镜像，禁止恢复旧 spinner/task widget 方法，并禁止在渲染镜像之外读取 `queued_submission_lines` 作为业务状态。
+
 ### 与 AgentClient 的关系（双模式通用）
 
 TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。

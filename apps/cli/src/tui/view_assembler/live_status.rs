@@ -13,6 +13,9 @@ pub struct LiveStatusAssembler;
 
 impl LiveStatusAssembler {
     /// 由 Model 业务态 + view_state 动画态 + 排队输入派生实时状态行视图。
+    ///
+    /// 排队输入真相目前归 `ConversationModel::queued_submissions`；调用方只传入文本切片，
+    /// 本层负责统一格式化为 live-status 预览行，避免 OutputArea 自持排队状态。
     pub fn assemble(
         runtime: &RuntimeModel,
         anim: &SpinnerAnim,

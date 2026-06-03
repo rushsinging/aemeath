@@ -26,33 +26,35 @@ impl App {
         self.refresh_output_widget_from_model();
     }
 
-    /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新输出文档。
+    /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新 live-status 投影。
     ///
     /// 用于「agent 处理期间用户提交输入」场景：在 `InputState::input_queue`
-    /// 入队的同时，派发 `QueueSubmission` 产生 `ConversationBlock::QueuedUserMessage`
-    /// 块，经 `QueuedSubmission` view 渲染为暗色「⏳ 排队中: ...」即时反馈。
+    /// 入队的同时，派发 `QueueSubmission` 写入 `ConversationModel::queued_submissions`。
+    /// 该列表是排队预览的真相；`OutputArea::queued_submission_lines` 只是 live-status
+    /// 渲染镜像，由 `refresh_live_status_from_model` 经 assembler/adapter 单向写回。
     ///
-    /// 一致性约定：`input_queue` 为权威发送队列，`QueuedUserMessage` 块是其显示投影；
+    /// 一致性约定：`input_queue` 为权威发送队列，`queued_submissions` 是其显示投影；
     /// 入队（此处）与出队（`clear_queued_submission_echo`）成对维护，二者始终同步。
     pub(crate) fn enqueue_submission_echo(&mut self, text: impl Into<String>) {
         self.model
             .conversation
             .apply(ConversationIntent::QueueSubmission { text: text.into() });
         self.refresh_output_widget_from_model();
+        self.refresh_live_status_from_model();
     }
 
-    /// 清除所有「排队中」用户提交块，并刷新输出文档。
+    /// 清除所有「排队中」用户提交，并刷新 live-status 投影。
     ///
-    /// 在 agent 取用（drain）排队输入时调用：先清除 `QueuedUserMessage` 排队块，
-    /// 再由 `append_user_echo` 以正式 `UserMessage` 显示，避免「排队块」与「已发送
+    /// 在 agent 取用（drain）排队输入时调用：先清除 `queued_submissions`，
+    /// 再由 `append_user_echo` 以正式 `UserMessage` 显示，避免「排队预览」与「已发送
     /// 回显」双显示。空队列时为无副作用 no-op（`QueuedSubmissionsCleared { count: 0 }`）。
     pub(crate) fn clear_queued_submission_echo(&mut self) {
         self.model
             .conversation
             .apply(ConversationIntent::ClearQueuedSubmissions);
         self.refresh_output_widget_from_model();
+        self.refresh_live_status_from_model();
     }
-
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`
@@ -276,6 +278,18 @@ mod tests {
         assert!(
             !plain.contains(">"),
             "排队提交不应出现在 document 渲染中，实际: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn test_enqueue_submission_echo_refreshes_live_status_projection() {
+        let mut app = make_app();
+        app.enqueue_submission_echo("排队中的输入");
+
+        assert_eq!(
+            app.output_area.queued_submission_lines,
+            vec!["> 排队中的输入"],
+            "入队后应立即刷新 live-status widget 镜像"
         );
     }
 
