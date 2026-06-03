@@ -12,8 +12,8 @@ use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tool_context::{build_tool_context, ToolContextParts};
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
-    ChatEventSink, GateDecision, GateKind, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
-    RuntimeStreamEvent, RuntimeStreamHandler,
+    ChatEventSink, ChatLoopFsm, ChatLoopTransition, GateDecision, GateKind, InputEventDrainPort,
+    PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
 };
 use provider::api::StopReason;
 use share::message::Message;
@@ -152,9 +152,11 @@ where
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
     let mut pending_input = PendingInputBuffer::default();
+    let mut loop_fsm = ChatLoopFsm::default();
 
     loop {
         turn_count += 1;
+        loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
             .await;
         // Refresh tool schemas each turn so dynamically registered MCP tools
@@ -175,12 +177,14 @@ where
             )
             .await;
             if outcome.decision == GateDecision::ContinueNextTurn {
+                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                 continue;
             }
             messages.truncate(messages_at_start);
             sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                 .await;
             sink.send_event(RuntimeStreamEvent::Cancelled).await;
+            loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
             if finalize_main_loop(
                 &AgentRunOutcome {
                     status: AgentRunStatus::Cancelled,
@@ -198,11 +202,14 @@ where
             .await
             .is_some()
             {
+                loop_fsm.transition(ChatLoopTransition::StopBlocked);
+                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                 continue;
             }
             break;
         }
 
+        loop_fsm.transition(ChatLoopTransition::Compact);
         auto_compact(
             &sink,
             &hook_ui,
@@ -216,6 +223,7 @@ where
             &ctx.client,
         )
         .await;
+        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
         let gate = drain_and_apply_gate(
             GateKind::BeforeLlm,
@@ -227,8 +235,11 @@ where
         )
         .await;
         match gate.decision {
-            GateDecision::Proceed | GateDecision::ContinueNextTurn => {}
+            GateDecision::Proceed | GateDecision::ContinueNextTurn => {
+                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+            }
             GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
+                loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
                 sink.send_event(RuntimeStreamEvent::Cancelled).await;
                 break;
             }
@@ -304,6 +315,7 @@ where
                         "[agent loop stopped: LLM is producing repetitive output]".to_string(),
                     ))
                     .await;
+                    loop_fsm.transition(ChatLoopTransition::TryStop);
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
@@ -314,8 +326,10 @@ where
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     break;
                 }
 
@@ -330,6 +344,7 @@ where
                     api_elapsed,
                 );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                    loop_fsm.transition(ChatLoopTransition::TryStop);
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
@@ -340,6 +355,7 @@ where
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
                     if let Some(text) = crate::business::chat::looping::reflection::run_reflection(
@@ -372,11 +388,13 @@ where
                     )
                     .await
                     {
+                        loop_fsm.transition(ChatLoopTransition::StopBlocked);
                         messages.push(Message::user(format!(
                             "<system-reminder>\n{outcome}\n</system-reminder>"
                         )));
                         sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                             .await;
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
                     let gate = drain_and_apply_gate(
@@ -389,12 +407,15 @@ where
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     finish_completed_loop(&outcome, &sink, &task_store).await;
                     break;
                 }
                 {
+                    loop_fsm.transition(ChatLoopTransition::AwaitTool);
                     let all_results = execute_tool_round(
                         &tool_calls,
                         &registry,
@@ -416,6 +437,7 @@ where
                     // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
+                    loop_fsm.transition(ChatLoopTransition::AwaitUser);
                     let gate = drain_and_apply_gate(
                         GateKind::AfterBlockingBoundary,
                         &mut pending_input,
@@ -429,9 +451,11 @@ where
                         gate.decision,
                         GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
                     ) {
+                        loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
                         sink.send_event(RuntimeStreamEvent::Cancelled).await;
                         break;
                     }
+                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
                     run_post_tool_batch(&sink, &hook_ui, &hook_runner, &agent.ctx, turn_count)
                         .await;
@@ -451,8 +475,10 @@ where
                 )
                 .await;
                 if gate.decision == GateDecision::ContinueNextTurn {
+                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     continue;
                 }
+                loop_fsm.transition(ChatLoopTransition::TryStop);
                 if let Some(outcome) = finalize_main_loop(
                     &AgentRunOutcome {
                         status: AgentRunStatus::ApiError(error_msg),
@@ -474,10 +500,23 @@ where
                     )));
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
+                    loop_fsm.transition(ChatLoopTransition::StopBlocked);
+                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     continue;
                 }
+                loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                 break;
             }
+        }
+    }
+}
+
+fn chat_loop_transition_for_gate_exit(decision: GateDecision) -> ChatLoopTransition {
+    match decision {
+        GateDecision::AbortCurrentLoop => ChatLoopTransition::AbortCurrentLoop,
+        GateDecision::CancelCurrentLoop => ChatLoopTransition::CancelCurrentLoop,
+        GateDecision::Proceed | GateDecision::ContinueNextTurn => {
+            unreachable!("only abort/cancel decisions should exit the chat loop")
         }
     }
 }
@@ -654,6 +693,65 @@ mod tests {
         }
     }
 
+    struct SequenceProvider {
+        responses: Arc<Mutex<VecDeque<String>>>,
+    }
+
+    impl SequenceProvider {
+        fn new(responses: Vec<&str>) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(
+                    responses.into_iter().map(str::to_string).collect(),
+                )),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for SequenceProvider {
+        async fn stream_message(
+            &self,
+            _system: &[SystemBlock],
+            _messages: &[Message],
+            _tool_schemas: &[serde_json::Value],
+            handler: &mut dyn StreamHandler,
+            _cancel: &CancellationToken,
+        ) -> Result<StreamResponse, provider::LlmError> {
+            let text = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| "fallback final response".to_string());
+            handler.on_text(&text);
+            Ok(StreamResponse {
+                assistant_message: Message {
+                    role: share::message::Role::Assistant,
+                    content: vec![share::message::ContentBlock::Text { text }],
+                },
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+                stop_reason: StopReason::EndTurn,
+            })
+        }
+
+        fn model_name(&self) -> &str {
+            "test-model"
+        }
+
+        fn provider_name(&self) -> &str {
+            "test-provider"
+        }
+
+        fn set_reasoning(&self, _enabled: bool) {}
+
+        fn is_reasoning(&self) -> bool {
+            false
+        }
+    }
+
     fn test_hook_runner() -> HookRunner {
         let mut events = HashMap::new();
         events.insert(
@@ -665,6 +763,84 @@ mod tests {
             }],
         );
         HookRunner::new(HooksConfig { events }, ".".to_string())
+    }
+
+    fn blocking_then_success_hook_runner() -> HookRunner {
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::Stop,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "python3 -c 'import pathlib, sys; p=pathlib.Path(\"target/stop-hook-once.flag\"); sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), p.write_text(\"blocked\"), print(\"fix before stopping\"), 2)[3])'".to_string(),
+                timeout: 5,
+            }],
+        );
+        HookRunner::new(HooksConfig { events }, ".".to_string())
+    }
+
+    #[tokio::test]
+    async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
+        let _ = std::fs::remove_file("target/stop-hook-once.flag");
+        let sink = RecordingSink::default();
+
+        process_chat_loop(ChatLoopContext {
+            sink: sink.clone(),
+            queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
+            input_events: EmptyInputEvents,
+            client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+                SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
+            ))),
+            registry: Arc::new(ToolRegistry::new()),
+            system_blocks: Vec::new(),
+            system_prompt_text: String::new(),
+            user_context: String::new(),
+            messages: vec![Message::user("hello")],
+            context_size: 200_000,
+            cwd: std::env::current_dir().unwrap(),
+            workspace_context: None,
+            session_id: "test-stop-hook-blocked".to_string(),
+            read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            session_reminders: Arc::new(
+                std::sync::Mutex::new(share::tool::SessionReminders::new()),
+            ),
+            agent_runner: None,
+            allow_all: false,
+            interrupted: Arc::new(AtomicBool::new(false)),
+            cancel: CancellationToken::new(),
+            task_store: Arc::new(storage::api::TaskStore::new()),
+            max_tool_concurrency: 1,
+            max_agent_concurrency: 1,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+            hook_runner: blocking_then_success_hook_runner(),
+            memory_config: share::config::MemoryConfig::default(),
+            json_logger: None,
+        })
+        .await;
+        let _ = std::fs::remove_file("target/stop-hook-once.flag");
+
+        let events = sink.events();
+        let feedback_sync = events
+            .iter()
+            .position(|event| event.contains("你 MUST 先满足下面 Stop hook 的要求"))
+            .expect("blocked Stop hook feedback should be synced into messages");
+        let second_text = events
+            .iter()
+            .position(|event| event == "Text:after hook feedback")
+            .expect("blocked Stop hook should continue to another LLM turn");
+        let done = events
+            .iter()
+            .position(|event| event == "DoneWithDuration")
+            .expect("loop should finish after Stop hook succeeds");
+
+        assert!(feedback_sync < second_text);
+        assert!(second_text < done);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]
