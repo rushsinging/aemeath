@@ -12,8 +12,9 @@ use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tool_context::{build_tool_context, ToolContextParts};
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
-    ChatEventSink, ChatLoopFsm, ChatLoopTransition, GateDecision, GateKind, InputEventDrainPort,
-    PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent, RuntimeStreamHandler,
+    ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
+    InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
+    RuntimeStreamHandler,
 };
 use provider::api::StopReason;
 use share::message::Message;
@@ -204,8 +205,17 @@ where
             {
                 loop_fsm.transition(ChatLoopTransition::StopBlocked);
                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                loop_fsm.assert_state(
+                    ChatLoopState::Running,
+                    "cancel stop hook blocked resumes loop",
+                );
                 continue;
             }
+            loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+            loop_fsm.assert_state(
+                ChatLoopState::Done,
+                "cancel finalizes after stop hooks pass",
+            );
             break;
         }
 
@@ -240,6 +250,7 @@ where
             }
             GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
                 loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
+                loop_fsm.assert_state(ChatLoopState::Done, "before-llm gate exits loop");
                 sink.send_event(RuntimeStreamEvent::Cancelled).await;
                 break;
             }
@@ -330,6 +341,7 @@ where
                         continue;
                     }
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(ChatLoopState::Done, "stall stop finalizes loop");
                     break;
                 }
 
@@ -395,6 +407,8 @@ where
                         sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                             .await;
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        loop_fsm
+                            .assert_state(ChatLoopState::Running, "stop hook blocked resumes loop");
                         continue;
                     }
                     let gate = drain_and_apply_gate(
@@ -411,6 +425,10 @@ where
                         continue;
                     }
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Done,
+                        "completed loop finalizes after stop hooks pass",
+                    );
                     finish_completed_loop(&outcome, &sink, &task_store).await;
                     break;
                 }
@@ -452,6 +470,7 @@ where
                         GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
                     ) {
                         loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
+                        loop_fsm.assert_state(ChatLoopState::Done, "after-tool gate exits loop");
                         sink.send_event(RuntimeStreamEvent::Cancelled).await;
                         break;
                     }
@@ -502,9 +521,17 @@ where
                         .await;
                     loop_fsm.transition(ChatLoopTransition::StopBlocked);
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Running,
+                        "api-error stop hook blocked resumes loop",
+                    );
                     continue;
                 }
                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                loop_fsm.assert_state(
+                    ChatLoopState::Done,
+                    "api-error finalizes after stop hooks pass",
+                );
                 break;
             }
         }
