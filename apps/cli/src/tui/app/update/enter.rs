@@ -43,7 +43,7 @@ impl App {
             .apply(ConversationIntent::StartChat {
                 submission: input.clone(),
             });
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
 
         let images: Vec<sdk::ToolResultImage> = self
             .chat

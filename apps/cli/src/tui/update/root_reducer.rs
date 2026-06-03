@@ -19,7 +19,7 @@ pub struct TuiUpdateResult {
 }
 
 pub fn update(model: &mut TuiModel, view_state: &mut AppViewState, msg: TuiMsg) -> TuiUpdateResult {
-    match msg {
+    let result = match msg {
         TuiMsg::TerminalKey(key) => reduce_key(model, key),
         TuiMsg::TerminalResize { width, height } => {
             apply_resize(view_state, map_resize(width, height));
@@ -44,7 +44,9 @@ pub fn update(model: &mut TuiModel, view_state: &mut AppViewState, msg: TuiMsg) 
             effects: vec![Effect::RequestRender],
             ..TuiUpdateResult::default()
         },
-    }
+    };
+    crate::tui::update::dirty::merge_dirty(&mut view_state.dirty, result.dirty.clone());
+    result
 }
 
 fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdateResult {
@@ -265,6 +267,20 @@ mod tests {
             TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text("hi".into())),
         );
         assert!(result.dirty.output);
+    }
+
+    #[test]
+    fn test_update_agent_text_persists_output_dirty_until_render_pipeline_refreshes() {
+        let mut model = TuiModel::default();
+        let mut view_state = AppViewState::default();
+        let result = update(
+            &mut model,
+            &mut view_state,
+            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text("hi".into())),
+        );
+
+        assert!(result.dirty.output);
+        assert!(view_state.dirty.output);
     }
 
     #[test]

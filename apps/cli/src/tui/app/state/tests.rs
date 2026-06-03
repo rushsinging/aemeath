@@ -269,6 +269,7 @@ mod tests {
         for event in grep_after_thinking_events() {
             let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
         }
+        app.flush_dirty_view_models();
 
         // marker（>/✓）与块级缩进现由 gutter 注入到行首 span（plain 保持内容原文）；
         // 故拼接 span 内容复现 gutter 后的可见行文本进行断言。

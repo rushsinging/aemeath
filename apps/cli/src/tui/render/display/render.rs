@@ -15,7 +15,7 @@ impl crate::tui::app::App {
             "assistant" => self.load_history_assistant_message(msg, subsequent_msg),
             _ => {}
         }
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
     }
 
     fn load_history_user_message(&mut self, msg: &sdk::ChatMessage) {

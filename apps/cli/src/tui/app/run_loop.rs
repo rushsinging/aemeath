@@ -50,6 +50,8 @@ impl App {
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();
 
+            // 每帧先批量派生 dirty ViewModel，避免 streaming chunk 每次同步重渲染输出区。
+            self.flush_dirty_view_models();
             // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
             self.refresh_live_status_from_model();
             // 每帧据 view_state 滚动真相写回 widget 镜像（last_visible_height 反喂 + 钳制）。
@@ -111,7 +113,7 @@ impl App {
                         .apply(ConversationIntent::StartChat {
                             submission: input.clone(),
                         });
-                    self.refresh_output_widget_from_model();
+                    self.mark_output_dirty();
                     self.chat
                         .messages
                         .push(sdk::ChatMessage::user_text(&prompt));

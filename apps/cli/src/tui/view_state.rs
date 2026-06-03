@@ -27,6 +27,9 @@ pub struct AppViewState {
     pub status_sel: StatusSelectionViewState,
     /// Input 选区真相（#59 S4）。T4 接入 mouse_handler + 渲染前管线。
     pub input_sel: InputSelectionViewState,
+    /// 待刷新的 ViewModel 区域。状态更新只置 dirty，渲染前管线统一派生 widget，
+    /// 避免 streaming chunk 每次同步重渲染输出区导致主循环滞后。
+    pub dirty: ViewModelDirty,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

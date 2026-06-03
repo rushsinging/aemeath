@@ -9,7 +9,7 @@ impl App {
         self.input.clear_queue();
         // 单一真相源：清空 ConversationModel，使输出文档随之回到空状态。
         self.model.conversation.reset();
-        self.refresh_output_widget_from_model();
+        self.mark_output_dirty();
         self.output_area.reset_runtime_state();
         // 滚动真相归 view_state：清空时同步复位，避免下一帧 adapter 用旧滚动态覆盖 widget。
         self.view_state.output.scroll_to_bottom();
