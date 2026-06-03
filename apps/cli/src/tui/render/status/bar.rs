@@ -92,60 +92,25 @@ impl StatusBar {
         log::debug!("[STATUS] reset_runtime_state()");
         self.status = "Ready".to_string();
         self.status_type = StatusType::Normal;
-        self.vm.input_tokens = 0;
-        self.vm.output_tokens = 0;
-        self.vm.last_input_tokens = 0;
-        self.vm.api_calls = 0;
-        self.vm.tps = 0.0;
         self.clear_selection();
     }
 
     /// 由 adapter 依据 `StatusViewAssembler` 派生结果单向写回 widget 镜像
-    /// （model/session/tps/工作目录上下文）。
+    /// （model/session/tps/token/api/context_size/工作目录上下文）。
     ///
     /// 这是上述镜像的**唯一**生产写入路径；update 业务路径禁止直接调用对应 `set_*`
-    /// （由 `check-tui-status-single-source.sh` guard 焊死）。token/api/context_size/
-    /// permission_mode 为渲染缓存与启动配置，在此保留不被覆盖。
+    /// （由结构性 status single-source guard 焊死）。permission_mode 为启动期配置，
+    /// 在此保留不被覆盖。
     pub(crate) fn apply_runtime_view(&mut self, view: StatusRuntimeViewModel) {
-        self.vm.model = view.model;
-        self.vm.session_id = view.session_id.clone();
-        self.vm.tps = view.tps;
-        self.context.path_base = view.context.path_base;
-        self.context.working_root = view.context.working_root;
-        self.context.worktree_kind = match view.context.kind {
+        self.vm = view;
+        self.context.path_base = self.vm.context.path_base.clone();
+        self.context.working_root = self.vm.context.working_root.clone();
+        self.context.worktree_kind = match self.vm.context.kind {
             crate::tui::view_model::StatusWorktreeKind::Worktree => WorktreeKind::Worktree,
             crate::tui::view_model::StatusWorktreeKind::Main => WorktreeKind::Main,
         };
-        self.context.branch = view.context.branch;
-        self.context.session_id = view.session_id;
-    }
-
-    pub(crate) fn set_tokens(&mut self, input: u64, output: u64, last_input: u64) {
-        self.vm.input_tokens = input;
-        self.vm.output_tokens = output;
-        self.vm.last_input_tokens = last_input;
-    }
-
-    pub(crate) fn set_session_id(&mut self, id: &str) {
-        let id = id.to_string();
-        self.vm.session_id = Some(id.clone());
-        self.context.session_id = Some(id);
-    }
-
-    pub(crate) fn set_model(&mut self, model: &str) {
-        self.vm.model = Some(model.to_string());
-    }
-
-    pub(crate) fn set_context_size(&mut self, size: u64) {
-        self.vm.context_size = size;
-    }
-
-    pub(crate) fn set_api_calls(&mut self, count: u64) {
-        self.vm.api_calls = count;
-    }
-
-    pub(crate) fn set_tps(&mut self, tps: f64) {
-        self.vm.tps = tps;
+        self.context.branch = self.vm.context.branch.clone();
+        self.context.session_id = self.vm.session_id.clone();
     }
 
     pub fn set_thinking(&mut self, enabled: bool) {
@@ -159,49 +124,24 @@ impl StatusBar {
         self.context.working_root = dir;
     }
 
-    pub fn set_context_paths(
-        &mut self,
-        path_base: impl Into<String>,
-        working_root: impl Into<String>,
-    ) {
-        self.context.path_base = path_base.into();
-        self.context.working_root = working_root.into();
-    }
-
-    /// Set git checkout/worktree identity for the status context.
-    pub fn set_git_context(&mut self, kind: WorktreeKind, branch: impl Into<String>) {
-        let branch = branch.into();
-        self.context.worktree_kind = kind;
-        self.context.branch = if branch.trim().is_empty() {
-            None
-        } else {
-            Some(branch)
-        };
-    }
-
-    /// 一次性初始化 session_id、model、工作目录上下文（替代手动 set_* 调用链）。
-    pub fn init(&mut self, session_id: &str, model: &str, cwd: &std::path::Path) {
-        self.set_session_id(session_id);
-        self.set_model(model);
+    /// 一次性初始化工作目录上下文。
+    pub fn init(&mut self, _session_id: &str, _model: &str, cwd: &std::path::Path) {
         let cwd_display = crate::tui::app::display_status_path(cwd);
-        self.set_context_paths(&cwd_display, &cwd_display);
+        self.context.path_base = cwd_display.clone();
+        self.context.working_root = cwd_display;
         if let Some(branch) = crate::tui::app::git_branch_for(cwd) {
-            self.set_git_context(crate::tui::app::worktree_kind_for(cwd), branch);
+            let branch = branch.trim().to_string();
+            self.context.worktree_kind = crate::tui::app::worktree_kind_for(cwd);
+            self.context.branch = if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            };
         }
     }
 
-    /// 绘制状态栏（携 token/api 数据一起渲染）。
-    pub fn draw(
-        &mut self,
-        area: Rect,
-        buf: &mut Buffer,
-        input_tokens: u64,
-        output_tokens: u64,
-        last_input: u64,
-        api_calls: u64,
-    ) {
-        self.set_tokens(input_tokens, output_tokens, last_input);
-        self.set_api_calls(api_calls);
+    /// 绘制状态栏。
+    pub fn draw(&self, area: Rect, buf: &mut Buffer) {
         self.render(area, buf);
     }
 

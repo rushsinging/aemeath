@@ -4,10 +4,6 @@
 #[derive(Debug)]
 pub(crate) struct ChatState {
     pub messages: Vec<sdk::ChatMessage>,
-    pub total_input_tokens: u64,
-    pub total_output_tokens: u64,
-    pub total_api_calls: u64,
-    pub last_input_tokens: u64,
     pub pending_images: Vec<sdk::ClipboardImageView>,
     pub system_prompt_text: String,
     pub context_size: usize,
@@ -43,13 +39,6 @@ impl ChatState {
         let remaining = self.active_tool_call_ids.len();
         self.tool_call_active = remaining > 0;
         remaining
-    }
-
-    pub(crate) fn record_usage(&mut self, input: u64, output: u64, last_input: u64) {
-        self.total_input_tokens += input;
-        self.total_output_tokens += output;
-        self.total_api_calls += 1;
-        self.last_input_tokens = last_input;
     }
 
     pub(crate) fn add_pending_image(&mut self, image: sdk::ClipboardImageView) -> usize {
@@ -97,10 +86,6 @@ impl ChatState {
     }
 
     pub(crate) fn reset_runtime_state(&mut self) {
-        self.total_input_tokens = 0;
-        self.total_output_tokens = 0;
-        self.total_api_calls = 0;
-        self.last_input_tokens = 0;
         self.clear_tool_activity();
         self.is_processing = false;
         self.pending_reflection = None;
@@ -116,32 +101,12 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
     }
-    pub(crate) fn usage_snapshot(&self) -> ChatUsageSnapshot {
-        ChatUsageSnapshot {
-            total_input_tokens: self.total_input_tokens,
-            total_output_tokens: self.total_output_tokens,
-            last_input_tokens: self.last_input_tokens,
-            total_api_calls: self.total_api_calls,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ChatUsageSnapshot {
-    pub total_input_tokens: u64,
-    pub total_output_tokens: u64,
-    pub last_input_tokens: u64,
-    pub total_api_calls: u64,
 }
 
 impl Default for ChatState {
     fn default() -> Self {
         Self {
             messages: Vec::new(),
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_api_calls: 0,
-            last_input_tokens: 0,
             pending_images: Vec::new(),
             system_prompt_text: String::new(),
             context_size: 200_000,

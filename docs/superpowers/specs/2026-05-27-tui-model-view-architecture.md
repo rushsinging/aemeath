@@ -947,6 +947,12 @@ check-unsafe-text-ops.sh
 2. 对应 widget 改为**无状态 / 纯投影**，渲染只读 `ViewModel` / `ViewState`。
 3. 写入该块状态的路径**唯一**（单一 assembler / reducer），且已被现有边界守卫（ViewAssembler boundary / Model purity）覆盖。
 
+### 已收敛切片：Status 运行态镜像
+
+Status 运行态镜像已先完成一轮结构性收敛：`token/api/context_size/tps/model/session/工作目录上下文` 的来源统一为 `RuntimeModel`/`SessionModel`，经 `StatusViewAssembler::assemble_runtime_view` 派生 `StatusRuntimeViewModel`，再由 `adapter/status_widget.rs` 调用 `StatusBar::apply_runtime_view` 写入 widget 镜像。`ChatState` 不再保存 token/api usage 镜像，`StatusBar` 不再暴露 `set_model`、`set_session_id`、`set_tps`、`set_tokens`、`set_api_calls`、`set_context_size`、`set_context_paths`、`set_git_context` 这类分散 setter。
+
+对应地，`check-tui-status-single-source.sh` 从“禁止业务路径调用若干 setter”的迁移期守卫，瘦身为结构规则：禁止恢复这些 setter，禁止在 `ChatState` 重新引入 token/api usage 镜像。status 切片因此满足本节退役判据中的“状态唯一归位 + widget 纯投影 + 写入路径唯一”。
+
 ### 与 AgentClient 的关系（双模式通用）
 
 TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。

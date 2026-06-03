@@ -51,11 +51,22 @@ impl RuntimeModel {
             RuntimeIntent::RecordUsage {
                 input_tokens,
                 output_tokens,
+                last_input_tokens,
                 cost_usd,
             } => {
                 self.usage.input_tokens += input_tokens;
                 self.usage.output_tokens += output_tokens;
+                self.usage.last_input_tokens = last_input_tokens;
+                self.usage.api_calls += 1;
                 self.usage.cost_usd += cost_usd;
+                vec![RuntimeChange::UsageChanged {
+                    input_tokens: self.usage.input_tokens,
+                    output_tokens: self.usage.output_tokens,
+                    cost_usd: self.usage.cost_usd,
+                }]
+            }
+            RuntimeIntent::SetContextSize(size) => {
+                self.usage.context_size = size;
                 vec![RuntimeChange::UsageChanged {
                     input_tokens: self.usage.input_tokens,
                     output_tokens: self.usage.output_tokens,
@@ -143,10 +154,21 @@ mod tests {
         model.apply(RuntimeIntent::RecordUsage {
             input_tokens: 10,
             output_tokens: 5,
+            last_input_tokens: 10,
             cost_usd: 0.01,
         });
         assert_eq!(model.usage.input_tokens, 10);
         assert_eq!(model.usage.output_tokens, 5);
+        assert_eq!(model.usage.last_input_tokens, 10);
+        assert_eq!(model.usage.api_calls, 1);
+    }
+
+    #[test]
+    fn test_runtime_set_context_size() {
+        let mut model = RuntimeModel::default();
+        model.apply(RuntimeIntent::SetContextSize(200_000));
+
+        assert_eq!(model.usage.context_size, 200_000);
     }
 
     #[test]

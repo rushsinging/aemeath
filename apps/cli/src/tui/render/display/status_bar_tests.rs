@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::render::theme;
+use crate::tui::view_model::{StatusContextViewModel, StatusRuntimeViewModel, StatusWorktreeKind};
 
 #[cfg(test)]
 pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {
@@ -58,6 +59,23 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
         .collect::<String>()
 }
 
+fn apply_runtime_context(bar: &mut StatusBar, path_base: &str, working_root: &str, branch: &str) {
+    let kind = if branch == "main" {
+        StatusWorktreeKind::Main
+    } else {
+        StatusWorktreeKind::Worktree
+    };
+    bar.apply_runtime_view(StatusRuntimeViewModel {
+        context: StatusContextViewModel {
+            path_base: path_base.to_string(),
+            working_root: working_root.to_string(),
+            branch: Some(branch.to_string()),
+            kind,
+        },
+        ..StatusRuntimeViewModel::default()
+    });
+}
+
 #[test]
 fn test_status_bar_render_uses_status_background() {
     let bar = StatusBar::new();
@@ -76,11 +94,12 @@ fn test_status_bar_render_uses_status_background() {
 #[test]
 fn test_status_bar_render_two_rows_includes_context_when_height_two() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
+        "feature/46-status-line",
     );
-    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
     let area = Rect::new(0, 0, 100, 2);
     let mut buf = Buffer::empty(area);
 
@@ -97,11 +116,12 @@ fn test_status_bar_render_two_rows_includes_context_when_height_two() {
 #[test]
 fn test_status_bar_render_one_row_omits_context() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
+        "feature/46-status-line",
     );
-    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
     let area = Rect::new(0, 0, 100, 1);
     let mut buf = Buffer::empty(area);
 
@@ -116,12 +136,12 @@ fn test_status_bar_render_one_row_omits_context() {
 #[test]
 fn test_status_line_context_defaults_to_balanced_row() {
     let mut bar = StatusBar::new();
-    bar.set_model("claude-sonnet");
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
+        "feature/46-status-line",
     );
-    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
     bar.set_permission_mode("AskMe");
 
     let row = bar.context_row_text(120);
@@ -137,11 +157,12 @@ fn test_status_line_context_defaults_to_balanced_row() {
 #[test]
 fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
+    apply_runtime_context(
+        &mut bar,
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
+        "feature/46-status-line",
     );
-    bar.set_git_context(WorktreeKind::Worktree, "feature/46-status-line");
     bar.set_permission_mode("AllowAll");
 
     let row = bar.context_row_text(56);
@@ -154,14 +175,19 @@ fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
 #[test]
 fn test_status_line_context_wide_truncates_to_width() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths(
-        "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update/deep/path",
-        "/workspace/projects/example/.worktrees/topic-46-status-line/with/an/extra/long/root/path",
-    );
-    bar.set_git_context(
-        WorktreeKind::Worktree,
-        "feature/46-status-line-with-a-very-long-branch-name",
-    );
+    bar.apply_runtime_view(StatusRuntimeViewModel {
+        context: StatusContextViewModel {
+            path_base:
+                "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update/deep/path"
+                    .to_string(),
+            working_root:
+                "/workspace/projects/example/.worktrees/topic-46-status-line/with/an/extra/long/root/path"
+                    .to_string(),
+            branch: Some("feature/46-status-line-with-a-very-long-branch-name".to_string()),
+            kind: StatusWorktreeKind::Worktree,
+        },
+        ..StatusRuntimeViewModel::default()
+    });
     bar.set_permission_mode("AllowAllWithExtraLongModeName");
 
     let row = bar.context_row_text(70);
@@ -253,8 +279,7 @@ fn test_status_bar_render_highlights_context_row_selection() {
 #[test]
 fn test_main_branch_does_not_repeat_main_main() {
     let mut bar = StatusBar::new();
-    bar.set_current_dir("~/aemeath");
-    bar.set_git_context(WorktreeKind::Main, "main");
+    apply_runtime_context(&mut bar, "~/aemeath", "~/aemeath", "main");
 
     let row = bar.context_row_text(80);
 
@@ -265,8 +290,7 @@ fn test_main_branch_does_not_repeat_main_main() {
 #[test]
 fn test_status_line_context_keeps_permission_when_space_is_tight() {
     let mut bar = StatusBar::new();
-    bar.set_context_paths("aemeath", "aemeath");
-    bar.set_git_context(WorktreeKind::Main, "main");
+    apply_runtime_context(&mut bar, "aemeath", "aemeath", "main");
     bar.set_permission_mode("AskMe");
 
     let row = bar.context_row_text(24);

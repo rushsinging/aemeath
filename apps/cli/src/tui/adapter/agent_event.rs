@@ -73,12 +73,13 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::Usage {
             input,
             output,
+            last_input,
             elapsed_secs,
-            ..
         } => {
             let mut mapping = runtime(RuntimeIntent::RecordUsage {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
+                last_input_tokens: u64::from(*last_input),
                 cost_usd: 0.0,
             });
             if *elapsed_secs > 0.0 {
@@ -284,6 +285,7 @@ mod tests {
             Some(RuntimeIntent::RecordUsage {
                 input_tokens: 1,
                 output_tokens: 2,
+                last_input_tokens: 1,
                 ..
             })
         ));

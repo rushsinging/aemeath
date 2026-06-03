@@ -13,12 +13,11 @@ pub struct StatusViewAssembler;
 
 impl StatusViewAssembler {
     /// 由 `RuntimeModel`/`SessionModel` 单向派生 StatusBar 运行态视图模型
-    /// （model/session/tps/工作目录上下文）。
+    /// （model/session/tps/token/api/context_size/工作目录上下文）。
     ///
     /// 这是上述镜像字段的唯一派生路径：adapter 据此写回 widget，update 业务路径
-    /// 不得再直接调用 `status_bar.set_model/set_session_id/set_tps/set_context_paths/set_git_context`。
-    /// token/api 总量为渲染期缓存（由 `StatusBar::draw` 从 `ChatState` 快照写入），
-    /// context_size/permission_mode 为启动期一次性配置，均不在本派生范围内。
+    /// 不得再直接调用对应 `status_bar.set_*` 或在 `ChatState` 保留 token/api 镜像。
+    /// permission_mode 为启动期配置，不在本派生范围内。
     pub fn assemble_runtime_view(
         runtime: &RuntimeModel,
         session: Option<&SessionModel>,
@@ -26,6 +25,11 @@ impl StatusViewAssembler {
         StatusRuntimeViewModel {
             model: runtime.model_id.clone(),
             session_id: session.and_then(|s| s.current_session_id.clone()),
+            input_tokens: runtime.usage.input_tokens,
+            output_tokens: runtime.usage.output_tokens,
+            last_input_tokens: runtime.usage.last_input_tokens,
+            api_calls: runtime.usage.api_calls,
+            context_size: runtime.usage.context_size,
             tps: runtime.live_tps.unwrap_or(0.0),
             context: StatusContextViewModel {
                 path_base: runtime.workspace.path_base.clone().unwrap_or_default(),
@@ -40,11 +44,8 @@ impl StatusViewAssembler {
                     _ => StatusWorktreeKind::Main,
                 },
             },
-            // token/api/context_size 为渲染缓存与启动配置，不由本派生承载（adapter 合并时保留）。
-            ..StatusRuntimeViewModel::default()
         }
     }
-
     pub fn assemble_basic(model_id: Option<&str>, cwd: Option<&str>) -> StatusLineViewModel {
         let mut vm = StatusLineViewModel::default();
         if let Some(model_id) = model_id {

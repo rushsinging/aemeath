@@ -20,8 +20,10 @@ pub enum RuntimeIntent {
     RecordUsage {
         input_tokens: u64,
         output_tokens: u64,
+        last_input_tokens: u64,
         cost_usd: f64,
     },
+    SetContextSize(u64),
     RecordLiveTps {
         tps: f64,
     },

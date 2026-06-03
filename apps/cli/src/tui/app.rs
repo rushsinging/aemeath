@@ -227,15 +227,7 @@ impl App {
                 self.input_area
                     .draw(chunks[1], chunks[2], buf, self.chat.pending_image_count());
             }));
-            let usage = self.chat.usage_snapshot();
-            self.status_bar.draw(
-                chunks[3],
-                buf,
-                usage.total_input_tokens,
-                usage.total_output_tokens,
-                usage.last_input_tokens,
-                usage.total_api_calls,
-            );
+            self.status_bar.draw(chunks[3], buf);
             if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }
