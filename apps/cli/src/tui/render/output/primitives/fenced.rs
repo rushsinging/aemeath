@@ -4,9 +4,9 @@
 //! 因此天然隔离跨调用的 code 样式泄漏（修 #65 的结构基础）。
 //!
 //! 行为：
-//! - ``` ``` `` 围栏行：切换 fence 状态，按 TEXT_DIM 着色围栏标记本身。
-//! - fence 内：``` ```diff `` 走 unified diff 渲染；否则按 fence_lang 语法高亮，
-//!   无语言信息时按 CODE 单色。
+//! - ``` ``` `` 围栏行：切换 fence 状态，普通代码 fence 按 TEXT_DIM 着色围栏标记本身。
+//! - fence 内：``` ```text `` 隐藏围栏并按普通 Markdown 渲染内容；``` ```diff `` 走 unified diff 渲染；
+//!   其他 fence 按 fence_lang 语法高亮，无语言信息时按 CODE 单色。
 //! - fence 外：表格走 table 原语，普通行走 inline markdown。
 //!
 //! 产出 depth=0、无缩进的行（spans 与 plain 均不含前导缩进）。
@@ -39,23 +39,41 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
             break;
         };
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if is_fence_marker(trimmed) {
             if in_fence {
+                let should_show_marker = fence_lang.as_deref() != Some("text");
                 in_fence = false;
                 fence_lang = None;
+                if should_show_marker {
+                    lines.push(RenderedLine::new(vec![Span::styled(
+                        line.to_string(),
+                        Style::default().fg(theme::TEXT_DIM),
+                    )]));
+                }
             } else {
+                let lang = fence_language(trimmed);
+                let should_show_marker = lang.as_deref() != Some("text");
                 in_fence = true;
-                fence_lang = Some(trimmed.trim_start_matches('`').trim().to_string());
+                fence_lang = lang;
+                if should_show_marker {
+                    lines.push(RenderedLine::new(vec![Span::styled(
+                        line.to_string(),
+                        Style::default().fg(theme::TEXT_DIM),
+                    )]));
+                }
             }
-            lines.push(RenderedLine::new(vec![Span::styled(
-                line.to_string(),
-                Style::default().fg(theme::TEXT_DIM),
-            )]));
             idx += 1;
             continue;
         }
 
         if in_fence {
+            // ` ```text ` 作为 Markdown 文本容器：隐藏围栏，内容按普通 Markdown 渲染。
+            if fence_lang.as_deref() == Some("text") {
+                lines.extend(markdown(line, base_style, width));
+                idx += 1;
+                continue;
+            }
+
             // ` ```diff ` 代码块走 unified diff 渲染（行号信息来自 @@ 原文）。
             if fence_lang.as_deref() == Some("diff") {
                 lines.extend(render_unified_diff(line, None, width));
@@ -107,6 +125,19 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
     lines
 }
 
+fn is_fence_marker(trimmed: &str) -> bool {
+    trimmed.starts_with("```")
+}
+
+fn fence_language(trimmed: &str) -> Option<String> {
+    let lang = trimmed.trim_start_matches('`').trim();
+    if lang.is_empty() {
+        None
+    } else {
+        Some(lang.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +176,39 @@ mod tests {
 
         assert_eq!(after.plain, "after");
         assert_ne!(after.spans[0].style.fg, Some(theme::CODE));
+    }
+
+    #[test]
+    fn test_fenced_text_block_renders_inner_markdown_without_fence_lines() {
+        use ratatui::style::Modifier;
+
+        let lines = render("```text\n**bold**\n- item\n```");
+        let plains: Vec<&str> = lines.iter().map(|line| line.plain.as_str()).collect();
+
+        assert_eq!(plains, vec!["bold", "• item"]);
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content.as_ref() == "bold"
+                    && span.style.add_modifier.contains(Modifier::BOLD)),
+            "text fence 内容应按 markdown 渲染 bold，got: {:?}",
+            lines[0].spans
+        );
+        assert_eq!(lines[1].spans[0].style.fg, Some(theme::ACCENT));
+        assert!(
+            !plains.iter().any(|plain| plain.contains("```")),
+            "text fence 不应显示围栏行，got: {plains:?}"
+        );
+    }
+
+    #[test]
+    fn test_fenced_unlabeled_code_block_still_renders_fence_and_code() {
+        let lines = render("```\n**not markdown**\n```");
+        let plains: Vec<&str> = lines.iter().map(|line| line.plain.as_str()).collect();
+
+        assert_eq!(plains, vec!["```", "**not markdown**", "```"]);
+        assert_eq!(lines[1].spans[0].style.fg, Some(theme::CODE));
     }
 
     #[test]
