@@ -42,11 +42,10 @@ pub(crate) fn apply_input_changes_to_widget(
 /// `status_widget.rs::apply_status_selection_to_widget`）。
 ///
 /// `view_state.input_sel` 是 input 选区真相（textarea `(row, col)` 锚点状态机），
-/// widget 的 `is_selecting`/`selection_start`/`selection_end` 降为只读镜像，供 render
-/// 期高亮与 `get_selected_text` 取 plain 文本。这是这些镜像字段的唯一生产写入路径。
+/// widget 的 `is_selecting`/`selection_start`/`selection_end` 降为渲染高亮镜像。
 ///
-/// 每帧渲染前调用；mouse-up 复制前亦显式调用以消除一帧滞后（对齐 output/status 选区
-/// 时序）。T4 接线。
+/// 每帧渲染前调用；复制选中文本直接读取 `InputSelectionViewState` + widget 文本投影，
+/// 不再把 widget 选区镜像作为取文真相。
 pub(crate) fn apply_input_selection_to_widget(
     view: &InputSelectionViewState,
     input_area: &mut InputArea,

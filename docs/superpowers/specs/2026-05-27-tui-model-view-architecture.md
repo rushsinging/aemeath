@@ -981,6 +981,12 @@ Spinner/task live status 已补齐 queued submission 预览的结构性收敛：
 
 渲染前路径统一为 `LiveStatusAssembler::assemble(...) -> apply_live_status_to_widget(...)`。排队输入入队/清空后会刷新 live-status 投影，复制/渲染只读 widget 镜像；业务路径不得把 `queued_submission_lines` 当作状态真相读取或写入。对应地，`check-tui-spinner-task-single-source.sh` 扩展为结构规则：禁止业务路径直写三类 live-status widget 镜像，禁止恢复旧 spinner/task widget 方法，并禁止在渲染镜像之外读取 `queued_submission_lines` 作为业务状态。
 
+### 已收敛切片：Input text/cursor guard 终态
+
+Input text/cursor 的生产路径已完成结构收敛：文本和光标真相归 `model.input.document`，生产编辑入口统一为 `InputIntent -> InputModel::apply`，再由 `InputChange -> adapter/input_widget.rs` 单向投影到 `InputArea`。`InputArea` 保留 `textarea` 作为渲染镜像；直接编辑 widget 的方法只保留为 crate-private adapter 投影或测试辅助，生产 app/update 不得读取 `InputArea` 文本/光标作为业务真相。
+
+对应地，`check-tui-input-single-source.sh` 从迁移期“扫描所有 widget 编辑方法调用”瘦身为结构规则：禁止 `InputArea` 暴露生产 text/cursor 公共 mutation/read API，禁止 app/update 直接驱动或读取 widget text/cursor，禁止绕过 `InputModel` 直接改 `model.input.document`，并继续禁止恢复 completion/suggestions 镜像。input text/cursor 因此满足“model.input.document 唯一真相 + InputArea 渲染镜像”。
+
 ### 与 AgentClient 的关系（双模式通用）
 
 TUI 是**入站 adapter**，只依赖 `dyn AgentClient`（其只读快照 + 变更通道）。domain 真相在 runtime / AgentClient，TUI 投影——**结构上不可能有第二份**。这套收敛对**本地直连**与**远程 server 模式**同样成立（TUI 不区分 `AgentClientImpl` 与远程客户端实现）。
