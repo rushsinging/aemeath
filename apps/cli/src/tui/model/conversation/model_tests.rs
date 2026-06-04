@@ -14,16 +14,19 @@ fn test_conversation_observes_tool_lifecycle() {
         .any(|change| matches!(change, ConversationChange::ChatStarted { .. })));
 
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
         summary: "Read file".to_string(),
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "ok".to_string(),
@@ -44,6 +47,7 @@ fn test_conversation_reports_orphan_tool_result() {
         submission: "read file".to_string(),
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "missing".to_string(),
         tool_name: "Read".to_string(),
         output: "late".to_string(),
@@ -63,10 +67,12 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         submission: "read file".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "line1\nline2".to_string(),
@@ -74,6 +80,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         image_count: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -131,10 +138,12 @@ fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
         text: "结论先到".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -179,10 +188,12 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
     });
     model.apply(ConversationIntent::CompleteTextBlock);
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -218,6 +229,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         submission: "read docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "file contents".to_string(),
@@ -225,10 +237,12 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         image_count: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -266,16 +280,19 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         submission: "read docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
         summary: "Read docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "file contents".to_string(),
@@ -364,15 +381,18 @@ fn test_conversation_keeps_tool_args_preview() {
         submission: "read file".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
         partial_args: r#"{"file_path":"src/main.rs"}"#.to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -401,11 +421,13 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     model.apply(ConversationIntent::CompleteTextBlock);
     // ToolCallStart 用纯 tool 序号 index=0
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Agent".to_string(),
         index: 0,
     });
     // ToolCall 用 content_block index=1（因为 text 占了 block 0）
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "call_agent_1".to_string(),
         name: "Agent".to_string(),
         index: 1,
@@ -418,6 +440,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     });
     // Agent tool result
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "call_agent_1".to_string(),
         tool_name: "Agent".to_string(),
         output: "审查报告".to_string(),
@@ -455,16 +478,19 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     });
     // 不调 CompleteTextBlock — text 还在 streaming
     model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Agent".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "call_abc".to_string(),
         name: "Agent".to_string(),
         index: 1,
         summary: "Review".to_string(),
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "call_abc".to_string(),
         tool_name: "Agent".to_string(),
         output: "报告".to_string(),
@@ -491,12 +517,14 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     });
     // 不发送 ToolCallStart
     model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "call_agent_no_start".to_string(),
         name: "Agent".to_string(),
         index: 0,
         summary: "Review code".to_string(),
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "call_agent_no_start".to_string(),
         tool_name: "Agent".to_string(),
         output: "审查报告".to_string(),

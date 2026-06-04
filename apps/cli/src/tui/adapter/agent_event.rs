@@ -42,40 +42,47 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
         }
         UiEvent::TextBlockComplete(_) => conversation(ConversationIntent::CompleteTextBlock),
-        UiEvent::ToolCallStart { name, index } => {
+        UiEvent::ToolCallStart { id, name, index } => {
             conversation(ConversationIntent::ObserveToolCallStart {
+                id: id.clone(),
                 name: name.clone(),
                 index: *index,
             })
         }
         UiEvent::ToolArgumentsDelta {
+            id,
             index,
             name,
             partial_args,
         } => conversation(ConversationIntent::ObserveToolArguments {
+            id: id.clone(),
             name: name.clone(),
             index: *index,
             partial_args: sanitize_tool_arguments_delta(name, partial_args),
         }),
         UiEvent::ToolCall {
             id,
+            provider_id,
             name,
             index,
             summary,
         } => conversation(ConversationIntent::ObserveToolCall {
             id: id.clone(),
+            provider_id: provider_id.clone(),
             name: name.clone(),
             index: index.unwrap_or(0),
             summary: sanitize_tool_summary(name, summary),
         }),
         UiEvent::ToolResult {
             id,
+            provider_id,
             tool_name,
             output,
             is_error,
             images,
         } => conversation(ConversationIntent::ObserveToolResult {
             id: id.clone(),
+            provider_id: provider_id.clone(),
             tool_name: tool_name.clone(),
             output: sanitize_tool_output(tool_name, output),
             is_error: *is_error,
@@ -344,6 +351,7 @@ mod tests {
     #[test]
     fn test_map_agent_event_tool_arguments_delta_truncates_large_stream() {
         let event = UiEvent::ToolArgumentsDelta {
+            id: "tool-1".to_string(),
             index: 0,
             name: "Edit".to_string(),
             partial_args: "x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2),
@@ -366,6 +374,7 @@ mod tests {
         let large_new = "新".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
         let event = UiEvent::ToolCall {
             id: "tool-1".to_string(),
+            provider_id: "provider-1".to_string(),
             name: "Edit".to_string(),
             index: Some(0),
             summary: serde_json::json!({
@@ -398,6 +407,7 @@ mod tests {
         for (tool_name, field) in [("Agent", "prompt"), ("Bash", "command")] {
             let event = UiEvent::ToolCall {
                 id: "tool-1".to_string(),
+                provider_id: "provider-1".to_string(),
                 name: tool_name.to_string(),
                 index: Some(0),
                 summary:
@@ -425,6 +435,7 @@ mod tests {
     fn test_map_agent_event_tool_result_truncates_large_output() {
         let event = UiEvent::ToolResult {
             id: "tool-1".to_string(),
+            provider_id: "provider-1".to_string(),
             tool_name: "Bash".to_string(),
             output: "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2),
             is_error: false,

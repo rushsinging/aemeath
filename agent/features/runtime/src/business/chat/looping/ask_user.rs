@@ -92,7 +92,13 @@ where
             Ok(a) if !a.is_empty() => a,
             _ => default.unwrap_or_default(),
         };
-        let result = (call.id.clone(), answer, false, Vec::new());
+        let result = (
+            call.id.clone(),
+            call.provider_id.clone(),
+            answer,
+            false,
+            Vec::new(),
+        );
         send_tool_result(sink, call, &result).await;
         ask_user_results.push(result);
     }

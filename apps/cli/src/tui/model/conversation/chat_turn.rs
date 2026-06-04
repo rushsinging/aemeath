@@ -21,41 +21,27 @@ impl ChatTurn {
         }
     }
 
-    pub fn observe_tool_start(&mut self, chat_id: ChatId, name: String, index: usize) {
-        let key = ToolStreamKey::new(chat_id, self.id.clone(), name, index);
-        self.tool_calls.push(ToolCall::pending(key));
-        self.status = ChatTurnStatus::ToolCalling;
-    }
-
-    pub fn bind_tool(
+    pub fn observe_tool_start(
         &mut self,
         id: ToolCallId,
-        name: &str,
+        chat_id: ChatId,
+        name: String,
         index: usize,
-        summary: String,
-    ) -> Option<String> {
-        // agent loop 每轮往同一 turn 追加占位，index 跨轮重复（0,1,0,1…）；且 ToolCallStart 用
-        // 工具序号、ObserveToolCall 用 content-block 序号（assistant 前置 thinking/text 时偏移）。
-        // 故 bind 只认「未绑定」占位：优先 (name,index) 精确匹配的未绑定占位，否则回退同名首个
-        // 未绑定占位。绝不覆盖已绑定占位——否则前一轮的 id 会被冲掉，其结果在 assemble 时找不到
-        // 对应 tool call，进而泄漏完整原始 output（#87 根因 B / #86 同步问题）。
-        let pos = self
+    ) {
+        let key = ToolStreamKey::new(chat_id, self.id.clone(), name, index);
+        self.tool_calls.push(ToolCall::pending(id, key));
+        self.status = ChatTurnStatus::ToolExecuting;
+    }
+
+    pub fn bind_tool(&mut self, id: &str, summary: String) -> Option<String> {
+        let call = self
             .tool_calls
-            .iter()
-            .position(|call| {
-                call.id.is_none() && call.stream_key.name == name && call.stream_key.index == index
-            })
-            .or_else(|| {
-                self.tool_calls
-                    .iter()
-                    .position(|call| call.id.is_none() && call.stream_key.name == name)
-            })?;
-        let call = &mut self.tool_calls[pos];
-        call.bind(id, summary);
+            .iter_mut()
+            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id))?;
+        call.bind(summary);
         self.status = ChatTurnStatus::ToolExecuting;
         Some(call.args_preview.clone())
     }
-
     pub fn complete_tool(
         &mut self,
         id: &str,
@@ -110,14 +96,12 @@ mod tests {
         // 正常路径：(name, index) 精确匹配未绑定占位。
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
-        turn.observe_tool_start(chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(chat, "Bash".into(), 1);
+        turn.observe_tool_start(ToolCallId::new("call_r"), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(ToolCallId::new("call_b"), chat, "Bash".into(), 1);
 
-        assert!(turn
-            .bind_tool(ToolCallId::new("call_r"), "Read", 0, String::new())
-            .is_some());
+        assert!(turn.bind_tool("call_r", String::new()).is_some());
         assert_eq!(turn.tool_calls[0].id.as_ref().unwrap().as_ref(), "call_r");
-        assert!(turn.tool_calls[1].id.is_none(), "Bash 占位不应被绑");
+        assert_eq!(turn.tool_calls[1].id.as_ref().unwrap().as_ref(), "call_b");
     }
 
     #[test]
@@ -127,16 +111,13 @@ mod tests {
         // 而非返回 None 成 orphan。
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
-        turn.observe_tool_start(chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(chat, "Read".into(), 1);
+        turn.observe_tool_start(ToolCallId::new("call_a"), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(ToolCallId::new("call_b"), chat, "Read".into(), 1);
 
-        assert!(turn
-            .bind_tool(ToolCallId::new("call_a"), "Read", 1, String::new())
-            .is_some());
+        assert!(turn.bind_tool("call_a", String::new()).is_some());
         assert!(
-            turn.bind_tool(ToolCallId::new("call_b"), "Read", 2, String::new())
-                .is_some(),
-            "index 错位应回退绑定，不应成 orphan"
+            turn.bind_tool("call_b", String::new()).is_some(),
+            "internal id 应直接绑定，不再依赖 provider/content index"
         );
 
         let ids = bound_ids(&turn);
@@ -151,14 +132,14 @@ mod tests {
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
         // 轮 1 占位 + 绑定。
-        turn.observe_tool_start(chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(chat.clone(), "Read".into(), 1);
-        turn.bind_tool(ToolCallId::new("call_1"), "Read", 1, String::new());
+        turn.observe_tool_start(ToolCallId::new("call_1a"), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(ToolCallId::new("call_1"), chat.clone(), "Read".into(), 1);
+        turn.bind_tool("call_1", String::new());
         // 轮 2 占位（index 跨轮重复）。
-        turn.observe_tool_start(chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(chat, "Read".into(), 1);
-        // 轮 2 bind(index=1)：first (Read,1) 是轮1 已绑 call_1，不应覆盖。
-        turn.bind_tool(ToolCallId::new("call_2"), "Read", 1, String::new());
+        turn.observe_tool_start(ToolCallId::new("call_2a"), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(ToolCallId::new("call_2"), chat, "Read".into(), 1);
+        // 轮 2 bind(index=1)：internal id 直连，不会覆盖轮1 已绑 call_1。
+        turn.bind_tool("call_2", String::new());
 
         let ids = bound_ids(&turn);
         assert!(

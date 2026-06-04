@@ -146,10 +146,12 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         submission: "edit docs".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Edit".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Edit".to_string(),
         output: "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew"
@@ -158,6 +160,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         image_count: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Edit".to_string(),
         index: 0,
@@ -269,10 +272,12 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
@@ -336,16 +341,19 @@ fn add_completed_tool(
     is_error: bool,
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: id.to_string(),
         name: name.to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCall {
+        provider_id: format!("provider-{id}"),
         id: id.to_string(),
         name: name.to_string(),
         index: 0,
         summary: summary.to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: format!("provider-{id}"),
         id: id.to_string(),
         tool_name: name.to_string(),
         output: output.to_string(),

@@ -18,22 +18,26 @@ pub enum AppEvent {
     Thinking(String),
     TextBlockComplete(String),
     ToolCallStart {
+        id: String,
         name: String,
         index: usize,
     },
     ToolArgumentsDelta {
+        id: String,
         index: usize,
         name: String,
         partial_args: String,
     },
     ToolCall {
         id: String,
+        provider_id: String,
         name: String,
         index: Option<usize>,
         summary: String,
     },
     ToolResult {
         id: String,
+        provider_id: String,
         tool_name: String,
         output: String,
         is_error: bool,

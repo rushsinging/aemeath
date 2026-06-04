@@ -3,7 +3,6 @@ use super::change::ConversationChange;
 use super::ids::ToolCallId;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
-use crate::tui::render::display::safe_text::safe_str_slice_by_char;
 
 impl ConversationModel {
     pub(super) fn promote_orphan_tool_result(&mut self, id: &str) {
@@ -43,24 +42,13 @@ impl ConversationModel {
     pub(super) fn observe_tool_result(
         &mut self,
         id: String,
+        _provider_id: String,
         tool_name: String,
         output: String,
         is_error: bool,
         image_count: usize,
     ) -> Vec<ConversationChange> {
-        log::warn!(
-            "[orphan-diag] observe_tool_result ENTRY id={} tool_name={} output_len={} is_error={} chats={}",
-            id,
-            tool_name,
-            output.len(),
-            is_error,
-            self.chats.len(),
-        );
         if let Some(status) = self.complete_active_tool(&id, output.clone(), is_error) {
-            log::warn!(
-                "[orphan-diag] observe_tool_result EMBEDDED id={} status={status:?}",
-                id
-            );
             self.insert_tool_result_after_tool_call(
                 ToolCallId::new(id.clone()),
                 output,
@@ -73,12 +61,6 @@ impl ConversationModel {
                 ConversationChange::OutputDirty,
             ];
         }
-        log::warn!(
-            "[orphan-diag] observe_tool_result ORPHAN id={} tool_name={} output_preview={}",
-            id,
-            tool_name,
-            safe_str_slice_by_char(&output, 0, 200),
-        );
         self.blocks.push(ConversationBlock::OrphanToolResult {
             id: id.clone(),
             tool_name,
@@ -91,7 +73,6 @@ impl ConversationModel {
             ConversationChange::OutputDirty,
         ]
     }
-
     pub(super) fn complete_active_tool(
         &mut self,
         id: &str,

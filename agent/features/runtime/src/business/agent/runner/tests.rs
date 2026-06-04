@@ -153,6 +153,7 @@ fn test_tool_call(
     input: serde_json::Value,
 ) -> crate::business::agent::ToolCall {
     crate::business::agent::ToolCall {
+        provider_id: "provider-test".to_string(),
         id: id.to_string(),
         name: name.to_string(),
         index: 0,

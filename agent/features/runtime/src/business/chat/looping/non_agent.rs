@@ -188,6 +188,7 @@ where
         .await;
     let owned_call = ToolCall {
         id: call.id.clone(),
+        provider_id: call.provider_id.clone(),
         name: call.name.clone(),
         index: call.index,
         input: call.input.clone(),
@@ -208,6 +209,7 @@ where
     if pre_results.iter().any(|r| r.blocked) {
         let result = (
             owned_call.id.clone(),
+            owned_call.provider_id.clone(),
             "Blocked by PreToolUse hook".to_string(),
             true,
             Vec::new(),
@@ -239,7 +241,7 @@ where
         );
         run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        let result = (id, output, is_error, images);
+        let result = (owned_call.id.clone(), id, output, is_error, images);
         send_tool_result(sink, &owned_call, &result).await;
         out.push(result);
     }

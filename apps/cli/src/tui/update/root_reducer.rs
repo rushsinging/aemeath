@@ -293,6 +293,7 @@ mod tests {
             &mut model,
             AgentEventMapping {
                 conversation: vec![ConversationIntent::ObserveToolCallStart {
+                    id: "tool-1".to_string(),
                     name: "Read".to_string(),
                     index: 0,
                 }],
@@ -304,6 +305,7 @@ mod tests {
             AgentEventMapping {
                 conversation: vec![ConversationIntent::ObserveToolCall {
                     id: "tool-1".to_string(),
+                    provider_id: "provider-1".to_string(),
                     name: "Read".to_string(),
                     index: 0,
                     summary: "Read file".to_string(),
