@@ -30,6 +30,10 @@ report_matches() {
 # - copying selected text must read OutputViewState + document, not widget selection mirrors.
 
 report_matches \
+  "output_widget/output_view_widget adapters must stay retired and test-only; keep production projection in App/ViewState, not widget adapters." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/^\\s*(\\/\\/.*)?\$/) { next } if (/pub[[:space:]]+mod[[:space:]]+(output_widget|output_view_widget)[[:space:]]*;/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/adapter.rs\""
+
+report_matches \
   "output_view_widget adapter must stay retired; synchronize scroll via OutputViewState::sync_document_metrics from App/layout, not widget readback." \
   bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/ || /^\\s*use / || /^\\s*fn / || /^\\s*let / || /^\\s*assert/ || /sync_document_metrics/; if (/(pub\\(crate\\)[[:space:]]+fn|OutputArea|&mut[[:space:]]+OutputViewState|output_area\\.|\\.last_visible_height[[:space:]]*=)/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/output_view_widget.rs\""
 
