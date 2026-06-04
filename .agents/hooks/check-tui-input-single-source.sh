@@ -25,14 +25,25 @@ report_matches() {
 }
 
 # Input text/cursor truth lives in model.input.document. Completion/suggestions truth lives in
-# model.input.completion. Phase 2 forbids InputArea from physically storing text/cursor mirror;
-# rendering must consume a model-derived projection and create any tui_textarea helper per frame.
+# model.input.completion. History navigation truth lives in model.input.history. Phase 2 forbids
+# InputArea from physically storing text/cursor/history mirror; rendering must consume a
+# model-derived projection and create any tui_textarea helper per frame.
 
 report_matches \
   "InputArea must not physically store tui_textarea::TextArea/text/cursor mirror fields." \
   grep -RInE 'textarea:[[:space:]]*TextArea|pub\(super\)[[:space:]]+(text|cursor):' \
     "$ROOT/apps/cli/src/tui/render/input/input_area.rs" \
     "$ROOT/apps/cli/src/tui/render/input/input_area" --include='*.rs'
+
+report_matches \
+  "InputArea must not physically store history navigation mirror fields; keep history truth in InputModel::history." \
+  grep -RInE 'pub\(super\)[[:space:]]+(history|history_index|saved_input):' \
+    "$ROOT/apps/cli/src/tui/render/input/input_area.rs" \
+    "$ROOT/apps/cli/src/tui/render/input/input_area" --include='*.rs'
+
+report_matches \
+  "InputArea must not expose history mirror mutation APIs; route history through InputIntent/InputModel." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\s*#\[cfg\(test\)\]/) { \$pending=1; next } if (/pub[[:space:]]*(\([^)]*\))?[[:space:]]*fn[[:space:]]+(add_history|reset_history_nav|navigate_history|set_history|history_previous|history_next)[[:space:]]*\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/history.rs\""
 
 report_matches \
   "InputArea must not expose production text/cursor mirror APIs." \

@@ -15,14 +15,6 @@ pub mod suggestions;
 pub struct InputArea {
     pub(super) focused: bool,
     pub(super) pending_images: usize,
-    /// Command history mirror is kept for test-only widget history helpers; production history
-    /// truth lives in `InputModel::history`.
-    #[cfg(test)]
-    pub(super) history: Vec<String>,
-    /// Current position in history (None means not browsing history)
-    pub(super) history_index: Option<usize>,
-    /// Saved input before browsing history (to restore when navigating back)
-    pub(super) saved_input: String,
     /// Input render content width cache; not a text/cursor truth.
     pub(crate) content_width: u16,
 }
@@ -38,10 +30,6 @@ impl InputArea {
         Self {
             focused: true,
             pending_images: 0,
-            #[cfg(test)]
-            history: Vec::new(),
-            history_index: None,
-            saved_input: String::new(),
             content_width: 0,
         }
     }
@@ -51,8 +39,9 @@ impl InputArea {
 
     /// Clear non-text input widget mirrors.
     pub(crate) fn clear(&mut self) {
-        self.history_index = None;
-        self.saved_input.clear();
+        // All former clearable input state (text/cursor/history/selection) now lives in model or
+        // view_state. Keep this hook for submit/clear adapter compatibility until the adapter can
+        // drop its widget argument entirely.
     }
 
     /// Set pending images count
