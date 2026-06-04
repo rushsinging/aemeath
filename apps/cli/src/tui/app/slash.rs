@@ -6,6 +6,7 @@ mod suggestions;
 
 use crate::tui::app::UiEvent;
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::runtime::intent::RuntimeIntent;
 
 /// 内置命令名常量（不再依赖 runtime::api）
 mod cmd {
@@ -307,19 +308,15 @@ impl super::App {
                                 );
                             }
                             self.session.current_model_display = result.display_name.clone();
-                            // model 真相归 RuntimeModel，经 adapter 单向写回 status_bar。
+                            // model 真相归 RuntimeModel，StatusBar 渲染时直接消费 StatusViewModel。
                             self.model.runtime.apply(
                                 crate::tui::model::runtime::intent::RuntimeIntent::SetProviderModel {
                                     provider: self.model.runtime.provider.clone(),
                                     model_id: Some(result.display_name.clone()),
                                 },
                             );
-                            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
-                                &self.model,
-                                &mut self.status_bar,
-                            );
                             if let Some(ra) = result.reasoning_active {
-                                self.status_bar.set_thinking(ra);
+                                self.model.runtime.apply(RuntimeIntent::SetThinking(ra));
                             }
                             self.append_system_notice(format!(
                                 "[switched to {}]",
@@ -347,7 +344,9 @@ impl super::App {
                         Ok(new_state) => {
                             let label = if new_state { "ON" } else { "OFF" };
                             self.append_system_notice(format!("[thinking mode: {}]", label));
-                            self.status_bar.set_thinking(new_state);
+                            self.model
+                                .runtime
+                                .apply(RuntimeIntent::SetThinking(new_state));
                         }
                         Err(e) => {
                             self.append_error_notice(format!("set thinking failed: {}", e));

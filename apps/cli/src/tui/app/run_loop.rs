@@ -20,10 +20,6 @@ impl App {
         }
         if change.contains(ChangeSet::PROJECT) {
             self.update_project_context().await;
-            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
-                &self.model,
-                &mut self.status_bar,
-            );
         }
     }
 

@@ -78,8 +78,9 @@ pub(crate) async fn run_chat(args: Args) {
             bootstrap.context_size as u64,
         ),
     );
-    app.status_bar.set_thinking(bootstrap.thinking);
-
+    app.model
+        .runtime
+        .apply(crate::tui::model::runtime::intent::RuntimeIntent::SetThinking(bootstrap.thinking));
     app.run(bootstrap.client, initial_resume_id)
         .await
         .unwrap_or_else(|e| {

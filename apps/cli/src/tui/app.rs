@@ -8,6 +8,7 @@ use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::view_state::AppViewState;
@@ -132,9 +133,7 @@ pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView)
 
 impl App {
     pub fn new(session_id: String, cwd: PathBuf, model: String) -> Self {
-        let mut status_bar = StatusBar::new();
-        status_bar.init(&session_id, &model, &cwd);
-
+        let status_bar = StatusBar::new();
         let output_area = OutputArea::new();
 
         let mut model_state = TuiModel::default();
@@ -183,7 +182,11 @@ impl App {
                 >= update::CTRL_C_TIMEOUT_SECS
             {
                 self.layout.clear_ctrlc();
-                self.status_bar.set_success("Ready");
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
+                        "Ready",
+                    )));
             }
         }
     }
@@ -220,6 +223,7 @@ impl App {
             }
 
             let live_status = self.live_status_view_model();
+            let mut status_view = self.status_view_model();
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.output_area
@@ -227,7 +231,12 @@ impl App {
             }))
             .is_err()
             {
-                self.status_bar.set_warning("Render error, try resizing");
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+                        "Render error, try resizing",
+                    )));
+                status_view = self.status_view_model();
             }
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let suggestions_view =
@@ -248,7 +257,7 @@ impl App {
                 );
             }));
             self.status_bar
-                .draw(chunks[3], buf, &self.view_state.status_sel);
+                .draw(chunks[3], buf, &self.view_state.status_sel, &status_view);
             if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }

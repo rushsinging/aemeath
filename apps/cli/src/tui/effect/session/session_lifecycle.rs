@@ -28,7 +28,7 @@ impl App {
                         self.session.cwd = ws.path_base.clone();
                         let ev = crate::tui::app::status_context_for_workspace(ws.clone());
                         if let crate::tui::app::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
-                            // 工作目录上下文真相归 RuntimeModel，经 adapter 单向写回 status_bar。
+                            // 工作目录上下文真相归 RuntimeModel，StatusBar 渲染时直接消费 StatusViewModel。
                             self.model.runtime.apply(
                                 crate::tui::model::runtime::intent::RuntimeIntent::WorkspaceSnapshotReceived {
                                     path_base: Some(ctx.path_base),
@@ -43,10 +43,6 @@ impl App {
                                         }
                                     },
                                 },
-                            );
-                            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
-                                &self.model,
-                                &mut self.status_bar,
                             );
                         }
                     }

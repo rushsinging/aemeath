@@ -2,6 +2,8 @@ use crate::tui::app::event::UiEvent;
 use crate::tui::app::App;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
 impl App {
@@ -141,10 +143,18 @@ impl App {
     /// 将文本复制到系统剪贴板，并据结果在 status bar 给出反馈。
     fn copy_to_clipboard_effect(&mut self, text: &str) {
         match crate::tui::render::input::clipboard::copy_text(text) {
-            Ok(()) => self.status_bar.set_success("已复制选中内容"),
+            Ok(()) => {
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
+                        "已复制选中内容",
+                    )));
+            }
             Err(err) => {
                 log::warn!("复制选中内容失败: {err}");
-                self.status_bar.set_warning(&err);
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(err)));
             }
         }
     }

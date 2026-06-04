@@ -1,4 +1,5 @@
 use super::spinner::SpinnerPhase;
+use super::status_notice::StatusNotice;
 use super::workspace::WorktreeKind;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,4 +44,6 @@ pub enum RuntimeIntent {
     SetSpinnerPhase(SpinnerPhase),
     StopSpinner,
     UpdateTaskLines(Vec<String>),
+    SetStatusNotice(StatusNotice),
+    SetThinking(bool),
 }

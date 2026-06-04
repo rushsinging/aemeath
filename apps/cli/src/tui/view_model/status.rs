@@ -1,11 +1,42 @@
 use super::style::SemanticStyle;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StatusNoticeViewKind {
+    #[default]
+    Normal,
+    Success,
+    Warning,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StatusNoticeViewModel {
+    pub text: String,
+    pub kind: StatusNoticeViewKind,
+}
+
+impl Default for StatusNoticeViewModel {
+    fn default() -> Self {
+        Self {
+            text: "Ready".to_string(),
+            kind: StatusNoticeViewKind::Normal,
+        }
+    }
+}
+
 /// 视图层自有的工作目录类型枚举，避免 view_model 依赖 model 内部类型。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StatusWorktreeKind {
     #[default]
     Main,
     Worktree,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StatusViewModel {
+    pub notice: StatusNoticeViewModel,
+    pub runtime: StatusRuntimeViewModel,
+    pub line: StatusLineViewModel,
+    pub thinking: bool,
 }
 
 /// 状态栏运行态视图模型：StatusBar 渲染所需 token/tps/model/session/context 的唯一派生表示。
