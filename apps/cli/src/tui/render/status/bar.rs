@@ -5,6 +5,7 @@ mod status_bar_selection;
 
 use crate::tui::render::theme;
 use crate::tui::view_model::StatusRuntimeViewModel;
+use crate::tui::view_state::StatusSelectionViewState;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -30,11 +31,6 @@ pub struct StatusBar {
     status: String,
     status_type: StatusType,
     vm: StatusRuntimeViewModel,
-    is_selecting: bool,
-    selection_start: Option<usize>,
-    selection_end: Option<usize>,
-    selection_row: StatusBarRow,
-    selection_width: u16,
     context: StatusLineContext,
     thinking: bool,
 }
@@ -68,11 +64,6 @@ impl StatusBar {
             status: "Ready".to_string(),
             status_type: StatusType::Normal,
             vm: StatusRuntimeViewModel::default(),
-            is_selecting: false,
-            selection_start: None,
-            selection_end: None,
-            selection_row: StatusBarRow::Runtime,
-            selection_width: 0,
             context: StatusLineContext::default(),
             thinking: true,
         }
@@ -140,8 +131,8 @@ impl StatusBar {
     }
 
     /// 绘制状态栏。
-    pub fn draw(&self, area: Rect, buf: &mut Buffer) {
-        self.render(area, buf);
+    pub fn draw(&self, area: Rect, buf: &mut Buffer, selection: &StatusSelectionViewState) {
+        self.render(area, buf, selection);
     }
 
     /// Set permission mode text for the status context.
@@ -158,19 +149,20 @@ impl StatusBar {
     }
 
     /// Render the status bar
-    pub fn render(&self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&self, area: Rect, buf: &mut Buffer, selection: &StatusSelectionViewState) {
         if area.height == 0 {
             return;
         }
 
         let base = Style::default().bg(theme::STATUS_BG);
         let runtime_area = Rect { height: 1, ..area };
-        let runtime_line =
-            if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
-                self.runtime_row_spans_with_selection(start, end, base)
-            } else {
-                self.runtime_row_spans()
-            };
+        // Default status selection points at Runtime, but an empty view_state short-circuits in
+        // spans_with_selection(), so no highlight is applied unless a real range exists.
+        let runtime_line = if selection.selection_row == StatusBarRow::Runtime {
+            self.runtime_row_spans_with_selection(selection, base)
+        } else {
+            self.runtime_row_spans()
+        };
         Paragraph::new(Line::from(runtime_line))
             .style(base)
             .render(runtime_area, buf);
@@ -181,7 +173,7 @@ impl StatusBar {
                 height: 1,
                 ..area
             };
-            let context_line = self.context_row_spans(area.width as usize, base);
+            let context_line = self.context_row_spans(area.width as usize, base, selection);
             Paragraph::new(Line::from(context_line))
                 .style(base)
                 .render(context_area, buf);
@@ -266,10 +258,15 @@ impl StatusBar {
             .collect()
     }
 
-    fn context_row_spans(&self, width: usize, base: Style) -> Vec<Span<'static>> {
+    fn context_row_spans(
+        &self,
+        width: usize,
+        base: Style,
+        selection: &StatusSelectionViewState,
+    ) -> Vec<Span<'static>> {
         let text = self.context_row_text(width);
-        if self.selection_row == StatusBarRow::Context {
-            return self.spans_with_selection(text, base);
+        if selection.selection_row == StatusBarRow::Context {
+            return self.spans_with_selection(text, base, selection);
         }
         let parts: Vec<&str> = text.split(" │ ").collect();
         let has_root = parts.get(1).is_some_and(|part| part.starts_with("root "));
@@ -300,11 +297,10 @@ impl StatusBar {
 
     fn runtime_row_spans_with_selection(
         &self,
-        _start: usize,
-        _end: usize,
+        selection: &StatusSelectionViewState,
         base: Style,
     ) -> Vec<Span<'static>> {
-        self.spans_with_selection(self.build_full_text(), base)
+        self.spans_with_selection(self.build_full_text(), base, selection)
     }
 
     pub(crate) fn build_full_text(&self) -> String {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui::render::theme;
 use crate::tui::view_model::{StatusContextViewModel, StatusRuntimeViewModel, StatusWorktreeKind};
+use crate::tui::view_state::StatusSelectionViewState;
 
 fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
     (0..width)
@@ -160,7 +161,7 @@ fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors
     let area = Rect::new(0, 0, 120, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
     assert_eq!(buf.cell((38, 1)).unwrap().style().fg, Some(theme::SUCCESS));
@@ -232,7 +233,7 @@ fn test_context_row_without_session_uses_correct_semantic_colors() {
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
     assert_eq!(buf.cell((12, 1)).unwrap().style().fg, Some(theme::SUCCESS));
@@ -254,7 +255,7 @@ fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
     assert_eq!(
@@ -290,7 +291,7 @@ fn test_status_bar_render_two_rows_v2() {
     let area = Rect::new(0, 0, 120, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     let runtime = row_text(&buf, 0, area.width);
     let context = row_text(&buf, 1, area.width);

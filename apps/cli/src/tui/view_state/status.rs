@@ -1,9 +1,8 @@
-//! Status 选区 view_state（#59 S4）。
+//! Status 选区 view_state（#59 S4 / #70 phase 2）。
 //!
 //! 对齐 S2 `output.rs` 范式：选区真相收敛到 view_state 锚点状态机，
-//! widget `render/status/bar.rs` 的 `is_selecting`/`selection_start`/
-//! `selection_end`/`selection_row`/`selection_width` 降为只读镜像，由
-//! `adapter/status_widget.rs::apply_status_selection_to_widget` 单向写回（T2 接线）。
+//! `render/status/bar.rs` 渲染时直接消费该投影，widget 不再保存第二份 status selection
+//! mirror。
 //!
 //! 坐标模型照搬现 `display/status_bar_selection.rs`，无行为漂移：
 //! - `row`：`StatusBarRow`（Runtime | Context），标识选区所在状态栏逻辑行；
@@ -11,8 +10,8 @@
 //!   （`screen_col_to_char_idx` 依赖 render 期 `build_full_text`/`context_row_text`）
 //!   保留在 widget 只读借用，view_state 只持已折算的 char_idx 锚点（对齐 output
 //!   的 `screen_to_anchor` 留 widget）；
-//! - `width`：折算 Context 行文本所需的渲染宽度（render 期布局数据，仅作为折算入参
-//!   的回显存档，供 adapter 写回 widget 时复原 `selection_width` 镜像）。
+//! - `width`：折算 Context 行文本所需的渲染宽度（render 期布局数据，作为 view_state
+//!   元数据供后续 render/copy 使用）。
 
 use crate::tui::render::status::StatusBarRow;
 
