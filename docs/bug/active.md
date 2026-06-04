@@ -13,6 +13,24 @@
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方 | 中 | 待确认 | 待用户确认 | 2026-06 | AskUser 未清理 active_text_block_id，新输出渲染到 AskUser 块上方；已修复 |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
+| 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 活动中 | 未确认 | 2026-06 | 待查：任务工具创建后未同步刷新 TUI task list window |
+
+### #117 创建 task list 和 task 时，TUI task list window 没有更新
+
+**状态**：活动中
+
+**症状**：通过工具创建 task list 并继续创建 task 后，TUI 的 task list window 没有立即更新，窗口仍显示旧任务状态或空状态；实际任务工具调用已经成功返回，任务状态与 TUI 展示不一致。
+
+**根因**：待查。初步怀疑 TaskListCreate / TaskCreate 成功更新 TaskStore 后，没有向 TUI runtime model 推送最新 task lines，或 TUI task status adapter 只在部分生命周期事件上刷新，未覆盖创建列表和创建任务的路径。
+
+**修复方向**：追踪 TaskListCreate、TaskCreate、TaskUpdate 与 TUI task_status lines 的数据流，确认任务持久化更新后是否触发 `RuntimeIntent::UpdateTaskLines` 或等价刷新；补充覆盖创建 task list 和 task 后 task list window 更新的回归测试，再按单一真相更新 TUI model。
+
+**验证**：待补充。建议至少新增并运行覆盖 task list / task 创建后窗口刷新逻辑的 CLI/TUI 单元测试。
+
+**涉及路径**：
+- `agent/features/storage/src/business/task/`
+- `agent/features/runtime/src/`
+- `apps/cli/src/tui/`
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
 
