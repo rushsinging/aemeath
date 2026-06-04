@@ -324,7 +324,7 @@ fn rendered_plain(texts: &[&str], width: u16) -> (OutputArea, Rect) {
 
 #[test]
 fn test_screen_to_anchor_maps_row_col_to_logic_char() {
-    let (mut output, area) = rendered_plain(&["hello", "世界"], 40);
+    let (output, area) = rendered_plain(&["hello", "世界"], 40);
     // 正常路径：第 0 行第 3 列 → (逻辑行 0, plain char 3)。
     assert_eq!(
         output.screen_to_anchor(0, 3, &area, &no_live_status()),
@@ -339,7 +339,7 @@ fn test_screen_to_anchor_maps_row_col_to_logic_char() {
 
 #[test]
 fn test_screen_to_anchor_returns_none_when_row_out_of_range() {
-    let (mut output, area) = rendered_plain(&["abc"], 40);
+    let (output, area) = rendered_plain(&["abc"], 40);
     // 错误/边界路径：屏幕行超出 screen_line_map 返回 None（不改任何状态）。
     assert_eq!(
         output.screen_to_anchor(5, 0, &area, &no_live_status()),
@@ -388,7 +388,7 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
 
 #[test]
 fn test_word_bounds_at_returns_word_half_open_range() {
-    let (mut output, area) = rendered_plain(&["foo bar_baz qux"], 40);
+    let (output, area) = rendered_plain(&["foo bar_baz qux"], 40);
     // 正常路径：点击 "bar_baz" 内 → 半开区间 [4, 11)（下划线视作 word-char）。
     assert_eq!(
         output.word_bounds_at(0, 6, &area, &no_live_status()),

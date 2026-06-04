@@ -54,6 +54,10 @@ report_matches \
   bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/pub[^\\(]*(fn\\s+(clear_selection|get_selected_text|start_selection|update_selection|end_selection|select_word)\\()/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/output_area/selection.rs\""
 
 report_matches \
+  "OutputArea selection/copy coordinate helpers must remain read-only; do not require &mut self for pure projection helpers." \
+  bash -c "perl -0ne 'while (/pub[[:space:]]+fn[[:space:]]+(get_line_content|screen_to_anchor|word_bounds_at|selected_text_for_view)[^{;]*&mut[[:space:]]+self/sg) { print \"\$ARGV:\$1 requires &mut self\\n\" } while (/fn[[:space:]]+selected_text_for_range[^{;]*&mut[[:space:]]+self/sg) { print \"\$ARGV:selected_text_for_range requires &mut self\\n\" }' \"$ROOT/apps/cli/src/tui/render/output_area/selection.rs\""
+
+report_matches \
   "production copy path must not read output_area.get_selected_text(); use output_area.selected_text_for_view(&view_state.output)." \
   grep -RInE 'output_area\.get_selected_text\(' \
     "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude='*_tests.rs'
