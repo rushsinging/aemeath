@@ -57,8 +57,10 @@ impl crate::tui::app::App {
                         // 输出区选区真相归 view_state；status/input 清 view_state（S4）。
                         self.view_state.input_sel.clear_selection();
                         self.view_state.status_sel.clear_selection();
+                        let live_status = self.live_status_view_model();
                         if let Some((line, ws, we)) =
-                            self.output_area.word_bounds_at(row, col, &output_area)
+                            self.output_area
+                                .word_bounds_at(row, col, &output_area, &live_status)
                         {
                             self.view_state.output.select_word(line, ws, we);
                         }
@@ -67,8 +69,10 @@ impl crate::tui::app::App {
                         // 清除其他区域的选中（status/input 清 view_state）
                         self.view_state.input_sel.clear_selection();
                         self.view_state.status_sel.clear_selection();
+                        let live_status = self.live_status_view_model();
                         if let Some((line, anchor)) =
-                            self.output_area.screen_to_anchor(row, col, &output_area)
+                            self.output_area
+                                .screen_to_anchor(row, col, &output_area, &live_status)
                         {
                             self.view_state.output.begin_selection(line, anchor);
                         }
@@ -94,12 +98,14 @@ impl crate::tui::app::App {
                     self.view_state.input_sel.clear_selection();
                     // 屏幕坐标 → status 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4）。
+                    let status_view = self.status_view_model();
                     let (status_row, char_idx, width) = self.status_bar.screen_to_status_anchor(
                         row,
                         col,
                         status_bar.y,
                         status_bar.x,
                         status_bar.width,
+                        &status_view,
                     );
                     self.view_state
                         .status_sel
@@ -110,8 +116,10 @@ impl crate::tui::app::App {
                 if self.view_state.output.is_selecting() {
                     // 屏幕坐标 → 锚点折算只读借 widget（依赖 render 期 screen_line_map），
                     // 选区真相写入 view_state；行超界时兜底到末尾锚点。
+                    let live_status = self.live_status_view_model();
                     if let Some((line, anchor)) =
-                        self.output_area.screen_to_anchor(row, col, &output_area)
+                        self.output_area
+                            .screen_to_anchor(row, col, &output_area, &live_status)
                     {
                         self.view_state.output.update_selection(line, anchor);
                     } else if let Some((line, anchor)) = self.output_area.last_visible_anchor() {
@@ -130,10 +138,12 @@ impl crate::tui::app::App {
                 } else if self.view_state.status_sel.is_selecting() {
                     // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
                     let sel = &self.view_state.status_sel;
+                    let status_view = self.status_view_model();
                     let char_idx = self.status_bar.screen_col_to_char_idx(
                         sel.selection_row,
                         col.saturating_sub(status_bar.x),
                         sel.selection_width,
+                        &status_view,
                     );
                     self.view_state.status_sel.update_selection(char_idx);
                 }
@@ -143,10 +153,11 @@ impl crate::tui::app::App {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.output.end_selection();
                     // 取 plain 文本（读 view_state 选区真相 + widget document，#63 gutter 不进 plain）。
+                    let live_status = self.live_status_view_model();
                     let text = self
                         .output_area
-                        .selected_text_for_view(&self.view_state.output);
-                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                        .selected_text_for_view(&self.view_state.output, &live_status);
+                    // 取完清选区：view_state 清空。
                     self.view_state.output.clear_selection();
                     text
                 } else if self.view_state.input_sel.is_selecting() {
@@ -164,10 +175,11 @@ impl crate::tui::app::App {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.status_sel.end_selection();
                     // 取 plain 文本（读 view_state 选区真相 + render 期 line_text 折算）。
+                    let status_view = self.status_view_model();
                     let text = self
                         .status_bar
-                        .selected_text_for_view(&self.view_state.status_sel);
-                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                        .selected_text_for_view(&self.view_state.status_sel, &status_view);
+                    // 取完清选区：view_state 清空。
                     self.view_state.status_sel.clear_selection();
                     text
                 } else {

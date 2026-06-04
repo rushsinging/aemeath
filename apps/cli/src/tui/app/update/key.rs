@@ -4,7 +4,10 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::input::change::submitted_text_from_changes;
 use crate::tui::model::input::intent::InputIntent;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
 
@@ -43,12 +46,8 @@ fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> Ct
 
 impl App {
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
-        let changes = self.model.input.apply(intent);
-        crate::tui::adapter::input_widget::apply_input_changes_to_widget(
-            &mut self.input_area,
-            &mut self.status_bar,
-            &changes,
-        );
+        // Input changes update the model only; render paths read model-derived view state directly.
+        let _changes = self.model.input.apply(intent);
     }
 
     pub(super) fn update_key(
@@ -87,7 +86,9 @@ impl App {
                     if let Some(agent_client) = &spawn_refs.agent_client {
                         agent_client.cancel();
                     }
-                    self.status_bar.set_warning("Interrupted");
+                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                        StatusNotice::warning("Interrupted"),
+                    ));
                 } else if completion_visible {
                     self.handle_input_intent(InputIntent::SetCompletions {
                         query: String::new(),
@@ -98,13 +99,16 @@ impl App {
                     {
                         CtrlCAction::ClearInput => {
                             self.handle_input_intent(InputIntent::Clear);
-                            self.status_bar
-                                .set_warning("Input cleared (Ctrl+C again to exit)");
+                            self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                                StatusNotice::warning("Input cleared (Ctrl+C again to exit)"),
+                            ));
                             self.layout.mark_ctrlc_now();
                         }
                         CtrlCAction::WarnExit => {
                             self.layout.mark_ctrlc_now();
-                            self.status_bar.set_warning("Press Ctrl+C again to exit");
+                            self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                                StatusNotice::warning("Press Ctrl+C again to exit"),
+                            ));
                         }
                         CtrlCAction::Quit => {
                             return UpdateResult::one(Effect::QuitApplication);
@@ -132,33 +136,22 @@ impl App {
                 if let Some(agent_client) = &spawn_refs.agent_client {
                     agent_client.cancel();
                 }
-                self.status_bar.set_warning("Interrupted");
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+                        "Interrupted",
+                    )));
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.model.input.document.is_empty() {
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    crate::tui::adapter::input_widget::apply_input_changes_to_widget(
-                        &mut self.input_area,
-                        &mut self.status_bar,
-                        &changes,
-                    );
-                    let input = changes
-                        .iter()
-                        .find_map(|change| {
-                            if let crate::tui::model::input::change::InputChange::Submitted {
-                                submission,
-                            } = change
-                            {
-                                Some(submission.text.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_default();
+                    let input = submitted_text_from_changes(&changes).unwrap_or_default();
                     let event = sdk::ChatInputEvent::classify_text(input.clone(), Vec::new());
                     // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
                     self.enqueue_submission_echo(input.clone());
-                    self.status_bar.set_warning("message event queued");
+                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                        StatusNotice::warning("message event queued"),
+                    ));
                     return UpdateResult::one(Effect::SendChatInputEvent { event });
                 }
             }

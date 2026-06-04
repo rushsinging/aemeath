@@ -14,7 +14,6 @@ impl ConversationModel {
         }) else {
             return;
         };
-        log::warn!("[orphan-diag] promote_orphan_tool_result FOUND id={id} -> promoting");
         let ConversationBlock::OrphanToolResult {
             id: _,
             tool_name: _,
@@ -34,8 +33,6 @@ impl ConversationModel {
                 is_error,
                 0,
             );
-        } else {
-            log::warn!("[orphan-diag] promote_orphan_tool_result FAIL: complete_active_tool returned None for id={id}");
         }
     }
 
@@ -80,32 +77,11 @@ impl ConversationModel {
         is_error: bool,
     ) -> Option<ToolCallStatus> {
         let Some(chat) = self.active_chat_mut() else {
-            log::warn!(
-                "[orphan-diag] complete_active_tool FAIL: no active_chat id={}",
-                id
-            );
             return None;
         };
         let Some(turn) = chat.active_turn_mut() else {
-            log::warn!(
-                "[orphan-diag] complete_active_tool FAIL: no active_turn id={}",
-                id
-            );
             return None;
         };
-        log::warn!(
-            "[orphan-diag] complete_active_tool searching id={} tool_calls_in_turn={} bound_ids={:?}",
-            id,
-            turn.tool_calls.len(),
-            turn.tool_calls.iter().filter_map(|c| c.id.as_ref().map(|i| i.as_ref())).collect::<Vec<_>>(),
-        );
-        let result = turn.complete_tool(id, output, is_error);
-        if result.is_none() {
-            log::warn!(
-                "[orphan-diag] complete_active_tool NOT_FOUND: id={} not in tool_calls",
-                id
-            );
-        }
-        result
+        turn.complete_tool(id, output, is_error)
     }
 }

@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_enqueue_submission_echo_renders_queued_block_into_model() {
         // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型。
-        // 渲染不再经 document block，改为 spinner 上方的 queued_submission_lines。
+        // 渲染不再经 document block，改为 live-status projection。
         let mut app = make_app();
         app.enqueue_submission_echo("排队中的输入");
 
@@ -269,7 +269,7 @@ mod tests {
             "入队应作为 QueuedUserMessage block 进入 ConversationModel"
         );
 
-        // queued_submission 不再出现在 document 中（已移至 spinner 上方）。
+        // queued_submission 不再出现在 document 中（已移至 live-status projection）。
         let plain = app
             .output_area
             .document()
@@ -289,9 +289,9 @@ mod tests {
         app.enqueue_submission_echo("排队中的输入");
 
         assert_eq!(
-            app.output_area.queued_submission_lines,
+            app.live_status_view_model().queued_lines,
             vec!["> 排队中的输入"],
-            "入队后应立即刷新 live-status widget 镜像"
+            "入队后应可从 live-status projection 派生排队输入"
         );
     }
 
@@ -362,7 +362,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "后续回复".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
 
         // 在 document 中找到包含"后续回复"的行
         let assistant_line = app
@@ -406,7 +406,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "你好".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
         // 模拟 System notice 中断（如自动 reflection）
         app.append_system_notice("[reflection: ...]");
         app.flush_dirty_view_models();
@@ -416,7 +416,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "世界".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
 
         // 验证"你好"和"世界"都在 document 中且使用 ASSISTANT 色
         for needle in &["你好", "世界"] {

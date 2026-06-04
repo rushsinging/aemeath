@@ -72,6 +72,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             index,
             name,
             partial_args,
+            ..
         } => UiEvent::ToolArgumentsDelta {
             id,
             index,
@@ -84,6 +85,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             name,
             index,
             summary,
+            ..
         } => UiEvent::ToolCall {
             id,
             provider_id,
@@ -98,6 +100,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             output,
             is_error,
             images,
+            ..
         } => UiEvent::ToolResult {
             id,
             provider_id,
@@ -179,6 +182,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             raw_working_root: std::path::PathBuf::from(working_root),
             workspace,
         }),
+        sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
         sdk::ChatEvent::Result(result) => UiEvent::Text(result.text),
     }
 }
@@ -288,6 +292,13 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_sdk_event_to_ui_event_maps_tasks_changed() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksChanged);
+
+        assert!(matches!(event, UiEvent::TaskStatusChanged));
     }
 
     /// 回归 #104：DrainQueuedInput 事件从 TUI input queue 取出排队消息后，

@@ -20,10 +20,6 @@ impl App {
         }
         if change.contains(ChangeSet::PROJECT) {
             self.update_project_context().await;
-            crate::tui::adapter::status_widget::apply_runtime_status_to_widget(
-                &self.model,
-                &mut self.status_bar,
-            );
         }
     }
 
@@ -44,7 +40,7 @@ impl App {
         self.update_task_status(self.chat.is_processing).await;
         self.update_project_context().await;
         self.draw(terminal)?;
-        self.refresh_output_widget_from_model();
+        self.refresh_output_document_from_model();
 
         loop {
             // Ctrl+C 超时复原 status line
@@ -52,11 +48,10 @@ impl App {
 
             // 每帧先批量派生 dirty ViewModel，避免 streaming chunk 每次同步重渲染输出区。
             self.flush_dirty_view_models();
-            // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
+            // 每帧维护 live-status 动画 view_state；render 直接消费 LiveStatusViewModel。
             self.refresh_live_status_from_model();
-            // 每帧据 view_state 滚动真相写回 widget 镜像（last_visible_height 反喂 + 钳制）。
+            // 每帧据 layout/live-status 与 document 指标同步 view_state 滚动真相。
             self.refresh_output_scroll_from_view_state();
-
             // Draw UI
             self.draw(terminal)?;
 

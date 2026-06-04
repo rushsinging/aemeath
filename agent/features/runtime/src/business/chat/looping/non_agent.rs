@@ -242,10 +242,21 @@ where
         run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         let result = (owned_call.id.clone(), id, output, is_error, images);
+        if task_store_mutation_succeeded(&owned_call.name, result.3) {
+            let _ = sink.send_event(RuntimeStreamEvent::TasksChanged).await;
+        }
         send_tool_result(sink, &owned_call, &result).await;
         out.push(result);
     }
     out
+}
+
+fn task_store_mutation_succeeded(tool_name: &str, is_error: bool) -> bool {
+    !is_error
+        && matches!(
+            tool_name,
+            "TaskListCreate" | "TaskCreate" | "TaskUpdate" | "TaskStop" | "TaskListComplete"
+        )
 }
 
 async fn run_task_hooks<S>(

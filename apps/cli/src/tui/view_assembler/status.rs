@@ -3,20 +3,45 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::model::RuntimeModel;
 use crate::tui::model::runtime::processing_job::ProcessingStatus;
 use crate::tui::model::runtime::session_model::SessionModel;
+use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
 use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
 use crate::tui::view_model::{
-    SemanticStyle, StatusContextViewModel, StatusLineViewModel, StatusRuntimeViewModel,
-    StatusSegment, StatusSeverity, StatusWorktreeKind,
+    SemanticStyle, StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind,
+    StatusNoticeViewModel, StatusRuntimeViewModel, StatusSegment, StatusSeverity, StatusViewModel,
+    StatusWorktreeKind,
 };
 
 pub struct StatusViewAssembler;
 
 impl StatusViewAssembler {
+    pub fn assemble_status_view(
+        runtime: &RuntimeModel,
+        session: Option<&SessionModel>,
+        diagnostics: &DiagnosticModel,
+    ) -> StatusViewModel {
+        StatusViewModel {
+            notice: Self::assemble_notice_view(&runtime.status_notice),
+            runtime: Self::assemble_runtime_view(runtime, session),
+            line: Self::assemble_from_runtime_session(runtime, session, diagnostics),
+            thinking: runtime.thinking,
+        }
+    }
+
+    pub fn assemble_notice_view(notice: &StatusNotice) -> StatusNoticeViewModel {
+        StatusNoticeViewModel {
+            text: notice.text.clone(),
+            kind: match notice.kind {
+                StatusNoticeKind::Normal => StatusNoticeViewKind::Normal,
+                StatusNoticeKind::Success => StatusNoticeViewKind::Success,
+                StatusNoticeKind::Warning => StatusNoticeViewKind::Warning,
+            },
+        }
+    }
+
     /// 由 `RuntimeModel`/`SessionModel` 单向派生 StatusBar 运行态视图模型
     /// （model/session/tps/token/api/context_size/工作目录上下文）。
     ///
-    /// 这是上述镜像字段的唯一派生路径：adapter 据此写回 widget，update 业务路径
-    /// 不得再直接调用对应 `status_bar.set_*` 或在 `ChatState` 保留 token/api 镜像。
+    /// StatusBar 不再保存运行态 widget mirror；渲染时直接消费本派生结果。
     /// permission_mode 为启动期配置，不在本派生范围内。
     pub fn assemble_runtime_view(
         runtime: &RuntimeModel,

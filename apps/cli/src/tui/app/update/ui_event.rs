@@ -3,7 +3,9 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
 impl App {
@@ -200,7 +202,11 @@ impl App {
                 }
                 self.spinner_stop();
                 self.chat.stop_processing();
-                self.status_bar.set_success("Ready");
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
+                        "Ready",
+                    )));
             }
             UiEvent::AskUser {
                 id,
@@ -315,6 +321,9 @@ impl App {
                 // 工作目录上下文已由 map_agent_event -> RuntimeIntent::WorkspaceSnapshotReceived
                 // 注入 RuntimeModel，经 adapter 单向写回 status_bar，此处仅同步会话 cwd。
                 self.session.cwd = ctx.raw_path_base.clone();
+            }
+            UiEvent::TaskStatusChanged => {
+                effects.push(Effect::FetchTaskStatus);
             }
             UiEvent::Done => {
                 log::debug!(

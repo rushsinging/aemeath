@@ -194,6 +194,8 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(AgentDisplay)
 });
 
+const WORKTREE_RESULT_MAX_LINES: usize = 16;
+
 struct EnterWorktreeDisplay;
 impl ToolDisplay for EnterWorktreeDisplay {
     fn name(&self) -> &str {
@@ -209,6 +211,9 @@ impl ToolDisplay for EnterWorktreeDisplay {
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn result_max_lines(&self) -> usize {
+        WORKTREE_RESULT_MAX_LINES
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -226,6 +231,9 @@ impl ToolDisplay for ExitWorktreeDisplay {
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn result_max_lines(&self) -> usize {
+        WORKTREE_RESULT_MAX_LINES
     }
 }
 inventory::submit!(ToolDisplayEntry {

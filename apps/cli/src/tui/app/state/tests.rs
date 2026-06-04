@@ -257,8 +257,8 @@ mod tests {
             .apply(crate::tui::model::input::intent::InputIntent::InsertText(
                 "search bug 76".to_string(),
             ));
-        app.output_area.last_visible_height = 3;
-        // 滚动真相归 view_state；设 stale offset，渲染前由 adapter 钳制并写回 widget。
+        app.view_state.output.last_visible_height = 3;
+        // 滚动真相归 view_state；设 stale offset，渲染前由 view_state document metrics 钳制。
         app.view_state.output.scroll_offset = 99;
         // 设置真实宽度，避免输出渲染按 width=1 逐字换行（G2 起工具结果走宽度换行）。
         app.layout.output_area_rect = ratatui::layout::Rect::new(0, 0, 100, 40);
@@ -300,9 +300,9 @@ mod tests {
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
-        // 渲染前滚动写回：view_state stale offset 经 adapter 钳制后镜像到 widget。
+        // 渲染前滚动同步：view_state stale offset 经 adapter 钳制。
         app.refresh_output_scroll_from_view_state();
-        assert!(app.output_area.scroll_offset <= app.output_area.document().total_lines());
+        assert!(app.view_state.output.scroll_offset <= app.output_area.document().total_lines());
     }
 
     /// 拼接 document 各行的 span 内容（gutter span + 内容 span）为逻辑可见行。

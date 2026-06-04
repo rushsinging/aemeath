@@ -276,6 +276,23 @@ mod tests {
     use share::message::ContentBlock;
 
     #[test]
+    fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
+        let results = vec![(
+            "runtime-id".to_string(),
+            "provider-id".to_string(),
+            "ok".to_string(),
+            false,
+            Vec::new(),
+        )];
+        let message = tool_results_for_api(results, "test-provider-id");
+
+        let [ContentBlock::ToolResult { tool_use_id, .. }] = message.content.as_slice() else {
+            panic!("expected one tool result");
+        };
+        assert_eq!(tool_use_id, "provider-id");
+    }
+
+    #[test]
     fn test_tool_results_for_api_persists_oversized_tui_result() {
         let session_id = format!("test-tui-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);

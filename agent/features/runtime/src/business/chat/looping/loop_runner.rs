@@ -96,8 +96,9 @@ where
     let hook_ui = HookUi::new(sink.clone());
 
     let (cwd, working_root, path_base, context_stack) = if let Some(workspace) = workspace_context {
+        let cwd = PathBuf::from(&workspace.working_root);
         (
-            PathBuf::from(&workspace.path_base),
+            cwd,
             Arc::new(Mutex::new(PathBuf::from(&workspace.working_root))),
             Arc::new(Mutex::new(PathBuf::from(&workspace.path_base))),
             Arc::new(Mutex::new(
@@ -660,6 +661,7 @@ mod tests {
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()
                 }
+                RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
             };
             self.events.lock().unwrap().push(name);
         }
@@ -868,6 +870,81 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() {
+        let sink = RecordingSink::default();
+        let path_base = tempfile::tempdir().unwrap();
+        let working_root = tempfile::tempdir().unwrap();
+        let marker = path_base.path().join("stop-hook-env.txt");
+        let marker_path = marker.display().to_string();
+        let workspace = crate::business::session::WorkspaceContext {
+            path_base: path_base.path().display().to_string(),
+            working_root: working_root.path().display().to_string(),
+            context_stack: vec![crate::business::session::WorkspaceStackEntry {
+                path_base: path_base.path().display().to_string(),
+                working_root: path_base.path().display().to_string(),
+            }],
+        };
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::Stop,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: format!(
+                    "printf '%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"$PWD\" > \"{}\"",
+                    marker_path
+                ),
+                timeout: 5,
+            }],
+        );
+
+        process_chat_loop(ChatLoopContext {
+            sink: sink.clone(),
+            queue: SequenceQueueDrainPort::new(vec![None, None]),
+            input_events: EmptyInputEvents,
+            client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+                SequenceProvider::new(vec!["final response"]),
+            ))),
+            registry: Arc::new(ToolRegistry::new()),
+            system_blocks: Vec::new(),
+            system_prompt_text: String::new(),
+            user_context: String::new(),
+            messages: vec![Message::user("hello")],
+            context_size: 200_000,
+            cwd: path_base.path().to_path_buf(),
+            workspace_context: Some(workspace),
+            session_id: "test-worktree-stop-hook-env".to_string(),
+            read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            session_reminders: Arc::new(
+                std::sync::Mutex::new(share::tool::SessionReminders::new()),
+            ),
+            agent_runner: None,
+            allow_all: false,
+            interrupted: Arc::new(AtomicBool::new(false)),
+            cancel: CancellationToken::new(),
+            task_store: Arc::new(storage::api::TaskStore::new()),
+            max_tool_concurrency: 1,
+            max_agent_concurrency: 1,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+            hook_runner: HookRunner::new(
+                HooksConfig { events },
+                path_base.path().display().to_string(),
+            ),
+            memory_config: share::config::MemoryConfig::default(),
+            json_logger: None,
+        })
+        .await;
+
+        assert!(sink.events().iter().any(|event| event == "HookEnd:Stop"));
+        let output = std::fs::read_to_string(marker).unwrap();
+        let parts: Vec<&str> = output.split('|').collect();
+        assert_eq!(parts.len(), 3);
+        let expected = working_root.path().canonicalize().unwrap();
+        for part in parts {
+            assert_eq!(std::fs::canonicalize(part).unwrap(), expected);
+        }
     }
 
     #[tokio::test]

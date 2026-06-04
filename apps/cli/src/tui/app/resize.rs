@@ -9,19 +9,22 @@ impl App {
         }
 
         self.layout.last_terminal_size = Some(size);
-        let visible_height_hint = self
-            .layout
-            .output_area_rect
-            .height
-            .max(height.saturating_sub(7));
-        self.output_area.handle_resize(width, visible_height_hint);
+        self.output_area.handle_resize(width);
+        let visible_height = crate::tui::app::update::output_visible_height(
+            self.layout
+                .output_area_rect
+                .height
+                .max(height.saturating_sub(7)),
+            &self.live_status_view_model(),
+        );
+        self.view_state
+            .output
+            .sync_document_metrics(self.output_area.document().total_lines(), visible_height);
         // 选区真相归 view_state：resize 时清三区选区真相，否则 widget 的镜像清空会被下一帧
         // adapter 用旧 view_state 选区复活（resize 仅作用于 widget 镜像，不动真相）。
         self.view_state.output.clear_selection();
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
-        let input_width = self.layout.input_area_rect.width.max(width);
-        self.input_area.handle_resize(input_width);
     }
 }
 
@@ -54,12 +57,23 @@ mod tests {
     }
 
     #[test]
-    fn handle_resize_updates_input_content_width() {
+    fn handle_resize_leaves_input_width_as_render_projection() {
         let mut app = test_app();
 
         app.handle_resize(80, 24);
 
-        assert_eq!(app.input_area.content_width, 78);
+        assert_eq!(crate::tui::InputArea::input_content_width(80), 78);
+    }
+
+    #[test]
+    fn handle_resize_updates_output_view_state_visible_height() {
+        let mut app = test_app();
+
+        app.handle_resize(80, 24);
+
+        assert_eq!(app.view_state.output.last_visible_height, 17);
+        assert_eq!(app.view_state.output.last_document_total_lines, 0);
+        assert!(app.view_state.output.auto_scroll);
     }
 
     #[test]
@@ -83,19 +97,13 @@ mod tests {
         // 触发 resize（用与初始不同的尺寸，避免 early-return）。
         app.handle_resize(100, 30);
 
-        // 三区真相被清空：避免下一帧 adapter 复活 widget 镜像。
+        // 三区真相被清空。
         assert_eq!(app.view_state.output.selection_range(), None);
         assert!(!app.view_state.output.is_selecting());
         assert_eq!(app.view_state.status_sel.selection_range(), None);
         assert!(!app.view_state.status_sel.is_selecting());
         assert_eq!(app.view_state.input_sel.normalized_selection(), None);
         assert!(!app.view_state.input_sel.is_selecting());
-
-        // 经渲染前刷新后，widget 镜像也被同步清空。
-        app.refresh_output_scroll_from_view_state();
-        assert!(!app.output_area.is_selecting);
-        assert!(app.output_area.selection_start.is_none());
-        assert!(app.output_area.selection_end.is_none());
     }
 
     #[test]
@@ -107,13 +115,12 @@ mod tests {
         app.view_state.output.last_document_total_lines = 20;
         app.view_state.output.scroll_offset = 7;
         app.view_state.output.auto_scroll = false;
-        app.refresh_output_scroll_from_view_state();
         app.output_area.term_width = 7;
 
         app.handle_resize(80, 24);
 
-        assert_eq!(app.output_area.scroll_offset, 3);
-        assert!(!app.output_area.auto_scroll);
+        assert_eq!(app.view_state.output.scroll_offset, 7);
+        assert!(!app.view_state.output.auto_scroll);
         assert_eq!(app.output_area.term_width, 7);
         assert_eq!(
             app.layout.last_terminal_size,

@@ -18,8 +18,8 @@ pub use output::{
     ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
-    StatusContextViewModel, StatusLineViewModel, StatusRuntimeViewModel, StatusSegment,
-    StatusSeverity, StatusWorktreeKind,
+    StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
+    StatusRuntimeViewModel, StatusSegment, StatusSeverity, StatusViewModel, StatusWorktreeKind,
 };
 pub use style::SemanticStyle;
 

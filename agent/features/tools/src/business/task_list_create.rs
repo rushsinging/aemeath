@@ -15,7 +15,7 @@ impl Tool for TaskListCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a task list for one coherent complex user request. Use before TaskCreate only when starting complex multi-step work that has at least 3 substantial execution steps, multiple dependent changes, or parallel sub-agent coordination. Do NOT use for simple one-step requests such as answering a question, inspecting a file, checking bug status, running a single command, or making a tiny localized edit; for those, execute directly without task management. The summary helps future reminders avoid overriding unrelated new user requests."
+        "Create a task list for one coherent complex user request. Use before TaskCreate only when starting complex multi-step work that has at least 3 substantial execution steps, multiple dependent changes, or parallel sub-agent coordination. Do NOT use for simple one-step requests such as answering a question, inspecting a file, checking bug status, running a single command, or making a tiny localized edit; for those, execute directly without task management. After successful creation, you can immediately call TaskCreate to add tasks — they automatically attach to this list. The summary helps future reminders avoid overriding unrelated new user requests."
     }
 
     fn input_schema(&self) -> Value {
@@ -51,11 +51,11 @@ impl Tool for TaskListCreateTool {
             None => return ToolResult::error("missing required parameter: summary"),
         };
 
-        let batch = self.store.create_list(subject, summary).await;
+        let batch = self.store.create_list(subject.clone(), summary).await;
+        let summary_text = batch.summary.as_deref().unwrap_or_default();
         ToolResult::success(format!(
-            "Task list #{} created\nSummary: {}",
-            batch.id,
-            batch.summary.unwrap_or_default()
+            "Task list #{} created successfully.\nSubject: {}\nSummary: {}\n\nNext steps: You can now create tasks with TaskCreate — they will automatically attach to this task list #{}.",
+            batch.id, subject, summary_text, batch.id
         ))
     }
 }
@@ -102,7 +102,8 @@ mod tests {
             .await;
 
         assert!(!result.is_error);
-        assert!(result.output.contains("Task list #0 created"));
+        assert!(result.output.contains("Task list #0 created successfully"));
+        assert!(result.output.contains("Subject: 修复 bug"));
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")

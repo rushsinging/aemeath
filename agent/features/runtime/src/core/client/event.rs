@@ -235,6 +235,11 @@ pub(crate) fn runtime_event_to_sdk_event(
                 workspace: super::mapping::workspace_context_to_sdk(workspace),
             }
         }
+        crate::business::chat::RuntimeStreamEvent::TasksChanged => {
+            let previous = *change_tx.borrow();
+            let _ = change_tx.send(previous | ChangeSet::TASKS);
+            ChatEvent::TasksChanged
+        }
     }
 }
 
@@ -285,6 +290,25 @@ mod tests {
                 self.queued.lock().unwrap().take()
             })
         }
+    }
+
+    #[test]
+    fn test_runtime_tasks_changed_emits_sdk_event_and_change_set() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
+        let current_messages = Arc::new(Mutex::new(Vec::new()));
+        let workspace_context = Arc::new(Mutex::new(None));
+        let (change_tx, mut change_rx) = tokio::sync::watch::channel(ChangeSet::empty());
+
+        let event = runtime_event_to_sdk_event(
+            crate::business::chat::RuntimeStreamEvent::TasksChanged,
+            &current_messages,
+            &workspace_context,
+            &change_tx,
+        );
+
+        assert!(matches!(event, ChatEvent::TasksChanged));
+        assert!(change_rx.borrow_and_update().contains(ChangeSet::TASKS));
+        drop(tx);
     }
 
     #[tokio::test]

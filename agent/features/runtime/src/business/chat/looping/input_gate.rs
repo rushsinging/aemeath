@@ -189,11 +189,7 @@ where
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {
-    let command = raw
-        .trim_start()
-        .split_whitespace()
-        .next()
-        .unwrap_or_default();
+    let command = raw.split_whitespace().next().unwrap_or_default();
     match command {
         "/clear" => ControlCommandKind::Abort,
         "/model" | "/provider" => ControlCommandKind::Reconfigure,

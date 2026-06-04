@@ -1,5 +1,7 @@
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
 /// 随机烹饪动词，用于"完成"消息。
@@ -56,7 +58,11 @@ impl App {
         }
         self.spinner_stop();
         self.chat.stop_processing();
-        self.status_bar.set_success("Ready");
+        self.model
+            .runtime
+            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
+                "Ready",
+            )));
         let mut effects = Vec::new();
         // 自动 reflection 的 spawn 由 executor 执行，此处仅描述 Effect。
         if let Some(effect) = self.maybe_auto_reflect() {

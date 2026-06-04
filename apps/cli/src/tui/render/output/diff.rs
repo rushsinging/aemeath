@@ -54,12 +54,7 @@ pub fn build_diff_lines_from(
                 old_line += 1;
                 let line_text = change.to_string();
                 let line_text_trimmed = line_text.trim_end_matches('\n');
-                out.push(build_delete_line(
-                    old_line,
-                    width,
-                    line_text_trimmed,
-                    syntax_ref.as_ref(),
-                ));
+                out.push(build_delete_line(old_line, width, line_text_trimmed));
             }
             ChangeTag::Insert => {
                 new_line += 1;
@@ -90,12 +85,7 @@ pub fn build_diff_lines_from(
 }
 
 /// 构建删除行 spans：`{old_num}  {new_pad} | - {highlighted_text}`（块缩进由 gutter 注入，#60/#63）。
-fn build_delete_line(
-    old_num: usize,
-    width: usize,
-    text: &str,
-    syntax_ref: Option<&syntect::parsing::SyntaxReference>,
-) -> Vec<SpanPart> {
+fn build_delete_line(old_num: usize, width: usize, text: &str) -> Vec<SpanPart> {
     let mut spans = Vec::new();
     // 行号：old_num + 空格占位
     spans.push(SpanPart::plain(
@@ -105,8 +95,12 @@ fn build_delete_line(
     // 分隔符 + 标记
     spans.push(SpanPart::plain("| ", LINE_NUM_COLOR));
     spans.push(SpanPart::plain("- ", DIFF_REMOVE_FG));
-    push_highlighted_text(&mut spans, text, DIFF_REMOVE_FG, syntax_ref);
+    push_deleted_text(&mut spans, text);
     spans
+}
+
+fn push_deleted_text(spans: &mut Vec<SpanPart>, text: &str) {
+    spans.push(SpanPart::plain(text.to_string(), DIFF_REMOVE_FG));
 }
 
 /// 构建新增行 spans：`{old_pad}  {new_num} | + {highlighted_text}`（块缩进由 gutter 注入）。
@@ -278,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_diff_lines_highlights_delete_insert_and_context_body() {
+    fn test_build_diff_lines_highlights_insert_and_context_but_delete_is_plain_red() {
         let old = "fn same() {}\nfn old() {}\n";
         let new = "fn same() {}\nfn new() {}\n";
         let mut out = Vec::new();
@@ -298,8 +292,12 @@ mod tests {
             .unwrap();
 
         assert!(context.len() > 3, "context 正文应走 syntect: {context:?}");
-        assert!(delete.len() > 3, "delete 正文应走 syntect: {delete:?}");
         assert!(insert.len() > 3, "insert 正文应走 syntect: {insert:?}");
+        assert_eq!(
+            delete.last().map(|span| (span.text.as_str(), span.color)),
+            Some(("fn old() {}", DIFF_REMOVE_FG)),
+            "delete 正文应为单个纯 DIFF_REMOVE_FG span: {delete:?}"
+        );
     }
 
     #[test]

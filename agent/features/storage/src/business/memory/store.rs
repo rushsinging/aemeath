@@ -62,6 +62,7 @@ impl MemoryStore {
         if entry.id.trim().is_empty() {
             entry.id = uuid::Uuid::now_v7().to_string();
         }
+        let entry_id = entry.id.clone();
         entries.push(entry);
         self.write_active(
             entries
@@ -70,7 +71,7 @@ impl MemoryStore {
                 .unwrap_or(MemoryLayer::Project),
             &entries,
         )?;
-        Ok(AddResult::Added)
+        Ok(AddResult::Added { id: entry_id })
     }
 
     pub fn delete(&mut self, id: &str) -> MemoryResult<()> {

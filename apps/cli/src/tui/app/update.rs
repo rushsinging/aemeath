@@ -14,18 +14,30 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
-use crate::tui::adapter::live_status_widget::apply_live_status_to_widget;
-use crate::tui::adapter::output_widget::render_document_from_view_model;
-use crate::tui::adapter::status_widget::{
-    apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
-};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
+use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
+
+pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusViewModel) -> usize {
+    let spinner_line_count = usize::from(live_status.spinner.is_some());
+    let task_line_count = if live_status.spinner.is_some() {
+        live_status.task_lines.len()
+    } else {
+        0
+    };
+    // No-spinner path reserves exactly queued line count; empty queue naturally reserves 0.
+    let reserved = if live_status.spinner.is_some() {
+        live_status.queued_lines.len() + spinner_line_count + task_line_count
+    } else {
+        live_status.queued_lines.len()
+    };
+    (area_height as usize).saturating_sub(reserved)
+}
 
 /// Return type for update: effects plus optional slash command continuation.
 pub struct UpdateResult {
@@ -167,23 +179,30 @@ impl App {
         result
     }
 
-    pub(crate) fn refresh_output_widget_from_model(&mut self) {
+    pub(crate) fn output_document_width(&self) -> u16 {
+        self.layout.output_area_rect.width.saturating_sub(5).max(1)
+    }
+
+    pub(crate) fn refresh_output_document_from_model(&mut self) {
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
         );
-        let width = self.layout.output_area_rect.width.saturating_sub(3).max(1);
-        render_document_from_view_model(&mut self.output_area, &view_model, width);
+        let width = self.output_document_width();
+        let document = self.output_document_renderer.render_model_document(
+            &view_model,
+            width,
+            self.output_area.term_width,
+        );
+        self.output_area.replace_document(document);
     }
 
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {
-            self.refresh_output_widget_from_model();
+            self.refresh_output_document_from_model();
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
-            apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
-            apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
             self.view_state.dirty.clear_status();
         }
     }
@@ -192,14 +211,39 @@ impl App {
         self.view_state.dirty.mark_output();
     }
 
+    pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
+        crate::tui::view_assembler::status::StatusViewAssembler::assemble_status_view(
+            &self.model.runtime,
+            Some(&self.model.session),
+            &self.model.diagnostic,
+        )
+    }
+
     /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
-    /// + view_state 动画态（frame/verb）派生实时状态行，单向写回 widget 镜像。
-    /// 这是 spinner/task/queued live-status 镜像的唯一写入路径。
+    /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
+    pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
+        let queued_texts: Vec<String> = self
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .map(|q| q.text.clone())
+            .collect();
+        crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
+            &self.model.runtime,
+            &self.view_state.spinner,
+            &queued_texts,
+        )
+    }
+
+    /// 渲染前维护 live-status 相关 view_state：
+    /// - active 且 verb 为空时选择动词；
+    /// - inactive 时清空动画状态，保证下次激活重新计时。
+    ///
+    /// OutputArea render 直接消费 `live_status_view_model()`，不再写 widget mirror。
     ///
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
-    /// 而非纯 reducer：
-    /// - 由 inactive→active（verb 为空）时一次性 `pick_verb`（选 verb + 复位 frame=0）；
-    /// - inactive 时复位 view_state.spinner，使下次激活重新 pick，elapsed/frame 归零。
+    /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
         let active = self.model.runtime.spinner.active;
         if active {
@@ -209,38 +253,19 @@ impl App {
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
-        let queued_texts: Vec<String> = self
-            .model
-            .conversation
-            .queued_submissions
-            .iter()
-            .map(|q| q.text.clone())
-            .collect();
-        let vm = crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
-            &self.model.runtime,
-            &self.view_state.spinner,
-            &queued_texts,
-        );
-        apply_live_status_to_widget(&mut self.output_area, &vm);
     }
-
-    /// 据 view_state 滚动真相单向写回 widget 镜像（含 last_visible_height 反喂 + 钳制）。
-    /// 这是 `output_area.scroll_offset` / `auto_scroll` 镜像的唯一生产写入路径，
-    /// 每帧渲染前调用，与 `refresh_live_status_from_model` 同处渲染前管线。
+    /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
+    /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。
     pub(crate) fn refresh_output_scroll_from_view_state(&mut self) {
-        crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget(
-            &mut self.view_state.output,
-            &mut self.output_area,
+        let visible_height = output_visible_height(
+            self.layout.output_area_rect.height,
+            &self.live_status_view_model(),
         );
-        crate::tui::adapter::output_view_widget::apply_output_selection_to_widget(
-            &self.view_state.output,
-            &mut self.output_area,
-        );
-        // #59 S4：status 选区真相归 view_state，每帧渲染前写回 widget 镜像。
-        crate::tui::adapter::status_widget::apply_status_selection_to_widget(
-            &self.view_state.status_sel,
-            &mut self.status_bar,
-        );
+        self.view_state
+            .output
+            .sync_document_metrics(self.output_area.document().total_lines(), visible_height);
+        // #70 phase 2：output selection/scroll render 直接消费 view_state.output，无 widget 镜像写回。
+        // #70 phase 2：status 选区 render 直接消费 view_state.status_sel，无 widget 镜像写回。
         // #70 phase 2：input 选区 render 直接消费 view_state.input_sel，无 widget 镜像写回。
     }
 }

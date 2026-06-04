@@ -2,20 +2,26 @@
 
 use crate::utils::bootstrap::claude_settings_adapter::ClaudeSettingsAdapter;
 use crate::utils::bootstrap::config_paths as paths;
+use serde::Deserialize;
+use serde_json::Value;
 use share::config::{
     hooks::{self, HooksConfig},
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
-    models::{volcengine_coding_plan_config, ModelsConfig},
+    memory::{MemoryConfig, ReflectionConfig},
+    models::{volcengine_coding_plan_config, ModelsConfig, ProviderModelsConfig},
     paths as share_paths,
     permissions::{PermissionConfig, PermissionModeConfig},
     skills::SkillsConfig,
     storage::StorageConfig,
-    tools::{AgentsConfig, ToolsConfig},
+    tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
     ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
     Config,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use tokio::sync::RwLock;
 
 /// Configuration manager.
@@ -30,28 +36,228 @@ pub struct ConfigManager {
     claude_project_settings_path: Option<PathBuf>,
 }
 
-fn default_api_config() -> ApiConfig {
-    ApiConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct ConfigPatch {
+    #[serde(default)]
+    api: Option<ApiConfigPatch>,
+    #[serde(default)]
+    model: Option<ModelConfigPatch>,
+    #[serde(default)]
+    models: Option<ModelsConfigPatch>,
+    #[serde(default)]
+    tools: Option<ToolsConfigPatch>,
+    #[serde(default)]
+    agents: Option<AgentsConfigPatch>,
+    #[serde(default)]
+    ui: Option<UiConfigPatch>,
+    #[serde(default)]
+    permissions: Option<PermissionConfigPatch>,
+    #[serde(default)]
+    skills: Option<SkillsConfigPatch>,
+    #[serde(default)]
+    storage: Option<StorageConfigPatch>,
+    #[serde(default)]
+    hooks: Option<HooksConfig>,
+    #[serde(default)]
+    memory: Option<MemoryConfigPatch>,
+    #[serde(default)]
+    logging: Option<LoggingConfigPatch>,
 }
 
-fn default_model_config() -> ModelConfig {
-    ModelConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ApiConfigPatch {
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    user_agent: Option<String>,
+    #[serde(default)]
+    timeout: Option<u64>,
+    #[serde(default)]
+    retries: Option<u32>,
 }
 
-fn default_tools_config() -> ToolsConfig {
-    ToolsConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ModelConfigPatch {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    context_size: Option<usize>,
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default)]
+    top_k: Option<u32>,
+    #[serde(default)]
+    top_p: Option<f32>,
+    #[serde(default)]
+    stop_sequences: Option<Vec<String>>,
 }
 
-fn default_agents_config() -> AgentsConfig {
-    AgentsConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ModelsConfigPatch {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    providers: Option<HashMap<String, ProviderModelsConfig>>,
+    #[serde(default)]
+    guidance: Option<HashMap<String, String>>,
 }
 
-fn default_logging_config() -> LoggingConfig {
-    LoggingConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ToolsConfigPatch {
+    #[serde(default)]
+    enabled: Option<Vec<String>>,
+    #[serde(default)]
+    disabled: Option<Vec<String>>,
+    #[serde(default)]
+    settings: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    max_concurrency: Option<usize>,
 }
 
-fn default_sub_agent_log_config() -> SubAgentLogConfig {
-    SubAgentLogConfig::default()
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AgentsConfigPatch {
+    #[serde(default)]
+    max_concurrency: Option<usize>,
+    #[serde(default)]
+    roles: Option<HashMap<String, AgentRoleConfig>>,
+    #[serde(default)]
+    default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UiConfigPatch {
+    #[serde(default)]
+    markdown: Option<bool>,
+    #[serde(default)]
+    syntax_highlight: Option<bool>,
+    #[serde(default)]
+    progress: Option<bool>,
+    #[serde(default)]
+    color: Option<bool>,
+    #[serde(default)]
+    verbose: Option<bool>,
+    #[serde(default)]
+    tui: Option<bool>,
+    #[serde(default)]
+    task_list: Option<TaskListConfigPatch>,
+    #[serde(default)]
+    task_lifecycle: Option<TaskLifecycleConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TaskListConfigPatch {
+    #[serde(default)]
+    max_lines: Option<usize>,
+    #[serde(default)]
+    fold_hint_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TaskLifecycleConfigPatch {
+    #[serde(default)]
+    auto_clear_completed_on_new_turn: Option<bool>,
+    #[serde(default)]
+    interrupt_prompt_enabled: Option<bool>,
+    #[serde(default)]
+    interrupt_default_action: Option<String>,
+    #[serde(default)]
+    stale_remind_after_turns: Option<usize>,
+    #[serde(default)]
+    stale_remind_repeat_interval: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct PermissionConfigPatch {
+    #[serde(default)]
+    mode: Option<PermissionModeConfig>,
+    #[serde(default)]
+    auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    deny: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct SkillsConfigPatch {
+    #[serde(default)]
+    dirs: Option<Vec<PathBuf>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StorageConfigPatch {
+    #[serde(default)]
+    sessions_dir: Option<PathBuf>,
+    #[serde(default)]
+    persist_sessions: Option<bool>,
+    #[serde(default)]
+    max_sessions: Option<usize>,
+    #[serde(default)]
+    history: Option<bool>,
+    #[serde(default)]
+    history_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MemoryConfigPatch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    max_entries: Option<usize>,
+    #[serde(default)]
+    max_inject_count: Option<usize>,
+    #[serde(default)]
+    auto_summary_on_session_end: Option<bool>,
+    #[serde(default)]
+    similarity_threshold: Option<f64>,
+    #[serde(default)]
+    reflection: Option<ReflectionConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ReflectionConfigPatch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    interval_turns: Option<usize>,
+    #[serde(default)]
+    auto_apply_suggestions: Option<bool>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LoggingConfigPatch {
+    #[serde(default, alias = "default_level")]
+    level: Option<String>,
+    #[serde(default)]
+    max_bytes: Option<u64>,
+    #[serde(default)]
+    max_backups: Option<usize>,
+    #[serde(default)]
+    retention_days: Option<u64>,
+    #[serde(default)]
+    sub_agent_log: Option<SubAgentLogConfigPatch>,
+    #[serde(default)]
+    logs_dir: Option<String>,
+    #[serde(default)]
+    role_logs_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct SubAgentLogConfigPatch {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    include_request_payload: Option<bool>,
+    #[serde(default)]
+    max_payload_bytes: Option<usize>,
 }
 
 impl ConfigManager {
@@ -80,8 +286,8 @@ impl ConfigManager {
         // Load global config.
         if self.global_path.exists() {
             match tokio::fs::read_to_string(&self.global_path).await {
-                Ok(content) => match serde_json::from_str::<Config>(&content) {
-                    Ok(global_config) => config = Self::merge_config(config, global_config),
+                Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
+                    Ok(global_patch) => config = Self::apply_patch(config, global_patch),
                     Err(err) => {
                         log::warn!("解析全局配置失败 {}: {err}", self.global_path.display())
                     }
@@ -97,7 +303,13 @@ impl ConfigManager {
                     Ok(content) => {
                         match serde_json::from_str::<hooks::ClaudeSettingsConfig>(&content) {
                             Ok(claude_config) => {
-                                config = Self::merge_config(config, claude_config.into_config())
+                                config = Self::apply_patch(
+                                    config,
+                                    ConfigPatch {
+                                        hooks: Some(claude_config.into_config().hooks),
+                                        ..Default::default()
+                                    },
+                                )
                             }
                             Err(err) => log::warn!(
                                 "解析 Claude Code 项目设置失败 {}: {err}",
@@ -117,8 +329,8 @@ impl ConfigManager {
         if let Some(project_path) = &self.project_path {
             if project_path.exists() {
                 match tokio::fs::read_to_string(project_path).await {
-                    Ok(content) => match serde_json::from_str::<Config>(&content) {
-                        Ok(project_config) => config = Self::merge_config(config, project_config),
+                    Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
+                        Ok(project_patch) => config = Self::apply_patch(config, project_patch),
                         Err(err) => {
                             log::warn!("解析项目配置失败 {}: {err}", project_path.display())
                         }
@@ -278,260 +490,615 @@ impl ConfigManager {
         config
     }
 
-    /// Merge two configs (overlay takes precedence).
-    pub(crate) fn merge_config(base: Config, overlay: Config) -> Config {
-        Config {
-            api: ApiConfig {
-                provider: overlay.api.provider.or(base.api.provider),
-                key: overlay.api.key.or(base.api.key),
-                base_url: overlay.api.base_url.or(base.api.base_url),
-                user_agent: if overlay.api.user_agent != default_api_config().user_agent {
-                    overlay.api.user_agent
-                } else {
-                    base.api.user_agent
-                },
-                timeout: if overlay.api.timeout != default_api_config().timeout {
-                    overlay.api.timeout
-                } else {
-                    base.api.timeout
-                },
-                retries: if overlay.api.retries != default_api_config().retries {
-                    overlay.api.retries
-                } else {
-                    base.api.retries
-                },
+    /// Apply a sparse config patch (overlay takes precedence only for explicitly present fields).
+    pub(crate) fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
+        if let Some(api) = patch.api {
+            base.api = Self::apply_api_patch(base.api, api);
+        }
+        if let Some(model) = patch.model {
+            base.model = Self::apply_model_patch(base.model, model);
+        }
+        if let Some(models) = patch.models {
+            base.models = Self::apply_models_patch(base.models, models);
+        }
+        if let Some(tools) = patch.tools {
+            base.tools = Self::apply_tools_patch(base.tools, tools);
+        }
+        if let Some(agents) = patch.agents {
+            base.agents = Self::apply_agents_patch(base.agents, agents);
+        }
+        if let Some(ui) = patch.ui {
+            base.ui = Self::apply_ui_patch(base.ui, ui);
+        }
+        if let Some(permissions) = patch.permissions {
+            base.permissions = Self::apply_permission_patch(base.permissions, permissions);
+        }
+        if let Some(skills) = patch.skills {
+            base.skills = Self::apply_skills_patch(base.skills, skills);
+        }
+        if let Some(storage) = patch.storage {
+            base.storage = Self::apply_storage_patch(base.storage, storage);
+        }
+        if let Some(hooks) = patch.hooks {
+            base.hooks = Self::merge_hooks(base.hooks, hooks);
+        }
+        if let Some(memory) = patch.memory {
+            base.memory = Self::apply_memory_patch(base.memory, memory);
+        }
+        if let Some(logging) = patch.logging {
+            base.logging = Self::apply_logging_patch(base.logging, logging);
+        }
+        base
+    }
+
+    fn apply_api_patch(mut base: ApiConfig, patch: ApiConfigPatch) -> ApiConfig {
+        if let Some(v) = patch.provider {
+            base.provider = Some(v);
+        }
+        if let Some(v) = patch.key {
+            base.key = Some(v);
+        }
+        if let Some(v) = patch.base_url {
+            base.base_url = Some(v);
+        }
+        if let Some(v) = patch.user_agent {
+            base.user_agent = v;
+        }
+        if let Some(v) = patch.timeout {
+            base.timeout = v;
+        }
+        if let Some(v) = patch.retries {
+            base.retries = v;
+        }
+        base
+    }
+
+    fn apply_model_patch(mut base: ModelConfig, patch: ModelConfigPatch) -> ModelConfig {
+        if let Some(v) = patch.name {
+            base.name = v;
+        }
+        if let Some(v) = patch.max_tokens {
+            base.max_tokens = v;
+        }
+        if let Some(v) = patch.context_size {
+            base.context_size = v;
+        }
+        if let Some(v) = patch.temperature {
+            base.temperature = Some(v);
+        }
+        if let Some(v) = patch.top_k {
+            base.top_k = Some(v);
+        }
+        if let Some(v) = patch.top_p {
+            base.top_p = Some(v);
+        }
+        if let Some(v) = patch.stop_sequences {
+            base.stop_sequences = v;
+        }
+        base
+    }
+
+    fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatch) -> ModelsConfig {
+        if let Some(v) = patch.mode {
+            base.mode = v;
+        }
+        if let Some(v) = patch.default {
+            base.default = v;
+        }
+        if let Some(providers) = patch.providers {
+            for (k, v) in providers {
+                base.providers.insert(k, v);
+            }
+        }
+        if let Some(guidance) = patch.guidance {
+            for (k, v) in guidance {
+                base.guidance.insert(k, v);
+            }
+        }
+        base
+    }
+
+    fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
+        if let Some(v) = patch.enabled {
+            base.enabled = v;
+        }
+        if let Some(v) = patch.disabled {
+            base.disabled = v;
+        }
+        if let Some(settings) = patch.settings {
+            for (k, v) in settings {
+                base.settings.insert(k, v);
+            }
+        }
+        if let Some(v) = patch.max_concurrency {
+            base.max_concurrency = v;
+        }
+        base
+    }
+
+    fn apply_agents_patch(mut base: AgentsConfig, patch: AgentsConfigPatch) -> AgentsConfig {
+        if let Some(v) = patch.max_concurrency {
+            base.max_concurrency = v;
+        }
+        if let Some(roles) = patch.roles {
+            for (k, v) in roles {
+                base.roles.insert(k, v);
+            }
+        }
+        if let Some(v) = patch.default_model {
+            base.default_model = v;
+        }
+        base
+    }
+
+    fn apply_ui_patch(mut base: UiConfig, patch: UiConfigPatch) -> UiConfig {
+        if let Some(v) = patch.markdown {
+            base.markdown = v;
+        }
+        if let Some(v) = patch.syntax_highlight {
+            base.syntax_highlight = v;
+        }
+        if let Some(v) = patch.progress {
+            base.progress = v;
+        }
+        if let Some(v) = patch.color {
+            base.color = v;
+        }
+        if let Some(v) = patch.verbose {
+            base.verbose = v;
+        }
+        if let Some(v) = patch.tui {
+            base.tui = v;
+        }
+        if let Some(v) = patch.task_list {
+            base.task_list = Self::apply_task_list_patch(base.task_list, v);
+        }
+        if let Some(v) = patch.task_lifecycle {
+            base.task_lifecycle = Self::apply_task_lifecycle_patch(base.task_lifecycle, v);
+        }
+        base
+    }
+
+    fn apply_task_list_patch(
+        mut base: TaskListConfig,
+        patch: TaskListConfigPatch,
+    ) -> TaskListConfig {
+        if let Some(v) = patch.max_lines {
+            base.max_lines = v;
+        }
+        if let Some(v) = patch.fold_hint_format {
+            base.fold_hint_format = v;
+        }
+        base
+    }
+
+    fn apply_task_lifecycle_patch(
+        mut base: TaskLifecycleConfig,
+        patch: TaskLifecycleConfigPatch,
+    ) -> TaskLifecycleConfig {
+        if let Some(v) = patch.auto_clear_completed_on_new_turn {
+            base.auto_clear_completed_on_new_turn = v;
+        }
+        if let Some(v) = patch.interrupt_prompt_enabled {
+            base.interrupt_prompt_enabled = v;
+        }
+        if let Some(v) = patch.interrupt_default_action {
+            base.interrupt_default_action = v;
+        }
+        if let Some(v) = patch.stale_remind_after_turns {
+            base.stale_remind_after_turns = v;
+        }
+        if let Some(v) = patch.stale_remind_repeat_interval {
+            base.stale_remind_repeat_interval = v;
+        }
+        base
+    }
+
+    fn apply_permission_patch(
+        mut base: PermissionConfig,
+        patch: PermissionConfigPatch,
+    ) -> PermissionConfig {
+        if let Some(v) = patch.mode {
+            base.mode = v;
+        }
+        if let Some(v) = patch.auto_approve {
+            base.auto_approve = v;
+        }
+        if let Some(v) = patch.deny {
+            base.deny = v;
+        }
+        base
+    }
+
+    fn apply_skills_patch(mut base: SkillsConfig, patch: SkillsConfigPatch) -> SkillsConfig {
+        if let Some(v) = patch.dirs {
+            base.dirs = v;
+        }
+        base
+    }
+
+    fn apply_storage_patch(mut base: StorageConfig, patch: StorageConfigPatch) -> StorageConfig {
+        if let Some(v) = patch.sessions_dir {
+            base.sessions_dir = Some(v);
+        }
+        if let Some(v) = patch.persist_sessions {
+            base.persist_sessions = v;
+        }
+        if let Some(v) = patch.max_sessions {
+            base.max_sessions = v;
+        }
+        if let Some(v) = patch.history {
+            base.history = v;
+        }
+        if let Some(v) = patch.history_file {
+            base.history_file = Some(v);
+        }
+        base
+    }
+
+    fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfig {
+        let mut events = base.events;
+        for (k, v) in overlay.events {
+            events.insert(k, v);
+        }
+        HooksConfig { events }
+    }
+
+    fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatch) -> MemoryConfig {
+        if let Some(v) = patch.enabled {
+            base.enabled = v;
+        }
+        if let Some(v) = patch.max_entries {
+            base.max_entries = v;
+        }
+        if let Some(v) = patch.max_inject_count {
+            base.max_inject_count = v;
+        }
+        if let Some(v) = patch.auto_summary_on_session_end {
+            base.auto_summary_on_session_end = v;
+        }
+        if let Some(v) = patch.similarity_threshold {
+            base.similarity_threshold = v;
+        }
+        if let Some(v) = patch.reflection {
+            base.reflection = Self::apply_reflection_patch(base.reflection, v);
+        }
+        base
+    }
+
+    fn apply_reflection_patch(
+        mut base: ReflectionConfig,
+        patch: ReflectionConfigPatch,
+    ) -> ReflectionConfig {
+        if let Some(v) = patch.enabled {
+            base.enabled = v;
+        }
+        if let Some(v) = patch.interval_turns {
+            base.interval_turns = v;
+        }
+        if let Some(v) = patch.auto_apply_suggestions {
+            base.auto_apply_suggestions = v;
+        }
+        if let Some(v) = patch.model {
+            base.model = Some(v);
+        }
+        base
+    }
+
+    fn apply_logging_patch(mut base: LoggingConfig, patch: LoggingConfigPatch) -> LoggingConfig {
+        if let Some(v) = patch.level {
+            base.level = v;
+        }
+        if let Some(v) = patch.max_bytes {
+            base.max_bytes = v;
+        }
+        if let Some(v) = patch.max_backups {
+            base.max_backups = v;
+        }
+        if let Some(v) = patch.retention_days {
+            base.retention_days = v;
+        }
+        if let Some(v) = patch.sub_agent_log {
+            base.sub_agent_log = Self::apply_sub_agent_log_patch(base.sub_agent_log, v);
+        }
+        if let Some(v) = patch.logs_dir {
+            base.logs_dir = Some(v);
+        }
+        if let Some(v) = patch.role_logs_enabled {
+            base.role_logs_enabled = v;
+        }
+        base
+    }
+
+    fn apply_sub_agent_log_patch(
+        mut base: SubAgentLogConfig,
+        patch: SubAgentLogConfigPatch,
+    ) -> SubAgentLogConfig {
+        if let Some(v) = patch.enabled {
+            base.enabled = v;
+        }
+        if let Some(v) = patch.include_request_payload {
+            base.include_request_payload = v;
+        }
+        if let Some(v) = patch.max_payload_bytes {
+            base.max_payload_bytes = v;
+        }
+        base
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_patch_project_hooks_do_not_reset_global_logging_level() {
+        let base = Config {
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                ..Default::default()
             },
-            model: ModelConfig {
-                name: if overlay.model.name != default_model_config().name {
-                    overlay.model.name
-                } else {
-                    base.model.name
-                },
-                max_tokens: if overlay.model.max_tokens != default_model_config().max_tokens {
-                    overlay.model.max_tokens
-                } else {
-                    base.model.max_tokens
-                },
-                context_size: if overlay.model.context_size != default_model_config().context_size {
-                    overlay.model.context_size
-                } else {
-                    base.model.context_size
-                },
-                temperature: overlay.model.temperature.or(base.model.temperature),
-                top_k: overlay.model.top_k.or(base.model.top_k),
-                top_p: overlay.model.top_p.or(base.model.top_p),
-                stop_sequences: if !overlay.model.stop_sequences.is_empty() {
-                    overlay.model.stop_sequences
-                } else {
-                    base.model.stop_sequences
-                },
+            ..Default::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+              "hooks": {
+                "Stop": [{ "command": "echo ok" }]
+              }
+            }"#,
+        )
+        .expect("project hooks patch should parse");
+
+        let merged = ConfigManager::apply_patch(base, patch);
+
+        assert_eq!(merged.logging.level, "debug");
+        assert_eq!(merged.hooks.events.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_patch_project_can_explicitly_override_logging_level_to_warn() {
+        let base = Config {
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                ..Default::default()
             },
-            models: {
-                let mut providers = base.models.providers;
-                for (k, v) in overlay.models.providers {
-                    providers.insert(k, v);
-                }
-                let mut guidance = base.models.guidance;
-                for (k, v) in overlay.models.guidance {
-                    guidance.insert(k, v);
-                }
-                ModelsConfig {
-                    mode: if overlay.models.mode.is_empty() {
-                        base.models.mode
-                    } else {
-                        overlay.models.mode
-                    },
-                    default: if overlay.models.default.is_empty() {
-                        base.models.default
-                    } else {
-                        overlay.models.default
-                    },
-                    providers,
-                    guidance,
-                }
-            },
-            tools: ToolsConfig {
-                enabled: if !overlay.tools.enabled.is_empty() {
-                    overlay.tools.enabled
-                } else {
-                    base.tools.enabled
-                },
-                disabled: if !overlay.tools.disabled.is_empty() {
-                    overlay.tools.disabled
-                } else {
-                    base.tools.disabled
-                },
-                settings: Self::merge_maps(base.tools.settings, overlay.tools.settings),
-                max_concurrency: if overlay.tools.max_concurrency
-                    != default_tools_config().max_concurrency
-                {
-                    overlay.tools.max_concurrency
-                } else {
-                    base.tools.max_concurrency
-                },
-            },
-            agents: AgentsConfig {
-                max_concurrency: if overlay.agents.max_concurrency
-                    != default_agents_config().max_concurrency
-                {
-                    overlay.agents.max_concurrency
-                } else {
-                    base.agents.max_concurrency
-                },
-                roles: {
-                    let mut roles = base.agents.roles;
-                    for (k, v) in overlay.agents.roles {
-                        roles.insert(k, v);
-                    }
-                    roles
-                },
-                default_model: if !overlay.agents.default_model.is_empty() {
-                    overlay.agents.default_model
-                } else {
-                    base.agents.default_model
-                },
-            },
+            ..Default::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+              "logging": { "level": "warn" }
+            }"#,
+        )
+        .expect("logging patch should parse");
+
+        let merged = ConfigManager::apply_patch(base, patch);
+
+        assert_eq!(merged.logging.level, "warn");
+    }
+
+    #[test]
+    fn test_apply_patch_missing_bool_fields_preserve_lower_priority_values() {
+        let base = Config {
             ui: UiConfig {
-                markdown: overlay.ui.markdown,
-                syntax_highlight: overlay.ui.syntax_highlight,
-                progress: overlay.ui.progress,
-                color: overlay.ui.color,
-                verbose: overlay.ui.verbose || base.ui.verbose,
-                tui: overlay.ui.tui,
-                task_list: TaskListConfig {
-                    max_lines: if overlay.ui.task_list.max_lines != 0 {
-                        overlay.ui.task_list.max_lines
-                    } else {
-                        base.ui.task_list.max_lines
-                    },
-                    fold_hint_format: if !overlay.ui.task_list.fold_hint_format.is_empty() {
-                        overlay.ui.task_list.fold_hint_format
-                    } else {
-                        base.ui.task_list.fold_hint_format
-                    },
-                },
+                markdown: false,
+                syntax_highlight: false,
+                progress: false,
+                color: false,
+                verbose: true,
+                tui: false,
                 task_lifecycle: TaskLifecycleConfig {
-                    auto_clear_completed_on_new_turn: overlay
-                        .ui
-                        .task_lifecycle
-                        .auto_clear_completed_on_new_turn,
-                    interrupt_prompt_enabled: overlay.ui.task_lifecycle.interrupt_prompt_enabled,
-                    interrupt_default_action: if !overlay
-                        .ui
-                        .task_lifecycle
-                        .interrupt_default_action
-                        .is_empty()
-                    {
-                        overlay.ui.task_lifecycle.interrupt_default_action
-                    } else {
-                        base.ui.task_lifecycle.interrupt_default_action
-                    },
-                    stale_remind_after_turns: if overlay.ui.task_lifecycle.stale_remind_after_turns
-                        != 0
-                    {
-                        overlay.ui.task_lifecycle.stale_remind_after_turns
-                    } else {
-                        base.ui.task_lifecycle.stale_remind_after_turns
-                    },
-                    stale_remind_repeat_interval: if overlay
-                        .ui
-                        .task_lifecycle
-                        .stale_remind_repeat_interval
-                        != 0
-                    {
-                        overlay.ui.task_lifecycle.stale_remind_repeat_interval
-                    } else {
-                        base.ui.task_lifecycle.stale_remind_repeat_interval
-                    },
+                    auto_clear_completed_on_new_turn: false,
+                    interrupt_prompt_enabled: false,
+                    ..Default::default()
                 },
-            },
-            permissions: PermissionConfig {
-                mode: if overlay.permissions.mode != PermissionModeConfig::default() {
-                    overlay.permissions.mode
-                } else {
-                    base.permissions.mode
-                },
-                auto_approve: if !overlay.permissions.auto_approve.is_empty() {
-                    overlay.permissions.auto_approve
-                } else {
-                    base.permissions.auto_approve
-                },
-                deny: if !overlay.permissions.deny.is_empty() {
-                    overlay.permissions.deny
-                } else {
-                    base.permissions.deny
-                },
+                ..Default::default()
             },
             storage: StorageConfig {
-                sessions_dir: overlay.storage.sessions_dir.or(base.storage.sessions_dir),
-                persist_sessions: overlay.storage.persist_sessions,
-                max_sessions: overlay.storage.max_sessions,
-                history: overlay.storage.history,
-                history_file: overlay.storage.history_file.or(base.storage.history_file),
+                persist_sessions: false,
+                history: false,
+                ..Default::default()
             },
-            skills: SkillsConfig {
-                dirs: if !overlay.skills.dirs.is_empty() {
-                    overlay.skills.dirs
-                } else {
-                    base.skills.dirs
+            memory: share::config::MemoryConfig {
+                enabled: false,
+                auto_summary_on_session_end: false,
+                reflection: ReflectionConfig {
+                    enabled: false,
+                    auto_apply_suggestions: true,
+                    ..Default::default()
                 },
+                ..Default::default()
             },
-            hooks: {
-                let mut events = base.hooks.events;
-                for (k, v) in overlay.hooks.events {
-                    events.insert(k, v);
-                }
-                HooksConfig { events }
-            },
-            memory: overlay.memory,
             logging: LoggingConfig {
-                level: if !overlay.logging.level.is_empty() {
-                    overlay.logging.level
-                } else {
-                    base.logging.level
-                },
-                max_bytes: if overlay.logging.max_bytes != default_logging_config().max_bytes {
-                    overlay.logging.max_bytes
-                } else {
-                    base.logging.max_bytes
-                },
-                max_backups: if overlay.logging.max_backups != default_logging_config().max_backups
-                {
-                    overlay.logging.max_backups
-                } else {
-                    base.logging.max_backups
-                },
-                retention_days: if overlay.logging.retention_days
-                    != default_logging_config().retention_days
-                {
-                    overlay.logging.retention_days
-                } else {
-                    base.logging.retention_days
-                },
                 sub_agent_log: SubAgentLogConfig {
-                    enabled: overlay.logging.sub_agent_log.enabled,
-                    include_request_payload: overlay.logging.sub_agent_log.include_request_payload,
-                    max_payload_bytes: if overlay.logging.sub_agent_log.max_payload_bytes
-                        != default_sub_agent_log_config().max_payload_bytes
-                    {
-                        overlay.logging.sub_agent_log.max_payload_bytes
-                    } else {
-                        base.logging.sub_agent_log.max_payload_bytes
-                    },
+                    enabled: false,
+                    include_request_payload: false,
+                    ..Default::default()
                 },
-                logs_dir: overlay.logging.logs_dir.or(base.logging.logs_dir.clone()),
-                role_logs_enabled: overlay.logging.role_logs_enabled,
+                role_logs_enabled: false,
+                ..Default::default()
             },
+            ..Default::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(r#"{}"#).expect("empty patch should parse");
+
+        let merged = ConfigManager::apply_patch(base, patch);
+
+        assert!(!merged.ui.markdown);
+        assert!(!merged.ui.syntax_highlight);
+        assert!(!merged.ui.progress);
+        assert!(!merged.ui.color);
+        assert!(merged.ui.verbose);
+        assert!(!merged.ui.tui);
+        assert!(!merged.ui.task_lifecycle.auto_clear_completed_on_new_turn);
+        assert!(!merged.ui.task_lifecycle.interrupt_prompt_enabled);
+        assert!(!merged.storage.persist_sessions);
+        assert!(!merged.storage.history);
+        assert!(!merged.memory.enabled);
+        assert!(!merged.memory.auto_summary_on_session_end);
+        assert!(!merged.memory.reflection.enabled);
+        assert!(merged.memory.reflection.auto_apply_suggestions);
+        assert!(!merged.logging.sub_agent_log.enabled);
+        assert!(!merged.logging.sub_agent_log.include_request_payload);
+        assert!(!merged.logging.role_logs_enabled);
+    }
+
+    #[test]
+    fn test_apply_patch_explicit_bool_fields_override_lower_priority_values() {
+        let base = Config {
+            ui: UiConfig {
+                markdown: true,
+                syntax_highlight: true,
+                progress: true,
+                color: true,
+                verbose: true,
+                tui: true,
+                task_lifecycle: TaskLifecycleConfig {
+                    auto_clear_completed_on_new_turn: true,
+                    interrupt_prompt_enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            storage: StorageConfig {
+                persist_sessions: true,
+                history: true,
+                ..Default::default()
+            },
+            memory: share::config::MemoryConfig {
+                enabled: true,
+                auto_summary_on_session_end: true,
+                reflection: ReflectionConfig {
+                    enabled: true,
+                    auto_apply_suggestions: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            logging: LoggingConfig {
+                sub_agent_log: SubAgentLogConfig {
+                    enabled: true,
+                    include_request_payload: true,
+                    ..Default::default()
+                },
+                role_logs_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+              "ui": {
+                "markdown": false,
+                "syntax_highlight": false,
+                "progress": false,
+                "color": false,
+                "verbose": false,
+                "tui": false,
+                "task_lifecycle": {
+                  "auto_clear_completed_on_new_turn": false,
+                  "interrupt_prompt_enabled": false
+                }
+              },
+              "storage": {
+                "persist_sessions": false,
+                "history": false
+              },
+              "memory": {
+                "enabled": false,
+                "auto_summary_on_session_end": false,
+                "reflection": {
+                  "enabled": false,
+                  "auto_apply_suggestions": false
+                }
+              },
+              "logging": {
+                "sub_agent_log": {
+                  "enabled": false,
+                  "include_request_payload": false
+                },
+                "role_logs_enabled": false
+              }
+            }"#,
+        )
+        .expect("bool patch should parse");
+
+        let merged = ConfigManager::apply_patch(base, patch);
+
+        assert!(!merged.ui.markdown);
+        assert!(!merged.ui.syntax_highlight);
+        assert!(!merged.ui.progress);
+        assert!(!merged.ui.color);
+        assert!(!merged.ui.verbose);
+        assert!(!merged.ui.tui);
+        assert!(!merged.ui.task_lifecycle.auto_clear_completed_on_new_turn);
+        assert!(!merged.ui.task_lifecycle.interrupt_prompt_enabled);
+        assert!(!merged.storage.persist_sessions);
+        assert!(!merged.storage.history);
+        assert!(!merged.memory.enabled);
+        assert!(!merged.memory.auto_summary_on_session_end);
+        assert!(!merged.memory.reflection.enabled);
+        assert!(!merged.memory.reflection.auto_apply_suggestions);
+        assert!(!merged.logging.sub_agent_log.enabled);
+        assert!(!merged.logging.sub_agent_log.include_request_payload);
+        assert!(!merged.logging.role_logs_enabled);
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: String) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
         }
     }
 
-    /// Merge two hashmaps.
-    pub(crate) fn merge_maps(
-        base: std::collections::HashMap<String, serde_json::Value>,
-        overlay: std::collections::HashMap<String, serde_json::Value>,
-    ) -> std::collections::HashMap<String, serde_json::Value> {
-        let mut result = base;
-        result.extend(overlay);
-        result
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_project_hooks_do_not_reset_global_logging_level() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let home = root.path().join("home_agents");
+        let project = root.path().join("project");
+        let project_agents = project.join(".agents");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&project_agents).await.unwrap();
+        tokio::fs::write(
+            home.join("aemeath.json"),
+            r#"{ "logging": { "level": "debug" } }"#,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            project_agents.join("aemeath.json"),
+            r#"{ "hooks": { "Stop": [{ "command": "echo ok" }] } }"#,
+        )
+        .await
+        .unwrap();
+
+        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let manager = ConfigManager::new(Some(&project));
+
+        let loaded = manager.load().await.expect("config should load");
+
+        assert_eq!(loaded.logging.level, "debug");
+        assert_eq!(loaded.hooks.events.len(), 1);
     }
 }

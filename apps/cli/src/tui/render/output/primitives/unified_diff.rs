@@ -105,7 +105,7 @@ fn render_line(line: &str, syntax_ref: Option<&syntect::parsing::SyntaxReference
         DiffLineKind::Removed => {
             let body = line.strip_prefix('-').unwrap_or(line);
             parts.push(SpanPart::plain("-".to_string(), theme::DIFF_REMOVE_FG));
-            push_highlighted_body(&mut parts, body, theme::DIFF_REMOVE_FG, syntax_ref);
+            push_removed_body(&mut parts, body);
         }
         DiffLineKind::Added => {
             // 去掉前导 '+'（单 ASCII 字节）做语法高亮，再补回 '+' 前缀语义符号。
@@ -120,6 +120,10 @@ fn render_line(line: &str, syntax_ref: Option<&syntect::parsing::SyntaxReference
         }
     }
     RenderedLine::new(spanparts_to_spans(&parts))
+}
+
+fn push_removed_body(parts: &mut Vec<SpanPart>, body: &str) {
+    parts.push(SpanPart::plain(body.to_string(), theme::DIFF_REMOVE_FG));
 }
 
 /// 将 body 高亮后追加；无语法引用或高亮失败时回退为 `fallback` 单色。
@@ -194,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_unified_diff_removed_and_context_lines_use_syntax_highlight() {
+    fn test_render_unified_diff_removed_is_plain_red_but_context_and_added_use_syntax_highlight() {
         let lines =
             render_unified_diff(" fn keep() {}\n-fn old() {}\n+fn new() {}", Some("rs"), 80);
         let context = lines.iter().find(|l| l.plain.contains("keep")).unwrap();
@@ -207,19 +211,24 @@ mod tests {
             context.spans
         );
         assert!(
-            removed.spans.len() > 2,
-            "removed 行正文应走 syntect 高亮，got: {:?}",
-            removed.spans
-        );
-        assert!(
             added.spans.len() > 2,
             "added 行正文应走 syntect 高亮，got: {:?}",
             added.spans
         );
+        assert_eq!(removed.plain, "  -fn old() {}");
+        assert_eq!(
+            removed
+                .spans
+                .last()
+                .map(|span| (span.content.as_ref(), span.style.fg)),
+            Some(("fn old() {}", Some(theme::DIFF_REMOVE_FG))),
+            "removed 行正文应为单个纯 DIFF_REMOVE_FG span，got: {:?}",
+            removed.spans
+        );
     }
 
     #[test]
-    fn test_render_unified_diff_infers_extension_from_file_headers() {
+    fn test_render_unified_diff_infers_extension_from_file_headers_for_added_only() {
         let text = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}";
         let lines = render_unified_diff(text, None, 80);
         let added = lines.iter().find(|l| l.plain.contains("new")).unwrap();
@@ -230,9 +239,13 @@ mod tests {
             "应从 diff 文件头推断 rs 并高亮新增行，got: {:?}",
             added.spans
         );
-        assert!(
-            removed.spans.len() > 2,
-            "应从 diff 文件头推断 rs 并高亮删除行，got: {:?}",
+        assert_eq!(
+            removed
+                .spans
+                .last()
+                .map(|span| (span.content.as_ref(), span.style.fg)),
+            Some(("fn old() {}", Some(theme::DIFF_REMOVE_FG))),
+            "删除行即使能推断 rs 也应保持纯红，got: {:?}",
             removed.spans
         );
     }
@@ -280,10 +293,10 @@ mod tests {
 
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|l| l.plain.starts_with("  ")));
-        assert!(lines.iter().all(|l| l
-            .spans
-            .iter()
-            .all(|s| s.style.fg != Some(theme::DIFF_ADD_FG)
-                && s.style.fg != Some(theme::DIFF_REMOVE_FG))));
+        assert!(lines.iter().all(|l| {
+            l.spans.iter().all(|s| {
+                s.style.fg != Some(theme::DIFF_ADD_FG) && s.style.fg != Some(theme::DIFF_REMOVE_FG)
+            })
+        }));
     }
 }

@@ -26,43 +26,54 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# spinner / task_status_lines / queued_submission_lines 是 OutputArea 的 live-status 运行态镜像。
-# 真相归 RuntimeModel.spinner (active+phase)、RuntimeModel.task_status.lines 与
-# ConversationModel.queued_submissions；动画 frame/verb 归 view_state.spinner。
-# 唯一生产写入路径为 view_assembler/live_status.rs -> adapter/live_status_widget.rs
-# (apply_live_status_to_widget)，每帧由 app/update.rs::refresh_live_status_from_model 调用。
-# 任何 update/effect/slash 业务路径都不得直接改 output(_area).spinner /
-# .task_status_lines / .queued_submission_lines，也不得调用已删除的
-# start_spinner/stop_spinner/set_spinner_phase/tick_spinner/set_task_status。
-#
-# 豁免：
-#  - adapter/live_status_widget.rs：唯一镜像写入路径。
-#  - render/output_area/content.rs：OutputArea 自身 reset_runtime_state 清空镜像。
-#  - render/output/status_line.rs：镜像直写仅在其 #[cfg(test)] mod 内（测试构造）。
-#  - *_tests.rs：测试文件按 spec 允许直填镜像。
-#  - view_state.spinner 是动画源（非 OutputArea 镜像），receiver 不在匹配前缀内，天然不命中。
+# spinner/task/queued live-status 真相归 RuntimeModel.spinner (active+phase)、
+# RuntimeModel.task_status.lines 与 ConversationModel.queued_submissions；动画 frame/verb
+# 归 view_state.spinner。OutputArea 必须直接从 LiveStatusViewModel 投影渲染，不能再
+# 物理存储 spinner/task_status_lines/queued_submission_lines widget mirror，也不能经
+# adapter 写回这些 mirror。
 
-# 1) 直写 OutputArea 镜像字段（receiver 限定为 output / output_area / self，避免误伤 view_state.spinner）。
+# 1) retired live-status adapter 不进入生产路径。
 report_matches \
-  "output(_area).spinner / .task_status_lines / .queued_submission_lines mirror writes are allowed only in adapter/live_status_widget.rs (and OutputArea's own reset / test code); send model intents and let the assembler + apply_live_status_to_widget write the widget." \
+  "live_status_widget adapter must stay retired and test-only; live status projection is assembled from model/view_state at render time." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/^\\s*(\\/\\/.*)?\$/) { next } if (/pub[[:space:]]+mod[[:space:]]+live_status_widget[[:space:]]*;/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/adapter.rs\""
+
+# 2) OutputArea 不得重新持有 live-status mirror 字段。
+report_matches \
+  "OutputArea must not physically store live-status mirror fields; render spinner/task/queued directly from LiveStatusViewModel." \
+  grep -RInE '^[[:space:]]*pub[[:space:]]+(spinner|task_status_lines|queued_submission_lines):' \
+    "$ROOT/apps/cli/src/tui/render/output_area.rs" \
+    "$ROOT/apps/cli/src/tui/render/output_area" --include='*.rs'
+
+# 2) 旧 widget mirror 类型必须退役，避免以别名方式恢复 Instant-based 状态。
+report_matches \
+  "SpinnerState widget mirror type must stay deleted; use SpinnerLineView from LiveStatusViewModel instead." \
+  grep -RInE '\bstruct[[:space:]]+SpinnerState\b|\bpub[[:space:]]+struct[[:space:]]+SpinnerState\b' \
+    "$ROOT/apps/cli/src/tui/render/output_area" --include='*.rs'
+
+# 3) 不得直写 OutputArea live-status mirror 字段（防止字段恢复后漏网）。
+report_matches \
+  "output(_area).spinner / .task_status_lines / .queued_submission_lines mirror writes must stay deleted; derive LiveStatusViewModel and pass it to render/selection." \
   grep -RInE '\b(output|output_area|self)\.(spinner|task_status_lines|queued_submission_lines)\s*=' \
     "$ROOT/apps/cli/src/tui" --include='*.rs' \
-    --exclude='live_status_widget.rs' \
-    --exclude='content.rs' \
-    --exclude='status_line.rs' \
     --exclude='*_tests.rs'
 
-# 2) 调用已删除的 spinner/task 镜像方法（防回归）。
+# 4) 写回 adapter 必须退役。
 report_matches \
-  "start_spinner/stop_spinner/set_spinner_phase/tick_spinner/set_task_status were removed; drive spinner/task via RuntimeIntent + the live_status assembler/adapter pipeline instead." \
+  "apply_live_status_to_widget must stay deleted; live status is projected into OutputArea::render from LiveStatusViewModel." \
+  grep -RInE '\bapply_live_status_to_widget\b' \
+    "$ROOT/apps/cli/src/tui" --include='*.rs' \
+    --exclude='*_tests.rs'
+
+# 5) 调用已删除的 spinner/task 镜像方法（防回归）。
+report_matches \
+  "start_spinner/stop_spinner/set_spinner_phase/tick_spinner/set_task_status were removed; drive spinner/task via RuntimeIntent + LiveStatusViewModel projection instead." \
   grep -RInE '\.(start_spinner|stop_spinner|set_spinner_phase|tick_spinner|set_task_status)\(' \
     "$ROOT/apps/cli/src/tui" --include='*.rs' \
-    --exclude='live_status_widget.rs' \
     --exclude='*_tests.rs'
 
-# 3) 排队输入预览只能来自 ConversationModel.queued_submissions，经 live-status assembler 格式化。
+# 6) 排队输入预览只能来自 ConversationModel.queued_submissions，经 live-status assembler 格式化。
 report_matches \
-  "queued_submission_lines must not be read as business truth outside OutputArea rendering/selection; use ConversationModel.queued_submissions." \
-  bash -c "grep -RInE 'queued_submission_lines' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='output_area.rs' --exclude='live_status_widget.rs' --exclude='render.rs' --exclude='content.rs' --exclude='*_tests.rs' | grep -v '^[^:]*:[0-9][0-9]*:[[:space:]]*//' | grep -v '/app/update/notice.rs:'"
+  "queued live-status lines must not be read as business truth from OutputArea; use ConversationModel.queued_submissions / LiveStatusViewModel." \
+  bash -c "grep -RInE 'queued_submission_lines' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '^[^:]*:[0-9][0-9]*:[[:space:]]*//' | grep -v '/app/update/notice.rs:'"
 
 exit "$fail"

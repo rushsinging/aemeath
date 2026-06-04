@@ -2,11 +2,12 @@ use super::change::RuntimeChange;
 use super::intent::RuntimeIntent;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::spinner::SpinnerModel;
+use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
 use super::workspace::WorkspaceState;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeModel {
     pub provider: Option<String>,
     pub model_id: Option<String>,
@@ -16,6 +17,25 @@ pub struct RuntimeModel {
     pub task_status: TaskStatusSnapshot,
     pub processing_jobs: Vec<ProcessingJob>,
     pub spinner: SpinnerModel,
+    pub status_notice: StatusNotice,
+    pub thinking: bool,
+}
+
+impl Default for RuntimeModel {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            model_id: None,
+            workspace: WorkspaceState::default(),
+            usage: UsageSummary::default(),
+            live_tps: None,
+            task_status: TaskStatusSnapshot::default(),
+            processing_jobs: Vec::new(),
+            spinner: SpinnerModel::default(),
+            status_notice: StatusNotice::default(),
+            thinking: true,
+        }
+    }
 }
 
 impl RuntimeModel {
@@ -126,6 +146,14 @@ impl RuntimeModel {
                 self.task_status.lines = lines;
                 vec![RuntimeChange::TaskLinesChanged]
             }
+            RuntimeIntent::SetStatusNotice(notice) => {
+                self.status_notice = notice;
+                vec![RuntimeChange::StatusNoticeChanged]
+            }
+            RuntimeIntent::SetThinking(enabled) => {
+                self.thinking = enabled;
+                vec![RuntimeChange::ThinkingChanged]
+            }
         }
     }
 }
@@ -209,6 +237,35 @@ mod tests {
             changes.first(),
             Some(RuntimeChange::TaskLinesChanged)
         ));
+    }
+
+    #[test]
+    fn test_runtime_set_status_notice() {
+        let mut model = RuntimeModel::default();
+        let changes = model.apply(RuntimeIntent::SetStatusNotice(
+            crate::tui::model::runtime::status_notice::StatusNotice::warning("Interrupted"),
+        ));
+
+        assert_eq!(model.status_notice.text, "Interrupted");
+        assert_eq!(
+            model.status_notice.kind,
+            crate::tui::model::runtime::status_notice::StatusNoticeKind::Warning
+        );
+        assert!(matches!(
+            changes.first(),
+            Some(RuntimeChange::StatusNoticeChanged)
+        ));
+    }
+
+    #[test]
+    fn test_runtime_default_status_notice_is_ready() {
+        let model = RuntimeModel::default();
+
+        assert_eq!(model.status_notice.text, "Ready");
+        assert_eq!(
+            model.status_notice.kind,
+            crate::tui::model::runtime::status_notice::StatusNoticeKind::Normal
+        );
     }
 
     #[test]
