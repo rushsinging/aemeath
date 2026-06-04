@@ -8,6 +8,7 @@ use crate::tui::render::theme;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
 use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
+use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
 
 impl OutputArea {
@@ -15,14 +16,13 @@ impl OutputArea {
         &mut self,
         lines: &mut Vec<Line<'static>>,
         spinner_line: &Option<Line<'static>>,
-        queued_lines: &[String],
-        task_status_lines: &[String],
+        live_status: &LiveStatusViewModel,
         view: &OutputViewState,
     ) {
         // 排队输入预览行（固定在 spinner 上方）
-        if !queued_lines.is_empty() {
+        if !live_status.queued_lines.is_empty() {
             let base_idx = self.document.total_lines();
-            for (i, text) in queued_lines.iter().enumerate() {
+            for (i, text) in live_status.queued_lines.iter().enumerate() {
                 let char_count = text.chars().count();
                 self.screen_line_map
                     .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
@@ -45,7 +45,7 @@ impl OutputArea {
         }
         if spinner_line.is_some() {
             let task_base_idx = self.document.total_lines();
-            for (i, task_line) in task_status_lines.iter().enumerate() {
+            for (i, task_line) in live_status.task_lines.iter().enumerate() {
                 let text = format!("  {task_line}");
                 let char_count = text.chars().count();
                 self.screen_line_map.push((
@@ -122,24 +122,30 @@ mod tests {
 
     use super::*;
     use crate::tui::render::output_area::selection::output_selection_view_for_test;
-    use crate::tui::render::output_area::types::SpinnerState;
+    use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
+
+    fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
+        LiveStatusViewModel {
+            spinner: Some(SpinnerLineView {
+                frame: 0,
+                verb: "Thinking".to_string(),
+                elapsed_secs: 0,
+                phase_elapsed_secs: 0,
+                phase_text: None,
+            }),
+            queued_lines: Vec::new(),
+            task_lines: task_lines.into_iter().map(str::to_string).collect(),
+        }
+    }
 
     #[test]
     fn test_render_maps_task_status_lines_for_selection() {
         let mut output = OutputArea::new();
-        output.task_status_lines =
-            vec!["━━ Tasks: 0/1 ━━".to_string(), "□ #1 修复 bug".to_string()];
-        output.spinner = Some(SpinnerState {
-            frame: 0,
-            verb: "Thinking".to_string(),
-            start: std::time::Instant::now(),
-            phase: None,
-            phase_start: std::time::Instant::now(),
-        });
+        let live_status = live_status(vec!["━━ Tasks: 0/1 ━━", "□ #1 修复 bug"]);
         let area = Rect::new(0, 0, 40, 5);
         let mut buf = Buffer::empty(area);
 
-        output.render(area, &mut buf, &Default::default());
+        output.render(area, &mut buf, &Default::default(), &live_status);
         // screen_line_map: spinner(1,不可选) + task_status(2) = 3
         assert_eq!(output.screen_line_map.len(), 3);
         // spinner 在 index 0, 不可选(usize::MAX)
@@ -147,14 +153,14 @@ mod tests {
         let base = output.document().total_lines();
         assert_eq!(output.screen_line_map[1].0, base);
         assert_eq!(output.screen_line_map[2].0, base + 1);
-        assert_eq!(output.task_status_lines.len(), 2);
+        assert_eq!(live_status.task_lines.len(), 2);
         // rel_row=2 对应第 2 个 task_status 行
-        let s = output.screen_to_anchor(2, 0, &area).unwrap();
-        let e = output.screen_to_anchor(2, 15, &area).unwrap();
+        let s = output.screen_to_anchor(2, 0, &area, &live_status).unwrap();
+        let e = output.screen_to_anchor(2, 15, &area, &live_status).unwrap();
         let view = output_selection_view_for_test(s, e);
 
         assert_eq!(
-            output.selected_text_for_view(&view),
+            output.selected_text_for_view(&view, &live_status),
             Some("  □ #1 修复 bug".to_string())
         );
     }
@@ -162,24 +168,17 @@ mod tests {
     #[test]
     fn test_render_highlights_selected_task_status_line() {
         let mut output = OutputArea::new();
-        output.task_status_lines = vec!["□ #1 修复 bug".to_string()];
-        output.spinner = Some(SpinnerState {
-            frame: 0,
-            verb: "Thinking".to_string(),
-            start: std::time::Instant::now(),
-            phase: None,
-            phase_start: std::time::Instant::now(),
-        });
+        let live_status = live_status(vec!["□ #1 修复 bug"]);
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);
 
-        output.render(area, &mut buf, &Default::default());
+        output.render(area, &mut buf, &Default::default(), &live_status);
         // screen_map: [spinner(usize::MAX), task_status(lines.len())]
         // 选 task_status 行（screen 行 1）
-        let s = output.screen_to_anchor(1, 0, &area).unwrap();
-        let e = output.screen_to_anchor(1, 8, &area).unwrap();
+        let s = output.screen_to_anchor(1, 0, &area, &live_status).unwrap();
+        let e = output.screen_to_anchor(1, 8, &area, &live_status).unwrap();
         let view = output_selection_view_for_test(s, e);
-        output.render(area, &mut buf, &view);
+        output.render(area, &mut buf, &view, &live_status);
 
         let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
         assert_eq!(first_selected.style().bg, Some(theme::SELECTION_BG));

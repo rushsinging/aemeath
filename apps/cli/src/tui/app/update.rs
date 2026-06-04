@@ -14,7 +14,6 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
-use crate::tui::adapter::live_status_widget::apply_live_status_to_widget;
 use crate::tui::adapter::output_widget::render_document_from_view_model;
 use crate::tui::adapter::status_widget::{
     apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
@@ -193,13 +192,29 @@ impl App {
     }
 
     /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
-    /// + view_state 动画态（frame/verb）派生实时状态行，单向写回 widget 镜像。
-    /// 这是 spinner/task/queued live-status 镜像的唯一写入路径。
+    /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
+    pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
+        let queued_texts: Vec<String> = self
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .map(|q| q.text.clone())
+            .collect();
+        crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
+            &self.model.runtime,
+            &self.view_state.spinner,
+            &queued_texts,
+        )
+    }
+
+    /// 渲染前维护 live-status 相关 view_state：
+    /// - active 且 verb 为空时选择动词；
+    /// - inactive 时清空动画状态，保证下次激活重新计时。
+    /// OutputArea render 直接消费 `live_status_view_model()`，不再写 widget mirror。
     ///
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
-    /// 而非纯 reducer：
-    /// - 由 inactive→active（verb 为空）时一次性 `pick_verb`（选 verb + 复位 frame=0）；
-    /// - inactive 时复位 view_state.spinner，使下次激活重新 pick，elapsed/frame 归零。
+    /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
         let active = self.model.runtime.spinner.active;
         if active {
@@ -209,21 +224,7 @@ impl App {
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
-        let queued_texts: Vec<String> = self
-            .model
-            .conversation
-            .queued_submissions
-            .iter()
-            .map(|q| q.text.clone())
-            .collect();
-        let vm = crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
-            &self.model.runtime,
-            &self.view_state.spinner,
-            &queued_texts,
-        );
-        apply_live_status_to_widget(&mut self.output_area, &vm);
     }
-
     /// 据 OutputViewState 滚动真相执行 last_visible_height 反喂、内容增长补偿与钳制。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。
     pub(crate) fn refresh_output_scroll_from_view_state(&mut self) {

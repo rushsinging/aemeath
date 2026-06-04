@@ -15,7 +15,7 @@ pub mod spinner;
 pub mod types;
 
 // 重新导出核心类型，方便外部使用
-pub use types::{SpanPart, SpinnerState, INDENT};
+pub use types::{SpanPart, INDENT};
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
@@ -25,16 +25,10 @@ pub struct OutputArea {
     pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
     /// 渲染后的逻辑行文本覆盖
     pub rendered_line_content: HashMap<usize, String>,
-    /// 活跃的 spinner 动画
-    pub spinner: Option<SpinnerState>,
     /// 上次渲染时的可见高度缓存
     pub last_visible_height: usize,
     /// todo id -> subject 缓存
     pub todo_subject_cache: std::collections::HashMap<String, String>,
-    /// spinner 下方显示的任务状态行
-    pub task_status_lines: Vec<String>,
-    /// spinner 上方显示的排队输入预览行
-    pub queued_submission_lines: Vec<String>,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
     /// 新输出渲染管线的 block 级缓存渲染器。
@@ -59,11 +53,8 @@ impl OutputArea {
             term_width,
             screen_line_map: Vec::new(),
             rendered_line_content: HashMap::new(),
-            spinner: None,
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
-            task_status_lines: Vec::new(),
-            queued_submission_lines: Vec::new(),
             document: RenderedDocument::default(),
             document_renderer: OutputDocumentRenderer::default(),
         }

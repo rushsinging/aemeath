@@ -52,11 +52,10 @@ impl App {
 
             // 每帧先批量派生 dirty ViewModel，避免 streaming chunk 每次同步重渲染输出区。
             self.flush_dirty_view_models();
-            // 每帧据 Model+view_state 派生 spinner/task 镜像，单向写回 widget。
+            // 每帧维护 live-status 动画 view_state；render 直接消费 LiveStatusViewModel。
             self.refresh_live_status_from_model();
-            // 每帧据 view_state 滚动真相写回 widget 镜像（last_visible_height 反喂 + 钳制）。
+            // 每帧据 view_state 滚动真相执行 last_visible_height 反喂 + 钳制。
             self.refresh_output_scroll_from_view_state();
-
             // Draw UI
             self.draw(terminal)?;
 

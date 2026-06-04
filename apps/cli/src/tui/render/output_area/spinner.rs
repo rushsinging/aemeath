@@ -4,6 +4,7 @@ use ratatui::{
 };
 
 use crate::tui::render::theme;
+use crate::tui::view_model::SpinnerLineView;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
 const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];
@@ -26,14 +27,12 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 }
 
 impl super::OutputArea {
-    /// Build the animated spinner line (called during render)
+    /// Build the animated spinner line (called during render).
     ///
-    /// 真相边界：spinner 镜像（`self.spinner`）由 `adapter/live_status_widget.rs`
-    /// 据 Model（active/phase）+ view_state（frame/verb）单向写回。本函数只读镜像渲染，
-    /// 不再自持 verb 选择/动画推进。
-    pub fn build_spinner_line(&self) -> Option<Line<'static>> {
-        let s = self.spinner.as_ref()?;
-
+    /// 真相边界：spinner active/phase 来自 RuntimeModel，frame/verb/elapsed 来自
+    /// view_state.spinner，经 LiveStatusViewModel 投影到渲染层；OutputArea 不再自持
+    /// spinner widget mirror。
+    pub fn build_spinner_line(&self, s: &SpinnerLineView) -> Line<'static> {
         let mut spans = Vec::new();
 
         let glyph = SPINNER_FRAMES[(s.frame / 3) as usize % SPINNER_FRAMES.len()];
@@ -63,7 +62,7 @@ impl super::OutputArea {
             spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
         }
 
-        let elapsed = s.start.elapsed().as_secs();
+        let elapsed = s.elapsed_secs;
         if elapsed >= 1 {
             spans.push(Span::styled(
                 format!("  {}s", elapsed),
@@ -71,13 +70,13 @@ impl super::OutputArea {
             ));
         }
 
-        if let Some(phase) = s.phase.as_deref().filter(|p| !p.is_empty()) {
+        if let Some(phase) = s.phase_text.as_deref().filter(|p| !p.is_empty()) {
             spans.push(Span::styled("  (", Style::default().fg(theme::TEXT_DIM)));
             spans.push(Span::styled(
                 phase.to_string(),
                 Style::default().fg(theme::WARNING),
             ));
-            let phase_elapsed = s.phase_start.elapsed().as_secs();
+            let phase_elapsed = s.phase_elapsed_secs;
             spans.push(Span::styled(
                 format!("  ⏱ {}s", phase_elapsed),
                 Style::default().fg(theme::TEXT_DIM),
@@ -85,6 +84,6 @@ impl super::OutputArea {
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
 
-        Some(Line::from(spans))
+        Line::from(spans)
     }
 }

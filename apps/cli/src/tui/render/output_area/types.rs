@@ -27,17 +27,3 @@ impl SpanPart {
         }
     }
 }
-
-pub struct SpinnerState {
-    /// 动画帧计数器，只能由固定 ticker 推进
-    pub frame: u64,
-    /// 当前动词文本
-    pub verb: String,
-    /// spinner 启动时间
-    pub start: std::time::Instant,
-    /// 当前细分阶段，显示在 spinner 行括号中
-    pub phase: Option<String>,
-    /// 当前 phase 首次出现的时间；phase 文本变化时重置，
-    /// 用于在括号内显示当前阶段的独立计时。
-    pub phase_start: std::time::Instant,
-}

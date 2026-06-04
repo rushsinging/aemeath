@@ -8,6 +8,7 @@ use sdk::CharIdx;
 
 use super::OutputArea;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
+use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
 
 impl OutputArea {
@@ -17,6 +18,7 @@ impl OutputArea {
         area: Rect,
         buf: &mut ratatui::buffer::Buffer,
         view: &OutputViewState,
+        live_status: &LiveStatusViewModel,
     ) {
         if area.height == 0 {
             return;
@@ -27,13 +29,16 @@ impl OutputArea {
             self.term_width = new_width;
         }
 
-        let spinner_line = self.build_spinner_line();
-        let task_line_count = if self.spinner.is_some() {
-            self.task_status_lines.len()
+        let spinner_line = live_status
+            .spinner
+            .as_ref()
+            .map(|spinner| self.build_spinner_line(spinner));
+        let task_line_count = if spinner_line.is_some() {
+            live_status.task_lines.len()
         } else {
             0
         };
-        let queued_line_count = self.queued_submission_lines.len();
+        let queued_line_count = live_status.queued_lines.len();
         let reserved = if spinner_line.is_some() {
             queued_line_count + 1 + task_line_count
         } else if queued_line_count > 0 {
@@ -78,15 +83,7 @@ impl OutputArea {
 
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
-        let queued_lines = self.queued_submission_lines.clone();
-        let task_status_lines = self.task_status_lines.clone();
-        self.append_status_lines(
-            &mut display_lines,
-            &spinner_line,
-            &queued_lines,
-            &task_status_lines,
-            view,
-        );
+        self.append_status_lines(&mut display_lines, &spinner_line, live_status, view);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -226,8 +223,13 @@ mod tests {
     use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
     use crate::tui::render::output_area::selection::output_selection_view_for_test;
     use crate::tui::render::theme;
+    use crate::tui::view_model::LiveStatusViewModel;
     use ratatui::{buffer::Buffer, layout::Rect, text::Span};
     use sdk::CharIdx;
+
+    fn no_live_status() -> LiveStatusViewModel {
+        LiveStatusViewModel::default()
+    }
 
     #[test]
     fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
@@ -245,7 +247,7 @@ mod tests {
         let area_rect = Rect::new(0, 0, 6, 2);
         let mut buf = Buffer::empty(area_rect);
 
-        area.render(area_rect, &mut buf, &Default::default());
+        area.render(area_rect, &mut buf, &Default::default(), &no_live_status());
 
         assert_ne!(
             buf[(5, 0)].symbol(),
@@ -267,7 +269,7 @@ mod tests {
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
         let area_rect = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area_rect);
-        area.render(area_rect, &mut buf, &view);
+        area.render(area_rect, &mut buf, &view, &no_live_status());
 
         assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
         assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG);
@@ -291,7 +293,7 @@ mod tests {
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
         let area_rect = Rect::new(0, 0, 12, 3);
         let mut buf = Buffer::empty(area_rect);
-        area.render(area_rect, &mut buf, &view);
+        area.render(area_rect, &mut buf, &view, &no_live_status());
 
         // gutter 占屏幕列 0..2，绝不高亮。
         assert_ne!(buf[(0, 0)].bg, theme::SELECTION_BG, "gutter 列不选中");
@@ -316,22 +318,35 @@ mod tests {
         });
         let area_rect = Rect::new(0, 0, 12, 3);
         let mut buf = Buffer::empty(area_rect);
-        area.render(area_rect, &mut buf, &Default::default());
+        area.render(area_rect, &mut buf, &Default::default(), &no_live_status());
 
         // 点击屏幕列 2（内容 "h"）→ plain 字符 0；拖到列 5（内容 "l" 之后）→ plain 3。
         // 经只读换算 screen_to_anchor 折算锚点后直接置选区镜像（widget start/update_selection
         // 已删除，选区真相迁至 view_state）。
-        let s = area.screen_to_anchor(0, 2, &area_rect).unwrap();
-        let e = area.screen_to_anchor(0, 5, &area_rect).unwrap();
-        let view = output_selection_view_for_test(s, e);
-        assert_eq!(area.selected_text_for_view(&view).as_deref(), Some("hel"));
-
-        // 点击 gutter 区间（列 0）→ 映射到 plain 字符 0，不偏移。
-        let s = area.screen_to_anchor(0, 0, &area_rect).unwrap();
-        let e = area.screen_to_anchor(0, 4, &area_rect).unwrap();
+        let s = area
+            .screen_to_anchor(0, 2, &area_rect, &no_live_status())
+            .unwrap();
+        let e = area
+            .screen_to_anchor(0, 5, &area_rect, &no_live_status())
+            .unwrap();
         let view = output_selection_view_for_test(s, e);
         assert_eq!(
-            area.selected_text_for_view(&view).as_deref(),
+            area.selected_text_for_view(&view, &no_live_status())
+                .as_deref(),
+            Some("hel")
+        );
+
+        // 点击 gutter 区间（列 0）→ 映射到 plain 字符 0，不偏移。
+        let s = area
+            .screen_to_anchor(0, 0, &area_rect, &no_live_status())
+            .unwrap();
+        let e = area
+            .screen_to_anchor(0, 4, &area_rect, &no_live_status())
+            .unwrap();
+        let view = output_selection_view_for_test(s, e);
+        assert_eq!(
+            area.selected_text_for_view(&view, &no_live_status())
+                .as_deref(),
             Some("he"),
             "点击 gutter 钳到 plain 0，拖到列 4 选到内容字符 2"
         );

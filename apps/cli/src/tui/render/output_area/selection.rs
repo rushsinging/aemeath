@@ -1,12 +1,13 @@
 use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
+use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::OutputViewState;
 
 impl super::OutputArea {
     /// 获取逻辑行总数（包括 document 行 + task_status 虚拟行）
-    fn total_virtual_line_count(&self) -> usize {
-        self.document.total_lines() + self.task_status_lines.len()
+    fn total_virtual_line_count(&self, live_status: &LiveStatusViewModel) -> usize {
+        self.document.total_lines() + live_status.task_lines.len()
     }
 
     /// 逻辑行的前导 gutter 显示列数（不进 plain）。task_status 等虚拟行无 gutter 返回 0。
@@ -20,8 +21,12 @@ impl super::OutputArea {
     }
 
     /// 根据逻辑索引获取行文本内容。
-    /// idx < document.total_lines() → document 行；否则 → task_status_lines[i]
-    pub fn get_line_content(&mut self, idx: usize) -> Option<String> {
+    /// idx < document.total_lines() → document 行；否则 → live status task_lines[i]
+    pub fn get_line_content(
+        &mut self,
+        idx: usize,
+        live_status: &LiveStatusViewModel,
+    ) -> Option<String> {
         if let Some(rendered) = self.rendered_line_content.get(&idx) {
             return Some(rendered.clone());
         }
@@ -29,7 +34,8 @@ impl super::OutputArea {
             return Some(line.plain.clone());
         }
         let task_idx = idx - self.document.total_lines();
-        self.task_status_lines
+        live_status
+            .task_lines
             .get(task_idx)
             .map(|s| format!("  {s}"))
     }
@@ -44,6 +50,7 @@ impl super::OutputArea {
         row: u16,
         col: u16,
         rect: &ratatui::layout::Rect,
+        live_status: &LiveStatusViewModel,
     ) -> Option<(usize, CharIdx)> {
         let rel_row = row.saturating_sub(rect.y) as usize;
         let rel_col = col.saturating_sub(rect.x) as usize;
@@ -53,7 +60,7 @@ impl super::OutputArea {
         let (logic_idx, char_start, _char_end) = self.screen_line_map.get(rel_row).copied()?;
         // 减去 gutter 显示列：gutter 不进 plain，点击 gutter 区间映射到 plain 字符 0。
         let content_col = rel_col.saturating_sub(self.gutter_cols_for_line(logic_idx));
-        let line = self.get_line_content(logic_idx)?;
+        let line = self.get_line_content(logic_idx, live_status)?;
         let byte_start = char_to_byte(&line, char_start);
         let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
             line.bslice_from(byte_start),
@@ -79,9 +86,10 @@ impl super::OutputArea {
         row: u16,
         col: u16,
         rect: &ratatui::layout::Rect,
+        live_status: &LiveStatusViewModel,
     ) -> Option<(usize, CharIdx, CharIdx)> {
-        let (logic_idx, abs_char_idx) = self.screen_to_anchor(row, col, rect)?;
-        let line = self.get_line_content(logic_idx)?;
+        let (logic_idx, abs_char_idx) = self.screen_to_anchor(row, col, rect, live_status)?;
+        let line = self.get_line_content(logic_idx, live_status)?;
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {
             return None;
@@ -108,15 +116,17 @@ impl super::OutputArea {
     pub fn selected_text_for_view(
         &mut self,
         view: &crate::tui::view_state::output::OutputViewState,
+        live_status: &LiveStatusViewModel,
     ) -> Option<String> {
         let (start, end) = view.selection_range()?;
-        self.selected_text_for_range(start, end)
+        self.selected_text_for_range(start, end, live_status)
     }
 
     fn selected_text_for_range(
         &mut self,
         start: crate::tui::view_state::output::SelectionAnchor,
         end: crate::tui::view_state::output::SelectionAnchor,
+        live_status: &LiveStatusViewModel,
     ) -> Option<String> {
         let (start_logic, start_col) = start;
         let (end_logic, end_col) = end;
@@ -128,7 +138,7 @@ impl super::OutputArea {
         let total = self
             .document
             .total_lines()
-            .max(self.total_virtual_line_count());
+            .max(self.total_virtual_line_count(live_status));
         let mut result = String::new();
 
         for logic_idx in start_logic..=end_logic {
@@ -141,10 +151,9 @@ impl super::OutputArea {
                 break;
             }
 
-            let Some(content) = self.get_line_content(logic_idx) else {
+            let Some(content) = self.get_line_content(logic_idx, live_status) else {
                 continue;
             };
-
             // 不同逻辑行之间加换行
             if logic_idx > start_logic {
                 result.push('\n');
@@ -211,9 +220,9 @@ mod document_selection_tests {
     use super::super::OutputArea;
     use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
     use crate::tui::render::output_area::selection::output_selection_view_for_test;
+    use crate::tui::view_model::LiveStatusViewModel;
     use ratatui::text::Span;
     use sdk::CharIdx;
-
     #[test]
     fn test_copy_selection_returns_plain_chars_across_lines() {
         let mut area = OutputArea::new();
@@ -227,7 +236,7 @@ mod document_selection_tests {
             }],
         });
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
-        let copied = area.selected_text_for_view(&view);
+        let copied = area.selected_text_for_view(&view, &LiveStatusViewModel::default());
 
         assert_eq!(copied.as_deref(), Some("bold\n世界"));
     }
