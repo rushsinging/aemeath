@@ -9,12 +9,17 @@ impl App {
         }
 
         self.layout.last_terminal_size = Some(size);
-        let visible_height_hint = self
-            .layout
-            .output_area_rect
-            .height
-            .max(height.saturating_sub(7));
-        self.output_area.handle_resize(width, visible_height_hint);
+        self.output_area.handle_resize(width);
+        let visible_height = crate::tui::app::update::output_visible_height(
+            self.layout
+                .output_area_rect
+                .height
+                .max(height.saturating_sub(7)),
+            &self.live_status_view_model(),
+        );
+        self.view_state
+            .output
+            .sync_document_metrics(self.output_area.document().total_lines(), visible_height);
         // 选区真相归 view_state：resize 时清三区选区真相，否则 widget 的镜像清空会被下一帧
         // adapter 用旧 view_state 选区复活（resize 仅作用于 widget 镜像，不动真相）。
         self.view_state.output.clear_selection();
@@ -61,6 +66,17 @@ mod tests {
     }
 
     #[test]
+    fn handle_resize_updates_output_view_state_visible_height() {
+        let mut app = test_app();
+
+        app.handle_resize(80, 24);
+
+        assert_eq!(app.view_state.output.last_visible_height, 17);
+        assert_eq!(app.view_state.output.last_document_total_lines, 0);
+        assert!(app.view_state.output.auto_scroll);
+    }
+
+    #[test]
     fn handle_resize_clears_view_state_selection_truth() {
         use crate::tui::render::status::StatusBarRow;
         use sdk::CharIdx;
@@ -99,12 +115,11 @@ mod tests {
         app.view_state.output.last_document_total_lines = 20;
         app.view_state.output.scroll_offset = 7;
         app.view_state.output.auto_scroll = false;
-        app.refresh_output_scroll_from_view_state();
         app.output_area.term_width = 7;
 
         app.handle_resize(80, 24);
 
-        assert_eq!(app.view_state.output.scroll_offset, 3);
+        assert_eq!(app.view_state.output.scroll_offset, 7);
         assert!(!app.view_state.output.auto_scroll);
         assert_eq!(app.output_area.term_width, 7);
         assert_eq!(

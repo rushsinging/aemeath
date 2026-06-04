@@ -7,9 +7,7 @@ impl super::OutputArea {
 
     /// 重置输出区域的运行态临时数据
     pub fn reset_runtime_state(&mut self) {
-        self.last_line_count = 0;
         self.screen_line_map.clear();
-        self.last_visible_height = 0;
         self.todo_subject_cache.clear();
     }
 }

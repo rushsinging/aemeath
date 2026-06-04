@@ -25,12 +25,24 @@ report_matches() {
 }
 
 # Output scroll/selection truth lives in view_state.output. OutputArea keeps only render-time mirrors:
-# - scroll_offset / auto_scroll are written by adapter/output_view_widget.rs before render;
+# - visible height / total document lines / scroll_offset / auto_scroll are maintained by OutputViewState;
 # - selection_start / selection_end / is_selecting are render highlight mirrors only;
 # - copying selected text must read OutputViewState + document, not widget selection mirrors.
 
 report_matches \
-  "output(_area) scroll/selection mirrors must not be written outside output_view_widget.rs or OutputArea internals/tests; write view_state.output instead." \
+  "output_view_widget adapter must stay retired; synchronize scroll via OutputViewState::sync_document_metrics from App/layout, not widget readback." \
+  bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/ || /^\\s*use / || /^\\s*fn / || /^\\s*let / || /^\\s*assert/ || /sync_document_metrics/; if (/(pub\\(crate\\)[[:space:]]+fn|OutputArea|&mut[[:space:]]+OutputViewState|output_area\\.|\\.last_visible_height[[:space:]]*=)/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/output_view_widget.rs\""
+
+report_matches \
+  "OutputArea must not keep scroll metrics mirrors; visible height and last document total lines live in OutputViewState." \
+  bash -c "grep -RInE 'last_visible_height|last_line_count' \"$ROOT/apps/cli/src/tui/render/output_area.rs\" \"$ROOT/apps/cli/src/tui/render/output_area\" --include='*.rs' | grep -v '/render/output_area/render.rs:.*view\.last_visible_height' | grep -v '/render/output_area/render.rs:.*last_visible_height:' || true"
+
+report_matches \
+  "OutputArea::handle_resize must not receive or store visible height hints; App updates OutputViewState instead." \
+  bash -c "grep -RInE 'handle_resize\\([^)]*visible_height|visible_height_hint|output_area\\.last_visible_height' \"$ROOT/apps/cli/src/tui\" --include='*.rs' || true"
+
+report_matches \
+  "output(_area) scroll/selection mirrors must not be written outside OutputArea internals/tests; write view_state.output instead." \
   bash -c "grep -RInE '\b(output|output_area|self)\.(scroll_offset|auto_scroll|is_selecting|selection_start|selection_end)\s*=' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v '/render/output_area' | grep -v '/adapter/output_view_widget.rs' | grep -v '/render/input/input_area/selection.rs' | grep -v '/render/display/status_bar_selection.rs' | grep -v 'view_state\.output\.' | grep -v '/app/resize.rs:.*app\.output_area\.'"
 
 report_matches \
