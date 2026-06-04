@@ -12,34 +12,9 @@
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | LLM 原始输出中的长文本行（无换行）在 TUI 中只渲染到屏幕可视宽度，超出部分不可见（不自动换行也不可横向滚动），用户看到的文本在某个位置突然中断 |
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方；AskUser 块本身固定在初始位置，其他内容在上方不断刷新 | 中 | 待确认 | 待用户确认 | 2026-06 | 根因：AskUser 作为交互块插入/回答时未清理 `ConversationModel.active_text_block_id`，若前一段 AssistantText 未收到 `TextBlockComplete`，后续 `ObserveAssistantText` 会继续 extend AskUser 前的旧 AssistantText，导致新输出渲染在 AskUser 上方。修复：ShowAskUser/AnswerAskUser 均清理活跃文本块边界，新增回归测试覆盖回答后新 assistant text 位于 AskUser 下方 |
-| 114 | Stop hook blocked 缺少显式 chat loop 停止状态表达 | 中 | 修复中 | 未确认 | 2026-06 | Stop hook blocked 的语义应是阻止 chat loop 真正停止，并把 hook 要求反馈给 LLM 继续处理；现有控制流依赖隐式 `continue/break`，缺少轻量 FSM 和强约束反馈文案，容易被误解为“LLM 已完成后无意义阻止” |
 | 115 | check-unit-tests 中 test_reasoning_config_uses_thinking_budget_before_model_reasoning 测试误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | 已验证当前 `main` 上该测试本身通过：`cargo test -p runtime reasoning_config` 与 `./.agents/hooks/check-unit-tests.sh` 均通过。根因是测试过滤参数误用：`cargo test -p runtime test_reasoning_config_uses_thinking_budget_before_model_reasoning -- --exact` 过滤的是完整测试路径，短名配合 `--exact` 会匹配 0 个测试，容易被 hook/人工检查误判为该测试失败。修复：增加 `test_reasoning_config_exact_filter_path_documents_stop_hook_command`，固化正确完整路径 `utils::bootstrap::provider_client::tests::test_reasoning_config_uses_thinking_budget_before_model_reasoning`，并补充文档说明。 |
 | 116 | TaskListCreate 工具返回未带 task list ID，LLM 无法继续维护任务状态 | 中 | 已修复 | 待用户确认 | 2026-06 | 修复：1) `TaskListCreate.call()` 返回结果新增 "Task list #N created successfully.\nSubject: ...\nSummary: ...\nNext steps: ..." 格式，明确显示 task list ID 并引导 LLM 直接调用 TaskCreate；2) 工具 description 增加 "After successful creation, you can immediately call TaskCreate — they automatically attach to this list" 引导。附带修复：Memory add 返回 "记忆已添加。ID: xxx" 而非仅"记忆已添加。"；TaskStop 新增 resolve_display_id 支持，与其它任务工具 ID 体系保持一致。 |
 
-
-### #114 Stop hook blocked 缺少显式 chat loop 停止状态表达
-
-**状态**：修复中
-
-**症状**：Stop hook blocked 时，runtime 会追加 system reminder 并继续下一轮，但宏观状态依赖 `continue/break` 隐式表达。用户容易理解为“LLM 已经完成输出后，Stop hook 再阻止停止没有意义”。
-
-**修正语义**：Stop hook blocked MUST 阻止 chat loop 真正停止。LLM 已经尝试结束不等于 runtime 已经 Done；blocked 时必须把 Stop hook 要求反馈给 LLM，回到 Running，直到后续 Stop hook success 才进入 Done。
-
-**修复**：
-1. 引入轻量手写 `ChatLoopFsm`，显式表达 `Running -> ... -> Stopping -> StopHookBlocked -> Running -> Stopping -> Done`。
-2. 强化 Stop hook blocked system reminder，明确“不能结束 / MUST 先满足 Stop hook 要求”。
-3. 保持现有 HookRunner/provider/TUI 事件架构，不引入 FSM 框架，不做 stream-time Stop hook。
-
-**验证**：
-- `cargo test -p runtime chat_loop_state`
-- `cargo test -p runtime stop_hook_feedback`
-- `cargo test -p runtime test_process_chat_loop_stop_hook_blocked_continues_until_success`
-
-**涉及路径**：
-- `agent/features/runtime/src/business/chat/looping/state.rs`
-- `agent/features/runtime/src/business/chat/looping.rs`
-- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
-- `agent/features/runtime/src/business/chat/looping/finalize.rs`
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
 
