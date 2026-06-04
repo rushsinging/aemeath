@@ -15,6 +15,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         submission: "x".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-orphan".to_string(),
         tool_name: "Read".to_string(),
         output: "1\t# 活动中 Feature\n2\t\n3\t|#|标题|\n4\t---\n5\t|8|Memory|".to_string(),
@@ -57,16 +58,19 @@ fn test_non_embedded_tool_result_uses_summary() {
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
         summary: "read file".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8".to_string(),
@@ -94,6 +98,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: "provider-1".to_string(),
         id: "tool-orphan".to_string(),
         tool_name: "Bash".to_string(),
         output: (1..=100)

@@ -7,7 +7,7 @@
 
 use crate::tui::render::output::primitives::spanparts_to_spans;
 use crate::tui::render::output::rendered::RenderedLine;
-use crate::tui::render::output_area::types::{INDENT, SpanPart};
+use crate::tui::render::output_area::types::{SpanPart, INDENT};
 use crate::tui::render::syntax::{self, extension_from_path, language_by_extension};
 use crate::tui::render::theme;
 use ratatui::style::Color;
@@ -158,11 +158,10 @@ mod tests {
         );
         // hunk 头行存在且为 dim 色。
         let hunk = lines.iter().find(|l| l.plain.contains("@@")).unwrap();
-        assert!(
-            hunk.spans
-                .iter()
-                .any(|s| s.style.fg == Some(theme::TEXT_DIM))
-        );
+        assert!(hunk
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(theme::TEXT_DIM)));
         // 删除行带 remove 语义色。
         let removed = lines.iter().find(|l| l.plain.contains("1;")).unwrap();
         assert!(
@@ -275,12 +274,10 @@ mod tests {
         );
         // 真正的新增行才着新增色。
         let added = lines.iter().find(|l| l.plain.ends_with("new")).unwrap();
-        assert!(
-            added
-                .spans
-                .iter()
-                .any(|s| s.style.fg == Some(theme::DIFF_ADD_FG))
-        );
+        assert!(added
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(theme::DIFF_ADD_FG)));
     }
 
     #[test]

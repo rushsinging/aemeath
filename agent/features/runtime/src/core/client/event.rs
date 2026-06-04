@@ -94,37 +94,43 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::TextBlockComplete(text) => {
             ChatEvent::TextBlockComplete(text)
         }
-        crate::business::chat::RuntimeStreamEvent::ToolCallStart { name, index } => {
-            ChatEvent::ToolCallStart { name, index }
+        crate::business::chat::RuntimeStreamEvent::ToolCallStart { id, name, index } => {
+            ChatEvent::ToolCallStart { id, name, index }
         }
         crate::business::chat::RuntimeStreamEvent::ToolArgumentsDelta {
+            id,
             index,
             name,
             partial_args,
         } => ChatEvent::ToolArgumentsDelta {
+            id,
             index,
             name,
             partial_args,
         },
         crate::business::chat::RuntimeStreamEvent::ToolCall {
             id,
+            provider_id,
             name,
             index,
             summary,
         } => ChatEvent::ToolCall {
             id,
+            provider_id,
             name,
             index,
             summary,
         },
         crate::business::chat::RuntimeStreamEvent::ToolResult {
             id,
+            provider_id,
             tool_name,
             output,
             is_error,
             images,
         } => ChatEvent::ToolResult {
             id,
+            provider_id,
             tool_name,
             output,
             is_error,

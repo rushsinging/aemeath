@@ -1,5 +1,6 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use provider::api::StreamHandler;
+use std::collections::HashMap;
 
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
 pub struct RuntimeStreamHandler<S: ChatEventSink> {
@@ -7,6 +8,8 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub first_text_time: Option<std::time::Instant>,
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
+    pub next_tool_id: usize,
+    pub stream_tool_ids: HashMap<usize, String>,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
@@ -16,7 +19,19 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
+            next_tool_id: 0,
+            stream_tool_ids: HashMap::new(),
         }
+    }
+
+    pub fn runtime_tool_id(&mut self, index: usize) -> String {
+        self.stream_tool_ids
+            .entry(index)
+            .or_insert_with(|| {
+                self.next_tool_id += 1;
+                format!("tool-{}", self.next_tool_id)
+            })
+            .clone()
     }
 }
 
@@ -44,12 +59,13 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, index: usize) {
+        let id = self.runtime_tool_id(index);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
+            id,
             name: name.to_string(),
             index,
         });
     }
-
     fn on_error(&mut self, error: &str) {
         self.sink
             .try_send_event(RuntimeStreamEvent::SystemMessage(format!(
@@ -69,8 +85,10 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_arguments_delta(&mut self, index: usize, name: &str, partial_args: &str) {
+        let id = self.runtime_tool_id(index);
         self.sink
             .try_send_event(RuntimeStreamEvent::ToolArgumentsDelta {
+                id,
                 index,
                 name: name.to_string(),
                 partial_args: partial_args.to_string(),

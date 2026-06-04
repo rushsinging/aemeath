@@ -82,6 +82,7 @@ impl crate::tui::app::App {
                     self.model
                         .conversation
                         .apply(ConversationIntent::ObserveToolCallStart {
+                            id: id.to_string(),
                             name: name.to_string(),
                             index,
                         });
@@ -89,6 +90,7 @@ impl crate::tui::app::App {
                         .conversation
                         .apply(ConversationIntent::ObserveToolCall {
                             id: id.to_string(),
+                            provider_id: id.to_string(),
                             name: name.to_string(),
                             index,
                             summary: input_json,
@@ -98,6 +100,7 @@ impl crate::tui::app::App {
                             .conversation
                             .apply(ConversationIntent::ObserveToolResult {
                                 id: id.to_string(),
+                                provider_id: id.to_string(),
                                 tool_name: name.to_string(),
                                 output: tool_result_content_to_string(content),
                                 is_error: *is_error,

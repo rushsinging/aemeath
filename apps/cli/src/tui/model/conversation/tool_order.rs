@@ -12,6 +12,11 @@ impl ConversationModel {
         summary: String,
         args_preview: String,
     ) {
+        if self.blocks.iter().any(|block| {
+            matches!(block, ConversationBlock::ToolCall { id: existing, .. } if existing == &id)
+        }) {
+            return;
+        }
         let block = ConversationBlock::ToolCall {
             id,
             name,
@@ -35,6 +40,9 @@ impl ConversationModel {
         is_error: bool,
         image_count: usize,
     ) {
+        self.blocks.retain(|existing| {
+            !matches!(existing, ConversationBlock::ToolResult { id: result_id, .. } if result_id == &id)
+        });
         let block = ConversationBlock::ToolResult {
             id: id.clone(),
             output,

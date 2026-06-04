@@ -35,7 +35,7 @@ impl App {
                 self.spinner_phase(SpinnerPhase::Thinking);
             }
             UiEvent::TextBlockComplete(_text) => {}
-            UiEvent::ToolCallStart { name, index } => {
+            UiEvent::ToolCallStart { name, index, .. } => {
                 log::debug!(
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
                     self.chat.tool_call_active
@@ -46,16 +46,13 @@ impl App {
                     self.spinner_phase(SpinnerPhase::CallingTool(name));
                 }
             }
-            UiEvent::ToolArgumentsDelta {
-                index: _,
-                name: _,
-                partial_args: _,
-            } => {}
+            UiEvent::ToolArgumentsDelta { .. } => {}
             UiEvent::ToolCall {
                 id,
                 name,
                 index: _,
                 summary: _,
+                ..
             } => {
                 log::debug!(
                     "[SPINNER] ToolCall({name}): tool_call_active={}",
@@ -70,6 +67,7 @@ impl App {
                 output: _,
                 is_error: _,
                 images: _,
+                ..
             } => {
                 let had_active_id = self.chat.has_active_tool_call(&id);
                 let remaining = self.chat.finish_tool_call(&id);

@@ -105,16 +105,19 @@ fn add_task_tool(
     output: &str,
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: id.to_string(),
         name: name.to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCall {
+        provider_id: format!("provider-{id}"),
         id: id.to_string(),
         name: name.to_string(),
         index: 0,
         summary: summary.to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        provider_id: format!("provider-{id}"),
         id: id.to_string(),
         tool_name: name.to_string(),
         output: output.to_string(),

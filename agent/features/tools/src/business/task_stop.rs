@@ -65,10 +65,7 @@ impl Tool for TaskStopTool {
                 ));
             }
             TaskStatus::Deleted => {
-                return ToolResult::error(format!(
-                    "Task #{} is already deleted",
-                    display_id
-                ));
+                return ToolResult::error(format!("Task #{} is already deleted", display_id));
             }
             _ => {}
         }
@@ -80,6 +77,9 @@ impl Tool for TaskStopTool {
             })
             .await;
 
-        ToolResult::success(format!("Task #{} stopped and marked as deleted", display_id))
+        ToolResult::success(format!(
+            "Task #{} stopped and marked as deleted",
+            display_id
+        ))
     }
 }

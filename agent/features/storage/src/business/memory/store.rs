@@ -297,7 +297,9 @@ impl MemoryStore {
     fn active_path(&self, layer: MemoryLayer) -> PathBuf {
         match layer {
             MemoryLayer::Global => self.base_dir.join("_global.json"),
-            MemoryLayer::Project => self.base_dir.join(format!("{}.json", self.project_file_name)),
+            MemoryLayer::Project => self
+                .base_dir
+                .join(format!("{}.json", self.project_file_name)),
         }
     }
 

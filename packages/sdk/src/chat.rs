@@ -196,9 +196,14 @@ pub enum ChatEvent {
     /// 文本块完成。
     TextBlockComplete(String),
     /// 工具调用开始。
-    ToolCallStart { name: String, index: usize },
+    ToolCallStart {
+        id: String,
+        name: String,
+        index: usize,
+    },
     /// 工具参数增量。
     ToolArgumentsDelta {
+        id: String,
         index: usize,
         name: String,
         partial_args: String,
@@ -206,6 +211,7 @@ pub enum ChatEvent {
     /// 工具调用确认。
     ToolCall {
         id: String,
+        provider_id: String,
         name: String,
         index: Option<usize>,
         summary: String,
@@ -213,6 +219,7 @@ pub enum ChatEvent {
     /// 工具执行结果。
     ToolResult {
         id: String,
+        provider_id: String,
         tool_name: String,
         output: String,
         is_error: bool,

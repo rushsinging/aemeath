@@ -12,7 +12,7 @@ use share::tool::ImageData;
 use std::sync::Arc;
 use tools::api::ToolRegistry;
 
-pub(crate) type UiToolResult = (String, String, bool, Vec<ImageData>);
+pub(crate) type UiToolResult = (String, String, String, bool, Vec<ImageData>);
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -40,6 +40,7 @@ where
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
+                provider_id: call.provider_id.clone(),
                 name: call.name.clone(),
                 index: Some(call.index),
                 summary: call.input.to_string(),
@@ -53,6 +54,7 @@ where
         .into_iter()
         .map(|c| ToolCall {
             id: c.id.clone(),
+            provider_id: c.provider_id.clone(),
             name: c.name.clone(),
             index: c.index,
             input: c.input.clone(),
@@ -118,6 +120,7 @@ where
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCall {
                 id: call.id.clone(),
+                provider_id: call.provider_id.clone(),
                 name: call.name.clone(),
                 index: Some(call.index),
                 summary: call.input.to_string(),
@@ -125,6 +128,7 @@ where
             .await;
         let result = (
             call.id.clone(),
+            call.provider_id.clone(),
             format!(
                 "Tool {} denied: use --allow-all to permit write operations",
                 call.name
@@ -219,10 +223,11 @@ where
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {
             id: result.0.clone(),
+            provider_id: result.1.clone(),
             tool_name: call.name.clone(),
-            output: result.1.clone(),
-            is_error: result.2,
-            images: result.3.clone(),
+            output: result.2.clone(),
+            is_error: result.3,
+            images: result.4.clone(),
         })
         .await;
 }
@@ -231,8 +236,14 @@ pub(crate) fn tool_results_for_api(
     mut results: Vec<UiToolResult>,
     session_id: &str,
 ) -> share::message::Message {
-    storage::api::persist_oversized_results(session_id, &mut results);
-    share::message::Message::tool_results_rich(results)
+    let mut provider_results: Vec<_> = results
+        .drain(..)
+        .map(|(_runtime_id, provider_id, output, is_error, images)| {
+            (provider_id, output, is_error, images)
+        })
+        .collect();
+    storage::api::persist_oversized_results(session_id, &mut provider_results);
+    share::message::Message::tool_results_rich(provider_results)
 }
 
 pub(crate) fn log_tool_result(
@@ -265,11 +276,33 @@ mod tests {
     use share::message::ContentBlock;
 
     #[test]
+    fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
+        let results = vec![(
+            "runtime-id".to_string(),
+            "provider-id".to_string(),
+            "ok".to_string(),
+            false,
+            Vec::new(),
+        )];
+        let message = tool_results_for_api(results, "test-provider-id");
+
+        let [ContentBlock::ToolResult { tool_use_id, .. }] = message.content.as_slice() else {
+            panic!("expected one tool result");
+        };
+        assert_eq!(tool_use_id, "provider-id");
+    }
+
+    #[test]
     fn test_tool_results_for_api_persists_oversized_tui_result() {
         let session_id = format!("test-tui-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
-        let results = vec![("tool-oversized".to_string(), oversized, false, Vec::new())];
-
+        let results = vec![(
+            "tool-1".to_string(),
+            "provider-oversized".to_string(),
+            oversized,
+            false,
+            Vec::new(),
+        )];
         let message = tool_results_for_api(results, &session_id);
 
         let [ContentBlock::ToolResult { content, .. }] = message.content.as_slice() else {

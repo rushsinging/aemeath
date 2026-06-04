@@ -1,6 +1,6 @@
 use similar::{ChangeTag, TextDiff};
 
-use crate::tui::render::output_area::types::{INDENT, SpanPart};
+use crate::tui::render::output_area::types::{SpanPart, INDENT};
 use crate::tui::render::syntax::{self, language_by_extension};
 use crate::tui::render::theme;
 use ratatui::style::Color;

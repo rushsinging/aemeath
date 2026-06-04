@@ -22,7 +22,7 @@ impl<'a> SubAgentRun<'a> {
         results: &[crate::business::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
-        for (id, output, is_error, _) in results.iter() {
+        for (id, _provider_id, output, is_error, _) in results.iter() {
             let label = if *is_error { "ERR" } else { "OK" };
             if let Some((name, input_short)) = call_info.get(id.as_str()) {
                 (self.progress)(Some(turn_number), &format!("  → {}({})", name, input_short));
@@ -50,7 +50,7 @@ impl<'a> SubAgentRun<'a> {
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         if let Some(ref jl) = self.runner.json_logger {
-            for (id, output, is_error, _) in results.iter() {
+            for (id, _provider_id, output, is_error, _) in results.iter() {
                 let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
                 let _ = jl.lock().unwrap().log_tool_result(
                     turn_number,
@@ -117,12 +117,20 @@ pub(super) fn append_tool_results(
     mut results: Vec<crate::business::agent::ToolResultTuple>,
     session_id: &str,
 ) {
-    storage::api::persist_oversized_results(session_id, &mut results);
-    let has_images = results.iter().any(|(_, _, _, imgs)| !imgs.is_empty());
+    let mut provider_results: Vec<_> = results
+        .drain(..)
+        .map(|(_runtime_id, provider_id, output, is_error, images)| {
+            (provider_id, output, is_error, images)
+        })
+        .collect();
+    storage::api::persist_oversized_results(session_id, &mut provider_results);
+    let has_images = provider_results
+        .iter()
+        .any(|(_, _, _, imgs)| !imgs.is_empty());
     if has_images {
-        messages.push(Message::tool_results_rich(results));
+        messages.push(Message::tool_results_rich(provider_results));
     } else {
-        let simple = results
+        let simple = provider_results
             .into_iter()
             .map(|(id, output, is_error, _)| (id, output, is_error))
             .collect();
@@ -137,11 +145,36 @@ mod tests {
     use share::message::ContentBlock;
 
     #[test]
+    fn test_append_tool_results_uses_provider_id_not_runtime_id() {
+        let mut messages = Vec::new();
+        let results = vec![(
+            "runtime-id".to_string(),
+            "provider-id".to_string(),
+            "ok".to_string(),
+            false,
+            Vec::new(),
+        )];
+
+        append_tool_results(&mut messages, results, "test-sub-agent-provider-id");
+
+        let [ContentBlock::ToolResult { tool_use_id, .. }] = messages[0].content.as_slice() else {
+            panic!("expected one tool result");
+        };
+        assert_eq!(tool_use_id, "provider-id");
+    }
+
+    #[test]
     fn test_append_tool_results_persists_oversized_sub_agent_result() {
         let session_id = format!("test-sub-agent-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
         let mut messages = Vec::new();
-        let results = vec![("tool-oversized".to_string(), oversized, false, Vec::new())];
+        let results = vec![(
+            "tool-oversized".to_string(),
+            "provider-oversized".to_string(),
+            oversized,
+            false,
+            Vec::new(),
+        )];
 
         append_tool_results(&mut messages, results, &session_id);
 

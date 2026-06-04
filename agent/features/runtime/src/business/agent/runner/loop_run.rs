@@ -6,7 +6,7 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::{CliAgentRunner, SilentHandler};
 use crate::business::agent::Agent;
-use crate::business::compact::safe_slice;
+use crate::business::compact::{safe_slice, truncate_tool_result};
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
@@ -127,7 +127,11 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    crate::business::compact::truncate_tool_results(&mut results);
+                    for (_, _, output, _, _) in &mut results {
+                        if output.len() > crate::business::compact::MAX_TOOL_RESULT_CHARS {
+                            *output = truncate_tool_result(output);
+                        }
+                    }
                     append_tool_results(&mut self.messages, results, &self.session_id);
                     self.compact_if_needed(api_input, turn_number);
                 }

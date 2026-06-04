@@ -175,7 +175,7 @@ impl InputDocument {
             .map(|pos| pos + 1)
             .unwrap_or(0);
         let prev_line_end = line_start.saturating_sub(1); // 当前行开头的 \n 位置
-        // allow unsafe_text_op: prev_line_start/prev_line_end 由 \n 搜索推算，ASCII 边界有效
+                                                          // allow unsafe_text_op: prev_line_start/prev_line_end 由 \n 搜索推算，ASCII 边界有效
         let prev_line = &self.buffer[prev_line_start..prev_line_end]; // allow unsafe_text_op
         let new_col = col.min(prev_line.chars().count());
         let new_cursor = prev_line_start
@@ -472,119 +472,119 @@ mod tests {
         assert_eq!(doc.cursor, "你好的".len());
     }
 
-  // 回归测试：Bug #99 — 多行输入时光标上下移动
-  //
-  // 场景：用户在多行文本中按 ↑/↓，期望光标在行间移动，
-  // 但旧逻辑始终触发历史翻看。修复后 InputDocument 支持
-  // move_up/move_down，在边界行时由 InputModel 切换到历史导航。
+    // 回归测试：Bug #99 — 多行输入时光标上下移动
+    //
+    // 场景：用户在多行文本中按 ↑/↓，期望光标在行间移动，
+    // 但旧逻辑始终触发历史翻看。修复后 InputDocument 支持
+    // move_up/move_down，在边界行时由 InputModel 切换到历史导航。
 
-  #[test]
-  fn test_move_up_goes_to_previous_line() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("第一行\n第二行\n第三行");
-      // 光标在第三行末尾
-      assert_eq!(doc.cursor_row(), 2);
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 1, "应移到第二行");
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 0, "应移到第一行");
-      // 已在第一行，再次 move_up 不动
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 0, "已在第一行，不应移动");
-  }
+    #[test]
+    fn test_move_up_goes_to_previous_line() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("第一行\n第二行\n第三行");
+        // 光标在第三行末尾
+        assert_eq!(doc.cursor_row(), 2);
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 1, "应移到第二行");
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 0, "应移到第一行");
+        // 已在第一行，再次 move_up 不动
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 0, "已在第一行，不应移动");
+    }
 
-  #[test]
-  fn test_move_down_goes_to_next_line() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("第一行\n第二行\n第三行");
-      doc.move_cursor(0); // 光标移到第一行开头
-      assert_eq!(doc.cursor_row(), 0);
-      doc.move_down();
-      assert_eq!(doc.cursor_row(), 1, "应移到第二行");
-      doc.move_down();
-      assert_eq!(doc.cursor_row(), 2, "应移到第三行");
-      // 已在最后一行，再次 move_down 不动
-      doc.move_down();
-      assert_eq!(doc.cursor_row(), 2, "已在最后一行，不应移动");
-  }
+    #[test]
+    fn test_move_down_goes_to_next_line() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("第一行\n第二行\n第三行");
+        doc.move_cursor(0); // 光标移到第一行开头
+        assert_eq!(doc.cursor_row(), 0);
+        doc.move_down();
+        assert_eq!(doc.cursor_row(), 1, "应移到第二行");
+        doc.move_down();
+        assert_eq!(doc.cursor_row(), 2, "应移到第三行");
+        // 已在最后一行，再次 move_down 不动
+        doc.move_down();
+        assert_eq!(doc.cursor_row(), 2, "已在最后一行，不应移动");
+    }
 
-  #[test]
-  fn test_move_up_down_preserves_column_position() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("abcde\nxyz");
-      // 光标在第二行末尾（xyz 之后）
-      // 移到第二行的 'y' 位置（字符列 1）
-      doc.set_cursor_col("abcde\n".len() + "x".len());
-      assert_eq!(doc.cursor_col(), 1);
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 0, "应移到第一行");
-      assert_eq!(doc.cursor_col(), 1, "列应保持为 1（即 'b' 的位置）");
-      // 验证光标在 'b' 位置
-      assert_eq!(doc.cursor, 1);
-  }
+    #[test]
+    fn test_move_up_down_preserves_column_position() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("abcde\nxyz");
+        // 光标在第二行末尾（xyz 之后）
+        // 移到第二行的 'y' 位置（字符列 1）
+        doc.set_cursor_col("abcde\n".len() + "x".len());
+        assert_eq!(doc.cursor_col(), 1);
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 0, "应移到第一行");
+        assert_eq!(doc.cursor_col(), 1, "列应保持为 1（即 'b' 的位置）");
+        // 验证光标在 'b' 位置
+        assert_eq!(doc.cursor, 1);
+    }
 
-  #[test]
-  fn test_move_up_down_clamps_shorter_line() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("ab\nxyzw");
-      // 光标在第二行的 'w' 之后（列 4）
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 0, "应移到第一行");
-      // 第一行只有 2 个字符，列 4 应 clamp 到 2
-      assert_eq!(doc.cursor_col(), 2, "列应 clamp 到第一行长 2");
-      assert_eq!(doc.cursor, 2, "光标应在第一行末尾");
-  }
+    #[test]
+    fn test_move_up_down_clamps_shorter_line() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("ab\nxyzw");
+        // 光标在第二行的 'w' 之后（列 4）
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 0, "应移到第一行");
+        // 第一行只有 2 个字符，列 4 应 clamp 到 2
+        assert_eq!(doc.cursor_col(), 2, "列应 clamp 到第一行长 2");
+        assert_eq!(doc.cursor, 2, "光标应在第一行末尾");
+    }
 
-  #[test]
-  fn test_move_up_down_single_line_is_noop() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("单行文本");
-      let cursor_before = doc.cursor;
-      doc.move_up();
-      assert_eq!(doc.cursor, cursor_before, "单行时 move_up 不动");
-      doc.move_down();
-      assert_eq!(doc.cursor, cursor_before, "单行时 move_down 不动");
-  }
+    #[test]
+    fn test_move_up_down_single_line_is_noop() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("单行文本");
+        let cursor_before = doc.cursor;
+        doc.move_up();
+        assert_eq!(doc.cursor, cursor_before, "单行时 move_up 不动");
+        doc.move_down();
+        assert_eq!(doc.cursor, cursor_before, "单行时 move_down 不动");
+    }
 
-  #[test]
-  fn test_cursor_row_col_with_cjk() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("你好\n世界");
-      // 光标在末尾（第二行'世界'之后）
-      assert_eq!(doc.cursor_row(), 1);
-      assert_eq!(doc.cursor_col(), 2, "第二行有 2 个字符");
-      doc.move_cursor(0);
-      assert_eq!(doc.cursor_row(), 0);
-      assert_eq!(doc.cursor_col(), 0);
-  }
+    #[test]
+    fn test_cursor_row_col_with_cjk() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("你好\n世界");
+        // 光标在末尾（第二行'世界'之后）
+        assert_eq!(doc.cursor_row(), 1);
+        assert_eq!(doc.cursor_col(), 2, "第二行有 2 个字符");
+        doc.move_cursor(0);
+        assert_eq!(doc.cursor_row(), 0);
+        assert_eq!(doc.cursor_col(), 0);
+    }
 
-  #[test]
-  fn test_move_up_down_with_cjk() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("你好世界\nabc\n测试");
-      // 光标在第三行末尾
-      assert_eq!(doc.cursor_row(), 2);
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 1);
-      doc.move_up();
-      assert_eq!(doc.cursor_row(), 0);
-      doc.move_down();
-      assert_eq!(doc.cursor_row(), 1);
-  }
+    #[test]
+    fn test_move_up_down_with_cjk() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("你好世界\nabc\n测试");
+        // 光标在第三行末尾
+        assert_eq!(doc.cursor_row(), 2);
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 1);
+        doc.move_up();
+        assert_eq!(doc.cursor_row(), 0);
+        doc.move_down();
+        assert_eq!(doc.cursor_row(), 1);
+    }
 
-  #[test]
-  fn test_is_cursor_at_first_last_line() {
-      let mut doc = InputDocument::default();
-      doc.insert_text("第一行\n第二行\n第三行");
-      assert!(doc.is_cursor_at_last_line());
-      assert!(!doc.is_cursor_at_first_line());
-      doc.move_cursor(0);
-      assert!(doc.is_cursor_at_first_line());
-      assert!(!doc.is_cursor_at_last_line());
-      // 移到第二行开头（第一行末尾的 \n 之后）
-      let second_line_start = "第一行\n".len();
-      doc.move_cursor(second_line_start);
-      assert!(!doc.is_cursor_at_first_line());
-      assert!(!doc.is_cursor_at_last_line());
-  }
+    #[test]
+    fn test_is_cursor_at_first_last_line() {
+        let mut doc = InputDocument::default();
+        doc.insert_text("第一行\n第二行\n第三行");
+        assert!(doc.is_cursor_at_last_line());
+        assert!(!doc.is_cursor_at_first_line());
+        doc.move_cursor(0);
+        assert!(doc.is_cursor_at_first_line());
+        assert!(!doc.is_cursor_at_last_line());
+        // 移到第二行开头（第一行末尾的 \n 之后）
+        let second_line_start = "第一行\n".len();
+        doc.move_cursor(second_line_start);
+        assert!(!doc.is_cursor_at_first_line());
+        assert!(!doc.is_cursor_at_last_line());
+    }
 }

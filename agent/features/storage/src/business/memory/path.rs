@@ -17,9 +17,7 @@ pub fn project_file_name(cwd: &str) -> String {
         .unwrap_or_else(|_| PathBuf::from(cwd))
         .to_string_lossy()
         .to_string();
-    canonical
-        .trim_start_matches('/')
-        .replace('/', "-")
+    canonical.trim_start_matches('/').replace('/', "-")
 }
 
 pub fn project_file_name_from_path(path: &Path) -> String {

@@ -33,6 +33,7 @@ where
             .map(|call| {
                 let call = ToolCall {
                     id: call.id.clone(),
+                    provider_id: call.provider_id.clone(),
                     name: call.name.clone(),
                     index: call.index,
                     input: call.input.clone(),
@@ -81,6 +82,7 @@ where
     if pre_results.iter().any(|r| r.blocked) {
         let result = (
             call.id.clone(),
+            call.provider_id.clone(),
             "Blocked by PreToolUse hook".to_string(),
             true,
             Vec::new(),
@@ -120,6 +122,7 @@ where
         .await;
     let results = vec![(
         call.id.clone(),
+        call.provider_id.clone(),
         result.output,
         result.is_error,
         result.images,
@@ -127,12 +130,18 @@ where
     ag_ctx.progress_tx = None;
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
-    for (id, output, is_error, images) in &results {
+    for (id, provider_id, output, is_error, images) in &results {
         run_post_tool_hooks(&sink, &hook_ui, &hook_runner, &call, output, *is_error).await;
         send_tool_result(
             &sink,
             &call,
-            &(id.clone(), output.clone(), *is_error, images.clone()),
+            &(
+                id.clone(),
+                provider_id.clone(),
+                output.clone(),
+                *is_error,
+                images.clone(),
+            ),
         )
         .await;
     }

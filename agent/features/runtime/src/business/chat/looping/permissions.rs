@@ -39,6 +39,7 @@ mod tests {
 
     fn call(name: &str, input: serde_json::Value) -> ToolCall {
         ToolCall {
+            provider_id: "provider-test".to_string(),
             id: format!("{name}-id"),
             name: name.to_string(),
             index: 0,

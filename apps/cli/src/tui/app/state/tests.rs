@@ -337,19 +337,21 @@ mod tests {
             UiEvent::Thinking("thinking".to_string()),
             UiEvent::TextBlockComplete("thinking".to_string()),
             UiEvent::ToolCallStart {
+                id: "grep-1".to_string(),
                 name: "Grep".to_string(),
                 index: 1,
             },
             UiEvent::ToolCall {
                 id: "grep-1".to_string(),
+                provider_id: "provider-grep-1".to_string(),
                 name: "Grep".to_string(),
                 index: Some(1),
                 summary: r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string(),
             },
             UiEvent::ToolResult {
                 id: "grep-1".to_string(),
-                tool_name: "Grep".to_string(),
-                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
+                provider_id: "provider-grep-1".to_string(),
+                tool_name: "Grep".to_string(),                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
                 is_error: false,
                 images: Vec::new(),
             },

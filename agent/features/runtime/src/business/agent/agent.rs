@@ -2,8 +2,8 @@ use share::message::{ContentBlock, Message};
 use share::tool::{ImageData, ToolResult};
 use tools::api::{Tool, ToolContext, ToolRegistry};
 
-/// (tool_use_id, output_text, is_error, images)
-pub type ToolResultTuple = (String, String, bool, Vec<ImageData>);
+/// (runtime_id, provider_id, output_text, is_error, images)
+pub type ToolResultTuple = (String, String, String, bool, Vec<ImageData>);
 
 pub struct Agent<'a> {
     pub registry: &'a ToolRegistry,
@@ -12,6 +12,7 @@ pub struct Agent<'a> {
 
 pub struct ToolCall {
     pub id: String,
+    pub provider_id: String,
     pub name: String,
     pub index: usize,
     pub input: serde_json::Value,
@@ -64,7 +65,8 @@ impl<'a> Agent<'a> {
             .enumerate()
             .filter_map(|(index, block)| match block {
                 ContentBlock::ToolUse { id, name, input } => Some(ToolCall {
-                    id: id.clone(),
+                    id: format!("tool-{}", index + 1),
+                    provider_id: id.clone(),
                     name: name.clone(),
                     index,
                     input: input.clone(),
@@ -117,16 +119,22 @@ impl<'a> Agent<'a> {
                         let input = call.input.clone();
                         let ctx = self.ctx.clone();
                         let id = call.id.clone();
+                        let provider_id = call.provider_id.clone();
                         let name = call.name.clone();
                         let sem = semaphore.clone();
 
                         async move {
                             let _permit = sem.acquire().await.expect("semaphore closed");
                             match call_tool_with_timeout(tool, &name, input, &ctx).await {
-                                Ok(result) => {
-                                    (pos, id, result.output, result.is_error, result.images)
-                                }
-                                Err(message) => (pos, id, message, true, Vec::new()),
+                                Ok(result) => (
+                                    pos,
+                                    id,
+                                    provider_id,
+                                    result.output,
+                                    result.is_error,
+                                    result.images,
+                                ),
+                                Err(message) => (pos, id, provider_id, message, true, Vec::new()),
                             }
                         }
                     })
@@ -134,8 +142,8 @@ impl<'a> Agent<'a> {
                 .collect();
 
             let concurrent_results = futures::future::join_all(futures).await;
-            for (pos, id, output, is_error, images) in concurrent_results {
-                results[pos] = Some((id, output, is_error, images));
+            for (pos, id, provider_id, output, is_error, images) in concurrent_results {
+                results[pos] = Some((id, provider_id, output, is_error, images));
             }
         }
 
@@ -145,6 +153,7 @@ impl<'a> Agent<'a> {
             if self.ctx.cancel.is_cancelled() {
                 results[pos] = Some((
                     call.id.clone(),
+                    call.provider_id.clone(),
                     "Cancelled by user".to_string(),
                     true,
                     Vec::new(),
@@ -157,18 +166,26 @@ impl<'a> Agent<'a> {
                     Ok(result) => {
                         results[pos] = Some((
                             call.id.clone(),
+                            call.provider_id.clone(),
                             result.output,
                             result.is_error,
                             result.images,
                         ));
                     }
                     Err(message) => {
-                        results[pos] = Some((call.id.clone(), message, true, Vec::new()));
+                        results[pos] = Some((
+                            call.id.clone(),
+                            call.provider_id.clone(),
+                            message,
+                            true,
+                            Vec::new(),
+                        ));
                     }
                 }
             } else {
                 results[pos] = Some((
                     call.id.clone(),
+                    call.provider_id.clone(),
                     format!("unknown tool: {}", call.name),
                     true,
                     Vec::new(),
@@ -195,6 +212,7 @@ impl<'a> Agent<'a> {
             .iter()
             .map(|c| ToolCall {
                 id: c.id.clone(),
+                provider_id: c.provider_id.clone(),
                 name: c.name.clone(),
                 index: c.index,
                 input: c.input.clone(),
