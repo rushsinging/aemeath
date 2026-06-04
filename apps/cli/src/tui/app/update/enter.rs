@@ -1,5 +1,5 @@
 use super::UpdateResult;
-use crate::tui::adapter::input_widget::apply_input_changes_to_widget;
+use crate::tui::adapter::input_widget::submission_from_changes;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::ConversationIntent;
@@ -16,19 +16,7 @@ impl App {
             .model
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
-        let input = changes
-            .iter()
-            .find_map(|change| {
-                if let crate::tui::model::input::change::InputChange::Submitted { submission } =
-                    change
-                {
-                    Some(submission.text.clone())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-        apply_input_changes_to_widget(&mut self.input_area, &mut self.status_bar, &changes);
+        let input = submission_from_changes(&changes).unwrap_or_default();
         if input.starts_with('/') {
             self.input.push_queue(input.clone());
             return UpdateResult {

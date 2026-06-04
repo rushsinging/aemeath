@@ -1,32 +1,16 @@
 use crate::tui::model::input::change::InputChange;
-use crate::tui::{InputArea, StatusBar};
 
-pub(crate) fn apply_input_changes_to_widget(
-    input_area: &mut InputArea,
-    _status_bar: &mut StatusBar,
-    changes: &[InputChange],
-) -> Option<String> {
-    let mut submission = None;
-    for change in changes {
-        match change {
-            InputChange::TextChanged { .. }
-            | InputChange::HistorySelected { .. }
-            | InputChange::CursorMoved { .. }
-            | InputChange::CompletionChanged { .. }
-            | InputChange::AttachmentChanged { .. } => {}
-            InputChange::Submitted {
-                submission: submitted,
-            } => {
-                submission = Some(submitted.text.clone());
-                input_area.clear();
-            }
-            InputChange::Cleared => {
-                input_area.clear();
-            }
-            InputChange::ModeChanged { .. } => {}
-        }
-    }
-    submission
+pub(crate) fn submission_from_changes(changes: &[InputChange]) -> Option<String> {
+    changes.iter().find_map(|change| match change {
+        InputChange::Submitted { submission } => Some(submission.text.clone()),
+        InputChange::TextChanged { .. }
+        | InputChange::HistorySelected { .. }
+        | InputChange::CursorMoved { .. }
+        | InputChange::CompletionChanged { .. }
+        | InputChange::AttachmentChanged { .. }
+        | InputChange::Cleared
+        | InputChange::ModeChanged { .. } => None,
+    })
 }
 
 #[cfg(test)]
@@ -34,23 +18,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_apply_input_changes_to_widget_ignores_text_change_mirror() {
-        let mut input_area = InputArea::new();
-        let mut status_bar = StatusBar::new();
+    fn test_submission_from_changes_ignores_text_change_mirror() {
         let changes = vec![InputChange::TextChanged {
             text: "abc".to_string(),
             cursor: 3,
         }];
 
-        let submitted = apply_input_changes_to_widget(&mut input_area, &mut status_bar, &changes);
+        let submitted = submission_from_changes(&changes);
 
         assert_eq!(submitted, None);
     }
 
     #[test]
-    fn test_apply_input_changes_to_widget_returns_submission() {
-        let mut input_area = InputArea::new();
-        let mut status_bar = StatusBar::new();
+    fn test_submission_from_changes_returns_submission_text() {
         let changes = vec![InputChange::Submitted {
             submission: crate::tui::model::input::submission::InputSubmission {
                 text: "run".to_string(),
@@ -58,8 +38,30 @@ mod tests {
             },
         }];
 
-        let submitted = apply_input_changes_to_widget(&mut input_area, &mut status_bar, &changes);
+        let submitted = submission_from_changes(&changes);
 
         assert_eq!(submitted.as_deref(), Some("run"));
+    }
+
+    #[test]
+    fn test_submission_from_changes_returns_first_submission() {
+        let changes = vec![
+            InputChange::Submitted {
+                submission: crate::tui::model::input::submission::InputSubmission {
+                    text: "first".to_string(),
+                    attachments: Vec::new(),
+                },
+            },
+            InputChange::Submitted {
+                submission: crate::tui::model::input::submission::InputSubmission {
+                    text: "second".to_string(),
+                    attachments: Vec::new(),
+                },
+            },
+        ];
+
+        let submitted = submission_from_changes(&changes);
+
+        assert_eq!(submitted.as_deref(), Some("first"));
     }
 }

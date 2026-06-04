@@ -49,7 +49,8 @@ impl super::super::App {
         };
 
         let suggestions = generate_suggestions(&ctx);
-        let changes = self.model.input.apply(
+        // Completion changes update the model only; InputArea renders from model-derived state.
+        let _changes = self.model.input.apply(
             crate::tui::model::input::intent::InputIntent::SetCompletions {
                 query: ctx.input.clone(),
                 items: suggestions
@@ -63,11 +64,6 @@ impl super::super::App {
                     })
                     .collect(),
             },
-        );
-        crate::tui::adapter::input_widget::apply_input_changes_to_widget(
-            &mut self.input_area,
-            &mut self.status_bar,
-            &changes,
         );
     }
 }

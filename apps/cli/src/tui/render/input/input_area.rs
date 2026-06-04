@@ -28,13 +28,6 @@ impl InputArea {
     #[cfg(test)]
     pub(super) fn hide_suggestions(&mut self) {}
 
-    /// Clear non-text input widget mirrors.
-    pub(crate) fn clear(&mut self) {
-        // All former clearable input state (text/cursor/history/selection) now lives in model or
-        // view_state. Keep this hook for submit/clear adapter compatibility until the adapter can
-        // drop its widget argument entirely.
-    }
-
     /// Get inner input render area, excluding border.
     pub fn get_inner_area(&self, area: &Rect) -> Rect {
         Self::inner_area(*area)

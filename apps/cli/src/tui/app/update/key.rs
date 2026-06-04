@@ -45,12 +45,8 @@ fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> Ct
 
 impl App {
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
-        let changes = self.model.input.apply(intent);
-        crate::tui::adapter::input_widget::apply_input_changes_to_widget(
-            &mut self.input_area,
-            &mut self.status_bar,
-            &changes,
-        );
+        // Input changes update the model only; render paths read model-derived view state directly.
+        let _changes = self.model.input.apply(intent);
     }
 
     pub(super) fn update_key(
@@ -148,24 +144,9 @@ impl App {
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.model.input.document.is_empty() {
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    crate::tui::adapter::input_widget::apply_input_changes_to_widget(
-                        &mut self.input_area,
-                        &mut self.status_bar,
-                        &changes,
-                    );
-                    let input = changes
-                        .iter()
-                        .find_map(|change| {
-                            if let crate::tui::model::input::change::InputChange::Submitted {
-                                submission,
-                            } = change
-                            {
-                                Some(submission.text.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_default();
+                    let input =
+                        crate::tui::adapter::input_widget::submission_from_changes(&changes)
+                            .unwrap_or_default();
                     let event = sdk::ChatInputEvent::classify_text(input.clone(), Vec::new());
                     // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
                     self.enqueue_submission_echo(input.clone());
