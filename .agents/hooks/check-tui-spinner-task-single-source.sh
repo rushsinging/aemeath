@@ -32,7 +32,12 @@ report_matches() {
 # 物理存储 spinner/task_status_lines/queued_submission_lines widget mirror，也不能经
 # adapter 写回这些 mirror。
 
-# 1) OutputArea 不得重新持有 live-status mirror 字段。
+# 1) retired live-status adapter 不进入生产路径。
+report_matches \
+  "live_status_widget adapter must stay retired and test-only; live status projection is assembled from model/view_state at render time." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/^\\s*(\\/\\/.*)?\$/) { next } if (/pub[[:space:]]+mod[[:space:]]+live_status_widget[[:space:]]*;/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/adapter.rs\""
+
+# 2) OutputArea 不得重新持有 live-status mirror 字段。
 report_matches \
   "OutputArea must not physically store live-status mirror fields; render spinner/task/queued directly from LiveStatusViewModel." \
   grep -RInE '^[[:space:]]*pub[[:space:]]+(spinner|task_status_lines|queued_submission_lines):' \

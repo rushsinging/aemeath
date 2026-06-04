@@ -41,9 +41,8 @@ report_matches \
     "$ROOT/apps/cli/src/tui/render/status" --include='*.rs'
 
 report_matches \
-  "status_widget adapter must remain retired; do not reintroduce widget writeback functions." \
-  grep -RInE 'fn[[:space:]]+apply_(runtime|diagnostic)_status_to_widget[[:space:]]*\(' \
-    "$ROOT/apps/cli/src/tui/adapter/status_widget.rs"
+  "status_widget adapter must remain retired and test-only; do not reintroduce production export or widget writeback functions." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\\s*#\\[cfg\\(test\\)\\]/) { \$pending=1; next } if (/^\\s*(\\/\\/.*)?\$/) { next } if (/pub[[:space:]]+mod[[:space:]]+status_widget[[:space:]]*;/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/adapter.rs\"; grep -nE 'fn[[:space:]]+apply_(runtime|diagnostic)_status_to_widget[[:space:]]*\\(' \"$ROOT/apps/cli/src/tui/adapter/status_widget.rs\" || true"
 
 report_matches \
   "ChatState must not mirror token/api/thinking usage; keep usage/thinking in RuntimeModel and derive status via StatusViewAssembler." \
