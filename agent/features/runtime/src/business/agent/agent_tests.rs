@@ -107,7 +107,7 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let elapsed = start.elapsed();
 
     assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| !r.2), "no errors expected");
+    assert!(results.iter().all(|r| !r.3), "no errors expected");
 
     // If they ran in parallel, total time should be < 350ms (2 * 200ms = 400ms if serial)
     assert!(
@@ -170,7 +170,7 @@ async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     let elapsed = start.elapsed();
 
     assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| !r.2), "no errors expected");
+    assert!(results.iter().all(|r| !r.3), "no errors expected");
 
     // Sequential: must take at least 2 * 150ms = 300ms
     assert!(
@@ -237,21 +237,21 @@ async fn test_execute_tools_preserves_original_order() {
     // Pass calls in order: tool_c, tool_a, tool_b
     let tool_calls = vec![
         ToolCall {
-            provider_id: "provider-test".to_string(),
+            provider_id: "provider-1".to_string(),
             id: "1".to_string(),
             name: "tool_c".to_string(),
             index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
-            provider_id: "provider-test".to_string(),
+            provider_id: "provider-2".to_string(),
             id: "2".to_string(),
             name: "tool_a".to_string(),
             index: 1,
             input: serde_json::json!({}),
         },
         ToolCall {
-            provider_id: "provider-test".to_string(),
+            provider_id: "provider-3".to_string(),
             id: "3".to_string(),
             name: "tool_b".to_string(),
             index: 2,
@@ -264,8 +264,11 @@ async fn test_execute_tools_preserves_original_order() {
 
     // Results should be in the original call order: tool_c, tool_a, tool_b
     assert_eq!(exec_results[0].0, "1"); // tool_c
+    assert_eq!(exec_results[0].1, "provider-1");
     assert_eq!(exec_results[1].0, "2"); // tool_a
+    assert_eq!(exec_results[1].1, "provider-2");
     assert_eq!(exec_results[2].0, "3"); // tool_b
+    assert_eq!(exec_results[2].1, "provider-3");
 }
 
 #[tokio::test]
@@ -316,10 +319,10 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
         .await;
 
     assert_eq!(results.len(), 1);
-    assert!(results[0].2);
-    assert!(results[0].1.contains("tool.call execution timed out"));
-    assert!(results[0].1.contains("tool=short_timeout"));
-    assert!(results[0].1.contains("timeout_secs=0"));
+    assert!(results[0].3);
+    assert!(results[0].2.contains("tool.call execution timed out"));
+    assert!(results[0].2.contains("tool=short_timeout"));
+    assert!(results[0].2.contains("timeout_secs=0"));
 }
 
 #[tokio::test]
@@ -376,5 +379,5 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
     assert_eq!(results[0].0, "p1");
     assert_eq!(results[1].0, "s1");
     assert_eq!(results[2].0, "p2");
-    assert!(results.iter().all(|r| !r.2), "no errors expected");
+    assert!(results.iter().all(|r| !r.3), "no errors expected");
 }
