@@ -2,7 +2,7 @@ use crate::api::{Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use storage::api::TaskStore;
+use storage::api::{TaskStatus, TaskStore};
 
 pub struct TaskStopTool {
     pub store: Arc<TaskStore>,
@@ -36,40 +36,50 @@ impl Tool for TaskStopTool {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        let task_id = input["taskId"].as_str().unwrap_or("");
+        let input_id = input["taskId"].as_str().unwrap_or("");
 
-        if task_id.is_empty() {
+        if input_id.is_empty() {
             return ToolResult::error("Task ID is required");
         }
 
-        let task = self.store.get(task_id).await;
+        // Resolve display number to global id
+        let task_id = match self.store.resolve_display_id(input_id).await {
+            Some(global_id) => global_id,
+            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+        };
+        let display_id = self.store.format_display_id(&task_id).await;
+
+        let task = self.store.get(&task_id).await;
 
         if task.is_none() {
-            return ToolResult::error(format!("Task not found: {}", task_id));
+            return ToolResult::error(format!("Task not found: {}", display_id));
         }
         let task = task.unwrap();
 
         // Check if task can be stopped
         match task.status {
-            storage::api::TaskStatus::Completed => {
+            TaskStatus::Completed => {
                 return ToolResult::error(format!(
                     "Task #{} is already completed and cannot be stopped",
-                    task_id
+                    display_id
                 ));
             }
-            storage::api::TaskStatus::Deleted => {
-                return ToolResult::error(format!("Task #{} is already deleted", task_id));
+            TaskStatus::Deleted => {
+                return ToolResult::error(format!(
+                    "Task #{} is already deleted",
+                    display_id
+                ));
             }
             _ => {}
         }
 
         // Mark task as deleted
         self.store
-            .update(task_id, |t| {
-                t.status = storage::api::TaskStatus::Deleted;
+            .update(&task_id, |t| {
+                t.status = TaskStatus::Deleted;
             })
             .await;
 
-        ToolResult::success(format!("Task #{} stopped and marked as deleted", task_id))
+        ToolResult::success(format!("Task #{} stopped and marked as deleted", display_id))
     }
 }

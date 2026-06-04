@@ -41,7 +41,9 @@ pub fn format_memory_list(entries: &[MemoryEntry]) -> String {
 
 pub fn format_add_result(result: AddResult) -> String {
     match result {
-        AddResult::Added => "记忆已添加。".to_string(),
+        AddResult::Added { id } => {
+            format!("记忆已添加。ID: {}", short_id(&id))
+        }
         AddResult::Merged { existing_id } => {
             format!("已与相似记忆合并: {}", short_id(&existing_id))
         }
