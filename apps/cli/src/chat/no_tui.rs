@@ -92,7 +92,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CurrentTurnChanged(_)
         | sdk::ChatEvent::HookStart { .. }
         | sdk::ChatEvent::HookEnd { .. }
-        | sdk::ChatEvent::WorkingDirectoryChanged { .. } => {}
+        | sdk::ChatEvent::WorkingDirectoryChanged { .. }
+        | sdk::ChatEvent::TasksChanged => {}
         sdk::ChatEvent::ToolCall { name, summary, .. } => {
             eprintln!("[tool] {name} {summary}");
         }

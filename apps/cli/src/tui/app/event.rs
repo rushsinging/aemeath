@@ -109,5 +109,7 @@ pub enum AppEvent {
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
+    /// Runtime task store changed; refresh TUI task list window.
+    TaskStatusChanged,
 }
 pub type UiEvent = AppEvent;

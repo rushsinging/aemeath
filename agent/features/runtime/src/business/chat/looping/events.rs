@@ -78,6 +78,7 @@ pub enum RuntimeStreamEvent {
         working_root: String,
         workspace: WorkspaceContext,
     },
+    TasksChanged,
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

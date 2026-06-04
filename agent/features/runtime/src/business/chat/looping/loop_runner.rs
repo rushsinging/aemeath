@@ -660,6 +660,7 @@ mod tests {
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()
                 }
+                RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
             };
             self.events.lock().unwrap().push(name);
         }
