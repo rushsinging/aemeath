@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | 高 | 待确认 | 待用户确认 | 2026-06 | ToolCall 绑定时空 summary 覆盖 ToolArgumentsDelta 收集的参数预览 |
 | 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
 | 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功时不记录 stdout/stderr 内容；已修复提取 [hook-env] 行写入日志 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
@@ -12,6 +13,28 @@
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
 | 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |
+
+### #119 TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失
+
+**状态**：待确认
+
+**修复 commits**：待提交
+
+**症状**：会话 `019e93a2-950d-715d-807b-f98a880902be` 中 TUI 开始显示 `Skill(superpowers:...)` 正确，但工具完成后变成 `Skill(?)`；随后创建 task list 和 task 时，TUI 显示了 task list 的 tool call，但没有显示对应的 `TaskCreate` tool call header。
+
+**根因**：运行时已经向 TUI 发送 `ToolCallStart`、`ToolArgumentsDelta`、`ToolCall` 与 `ToolResult` 事件；问题出在 TUI conversation model 绑定阶段。`ToolArgumentsDelta` 已经把真实入参写入 `args_preview`，但后续 `ToolCall` 到达时若 `summary` 为空，会把已收集参数覆盖为空，渲染层再用空 JSON/Null 调用工具显示 formatter，导致 `Skill` 取不到 `skill` 字段回退为 `?`，任务类工具也失去 subject/description 摘要。
+
+**修复**：`ToolCall::bind` 在收到空 summary 时不再覆盖已有摘要；若已经存在 `args_preview`，则使用流式参数作为 summary fallback。`ConversationModel::observe_tool_call` 同步使用最终 summary 更新 block，并避免用空 summary 清空已有 block 摘要。补充回归测试覆盖 `Skill` 空 summary 保留流式参数，以及 `TaskListCreate` 后紧跟 `TaskCreate` 时两个 tool call block 都保留且摘要正确。
+
+**验证**：
+- `cargo test -p cli test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty -- --nocapture` 先失败、修复后通过
+- `cargo test -p cli test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind -- --nocapture` 先失败、修复后通过
+- `cargo fmt --check && cargo test -p cli tui::model::conversation -- --nocapture && cargo clippy -p cli --all-targets -- -D warnings`
+
+**涉及路径**：
+- `apps/cli/src/tui/model/conversation/model.rs`
+- `apps/cli/src/tui/model/conversation/tool_call.rs`
+- `apps/cli/src/tui/model/conversation/model_tests.rs`
 
 ### #118 Hook env 中项目目录仍指向主工作区而非当前 worktree
 

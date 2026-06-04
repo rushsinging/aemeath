@@ -30,7 +30,15 @@ impl ToolCall {
     }
 
     pub fn bind(&mut self, summary: String) -> Vec<ToolCallChange> {
-        self.summary = Some(summary);
+        if summary.is_empty() {
+            if self.summary.as_deref().unwrap_or_default().is_empty()
+                && !self.args_preview.is_empty()
+            {
+                self.summary = Some(self.args_preview.clone());
+            }
+        } else {
+            self.summary = Some(summary);
+        }
         if self.status == ToolCallStatus::PendingArgs {
             self.status = ToolCallStatus::Running;
             vec![ToolCallChange::Bound, ToolCallChange::Running]

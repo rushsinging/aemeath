@@ -61,6 +61,105 @@ fn test_conversation_reports_orphan_tool_result() {
 }
 
 #[test]
+fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "load skill".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "call-skill".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "call-skill".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-skill".to_string(),
+        id: "call-skill".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+
+    assert_eq!(
+        model.chats[0].turns[0].tool_calls[0].summary.as_deref(),
+        Some(r#"{"skill":"superpowers:using-superpowers"}"#)
+    );
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolCall { summary, .. }
+            if summary == r#"{"skill":"superpowers:using-superpowers"}"#
+    )));
+}
+
+#[test]
+fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "create tasks".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "call-list".to_string(),
+        name: "TaskListCreate".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "call-list".to_string(),
+        name: "TaskListCreate".to_string(),
+        index: 0,
+        partial_args: r#"{"subject":"修复显示","summary":"排查 tool call"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-list".to_string(),
+        id: "call-list".to_string(),
+        name: "TaskListCreate".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "call-task".to_string(),
+        name: "TaskCreate".to_string(),
+        index: 1,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "call-task".to_string(),
+        name: "TaskCreate".to_string(),
+        index: 1,
+        partial_args: r#"{"subject":"写测试","description":"复现 TaskCreate 显示"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "provider-task".to_string(),
+        id: "call-task".to_string(),
+        name: "TaskCreate".to_string(),
+        index: 1,
+        summary: String::new(),
+    });
+
+    let tool_blocks: Vec<_> = model
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            super::block::ConversationBlock::ToolCall {
+                id, name, summary, ..
+            } => Some((id.as_ref(), name.as_str(), summary.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(tool_blocks.len(), 2, "应保留两个独立 tool call block");
+    assert!(tool_blocks.iter().any(|(id, name, summary)| {
+        *id == "call-list" && *name == "TaskListCreate" && summary.contains("修复显示")
+    }));
+    assert!(tool_blocks.iter().any(|(id, name, summary)| {
+        *id == "call-task" && *name == "TaskCreate" && summary.contains("写测试")
+    }));
+}
+
+#[test]
 fn test_conversation_late_tool_call_binds_existing_result() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {

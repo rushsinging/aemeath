@@ -166,11 +166,21 @@ impl ConversationModel {
         summary: String,
     ) -> Vec<ConversationChange> {
         let mut args_preview = String::new();
+        let mut final_summary = summary.clone();
         let mut bound = false;
         if let Some(chat) = self.active_chat_mut() {
             if let Some(turn) = chat.active_turn_mut() {
                 if let Some(preview) = turn.bind_tool(&id, summary.clone()) {
                     args_preview = preview;
+                    if final_summary.is_empty() {
+                        if let Some(call) = turn
+                            .tool_calls
+                            .iter()
+                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                        {
+                            final_summary = call.summary.clone().unwrap_or_default();
+                        }
+                    }
                     bound = true;
                 }
             }
@@ -184,6 +194,16 @@ impl ConversationModel {
                     let tool_call_id = ToolCallId::new(id.clone());
                     turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
                     let _ = turn.bind_tool(&id, summary.clone());
+                    if final_summary.is_empty() {
+                        if let Some(call) = turn
+                            .tool_calls
+                            .iter()
+                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                        {
+                            args_preview = call.args_preview.clone();
+                            final_summary = call.summary.clone().unwrap_or_default();
+                        }
+                    }
                 }
             }
         }
@@ -198,7 +218,7 @@ impl ConversationModel {
             self.insert_tool_call_block_before_active_text(
                 ToolCallId::new(id.clone()),
                 name.clone(),
-                summary.clone(),
+                final_summary.clone(),
                 args_preview,
             );
         } else {
@@ -211,7 +231,9 @@ impl ConversationModel {
                 } = block
                 {
                     if block_id.as_ref() == id {
-                        *block_summary = summary.clone();
+                        if !final_summary.is_empty() {
+                            *block_summary = final_summary.clone();
+                        }
                         if !args_preview.is_empty() {
                             *block_args = args_preview.clone();
                         }

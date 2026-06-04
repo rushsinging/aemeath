@@ -434,28 +434,28 @@ mod tests {
                 line.width()
             );
         }
+    }
 
-        #[test]
-        fn test_render_ask_user_answered_shows_answer_text() {
-            let mut v = view(&["A", "B"], 0, false);
-            v.answer = Some("都不喜欢".to_string());
-            let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-            // 应包含回答文本
-            assert!(
-                block.lines.iter().any(|l| l.plain.contains("❯ 都不喜欢")),
-                "应显示回答文本: {:?}",
-                block.lines
-            );
-            // 不应显示选项列表或键盘提示
-            assert!(
-                !block.lines.iter().any(|l| l.plain.contains("1. A")),
-                "已回答时不应显示选项"
-            );
-            assert!(
-                !block.lines.iter().any(|l| l.plain.contains("[Enter]")),
-                "已回答时不应显示键盘提示"
-            );
-        }
+    #[test]
+    fn test_render_ask_user_answered_shows_answer_text() {
+        let mut v = view(&["A", "B"], 0, false);
+        v.answer = Some("都不喜欢".to_string());
+        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+        // 应包含回答文本
+        assert!(
+            block.lines.iter().any(|l| l.plain.contains("❯ 都不喜欢")),
+            "应显示回答文本: {:?}",
+            block.lines
+        );
+        // 不应显示选项列表或键盘提示
+        assert!(
+            !block.lines.iter().any(|l| l.plain.contains("1. A")),
+            "已回答时不应显示选项"
+        );
+        assert!(
+            !block.lines.iter().any(|l| l.plain.contains("[Enter]")),
+            "已回答时不应显示键盘提示"
+        );
     }
 
     #[test]
