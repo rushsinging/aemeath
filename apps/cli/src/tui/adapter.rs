@@ -8,5 +8,6 @@ pub mod live_status_widget;
 #[cfg(test)]
 pub mod output_view_widget;
 pub mod output_widget;
+#[cfg(test)]
 pub mod resize;
 pub mod status_widget;

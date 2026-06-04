@@ -2,7 +2,6 @@ use crate::tui::adapter::agent_event::{map_agent_event, AgentEventMapping};
 use crate::tui::adapter::effect_result::{map_effect_result, EffectResultMapping};
 use crate::tui::adapter::input::{route_submission, ConversationAvailability, SubmissionRoute};
 use crate::tui::adapter::key_event::map_key_event;
-use crate::tui::adapter::resize::{apply_resize, map_resize};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::change::ConversationChange;
 use crate::tui::model::conversation::intent::ConversationIntent;
@@ -22,7 +21,8 @@ pub fn update(model: &mut TuiModel, view_state: &mut AppViewState, msg: TuiMsg) 
     let result = match msg {
         TuiMsg::TerminalKey(key) => reduce_key(model, key),
         TuiMsg::TerminalResize { width, height } => {
-            apply_resize(view_state, map_resize(width, height));
+            view_state.layout.terminal_width = width;
+            view_state.layout.terminal_height = height;
             let mut dirty = ViewModelDirty::default();
             dirty.mark_all();
             TuiUpdateResult {
@@ -349,6 +349,29 @@ mod tests {
             Some(0),
             "Up 在补全可见时应选择上一项"
         );
+    }
+
+    #[test]
+    fn test_update_terminal_resize_updates_layout_view_state() {
+        let mut model = TuiModel::default();
+        let mut view_state = AppViewState::default();
+
+        let result = update(
+            &mut model,
+            &mut view_state,
+            TuiMsg::TerminalResize {
+                width: 100,
+                height: 40,
+            },
+        );
+
+        assert_eq!(view_state.layout.terminal_width, 100);
+        assert_eq!(view_state.layout.terminal_height, 40);
+        assert!(result.dirty.output);
+        assert!(result.dirty.status);
+        assert!(result.dirty.input);
+        assert!(result.dirty.dialog);
+        assert!(matches!(result.effects.as_slice(), [Effect::RequestRender]));
     }
 
     #[test]
