@@ -13,24 +13,35 @@
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方 | 中 | 待确认 | 待用户确认 | 2026-06 | AskUser 未清理 active_text_block_id，新输出渲染到 AskUser 块上方；已修复 |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
-| 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 活动中 | 未确认 | 2026-06 | 待查：任务工具创建后未同步刷新 TUI task list window |
+| 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |
 
 ### #117 创建 task list 和 task 时，TUI task list window 没有更新
 
-**状态**：活动中
+**状态**：待确认
 
 **症状**：通过工具创建 task list 并继续创建 task 后，TUI 的 task list window 没有立即更新，窗口仍显示旧任务状态或空状态；实际任务工具调用已经成功返回，任务状态与 TUI 展示不一致。
 
-**根因**：待查。初步怀疑 TaskListCreate / TaskCreate 成功更新 TaskStore 后，没有向 TUI runtime model 推送最新 task lines，或 TUI task status adapter 只在部分生命周期事件上刷新，未覆盖创建列表和创建任务的路径。
+**根因**：任务工具成功更新 TaskStore 后，运行时只发送普通 `ToolResult`，没有产生任务状态变化事件；SDK 的 change watch 因此不会标记 `ChangeSet::TASKS`，TUI 也不会重新拉取 `task_status` 快照。TUI 原本只会在启动、处理完成或显式刷新路径更新 task list window，未覆盖 TaskListCreate / TaskCreate 等工具执行期间的任务变更。
 
-**修复方向**：追踪 TaskListCreate、TaskCreate、TaskUpdate 与 TUI task_status lines 的数据流，确认任务持久化更新后是否触发 `RuntimeIntent::UpdateTaskLines` 或等价刷新；补充覆盖创建 task list 和 task 后 task list window 更新的回归测试，再按单一真相更新 TUI model。
+**修复**：
+1. `RuntimeStreamEvent` / `sdk::ChatEvent` 新增 `TasksChanged`，表示任务存储发生变化。
+2. `TaskListCreate`、`TaskCreate`、`TaskUpdate`、`TaskStop`、`TaskListComplete` 成功后发送 `TasksChanged`。
+3. SDK 收到 `TasksChanged` 时标记 `ChangeSet::TASKS`。
+4. TUI 将 `TasksChanged` 映射为 `UiEvent::TaskStatusChanged`，并触发 `Effect::FetchTaskStatus` 重新拉取窗口内容；no-TUI 模式忽略该事件。
 
-**验证**：待补充。建议至少新增并运行覆盖 task list / task 创建后窗口刷新逻辑的 CLI/TUI 单元测试。
+**验证**：
+- `cargo test -p runtime test_runtime_tasks_changed_emits_sdk_event_and_change_set`
+- `cargo test -p cli test_sdk_event_to_ui_event_maps_tasks_changed`
+- `cargo test -p runtime --lib`
+- `cargo test -p cli`
 
 **涉及路径**：
-- `agent/features/storage/src/business/task/`
-- `agent/features/runtime/src/`
+- `agent/features/runtime/src/business/chat/looping/events.rs`
+- `agent/features/runtime/src/business/chat/looping/non_agent.rs`
+- `agent/features/runtime/src/core/client/event.rs`
+- `packages/sdk/src/chat.rs`
 - `apps/cli/src/tui/`
+- `apps/cli/src/chat/no_tui.rs`
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
 

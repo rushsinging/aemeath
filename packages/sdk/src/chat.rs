@@ -277,6 +277,8 @@ pub enum ChatEvent {
         working_root: String,
         workspace: WorkspaceContextView,
     },
+    /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。
+    TasksChanged,
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }
