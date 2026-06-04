@@ -76,12 +76,8 @@ impl ConversationModel {
         output: String,
         is_error: bool,
     ) -> Option<ToolCallStatus> {
-        let Some(chat) = self.active_chat_mut() else {
-            return None;
-        };
-        let Some(turn) = chat.active_turn_mut() else {
-            return None;
-        };
+        let chat = self.active_chat_mut()?;
+        let turn = chat.active_turn_mut()?;
         turn.complete_tool(id, output, is_error)
     }
 }
