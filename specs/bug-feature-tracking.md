@@ -10,8 +10,8 @@
 
 ## 编号与查找
 
-- **编号独立**：bug 与 feature **NEVER** 共享编号序列，各自独立递增。bug 编号取 `docs/bug/active.md` 与 `docs/bug/archived/` 的最大值 +1；feature 编号取 `docs/feature/active.md` 与 `docs/feature/archived/` 的最大值 +1。新增条目前 **MUST** 在对应类别内核对最大编号，不得跨类别取号。
-- **查找固定文档**：查询 bug / feature 时，**MUST** 优先查找固定追踪文档：活跃 bug 查 `docs/bug/active.md`，活跃 feature 查 `docs/feature/active.md`；归档条目查 `docs/bug/archived/` 或 `docs/feature/archived/`。按编号查找时 **MUST** 在对应 `active.md` 中搜索编号标题（如 `#70`）并阅读命中行附近的详细章节，NEVER 只根据顶部表格摘要下结论。
+- **编号独立**：bug 与 feature **NEVER** 共享编号序列，各自独立递增。bug 编号取 `docs/bug/active.md`、`docs/bug/archive.md` 与 `docs/bug/archived/` 的最大值 +1；feature 编号取 `docs/feature/active.md`、`docs/feature/archive.md` 与 `docs/feature/archived/` 的最大值 +1。新增条目前 **MUST** 在对应类别内核对最大编号，不得跨类别取号。
+- **查找固定文档**：查询 bug / feature 时，**MUST** 优先查找固定追踪文档：活跃 bug 查 `docs/bug/active.md`，活跃 feature 查 `docs/feature/active.md`；归档条目先查 `docs/bug/archive.md` 或 `docs/feature/archive.md`，再读取索引指向的 `archived/<编号>-<slug>.md`。按编号查找活跃条目时 **MUST** 在对应 `active.md` 中搜索编号标题（如 `#70`）并阅读命中行附近的详细章节；按编号查找归档条目时 **MUST** 在对应 `archive.md` 中搜索编号行并读取链接文件，NEVER 只根据顶部表格摘要下结论。
 
 ## 修复流程
 
@@ -29,11 +29,11 @@
 ## 归档门禁
 
 - bug 修复或 feature 完成后，**MUST** 等待用户确认，确认后将完整详细描述**移动**到 `archived/<编号>-<slug>.md`：
-    1. 保留表格中对应行，将摘要改为索引链接：`→ [archived/<编号>-<slug>.md](archived/<编号>-<slug>.md)`。
+    1. 从 `active.md` 表格中删除对应行，并按编号顺序加入 `archive.md` 归档索引。
     2. 把 active.md 中 `### #<编号>` / `## #<编号>` 详情段整体迁移到归档文件，**NEVER** 只在 active.md 标题后追加"（已修复）"等标记。
     3. 归档文件 **MUST** 包含编号、标题、状态、修复 commits、症状、根因、修复方案、验证、涉及路径。
   - 在 `main` 上更新文档后 **MUST** 立即提交，不与其他改动混入同一 commit。
-- **active.md **MUST** 保留所有条目的表格行**（包括已归档），但已归档条目 **NEVER** 保留详情段落——详情段落 **MUST** 完整迁移到 `archived/` 或删除。
+- `active.md` **MUST** 只保留活跃或待确认条目；已归档条目 **MUST** 从 `active.md` 表格和详情段落移除，并在 `archive.md` 中保留索引行。
 
 ## active.md 文档规范
 
@@ -52,6 +52,6 @@
 
 ### 归档条目处理
 
-- 已归档条目的表格行 **MUST** 保留在 active.md 中（不删除），摘要改为索引链接：`→ [archived/<编号>-<slug>.md](archived/<编号>-<slug>.md)`。
-- 已归档条目在 active.md 中 **NEVER** 保留详情段落。
+- 已归档条目 **MUST** 出现在对应 `archive.md` 索引中，索引 **MUST** 按 ID 升序排列并链接到 `archived/<编号>-<slug>.md`。
+- 已归档条目在 active.md 中 **NEVER** 保留表格行或详情段落。
 - 迁移详情到归档文件时 **MUST** 完整搬运，**NEVER** 丢弃信息。

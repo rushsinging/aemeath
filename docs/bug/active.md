@@ -10,7 +10,6 @@
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | /clear 未清空 TaskStore 和 task_status lines；已新增 clear_tasks 并清空 task lines |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | TUI 长行不自动换行也不可横向滚动，超出屏幕宽度的内容不可见 |
-| 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方 | 中 | 待确认 | 待用户确认 | 2026-06 | AskUser 未清理 active_text_block_id，新输出渲染到 AskUser 块上方；已修复 |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
 | 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |

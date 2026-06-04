@@ -55,7 +55,7 @@ aemeath/                    # workspace root
 ├── packages/
 │   ├── sdk/                # AgentClient trait + 公共类型（CLI↔Runtime 通信契约）
 │   └── global/logging/     # 日志 projection 适配
-├── docs/                   # bug / feature 追踪（active.md + archived/）
+├── docs/                   # bug / feature 追踪（active.md + archive.md + archived/）
 ├── specs/                  # 渐进式披露分片：按需加载的 detailed 规则
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
 └── AGENTS.md               # 本文件（CLAUDE.md 软链指向它）
@@ -91,7 +91,7 @@ aemeath/                    # workspace root
 
 修复 bug 或实现 feature 时 **MUST** 按以下步骤执行，**NEVER** 跳过：
 
-1. **阅读描述**：读取 `docs/bug/active.md` 或 `docs/feature/active.md` 中对应条目的完整描述（含详情区块）。
+1. **阅读描述**：活跃条目读取 `docs/bug/active.md` 或 `docs/feature/active.md` 中对应条目的完整描述（含详情区块）；归档条目先查 `docs/bug/archive.md` 或 `docs/feature/archive.md`，再读取索引指向的 `archived/<编号>-<slug>.md`。
 2. **定位问题并给出修复方案**：阅读相关源码，定位根因或设计点，给出修复/实现方案。复杂改动 **SHOULD** 调用 `superpowers:writing-plans` 制定详细计划。
 3. **等待用户同意**：将方案呈现给用户，**MUST** 获得明确同意后才开始修改代码。用户可能要求调整方案。
 4. **执行与验证**：在 worktree 中实施，通过编译、测试、clippy 验证后合并回 `main`。
