@@ -53,6 +53,7 @@ impl ConversationModel {
     ) -> Vec<ConversationChange> {
         let total = options.len();
         let cursor = if total == 0 { 0 } else { cursor.min(total - 1) };
+        self.clear_active_text_blocks();
         self.remove_ask_user_block();
         self.blocks.push(ConversationBlock::AskUser {
             id: ASK_USER_BLOCK_ID.to_string(),
@@ -189,10 +190,8 @@ impl ConversationModel {
 
     /// 设置用户回答内容，block 进入已回答状态（不再显示选项和键盘提示）。
     pub(super) fn answer_ask_user(&mut self, answer: String) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
-            answer: ans, ..
-        }) = self.ask_user_block_mut()
-        {
+        self.clear_active_text_blocks();
+        if let Some(ConversationBlock::AskUser { answer: ans, .. }) = self.ask_user_block_mut() {
             *ans = Some(answer);
             return Self::ask_user_updated();
         }
@@ -352,5 +351,55 @@ mod tests {
         {
             assert!(*chat_input_active);
         }
+    }
+
+    #[test]
+    fn test_assistant_text_after_answered_ask_user_stays_below_ask_user() {
+        let mut model = ConversationModel::default();
+        model.apply(ConversationIntent::StartChat {
+            submission: "需要选择".to_string(),
+        });
+        model.apply(ConversationIntent::ObserveAssistantText {
+            text: "请选择：".to_string(),
+        });
+        show(&mut model, &["A", "B"], 2, false);
+        model.apply(ConversationIntent::AnswerAskUser {
+            answer: "A".to_string(),
+        });
+
+        model.apply(ConversationIntent::ObserveAssistantText {
+            text: "继续生成".to_string(),
+        });
+
+        let assistant_texts = model
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                ConversationBlock::AssistantText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assistant_texts,
+            vec!["请选择：", "继续生成"],
+            "AskUser 后的 assistant text 应创建新块，不应拼接到旧块"
+        );
+
+        let ask_position = model
+            .blocks
+            .iter()
+            .position(|block| matches!(block, ConversationBlock::AskUser { .. }))
+            .expect("ask user block");
+        let continued_position = model
+            .blocks
+            .iter()
+            .position(|block| {
+                matches!(block, ConversationBlock::AssistantText { text, .. } if text == "继续生成")
+            })
+            .expect("continued assistant text");
+        assert!(
+            continued_position > ask_position,
+            "AskUser 回答后的新 assistant text 应渲染在 AskUser 下方"
+        );
     }
 }
