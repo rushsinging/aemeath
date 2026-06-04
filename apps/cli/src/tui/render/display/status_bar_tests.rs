@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui::render::theme;
 use crate::tui::view_model::{StatusContextViewModel, StatusRuntimeViewModel, StatusWorktreeKind};
+use crate::tui::view_state::StatusSelectionViewState;
 
 #[cfg(test)]
 pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {
@@ -10,13 +11,22 @@ pub(crate) fn set_test_status_text(bar: &mut StatusBar, status: &str) {
     bar.thinking = false;
 }
 
-/// 屏幕列经只读折算 + 镜像写回（adapter 唯一生产写入路径），驱动 plain 取文本。
-/// 替代已删除的 `start_selection*`/`update_selection*` 状态变更方法，覆盖不弱化。
+/// 屏幕列经只读折算后写入 view_state，驱动 render/copy 投影。
 #[cfg(test)]
-fn select_via_mirror(bar: &mut StatusBar, row: StatusBarRow, sc: u16, ec: u16, width: u16) {
+fn select_via_view_state(
+    bar: &StatusBar,
+    row: StatusBarRow,
+    sc: u16,
+    ec: u16,
+    width: u16,
+) -> StatusSelectionViewState {
     let start = bar.screen_col_to_char_idx(row, sc, width);
     let end = bar.screen_col_to_char_idx(row, ec, width);
-    bar.apply_selection_mirror(true, Some(start), Some(end), row, width);
+    let mut selection = StatusSelectionViewState::default();
+    selection.begin_selection(row, start, width);
+    selection.update_selection(end);
+    selection.end_selection();
+    selection
 }
 
 #[test]
@@ -25,15 +35,18 @@ fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
     set_test_status_text(&mut bar, "你好a");
     let prefix_width = 1;
 
-    select_via_mirror(
-        &mut bar,
+    let selection = select_via_view_state(
+        &bar,
         StatusBarRow::Runtime,
         prefix_width + 2,
         prefix_width + 6,
         0,
     );
 
-    assert_eq!(bar.get_selected_text(), Some("好a ".to_string()));
+    assert_eq!(
+        bar.selected_text_for_view(&selection),
+        Some("好a ".to_string())
+    );
 }
 
 #[test]
@@ -42,15 +55,18 @@ fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
     set_test_status_text(&mut bar, "a🚀b");
     let prefix_width = 1;
 
-    select_via_mirror(
-        &mut bar,
+    let selection = select_via_view_state(
+        &bar,
         StatusBarRow::Runtime,
         prefix_width + 1,
         prefix_width + 4,
         0,
     );
 
-    assert_eq!(bar.get_selected_text(), Some("🚀b".to_string()));
+    assert_eq!(
+        bar.selected_text_for_view(&selection),
+        Some("🚀b".to_string())
+    );
 }
 
 fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
@@ -82,7 +98,7 @@ fn test_status_bar_render_uses_status_background() {
     let area = Rect::new(0, 0, 40, 1);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     assert_eq!(buf.cell((0, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
     assert_eq!(
@@ -103,7 +119,7 @@ fn test_status_bar_render_two_rows_includes_context_when_height_two() {
     let area = Rect::new(0, 0, 100, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     let runtime = row_text(&buf, 0, area.width);
     let context = row_text(&buf, 1, area.width);
@@ -125,7 +141,7 @@ fn test_status_bar_render_one_row_omits_context() {
     let area = Rect::new(0, 0, 100, 1);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     let runtime = row_text(&buf, 0, area.width);
     assert!(!runtime.contains("Think:"));
@@ -202,7 +218,7 @@ fn test_status_bar_render_second_row_uses_muted_color() {
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
-    bar.render(area, &mut buf);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default());
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
     assert_eq!(buf.cell((0, 1)).unwrap().style().bg, Some(theme::STATUS_BG));
@@ -241,8 +257,9 @@ fn test_screen_to_status_anchor_does_not_mutate_widget_state() {
     set_test_status_text(&mut bar, "abc");
     // 只读折算 NEVER 触动 widget 选区字段。
     let _ = bar.screen_to_status_anchor(0, 1, 0, 0, 0);
-    assert!(!bar.is_selecting());
-    assert!(bar.get_selected_text().is_none());
+    assert!(bar
+        .selected_text_for_view(&StatusSelectionViewState::default())
+        .is_none());
 }
 
 #[test]
@@ -251,9 +268,12 @@ fn test_status_bar_selection_supports_context_row() {
     bar.set_current_dir("~/aemeath");
     let width = 80;
 
-    select_via_mirror(&mut bar, StatusBarRow::Context, 2, 9, width);
+    let selection = select_via_view_state(&bar, StatusBarRow::Context, 2, 9, width);
 
-    assert_eq!(bar.get_selected_text(), Some("aemeath".to_string()));
+    assert_eq!(
+        bar.selected_text_for_view(&selection),
+        Some("aemeath".to_string())
+    );
 }
 
 #[test]
@@ -263,17 +283,14 @@ fn test_status_bar_render_highlights_context_row_selection() {
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
-    select_via_mirror(&mut bar, StatusBarRow::Context, 4, 11, area.width);
-    bar.render(area, &mut buf);
+    let selection = select_via_view_state(&bar, StatusBarRow::Context, 4, 11, area.width);
+    bar.render(area, &mut buf, &selection);
 
     assert_eq!(
         buf.cell((4, 1)).unwrap().style().bg,
         Some(theme::SELECTION_BG)
     );
-    assert_eq!(
-        buf.cell((4, 0)).unwrap().style().bg,
-        Some(theme::SELECTION_BG)
-    );
+    assert_eq!(buf.cell((4, 0)).unwrap().style().bg, Some(theme::STATUS_BG));
 }
 
 #[test]

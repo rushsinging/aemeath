@@ -245,7 +245,8 @@ impl App {
                     &suggestions_view,
                 );
             }));
-            self.status_bar.draw(chunks[3], buf);
+            self.status_bar
+                .draw(chunks[3], buf, &self.view_state.status_sel);
             if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }
