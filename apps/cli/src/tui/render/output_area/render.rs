@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
         let mut area = OutputArea::new();
-        area.set_document(RenderedDocument {
+        area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
                 lines: vec![
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn test_render_document_paints_spans_and_overlays_selection() {
         let mut area = OutputArea::new();
-        area.set_document(RenderedDocument {
+        area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
                 lines: vec![RenderedLine::new(vec![Span::raw("hello")])],
@@ -283,7 +283,7 @@ mod tests {
             RenderedLine::with_plain(vec![Span::raw("✓ "), Span::raw("hello")], "hello".into());
         line.gutter_cols = 2;
         let mut area = OutputArea::new();
-        area.set_document(RenderedDocument {
+        area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
                 lines: vec![line],
@@ -310,7 +310,7 @@ mod tests {
             RenderedLine::with_plain(vec![Span::raw("✓ "), Span::raw("hello")], "hello".into());
         line.gutter_cols = 2;
         let mut area = OutputArea::new();
-        area.set_document(RenderedDocument {
+        area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
                 lines: vec![line],

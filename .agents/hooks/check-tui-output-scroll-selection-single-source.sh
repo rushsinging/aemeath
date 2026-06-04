@@ -47,4 +47,31 @@ report_matches \
   grep -RInE 'output_area\.(scroll_up|scroll_down|scroll_to_bottom|scroll_to_top)\(' \
     "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude='*_tests.rs'
 
+# Output document projection is owned by App's render pipeline:
+# - OutputDocumentRenderer::render_model_document builds a RenderedDocument from OutputViewModel + renderer cache;
+# - adapter/output_widget.rs remains retired and must not contain production helpers;
+# - production paths replace OutputArea.document only through refresh_output_document_from_model.
+
+report_matches \
+  "output_widget adapter must stay retired; keep production projection in OutputArea/App and do not reintroduce widget writeback." \
+  bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/ || /^\\s*use / || /^\\s*fn / || /^\\s*let / || /^\\s*assert/ || /renderer\\.render_model_document/ || /OutputArea::new/ || /output_area\\.replace_document\\(document\\)/; if (/(pub\\(crate\\)[[:space:]]+fn|render_document_from_view_model|render_output_document|&mut[[:space:]]+OutputArea|\\.replace_document\\(|\\.set_document\\()/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/output_widget.rs\""
+
+report_matches \
+  "OutputArea must not own the renderer cache; App owns OutputDocumentRenderer and applies RenderedDocument centrally." \
+  grep -RInE 'pub[[:space:]]+document_renderer|[[:space:]]document_renderer[[:space:]]*:' \
+    "$ROOT/apps/cli/src/tui/render/output_area.rs"
+
+report_matches \
+  "production output refresh must use refresh_output_document_from_model, not the retired refresh_output_widget_from_model name." \
+  grep -RInE 'refresh_output_widget_from_model' \
+    "$ROOT/apps/cli/src/tui" --include='*.rs'
+
+report_matches \
+  "production OutputArea document replacement must stay centralized in app/update.rs; tests may call replace_document directly." \
+  bash -c "grep -RInE 'output_area\\.replace_document\\(|\\barea\\.replace_document\\(|\\boutput\\.replace_document\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/app/update.rs:' | grep -v '/render/output_area.rs:' | grep -v '/render/output_area/render.rs:' | grep -v '/render/output_area/selection.rs:' | grep -v '/render/output/selection_tests.rs:' | grep -v '/adapter/output_widget.rs:'"
+
+report_matches \
+  "the retired OutputArea::set_document API must not be restored; use replace_document in the centralized render pipeline/tests." \
+  bash -c "grep -RInE '\\.[[:space:]]*set_document[[:space:]]*\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' || true"
+
 exit "$fail"

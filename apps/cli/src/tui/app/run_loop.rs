@@ -40,7 +40,7 @@ impl App {
         self.update_task_status(self.chat.is_processing).await;
         self.update_project_context().await;
         self.draw(terminal)?;
-        self.refresh_output_widget_from_model();
+        self.refresh_output_document_from_model();
 
         loop {
             // Ctrl+C 超时复原 status line

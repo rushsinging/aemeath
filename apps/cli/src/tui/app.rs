@@ -11,6 +11,7 @@ use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::render::input::input_render_model::InputRenderModel;
+use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
@@ -31,6 +32,7 @@ pub struct App {
     pub output_area: OutputArea,
     pub input_area: InputArea,
     pub status_bar: StatusBar,
+    pub(crate) output_document_renderer: OutputDocumentRenderer,
     // 纯数据子状态
     pub chat: ChatState,
     pub input: InputState,
@@ -156,6 +158,7 @@ impl App {
             output_area,
             input_area: InputArea::new(),
             status_bar,
+            output_document_renderer: OutputDocumentRenderer::default(),
             chat: ChatState::default(),
             input: InputState::default(),
             session: SessionState {

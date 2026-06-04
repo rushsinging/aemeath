@@ -13,6 +13,20 @@ pub struct OutputDocumentRenderer {
 }
 
 impl OutputDocumentRenderer {
+    pub fn render_model_document(
+        &mut self,
+        view_model: &OutputViewModel,
+        width: u16,
+        fallback_width: usize,
+    ) -> RenderedDocument {
+        let render_width = if width > 1 {
+            width
+        } else {
+            u16::try_from(fallback_width.max(1)).unwrap_or(u16::MAX)
+        };
+        self.render_tree(view_model, render_width)
+    }
+
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
     /// gutter（depth 缩进 + marker）在组合期注入。
     pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {

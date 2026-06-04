@@ -14,7 +14,6 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
-use crate::tui::adapter::output_widget::render_document_from_view_model;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -163,18 +162,23 @@ impl App {
         result
     }
 
-    pub(crate) fn refresh_output_widget_from_model(&mut self) {
+    pub(crate) fn refresh_output_document_from_model(&mut self) {
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
         );
         let width = self.layout.output_area_rect.width.saturating_sub(3).max(1);
-        render_document_from_view_model(&mut self.output_area, &view_model, width);
+        let document = self.output_document_renderer.render_model_document(
+            &view_model,
+            width,
+            self.output_area.term_width,
+        );
+        self.output_area.replace_document(document);
     }
 
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {
-            self.refresh_output_widget_from_model();
+            self.refresh_output_document_from_model();
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
