@@ -4,6 +4,7 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::input::change::submitted_text_from_changes;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
@@ -144,9 +145,7 @@ impl App {
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.model.input.document.is_empty() {
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    let input =
-                        crate::tui::adapter::input_widget::submission_from_changes(&changes)
-                            .unwrap_or_default();
+                    let input = submitted_text_from_changes(&changes).unwrap_or_default();
                     let event = sdk::ChatInputEvent::classify_text(input.clone(), Vec::new());
                     // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
                     self.enqueue_submission_echo(input.clone());

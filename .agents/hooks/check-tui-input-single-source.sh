@@ -59,6 +59,10 @@ report_matches \
   bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\s*#\[cfg\(test\)\]/) { \$pending=1; next } if (/pub[[:space:]]*(\([^)]*\))?[[:space:]]*fn[[:space:]]+(set_text|set_cursor_byte_index|text_snapshot|get_text)[[:space:]]*\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\""
 
 report_matches \
+  "input_widget adapter must stay retired; keep submission helpers in model/input/change.rs and do not reintroduce widget writeback." \
+  bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/; if (/(pub[[:space:]]*(\\([^)]*\\))?[[:space:]]*fn|submission_from_changes|InputChange|InputArea|StatusBar|input_area\\.|&mut[[:space:]]+(InputArea|StatusBar))/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/input_widget.rs\""
+
+report_matches \
   "production app/update code must not drive InputArea text/cursor directly; send InputIntent and read InputChange projections without widget writeback." \
   grep -RInE '\binput_area\.(set_text|set_cursor_byte_index|clear|set_pending_images|get_text|cursor_position|is_empty)\(' \
     "$ROOT/apps/cli/src/tui/app" "$ROOT/apps/cli/src/tui/input" --include='*.rs'
@@ -78,10 +82,5 @@ report_matches \
   "app/update should read completion visibility from model.input.completion, not from InputArea." \
   grep -RInE 'input_area\.(is_showing_suggestions|selected_suggestion)\(' \
     "$ROOT/apps/cli/src/tui/app" --include='*.rs'
-
-report_matches \
-  "input_widget adapter must not reintroduce widget writeback; keep it free of InputArea/StatusBar mutable widget dependencies." \
-  perl -ne 'next if /^\s*\/\//; if (/(apply_input_changes_to_widget|\bInputArea\b|\bStatusBar\b|input_area\.clear\(|&mut[[:space:]]+(InputArea|StatusBar))/) { print "$ARGV:$.:$_" }' \
-    "$ROOT/apps/cli/src/tui/adapter/input_widget.rs"
 
 exit "$fail"

@@ -1,6 +1,7 @@
 pub mod agent_event;
 pub mod effect_result;
 pub mod input;
+#[cfg(test)]
 pub mod input_widget;
 pub mod key_event;
 pub mod live_status_widget;
