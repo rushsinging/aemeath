@@ -15,45 +15,28 @@
 | 42 | 权限管控系统：交互式外部授权 + 统一权限评估 + audit/policy 域落地 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。**2026-05-30 并入 #62（audit/policy 域实现）**：047 DDD spec §4.2/§4.3/§8/§9 定义的 audit 域（AuditTrail / correlation id 串联 Session·Chat·Turn·Agent·Tool·Resource / policy·hook·outcome 三分记录）与 policy 域（PermissionRequest/Decision/Grant/Mode/Capability/RiskAssessment）归入本 feature 统一设计实施，不再独立拆分。详见 [spec](specs/042-permission-control-system.md)、[047 spec](specs/047-ddd-redesign.md) |
 | 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
 | 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
-| 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 活动中 | 未确认 | 这两个 tool 输出行数固定且少，不应被 `TOOL_RESULT_MAX_LINES=5` 截断显示 `... (n lines omitted)` |
+| 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 已为 EnterWorktree / ExitWorktree 单独放宽 result 展示行数，固定上下文提示不再被 `TOOL_RESULT_MAX_LINES=5` 截断显示 `... (n lines omitted)` |
 
-### #75 日志模块整理与 hook 可观测性增强
+### #75 EnterWorktree/ExitWorktree result 不截断
 
 **状态**：待确认
 
-**背景**：日志配置中仍保留已废弃的 `module_levels` 字段，但运行时实际只使用 `logging.level`。同时 Stop hook 的 `[hook-env]` 行即使已在 runner 中记录，当前日志仍看不到 hook 相关信息；排查发现全局 `~/.agents/aemeath.json` 只有 `SessionStart` hook，项目 `.agents/aemeath.json` 才有 `Stop` hook，因此需要更明确的日志来区分“配置未加载/未匹配/未执行”和“已执行但 stdout 未记录”。
+**背景**：EnterWorktree / ExitWorktree 的工具结果是固定的工作区上下文提示，通常只有少量行；默认 `TOOL_RESULT_MAX_LINES = 5` 会导致 TUI 输出区显示 `... (n lines omitted)`，隐藏后续关于 path_base / working_root 使用约束的关键提示。
 
 **实现**：
-1. 从 `LoggingConfig` 移除 `module_levels` 字段，`to_filter_string()` 只返回全局 `logging.level`。
-2. 配置合并逻辑移除 `module_levels` 填充。
-3. `specs/rust-coding.md` 日志规范更新为读取 `logging.level`。
-4. `init_logging` 启动后记录日志 filter、target 与 logs_dir，便于确认配置是否生效。
-5. `build_hook_runner` 记录 hook runner 的 project_dir 与 configured_events。
-6. chat loop 设置 hook project_dir 后记录 runner 状态。
-7. `matching_hooks` 与 `HookUi::run_json` 记录 hook 匹配/分发结果，即使 matched=0 也可观测。
-
-**关于当前看不到 hook 日志的原因**：
-- 日志初始化本身是生效的，`aemeath.log` 有新会话日志。
-- 代码中的 `hook start/end/env` 只有在 `execute_hook` 被调用时才会出现。
-- 当前全局配置 `~/.agents/aemeath.json` 的 `hooks` 只有 `SessionStart`，没有 `Stop`。
-- Stop hook 配置位于项目 `.agents/aemeath.json`。如果当前运行时 cwd/project_dir 没有加载这个项目配置，或 Stop 事件没有匹配到 hook，则不会进入 `execute_hook`，因此不会有 `hook start/end/env`。
-- 本次新增的 `hook runner built`、`chat loop hook runner ready`、`hook match`、`hook ui dispatch` 会直接暴露是哪一层没走到。
+1. 保持全局默认工具结果预览行数不变，避免影响 Bash / Read / Grep 等可能产生大输出的工具。
+2. 为 `EnterWorktreeDisplay` 与 `ExitWorktreeDisplay` 单独覆盖 `result_max_lines()`，允许完整展示固定上下文结果。
+3. 新增回归测试覆盖 EnterWorktree / ExitWorktree 结果不出现 `lines omitted`，且仍展示最后一条工作区路径使用提示。
 
 **验证**：
-- `cargo test -p share logging_config`
-- `cargo test -p runtime build_hook_runner`
-- `cargo test -p hook hook_env_lines`
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
+- `cargo test -p cli test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result`
+- `cargo test -p cli tool_result`
+- `cargo fmt --check`
+- `cargo check -p cli`
 
 **涉及路径**：
-- `agent/shared/src/config/logging.rs`
-- `agent/features/runtime/src/utils/bootstrap/config_manager.rs`
-- `agent/features/runtime/src/utils/bootstrap/logging_setup.rs`
-- `agent/features/runtime/src/utils/bootstrap/runtime_support.rs`
-- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
-- `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
-- `agent/features/hook/src/business/hook/runner.rs`
-- `specs/rust-coding.md`
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
+- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
 
 ### #77 diff removed 行不语法高亮，只显示纯红色
 
