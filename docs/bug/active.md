@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
 | 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功时不记录 stdout/stderr 内容；已修复提取 [hook-env] 行写入日志 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
@@ -11,6 +12,23 @@
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
 | 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |
+
+### #118 Hook env 中项目目录仍指向主工作区而非当前 worktree
+
+**状态**：活动中
+
+**症状**：`~/.agents/logs/aemeath.log` 中 hook 匹配阶段已经记录当前 worktree 的 `project_dir`，例如 `.../aemeath/.worktrees/fix-111-tui-column-scroll-padding`；但 hook 脚本 stdout 中提取出的 `[hook-env] AEMEATH_PROJECT_DIR=...` 与 `[hook-env] CLAUDE_PROJECT_DIR=...` 仍是主工作区 `/Users/guoyuqi/Nextcloud/work/claudecode/aemeath`。这会导致 Stop hook / 项目 hook 在 worktree 会话中按主工作区执行检查或输出错误上下文。
+
+**根因**：待定位。初步判断 HookRunner 匹配阶段使用的 `project_dir` 与构造 hook 子进程环境变量时使用的项目根来源不同步，环境变量注入仍取主 checkout 的 project dir。
+
+**修复方向**：检查 hook 执行环境变量注入路径，确保 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR` 使用当前会话/工具上下文的 effective project dir，并与 `hook match` 日志中的 `project_dir` 一致；补充覆盖 worktree 场景的回归测试。
+
+**验证**：待补充。
+
+**涉及路径**：
+- `agent/features/hook/src/business/hook/runner.rs`
+- `agent/features/policy/src/` 或 runtime 调用 HookRunner 的上下文传递路径
+- `specs/policy-hook-audit.md`
 
 ### #117 创建 task list 和 task 时，TUI task list window 没有更新
 
