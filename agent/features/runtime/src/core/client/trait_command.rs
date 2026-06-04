@@ -99,18 +99,9 @@ pub(super) async fn switch_model_impl(
 ) -> Result<sdk::ModelSwitchResult> {
     use provider::api::openai_compatible::ReasoningConfig;
     use provider::api::ApiDriverKind;
-    use provider::api::OpenAIProviderConfig;
 
     let api_type = ApiDriverKind::parse(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
-
-    let openai_config = if matches!(api_type, ApiDriverKind::Anthropic) {
-        None
-    } else {
-        Some(OpenAIProviderConfig::from_api_driver(
-            api_type,
-            &params.provider_name,
-        ))
-    };
+    let openai_config = switch_model_openai_config(api_type, &params.provider_name);
 
     let reasoning = params.reasoning.unwrap_or(true);
     let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
@@ -297,6 +288,22 @@ fn current_timestamp_secs() -> u64 {
         .unwrap_or(0)
 }
 
+fn switch_model_openai_config(
+    api_type: provider::api::ApiDriverKind,
+    source_key: &str,
+) -> Option<provider::api::OpenAIProviderConfig> {
+    if matches!(
+        api_type,
+        provider::api::ApiDriverKind::Anthropic | provider::api::ApiDriverKind::Ollama
+    ) {
+        None
+    } else {
+        Some(provider::api::OpenAIProviderConfig::from_api_driver(
+            api_type, source_key,
+        ))
+    }
+}
+
 pub(super) async fn complete_reminder_impl(me: &AgentClientImpl, id: &str) -> Result<()> {
     me.inner
         .session_reminders
@@ -310,4 +317,33 @@ pub(super) async fn get_thinking_impl(me: &AgentClientImpl) -> Result<bool> {
     let client = me.inner.current_client.read().unwrap().clone();
     let adapter = LlmClientAdapter::new(client);
     Ok(adapter.is_reasoning())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_switch_model_openai_config_skips_ollama() {
+        let result = switch_model_openai_config(provider::api::ApiDriverKind::Ollama, "ollama");
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_switch_model_openai_config_skips_anthropic() {
+        let result =
+            switch_model_openai_config(provider::api::ApiDriverKind::Anthropic, "anthropic");
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_switch_model_openai_config_uses_source_key_for_openai_compatible() {
+        let result = switch_model_openai_config(provider::api::ApiDriverKind::Zhipu, "Zhipu")
+            .expect("zhipu should use openai-compatible config");
+
+        assert_eq!(result.source_key, "Zhipu");
+        assert_eq!(result.api, provider::api::ApiDriverKind::Zhipu);
+    }
 }
