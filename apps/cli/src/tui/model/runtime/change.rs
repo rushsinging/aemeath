@@ -36,4 +36,6 @@ pub enum RuntimeChange {
     SpinnerPhaseChanged,
     SpinnerStopped,
     TaskLinesChanged,
+    StatusNoticeChanged,
+    ThinkingChanged,
 }

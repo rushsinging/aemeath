@@ -98,12 +98,14 @@ impl crate::tui::app::App {
                     self.view_state.input_sel.clear_selection();
                     // 屏幕坐标 → status 锚点只读折算借 widget（依赖 render 期布局），
                     // 选区真相写入 view_state（#59 S4）。
+                    let status_view = self.status_view_model();
                     let (status_row, char_idx, width) = self.status_bar.screen_to_status_anchor(
                         row,
                         col,
                         status_bar.y,
                         status_bar.x,
                         status_bar.width,
+                        &status_view,
                     );
                     self.view_state
                         .status_sel
@@ -136,10 +138,12 @@ impl crate::tui::app::App {
                 } else if self.view_state.status_sel.is_selecting() {
                     // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
                     let sel = &self.view_state.status_sel;
+                    let status_view = self.status_view_model();
                     let char_idx = self.status_bar.screen_col_to_char_idx(
                         sel.selection_row,
                         col.saturating_sub(status_bar.x),
                         sel.selection_width,
+                        &status_view,
                     );
                     self.view_state.status_sel.update_selection(char_idx);
                 }
@@ -171,10 +175,11 @@ impl crate::tui::app::App {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.status_sel.end_selection();
                     // 取 plain 文本（读 view_state 选区真相 + render 期 line_text 折算）。
+                    let status_view = self.status_view_model();
                     let text = self
                         .status_bar
-                        .selected_text_for_view(&self.view_state.status_sel);
-                    // 取完清选区：view_state 清空，下帧 adapter 同步清 widget 镜像。
+                        .selected_text_for_view(&self.view_state.status_sel, &status_view);
+                    // 取完清选区：view_state 清空。
                     self.view_state.status_sel.clear_selection();
                     text
                 } else {

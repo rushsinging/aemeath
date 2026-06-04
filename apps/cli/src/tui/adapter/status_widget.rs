@@ -1,33 +1,23 @@
-use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
-use crate::tui::model::root::TuiModel;
-use crate::tui::view_assembler::status::StatusViewAssembler;
-use crate::tui::StatusBar;
-
-/// 单向写回 StatusBar 运行态镜像：由 `StatusViewAssembler` 从 Model 派生 ViewModel，
-/// 再经唯一写入口 `apply_runtime_view` 落地 widget。这是 model/session/tps/token/api/
-/// context_size/工作目录上下文的唯一生产写入路径。
-pub(crate) fn apply_runtime_status_to_widget(model: &TuiModel, status_bar: &mut StatusBar) {
-    let view = StatusViewAssembler::assemble_runtime_view(&model.runtime, Some(&model.session));
-    status_bar.apply_runtime_view(view);
-}
-
-pub(crate) fn apply_diagnostic_status_to_widget(model: &TuiModel, status_bar: &mut StatusBar) {
-    match model.diagnostic.highest_severity() {
-        Some(DiagnosticSeverity::Error) => status_bar.set_warning("Error"),
-        Some(DiagnosticSeverity::Warning) => status_bar.set_warning("Warning"),
-        Some(DiagnosticSeverity::Info) | None => {}
-    }
-}
+//! Retired StatusBar widget adapter.
+//!
+//! StatusBar is now stateless for runtime/diagnostic/status data: render and
+//! selection receive `StatusViewModel` directly. This module remains only to
+//! verify the projection that replaced the old widget writeback adapter.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::tui::model::diagnostic::intent::DiagnosticIntent;
+    use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
+    use crate::tui::model::root::TuiModel;
     use crate::tui::model::runtime::intent::RuntimeIntent;
     use crate::tui::model::runtime::session_intent::SessionIntent;
+    use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
     use crate::tui::model::runtime::workspace::WorktreeKind;
+    use crate::tui::view_assembler::status::StatusViewAssembler;
+    use crate::tui::view_model::{StatusNoticeViewKind, StatusSeverity};
 
     #[test]
-    fn test_apply_runtime_status_writes_model_usage_and_context() {
+    fn test_status_view_projects_runtime_usage_and_context() {
         let mut model = TuiModel::default();
         model.runtime.apply(RuntimeIntent::SetProviderModel {
             provider: None,
@@ -51,45 +41,75 @@ mod tests {
         model.session.apply(SessionIntent::SetCurrentSession {
             id: "s-1".to_string(),
         });
-        let mut status_bar = StatusBar::new();
+        model.runtime.apply(RuntimeIntent::SetThinking(true));
 
-        apply_runtime_status_to_widget(&model, &mut status_bar);
-
-        let row = status_bar.build_full_text();
-        assert!(row.contains("glm-5.1"));
-        assert!(row.contains("in 12k"));
-        assert!(row.contains("out 1.8k"));
-        assert!(row.contains("ctx 37%"));
-        assert!(row.contains("api 1"));
-        let context = status_bar.context_row_text(120);
-        assert!(context.contains("~/repo"));
-        assert!(context.contains("session s-1"));
-    }
-
-    #[test]
-    fn test_apply_runtime_status_empty_model_keeps_defaults() {
-        let model = TuiModel::default();
-        let mut status_bar = StatusBar::new();
-
-        apply_runtime_status_to_widget(&model, &mut status_bar);
-
-        let row = status_bar.build_full_text();
-        assert!(row.contains("Ready"));
-    }
-
-    #[test]
-    fn test_apply_diagnostic_status_sets_warning_on_error() {
-        let mut model = TuiModel::default();
-        model.diagnostic.apply(
-            crate::tui::model::diagnostic::intent::DiagnosticIntent::RecordNotice {
-                severity: DiagnosticSeverity::Error,
-                message: "boom".to_string(),
-            },
+        let view = StatusViewAssembler::assemble_status_view(
+            &model.runtime,
+            Some(&model.session),
+            &model.diagnostic,
         );
-        let mut status_bar = StatusBar::new();
 
-        apply_diagnostic_status_to_widget(&model, &mut status_bar);
+        assert_eq!(view.runtime.model.as_deref(), Some("glm-5.1"));
+        assert_eq!(view.runtime.input_tokens, 12_400);
+        assert_eq!(view.runtime.output_tokens, 1_800);
+        assert_eq!(view.runtime.last_input_tokens, 74_000);
+        assert_eq!(view.runtime.context_size, 200_000);
+        assert_eq!(view.runtime.api_calls, 1);
+        assert_eq!(view.runtime.session_id.as_deref(), Some("s-1"));
+        assert_eq!(view.runtime.context.path_base, "~/repo");
+        assert_eq!(view.runtime.context.branch.as_deref(), Some("main"));
+        assert!(view.thinking);
+    }
 
-        assert!(status_bar.build_full_text().contains("Error"));
+    #[test]
+    fn test_status_view_projects_status_notice() {
+        let mut model = TuiModel::default();
+        model
+            .runtime
+            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+                "Interrupted",
+            )));
+        model.runtime.apply(RuntimeIntent::SetThinking(false));
+
+        let view =
+            StatusViewAssembler::assemble_status_view(&model.runtime, None, &model.diagnostic);
+
+        assert_eq!(view.notice.text, "Interrupted");
+        assert_eq!(view.notice.kind, StatusNoticeViewKind::Warning);
+        assert!(!view.thinking);
+    }
+
+    #[test]
+    fn test_status_notice_kind_maps_all_variants() {
+        assert_eq!(
+            StatusViewAssembler::assemble_notice_view(&StatusNotice::ready()).kind,
+            StatusNoticeViewKind::Normal
+        );
+        assert_eq!(
+            StatusViewAssembler::assemble_notice_view(&StatusNotice::success("Copied")).kind,
+            StatusNoticeViewKind::Success
+        );
+        assert_eq!(
+            StatusViewAssembler::assemble_notice_view(&StatusNotice {
+                text: "Warn".to_string(),
+                kind: StatusNoticeKind::Warning,
+            })
+            .kind,
+            StatusNoticeViewKind::Warning
+        );
+    }
+
+    #[test]
+    fn test_status_view_projects_diagnostic_severity() {
+        let mut model = TuiModel::default();
+        model.diagnostic.apply(DiagnosticIntent::RecordNotice {
+            severity: DiagnosticSeverity::Error,
+            message: "boom".to_string(),
+        });
+
+        let view =
+            StatusViewAssembler::assemble_status_view(&model.runtime, None, &model.diagnostic);
+
+        assert_eq!(view.line.severity, StatusSeverity::Error);
     }
 }

@@ -15,9 +15,6 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
 use crate::tui::adapter::output_widget::render_document_from_view_model;
-use crate::tui::adapter::status_widget::{
-    apply_diagnostic_status_to_widget, apply_runtime_status_to_widget,
-};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -181,14 +178,20 @@ impl App {
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
-            apply_runtime_status_to_widget(&self.model, &mut self.status_bar);
-            apply_diagnostic_status_to_widget(&self.model, &mut self.status_bar);
             self.view_state.dirty.clear_status();
         }
     }
 
     pub(crate) fn mark_output_dirty(&mut self) {
         self.view_state.dirty.mark_output();
+    }
+
+    pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
+        crate::tui::view_assembler::status::StatusViewAssembler::assemble_status_view(
+            &self.model.runtime,
+            Some(&self.model.session),
+            &self.model.diagnostic,
+        )
     }
 
     /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）

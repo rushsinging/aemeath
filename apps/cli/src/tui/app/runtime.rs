@@ -1,5 +1,6 @@
 use super::App;
 use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::model::runtime::workspace::WorktreeKind;
 
 impl App {
@@ -17,7 +18,9 @@ impl App {
         self.view_state.output.clear_selection();
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
-        self.status_bar.reset_runtime_state();
+        self.model
+            .runtime
+            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::ready()));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
         if let Some(agent_client) = &self.agent_client {

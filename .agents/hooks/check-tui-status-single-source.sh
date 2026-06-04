@@ -24,18 +24,30 @@ report_matches() {
   rm -f "$tmp"
 }
 
-# StatusBar 运行态镜像（model/session/tps/token/api/context_size/工作目录上下文）的真相归
-# RuntimeModel/SessionModel。唯一生产写入路径为
-# StatusViewAssembler::assemble_runtime_view -> StatusBar::apply_runtime_view，
-# 由 adapter/status_widget.rs 调用。结构上禁止恢复分散 setter 或 ChatState token/api 镜像。
+# StatusBar 必须保持 runtime/diagnostic/status stateless：
+# - runtime/token/tps/model/session/context 真相归 RuntimeModel/SessionModel
+# - status notice 真相归 RuntimeModel.status_notice
+# - diagnostic severity/text 真相归 DiagnosticModel
+# - thinking 开关真相归 RuntimeModel.thinking
+# 渲染/选区路径只能消费 StatusViewModel，不得恢复 widget mirror 或写回 adapter。
 report_matches \
-  "status_bar runtime mirror setters must not be reintroduced; derive StatusRuntimeViewModel from RuntimeModel/SessionModel and write via apply_runtime_view." \
-  grep -RInE 'fn[[:space:]]+(set_model|set_session_id|set_tps|set_tokens|set_api_calls|set_context_size|set_context_paths|set_git_context)[[:space:]]*\(' \
+  "StatusBar must not store runtime/diagnostic/status widget mirrors; derive StatusViewModel from model at render time." \
+  grep -RInE '^[[:space:]]*(pub\([^)]*\)[[:space:]]+|pub[[:space:]]+)?(status|status_type|vm|thinking)[[:space:]]*:' \
     "$ROOT/apps/cli/src/tui/render/status" --include='*.rs'
 
 report_matches \
-  "ChatState must not mirror token/api usage; keep usage in RuntimeModel and derive status via StatusViewAssembler." \
-  grep -RInE '(total_input_tokens|total_output_tokens|total_api_calls|last_input_tokens|usage_snapshot|record_usage)' \
+  "StatusBar runtime/status setters must stay deleted; update RuntimeModel/DiagnosticModel and render StatusViewModel instead." \
+  grep -RInE 'fn[[:space:]]+(set_success|set_warning|reset_runtime_state|set_thinking|apply_runtime_view|init|set_model|set_session_id|set_tps|set_tokens|set_api_calls|set_context_size|set_context_paths|set_git_context)[[:space:]]*\(' \
+    "$ROOT/apps/cli/src/tui/render/status" --include='*.rs'
+
+report_matches \
+  "status_widget adapter must remain retired; do not reintroduce widget writeback functions." \
+  grep -RInE 'fn[[:space:]]+apply_(runtime|diagnostic)_status_to_widget[[:space:]]*\(' \
+    "$ROOT/apps/cli/src/tui/adapter/status_widget.rs"
+
+report_matches \
+  "ChatState must not mirror token/api/thinking usage; keep usage/thinking in RuntimeModel and derive status via StatusViewAssembler." \
+  grep -RInE '(total_input_tokens|total_output_tokens|total_api_calls|last_input_tokens|usage_snapshot|record_usage|thinking_enabled)' \
     "$ROOT/apps/cli/src/tui/app/state" --include='*.rs'
 
 exit "$fail"
