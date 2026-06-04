@@ -25,6 +25,8 @@ impl LiveStatusAssembler {
             Some(SpinnerLineView {
                 frame: anim.frame,
                 verb: anim.verb.clone(),
+                elapsed_secs: anim.elapsed_secs(),
+                phase_elapsed_secs: anim.elapsed_secs(),
                 phase_text: runtime.spinner.phase.as_ref().map(phase_text),
             })
         } else {
@@ -102,6 +104,8 @@ mod tests {
         let view = vm.spinner.expect("spinner present");
         assert_eq!(view.frame, 12);
         assert_eq!(view.verb, "Forging");
+        assert_eq!(view.elapsed_secs, 1);
+        assert_eq!(view.phase_elapsed_secs, 1);
         assert_eq!(view.phase_text, None);
     }
 

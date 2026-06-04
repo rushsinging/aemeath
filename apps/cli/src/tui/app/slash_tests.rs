@@ -236,14 +236,14 @@ async fn test_clear_command_clears_task_store_and_task_window() {
         ]),
     );
     app.refresh_live_status_from_model();
-    assert!(!app.output_area.task_status_lines.is_empty());
+    assert!(!app.live_status_view_model().task_lines.is_empty());
 
     app.handle_slash_command_with_events("/clear", None).await;
     app.refresh_live_status_from_model();
 
     assert_eq!(client.clear_tasks_calls.load(Ordering::SeqCst), 1);
     assert!(app.model.runtime.task_status.lines.is_empty());
-    assert!(app.output_area.task_status_lines.is_empty());
+    assert!(app.live_status_view_model().task_lines.is_empty());
     let _ = finish_tx.send(());
 }
 
@@ -263,13 +263,13 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
         "/reflect 应返回前台 RunReflection Effect"
     );
     assert!(app.chat.is_processing, "/reflect 后应进入后台处理中状态");
-    // spinner 业务真相在 Model；widget 镜像经 refresh_live_status_from_model 单向派生。
+    // spinner 业务真相在 Model；渲染直接消费 LiveStatusViewModel。
     assert!(
         app.model.runtime.spinner.active,
         "/reflect 后 Model spinner 应 active"
     );
     app.refresh_live_status_from_model();
-    assert!(app.output_area.spinner.is_some());
+    assert!(app.live_status_view_model().spinner.is_some());
 
     // 由 executor 执行 Effect：后台 spawn 调用 LLM，不阻塞调用方。
     for effect in effects {
@@ -329,8 +329,8 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
     );
     app.refresh_live_status_from_model();
     assert!(
-        app.output_area.spinner.is_none(),
-        "自动 reflection 不应启动 spinner（widget 镜像）"
+        app.live_status_view_model().spinner.is_none(),
+        "自动 reflection 不应启动 spinner（LiveStatusViewModel）"
     );
 
     let _ = finish_tx.send(());

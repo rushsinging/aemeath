@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_enqueue_submission_echo_renders_queued_block_into_model() {
         // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型。
-        // 渲染不再经 document block，改为 spinner 上方的 queued_submission_lines。
+        // 渲染不再经 document block，改为 live-status projection。
         let mut app = make_app();
         app.enqueue_submission_echo("排队中的输入");
 
@@ -269,7 +269,7 @@ mod tests {
             "入队应作为 QueuedUserMessage block 进入 ConversationModel"
         );
 
-        // queued_submission 不再出现在 document 中（已移至 spinner 上方）。
+        // queued_submission 不再出现在 document 中（已移至 live-status projection）。
         let plain = app
             .output_area
             .document()
@@ -289,9 +289,9 @@ mod tests {
         app.enqueue_submission_echo("排队中的输入");
 
         assert_eq!(
-            app.output_area.queued_submission_lines,
+            app.live_status_view_model().queued_lines,
             vec!["> 排队中的输入"],
-            "入队后应立即刷新 live-status widget 镜像"
+            "入队后应可从 live-status projection 派生排队输入"
         );
     }
 

@@ -219,10 +219,11 @@ impl App {
                 return;
             }
 
+            let live_status = self.live_status_view_model();
             let buf = f.buffer_mut();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.output_area
-                    .render(chunks[0], buf, &self.view_state.output);
+                    .render(chunks[0], buf, &self.view_state.output, &live_status);
             }))
             .is_err()
             {
