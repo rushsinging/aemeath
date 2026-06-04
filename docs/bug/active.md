@@ -2,17 +2,17 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功执行 hook 时只记录 stdout/stderr 字节数，不记录内容；已提取 stdout/stderr 中 `[hook-env]` 行并用 info 日志写入 `aemeath.log`，便于 debug 日志级别下排查 main/worktree 路径 |
-| 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | 根因补充：`UiEvent::Text` / `UiEvent::Thinking` 等 streaming 事件每个 chunk 都同步 `refresh_output_widget_from_model()`，会反复 assemble/render 整个输出区，长输出时拖慢主循环，表现为正文/工具块/输入响应滞后。修复：新增 `AppViewState.dirty`，事件处理只合并 dirty，渲染前管线 `flush_dirty_view_models()` 按帧批量刷新 output/status；系统提示、用户回显、AskUser、历史恢复等路径改为标记 output dirty。保留 Text/Thinking 与 spinner phase 同批 intent 的修复。验证：`test_update_agent_text_persists_output_dirty_until_render_pipeline_refreshes`、notice 渲染回归、`tui::app::update::notice`。 |
-| 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
-| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
-| 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
-| 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
-| 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
-| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | LLM 原始输出中的长文本行（无换行）在 TUI 中只渲染到屏幕可视宽度，超出部分不可见（不自动换行也不可横向滚动），用户看到的文本在某个位置突然中断 |
-| 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方；AskUser 块本身固定在初始位置，其他内容在上方不断刷新 | 中 | 待确认 | 待用户确认 | 2026-06 | 根因：AskUser 作为交互块插入/回答时未清理 `ConversationModel.active_text_block_id`，若前一段 AssistantText 未收到 `TextBlockComplete`，后续 `ObserveAssistantText` 会继续 extend AskUser 前的旧 AssistantText，导致新输出渲染在 AskUser 上方。修复：ShowAskUser/AnswerAskUser 均清理活跃文本块边界，新增回归测试覆盖回答后新 assistant text 位于 AskUser 下方 |
-| 115 | check-unit-tests 中 test_reasoning_config_uses_thinking_budget_before_model_reasoning 测试误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | 已验证当前 `main` 上该测试本身通过：`cargo test -p runtime reasoning_config` 与 `./.agents/hooks/check-unit-tests.sh` 均通过。根因是测试过滤参数误用：`cargo test -p runtime test_reasoning_config_uses_thinking_budget_before_model_reasoning -- --exact` 过滤的是完整测试路径，短名配合 `--exact` 会匹配 0 个测试，容易被 hook/人工检查误判为该测试失败。修复：增加 `test_reasoning_config_exact_filter_path_documents_stop_hook_command`，固化正确完整路径 `utils::bootstrap::provider_client::tests::test_reasoning_config_uses_thinking_budget_before_model_reasoning`，并补充文档说明。 |
-| 116 | TaskListCreate 工具返回未带 task list ID，LLM 无法继续维护任务状态 | 中 | 已修复 | 待用户确认 | 2026-06 | 修复：1) `TaskListCreate.call()` 返回结果新增 "Task list #N created successfully.\nSubject: ...\nSummary: ...\nNext steps: ..." 格式，明确显示 task list ID 并引导 LLM 直接调用 TaskCreate；2) 工具 description 增加 "After successful creation, you can immediately call TaskCreate — they automatically attach to this list" 引导。附带修复：Memory add 返回 "记忆已添加。ID: xxx" 而非仅"记忆已添加。"；TaskStop 新增 resolve_display_id 支持，与其它任务工具 ID 体系保持一致。 |
+| 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功时不记录 stdout/stderr 内容；已修复提取 [hook-env] 行写入日志 |
+| 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
+| 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | TUI 保存/渲染大工具参数或 result 触发主线程大量 clone/计算阻塞 event loop |
+| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
+| 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
+| 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | /clear 未清空 TaskStore 和 task_status lines；已新增 clear_tasks 并清空 task lines |
+| 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
+| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | TUI 长行不自动换行也不可横向滚动，超出屏幕宽度的内容不可见 |
+| 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方 | 中 | 待确认 | 待用户确认 | 2026-06 | AskUser 未清理 active_text_block_id，新输出渲染到 AskUser 块上方；已修复 |
+| 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
+| 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
 
 
 ### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
@@ -355,199 +355,66 @@
 **涉及路径**：`aemeath-core/src/tool_result_storage.rs`、`aemeath-cli/src/tui/app/stream.rs`、`aemeath-cli/src/agent_runner/loop_helpers.rs`、`aemeath-cli/src/agent_runner/loop_run.rs`
 
 ### #27 Sub-agent 已执行 tool call 但 task list 状态不更新
-**症状**：父 agent 创建 7 个 task（"#1 拆分 task.rs (509→<400)" ... "#7 ..."），通过 Agent tool 派发 sub-agent 执行其中某个（如 "拆分 state.rs 到400行以下"）。sub-agent 已完成 Read / Bash / Write / Bash / Bash 等多个 tool call（屏幕可见），但临时区域的 task list 仍显示 `Tasks: 0/7`，所有 7 项保持 `☐`（pending）状态。
-**复现路径**：
-1. LLM 通过 TaskCreate 一次创建多条 task
-2. LLM 通过 Agent tool 派发 sub-agent 处理其中一个 task
-3. sub-agent 在隔离 context 内调用工具完成工作
-4. 父 agent 一侧 task list 未变化，无 in_progress / completed 反馈
-**疑似根因**：
-1. AgentTool 派发时未读取 / 不接受 `task_id` 参数，无法把"对应哪个父 task"传递下去
-2. sub-agent 完成回报后，父 agent 一侧没有自动 `TaskUpdate(completed)` 联动
-3. sub-agent 的 TaskStore 与父隔离：即便 sub-agent 自己调用 TaskUpdate，也写到自己的 store，父看不到
-4. 父 agent 自身在派发前也没有 `TaskUpdate(in_progress)`（这部分与 #29 共因）
-**修复方向**：
-1. **AgentTool 自动桥接 taskId**：Agent tool 接受 `task_id` 参数，执行前把对应 task 标 in_progress，执行成功后标 completed，失败时标 cancelled / 留 in_progress
-2. **TaskStore 父子共享**：让 sub-agent 通过引用看到父的 TaskStore，TaskUpdate 直接写父
-3. **system prompt 增强**：派发 sub-agent 时必须在 prompt 中绑定 task_id，并在 sub-agent 完成后由父 agent 自检状态
-4. **UI 兜底**：sub-agent 期间在对应 task 旁显示 `(agent working)` 标记
-**涉及路径**：
-- `aemeath-tools/src/agent.rs`（AgentTool 接受 `task_id` 并在 run_agent 前后自动联动）
-- `aemeath-core/src/task.rs`（TaskStore 父子共享 / 引用语义）
-- `aemeath-cli/src/agent_runner.rs`（sub-agent 与父 TaskStore 的关系）
+
+**症状**：父 agent 创建多条 task 后通过 Agent tool 派发 sub-agent 执行，sub-agent 已完成多个 tool call，但父侧 task list 仍显示 `Tasks: 0/7`，全部保持 pending。
+
+**根因**：AgentTool 派发时未接受 `task_id` 参数，无法桥接父子 task 状态；sub-agent 的 TaskStore 与父隔离，TaskUpdate 只写自己 store，父看不到。
+
 **修复（2026-05-11）**：
-1. `Agent` tool 新增 `taskId/task_id` 参数，执行前自动将父 task 标记为 `in_progress`，成功后标记为 `completed`，失败后恢复为 `pending`。
-2. 子代理上下文继续复用父 `TaskStore`，父侧 task list 可实时观察到 AgentTool 的状态桥接结果。
-3. 子代理注册工具时排除 TaskCreate/TaskUpdate/TaskList 等协调类工具，避免子代理绕过父级状态管理。
-4. 新增 `agent_tool_tests` 覆盖 taskId 缺失、成功完成、失败回滚三条路径。
+1. `Agent` tool 新增 `taskId/task_id` 参数，执行前自动将父 task 标记为 `in_progress`，成功后 `completed`，失败后恢复 `pending`
+2. 子代理上下文复用父 `TaskStore`，父侧可实时观察状态桥接
+3. 子代理注册时排除 TaskCreate/TaskUpdate/TaskList 等协调类工具
+4. 新增 `agent_tool_tests` 覆盖 taskId 缺失、成功完成、失败回滚
+
+**涉及路径**：`aemeath-tools/src/agent.rs`（AgentTool taskId 桥接）、`aemeath-core/src/task.rs`（TaskStore）、`aemeath-cli/src/agent_runner.rs`（sub-agent 与父 TaskStore 关系）
 
 ### #29 主 agent tool call 执行后 task list 状态不更新
-**症状**：task 列表只有 1 条 `#1 拆分 hook.rs → hook/ 目录`，状态 `☐`（pending）。LLM（主 agent，不是 sub-agent）已通过 Bash tool 执行 `mkdir -p .../aemeath-core/src/hook`（属于该 task 的第一步），并进入 Thinking 阶段（spinner 显示 `Cogitating... 389s (Thinking...)`）。task list 仍显示 `Tasks: 0/1`，#1 仍为 `☐`，没有任何 in_progress / completed 联动。
 
-**复现路径**：
-1. LLM 创建 task（TaskCreate）
-2. LLM 直接调用 Bash / Edit / Write 等核心 tool 开始执行该 task 的工作
-3. 观察 task 状态：始终停在 `☐`，从未变成 `⟳`（in_progress）或 `✓`（completed）
+**症状**：主 agent（非 sub-agent）已通过 Bash/Edit/Write 等工具开始执行 task 工作，但 task list 仍显示 pending，从未变为 in_progress 或 completed。
 
-**根因**：当前架构完全依赖 LLM 自觉调用 TaskUpdate，但：
-1. **system prompt 缺少强约束**：task 系统的指引可能只是"鼓励"而非"强制"维护状态，LLM 倾向跳过
-2. **核心 tool 无自动联动**：Bash / Edit / Write 等核心 tool 执行前后没有任何机制把"当前正在处理哪个 task"标 in_progress
-3. 与 sub-agent 路径（#27）的差异：主 agent 路径 **不能** 走 AgentTool 桥接 taskId 的方案——主 agent 一次回复可能跨多个 task，没有显式"哪个 tool call 对应哪个 task"的语义信号
-
-**修复方向**（按介入强度排序）：
-1. **system prompt 强约束**（最小改动，主推）：明确规定"开始任何实质性 tool call 前必须先 TaskUpdate(in_progress)；完成后必须 TaskUpdate(completed)"，并在 prompt 中给反例 / 失败示例
-2. **任务文本启发式联动**（中等激进）：tool call 执行时若有 in_progress task，不动；若没有 in_progress 但有 pending task，且 LLM 在 thinking 文本或 tool input 中提到该 task 标题关键词，自动标 in_progress
-3. **UI 兜底**：tool call 期间在第一个 pending task 旁显示 `(working?)` 提示，让用户知道存在 task/work 错配
-4. **Hook 兜底**：PostToolUse hook 检查"是否有 in_progress task"，若无则在日志或 UI 警告
-
-**涉及路径**：
-- system prompt 中 task 维护指引（`aemeath-core/src/context.rs` 或专用 task prompt 文件）
-- `aemeath-core/src/task.rs`（如做启发式联动需要 query 接口）
-- `aemeath-cli/src/tui/output_area/`（UI 兜底显示）
+**根因**：架构完全依赖 LLM 自觉调用 TaskUpdate，但 system prompt 缺少强约束，且核心工具（Bash/Edit/Write）执行前后无自动联动机制。与 #27 不同，主 agent 一次回复可能跨多个 task，无法走 AgentTool taskId 桥接方案。
 
 **修复（2026-05-11）**：
-1. 静态 system prompt 新增强制流程：新多步请求先 `TaskListCreate`，直接执行 Read/Grep/Glob/Bash/Edit/Write 等工具前先 `TaskUpdate(in_progress)`，完成后 `TaskUpdate(completed)`，全部完成后 `TaskListComplete`。
-2. `TaskCreate` 工具描述同步加入 TaskListCreate 前置要求，降低模型跳过状态维护的概率。
-3. 新增 prompt 单元测试覆盖直接工具前后必须 TaskUpdate、Agent taskId 委派、Task reminder 可能无关等约束。
+1. 静态 system prompt 新增强制流程：直接执行工具前先 TaskUpdate(in_progress)，完成后 TaskUpdate(completed)
+2. `TaskCreate` 工具描述加入 TaskListCreate 前置要求，降低模型跳过状态维护的概率
+3. 新增 prompt 单元测试覆盖相关约束
 
-### #26 几乎每次对话都触发 superpowers skill 调用（已归档：不作为 Bug）
-**归档原因**：用户确认该项不算 Bug，不再作为活动 bug 跟踪。
-**原现象**：几乎每次对话开始时，LLM 都会主动通过 Skill 工具调用 superpowers 系列 skill（如 `superpowers:using-superpowers`、`superpowers:brainstorming` 等），即使用户的请求只是简单提问、查询信息或闲聊，并不需要任何 skill 介入。
-**原疑似根因**：SessionStart hook 提示语偏强、`using-superpowers` description 触发面过宽、Skill 列表注入后模型倾向调用 skill。
-**后续处理**：如需调整，应作为体验优化 / feature 另行登记，而非 bug 修复。
+**涉及路径**：system prompt 中 task 维护指引、`aemeath-tools/src/task_create.rs`
 
-### #34 Task reminder 干扰新用户请求（已归档 2026-05-17）
-用户确认修复。修复内容：新增 batch summary 与 TaskListCreate/TaskListComplete，task reminder 按 batch 输出并明确提示旧 batch 可能与最新用户消息无关。详见 `docs/bug/archived/034-task-reminder-interference.md`。
+### #26 几乎每次对话都触发 superpowers skill 调用 → [archived/026-superpowers-skill-trigger.md](archived/026-superpowers-skill-trigger.md)
 
-### #31 WebSearch 工具返回空结果（已归档 2026-05-14）
-用户确认修复。修复内容：结果块匹配改为 `<div class="result "`，title/snippet 不再依赖属性顺序，检测 `anomaly.js` 后 fallback 到 Bing 搜索。详见 `docs/bug/archived/031-web-search-empty-results.md`。
+### #34 Task reminder 干扰新用户请求 → [archived/034-task-reminder-interference.md](archived/034-task-reminder-interference.md)
+
+### #31 WebSearch 工具返回空结果 → [archived/031-web-search-empty-results.md](archived/031-web-search-empty-results.md)
 
 ### #32 Task list 窗口化：始终只显示 1 条 task
 
-**症状**：task list 显示行为不一致，表现出两种症状：
+**症状**：task list 窗口在多种场景下表现异常：串行执行时退缩至 1 条、completed 挂留不清理、排序错乱、TTL 过滤导致窗口未填满。
 
-**症状 A — 窗口退缩至 1 条**：
-Session `019e0665-0efc-7e7e-ad54-e895c2ae8a3a` 实例：
-- Task 1~10 陆续创建，总数 > 7
-- LLM 持续完成任务（TaskUpdate completed），不断增加新 task
-- task list 窗口始终只显示 1 行（如正在执行 #9，则只显示 #9）
-- #9 完成后跳到 #10，#9 随之消失，窗口仍只显示 1 行
+**根因**：`build_task_window()` 窗口化策略存在多处缺陷：
+1. 串行执行时 completed 只取 1 条，窗口易退缩至 1
+2. completed 无 TTL 自动清理，过期项不排除
+3. "最近完成"按 id 升序取而非 `updated_at` 降序
+4. 温和扩展/下限保护阶段只在 TTL 过滤后的 completed 中选取，大量超 TTL completed 被移除后不够补齐
+5. completed 扩展补齐后未按显示编号排序，导致视觉错乱
 
-**症状 B — completed 挂留 + 窗口截断**：
-- Task 2 已完成（completed），但仍滞留在 task list 中不消失
-- 同时在显示 task 4（执行中）和 task 5（待执行）
-- 即 task list 显示：2（completed）、4（in_progress）、5（pending）
-- 未达 7 条上限，但 task 3 等中间 task 未显示，completed 未自动清理
+**修复历史**（6 轮迭代，最终版本核心逻辑）：
+- A 轮(05-09)：Completed TTL 过滤(30s)+温和扩展+下限保护+pending 升序
+- B 轮(05-11)：TTL 阈值调至 300s，摘要行用全量 completed 计数，completed 按 id 升序显示
+- C 轮(05-18)：pending=0 且有 in_progress 时跳过 TTL 过滤，从旧 completed 补满窗口
+- D 轮(05-18 E)：温和扩展/下限保护回退到 `all_completed_sorted`（未过滤）补齐，避免 TTL 移除过多
+- E 轮(05-19 F)：新增 `merge_completed_lines()` 按 display number 排序 completed 区块
 
-**症状 C — completed 不是"最近"、pending 跳号（2026-05-12 截图）**：
-- `Tasks: 5/11`，共 5 条 completed，窗口只显示 #1（通常是最早完成的，而非"最近完成"）
-- 显示顺序：✓ #1、■ #3、■ #9、□ #4、□ #5、□ #10、□ #11
-- pending 列表从 #5 跳到 #10，#6/#7/#8 既未出现在 completed 也未出现在 pending 段，疑似被静默截断
-- 期望：「最近完成（按 updated_at desc 取 1~N 条）+ 所有 in_progress + 后续 pending 升序连续填充」
+**回归测试**：22 个 task_window 测试全部通过（含 `test_bug32_window_stays_full_with_ttl_pressure`、`test_bug32_window_never_shrinks_during_progression`、`test_bug32_completed_expansion_keeps_display_order_for_user_snapshot`）
 
-**症状 D — 仅剩最后 in_progress 时窗口未填满（2026-05-17 截图）**：
-- `Tasks: 9/10`，只显示 `✓ #9 Important 7: can_create_agents 硬校验` 和 `■ #10 Minor 1-6...`
-- 实际还有 #1~#8 completed，可用于填满 7 条窗口，但被 TTL 过滤提前丢弃
-- 期望：无 pending 且存在 in_progress 时，窗口显示最近 completed 补足剩余容量 + 当前 in_progress，例如 #4~#9 completed + #10 in_progress
+**关联**：Feature #24（窗口化限量显示）、Feature #18（task batch 机制）
 
-**复现路径**：
-1. LLM 创建 ≥ 2 条 task
-2. LLM 完成部分 task，新建更多 task（总数持续波动）
-3. 观察 task list 显示 —— 始终只有 1 行
-
-**根因**：`build_task_window()` 窗口化策略在两处逻辑缺陷：
-
-1. **症状 A 根因**：窗口填充规则"上一条 completed + 所有 in_progress + 后续 pending"在串行执行场景（1 条 in_progress）下，completed 最多只取 1 条，结果窗口极易退缩至 1 条
-2. **症状 B 根因**：
-   - completed 未设置自动清理（TTL），过期 completed 不会自动从窗口排除
-   - 窗口填充时对 pending 的截断位置不正确，跳过了 task 3（pending）而直接到了 task 5
-3. **症状 C 根因（疑似）**：
-   - "最近完成"未按 `updated_at` 降序取最新，而是按 id 升序取第一条 completed → 永远显示 #1
-   - pending 段在 in_progress 之后接着取"id > 最大 in_progress id"的 pending，导致 #6/#7/#8 若状态是 completed 但被 TTL 排除，pending 仍从 #4 起，但配额耗尽前出现跳号说明排序/截断逻辑存在 off-by-one
-
-另外需确认 `task_status_lines` 是批量替换还是增量追加 —— 如果是增量方式，旧行不会被移除，会导致 completed 长期滞留。
-
-**修复方向**：
-1. `build_task_window()` 添加**下限保护**：窗口结果 < `min(3, total_tasks)` 时扩大填充（补入更多 pending / completed）
-2. `build_task_window()` 修复 **pending 截断顺序**：按 task id 升序取 pending，不跳跃
-3. Completed task **自动清理**：窗口化时排除太旧的 completed（如已完成超过 3 秒），或每次重建窗口时只保留最近 N 条 completed
-4. 确认 `update_task_status` 每次推送的是 **完整窗口行列表**（批量替换），而非增量追加
-5. 单元测试覆盖：
-   - 10 tasks、1 in_progress / 9 pending → ≥ 3 条显示
-   - 5 tasks、1 completed(#2) / 1 in_progress(#4) / 3 pending(#3,#5,#6) → 按序显示 #2,#3,#4,#5
-
-**涉及路径**：
-- `aemeath-cli/src/tui/app/task_window.rs`（`build_task_window` 窗口化逻辑）
-- `aemeath-cli/src/tui/app/mod.rs`（`update_task_status` 调用侧）
-
-**修复（2026-05-09）**：
-1. **Completed TTL 过滤**：按 `updated_at` 降序排列，排除更新超过 30s 的旧 completed
-2. **温和扩展**：填充完核心任务后，有余量时自动补充更多 completed 和 pending
-3. **下限保护**：扩展后不足 `min(3, total)` 时进一步从 completed 头部补充
-4. **pending 顺序**：`pending.sort_by_key(|t| t.id.parse::<u64>().unwrap_or(u64::MAX))` 确保升序
-5. **单元测试**：新增 4 个测试覆盖下限保护、TTL 过滤、pending 顺序、温和扩展场景
-6. **门禁脚本补漏**：`scripts/check-unsafe-text-ops.sh` 新增不带 `&` 的切片检测模式
-
-**修复（2026-05-11）**：
-7. **TTL 阈值调整**：30s → 300s（5 分钟），且仅当 completed 数量超过 `max_lines` 时才触发 TTL 过滤；窗口有空位时所有 completed 都显示
-8. **摘要行全量 completed 计数**：`Tasks: x/y` 中的 x 改为使用全量 completed 数（`all_completed_count`），而非 TTL 过滤后的数量，修复"Tasks: 1/5 但实际已完成 3 条"的问题
-9. **Completed 显示顺序修正**：completed 行改为按 task id 升序显示，保持 task list 视觉顺序稳定；TTL 判断仍使用最大 `updated_at` 作为最新完成时间。
-10. **回归测试补充**：新增用户示例对应的 completed 乱序测试；`task_window` 16 个单元测试、`cargo test -p aemeath-cli`、`cargo check -p aemeath-cli` 通过。
-
-**修复验证（2026-05-18）**：
-11. **症状 D 验证**：当前 `build_task_window()` 已在 `pending_count == 0 && in_progress_count > 0` 时跳过 completed TTL 过滤，并按 `remaining - in_progress_count` 选取最近 completed 补满窗口。
-12. **回归测试确认**：`test_bug32_user_snapshot_keeps_full_window_when_only_recent_completed_and_in_progress` 覆盖 9/10 完成场景，期望显示 #4~#9 completed + #10 in_progress；`cargo test -p aemeath-cli task_window -- --nocapture` 通过 19 个 task_window 测试。
-
-**修复（2026-05-18 E 轮）**：用户复现：13 条 task，一开始显示 7 条，pending 减少后窗口逐渐收缩到 6/5/4/1 条。
-13. **根因**：温和扩展和下限保护阶段只在 TTL 过滤后的 `completed_for_display` 中选取，当大量 completed 超过 TTL（5 分钟）后，TTL 过滤移除了大部分 completed，剩余 completed 不够补齐窗口。
-14. **修复**：新增 `shown_ids: HashSet<&str>` 跟踪已显示的 task id 避免重复；温和扩展先从 TTL 过滤后 completed 补充，仍有余量时从 `all_completed_sorted`（未过滤）回退补齐；下限保护也从 `all_completed_sorted` 选取。所有选取阶段先 `collect()` 再遍历避免借用冲突。
-15. **回归测试**：新增 `test_bug32_window_stays_full_with_ttl_pressure`（8 completed + 1 in_progress，窗口保持 7 条）和 `test_bug32_window_never_shrinks_during_progression`（4 阶段渐进完成，窗口始终 7 条）。`cargo test -p aemeath-cli` 135 通过。
-
-**修复（2026-05-19 F 轮）**：用户复现 session `019e359e-4a50-77a7-a752-56f6ac115240`：窗口显示 `✓ #8 修复 architecture.md` 后接 `✓ #1/#2/#3/#4`，completed 区块排序错乱。
-16. **根因**：`build_task_window()` 先按 `updated_at` 选出最近 completed（如 #8），再把温和扩展补齐的旧 completed 插入到 `1 + comp_show` 之后，导致 completed 区块变成「最近完成 + 旧 completed 升序」，而不是视觉上的显示编号升序。
-17. **修复**：新增 `merge_completed_lines()`，每次 completed 扩展补齐后重建 completed 区块并按显示编号排序；窗口仍按 `updated_at` 选择最近 completed 作为候选，只修正最终显示顺序。
-18. **回归测试**：新增 `test_bug32_completed_expansion_keeps_display_order_for_user_snapshot`，覆盖用户截图中的 #8/#1/#2/#3/#4/#9/#10 顺序；同步调整 `test_completed_lines_keep_task_id_order_when_expanded` 和 mix 场景期望。`cargo test -p aemeath-cli task_window` 22 通过。
-
-**关联**：
-- Feature #24（task list 窗口化限量显示）—— 本 bug 是 #24 窗口化策略的缺陷
-- Feature #18（task batch 机制）—— 同属 task list 显示链路
+**涉及路径**：`aemeath-cli/src/tui/app/task_window.rs`（`build_task_window` 窗口化逻辑）、`aemeath-cli/src/tui/app/mod.rs`（`update_task_status` 调用侧）
 
 
 ### #33 Spinner 下方 task list 无法选中和复制
 
 **症状**：spinner 下方的 task list 行（摘要行 `━━ Tasks: 3/5 ━━` 及每条 task 的 `✓ #1 标题`、`■ #2 标题`、`□ #3 标题`）在 TUI 中可见但鼠标无法选中、无法复制。拖拽选中时这些行被跳过，`Ctrl+C` 复制时也拿不到文本。
-
-### #41 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出
-
-**状态**：待确认（已修复渲染缓存未 invalidate 问题）
-
-**症状**：
-- 在 TUI 中执行 `/reflect` 后界面像卡死一样无即时反馈
-- 等待一段时间后才开始出现 LLM 输出
-- 用户感知为命令执行期间 UI 事件循环被阻塞，而不是正常的流式/异步反馈
-
-**复现路径**：
-1. 在 TUI 会话中输入 `/reflect`
-2. 观察命令提交后的界面响应
-3. 界面短时间无更新，过一会儿才显示 LLM 相关输出
-
-**疑似根因**：
-1. `/reflect` 命令路径可能在 TUI update/命令处理阶段同步等待 LLM 调用，阻塞事件循环
-2. reflection 调用未通过 `Cmd`/runtime 异步副作用模型执行，或虽然异步执行但没有先更新状态/进度
-3. reflection LLM 请求未接入和主对话一致的 streaming/progress 反馈，导致首个输出前没有任何 UI 心跳
-
-**修复方向**：
-1. 排查 `/reflect` 命令入口、TUI update 路径和 reflection runner 的调用关系
-2. 确保 LLM 请求类副作用不在 `update()` 同步等待，必须通过 `Cmd` 或 runtime 异步执行
-3. 提交 `/reflect` 后立即显示状态（如"正在反思..."），并保持 spinner/UI 可刷新
-4. 如 reflection 输出不支持 token 级流式，至少在请求开始、收到响应、解析建议、写入 pending/auto-apply 阶段推送进度
-5. 添加回归测试或结构性测试，覆盖 `/reflect` 不阻塞 update 主路径
-
-**涉及路径**：
-- `aemeath-core/src/command/commands/reflect.rs`
-- `aemeath-core/src/reflection.rs`
-- `aemeath-cli/src/tui/app/update/`
-- `aemeath-cli/src/tui/app/stream/`
 
 ### #41 执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出
 

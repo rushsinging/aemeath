@@ -2,20 +2,20 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除已废弃 `logging.module_levels` 字段，统一为 `logging.level` 全局过滤；补充日志初始化、hook runner 构建、chat loop hook runner、hook 匹配/分发日志，便于判断 hook 配置是否加载、Stop hook 是否实际匹配和执行 |
-| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | 在 Stop hook 的关键脚本输出 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，并输出解析后的 `ROOT`/`PWD`，便于排查 main/worktree 中 hook 实际运行路径与 Claude 兼容目录注入是否正确 |
-| 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig、MemoryStore、/memory 命令、MemoryTool、system prompt 注入配置化，以及对话结束后的 session reminder recap；MemoryTool 存储参数已使用运行时 MemoryConfig，不再硬编码；Hook 兜底自动提取与淘汰确认暂缓。详见 [spec](specs/008-memory-system.md) |
-| 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
-| 68 | 项目指令搜索增强：全局 fallback ~/.claude/CLAUDE.md + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局指令优先 ~/.agents/AGENTS.md，不存在时 fallback ~/.claude/CLAUDE.md；项目指令从 cwd 向上最多 5 级祖先搜索 CLAUDE.md/AGENTS.md，每层级 Claude 优先；不再向下递归子目录，避免启动时扫描大型父目录导致 TUI 卡住 |
-| 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 产生的用户可见反馈不再混用普通 SystemMessage 展示；TUI 展示层对 `<system-reminder>` 包装脱壳，避免标签原样出现在输出区；新增 Hook 类消息，支持 Stop/StopFailure/其他 hook 后续按类型使用不同文案与样式 |
-| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed/delete 行当前走 syntect 语法高亮，应改为纯 `DIFF_REMOVE_FG` 红色，不调用 `push_highlighted_body`。涉及：`unified_diff.rs:105-108`（`DiffLineKind::Removed` arm）、`diff.rs:93-110`（`build_delete_line`）|
-| 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `cargo run -q` 跳过 TUI 直接 REPL 交互（或 pipe 模式），方便快速调试；`cargo run -v` 将日志输出到 stderr 而非仅写文件，方便 `cargo run` 时实时查看日志。涉及：CLI 参数解析（`apps/cli/src/main.rs` 或 `clap` 定义）、TUI 初始化条件分支、日志初始化（`logging_setup.rs`）|
-| 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
-| 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
-| 42 | 权限管控系统：交互式外部授权 + 统一权限评估 + audit/policy 域落地 | 高 | 设计中 | 未确认 | 范围从 Allow All 外部路径访问升级为完整权限管控系统：采用交互式授权体验 + 统一 PermissionEngine 评估模型；权限模式为 AskMe / Auto / Plan / AllowAll，其中 AllowAll 保留 root/YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只分析不执行副作用；Sandbox 仅预留未来扩展。**2026-05-30 并入 #62（audit/policy 域实现）**：047 DDD spec §4.2/§4.3/§8/§9 定义的 audit 域（AuditTrail / correlation id 串联 Session·Chat·Turn·Agent·Tool·Resource / policy·hook·outcome 三分记录）与 policy 域（PermissionRequest/Decision/Grant/Mode/Capability/RiskAssessment）归入本 feature 统一设计实施，不再独立拆分。详见 [spec](specs/042-permission-control-system.md)、[047 spec](specs/047-ddd-redesign.md) |
-| 49 | AskUserQuestion 增加「All of the above」与「Chat about this...」选项 | 中 | ✅ 已完成 | 未确认 | 已实现：AskUserState 新增 llm_option_count/chat_input_active 字段；ui_event.rs 构建 AskUserState 时追加内建选项（仅 LLM options ≥ 1 时）；ask_user_key.rs Enter 键分支处理 All/Chat/普通选项；Chat about this 进入自由输入子态（Esc 回选项列表，Enter 提交）；Space 禁止在内建选项上切换 multi_select；default guidance 告知 LLM 不要重复定义内建选项文案。内建选项文案使用英文 "All of the above" / "Chat about this..." |
-| 52 | Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文 | 中 | 未开始 | 未确认 | 当前 29 个内置 tool 中 27 个 description 已是英文，仅 EnterWorktree / ExitWorktree 两个 tool 的 description 和 input_schema 参数描述为中文。目标：将这两个 tool 的描述统一为英文，同时审查所有 tool 的 input_schema 参数描述是否也有中文残留。MCP tool 的 description 来自 MCP server 透传，不在本 feature 范围内。 |
-| 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 已为 EnterWorktree / ExitWorktree 单独放宽 result 展示行数，固定上下文提示不再被 `TOOL_RESULT_MAX_LINES=5` 截断显示 `... (n lines omitted)` |
+| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
+| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | Stop hook 脚本输出 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，便于排查路径 |
+| 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig/Store/命令/Tool/session reminder；Hook 兜底暂缓 |
+| 9 | 反思系统 | - | 已完成 | 未确认 | 已接入 /reflect、auto_apply、N 轮自动触发；用默认模型，不做独立 reflection model |
+| 68 | 项目指令搜索增强：全局 fallback + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局 fallback `~/.claude/CLAUDE.md`；项目指令向上 5 级搜索，不向下递归 |
+| 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
+| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
+| 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
+| 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成；SSE 传输有可靠性问题，MCP 加载暂时禁用待修复 |
+| 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Messages API 适配（流式/非流式/thinking/重试/tool use） |
+| 42 | 权限管控系统 | 高 | 设计中 | 未确认 | 交互式外部授权 + 统一 PermissionEngine + audit/policy 域；详见 [spec](specs/042-permission-control-system.md) |
+| 49 | AskUserQuestion 增加 All/Chat 选项 | 中 | ✅ 已完成 | 未确认 | 已实现 All/Chat 内建选项、chat about this 自由输入态、选项双行渲染 |
+| 52 | Tool 描述英文化 | 中 | 未开始 | 未确认 | 将 EnterWorktree/ExitWorktree 两个 tool 的中文描述统一为英文 |
+| 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 为 worktree 工具单独放宽 result 展示行数，不再被截断 |
 
 ### #75 EnterWorktree/ExitWorktree result 不截断
 
@@ -125,150 +125,42 @@
 
 **状态**：已完成（c98c26c），待确认
 
-**背景**：AskUserQuestion 选项只支持纯字符串，无法为每个选项附带说明文字；内建选项缺乏"以上全不"选项；自定义输入需要先进入子态再切换，操作不直观。
-
 **实现**：
-1. **OptionItem 类型**：sdk 层新增 `OptionItem { title, description }` 结构体，支持 LLM 返回 `{ title, description }` 对象格式，向后兼容纯字符串反序列化
-2. **智能内建选项**：≥2 LLM 选项时追加 All/None/Type something；1 个选项时追加 None/Type something；0 个选项时纯自由输入
+1. **OptionItem 类型**：sdk 层新增 `OptionItem { title, description }`，向后兼容纯字符串
+2. **智能内建选项**：≥2 LLM 选项时追加 All/None/Type something；1 个追加 None/Type something；0 个纯自由输入
 3. **Type something 输入框**：选中后进入行内编辑态，Up 返回选项列表，Enter 提交，Esc 取消
 4. **选项渲染**：title 加粗 + description 灰色缩进双行布局
 5. **工具 schema 更新**：options 支持 `oneOf(string, object { title, description })`
 
 **变更范围**：sdk, runtime, tools, TUI 全链路（18 files, +404 -96）
-3. 「以上全是」回传给 LLM 的内容**必须**是结构化的全部选项集合，不能只回传字面字符串「以上全是」，否则 LLM 无法判断到底选了哪些。
-4. 「chat about this」**必须**进入与 free_input 等价的输入态：输入区获得焦点、Enter 提交、Esc 取消回到选择态；不应直接把字面「chat about this」当作回答提交。
-5. 两个内建选项**不得**与 LLM 提供的 option label 冲突；如果发生重名，**必须**有明确的去重或避让策略。
-6. 既有「上下键移动 → Enter 确认」交互**必须**保持；内建选项参与同一 selected index 序列，不能引入第二条选择状态机。
 
-**推荐设计方向**：
-- 在 AskUserQuestion options 渲染层把内建选项作为合成项追加到列表末尾，selected index 仍是单一来源；
-- 内建选项类型化（例如枚举 `BuiltinOption::All` / `BuiltinOption::Chat`），在 Enter 时分支处理：`All` 直接构造全部 option 的回答，`Chat` 切换 UI 到自由输入态再提交；
-- 回答提交层区分「来自 options 的选择」和「来自 chat 自由输入」两种结构，避免 LLM 收到无法解析的混合字符串；
-- 多语言/i18n 文案以中文为主，参考 `[Enter] 确认 / [Esc] 取消 / [Tab] 切换选项` 现有风格，统一文案常量；
-- 与 bug #63（AskUserQuestion options 选择同步）协同：渲染缓存必须随 selected index 变化失效，确保内建选项也能正确高亮。
+**涉及路径**：AskUserQuestion options 渲染、输入态切换、回答构造、文案常量
 
-**涉及路径（预计）**：
-- AskUserQuestion options 渲染与 selected index 状态（TUI options 列表）
-- AskUserQuestion 输入态切换（chat about this 进入 free_input 子态）
-- AskUserQuestion 回答构造与回传（结构化「以上全是」与自定义文本）
-- AskUserQuestion 文案常量与 i18n
-- 既有 free_input 模式与新增 chat about this 的关系澄清
-
-**验收标准**：
-1. 任意 options 模式下，选项列表末尾稳定出现「以上全是」与「chat about this」两项；options 为空场景按 spec 决定是否出现。
-2. 选择「以上全是」后，工具回答能让 LLM 准确还原所有 LLM 提供 option（按显示顺序），不会被误识别为某一个 option。
-3. 选择「chat about this」后，TUI 进入自定义输入态，Enter 提交内容、Esc 返回选项列表；不会把字面文案当作回答。
-4. 内建选项与 bug #63 的修复方向一致，上下键高亮和回车确认始终对应同一项，不出现 TUI 显示与实际回答不一致。
-5. 单元测试覆盖：仅 options、options + free_input、options 为空、内建选项与 LLM option 重名、内建选项被高亮后 Enter 行为。
-
-**明确不做**：
-1. 不引入多选机制；「以上全是」只是一次性全选回答的语义糖，不改变 options 单选模型。
-2. 不为「chat about this」额外引入富文本/Markdown 渲染；输入态仍以单行/多行纯文本为主。
-3. 不在本 feature 中重做 AskUserQuestion 渲染缓存，相关修复归 bug #63 范围。
-4. 不替换或废弃既有 free_input：原 `allow_free_input=true` 行为保持，「chat about this」是 options 模式下的补充入口，不是替代。
-
-### #42 权限管控系统：交互式外部授权 + 统一权限评估
-
-**状态**：设计中
-
-**背景**：原始问题是在 allow all 模式下，用户明确要求访问 workspace 外路径时，Glob/Grep 仍被安全边界拦截。例如：
-
-```text
-Glob(**/*)
-Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is outside the workspace '/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform'.
-
-Grep /gha/notify|deployments|actor|pusher|github-actions|执行人/
-in /Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver
-Search path '/Users/guoyuqi/Nextcloud/work/wanaka/wanakadeploy/cicdserver' is outside the workspace '/Users/guoyuqi/Nextcloud/work/wanaka/wanaka-platform'.
-```
-
-**目标**：升级为完整权限管控系统。采用交互式授权体验与统一 `PermissionEngine` 评估模型：所有工具调用先归一化为 action / resource / risk / profile，再输出 Allow / Ask / Deny；权限模式包含 AskMe、Auto、Plan、AllowAll，其中 AllowAll 保留 root / YOLO 语义，Auto 是带护栏的日常开发模式，Plan 只允许规划和分析。完整设计见 [spec](specs/042-permission-control-system.md)。
-
-**建议范围**：
-1. 新增 `PermissionEngine` 与统一权限模型（request/action/resource/risk/decision/grant）。
-2. 将外部路径授权做成 TUI 交互式选择，而不是以 slash command 为主入口。
-3. `ToolContext` 或等价上下文保存 session 级授权 scope，路径必须 canonicalize 后保存。
-4. Read / Glob / Grep 先接入统一权限评估，解决原始外部路径访问场景。
-5. Edit / Write 后续接入 capability 检查，外部写入必须有 Write capability，AllowAll 除外。
-6. AllowAll 下默认允许 workspace 内外读写执行，仅记录审计，不再被 workspace 边界拦截。
-7. Sandbox 仅预留未来设计，本轮不实现；不引入复杂 modifier。
-
-**涉及路径**：
-- `shared/kernel/src/permission.rs`：权限模式、授权记录、决策模型与 engine。
-- `shared/kernel/src/tool.rs`：`ToolContext` / session grants / path_base 与权限上下文。
-- `contexts/tool/src/path_security.rs`：路径 canonicalize 与 scope 判断。
-- `contexts/tool/src/file_read.rs`、`glob_tool.rs`、`grep.rs`、`file_edit.rs`、`file_write.rs`：工具接入统一权限评估。
-- `apps/cli/src/tui/app/stream/permissions.rs`、`tools.rs`：TUI 权限 prompt、用户选择、approved/denied tool call 流程。
-
-
-**目标**：把 Aemeath 的配置、项目指令和 skills 发现机制调整为 Codex 风格，统一围绕 `~/.agents` 与项目内 `.agents` 目录组织，降低与 Claude 专属路径的耦合，并支持把当前用户已有配置迁移到最新模式。
-
-**核心要求**：
-
-**实现结果（2026-05-21）**：运行时读取已切换到新路径并加入 Claude Code 兼容：全局配置 `~/.agents/aemeath.json`，项目配置优先 `{cwd}/.agents/aemeath.json`，不存在或不覆盖的字段可由 `{cwd}/.claude/settings.json` 补充，其中 Claude Code hooks 数组结构会转换为 Aemeath hooks；全局指令读取 `~/.agents/AGENTS.md`，项目指令优先 `{cwd}/CLAUDE.md`，不存在时 fallback 到 `{cwd}/AGENTS.md`；项目 skills 优先 `{cwd}/.claude/skills`，其次 `{cwd}/.agents/skills`，全局 skills 读取 `~/.agents/skills`；Hook 执行环境同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`，兼容 Claude Code 脚本。应用主日志 `~/.agents/logs/aemeath.log`；guidance、memory、sessions、history、cost_history、mcp、settings 等运行数据统一派生自 `~/.agents`。程序不提供 `/config migrate` 且启动时不自动迁移；现有 `~/.aemeath` 与 `~/.claude/CLAUDE.md` 由发布/部署阶段手动复制到新路径。Worktree 下以启动 `cwd` 为边界读取，不跨 checkout 共享项目配置。
-
-1. **全局配置目录**：默认使用 `~/.agents` 作为全局配置根，且该根目录本身必须可配置。
-2. **Agent 配置文件**：Aemeath 的主配置文件改为 `aemeath.json`，默认路径为 `~/.agents/aemeath.json`；项目级配置后续可按 Codex 风格放在项目 `.agents` / `.codex` 同类目录中评估，但本 feature 的明确目标是先统一全局配置与 agent 配置命名。
-3. **AGENTS.md 指令读取**：读取 `~/.agents/AGENTS.md` 与 `{cwd}/AGENTS.md`，用于替代当前 `CLAUDE.md` 方向；拼接顺序、冲突处理和 prompt injection 扫描需在实现前明确。
-4. **skills 读取目录**：skills 固定优先读取 `~/.agents/skills` 与 `{cwd}/.agents/skills`，保持 skill 包与命名空间机制可用。
-5. **现有配置迁移**：实现时必须提供从当前模式迁移到新模式的路径，包括但不限于 `~/.aemeath/config.json`、`{cwd}/.aemeath/config.json`、`~/.aemeath/skills`、`{cwd}/.aemeath/skills`、`{cwd}/CLAUDE.md`、`~/.claude/CLAUDE.md` 到新路径的迁移、兼容读取或提示方案。
-6. **Worktree 场景**：必须考虑 git worktree。读取项目指令和 repo skills 时，不能只假设 `cwd` 就是主 checkout；需要明确 cwd、worktree checkout root、git common dir / repo root 的关系，避免 linked worktree 中漏读项目级 `.agents/skills` 或重复读取同一份配置。
-
-**推荐设计方向**：
-
-- 新增统一的配置根解析逻辑：默认 `~/.agents`，允许通过 CLI 参数、环境变量或现有配置 bootstrap 指定其他目录；解析后统一供配置、skills、AGENTS.md 使用，避免各模块重复拼路径。
-- 新增迁移/兼容层：首次发现旧配置但新配置不存在时，提示或自动迁移到 `~/.agents/aemeath.json`；迁移完成前可保留只读兼容窗口，但新写入必须写到新路径。
-- 项目指令读取从 `CLAUDE.md` 改为 `AGENTS.md`：全局 `~/.agents/AGENTS.md` + 当前工作目录 `{cwd}/AGENTS.md`。后续如需 Codex 的父目录链式读取，应单独拆 feature，避免本轮范围失控。
-- Skills 读取收敛到 `~/.agents/skills` 与 `{cwd}/.agents/skills`；旧目录仅作为迁移来源，不应继续作为长期主路径。
-- Worktree 处理应优先基于 git 信息确定 worktree checkout root，并在 cwd 与 checkout root 不同时定义清楚读取策略：至少保证当前 cwd 的 `{cwd}/AGENTS.md`、`{cwd}/.agents/skills` 可用；如后续引入 checkout root 级读取，必须做路径 canonicalize 与去重。
-
-**涉及路径（预计）**：
-
-- `shared/kernel/src/config/manager/mod.rs`：配置文件路径与加载层级调整。
-- `shared/kernel/src/config/mod.rs`：配置 schema / 默认路径常量调整。
-- `apps/cli/src/prompt.rs`：`CLAUDE.md` 读取迁移到 `AGENTS.md`。
-- `shared/kernel/src/skill/loader.rs`：skill root 调整为 `~/.agents/skills` 与 `{cwd}/.agents/skills`。
-- `shared/kernel/src/state/settings.rs`：若仍保留 settings 写入，需迁移到新配置根或明确废弃。
-- `docs/feature/active.md`：实现进度同步更新。
-
-**验收标准**：
-
-1. 新安装用户默认读取 `~/.agents/aemeath.json`、`~/.agents/AGENTS.md`、`~/.agents/skills`。
-2. 项目内默认读取 `{cwd}/AGENTS.md` 与 `{cwd}/.agents/skills`。
-3. 旧 `~/.aemeath/config.json` / `.aemeath/config.json` / `.aemeath/skills` / `CLAUDE.md` 存在时，有清晰迁移或兼容提示，不静默丢配置。
-4. 在 linked worktree 中启动时，项目级 AGENTS.md 与 skills 读取行为稳定、可预测，且不会重复加载同一路径。
-5. 新写入的配置落到新模式，不再写回旧路径。
+**验收标准**：选项末尾稳定出现 All/Chat；All 回传结构化选项集合；Chat 进入自由输入态；内建选项不与 LLM option 重名冲突
 
 ---
 
-### #33 优化 TaskListCreate / TaskListComplete 工具调用显示（已归档 2026-05-14）
-用户确认完成。详见 `docs/feature/archived/033-task-list-display-optimization.md`。
+### #42 权限管控系统
 
-### #30 Agent loop 收尾工作
+**状态**：设计中
 
-**目标**：把 agent loop 的所有退出路径收敛到统一 finalize，避免正常结束、用户打断、API 错误、超时、达到 max turns 等分支各自手写清理逻辑，导致 task 状态、hook、日志、session 持久化行为不一致。
+**目标**：AllowAll 模式下 Glob/Grep 访问 workspace 外路径仍被拦截。升级为完整权限管控：交互式授权 + 统一 `PermissionEngine`（action/resource/risk → Allow/Ask/Deny）；权限模式 AskMe/Auto/Plan/AllowAll。详见 [spec](specs/042-permission-control-system.md)。
 
-**与 #27/#29/#34 的关系**：
-- #27 已先在 `Agent` tool 层补 taskId 状态桥接，但子代理内部取消/超时/API error 等结果仍应由统一 `AgentRunOutcome` 表达，避免继续依赖字符串结果判断。
-- #29 已先通过 prompt 和工具描述强化主 agent 必须 `TaskUpdate`，后续 #30 只做收尾检查和日志提示，**不应**启发式自动替用户推进 task 状态。
-- #34 已先引入 task batch summary、`TaskListCreate` / `TaskListComplete` 和 reminder 隔离；后续 #30 可在 finalize 中检查 active list 是否仍有 pending/in_progress，并决定记录摘要或提示关闭，不自动误归档。
+**范围**：
+1. `PermissionEngine` + 统一权限模型
+2. 外部路径授权 → TUI 交互式选择
+3. `ToolContext` 保存 session 级授权 scope
+4. Read/Glob/Grep 先接入；Edit/Write 后续接入
+5. AllowAll 下允许 workspace 内外读写，仅审计
 
-**推荐 P0 范围**：
-1. 新增 `AgentRunStatus` / `AgentRunOutcome`，覆盖 completed、cancelled、timed_out、api_error、max_turns。
-2. 将 `CliAgentRunner::run_agent()` 多个 early return 收敛为统一 finalize 函数/guard。
-3. finalize 统一执行：恢复 client 设置、调用 `SubagentStop` hook、写结构化日志摘要（status、turns、duration、role、model）。
-4. 保持当前对外行为不变；不在本 feature 中自动完成 pending task。
-5. 补单元测试覆盖各类 outcome 的 finalize 行为，至少覆盖正常完成、错误、max turns。
+**涉及路径**：`permission.rs`、`tool.rs`、`path_security.rs`、`file_read/glob/grep/file_edit/file_write.rs`、TUI `permissions.rs`/`tools.rs`
 
-**后续 P1/P2 可选**：
-- session 持久化接入 finalize。
-- tool 资源释放/取消 token 清理接入 finalize。
-- task list 收尾检查结果写入日志或 reminder 状态。
+---
 
-**明确不做**：
-- 不自动把所有 pending task 标记 completed。
-- 不按工具调用启发式猜测应该更新哪个 task。
-- 不在当前 #27/#29/#34 修复分支里扩大实现该 feature；本轮只记录设计，后续单独在 #30 中统一完成。
+### #33 优化 TaskListCreate / TaskListComplete 工具调用显示
+→ [archived/033-task-list-display-optimization.md](archived/033-task-list-display-optimization.md)
+
+→ 详见下方 `### #30 Agent loop 收尾工作` 完整描述
 
 ---
 
@@ -840,101 +732,13 @@ enum MemoryCategory {
 
 ---
 
-### #9 反思系统（初版设计）
+### #9 反思系统
 
-**目标**：在关键节点自动触发反思，让 agent 从过去的行为中提炼经验，写入 Memory 系统，避免重复犯错。
+**状态**：已完成（待确认）
 
-**反思触发时机**：
+**目标**：在关键节点（任务完成、Stop、错误恢复后、用户显式触发）执行反思，将有价值的经验写入 Memory 系统（#8）。
 
-| 触发点 | 条件 | 反思内容 |
-|--------|------|---------|
-| 连续工具失败 | 同一 turn 内 ≥2 次工具调用失败 | 失败原因分析 + 正确做法 |
-| 会话结束 | `SessionEnd` hook | 整体会话总结 + 关键决策 |
-| 子代理结束 | `SubagentStop` hook | 子代理执行摘要 |
-| 用户中断 | 用户按 Escape 取消 | 当前进度快照 + 未完成原因 |
-| 重试后成功 | API 错误后重试成功 | 错误类型 + 重试策略有效性 |
-
-**反思流程**：
-
-```
-触发条件满足
-  → 构造反思 prompt（含近期对话片段）
-  → 调用 LLM 生成反思摘要（用轻量模型，如 deepseek-chat）
-  → 解析反思结果为结构化 MemoryEntry
-  → 写入 MemoryStore
-```
-
-**反思 Prompt 模板**：
-
-```
-你是一个反思助手。请分析以下对话片段，提炼出对未来会话有价值的信息。
-
-要求：
-1. 只记录客观事实和有效经验，不要记录临时状态
-2. 每条不超过 200 字
-3. 标注分类：Decision / Pattern / Pitfall / Preference
-
-对话片段：
-{recent_messages}
-
-请输出 JSON 数组：
-[{"category": "...", "content": "...", "tags": ["..."]}]
-```
-
-**反思结果结构**：
-
-```rust
-struct ReflectionResult {
-    entries: Vec<ReflectionEntry>,
-}
-
-struct ReflectionEntry {
-    category: MemoryCategory,
-    content: String,
-    tags: Vec<String>,
-}
-```
-
-**实现策略**：
-
-1. 反思调用使用**独立轻量 LLM 调用**（非主对话），避免干扰上下文
-2. 反思在后台异步执行（tokio::spawn），不阻塞主循环
-3. 反思结果静默写入 MemoryStore，不显示在对话中
-4. 仅在 `memory.enabled = true` 且有有效反思内容时触发
-
-**配置**（`config.json`）：
-
-```json
-{
-  "reflection": {
-    "enabled": true,
-    "model": "deepseek/deepseek-chat",
-    "max_entries_per_reflection": 3,
-    "min_turns_for_session_summary": 5,
-    "consecutive_failures_threshold": 2
-  }
-}
-```
-
-**依赖**：
-- Feature #8（Memory 系统）— 反思结果写入 MemoryStore
-- Hook 系统 — 通过 HookEvent 触发反思
-
-**实施阶段**：
-- P0：会话结束反思（最核心，收益最大）
-- P1：连续工具失败反思
-- P2：子代理反思、用户中断反思
-
-**开放问题**：
-- 反思是否消耗当前 session 的 model 调用，还是用独立的轻量 model（成本权衡）
-- 反思失败（如 LLM 返回空）时是否静默丢弃 vs 提示用户
-- Memory 容量上限策略：何时压缩 / 淘汰旧反思
-
----
-
-### #9 反思系统（实施版）
-
-#### 完成度评估（2026-05-19）：待确认
+#### 完成度评估（2026-05-19）
 
 **已实现**：
 
@@ -942,69 +746,14 @@ struct ReflectionEntry {
 |------|------|
 | `ReflectionEngine`（解析 JSON、格式化输出） | `reflection/` |
 | Prompt 模板（偏差检测 + 建议记忆 + 过时记忆） | `reflection/prompt.rs` |
-| `ReflectionOutput` 结构 | `reflection/types.rs` |
-| `/reflect` 命令（后台异步触发 + apply/stats/history 子命令占位） | `tui/app/slash/reflection.rs` |
+| `/reflect` 命令（后台异步触发 + apply/stats/history） | `tui/app/slash/reflection.rs` |
 | pending 建议与 `/reflect apply` 写入 MemoryStore | `tui/app/slash/reflection.rs` |
 | `auto_apply_suggestions` 自动应用 suggested memories 与 outdated markers | `tui/app/update/ui_event.rs` |
-| `apply_outdated()` 标记过时记忆 | `reflection/apply.rs` |
-| `recent_messages_summary()` 提取对话摘要 | `reflection/format.rs` |
-| 自动 N 轮触发（`reflection.interval_turns`，0 表示禁用自动触发；后台静默执行，不锁住输入） | `tui/app/slash/reflection.rs`、`tui/app/update/ui_event.rs` |
-| 配置（`ReflectionConfig`） | `config/memory.rs` |
+| 自动 N 轮触发（`reflection.interval_turns`，0 禁用） | `tui/app/slash/reflection.rs` |
 
-**暂缓/未实现**：
+**暂缓**：连续工具失败触发、SessionEnd/SubagentStop 反思、独立 reflection model、PostCompact 后反思。
 
-| 需求 | 说明 |
-|------|------|
-| 连续工具失败触发反思 | spec P1 |
-| SessionEnd 反思 | agent loop 结束时暂不触发反思 |
-| SubagentStop 反思 | spec P2 |
-| 用户中断反思 | spec P2 |
-| 错误恢复后反思 | spec P2 |
-| 独立 reflection model | `ReflectionConfig.model` 字段保留，但本轮使用当前 client，避免新增模型路由复杂度 |
-| PostCompact 后反思 | 暂缓，避免压缩后上下文损失 |
-
-**行为取舍**：
-
-| 原 spec | 本轮实现 |
-|-----------|----------|
-| 反思结果静默写入 MemoryStore，不显示在对话中 | TUI 中展示 Reflection 摘要；若 `auto_apply_suggestions = false`，提示用户运行 `/reflect apply` |
-| 使用独立轻量模型（成本优化） | 使用当前默认模型 |
-| 后台异步执行（不阻塞主循环） | `/reflect` 与自动 N 轮触发均通过后台任务回传 `ReflectionDone` |
-
-**目标**：在关键节点（任务完成、Stop、错误恢复后、用户显式触发）执行反思流程，对最近的行为、决策、失败、用户反馈做结构化总结，将有价值的经验写入 Memory 系统（#8），让 agent 在未来会话中能够基于历史经验做更好的决策。
-
-**依赖**：Feature #8 Memory 系统（反思的输出目标）
-
-**设计草案**：
-
-#### 触发时机
-- **任务完成后**：TaskUpdate 将 task 置为 `completed` 时，对该 task 的执行过程做总结
-- **Stop 事件**：会话结束 / agent 主动停止时，对整段会话做反思
-- **错误恢复后**：tool call 失败 → 修复 → 成功 的链路上，提炼"哪种修复有效"
-- **用户显式触发**：`/reflect` slash 命令，对最近 N 轮做即时反思
-- **PostCompact 钩子**：上下文压缩前抢救关键经验
-
-#### 反思维度
-- **成功模式**：哪些工具组合 / 推理路径达成了目标
-- **失败教训**：哪些假设错了、哪些 tool call 走了弯路
-- **用户偏好**：用户在本次会话中的纠正、拒绝、确认（参考 superpowers `feedback` 类型）
-- **未解决问题**：本次会话中悬而未决的事项（提示下次继续）
-
-#### 输出格式
-- 结构化条目（type / title / body / scope），写入 Memory 系统
-- 每条反思 must 标注来源会话 ID + 时间戳，便于追溯
-- 避免重复：写入前检索 Memory，相似条目优先 update 而非 insert
-
-#### 实施阶段
-1. **Phase 1**：实现 `/reflect` 命令 + 基础反思 prompt 模板（依赖 #8 已落地的 Memory 接口）
-2. **Phase 2**：接入 Stop / TaskUpdate(completed) 自动触发
-3. **Phase 3**：错误恢复链路反思 + PostCompact 钩子
-
-**涉及路径**（待实施）：
-- `aemeath-core/src/reflection/` — 反思引擎、prompt 模板、写入策略
-- `aemeath-core/src/command/commands/reflect.rs` — `/reflect` 命令
-- `aemeath-cli/src/tui/app/update.rs` — Stop 事件触发钩子
-- `aemeath-cli/src/tui/app/stream.rs` — TaskUpdate / 错误恢复触发钩子
+**涉及路径**：`reflection/`、`tui/app/slash/reflection.rs`、`tui/app/update/ui_event.rs`
 
 ---
 
