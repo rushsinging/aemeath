@@ -15,7 +15,9 @@
 
 ### #118 Hook env 中项目目录仍指向主工作区而非当前 worktree
 
-**状态**：活动中
+**状态**：已修复
+
+**修复 commits**：待提交
 
 **症状**：`~/.agents/logs/aemeath.log` 中 hook 匹配阶段已经记录当前 worktree 的 `project_dir`，例如 `.../aemeath/.worktrees/fix-111-tui-column-scroll-padding`；但 hook 脚本 stdout 中提取出的 `[hook-env] AEMEATH_PROJECT_DIR=...` 与 `[hook-env] CLAUDE_PROJECT_DIR=...` 仍是主工作区 `/Users/guoyuqi/Nextcloud/work/claudecode/aemeath`。这会导致 Stop hook / 项目 hook 在 worktree 会话中按主工作区执行检查或输出错误上下文。
 
@@ -23,7 +25,7 @@
 
 **修复方向**：检查 hook 执行环境变量注入路径，确保 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR` 使用当前会话/工具上下文的 effective project dir，并与 `hook match` 日志中的 `project_dir` 一致；补充覆盖 worktree 场景的回归测试。
 
-**验证**：待补充。
+**验证**：`cargo fmt -p runtime`、`cargo test -p runtime test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env -- --nocapture`、`cargo test -p runtime business::chat::looping::loop_runner::tests -- --nocapture`、`cargo clippy -p runtime --all-targets -- -D warnings`。
 
 **涉及路径**：
 - `agent/features/hook/src/business/hook/runner.rs`
