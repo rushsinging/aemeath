@@ -270,6 +270,37 @@ impl App {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn test_output_document_width_reserves_scrollbar_and_two_padding_columns() {
+        let mut app = App::new(
+            "session".to_string(),
+            std::env::current_dir().unwrap(),
+            "model".to_string(),
+        );
+        app.layout.output_area_rect = Rect::new(0, 0, 80, 20);
+
+        assert_eq!(app.output_document_width(), 75);
+    }
+
+    #[test]
+    fn test_output_document_width_never_underflows() {
+        let mut app = App::new(
+            "session".to_string(),
+            std::env::current_dir().unwrap(),
+            "model".to_string(),
+        );
+        app.layout.output_area_rect = Rect::new(0, 0, 3, 20);
+
+        assert_eq!(app.output_document_width(), 1);
+    }
+}
+
 pub mod slash;
 #[cfg(test)]
 mod slash_effect_tests;

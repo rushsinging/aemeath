@@ -8,7 +8,7 @@
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
-| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | TUI 长行不自动换行也不可横向滚动，超出屏幕宽度的内容不可见 |
+| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
 | 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
 | 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |
@@ -31,6 +31,24 @@
 - `agent/features/hook/src/business/hook/runner.rs`
 - `agent/features/policy/src/` 或 runtime 调用 HookRunner 的上下文传递路径
 - `specs/policy-hook-audit.md`
+
+### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
+
+**状态**：待确认
+
+**症状**：LLM 输出长行在 TUI 中曾只显示到屏幕宽度，超出部分不可见；首轮修复后长行可换行，但正文右侧尽头仍过于靠近 output area 的 scrollbar。
+
+**根因**：输出文档渲染宽度使用 output area 宽度减去固定预留列。原预留列覆盖边框/scrollbar 后，正文与 scrollbar 之间视觉留白不足。
+
+**修复**：将输出文档宽度统一封装为 `output_document_width()`，在原有预留基础上额外缩小 2 列，使正文和 scrollbar 之间保留更明显的右侧安全留白；同时保持窄终端下最小宽度为 1，避免下溢。
+
+**验证**：
+- `cargo test -p cli test_output_document_width_reserves_scrollbar_and_two_padding_columns`
+- `cargo test -p cli test_output_document_width_never_underflows`
+
+**涉及路径**：
+- `apps/cli/src/tui/app/update.rs`
+- `apps/cli/src/tui/app.rs`
 
 ### #117 创建 task list 和 task 时，TUI task list window 没有更新
 

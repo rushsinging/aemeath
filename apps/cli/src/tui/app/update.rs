@@ -179,12 +179,16 @@ impl App {
         result
     }
 
+    pub(crate) fn output_document_width(&self) -> u16 {
+        self.layout.output_area_rect.width.saturating_sub(5).max(1)
+    }
+
     pub(crate) fn refresh_output_document_from_model(&mut self) {
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
         );
-        let width = self.layout.output_area_rect.width.saturating_sub(3).max(1);
+        let width = self.output_document_width();
         let document = self.output_document_renderer.render_model_document(
             &view_model,
             width,
@@ -235,6 +239,7 @@ impl App {
     /// 渲染前维护 live-status 相关 view_state：
     /// - active 且 verb 为空时选择动词；
     /// - inactive 时清空动画状态，保证下次激活重新计时。
+    ///
     /// OutputArea render 直接消费 `live_status_view_model()`，不再写 widget mirror。
     ///
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
