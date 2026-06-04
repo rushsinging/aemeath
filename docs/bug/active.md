@@ -6,7 +6,7 @@
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | 根因补充：`UiEvent::Text` / `UiEvent::Thinking` 等 streaming 事件每个 chunk 都同步 `refresh_output_widget_from_model()`，会反复 assemble/render 整个输出区，长输出时拖慢主循环，表现为正文/工具块/输入响应滞后。修复：新增 `AppViewState.dirty`，事件处理只合并 dirty，渲染前管线 `flush_dirty_view_models()` 按帧批量刷新 output/status；系统提示、用户回显、AskUser、历史恢复等路径改为标记 output dirty。保留 Text/Thinking 与 spinner phase 同批 intent 的修复。验证：`test_update_agent_text_persists_output_dirty_until_render_pipeline_refreshes`、notice 渲染回归、`tui::app::update::notice`。 |
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
-| 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
+| 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 修复中 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现；主启动和 pool 路径已补 `ApiDriverKind::Ollama`、client/pool 工厂分支、openai_config 排除等接线（commit: 111393e）。2026-06-04 补运行时 `/model` 切换路径，避免 `api_type:"ollama"` 仍生成 OpenAIProviderConfig 并走 OpenAI-compatible 分支 |
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | 根因：EnterWorktree 工具内部维护独立的上下文栈，当栈状态与实际 git worktree/git branch 不同步时（如上次会话异常退出未清理），EnterWorktree 在仅给 `branch` 参数（自动创建模式）时会误判为"已在 worktree 中"拒绝进入；而 ExitWorktree 可能已返回"上下文栈为空"，两者矛盾。临时规避：给显式 `path` 参数可直接进入已存在的 worktree |
 | 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | 根因：`/clear` 仅重置 TUI 对话、图片和运行态，并同步清空 session messages；Runtime TaskStore 没有 SDK 清空端口，TUI `RuntimeModel.task_status.lines` 也未显式清空，导致 clear 后任务状态窗口仍显示旧任务。修复：SDK 增加 `clear_tasks`，Runtime 委托 TaskStore.clear；TUI reset_runtime_state 调用 clear_tasks 并清空 task lines。验证：新增 `test_clear_command_clears_task_store_and_task_window` |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | 根因：`load_session_impl` 返回 `SessionSnapshot.workspace: None`，丢弃了持久化的 workspace 上下文；同时 runtime handle 的 `workspace_context` 也未更新，导致后续 `chat()` 调用使用初始 cwd 而非 worktree 路径。修复：从加载的 session 中映射 workspace 到 SDK 视图返回给 TUI，同时写入 runtime handle 的 `workspace_context` |
@@ -191,7 +191,7 @@
 
 ### #85 Ollama provider 声明但工厂未接线（整模块死代码）
 
-**状态**：待确认
+**状态**：修复中
 
 **症状**：`agent/provider/src/providers/ollama/` 是一个完整的 `OllamaProvider` 实现（856 行：带重试/取消的 `stream_message`、非流式回退、空响应检测、`think:false` reasoning 控制、model/max_tokens 管理），但全代码库零构造点。#61 D3 收窄 provider crate 可见性、移除 crate-root `pub use` 后，该模块以 `#[allow(dead_code)]` 暴露为整模块死代码。
 
@@ -209,6 +209,7 @@
 - `providers/openai_compatible/driver.rs::driver_for_api`：Ollama 归入 OpenAI 驱动兜底（防御性，实际不经此路径）。
 - `providers/mod.rs`：移除 `#[allow(dead_code)]`，恢复 `pub use ollama::OllamaProvider`。
 - 重现测试（修复前失败）：`provider_client.rs` 的 `test_build_llm_client_ollama_constructs_ollama_provider`（config `api:"ollama"` → `client.provider_name()=="ollama"`）、`test_openai_config_skips_ollama`、`test_provider_api_key_env_name_ollama`；`api.rs` 的 `test_from_str_ollama`、`test_as_str_ollama_roundtrip`。
+- 2026-06-04 补充：运行时 `/model` 切换路径 `trait_command.rs::switch_model_impl` 仍只排除 Anthropic，切换到 `api_type="ollama"` 时会生成 `OpenAIProviderConfig` 并走 OpenAI-compatible 分支；已抽取 `switch_model_openai_config` 并补 `test_switch_model_openai_config_skips_ollama`，确保 Anthropic | Ollama 均不生成 openai_config。
 
 ### #61 Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失
 
