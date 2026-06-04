@@ -64,11 +64,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::Token(text) => UiEvent::Text(text),
         sdk::ChatEvent::Thinking(text) => UiEvent::Thinking(text),
         sdk::ChatEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
-        sdk::ChatEvent::ToolCallStart { name, index } => UiEvent::ToolCallStart { name, index },
+        sdk::ChatEvent::ToolCallStart { name, index, .. } => UiEvent::ToolCallStart { name, index },
         sdk::ChatEvent::ToolArgumentsDelta {
             index,
             name,
             partial_args,
+            ..
         } => UiEvent::ToolArgumentsDelta {
             index,
             name,
@@ -79,6 +80,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             name,
             index,
             summary,
+            ..
         } => UiEvent::ToolCall {
             id,
             name,
@@ -91,6 +93,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             output,
             is_error,
             images,
+            ..
         } => UiEvent::ToolResult {
             id,
             tool_name,

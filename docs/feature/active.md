@@ -8,7 +8,7 @@
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入真实 LLM `/reflect`、JSON 解析、pending 建议与 `/reflect apply` 写入 Memory、auto_apply_suggestions 自动写入、自动 N 轮触发；使用当前默认模型，不做独立 reflection model；不做 PostCompact 后反思，避免压缩后上下文损失。详见 [spec](specs/009-reflection-system.md) |
 | 68 | 项目指令搜索增强：全局 fallback ~/.claude/CLAUDE.md + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局指令优先 ~/.agents/AGENTS.md，不存在时 fallback ~/.claude/CLAUDE.md；项目指令从 cwd 向上最多 5 级祖先搜索 CLAUDE.md/AGENTS.md，每层级 Claude 优先；不再向下递归子目录，避免启动时扫描大型父目录导致 TUI 卡住 |
 | 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 产生的用户可见反馈不再混用普通 SystemMessage 展示；TUI 展示层对 `<system-reminder>` 包装脱壳，避免标签原样出现在输出区；新增 Hook 类消息，支持 Stop/StopFailure/其他 hook 后续按类型使用不同文案与样式 |
-| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 活动中 | 未确认 | removed/delete 行当前走 syntect 语法高亮，应改为纯 `DIFF_REMOVE_FG` 红色，不调用 `push_highlighted_body`。涉及：`unified_diff.rs:105-108`（`DiffLineKind::Removed` arm）、`diff.rs:93-110`（`build_delete_line`）|
+| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed/delete 行当前走 syntect 语法高亮，应改为纯 `DIFF_REMOVE_FG` 红色，不调用 `push_highlighted_body`。涉及：`unified_diff.rs:105-108`（`DiffLineKind::Removed` arm）、`diff.rs:93-110`（`build_delete_line`）|
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `cargo run -q` 跳过 TUI 直接 REPL 交互（或 pipe 模式），方便快速调试；`cargo run -v` 将日志输出到 stderr 而非仅写文件，方便 `cargo run` 时实时查看日志。涉及：CLI 参数解析（`apps/cli/src/main.rs` 或 `clap` 定义）、TUI 初始化条件分支、日志初始化（`logging_setup.rs`）|
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
@@ -54,6 +54,26 @@
 - `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
 - `agent/features/hook/src/business/hook/runner.rs`
 - `specs/rust-coding.md`
+
+### #77 diff removed 行不语法高亮，只显示纯红色
+
+**状态**：待确认
+
+**背景**：diff removed/delete 行当前会把正文交给 syntect 语法高亮，导致删除行中出现关键字、标点等语法色。Feature #77 要求删除语义行保持单一删除色，避免红色删除语义被语法色冲淡。
+
+**设计**：
+1. 采用 deleted/removed 专用 helper，而不是给通用高亮 helper 增加开关。
+2. unified diff 的 `DiffLineKind::Removed` 只保留 `-` prefix 与纯 `DIFF_REMOVE_FG` 正文 span。
+3. 普通 diff 的 `build_delete_line` 不再接收 `syntax_ref`，避免误用语法高亮。
+4. added/context 行继续沿用现有 syntect 高亮逻辑。
+
+**验证**：
+- `cargo test -p cli unified_diff -- --nocapture`
+- `cargo test -p cli diff -- --nocapture`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
+- `apps/cli/src/tui/render/output/diff.rs`
 
 ### #71 Stop hook 日志输出项目目录上下文
 
