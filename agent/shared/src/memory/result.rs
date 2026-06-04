@@ -7,7 +7,7 @@ use super::MemoryEntry;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddResult {
-    Added,
+    Added { id: String },
     Merged { existing_id: String },
     NeedsEviction { candidates: Vec<MemoryEntry> },
 }
