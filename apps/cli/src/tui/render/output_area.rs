@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use sdk::CharIdx;
 
-use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
@@ -31,8 +30,6 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
-    /// 新输出渲染管线的 block 级缓存渲染器。
-    pub document_renderer: OutputDocumentRenderer,
 }
 
 impl Default for OutputArea {
@@ -56,11 +53,10 @@ impl OutputArea {
             last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             document: RenderedDocument::default(),
-            document_renderer: OutputDocumentRenderer::default(),
         }
     }
 
-    pub fn set_document(&mut self, document: RenderedDocument) {
+    pub(crate) fn replace_document(&mut self, document: RenderedDocument) {
         self.document = document;
     }
 
@@ -93,7 +89,7 @@ mod tests {
     use ratatui::text::Span;
 
     #[test]
-    fn test_output_area_set_document_replaces_content() {
+    fn test_output_area_replace_document_replaces_content() {
         let mut area = OutputArea::new();
         let document = RenderedDocument {
             blocks: vec![RenderedBlock {
@@ -101,7 +97,7 @@ mod tests {
                 lines: vec![RenderedLine::new(vec![Span::raw("x")])],
             }],
         };
-        area.set_document(document);
+        area.replace_document(document);
 
         assert_eq!(area.document().total_lines(), 1);
     }

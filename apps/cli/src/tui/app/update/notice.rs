@@ -362,7 +362,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "后续回复".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
 
         // 在 document 中找到包含"后续回复"的行
         let assistant_line = app
@@ -406,7 +406,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "你好".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
         // 模拟 System notice 中断（如自动 reflection）
         app.append_system_notice("[reflection: ...]");
         app.flush_dirty_view_models();
@@ -416,7 +416,7 @@ mod tests {
             .apply(ConversationIntent::ObserveAssistantText {
                 text: "世界".to_string(),
             });
-        app.refresh_output_widget_from_model();
+        app.refresh_output_document_from_model();
 
         // 验证"你好"和"世界"都在 document 中且使用 ASSISTANT 色
         for needle in &["你好", "世界"] {

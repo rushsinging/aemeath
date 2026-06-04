@@ -226,7 +226,7 @@ mod document_selection_tests {
     #[test]
     fn test_copy_selection_returns_plain_chars_across_lines() {
         let mut area = OutputArea::new();
-        area.set_document(RenderedDocument {
+        area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
                 lines: vec![

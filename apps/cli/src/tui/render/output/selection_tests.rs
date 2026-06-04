@@ -34,7 +34,7 @@ fn set_plain_lines(output: &mut OutputArea, texts: &[&str]) {
         .iter()
         .map(|text| RenderedLine::new(vec![Span::raw(text.to_string())]))
         .collect();
-    output.set_document(RenderedDocument {
+    output.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "test".into(),
             lines,
@@ -51,7 +51,7 @@ fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
         style: SemanticStyle::Normal,
     };
     let block = render_assistant_message("md", &view, &RenderCtx { width });
-    output.set_document(RenderedDocument {
+    output.replace_document(RenderedDocument {
         blocks: vec![block],
     });
 }
@@ -320,7 +320,7 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
         RenderedLine::with_plain(vec![Span::raw("✓ "), Span::raw("hello")], "hello".into());
     line.gutter_cols = 2;
     let mut output = OutputArea::new();
-    output.set_document(RenderedDocument {
+    output.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "g".into(),
             lines: vec![line],
