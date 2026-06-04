@@ -73,6 +73,27 @@ impl OutputViewState {
         self.scroll_up(total_lines, total_lines);
     }
 
+    /// 同步 document 指标并维护滚动真相。
+    ///
+    /// 每帧渲染前由 App 根据 Output document 与 layout/live-status 投影调用：
+    /// - `visible_height` 直接来自当前 layout，不经 OutputArea 反喂；
+    /// - document 增长且 `auto_scroll=false` 时补偿 offset，保持视窗内容固定；
+    /// - offset 钳制到当前最大可滚动范围；offset 归零时恢复贴尾。
+    pub fn sync_document_metrics(&mut self, total_lines: usize, visible_height: usize) {
+        self.last_visible_height = visible_height;
+        if !self.auto_scroll {
+            let growth = total_lines.saturating_sub(self.last_document_total_lines);
+            self.scroll_offset = self.scroll_offset.saturating_add(growth);
+        }
+        self.last_document_total_lines = total_lines;
+
+        let max_offset = total_lines.saturating_sub(self.last_visible_height);
+        self.scroll_offset = self.scroll_offset.min(max_offset);
+        if self.scroll_offset == 0 {
+            self.auto_scroll = true;
+        }
+    }
+
     /// 开始选区。锚点 `(line, col)` 由调用方据 render 期的 screen_line_map
     /// 折算屏幕坐标（含 gutter_cols 补偿）后传入。
     ///
@@ -246,6 +267,103 @@ mod tests {
         fits.scroll_to_top(5);
         assert_eq!(fits.scroll_offset, 0);
         assert!(fits.auto_scroll);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_keeps_valid_view_scroll() {
+        let mut state = OutputViewState {
+            scroll_offset: 5,
+            auto_scroll: false,
+            last_document_total_lines: 100,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(100, 20);
+
+        assert_eq!(state.last_visible_height, 20);
+        assert_eq!(state.scroll_offset, 5);
+        assert!(!state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 100);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_clamps_stale_offset_and_reenables_auto_scroll() {
+        let mut state = OutputViewState {
+            scroll_offset: 100,
+            auto_scroll: false,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(1, 2);
+
+        assert_eq!(state.last_visible_height, 2);
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 1);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_compensates_growth_when_not_auto_scroll() {
+        let mut state = OutputViewState {
+            scroll_offset: 5,
+            auto_scroll: false,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(60, 20);
+
+        assert_eq!(state.scroll_offset, 15);
+        assert!(!state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 60);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_clamps_to_max_offset_when_offset_exceeds() {
+        let mut state = OutputViewState {
+            scroll_offset: 50,
+            auto_scroll: false,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(30, 10);
+
+        assert_eq!(state.last_visible_height, 10);
+        assert_eq!(state.scroll_offset, 20);
+        assert!(!state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 30);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_no_compensation_when_auto_scroll() {
+        let mut state = OutputViewState {
+            scroll_offset: 0,
+            auto_scroll: true,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(70, 20);
+
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 70);
+    }
+
+    #[test]
+    fn test_sync_document_metrics_clamps_small_offset_to_zero_when_content_shrinks() {
+        let mut state = OutputViewState {
+            scroll_offset: 3,
+            auto_scroll: false,
+            last_document_total_lines: 50,
+            ..Default::default()
+        };
+
+        state.sync_document_metrics(5, 10);
+
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.auto_scroll);
+        assert_eq!(state.last_document_total_lines, 5);
     }
 
     #[test]

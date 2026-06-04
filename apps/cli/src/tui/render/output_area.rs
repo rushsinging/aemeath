@@ -18,14 +18,11 @@ pub use types::{SpanPart, INDENT};
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
-    pub last_line_count: usize,
     pub term_width: usize,
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
     pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
     /// 渲染后的逻辑行文本覆盖
     pub rendered_line_content: HashMap<usize, String>,
-    /// 上次渲染时的可见高度缓存
-    pub last_visible_height: usize,
     /// todo id -> subject 缓存
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// 新输出渲染管线产物（spans + plain）。
@@ -46,11 +43,9 @@ impl OutputArea {
             .saturating_sub(2);
 
         Self {
-            last_line_count: 0,
             term_width,
             screen_line_map: Vec::new(),
             rendered_line_content: HashMap::new(),
-            last_visible_height: 0,
             todo_subject_cache: std::collections::HashMap::new(),
             document: RenderedDocument::default(),
         }

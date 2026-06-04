@@ -7,6 +7,7 @@ use crate::tui::render::output::rendered::{
 use crate::tui::view_model::output::TextBlockView;
 use crate::tui::view_model::style::SemanticStyle;
 use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
+use crate::tui::view_state::output::OutputViewState;
 use ratatui::{buffer::Buffer, layout::Rect, text::Span};
 use sdk::CharIdx;
 
@@ -26,6 +27,15 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
 
 fn no_live_status() -> LiveStatusViewModel {
     LiveStatusViewModel::default()
+}
+
+/// Test helper for no-live-status render paths; callers with spinner/queued/task lines must
+/// compute visible height through the same projection used by App.
+fn render_view_for_area(area: &Rect) -> OutputViewState {
+    OutputViewState {
+        last_visible_height: area.height as usize,
+        ..Default::default()
+    }
 }
 
 /// 测试辅助：以若干纯文本行填充 document（单 block）。
@@ -160,8 +170,12 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
-
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    );
     // 经只读换算 screen_to_anchor 取屏幕坐标对应的逻辑锚点，直接置选区镜像（替代
     // 已删除的 widget start/update_selection；选区真相迁至 view_state）。
     let start = output
@@ -192,8 +206,12 @@ fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
-
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    );
     let start = output
         .screen_to_anchor(0, 0, &area, &no_live_status())
         .unwrap();
@@ -225,7 +243,12 @@ fn test_get_selected_text_strips_inline_markdown_formatting() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    );
     let plain_len = output
         .document()
         .iter_lines()
@@ -257,7 +280,12 @@ fn test_get_selected_text_preserves_unclosed_markdown_marker() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    );
     let plain = output
         .document()
         .iter_lines()
@@ -285,7 +313,12 @@ fn rendered_plain(texts: &[&str], width: u16) -> (OutputArea, Rect) {
         height: texts.len() as u16 + 1,
     };
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    );
     (output, area)
 }
 
@@ -328,8 +361,12 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
     });
     let area = Rect::new(0, 0, 20, 3);
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf, &Default::default(), &no_live_status());
-    // #63：点击 gutter 列（0/1）补偿后映射到 plain 字符 0。
+    output.render(
+        area,
+        &mut buf,
+        &render_view_for_area(&area),
+        &no_live_status(),
+    ); // #63：点击 gutter 列（0/1）补偿后映射到 plain 字符 0。
     assert_eq!(
         output.screen_to_anchor(0, 0, &area, &no_live_status()),
         Some((0, CharIdx::new(0)))

@@ -33,22 +33,8 @@ impl OutputArea {
             .spinner
             .as_ref()
             .map(|spinner| self.build_spinner_line(spinner));
-        let task_line_count = if spinner_line.is_some() {
-            live_status.task_lines.len()
-        } else {
-            0
-        };
-        let queued_line_count = live_status.queued_lines.len();
-        let reserved = if spinner_line.is_some() {
-            queued_line_count + 1 + task_line_count
-        } else if queued_line_count > 0 {
-            queued_line_count
-        } else {
-            0
-        };
 
-        let visible_lines = (area.height as usize).saturating_sub(reserved);
-        self.last_visible_height = visible_lines;
+        let visible_lines = view.last_visible_height;
         let total_lines = self.document.total_lines();
         let needs_scrollbar = total_lines > visible_lines;
         let content_area = content_area_for_scrollbar(area, needs_scrollbar);
@@ -109,7 +95,6 @@ impl OutputArea {
             view.auto_scroll,
             view.scroll_offset,
         );
-        self.last_line_count = total_lines;
     }
 }
 
@@ -245,9 +230,13 @@ mod tests {
             }],
         });
         let area_rect = Rect::new(0, 0, 6, 2);
+        let view = OutputViewState {
+            last_visible_height: 2,
+            ..Default::default()
+        };
         let mut buf = Buffer::empty(area_rect);
 
-        area.render(area_rect, &mut buf, &Default::default(), &no_live_status());
+        area.render(area_rect, &mut buf, &view, &no_live_status());
 
         assert_ne!(
             buf[(5, 0)].symbol(),
@@ -266,8 +255,11 @@ mod tests {
                 lines: vec![RenderedLine::new(vec![Span::raw("hello")])],
             }],
         });
-        let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
         let area_rect = Rect::new(0, 0, 10, 3);
+        let view = OutputViewState {
+            last_visible_height: 3,
+            ..output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)))
+        };
         let mut buf = Buffer::empty(area_rect);
         area.render(area_rect, &mut buf, &view, &no_live_status());
 
@@ -290,7 +282,10 @@ mod tests {
             }],
         });
         // 选中 plain 字符 [0,3) = "hel"
-        let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)));
+        let view = OutputViewState {
+            last_visible_height: 3,
+            ..output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(3)))
+        };
         let area_rect = Rect::new(0, 0, 12, 3);
         let mut buf = Buffer::empty(area_rect);
         area.render(area_rect, &mut buf, &view, &no_live_status());
@@ -317,8 +312,12 @@ mod tests {
             }],
         });
         let area_rect = Rect::new(0, 0, 12, 3);
+        let view = OutputViewState {
+            last_visible_height: 3,
+            ..Default::default()
+        };
         let mut buf = Buffer::empty(area_rect);
-        area.render(area_rect, &mut buf, &Default::default(), &no_live_status());
+        area.render(area_rect, &mut buf, &view, &no_live_status());
 
         // 点击屏幕列 2（内容 "h"）→ plain 字符 0；拖到列 5（内容 "l" 之后）→ plain 3。
         // 经只读换算 screen_to_anchor 折算锚点后直接置选区镜像（widget start/update_selection

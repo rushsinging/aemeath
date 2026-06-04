@@ -6,14 +6,11 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::adapter::output_view_widget::sync_output_scroll_view_state;
     use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
-    use crate::tui::render::output_area::OutputArea;
     use crate::tui::view_model::output::{
         BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
     };
     use crate::tui::view_model::style::SemanticStyle;
-    use crate::tui::view_state::output::OutputViewState;
 
     /// 构造一个 SystemNotice 叶子 BlockNode（生产路径走 render_tree(roots)）。
     fn leaf(id: &str, text: &str) -> BlockNode {
@@ -88,50 +85,5 @@ mod tests {
             1,
             "相同 view model 与有效 layout width 应命中 renderer cache"
         );
-    }
-
-    /// 钳制真相已迁至 `output_view_widget::sync_output_scroll_view_state`（操作 view_state）。
-    /// 这两个回归用例走 document projection + 滚动同步组合，验证 stale offset 钳零 / 有效
-    /// offset 保留的整链行为不变。
-    #[test]
-    fn test_render_then_apply_scroll_clamps_stale_offset() {
-        let mut output_area = OutputArea::new();
-        output_area.last_visible_height = 2;
-        let mut renderer = OutputDocumentRenderer::default();
-        let mut view = OutputViewState {
-            scroll_offset: 100,
-            auto_scroll: false,
-            ..Default::default()
-        };
-
-        let document = renderer.render_model_document(&vm(1), 80, output_area.term_width);
-        output_area.replace_document(document);
-        // 初始化 last_document_total_lines，避免首帧触发补偿
-        view.last_document_total_lines = output_area.document().total_lines();
-        sync_output_scroll_view_state(&mut view, &output_area);
-
-        assert_eq!(view.scroll_offset, 0);
-        assert!(view.auto_scroll);
-    }
-
-    #[test]
-    fn test_render_then_apply_scroll_preserves_valid_offset() {
-        let mut output_area = OutputArea::new();
-        output_area.last_visible_height = 20;
-        let mut renderer = OutputDocumentRenderer::default();
-        let mut view = OutputViewState {
-            scroll_offset: 5,
-            auto_scroll: false,
-            ..Default::default()
-        };
-
-        let document = renderer.render_model_document(&vm(100), 80, output_area.term_width);
-        output_area.replace_document(document);
-        // 初始化 last_document_total_lines，避免首帧触发补偿
-        view.last_document_total_lines = output_area.document().total_lines();
-        sync_output_scroll_view_state(&mut view, &output_area);
-
-        assert_eq!(view.scroll_offset, 5);
-        assert!(!view.auto_scroll);
     }
 }

@@ -20,7 +20,24 @@ use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
+use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
+
+pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusViewModel) -> usize {
+    let spinner_line_count = usize::from(live_status.spinner.is_some());
+    let task_line_count = if live_status.spinner.is_some() {
+        live_status.task_lines.len()
+    } else {
+        0
+    };
+    // No-spinner path reserves exactly queued line count; empty queue naturally reserves 0.
+    let reserved = if live_status.spinner.is_some() {
+        live_status.queued_lines.len() + spinner_line_count + task_line_count
+    } else {
+        live_status.queued_lines.len()
+    };
+    (area_height as usize).saturating_sub(reserved)
+}
 
 /// Return type for update: effects plus optional slash command continuation.
 pub struct UpdateResult {
@@ -232,13 +249,16 @@ impl App {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
     }
-    /// 据 OutputViewState 滚动真相执行 last_visible_height 反喂、内容增长补偿与钳制。
+    /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。
     pub(crate) fn refresh_output_scroll_from_view_state(&mut self) {
-        crate::tui::adapter::output_view_widget::sync_output_scroll_view_state(
-            &mut self.view_state.output,
-            &self.output_area,
+        let visible_height = output_visible_height(
+            self.layout.output_area_rect.height,
+            &self.live_status_view_model(),
         );
+        self.view_state
+            .output
+            .sync_document_metrics(self.output_area.document().total_lines(), visible_height);
         // #70 phase 2：output selection/scroll render 直接消费 view_state.output，无 widget 镜像写回。
         // #70 phase 2：status 选区 render 直接消费 view_state.status_sel，无 widget 镜像写回。
         // #70 phase 2：input 选区 render 直接消费 view_state.input_sel，无 widget 镜像写回。

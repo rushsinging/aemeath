@@ -257,8 +257,8 @@ mod tests {
             .apply(crate::tui::model::input::intent::InputIntent::InsertText(
                 "search bug 76".to_string(),
             ));
-        app.output_area.last_visible_height = 3;
-        // 滚动真相归 view_state；设 stale offset，渲染前由 adapter 钳制并写回 widget。
+        app.view_state.output.last_visible_height = 3;
+        // 滚动真相归 view_state；设 stale offset，渲染前由 view_state document metrics 钳制。
         app.view_state.output.scroll_offset = 99;
         // 设置真实宽度，避免输出渲染按 width=1 逐字换行（G2 起工具结果走宽度换行）。
         app.layout.output_area_rect = ratatui::layout::Rect::new(0, 0, 100, 40);

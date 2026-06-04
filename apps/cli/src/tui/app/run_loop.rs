@@ -50,7 +50,7 @@ impl App {
             self.flush_dirty_view_models();
             // 每帧维护 live-status 动画 view_state；render 直接消费 LiveStatusViewModel。
             self.refresh_live_status_from_model();
-            // 每帧据 view_state 滚动真相执行 last_visible_height 反喂 + 钳制。
+            // 每帧据 layout/live-status 与 document 指标同步 view_state 滚动真相。
             self.refresh_output_scroll_from_view_state();
             // Draw UI
             self.draw(terminal)?;
