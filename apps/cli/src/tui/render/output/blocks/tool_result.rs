@@ -220,6 +220,42 @@ mod tests {
     }
 
     #[test]
+    fn test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result() {
+        // #75：EnterWorktree/ExitWorktree 的结果行数固定且较少，应完整展示，不出现 omitted。
+        let result_text = "已进入 worktree：branch feature/75\n当前分支：feature/75\n当前 path_base：/repo/.worktrees/feature-75\n当前 working_root：/repo/.worktrees/feature-75\n\n后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。\n如果必须使用绝对路径，必须位于当前 working_root 下。\n不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。";
+
+        for tool_title in ["EnterWorktree", "ExitWorktree"] {
+            let view = result(tool_title, result_text);
+            let block = render_tool_result("worktree-result", &view, &RenderCtx { width: 80 });
+
+            assert!(
+                block
+                    .lines
+                    .iter()
+                    .any(|line| line.plain.contains("不要继续使用进入 worktree 前")),
+                "{tool_title} 应完整展示固定 worktree 上下文结果，实际: {:?}",
+                block
+                    .lines
+                    .iter()
+                    .map(|line| line.plain.as_str())
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                block
+                    .lines
+                    .iter()
+                    .all(|line| !line.plain.contains("lines omitted")),
+                "{tool_title} 不应显示 omitted 截断提示，实际: {:?}",
+                block
+                    .lines
+                    .iter()
+                    .map(|line| line.plain.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
     fn test_render_tool_result_omitted_line_count_is_bounded() {
         let result_text = "line\n".repeat(OMITTED_LINE_COUNT_LIMIT + 20);
         let view = result("Bash", &result_text);
