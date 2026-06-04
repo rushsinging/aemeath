@@ -67,7 +67,7 @@
 | 82 | TUI 渲染 tool call 时丢失 theme 颜色 | [archived/082-tool-call-theme-color-lost.md](archived/082-tool-call-theme-color-lost.md) |
 | 83 | TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏 | [archived/083-tool-result-duplicate-flood.md](archived/083-tool-result-duplicate-flood.md) |
 | 84 | TUI 未渲染 TaskListCreate 工具调用 | [archived/084-tasklistcreate-not-rendered.md](archived/084-tasklistcreate-not-rendered.md) |
-| 85 | Ollama provider 声明但工厂未接线（整模块死代码） | [archived/85-ollama-factory-wiring.md](archived/85-ollama-factory-wiring.md) |
+| 85 | Ollama provider 声明但工厂未接线（整模块死代码） | [archived/085-ollama-factory-wiring.md](archived/085-ollama-factory-wiring.md) |
 | 86 | TUI tool call 顺序颠倒 | [archived/086-tool-call-order-reversed.md](archived/086-tool-call-order-reversed.md) |
 | 87 | TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误 | [archived/087-tool-result-overflow.md](archived/087-tool-result-overflow.md) |
 | 88 | TUI Read tool call 头部下重复显示一行 <code>Read /path</code> | [archived/088-read-path-duplicate.md](archived/088-read-path-duplicate.md) |
@@ -78,8 +78,10 @@
 | 93 | TUI 工具结果块内重复显示工具名和图标 | [archived/093-tool-result-header-duplicate.md](archived/093-tool-result-header-duplicate.md) |
 | 94 | Bash 工具运行时阻塞 LLM 流式渲染 | [archived/094-bash-blocks-streaming.md](archived/094-bash-blocks-streaming.md) |
 | 95 | Agent tool result 被归为 orphan | [archived/095-agent-tool-result-orphan.md](archived/095-agent-tool-result-orphan.md) |
+| 97 | /clear 未清空 task store 和 task list window | [archived/097-clear-tasks-window.md](archived/097-clear-tasks-window.md) |
 | 99 | input area 里上下键始终翻看历史，无法上下移动光标 | [archived/099-input-up-down-cursor.md](archived/099-input-up-down-cursor.md) |
 | 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | [archived/101-hook-start-per-hook.md](archived/101-hook-start-per-hook.md) |
+| 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | [archived/102-tool-content-tui-block.md](archived/102-tool-content-tui-block.md) |
 | 103 | EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容 | [archived/103-worktree-tool-display.md](archived/103-worktree-tool-display.md) |
 | 104 | input queue drain 后没有在 TUI 中显示 | [archived/104-input-queue-drain-display.md](archived/104-input-queue-drain-display.md) |
 | 105 | TUI 中 <code>```text</code> fenced block 被当作代码块显示而非 Markdown 渲染 | [archived/105-text-fence-markdown.md](archived/105-text-fence-markdown.md) |

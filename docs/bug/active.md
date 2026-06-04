@@ -4,10 +4,8 @@
 |---|------|--------|------|----------|----------|----------|
 | 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功时不记录 stdout/stderr 内容；已修复提取 [hook-env] 行写入日志 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
-| 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | TUI 保存/渲染大工具参数或 result 触发主线程大量 clone/计算阻塞 event loop |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
-| 97 | /clear 未清空 task store 和 task list window | 中 | 待确认 | 未确认 | 2026-05 | /clear 未清空 TaskStore 和 task_status lines；已新增 clear_tasks 并清空 task lines |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 未确认 | 2026-06 | TUI 长行不自动换行也不可横向滚动，超出屏幕宽度的内容不可见 |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
@@ -61,41 +59,6 @@
 **涉及路径**：
 - `agent/features/hook/src/business/hook/runner.rs`
 - `agent/features/hook/src/business/hook/tests.rs`
-
-### #102 长工具调用内容导致 TUI 画面完全不刷新、按键无响应
-
-**状态**：修复中
-
-**症状**：执行包含超大参数或结果的工具调用期间，TUI 画面完全不刷新，spinner 不动，键盘输入/快捷键无响应；表现为 event loop 被同步重活堵住，而不是单纯停留在 Generating 状态。高风险工具包括 Write 大 `content`、Edit 大 `old_string/new_string`、Agent 大 `prompt`、Bash 大 `command`，以及 Read/Grep/Glob/Bash/WebFetch/Agent 等大 result。
-
-**初步判断**：工具 I/O 多数走异步路径，不应直接阻塞 TUI 主线程。更可疑的是 TUI 渲染/update 路径保存和处理完整工具参数或完整工具结果，导致每帧发生大字符串 clone、`lines()` 全量收集、宽度计算、block cache version/hash 计算或富文本渲染，从而阻塞 event loop。
-
-**修复方向**：
-1. TUI 层展示工具调用时只保留路径、字节数、小预览等摘要，NEVER 将完整大字段放入可反复 clone/render/hash 的 view model。
-2. 所有工具结果进入 TUI model 前按字节上限截断；工具结果预览按 `result_max_lines` streaming/take 截断，NEVER 为了显示前 N 行先 `collect()` 完整 result lines。
-3. 添加大工具参数/结果回归测试，覆盖格式化/渲染路径不会随正文大小线性处理完整正文。
-
-**涉及路径**：
-- `apps/cli/src/tui/adapter/agent_event.rs`
-- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
-- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
-- `apps/cli/src/tui/view_assembler/output.rs`
-
-### #97 /clear 未清空 task store 和 task list window
-
-**状态**：待确认
-
-**症状**：执行 `/clear` 后，对话区域被清空，但任务状态窗口仍显示旧 task list；Runtime TaskStore 中旧任务也可能继续存在，后续任务列表与窗口状态不一致。
-
-**根因（已确认）**：`/clear` 只调用 `reset_runtime_state()` 清空 TUI 对话、图片、输出与 session messages；SDK `AgentClient` 没有暴露 TaskStore 清空端口，`RuntimeModel.task_status.lines` 也没有在 clear 路径显式置空，导致下一帧 live status adapter 会继续把旧 task lines 写回 `OutputArea.task_status_lines`。
-
-**修复**：
-1. `sdk::AgentClient` 新增 `clear_tasks()` 写端口，默认空实现保持兼容。
-2. `AgentClientImpl::clear_tasks()` 委托 runtime `TaskStore.clear()`。
-3. `App::reset_runtime_state()` 在同步清空 session messages 后调用 `clear_tasks()`，并通过 `RuntimeIntent::UpdateTaskLines(Vec::new())` 清空 task list window 的 model 真相。
-4. 新增回归测试 `test_clear_command_clears_task_store_and_task_window`，覆盖 `/clear` 会调用 clear_tasks 且清空 widget/model task lines。
-
-**验证**：`cargo test -p cli test_clear_command_clears_task_store_and_task_window` 通过。
 
 ### #96 EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中"
 
