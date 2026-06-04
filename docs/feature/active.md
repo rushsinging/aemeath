@@ -11,7 +11,7 @@
 | 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 产生的用户可见反馈不再混用普通 SystemMessage 展示；TUI 展示层对 `<system-reminder>` 包装脱壳，避免标签原样出现在输出区；新增 Hook 类消息，支持 Stop/StopFailure/其他 hook 后续按类型使用不同文案与样式 |
 | 70 | 统一 input_queue 到事件驱动 | 中 | 活动中 | 未确认 | 移除 `input_queue`/`QueueDrainPort`/`DrainQueuedInput` 死代码，所有用户输入（含 slash 命令、对话框选模型）统一通过 `InputEventPort` 事件驱动 |
 | 76 | TUI spinner 时长显示改进 | 低 | ✅ 已完成 | 未确认 | spinner 渲染 verb 后缀从 `…` 改为 `...`；保留 verb 后的总时长（如 `12s`）；phase_text 括号内追加 `⏱ Xs` 计时，让用户直观看到当前 Thinking/Generating/Hook 等阶段已执行多久 |
-| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 活动中 | 未确认 | removed/delete 行当前走 syntect 语法高亮，应改为纯 `DIFF_REMOVE_FG` 红色，不调用 `push_highlighted_body`。涉及：`unified_diff.rs:105-108`（`DiffLineKind::Removed` arm）、`diff.rs:93-110`（`build_delete_line`）|
+| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed/delete 行当前走 syntect 语法高亮，应改为纯 `DIFF_REMOVE_FG` 红色，不调用 `push_highlighted_body`。涉及：`unified_diff.rs:105-108`（`DiffLineKind::Removed` arm）、`diff.rs:93-110`（`build_delete_line`）|
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `cargo run -q` 跳过 TUI 直接 REPL 交互（或 pipe 模式），方便快速调试；`cargo run -v` 将日志输出到 stderr 而非仅写文件，方便 `cargo run` 时实时查看日志。涉及：CLI 参数解析（`apps/cli/src/main.rs` 或 `clap` 定义）、TUI 初始化条件分支、日志初始化（`logging_setup.rs`）|
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成：stdio 可用配置、配置层、Manager/API、命令解析、工具注册/注销和默认 1MB tool result 限制已落地；SSE 传输已实现但存在可靠性问题（z.ai SSE server 响应在 tools/list 时经常超时/不完整），MCP 加载已暂时从启动流程中禁用，待修复后重新启用；Streamable HTTP 传输待后续补充 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Claude API 适配（Messages API、流式/非流式、thinking budget、重试、tool use），作为独立 provider 与 OpenAI/OpenRouter 等并列；默认 provider |
@@ -59,6 +59,26 @@
 - `agent/features/runtime/src/business/chat/looping/hook_ui.rs`
 - `agent/features/hook/src/business/hook/runner.rs`
 - `specs/rust-coding.md`
+
+### #77 diff removed 行不语法高亮，只显示纯红色
+
+**状态**：待确认
+
+**背景**：diff removed/delete 行当前会把正文交给 syntect 语法高亮，导致删除行中出现关键字、标点等语法色。Feature #77 要求删除语义行保持单一删除色，避免红色删除语义被语法色冲淡。
+
+**设计**：
+1. 采用 deleted/removed 专用 helper，而不是给通用高亮 helper 增加开关。
+2. unified diff 的 `DiffLineKind::Removed` 只保留 `-` prefix 与纯 `DIFF_REMOVE_FG` 正文 span。
+3. 普通 diff 的 `build_delete_line` 不再接收 `syntax_ref`，避免误用语法高亮。
+4. added/context 行继续沿用现有 syntect 高亮逻辑。
+
+**验证**：
+- `cargo test -p cli unified_diff -- --nocapture`
+- `cargo test -p cli diff -- --nocapture`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
+- `apps/cli/src/tui/render/output/diff.rs`
 
 ### #74 Guidance：任务执行期间用户提问时同步更新 task list
 
