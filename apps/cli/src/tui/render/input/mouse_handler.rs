@@ -19,7 +19,7 @@ impl crate::tui::app::App {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if point_in_rect(row, col, &output_area) {
-                    // 滚动真相归 view_state；widget 镜像每帧由 adapter 写回。
+                    // 滚动真相归 view_state；render 前由 App/layout/document projection 同步指标。
                     let total_lines = self.output_area.document().total_lines();
                     self.view_state.output.scroll_up(3, total_lines);
                 }

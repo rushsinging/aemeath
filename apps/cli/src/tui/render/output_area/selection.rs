@@ -23,7 +23,7 @@ impl super::OutputArea {
     /// 根据逻辑索引获取行文本内容。
     /// idx < document.total_lines() → document 行；否则 → live status task_lines[i]
     pub fn get_line_content(
-        &mut self,
+        &self,
         idx: usize,
         live_status: &LiveStatusViewModel,
     ) -> Option<String> {
@@ -46,7 +46,7 @@ impl super::OutputArea {
     /// 不改 widget 选区状态。供 mouse_handler 折算后写入 view_state 选区真相。
     /// row/col 为终端绝对坐标，rect 为输出区。映射失败（行超界/无行内容）返回 None。
     pub fn screen_to_anchor(
-        &mut self,
+        &self,
         row: u16,
         col: u16,
         rect: &ratatui::layout::Rect,
@@ -82,7 +82,7 @@ impl super::OutputArea {
     /// 只读：在 `screen_to_anchor` 命中的字符位置向两侧扫描 word-char（字母数字/下划线）。
     /// 非 word-char 命中点返回单字符词。映射失败返回 None。不改 widget 选区状态。
     pub fn word_bounds_at(
-        &mut self,
+        &self,
         row: u16,
         col: u16,
         rect: &ratatui::layout::Rect,
@@ -114,7 +114,7 @@ impl super::OutputArea {
 
     /// Return selected text for the supplied selection state and document.
     pub fn selected_text_for_view(
-        &mut self,
+        &self,
         view: &crate::tui::view_state::output::OutputViewState,
         live_status: &LiveStatusViewModel,
     ) -> Option<String> {
@@ -123,7 +123,7 @@ impl super::OutputArea {
     }
 
     fn selected_text_for_range(
-        &mut self,
+        &self,
         start: crate::tui::view_state::output::SelectionAnchor,
         end: crate::tui::view_state::output::SelectionAnchor,
         live_status: &LiveStatusViewModel,
