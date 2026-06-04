@@ -224,18 +224,14 @@ impl App {
         apply_live_status_to_widget(&mut self.output_area, &vm);
     }
 
-    /// 据 view_state 滚动真相单向写回 widget 镜像（含 last_visible_height 反喂 + 钳制）。
-    /// 这是 `output_area.scroll_offset` / `auto_scroll` 镜像的唯一生产写入路径，
-    /// 每帧渲染前调用，与 `refresh_live_status_from_model` 同处渲染前管线。
+    /// 据 OutputViewState 滚动真相执行 last_visible_height 反喂、内容增长补偿与钳制。
+    /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。
     pub(crate) fn refresh_output_scroll_from_view_state(&mut self) {
-        crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget(
+        crate::tui::adapter::output_view_widget::sync_output_scroll_view_state(
             &mut self.view_state.output,
-            &mut self.output_area,
+            &self.output_area,
         );
-        crate::tui::adapter::output_view_widget::apply_output_selection_to_widget(
-            &self.view_state.output,
-            &mut self.output_area,
-        );
+        // #70 phase 2：output selection/scroll render 直接消费 view_state.output，无 widget 镜像写回。
         // #70 phase 2：status 选区 render 直接消费 view_state.status_sel，无 widget 镜像写回。
         // #70 phase 2：input 选区 render 直接消费 view_state.input_sel，无 widget 镜像写回。
     }

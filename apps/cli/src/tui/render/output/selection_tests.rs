@@ -1,4 +1,5 @@
 use super::super::OutputArea;
+use super::output_selection_view_for_test;
 use crate::tui::render::output::blocks::assistant_message::render_assistant_message;
 use crate::tui::render::output::rendered::{
     RenderCtx, RenderedBlock, RenderedDocument, RenderedLine,
@@ -40,10 +41,9 @@ fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
 fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
     let mut output = OutputArea::new();
     set_plain_lines(&mut output, &["短"]);
-    output.selection_start = Some((0, CharIdx::new(4)));
-    output.selection_end = Some((0, CharIdx::new(6)));
+    let view = output_selection_view_for_test((0, CharIdx::new(4)), (0, CharIdx::new(6)));
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(selected, None);
 }
@@ -52,10 +52,9 @@ fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
 fn test_get_selected_text_skips_line_when_clamped_start_exceeds_end() {
     let mut output = OutputArea::new();
     set_plain_lines(&mut output, &["ab"]);
-    output.selection_start = Some((0, CharIdx::new(4)));
-    output.selection_end = Some((0, CharIdx::new(1)));
+    let view = output_selection_view_for_test((0, CharIdx::new(4)), (0, CharIdx::new(1)));
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(selected, Some("b".to_string()));
 }
@@ -97,9 +96,8 @@ fn test_get_selected_text_task_status_only() {
     set_plain_lines(&mut output, &["normal line"]);
     output.task_status_lines = vec!["pending task".to_string()];
     // 选中 task_status 行（logic_idx=1）
-    output.selection_start = Some((1, CharIdx::new(2)));
-    output.selection_end = Some((1, CharIdx::new(8)));
-    let selected = output.get_selected_text();
+    let view = output_selection_view_for_test((1, CharIdx::new(2)), (1, CharIdx::new(8)));
+    let selected = output.selected_text_for_view(&view);
     // content is "  pending task", chars [2..8) = "pendin"
     assert_eq!(selected, Some("pendin".to_string()));
 }
@@ -110,9 +108,8 @@ fn test_get_selected_text_spanning_normal_and_task_status() {
     set_plain_lines(&mut output, &["abc"]);
     output.task_status_lines = vec!["xyz".to_string()];
     // 选中从普通行末尾到 task_status 行开头
-    output.selection_start = Some((0, CharIdx::new(1)));
-    output.selection_end = Some((1, CharIdx::new(3)));
-    let selected = output.get_selected_text();
+    let view = output_selection_view_for_test((0, CharIdx::new(1)), (1, CharIdx::new(3)));
+    let selected = output.selected_text_for_view(&view);
     // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
     assert_eq!(selected, Some("bc\n  x".to_string()));
 }
@@ -132,15 +129,15 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
 
     // 经只读换算 screen_to_anchor 取屏幕坐标对应的逻辑锚点，直接置选区镜像（替代
     // 已删除的 widget start/update_selection；选区真相迁至 view_state）。
     let start = output.screen_to_anchor(0, 0, &area).unwrap();
     let end = output.screen_to_anchor(0, 15, &area).unwrap();
-    output.set_selection_for_test(start, end);
+    let view = output_selection_view_for_test(start, end);
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(selected, Some(" Name  │ Status".to_string()));
 }
@@ -160,13 +157,13 @@ fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
 
     let start = output.screen_to_anchor(0, 0, &area).unwrap();
     let end = output.screen_to_anchor(0, 32, &area).unwrap();
-    output.set_selection_for_test(start, end);
+    let view = output_selection_view_for_test(start, end);
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(
         selected,
@@ -189,17 +186,16 @@ fn test_get_selected_text_strips_inline_markdown_formatting() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
     let plain_len = output
         .document()
         .iter_lines()
         .next()
         .map(|line| line.plain.chars().count())
         .unwrap_or(0);
-    output.selection_start = Some((0, CharIdx::new(0)));
-    output.selection_end = Some((0, CharIdx::new(plain_len)));
+    let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(plain_len)));
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(
         selected,
@@ -222,17 +218,19 @@ fn test_get_selected_text_preserves_unclosed_markdown_marker() {
         area.width.saturating_sub(2),
     );
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
     let plain = output
         .document()
         .iter_lines()
         .next()
         .map(|line| line.plain.clone())
         .unwrap_or_default();
-    output.selection_start = Some((0, CharIdx::new(0)));
-    output.selection_end = Some((0, CharIdx::new(plain.chars().count())));
+    let view = output_selection_view_for_test(
+        (0, CharIdx::new(0)),
+        (0, CharIdx::new(plain.chars().count())),
+    );
 
-    let selected = output.get_selected_text();
+    let selected = output.selected_text_for_view(&view);
 
     assert_eq!(selected, Some("**unclosed marker".to_string()));
 }
@@ -248,7 +246,7 @@ fn rendered_plain(texts: &[&str], width: u16) -> (OutputArea, Rect) {
         height: texts.len() as u16 + 1,
     };
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
     (output, area)
 }
 
@@ -272,8 +270,6 @@ fn test_screen_to_anchor_returns_none_when_row_out_of_range() {
     let (mut output, area) = rendered_plain(&["abc"], 40);
     // 错误/边界路径：屏幕行超出 screen_line_map 返回 None（不改任何状态）。
     assert_eq!(output.screen_to_anchor(5, 0, &area), None);
-    assert!(output.selection_start.is_none());
-    assert!(!output.is_selecting);
 }
 
 #[test]
@@ -290,7 +286,7 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
     });
     let area = Rect::new(0, 0, 20, 3);
     let mut buf = Buffer::empty(area);
-    output.render(area, &mut buf);
+    output.render(area, &mut buf, &Default::default());
     // #63：点击 gutter 列（0/1）补偿后映射到 plain 字符 0。
     assert_eq!(
         output.screen_to_anchor(0, 0, &area),
