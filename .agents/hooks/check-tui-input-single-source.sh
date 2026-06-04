@@ -63,6 +63,10 @@ report_matches \
   bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/; if (/(pub[[:space:]]*(\\([^)]*\\))?[[:space:]]*fn|submission_from_changes|InputChange|InputArea|StatusBar|input_area\\.|&mut[[:space:]]+(InputArea|StatusBar))/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/input_widget.rs\""
 
 report_matches \
+  "resize adapter must stay retired; handle resize directly in App::handle_resize and view_state reducers, not via adapter mapping helpers." \
+  bash -c "perl -ne 'next if /^\\s*\\/\\// || /^\\s*#!?\\[/ || /^\\s*#\\[cfg\\(test\\)\\]/ || /^\\s*mod tests/; if (/(pub[[:space:]]*(\\([^)]*\\))?[[:space:]]*(struct|fn)|ResizeMapping|map_resize|apply_resize)/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/adapter/resize.rs\""
+
+report_matches \
   "production app/update code must not drive InputArea text/cursor directly; send InputIntent and read InputChange projections without widget writeback." \
   grep -RInE '\binput_area\.(set_text|set_cursor_byte_index|clear|set_pending_images|get_text|cursor_position|is_empty)\(' \
     "$ROOT/apps/cli/src/tui/app" "$ROOT/apps/cli/src/tui/input" --include='*.rs'
