@@ -20,73 +20,69 @@ impl InputArea {
         model: &InputRenderModel,
         selection: &InputSelectionViewState,
     ) {
-        self.pending_images = model.pending_images;
-        self.focused = model.focused;
-        let block = self.input_block();
+        let block = input_block(model);
         let inner_area = block.inner(area);
-        self.content_width = inner_area.width;
         block.render(area, buf);
 
         let mut textarea = configured_textarea(model);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
-        self.render_selection(inner_area, buf, model, selection);
+        render_selection(inner_area, buf, model, selection);
     }
+}
 
-    fn input_block(&self) -> Block<'static> {
-        let title = if self.pending_images > 0 {
-            format!(" Input [{} image(s) pending] ", self.pending_images)
-        } else {
-            " Input ".to_string()
-        };
-        let border_style = if self.focused {
-            Style::default().fg(theme::ACCENT)
-        } else {
-            Style::default().fg(theme::BORDER)
-        };
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(border_style)
-    }
+fn input_block(model: &InputRenderModel) -> Block<'static> {
+    let title = if model.pending_images > 0 {
+        format!(" Input [{} image(s) pending] ", model.pending_images)
+    } else {
+        " Input ".to_string()
+    };
+    let border_style = if model.focused {
+        Style::default().fg(theme::ACCENT)
+    } else {
+        Style::default().fg(theme::BORDER)
+    };
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style)
+}
 
-    fn render_selection(
-        &self,
-        inner_area: Rect,
-        buf: &mut Buffer,
-        model: &InputRenderModel,
-        selection: &InputSelectionViewState,
-    ) {
-        let Some(((start_row, start_col), (end_row, end_col))) = selection.normalized_selection()
-        else {
-            return;
-        };
+fn render_selection(
+    inner_area: Rect,
+    buf: &mut Buffer,
+    model: &InputRenderModel,
+    selection: &InputSelectionViewState,
+) {
+    let Some(((start_row, start_col), (end_row, end_col))) = selection.normalized_selection()
+    else {
+        return;
+    };
 
-        let lines = model.lines();
-        let selection_style = Style::default()
-            .bg(theme::SELECTION_BG)
-            .fg(theme::SELECTION_FG);
-        for (row, line_text) in lines.iter().enumerate() {
-            if row < start_row || row > end_row {
-                continue;
-            }
-            let line_len = line_text.chars().count();
-            let col_from = if row == start_row { start_col } else { 0 };
-            let col_to = if row == end_row {
-                end_col.min(line_len)
-            } else {
-                line_len
-            };
-            highlight_selection_row(
-                inner_area,
-                buf,
-                row,
-                line_text,
-                col_from,
-                col_to,
-                selection_style,
-            );
+    let lines = model.lines();
+    let selection_style = Style::default()
+        .bg(theme::SELECTION_BG)
+        .fg(theme::SELECTION_FG);
+    for (row, line_text) in lines.iter().enumerate() {
+        if row < start_row || row > end_row {
+            continue;
         }
+        let line_len = line_text.chars().count();
+        let col_from = if row == start_row { start_col } else { 0 };
+        let col_to = if row == end_row {
+            end_col.min(line_len)
+        } else {
+            line_len
+        };
+        highlight_selection_row(
+            inner_area,
+            buf,
+            row,
+            line_text,
+            col_from,
+            col_to,
+            selection_style,
+        );
     }
 }
 
@@ -154,16 +150,20 @@ mod tests {
     use crate::tui::render::input::input_area::selection::text_anchor_for_screen_col;
     use ratatui::buffer::Buffer;
 
-    fn render_model(text: &str) -> InputRenderModel {
+    fn render_model_with_state(
+        text: &str,
+        pending_images: usize,
+        focused: bool,
+    ) -> InputRenderModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputRenderModel::from_document(&document, None, 0, true)
+        InputRenderModel::from_document(&document, None, pending_images, focused)
     }
 
     #[test]
     fn test_render_selection_highlights_cjk_to_screen_width_end() {
         let mut input = InputArea::new();
-        let model = render_model("@docs/ bug 33，拖动选中后还是没有高亮");
+        let model = render_model_with_state("@docs/ bug 33，拖动选中后还是没有高亮", 0, true);
         let area = Rect {
             x: 0,
             y: 0,
@@ -190,5 +190,25 @@ mod tests {
                 .bg,
             Some(theme::SELECTION_BG)
         );
+    }
+
+    #[test]
+    fn test_render_projects_pending_images_and_focus_from_model() {
+        let mut input = InputArea::new();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 3,
+        };
+        let mut buf = Buffer::empty(area);
+        let model = render_model_with_state("hello", 2, false);
+
+        input.render(area, &mut buf, &model, &InputSelectionViewState::default());
+
+        assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "I");
+        assert_eq!(buf.cell((8, 0)).unwrap().symbol(), "[");
+        assert_eq!(buf.cell((9, 0)).unwrap().symbol(), "2");
+        assert_eq!(buf.cell((0, 0)).unwrap().style().fg, Some(theme::BORDER));
     }
 }

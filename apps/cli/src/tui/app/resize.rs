@@ -20,8 +20,6 @@ impl App {
         self.view_state.output.clear_selection();
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
-        let input_width = self.layout.input_area_rect.width.max(width);
-        self.input_area.handle_resize(input_width);
     }
 }
 
@@ -54,12 +52,12 @@ mod tests {
     }
 
     #[test]
-    fn handle_resize_updates_input_content_width() {
+    fn handle_resize_leaves_input_width_as_render_projection() {
         let mut app = test_app();
 
         app.handle_resize(80, 24);
 
-        assert_eq!(app.input_area.content_width, 78);
+        assert_eq!(crate::tui::InputArea::input_content_width(80), 78);
     }
 
     #[test]

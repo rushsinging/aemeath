@@ -25,9 +25,10 @@ report_matches() {
 }
 
 # Input text/cursor truth lives in model.input.document. Completion/suggestions truth lives in
-# model.input.completion. History navigation truth lives in model.input.history. Phase 2 forbids
-# InputArea from physically storing text/cursor/history mirror; rendering must consume a
-# model-derived projection and create any tui_textarea helper per frame.
+# model.input.completion. History navigation truth lives in model.input.history. Pending image truth
+# lives in app chat state and is projected through InputRenderModel. Phase 2 forbids InputArea from
+# physically storing text/cursor/history/render mirror; rendering must consume a model-derived
+# projection and create any tui_textarea helper per frame.
 
 report_matches \
   "InputArea must not physically store tui_textarea::TextArea/text/cursor mirror fields." \
@@ -44,6 +45,14 @@ report_matches \
 report_matches \
   "InputArea must not expose history mirror mutation APIs; route history through InputIntent/InputModel." \
   bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\s*#\[cfg\(test\)\]/) { \$pending=1; next } if (/pub[[:space:]]*(\([^)]*\))?[[:space:]]*fn[[:space:]]+(add_history|reset_history_nav|navigate_history|set_history|history_previous|history_next)[[:space:]]*\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/history.rs\""
+
+report_matches \
+  "InputArea must not physically store render projection mirror fields; derive pending/focus/width from render model or area." \
+  bash -c "awk '/pub struct InputArea \{/{inside=1; next} inside && /^\}/{inside=0} inside && /^[[:space:]]*(pub\\((super|crate)\\)[[:space:]]+)?(focused|pending_images|content_width):/ { print FILENAME \":\" FNR \":\" \$0 }' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\""
+
+report_matches \
+  "InputArea must not expose render mirror mutation APIs; derive focused/pending/width during render." \
+  bash -c "perl -ne 'BEGIN { \$pending=0 } if (/^\s*#\[cfg\(test\)\]/) { \$pending=1; next } if (/pub[[:space:]]*(\([^)]*\))?[[:space:]]*fn[[:space:]]+(set_pending_images|set_focused|handle_resize)[[:space:]]*\(/ && !\$pending) { print \"\$ARGV:\$.:\$_\" } \$pending=0' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/resize.rs\""
 
 report_matches \
   "InputArea must not expose production text/cursor mirror APIs." \
