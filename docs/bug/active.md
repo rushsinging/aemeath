@@ -4,7 +4,6 @@
 |---|------|--------|------|----------|----------|----------|
 | 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功执行 hook 时只记录 stdout/stderr 字节数，不记录内容；已提取 stdout/stderr 中 `[hook-env]` 行并用 info 日志写入 `aemeath.log`，便于 debug 日志级别下排查 main/worktree 路径 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | 根因补充：`UiEvent::Text` / `UiEvent::Thinking` 等 streaming 事件每个 chunk 都同步 `refresh_output_widget_from_model()`，会反复 assemble/render 整个输出区，长输出时拖慢主循环，表现为正文/工具块/输入响应滞后。修复：新增 `AppViewState.dirty`，事件处理只合并 dirty，渲染前管线 `flush_dirty_view_models()` 按帧批量刷新 output/status；系统提示、用户回显、AskUser、历史恢复等路径改为标记 output dirty。保留 Text/Thinking 与 spinner phase 同批 intent 的修复。验证：`test_update_agent_text_persists_output_dirty_until_render_pipeline_refreshes`、notice 渲染回归、`tui::app::update::notice`。 |
-| 105 | TUI 中 ```text fenced block 被当作代码块显示而非 Markdown 渲染 | 中 | 待确认 | 待用户确认 | 2026-06 | 已将 `text` fence 作为 Markdown 文本容器处理：隐藏开闭围栏，内容按普通 Markdown 渲染；无语言 fence、其他语言 fence、`diff` fence 行为保持不变 |
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | 高 | 修复中 | 未确认 | 2026-06 | 初步判断不是工具 I/O 阻塞，而是 Write/Edit/Agent/Bash 等大参数或大 result 进入 TUI conversation/view model 后触发主线程大量 clone/lines/宽度计算/渲染；应限制 TUI 保存与渲染的工具参数/结果体量 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | 根因：`ReflectionDone` 将 `output.content`（含完整会话转录）以 `System(Muted)` 暗色推入，大段暗色文本占据输出区，视觉上后续 assistant 回复也"看起来暗了"。修复：只推摘要（建议数+过时数），不推完整内容 |
 | 85 | Ollama provider 声明但工厂未接线（整模块死代码） | 中 | 待确认 | 未确认 | 2026-05 | provider crate 的 OllamaProvider 是完整 LlmProvider 实现（streaming/重试/非流式回退/empty-response 检测/think 控制），但 `ApiDriverKind` 缺 `Ollama` 变体、`parse("ollama")` 返回 None，client/pool 工厂 match 无 Ollama 分支；config 中 `api:"ollama"` 被 `unwrap_or(OpenAI)` 回退并经 OpenAI 兼容工厂构造，专用 OllamaProvider 永不构造（#61 D3 收窄可见性后暴露为整模块死代码）。修复：补 `ApiDriverKind::Ollama` 变体 + parse/as_str，client/pool 工厂加 Ollama 分支构造 OllamaProvider，`openai_config`/pool 排除 Ollama（防回退 OpenAI 兼容），移除 mod.rs 上的 `#[allow(dead_code)]`。修复 commit: 111393e |
@@ -144,27 +143,6 @@
 **涉及路径**：
 - `apps/cli/src/tui/render/output_area/render.rs`
 - `apps/cli/src/tui/app/update.rs`
-
-### #105 TUI 中 ```text fenced block 被当作代码块显示而非 Markdown 渲染
-
-**状态**：待确认
-
-**症状**：assistant 或工具结果输出 ` ```text ... ``` ` 时，TUI 会显示围栏行，并把内容按代码块/语法高亮处理。用户期望 `text` fence 作为“Markdown 文本容器”：隐藏围栏，内容按普通 Markdown 渲染（例如 `**bold**` 加粗、列表项渲染为列表）。
-
-**根因**：`render_fenced_markdown` 对所有非 `diff` fence 统一走 `syntax::language_by_extension` / `theme::CODE` 分支，缺少 `text` 语言的 Markdown 语义特判。
-
-**修复**：
-1. ` ```text ` fence 内内容走 `markdown(line, base_style, width)`。
-2. `text` fence 的开闭围栏行不进入渲染结果。
-3. 保持无语言 fence、其他语言 fence、`diff` fence 既有行为不变。
-4. 添加回归测试覆盖 Markdown 样式生效、围栏隐藏，以及普通代码 fence 不受影响。
-
-**验证**：
-- `cargo test -p cli test_fenced_text_block_renders_inner_markdown_without_fence_lines`
-- `cargo test -p cli test_fenced_unlabeled_code_block_still_renders_fence_and_code`
-
-**涉及路径**：
-- `apps/cli/src/tui/render/output/primitives/fenced.rs`
 
 ### #102 长工具调用内容导致 TUI 画面完全不刷新、按键无响应
 
