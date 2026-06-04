@@ -11,9 +11,9 @@ pub(crate) fn render_document_from_view_model(
         .document_renderer
         .render_tree(view_model, render_width);
     output_area.set_document(document);
-    // 滚动钳制（offset 反喂 + clamp + 镜像写回）统一由
-    // `adapter::output_view_widget::apply_output_scroll_to_widget` 在渲染前管线处理，
-    // 真相归 view_state，此处不再直改 widget 滚动态。
+    // 滚动钳制（offset 反喂 + clamp）统一由
+    // `adapter::output_view_widget::sync_output_scroll_view_state` 在渲染前管线处理，
+    // 真相归 view_state，此处不再直改滚动态。
 }
 
 fn effective_render_width(output_area: &OutputArea, width: u16) -> u16 {
@@ -87,12 +87,12 @@ mod tests {
             .any(|l| l.plain == "整理一轮，不改代码。"));
     }
 
-    /// 钳制真相已迁至 `output_view_widget::apply_output_scroll_to_widget`（操作 view_state）。
+    /// 钳制真相已迁至 `output_view_widget::sync_output_scroll_view_state`（操作 view_state）。
     /// 这两个回归用例改为走渲染（render_document_from_view_model）+ 滚动写回（adapter）组合，
     /// 验证 stale offset 钳零 / 有效 offset 保留的整链行为不变。
     #[test]
     fn test_render_then_apply_scroll_clamps_stale_offset() {
-        use crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget;
+        use crate::tui::adapter::output_view_widget::sync_output_scroll_view_state;
         use crate::tui::view_state::output::OutputViewState;
 
         let mut output_area = OutputArea::new();
@@ -106,15 +106,15 @@ mod tests {
         render_document_from_view_model(&mut output_area, &vm(1), 80);
         // 初始化 last_document_total_lines，避免首帧触发补偿
         view.last_document_total_lines = output_area.document().total_lines();
-        apply_output_scroll_to_widget(&mut view, &mut output_area);
+        sync_output_scroll_view_state(&mut view, &output_area);
 
-        assert_eq!(output_area.scroll_offset, 0);
-        assert!(output_area.auto_scroll);
+        assert_eq!(view.scroll_offset, 0);
+        assert!(view.auto_scroll);
     }
 
     #[test]
     fn test_render_then_apply_scroll_preserves_valid_offset() {
-        use crate::tui::adapter::output_view_widget::apply_output_scroll_to_widget;
+        use crate::tui::adapter::output_view_widget::sync_output_scroll_view_state;
         use crate::tui::view_state::output::OutputViewState;
 
         let mut output_area = OutputArea::new();
@@ -128,9 +128,9 @@ mod tests {
         render_document_from_view_model(&mut output_area, &vm(100), 80);
         // 初始化 last_document_total_lines，避免首帧触发补偿
         view.last_document_total_lines = output_area.document().total_lines();
-        apply_output_scroll_to_widget(&mut view, &mut output_area);
+        sync_output_scroll_view_state(&mut view, &output_area);
 
-        assert_eq!(output_area.scroll_offset, 5);
-        assert!(!output_area.auto_scroll);
+        assert_eq!(view.scroll_offset, 5);
+        assert!(!view.auto_scroll);
     }
 }

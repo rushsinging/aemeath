@@ -300,9 +300,9 @@ mod tests {
         assert!(!rendered
             .iter()
             .any(|line| line == "/tmp/docs/bug/active.md:18:match"));
-        // 渲染前滚动写回：view_state stale offset 经 adapter 钳制后镜像到 widget。
+        // 渲染前滚动同步：view_state stale offset 经 adapter 钳制。
         app.refresh_output_scroll_from_view_state();
-        assert!(app.output_area.scroll_offset <= app.output_area.document().total_lines());
+        assert!(app.view_state.output.scroll_offset <= app.output_area.document().total_lines());
     }
 
     /// 拼接 document 各行的 span 内容（gutter span + 内容 span）为逻辑可见行。

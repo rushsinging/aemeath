@@ -5,7 +5,6 @@ use sdk::CharIdx;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
-use crate::tui::view_state::output::OutputViewState;
 
 pub mod content;
 pub mod display;
@@ -20,16 +19,8 @@ pub use types::{SpanPart, SpinnerState, INDENT};
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
-    pub scroll_offset: usize,
-    pub auto_scroll: bool,
     pub last_line_count: usize,
     pub term_width: usize,
-    /// 鼠标是否正在拖拽选择
-    pub is_selecting: bool,
-    /// 选择起始点：(逻辑行索引, char 偏移)
-    pub selection_start: Option<(usize, CharIdx)>,
-    /// 选择结束点：(逻辑行索引, char 偏移)
-    pub selection_end: Option<(usize, CharIdx)>,
     /// 屏幕行到逻辑行的映射：每项是 (逻辑行索引, chunk内的char起始偏移, chunk内的char结束偏移)
     pub screen_line_map: Vec<(usize, CharIdx, CharIdx)>,
     /// 渲染后的逻辑行文本覆盖
@@ -64,13 +55,8 @@ impl OutputArea {
             .saturating_sub(2);
 
         Self {
-            scroll_offset: OutputViewState::default().scroll_offset,
-            auto_scroll: OutputViewState::default().auto_scroll,
             last_line_count: 0,
             term_width,
-            is_selecting: OutputViewState::default().is_selecting,
-            selection_start: OutputViewState::default().selection_start,
-            selection_end: OutputViewState::default().selection_end,
             screen_line_map: Vec::new(),
             rendered_line_content: HashMap::new(),
             spinner: None,

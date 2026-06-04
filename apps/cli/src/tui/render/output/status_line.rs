@@ -6,7 +6,9 @@ use crate::tui::render::display::safe_text::clamp_split_index;
 use crate::tui::render::theme;
 
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
+use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
+use crate::tui::view_state::output::OutputViewState;
 
 impl OutputArea {
     pub(crate) fn append_status_lines(
@@ -15,6 +17,7 @@ impl OutputArea {
         spinner_line: &Option<Line<'static>>,
         queued_lines: &[String],
         task_status_lines: &[String],
+        view: &OutputViewState,
     ) {
         // 排队输入预览行（固定在 spinner 上方）
         if !queued_lines.is_empty() {
@@ -28,7 +31,7 @@ impl OutputArea {
                     &crate::tui::render::output::rendered::RenderedLine::new(vec![
                         ratatui::text::Span::styled(text.clone(), style),
                     ]),
-                    self.selection_range_for_virtual_line(base_idx + i, char_count),
+                    selection_range_for_virtual_line(view, base_idx + i, char_count),
                     theme::SELECTION_FG,
                 ));
                 lines.push(line);
@@ -55,42 +58,12 @@ impl OutputArea {
                     &crate::tui::render::output::rendered::RenderedLine::new(vec![
                         ratatui::text::Span::styled(text, task_style),
                     ]),
-                    self.selection_range_for_virtual_line(task_base_idx + i, char_count),
+                    selection_range_for_virtual_line(view, task_base_idx + i, char_count),
                     theme::SELECTION_FG,
                 ));
                 lines.push(line);
             }
         }
-    }
-
-    fn selection_range_for_virtual_line(
-        &self,
-        line_idx: usize,
-        plain_len: usize,
-    ) -> Option<SelRange> {
-        let (start_line, start_col) = self.selection_start?;
-        let (end_line, end_col) = self.selection_end?;
-        let (start_line, start_col, end_line, end_col) =
-            if start_line < end_line || (start_line == end_line && start_col < end_col) {
-                (start_line, start_col, end_line, end_col)
-            } else {
-                (end_line, end_col, start_line, start_col)
-            };
-
-        if line_idx < start_line || line_idx > end_line {
-            return None;
-        }
-        let start = if line_idx == start_line {
-            start_col.as_usize().min(plain_len)
-        } else {
-            0
-        };
-        let end = if line_idx == end_line {
-            end_col.as_usize().min(plain_len)
-        } else {
-            plain_len
-        };
-        (start < end).then_some(SelRange { start, end })
     }
 
     pub(crate) fn trim_to_area_height(
@@ -120,6 +93,15 @@ impl OutputArea {
     }
 }
 
+fn selection_range_for_virtual_line(
+    view: &OutputViewState,
+    line_idx: usize,
+    plain_len: usize,
+) -> Option<SelRange> {
+    let (start, end) = view.selection_range()?;
+    sel_range_for_bounds(start, end, line_idx, plain_len)
+}
+
 fn task_status_style(text: &str) -> Style {
     if text.starts_with('✓') || text.trim_start().starts_with('✓') {
         Style::default().fg(theme::SUCCESS)
@@ -139,6 +121,7 @@ mod tests {
     use ratatui::{buffer::Buffer, layout::Rect};
 
     use super::*;
+    use crate::tui::render::output_area::selection::output_selection_view_for_test;
     use crate::tui::render::output_area::types::SpinnerState;
 
     #[test]
@@ -156,7 +139,7 @@ mod tests {
         let area = Rect::new(0, 0, 40, 5);
         let mut buf = Buffer::empty(area);
 
-        output.render(area, &mut buf);
+        output.render(area, &mut buf, &Default::default());
         // screen_line_map: spinner(1,不可选) + task_status(2) = 3
         assert_eq!(output.screen_line_map.len(), 3);
         // spinner 在 index 0, 不可选(usize::MAX)
@@ -168,10 +151,10 @@ mod tests {
         // rel_row=2 对应第 2 个 task_status 行
         let s = output.screen_to_anchor(2, 0, &area).unwrap();
         let e = output.screen_to_anchor(2, 15, &area).unwrap();
-        output.set_selection_for_test(s, e);
+        let view = output_selection_view_for_test(s, e);
 
         assert_eq!(
-            output.get_selected_text(),
+            output.selected_text_for_view(&view),
             Some("  □ #1 修复 bug".to_string())
         );
     }
@@ -190,13 +173,13 @@ mod tests {
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);
 
-        output.render(area, &mut buf);
+        output.render(area, &mut buf, &Default::default());
         // screen_map: [spinner(usize::MAX), task_status(lines.len())]
         // 选 task_status 行（screen 行 1）
         let s = output.screen_to_anchor(1, 0, &area).unwrap();
         let e = output.screen_to_anchor(1, 8, &area).unwrap();
-        output.set_selection_for_test(s, e);
-        output.render(area, &mut buf);
+        let view = output_selection_view_for_test(s, e);
+        output.render(area, &mut buf, &view);
 
         let first_selected = buf.cell((area.x, area.y + 1)).unwrap();
         assert_eq!(first_selected.style().bg, Some(theme::SELECTION_BG));

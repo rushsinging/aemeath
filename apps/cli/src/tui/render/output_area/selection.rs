@@ -1,6 +1,7 @@
 use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
+use crate::tui::view_state::OutputViewState;
 
 impl super::OutputArea {
     /// 获取逻辑行总数（包括 document 行 + task_status 虚拟行）
@@ -188,25 +189,17 @@ impl super::OutputArea {
             Some(result)
         }
     }
+}
 
-    /// Get the selected text based on logic line coordinates
-    #[cfg(test)]
-    pub fn get_selected_text(&mut self) -> Option<String> {
-        let view = crate::tui::view_state::output::OutputViewState {
-            selection_start: self.selection_start,
-            selection_end: self.selection_end,
-            ..Default::default()
-        };
-        self.selected_text_for_view(&view)
-    }
-
-    /// Clear the current selection
-    #[cfg(test)]
-    pub fn clear_selection(&mut self) {
-        self.selection_start = None;
-        self.selection_end = None;
-        self.is_selecting = false;
-    }
+pub(crate) fn output_selection_view_for_test(
+    start: (usize, CharIdx),
+    end: (usize, CharIdx),
+) -> OutputViewState {
+    let mut view = OutputViewState::default();
+    view.begin_selection(start.0, start.1);
+    view.update_selection(end.0, end.1);
+    view.end_selection();
+    view
 }
 
 #[cfg(test)]
@@ -217,6 +210,7 @@ mod tests;
 mod document_selection_tests {
     use super::super::OutputArea;
     use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
+    use crate::tui::render::output_area::selection::output_selection_view_for_test;
     use ratatui::text::Span;
     use sdk::CharIdx;
 
@@ -232,8 +226,8 @@ mod document_selection_tests {
                 ],
             }],
         });
-        area.set_selection_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
-        let copied = area.get_selected_text();
+        let view = output_selection_view_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
+        let copied = area.selected_text_for_view(&view);
 
         assert_eq!(copied.as_deref(), Some("bold\n世界"));
     }

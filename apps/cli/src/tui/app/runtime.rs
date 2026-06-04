@@ -165,18 +165,12 @@ mod tests {
 
         app.reset_runtime_state().await;
 
-        // 三区真相被清空：避免下一帧 adapter 复活 widget 镜像。
+        // 三区真相被清空。
         assert_eq!(app.view_state.output.selection_range(), None);
         assert!(!app.view_state.output.is_selecting());
         assert_eq!(app.view_state.status_sel.selection_range(), None);
         assert!(!app.view_state.status_sel.is_selecting());
         assert_eq!(app.view_state.input_sel.normalized_selection(), None);
         assert!(!app.view_state.input_sel.is_selecting());
-
-        // 经渲染前刷新后，widget 镜像也被同步清空。
-        app.refresh_output_scroll_from_view_state();
-        assert!(!app.output_area.is_selecting);
-        assert!(app.output_area.selection_start.is_none());
-        assert!(app.output_area.selection_end.is_none());
     }
 }
