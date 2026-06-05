@@ -89,5 +89,9 @@
 | 107 | TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮 | [archived/107-rust-fence-highlight.md](archived/107-rust-fence-highlight.md) |
 | 108 | TUI diff 代码块没有统一走 syntect 高亮 | [archived/108-diff-syntect-highlight.md](archived/108-diff-syntect-highlight.md) |
 | 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | [archived/109-syntect-theme-macchiato.md](archived/109-syntect-theme-macchiato.md) |
+| 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | [archived/110-hook-env-log.md](archived/110-hook-env-log.md) |
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方；AskUser 块本身固定在初始位置 | [archived/113-askuser-output-order.md](archived/113-askuser-output-order.md) |
 | 114 | Stop hook blocked 缺少显式 chat loop 停止状态表达 | [archived/114-stop-hook-blocked-chat-loop-state.md](archived/114-stop-hook-blocked-chat-loop-state.md) |
+| 115 | check-unit-tests 测试过滤参数误用导致误报失败 | [archived/115-check-unit-tests-filter.md](archived/115-check-unit-tests-filter.md) |
+| 116 | TaskListCreate 工具返回未带 task list ID | [archived/116-tasklistcreate-no-id.md](archived/116-tasklistcreate-no-id.md) |
+| 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | [archived/117-tui-task-list-refresh.md](archived/117-tui-task-list-refresh.md) |

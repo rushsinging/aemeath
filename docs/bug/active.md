@@ -4,15 +4,11 @@
 |---|------|--------|------|----------|----------|----------|
 | 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | 高 | 待确认 | 待用户确认 | 2026-06 | ToolCall 绑定时空 summary 覆盖 ToolArgumentsDelta 收集的参数预览 |
 | 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
-| 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | 中 | 待确认 | 待用户确认 | 2026-06 | HookRunner 成功时不记录 stdout/stderr 内容；已修复提取 [hook-env] 行写入日志 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
 | 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
-| 115 | check-unit-tests 测试过滤参数误用导致误报失败 | 低 | 待确认 | 待用户确认 | 2026-06 | cargo test 短名+--exact 过滤 0 个测试误报失败；已补充完整路径测试 |
-| 116 | TaskListCreate 工具返回未带 task list ID | 中 | 已修复 | 待用户确认 | 2026-06 | TaskListCreate 返回未带 ID；已修复返回格式并增加引导说明 |
-| 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | 中 | 待确认 | 待用户确认 | 2026-06 | 任务工具成功后未发 TASKS change；已补 TasksChanged 事件并触发 TUI 刷新 |
 
 ### #119 TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失
 
@@ -72,54 +68,6 @@
 **涉及路径**：
 - `apps/cli/src/tui/app/update.rs`
 - `apps/cli/src/tui/app.rs`
-
-### #117 创建 task list 和 task 时，TUI task list window 没有更新
-
-**状态**：待确认
-
-**症状**：通过工具创建 task list 并继续创建 task 后，TUI 的 task list window 没有立即更新，窗口仍显示旧任务状态或空状态；实际任务工具调用已经成功返回，任务状态与 TUI 展示不一致。
-
-**根因**：任务工具成功更新 TaskStore 后，运行时只发送普通 `ToolResult`，没有产生任务状态变化事件；SDK 的 change watch 因此不会标记 `ChangeSet::TASKS`，TUI 也不会重新拉取 `task_status` 快照。TUI 原本只会在启动、处理完成或显式刷新路径更新 task list window，未覆盖 TaskListCreate / TaskCreate 等工具执行期间的任务变更。
-
-**修复**：
-1. `RuntimeStreamEvent` / `sdk::ChatEvent` 新增 `TasksChanged`，表示任务存储发生变化。
-2. `TaskListCreate`、`TaskCreate`、`TaskUpdate`、`TaskStop`、`TaskListComplete` 成功后发送 `TasksChanged`。
-3. SDK 收到 `TasksChanged` 时标记 `ChangeSet::TASKS`。
-4. TUI 将 `TasksChanged` 映射为 `UiEvent::TaskStatusChanged`，并触发 `Effect::FetchTaskStatus` 重新拉取窗口内容；no-TUI 模式忽略该事件。
-
-**验证**：
-- `cargo test -p runtime test_runtime_tasks_changed_emits_sdk_event_and_change_set`
-- `cargo test -p cli test_sdk_event_to_ui_event_maps_tasks_changed`
-- `cargo test -p runtime --lib`
-- `cargo test -p cli`
-
-**涉及路径**：
-- `agent/features/runtime/src/business/chat/looping/events.rs`
-- `agent/features/runtime/src/business/chat/looping/non_agent.rs`
-- `agent/features/runtime/src/core/client/event.rs`
-- `packages/sdk/src/chat.rs`
-- `apps/cli/src/tui/`
-- `apps/cli/src/chat/no_tui.rs`
-
-### #110 Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log
-
-**状态**：待确认
-
-**症状**：Stop hook 脚本已输出 `[hook-env] AEMEATH_PROJECT_DIR=...`、`CLAUDE_PROJECT_DIR=...`、`ROOT/PWD=...`，但 hook 成功通过时，这些内容只出现在 hook stdout/TUI 验证输出中，不进入 `~/.agents/logs/aemeath.log`；即使将 `logging.level` 调为 `debug`，日志中也只能看到已有 hook start/end 元信息，无法直接检索 `[hook-env]` 行。
-
-**根因**：`HookRunner::execute_hook` 成功等待子进程后只记录 stdout/stderr 字节数，没有记录 stdout/stderr 内容。为避免完整 hook 输出污染日志，需要只提取稳定的 `[hook-env]` 诊断行写入日志。
-
-**修复**：
-1. 新增 `hook_env_lines`，从 stdout/stderr 中提取以 `[hook-env]` 开头的行。
-2. `execute_hook` 在判定 blocked 前，将 stdout/stderr 中的 `[hook-env]` 行写入 `log::info!`，日志包含 event、command、stream 与 line。
-3. 不记录完整 hook stdout/stderr，避免单测和构建输出大量进入主日志。
-
-**验证**：
-- `cargo test -p hook test_hook_env_lines_extracts_only_hook_env_stdout_lines`
-
-**涉及路径**：
-- `agent/features/hook/src/business/hook/runner.rs`
-- `agent/features/hook/src/business/hook/tests.rs`
 
 ### #96 EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中"
 
