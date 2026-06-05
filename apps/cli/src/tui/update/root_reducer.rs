@@ -294,6 +294,7 @@ mod tests {
             AgentEventMapping {
                 conversation: vec![ConversationIntent::ObserveToolCallStart {
                     id: "tool-1".to_string(),
+                    provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),
                     index: 0,
                 }],

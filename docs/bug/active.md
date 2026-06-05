@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 120 | TUI tool call block 跨 turn 串写 | 高 | 待确认 | 待用户确认 | 2026-06 | runtime tool id 仅 stream/message 局部唯一，TUI 全局按裸 id 绑定导致后续工具夺舍前序 block |
 | 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | 高 | 待确认 | 待用户确认 | 2026-06 | ToolCall 绑定时空 summary 覆盖 ToolArgumentsDelta 收集的参数预览 |
 | 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
@@ -9,6 +10,31 @@
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
+
+### #120 TUI tool call block 跨 turn 串写
+
+**状态**：待确认
+
+**修复 commits**：待提交
+
+**症状**：会话 `019e7c10-3985-7daa-b002-da5cb1c213aa` 中应有两个 `Skill` tool call：`superpowers:using-superpowers` 与 `superpowers:brainstorming`。TUI 最终显示时后者覆盖前者，后续 `Read` 的内容也可能更新到已有 `Skill`/其他 tool call block 中，表现为 tool call block 串写或“夺舍”。
+
+**根因**：runtime streaming 阶段生成的 tool id 以每次 stream 局部计数为基础，`Agent::extract_tool_calls()` 也会按 assistant message 内位置重新生成 `tool-N`，跨 turn 会重复。TUI conversation model 与 view assembler 使用裸 id 作为全局 block/result 查找键，导致后续 turn 中相同 id 的工具更新到前序 block。早期 `ToolCallStart` / `ToolArgumentsDelta` 事件也没有携带 provider tool id，无法在 streaming 阶段稳定关联。
+
+**修复**：扩展 provider `StreamHandler`，让 tool start 与 arguments delta 透传 `provider_id`；SDK、runtime 与 TUI 事件同步携带 `provider_id`。runtime chat loop 使用共享 `AtomicUsize` 计数器为同一会话循环内的 streaming tool call 分配 session 级唯一 runtime id。TUI 绑定最终 `ToolCall` 时同时尝试 runtime id 与 provider id，避免 resume/live 入口 id 不一致时产生新 block 或覆盖旧 block。
+
+**验证**：
+- `cargo test -p runtime stream_handler -- --nocapture`
+- `cargo test -p cli tui::model::conversation -- --nocapture`
+- `cargo fmt --check && cargo clippy -p provider -p runtime -p sdk -p cli --all-targets -- -D warnings`
+- 代码审查：无阻塞问题；已补充 provider_id fallback 绑定测试。
+
+**涉及路径**：
+- `agent/features/provider/src/core/provider.rs`
+- `agent/features/runtime/src/business/chat/looping/stream_handler.rs`
+- `packages/sdk/src/chat.rs`
+- `apps/cli/src/tui/model/conversation/model.rs`
+- `apps/cli/src/tui/model/conversation/model_tests.rs`
 
 ### #119 TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失
 

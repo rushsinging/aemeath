@@ -1,6 +1,10 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use provider::api::StreamHandler;
 use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
 pub struct RuntimeStreamHandler<S: ChatEventSink> {
@@ -8,18 +12,22 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub first_text_time: Option<std::time::Instant>,
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
-    pub next_tool_id: usize,
+    pub next_tool_id: Arc<AtomicUsize>,
     pub stream_tool_ids: HashMap<usize, String>,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
     pub fn new(sink: S) -> Self {
+        Self::with_tool_id_counter(sink, Arc::new(AtomicUsize::new(0)))
+    }
+
+    pub fn with_tool_id_counter(sink: S, next_tool_id: Arc<AtomicUsize>) -> Self {
         Self {
             sink,
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
-            next_tool_id: 0,
+            next_tool_id,
             stream_tool_ids: HashMap::new(),
         }
     }
@@ -28,8 +36,8 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
         self.stream_tool_ids
             .entry(index)
             .or_insert_with(|| {
-                self.next_tool_id += 1;
-                format!("tool-{}", self.next_tool_id)
+                let next = self.next_tool_id.fetch_add(1, Ordering::Relaxed) + 1;
+                format!("tool-{next}")
             })
             .clone()
     }
@@ -58,10 +66,11 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         }
     }
 
-    fn on_tool_use_start(&mut self, name: &str, index: usize) {
+    fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
         let id = self.runtime_tool_id(index);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
             id,
+            provider_id: provider_id.map(str::to_string),
             name: name.to_string(),
             index,
         });
@@ -84,11 +93,18 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
             .try_send_event(RuntimeStreamEvent::Thinking(text.to_string()));
     }
 
-    fn on_tool_arguments_delta(&mut self, index: usize, name: &str, partial_args: &str) {
+    fn on_tool_arguments_delta(
+        &mut self,
+        index: usize,
+        name: &str,
+        provider_id: Option<&str>,
+        partial_args: &str,
+    ) {
         let id = self.runtime_tool_id(index);
         self.sink
             .try_send_event(RuntimeStreamEvent::ToolArgumentsDelta {
                 id,
+                provider_id: provider_id.map(str::to_string),
                 index,
                 name: name.to_string(),
                 partial_args: partial_args.to_string(),

@@ -19,11 +19,13 @@ pub enum AppEvent {
     TextBlockComplete(String),
     ToolCallStart {
         id: String,
+        provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolArgumentsDelta {
         id: String,
+        provider_id: Option<String>,
         index: usize,
         name: String,
         partial_args: String,

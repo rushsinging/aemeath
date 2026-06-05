@@ -19,11 +19,13 @@ pub enum ConversationIntent {
     CompleteTextBlock,
     ObserveToolCallStart {
         id: String,
+        provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ObserveToolArguments {
         id: String,
+        provider_id: Option<String>,
         name: String,
         index: usize,
         partial_args: String,

@@ -128,7 +128,7 @@ impl OpenAICompatibleProvider {
                                 let input: serde_json::Value = serde_json::from_str(arguments)
                                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-                                handler.on_tool_use_start(&name, idx);
+                                handler.on_tool_use_start(&name, Some(&id), idx);
                                 if !name.is_empty() {
                                     content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                 }

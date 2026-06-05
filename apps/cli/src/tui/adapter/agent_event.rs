@@ -42,20 +42,26 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
         }
         UiEvent::TextBlockComplete(_) => conversation(ConversationIntent::CompleteTextBlock),
-        UiEvent::ToolCallStart { id, name, index } => {
-            conversation(ConversationIntent::ObserveToolCallStart {
-                id: id.clone(),
-                name: name.clone(),
-                index: *index,
-            })
-        }
+        UiEvent::ToolCallStart {
+            id,
+            provider_id,
+            name,
+            index,
+        } => conversation(ConversationIntent::ObserveToolCallStart {
+            id: id.clone(),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+        }),
         UiEvent::ToolArgumentsDelta {
             id,
+            provider_id,
             index,
             name,
             partial_args,
         } => conversation(ConversationIntent::ObserveToolArguments {
             id: id.clone(),
+            provider_id: provider_id.clone(),
             name: name.clone(),
             index: *index,
             partial_args: sanitize_tool_arguments_delta(name, partial_args),
@@ -352,6 +358,7 @@ mod tests {
     fn test_map_agent_event_tool_arguments_delta_truncates_large_stream() {
         let event = UiEvent::ToolArgumentsDelta {
             id: "tool-1".to_string(),
+            provider_id: Some("provider-1".to_string()),
             index: 0,
             name: "Edit".to_string(),
             partial_args: "x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2),

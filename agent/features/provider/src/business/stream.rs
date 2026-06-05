@@ -108,7 +108,7 @@ pub async fn parse_stream(
                         current_tool_id = id;
                         current_tool_name = name.clone();
                         current_tool_json.clear();
-                        handler.on_tool_use_start(&name, tool_index);
+                        handler.on_tool_use_start(&name, Some(&current_tool_id), tool_index);
                         tool_index += 1;
                     }
                     ContentBlockPayload::Thinking { thinking } => {
@@ -127,6 +127,14 @@ pub async fn parse_stream(
                     }
                     DeltaPayload::InputJsonDelta { partial_json } => {
                         current_tool_json.push_str(&partial_json);
+                        if !current_tool_name.is_empty() {
+                            handler.on_tool_arguments_delta(
+                                tool_index.saturating_sub(1),
+                                &current_tool_name,
+                                Some(&current_tool_id),
+                                &current_tool_json,
+                            );
+                        }
                     }
                     DeltaPayload::ThinkingDelta { thinking } => {
                         current_thinking.push_str(&thinking);

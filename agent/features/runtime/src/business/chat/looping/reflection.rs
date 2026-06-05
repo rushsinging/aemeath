@@ -115,7 +115,7 @@ async fn call_llm_for_reflection(
         fn on_text(&mut self, text: &str) {
             self.text.push_str(text);
         }
-        fn on_tool_use_start(&mut self, _name: &str, _index: usize) {}
+        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
         fn on_error(&mut self, _error: &str) {}
     }
 

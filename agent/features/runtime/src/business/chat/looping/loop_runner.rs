@@ -19,7 +19,7 @@ use crate::business::chat::looping::{
 use provider::api::StopReason;
 use share::message::Message;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
@@ -155,6 +155,7 @@ where
     let mut stall_detector = StallDetector::new();
     let mut pending_input = PendingInputBuffer::default();
     let mut loop_fsm = ChatLoopFsm::default();
+    let tool_id_counter = Arc::new(AtomicUsize::new(0));
 
     loop {
         turn_count += 1;
@@ -278,8 +279,8 @@ where
             api_msgs
         };
 
-        let mut handler = RuntimeStreamHandler::new(sink.clone());
-
+        let mut handler =
+            RuntimeStreamHandler::with_tool_id_counter(sink.clone(), tool_id_counter.clone());
         log_llm_input(
             &json_logger,
             turn_count,
