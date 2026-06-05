@@ -29,9 +29,12 @@ impl ConversationModel {
         match intent {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
             ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
-            ConversationIntent::ObserveToolCallStart { id, name, index } => {
-                self.observe_tool_call_start(id, name, index)
-            }
+            ConversationIntent::ObserveToolCallStart {
+                id,
+                provider_id,
+                name,
+                index,
+            } => self.observe_tool_call_start(id, provider_id, name, index),
             ConversationIntent::ObserveToolCall {
                 id,
                 provider_id,
@@ -55,10 +58,11 @@ impl ConversationModel {
             ConversationIntent::CompleteTextBlock => self.complete_text_block(),
             ConversationIntent::ObserveToolArguments {
                 id,
+                provider_id,
                 name,
                 index,
                 partial_args,
-            } => self.observe_tool_arguments(id, name, index, partial_args),
+            } => self.observe_tool_arguments(id, provider_id, name, index, partial_args),
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
             ConversationIntent::AppendError { text } => self.append_error(text),
             ConversationIntent::QueueSubmission { text } => self.queue_submission(text),
@@ -134,6 +138,7 @@ impl ConversationModel {
     fn observe_tool_call_start(
         &mut self,
         id: String,
+        _provider_id: Option<String>,
         name: String,
         index: usize,
     ) -> Vec<ConversationChange> {
@@ -160,28 +165,32 @@ impl ConversationModel {
     fn observe_tool_call(
         &mut self,
         id: String,
-        _provider_id: String,
+        provider_id: String,
         name: String,
         index: usize,
         summary: String,
     ) -> Vec<ConversationChange> {
+        let candidate_ids = [id.as_str(), provider_id.as_str()];
         let mut args_preview = String::new();
         let mut final_summary = summary.clone();
+        let mut bound_id = id.clone();
         let mut bound = false;
         if let Some(chat) = self.active_chat_mut() {
             if let Some(turn) = chat.active_turn_mut() {
-                if let Some(preview) = turn.bind_tool(&id, summary.clone()) {
-                    args_preview = preview;
-                    if final_summary.is_empty() {
-                        if let Some(call) = turn
-                            .tool_calls
-                            .iter()
-                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
-                        {
-                            final_summary = call.summary.clone().unwrap_or_default();
+                for candidate_id in candidate_ids {
+                    if let Some(preview) = turn.bind_tool(candidate_id, summary.clone()) {
+                        args_preview = preview;
+                        bound_id = candidate_id.to_string();
+                        if final_summary.is_empty() {
+                            if let Some(call) = turn.tool_calls.iter().find(|call| {
+                                call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id)
+                            }) {
+                                final_summary = call.summary.clone().unwrap_or_default();
+                            }
                         }
+                        bound = true;
+                        break;
                     }
-                    bound = true;
                 }
             }
         }
@@ -194,6 +203,7 @@ impl ConversationModel {
                     let tool_call_id = ToolCallId::new(id.clone());
                     turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
                     let _ = turn.bind_tool(&id, summary.clone());
+                    bound_id = id.clone();
                     if final_summary.is_empty() {
                         if let Some(call) = turn
                             .tool_calls
@@ -207,16 +217,16 @@ impl ConversationModel {
                 }
             }
         }
-        self.promote_orphan_tool_result(&id);
+        self.promote_orphan_tool_result(&bound_id);
         let existing_tool_position = self.blocks.iter().position(|block| {
             matches!(
                 block,
-                ConversationBlock::ToolCall { id: block_id, .. } if block_id.as_ref() == id
+                ConversationBlock::ToolCall { id: block_id, .. } if block_id.as_ref() == bound_id
             )
         });
         if existing_tool_position.is_none() {
             self.insert_tool_call_block_before_active_text(
-                ToolCallId::new(id.clone()),
+                ToolCallId::new(bound_id.clone()),
                 name.clone(),
                 final_summary.clone(),
                 args_preview,
@@ -230,7 +240,7 @@ impl ConversationModel {
                     ..
                 } = block
                 {
-                    if block_id.as_ref() == id {
+                    if block_id.as_ref() == bound_id {
                         if !final_summary.is_empty() {
                             *block_summary = final_summary.clone();
                         }
@@ -242,9 +252,9 @@ impl ConversationModel {
                 }
             }
         }
-        self.move_tool_results_after_tool_call(&id);
+        self.move_tool_results_after_tool_call(&bound_id);
         vec![
-            ConversationChange::ToolCallBound { id, name },
+            ConversationChange::ToolCallBound { id: bound_id, name },
             ConversationChange::OutputDirty,
         ]
     }
@@ -297,6 +307,7 @@ impl ConversationModel {
     fn observe_tool_arguments(
         &mut self,
         id: String,
+        _provider_id: Option<String>,
         name: String,
         index: usize,
         partial_args: String,

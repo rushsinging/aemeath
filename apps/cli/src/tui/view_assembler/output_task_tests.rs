@@ -106,6 +106,7 @@ fn add_task_tool(
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         id: id.to_string(),
+        provider_id: None,
         name: name.to_string(),
         index: 0,
     });

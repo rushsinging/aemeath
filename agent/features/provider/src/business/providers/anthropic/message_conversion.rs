@@ -35,9 +35,9 @@ impl<'a> StreamHandler for TrackingHandler<'a> {
         self.emitted = true;
         self.inner.on_text(text);
     }
-    fn on_tool_use_start(&mut self, name: &str, index: usize) {
+    fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
         self.emitted = true;
-        self.inner.on_tool_use_start(name, index);
+        self.inner.on_tool_use_start(name, provider_id, index);
     }
     fn on_error(&mut self, error: &str) {
         self.inner.on_error(error);
@@ -158,7 +158,7 @@ pub(crate) async fn send_message_non_stream(
                         .cloned()
                         .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
                     let idx = content_blocks.len();
-                    handler.on_tool_use_start(&name, idx);
+                    handler.on_tool_use_start(&name, Some(&id), idx);
                     content_blocks.push(ContentBlock::ToolUse { id, name, input });
                 }
                 _ => {}

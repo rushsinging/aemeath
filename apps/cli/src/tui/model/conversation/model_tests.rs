@@ -15,6 +15,7 @@ fn test_conversation_observes_tool_lifecycle() {
 
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -61,6 +62,117 @@ fn test_conversation_reports_orphan_tool_result() {
 }
 
 #[test]
+fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_blocks() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "load first skill".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Skill".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Skill".to_string(),
+        index: 0,
+        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "call-using".to_string(),
+        id: "tool-1".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+    model.apply(ConversationIntent::CompleteChat);
+
+    model.apply(ConversationIntent::StartChat {
+        submission: "load second skill".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-3".to_string(),
+        provider_id: None,
+        name: "Skill".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-3".to_string(),
+        provider_id: None,
+        name: "Skill".to_string(),
+        index: 0,
+        partial_args: r#"{"skill":"superpowers:brainstorming"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "call-brainstorm".to_string(),
+        id: "tool-3".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+
+    let summaries: Vec<_> = model
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            super::block::ConversationBlock::ToolCall { name, summary, .. } if name == "Skill" => {
+                Some(summary.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(summaries.len(), 2);
+    assert!(summaries[0].contains("superpowers:using-superpowers"));
+    assert!(summaries[1].contains("superpowers:brainstorming"));
+}
+
+#[test]
+fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "load skill".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "call-provider-skill".to_string(),
+        provider_id: Some("call-provider-skill".to_string()),
+        name: "Skill".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "call-provider-skill".to_string(),
+        provider_id: Some("call-provider-skill".to_string()),
+        name: "Skill".to_string(),
+        index: 0,
+        partial_args: r#"{"skill":"superpowers:brainstorming"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "call-provider-skill".to_string(),
+        id: "tool-99".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+
+    let tool_blocks: Vec<_> = model
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            super::block::ConversationBlock::ToolCall { id, summary, .. } => {
+                Some((id.as_ref(), summary.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(tool_blocks.len(), 1);
+    assert_eq!(tool_blocks[0].0, "call-provider-skill");
+    assert!(tool_blocks[0].1.contains("superpowers:brainstorming"));
+}
+
+#[test]
 fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {
@@ -68,11 +180,13 @@ fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "call-skill".to_string(),
+        provider_id: None,
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolArguments {
         id: "call-skill".to_string(),
+        provider_id: None,
         name: "Skill".to_string(),
         index: 0,
         partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
@@ -104,11 +218,13 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "call-list".to_string(),
+        provider_id: None,
         name: "TaskListCreate".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolArguments {
         id: "call-list".to_string(),
+        provider_id: None,
         name: "TaskListCreate".to_string(),
         index: 0,
         partial_args: r#"{"subject":"修复显示","summary":"排查 tool call"}"#.to_string(),
@@ -122,11 +238,13 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "call-task".to_string(),
+        provider_id: None,
         name: "TaskCreate".to_string(),
         index: 1,
     });
     model.apply(ConversationIntent::ObserveToolArguments {
         id: "call-task".to_string(),
+        provider_id: None,
         name: "TaskCreate".to_string(),
         index: 1,
         partial_args: r#"{"subject":"写测试","description":"复现 TaskCreate 显示"}"#.to_string(),
@@ -167,6 +285,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -238,6 +357,7 @@ fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -288,6 +408,7 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
     model.apply(ConversationIntent::CompleteTextBlock);
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -337,6 +458,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -380,6 +502,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -481,11 +604,13 @@ fn test_conversation_keeps_tool_args_preview() {
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolArguments {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
         partial_args: r#"{"file_path":"src/main.rs"}"#.to_string(),
@@ -521,6 +646,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     // ToolCallStart 用纯 tool 序号 index=0
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Agent".to_string(),
         index: 0,
     });
@@ -578,6 +704,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     // 不调 CompleteTextBlock — text 还在 streaming
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Agent".to_string(),
         index: 0,
     });

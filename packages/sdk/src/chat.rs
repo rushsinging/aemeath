@@ -198,12 +198,14 @@ pub enum ChatEvent {
     /// 工具调用开始。
     ToolCallStart {
         id: String,
+        provider_id: Option<String>,
         name: String,
         index: usize,
     },
     /// 工具参数增量。
     ToolArgumentsDelta {
         id: String,
+        provider_id: Option<String>,
         index: usize,
         name: String,
         partial_args: String,

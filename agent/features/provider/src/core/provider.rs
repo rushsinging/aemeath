@@ -9,7 +9,7 @@ use crate::business::types::{StreamResponse, SystemBlock};
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
     fn on_text(&mut self, text: &str);
-    fn on_tool_use_start(&mut self, name: &str, index: usize);
+    fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize);
     fn on_error(&mut self, error: &str);
     fn on_raw_line(&mut self, _line: &str) {}
     fn on_text_block_complete(&mut self, _full_text: &str) {}
@@ -18,8 +18,16 @@ pub trait StreamHandler: Send {
     fn on_thinking(&mut self, _text: &str) {}
     /// Called when arguments delta arrives during streaming tool calls.
     /// `index` is the tool call index, `name` is the tool name,
+    /// `provider_id` is the provider tool-use id when available,
     /// `partial_args` is the accumulated arguments string so far.
-    fn on_tool_arguments_delta(&mut self, _index: usize, _name: &str, _partial_args: &str) {}
+    fn on_tool_arguments_delta(
+        &mut self,
+        _index: usize,
+        _name: &str,
+        _provider_id: Option<&str>,
+        _partial_args: &str,
+    ) {
+    }
 }
 
 /// Simple callback handler for raw text streaming
@@ -37,7 +45,7 @@ impl StreamHandler for CallbackHandler {
     fn on_text(&mut self, text: &str) {
         (self.callback)(text);
     }
-    fn on_tool_use_start(&mut self, _name: &str, _index: usize) {}
+    fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
     fn on_error(&mut self, _error: &str) {}
     fn on_text_block_complete(&mut self, _full_text: &str) {}
 }

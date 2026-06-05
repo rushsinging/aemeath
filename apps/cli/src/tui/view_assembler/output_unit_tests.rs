@@ -59,6 +59,7 @@ fn test_non_embedded_tool_result_uses_summary() {
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });

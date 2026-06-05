@@ -64,17 +64,27 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::Token(text) => UiEvent::Text(text),
         sdk::ChatEvent::Thinking(text) => UiEvent::Thinking(text),
         sdk::ChatEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
-        sdk::ChatEvent::ToolCallStart { id, name, index } => {
-            UiEvent::ToolCallStart { id, name, index }
-        }
+        sdk::ChatEvent::ToolCallStart {
+            id,
+            provider_id,
+            name,
+            index,
+        } => UiEvent::ToolCallStart {
+            id,
+            provider_id,
+            name,
+            index,
+        },
         sdk::ChatEvent::ToolArgumentsDelta {
             id,
+            provider_id,
             index,
             name,
             partial_args,
             ..
         } => UiEvent::ToolArgumentsDelta {
             id,
+            provider_id,
             index,
             name,
             partial_args,

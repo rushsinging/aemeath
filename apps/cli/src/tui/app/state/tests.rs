@@ -338,6 +338,7 @@ mod tests {
             UiEvent::TextBlockComplete("thinking".to_string()),
             UiEvent::ToolCallStart {
                 id: "grep-1".to_string(),
+                provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
             },

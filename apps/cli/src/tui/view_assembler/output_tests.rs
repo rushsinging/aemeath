@@ -147,6 +147,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Edit".to_string(),
         index: 0,
     });
@@ -273,6 +274,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
+        provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
@@ -342,6 +344,7 @@ fn add_completed_tool(
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         id: id.to_string(),
+        provider_id: None,
         name: name.to_string(),
         index: 0,
     });
