@@ -130,6 +130,71 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
 }
 
 #[test]
+fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provider_tool() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "load skill".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
+        provider_id: Some("call-skill".to_string()),
+        name: "Skill".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-1".to_string(),
+        provider_id: Some("call-skill".to_string()),
+        name: "Skill".to_string(),
+        index: 0,
+        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "call-skill".to_string(),
+        id: "tool-1".to_string(),
+        name: "Skill".to_string(),
+        index: 0,
+        summary: String::new(),
+    });
+    model.apply(ConversationIntent::CompleteChat);
+
+    model.apply(ConversationIntent::StartChat {
+        submission: "read config".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolResult {
+        id: "tool-2".to_string(),
+        provider_id: "call-read".to_string(),
+        tool_name: "Read".to_string(),
+        output: "//! Configuration file management".to_string(),
+        is_error: false,
+        image_count: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCall {
+        provider_id: "call-read".to_string(),
+        id: "tool-2".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        summary: r#"{"file_path":"agent/shared/src/config.rs"}"#.to_string(),
+    });
+
+    let skill_result = model.chats[0].turns[0].tool_calls[0].result.as_deref();
+    assert_ne!(
+        skill_result,
+        Some("//! Configuration file management"),
+        "Read 结果不应写入上一轮 Skill"
+    );
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolCall { id, name, .. }
+            if id.as_ref() == "tool-2" && name == "Read"
+    )));
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolResult { id, output, .. }
+            if id.as_ref() == "tool-2" && output.contains("Configuration file management")
+    )));
+}
+
+#[test]
 fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {

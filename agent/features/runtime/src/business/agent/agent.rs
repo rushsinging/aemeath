@@ -58,14 +58,20 @@ async fn call_tool_with_timeout(
 }
 
 impl<'a> Agent<'a> {
-    pub fn extract_tool_calls(message: &Message) -> Vec<ToolCall> {
+    pub fn extract_tool_calls_with_ids<F>(
+        message: &Message,
+        mut runtime_id_for_provider: F,
+    ) -> Vec<ToolCall>
+    where
+        F: FnMut(&str) -> String,
+    {
         message
             .content
             .iter()
             .enumerate()
             .filter_map(|(index, block)| match block {
                 ContentBlock::ToolUse { id, name, input } => Some(ToolCall {
-                    id: format!("tool-{}", index + 1),
+                    id: runtime_id_for_provider(id),
                     provider_id: id.clone(),
                     name: name.clone(),
                     index,
@@ -74,6 +80,10 @@ impl<'a> Agent<'a> {
                 _ => None,
             })
             .collect()
+    }
+
+    pub fn extract_tool_calls(message: &Message) -> Vec<ToolCall> {
+        Self::extract_tool_calls_with_ids(message, |provider_id| provider_id.to_string())
     }
 
     pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolResultTuple> {

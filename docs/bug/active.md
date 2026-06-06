@@ -21,17 +21,19 @@
 
 **根因**：runtime streaming 阶段生成的 tool id 以每次 stream 局部计数为基础，`Agent::extract_tool_calls()` 也会按 assistant message 内位置重新生成 `tool-N`，跨 turn 会重复。TUI conversation model 与 view assembler 使用裸 id 作为全局 block/result 查找键，导致后续 turn 中相同 id 的工具更新到前序 block。早期 `ToolCallStart` / `ToolArgumentsDelta` 事件也没有携带 provider tool id，无法在 streaming 阶段稳定关联。
 
-**修复**：扩展 provider `StreamHandler`，让 tool start 与 arguments delta 透传 `provider_id`；SDK、runtime 与 TUI 事件同步携带 `provider_id`。runtime chat loop 使用共享 `AtomicUsize` 计数器为同一会话循环内的 streaming tool call 分配 session 级唯一 runtime id。TUI 绑定最终 `ToolCall` 时同时尝试 runtime id 与 provider id，避免 resume/live 入口 id 不一致时产生新 block 或覆盖旧 block。
+**修复**：扩展 provider `StreamHandler`，让 tool start 与 arguments delta 透传 `provider_id`；SDK、runtime 与 TUI 事件同步携带 `provider_id`。runtime chat loop 使用共享 `ToolIdentityRegistry` 维护 `provider_id -> runtime_id` 映射，并为同一会话循环内所有 tool call 分配 session 级稳定 runtime id。`ToolCallStart` / `ToolArgumentsDelta`、最终 `ToolCall` 与 `ToolResult` 都通过该 registry 归一化到同一个 runtime id；TUI 继续以 runtime id 为 canonical，`provider_id` 仅作为 runtime 关联外部 provider/tool_result 的辅助键。
 
 **验证**：
 - `cargo test -p runtime stream_handler -- --nocapture`
+- `cargo test -p runtime tool_identity -- --nocapture`
 - `cargo test -p cli tui::model::conversation -- --nocapture`
-- `cargo fmt --check && cargo clippy -p provider -p runtime -p sdk -p cli --all-targets -- -D warnings`
-- 代码审查：无阻塞问题；已补充 provider_id fallback 绑定测试。
+- `cargo fmt --check && cargo clippy -p runtime -p cli --all-targets -- -D warnings`
+- 代码审查：待执行。
 
 **涉及路径**：
 - `agent/features/provider/src/core/provider.rs`
 - `agent/features/runtime/src/business/chat/looping/stream_handler.rs`
+- `agent/features/runtime/src/business/chat/looping/tool_identity.rs`
 - `packages/sdk/src/chat.rs`
 - `apps/cli/src/tui/model/conversation/model.rs`
 - `apps/cli/src/tui/model/conversation/model_tests.rs`

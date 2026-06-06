@@ -20,6 +20,7 @@ mod stream_handler;
 mod stream_handler_tests;
 mod task_reminder;
 mod tool_context;
+mod tool_identity;
 mod tools;
 
 pub use events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
