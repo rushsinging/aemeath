@@ -2,7 +2,7 @@ use crate::core::client::OpenAIProviderConfig;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::driver::{driver_for_api, ChatApiDriver};
+use super::driver::{driver_for_provider_driver, ChatApiDriver};
 use super::ReasoningConfig;
 
 pub struct OpenAICompatibleProvider {
@@ -33,7 +33,7 @@ impl OpenAICompatibleProvider {
         reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
-        let driver = driver_for_api(config.api);
+        let driver = driver_for_provider_driver(config.driver);
         Self {
             base_url: {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());

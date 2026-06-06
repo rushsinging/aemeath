@@ -82,7 +82,7 @@ pub enum CommandAction {
         model_name: String,
         base_url: String,
         api_key: String,
-        api_type: String,
+        driver: String,
         max_tokens: u32,
         context_window: usize,
         reasoning: Option<bool>,

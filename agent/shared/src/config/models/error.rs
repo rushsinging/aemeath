@@ -19,9 +19,9 @@ pub enum ModelResolveError {
         query: String,
         available_models: Vec<String>,
     },
-    UnknownApi {
+    UnknownDriver {
         source: String,
-        api: String,
+        driver: String,
     },
 }
 
@@ -56,10 +56,10 @@ impl fmt::Display for ModelResolveError {
                 query,
                 available_models.join("\n  ")
             ),
-            Self::UnknownApi { source, api } => write!(
+            Self::UnknownDriver { source, driver } => write!(
                 f,
-                "来源 '{}' 的 api '{}' 不受支持。支持的 api：anthropic, openai, zhipu, litellm",
-                source, api
+                "来源 '{}' 的 driver '{}' 不受支持。支持的 driver：anthropic, openai, zhipu, litellm, volcengine, ollama",
+                source, driver
             ),
         }
     }

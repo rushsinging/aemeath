@@ -1,6 +1,6 @@
 use super::model_runtime::ModelRuntimeSettings;
 use provider::api::openai_compatible::ReasoningConfig;
-use provider::api::ApiDriverKind;
+use provider::api::ProviderDriverKind;
 use provider::api::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
 use share::config::models::ResolvedModel;
 use std::env;
@@ -12,10 +12,11 @@ pub fn resolve_api_key(
     resolved_model: &ResolvedModel,
     env_value: EnvReader<'_>,
 ) -> Option<String> {
-    let api_type = ApiDriverKind::parse(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
+    let driver =
+        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
     cli_api_key
         .or_else(|| env_or_runtime("AEMEATH_API_KEY", env_value))
-        .or_else(|| provider_api_key_from_env(api_type, env_value))
+        .or_else(|| provider_driver_api_key_from_env(driver, env_value))
         .or_else(|| env_or_runtime("LLM_API_KEY", env_value))
         .or_else(|| non_empty_string(&resolved_model.source_config.api_key))
 }
@@ -28,7 +29,7 @@ pub fn resolve_base_url(
 }
 
 pub fn build_llm_client(
-    api_type: ApiDriverKind,
+    driver: ProviderDriverKind,
     api_key: String,
     base_url: Option<String>,
     model: String,
@@ -37,7 +38,7 @@ pub fn build_llm_client(
 ) -> LlmClient {
     let reasoning_effort = runtime_settings.reasoning_effort.clone();
     let client = LlmClient::from_config(LlmConfigOptions {
-        api: api_type,
+        driver,
         api_key,
         base_url,
         model,
@@ -45,7 +46,7 @@ pub fn build_llm_client(
         thinking_max_tokens: runtime_settings.thinking_max_tokens,
         reasoning: runtime_settings.reasoning,
         reasoning_config: reasoning_config(runtime_settings, resolved_model.model.reasoning),
-        openai_config: openai_config(api_type, &resolved_model.source_key),
+        openai_config: openai_config(driver, &resolved_model.source_key),
     });
 
     if let Some(effort) = reasoning_effort {
@@ -55,17 +56,20 @@ pub fn build_llm_client(
     client
 }
 
-fn provider_api_key_from_env(api_type: ApiDriverKind, env_value: EnvReader<'_>) -> Option<String> {
-    provider_api_key_env_name(api_type).and_then(|name| env_or_runtime(name, env_value))
+fn provider_driver_api_key_from_env(
+    driver: ProviderDriverKind,
+    env_value: EnvReader<'_>,
+) -> Option<String> {
+    provider_driver_api_key_env_name(driver).and_then(|name| env_or_runtime(name, env_value))
 }
 
-fn provider_api_key_env_name(api_type: ApiDriverKind) -> Option<&'static str> {
-    match api_type {
-        ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
-        ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
-        ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
-        ApiDriverKind::Ollama => Some("OLLAMA_API_KEY"),
-        ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
+fn provider_driver_api_key_env_name(driver: ProviderDriverKind) -> Option<&'static str> {
+    match driver {
+        ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
+        ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
+        ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+        ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
+        ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
     }
 }
 
@@ -85,12 +89,15 @@ fn non_empty_string(value: &str) -> Option<String> {
     }
 }
 
-fn openai_config(api_type: ApiDriverKind, source_key: &str) -> Option<OpenAIProviderConfig> {
+fn openai_config(driver: ProviderDriverKind, source_key: &str) -> Option<OpenAIProviderConfig> {
     // Anthropic 与 Ollama 各有专用 provider，不走 OpenAI 兼容工厂分支。
-    if matches!(api_type, ApiDriverKind::Anthropic | ApiDriverKind::Ollama) {
+    if matches!(
+        driver,
+        ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama
+    ) {
         None
     } else {
-        Some(OpenAIProviderConfig::from_api_driver(api_type, source_key))
+        Some(OpenAIProviderConfig::from_driver(driver, source_key))
     }
 }
 
@@ -122,7 +129,7 @@ mod tests {
     use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 
     fn resolved_model(
-        api: ApiDriverKind,
+        driver: ProviderDriverKind,
         api_key: &str,
         base_url: &str,
         source_key: &str,
@@ -132,7 +139,7 @@ mod tests {
             source_config: ProviderModelsConfig {
                 api_key: api_key.to_string(),
                 base_url: base_url.to_string(),
-                api: api.as_str().to_string(),
+                driver: driver.as_str().to_string(),
                 models: Vec::new(),
             },
             model: ModelEntryConfig {
@@ -145,7 +152,7 @@ mod tests {
                 reasoning: None,
                 reasoning_effort: None,
             },
-            api: api.as_str().to_string(),
+            driver: driver.as_str().to_string(),
         }
     }
 
@@ -173,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_prefers_cli_key() {
-        let resolved = resolved_model(ApiDriverKind::OpenAI, "config-key", "", "openai");
+        let resolved = resolved_model(ProviderDriverKind::OpenAI, "config-key", "", "openai");
         let read_env = env_reader(&[("AEMEATH_API_KEY", "env-key")]);
 
         let result = resolve_api_key(Some("cli-key".to_string()), &resolved, Some(&read_env));
@@ -183,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_uses_aemeath_env_before_provider_env() {
-        let resolved = resolved_model(ApiDriverKind::OpenAI, "config-key", "", "openai");
+        let resolved = resolved_model(ProviderDriverKind::OpenAI, "config-key", "", "openai");
         let read_env = env_reader(&[
             ("AEMEATH_API_KEY", "aemeath-key"),
             ("OPENAI_API_KEY", "openai-key"),
@@ -196,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_uses_provider_env_before_llm_env() {
-        let resolved = resolved_model(ApiDriverKind::Anthropic, "config-key", "", "anthropic");
+        let resolved = resolved_model(ProviderDriverKind::Anthropic, "config-key", "", "anthropic");
         let read_env = env_reader(&[
             ("ANTHROPIC_API_KEY", "anthropic-key"),
             ("LLM_API_KEY", "llm-key"),
@@ -209,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_uses_llm_env_for_litellm_without_provider_env() {
-        let resolved = resolved_model(ApiDriverKind::LiteLLM, "config-key", "", "litellm");
+        let resolved = resolved_model(ProviderDriverKind::LiteLLM, "config-key", "", "litellm");
         let read_env = env_reader(&[("LLM_API_KEY", "llm-key")]);
 
         let result = resolve_api_key(None, &resolved, Some(&read_env));
@@ -219,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_uses_config_key_when_env_missing() {
-        let resolved = resolved_model(ApiDriverKind::Zhipu, "config-key", "", "zhipu");
+        let resolved = resolved_model(ProviderDriverKind::Zhipu, "config-key", "", "zhipu");
         let read_env = env_reader(&[]);
 
         let result = resolve_api_key(None, &resolved, Some(&read_env));
@@ -229,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_returns_none_when_all_sources_missing() {
-        let resolved = resolved_model(ApiDriverKind::Zhipu, "", "", "zhipu");
+        let resolved = resolved_model(ProviderDriverKind::Zhipu, "", "", "zhipu");
         let read_env = env_reader(&[]);
 
         let result = resolve_api_key(None, &resolved, Some(&read_env));
@@ -240,7 +247,7 @@ mod tests {
     #[test]
     fn test_resolve_base_url_prefers_cli_base_url() {
         let resolved = resolved_model(
-            ApiDriverKind::OpenAI,
+            ProviderDriverKind::OpenAI,
             "",
             "https://config.example",
             "openai",
@@ -254,7 +261,7 @@ mod tests {
     #[test]
     fn test_resolve_base_url_uses_config_base_url() {
         let resolved = resolved_model(
-            ApiDriverKind::OpenAI,
+            ProviderDriverKind::OpenAI,
             "",
             "https://config.example",
             "openai",
@@ -267,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_resolve_base_url_returns_none_when_missing() {
-        let resolved = resolved_model(ApiDriverKind::OpenAI, "", "", "openai");
+        let resolved = resolved_model(ProviderDriverKind::OpenAI, "", "", "openai");
 
         let result = resolve_base_url(None, &resolved);
 
@@ -276,17 +283,17 @@ mod tests {
 
     #[test]
     fn test_openai_config_skips_anthropic() {
-        let result = openai_config(ApiDriverKind::Anthropic, "anthropic");
+        let result = openai_config(ProviderDriverKind::Anthropic, "anthropic");
 
         assert!(result.is_none());
     }
 
     #[test]
     fn test_openai_config_uses_source_key_for_openai_compatible() {
-        let result = openai_config(ApiDriverKind::Zhipu, "Zhipu").unwrap();
+        let result = openai_config(ProviderDriverKind::Zhipu, "Zhipu").unwrap();
 
         assert_eq!(result.source_key, "Zhipu");
-        assert_eq!(result.api, ApiDriverKind::Zhipu);
+        assert_eq!(result.driver, ProviderDriverKind::Zhipu);
     }
 
     #[test]
@@ -346,20 +353,20 @@ mod tests {
     fn test_openai_config_skips_ollama() {
         // 回归 #85：Ollama 有专用 OllamaProvider，不应生成 openai_config，
         // 否则 from_config 会把它错误地路由到 OpenAI 兼容工厂分支。
-        let result = openai_config(ApiDriverKind::Ollama, "ollama");
+        let result = openai_config(ProviderDriverKind::Ollama, "ollama");
 
         assert!(result.is_none());
     }
 
     #[test]
     fn test_build_llm_client_ollama_constructs_ollama_provider() {
-        // 回归 #85：config 中 api="ollama" 必须由工厂构造出 OllamaProvider，
-        // 修复前会回退到 ApiDriverKind::OpenAI 并构造 OpenAICompatibleProvider。
-        let resolved = resolved_model(ApiDriverKind::Ollama, "", "", "ollama");
+        // 回归 #85：config 中 driver="ollama" 必须由工厂构造出 OllamaProvider，
+        // 修复前会回退到 ProviderDriverKind::OpenAI 并构造 OpenAICompatibleProvider。
+        let resolved = resolved_model(ProviderDriverKind::Ollama, "", "", "ollama");
         let settings = runtime_settings(0, false, None);
 
         let client = build_llm_client(
-            ApiDriverKind::Ollama,
+            ProviderDriverKind::Ollama,
             "ollama".to_string(),
             Some("http://localhost:11434".to_string()),
             "llama3.2".to_string(),
@@ -371,20 +378,20 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_api_key_env_name_ollama() {
+    fn test_provider_driver_api_key_env_name_ollama() {
         assert_eq!(
-            provider_api_key_env_name(ApiDriverKind::Ollama),
+            provider_driver_api_key_env_name(ProviderDriverKind::Ollama),
             Some("OLLAMA_API_KEY")
         );
     }
 
     #[test]
     fn test_build_llm_client_sets_reasoning_effort() {
-        let resolved = resolved_model(ApiDriverKind::OpenAI, "", "", "OpenAI");
+        let resolved = resolved_model(ProviderDriverKind::OpenAI, "", "", "OpenAI");
 
         let settings = runtime_settings(0, true, Some("high"));
         let client = build_llm_client(
-            ApiDriverKind::OpenAI,
+            ProviderDriverKind::OpenAI,
             "key".to_string(),
             None,
             "model-id".to_string(),

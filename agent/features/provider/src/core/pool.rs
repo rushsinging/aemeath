@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::api::ApiDriverKind;
+use crate::api::ProviderDriverKind;
 use share::config::ModelsConfig;
 
 use crate::core::client::{LlmClient, OpenAIProviderConfig};
@@ -116,30 +116,35 @@ impl LlmClientPool {
                 )
             })?;
 
-        // Resolve ApiDriverKind from config (the `api` field)
-        let api = ApiDriverKind::parse(&provider_config.api).unwrap_or(ApiDriverKind::OpenAI);
+        // Resolve ProviderDriverKind from config (the `driver` field)
+        let driver = ProviderDriverKind::parse(&provider_config.driver)
+            .unwrap_or(ProviderDriverKind::OpenAI);
 
         // Build OpenAI provider config for OpenAI-compatible providers.
         // Anthropic 与 Ollama 各有专用 provider，不生成 openai_config。
-        let openai_config = if !matches!(api, ApiDriverKind::Anthropic | ApiDriverKind::Ollama) {
-            Some(OpenAIProviderConfig::from_api_driver(api, provider_name))
+        let openai_config = if !matches!(
+            driver,
+            ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama
+        ) {
+            Some(OpenAIProviderConfig::from_driver(driver, provider_name))
         } else {
             None
         };
         // API key — config first, then driver-specific / generic env vars.
         let api_key = if provider_config.api_key.is_empty() {
-            let driver_env = match api {
-                ApiDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
-                ApiDriverKind::OpenAI => Some("OPENAI_API_KEY"),
-                ApiDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
-                ApiDriverKind::Ollama => Some("OLLAMA_API_KEY"),
-                ApiDriverKind::Zhipu | ApiDriverKind::LiteLLM => None,
+            let driver_env = match driver {
+                ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
+                ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
+                ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+                ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
+                ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
             };
             driver_env
                 .and_then(|name| std::env::var(name).ok())
                 .or_else(|| std::env::var("LLM_API_KEY").ok())
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                .ok_or_else(|| {                    format!(
+                .ok_or_else(|| {
+                    format!(
                         "no API key for provider '{}'. Set it in config.json or provider-specific env var",
                         provider_name
                     )
@@ -167,7 +172,7 @@ impl LlmClientPool {
 
         Ok(LlmClient::from_config(
             crate::core::client::LlmConfigOptions {
-                api,
+                driver,
                 api_key,
                 base_url,
                 model: model_entry.id,

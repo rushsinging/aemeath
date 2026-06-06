@@ -50,7 +50,7 @@ fn model_execute(args: &str, ctx: &mut CommandContext) -> CommandResult {
             model_name: resolved.model.name.clone(),
             base_url: resolved.source_config.base_url.clone(),
             api_key: resolved.source_config.api_key.clone(),
-            api_type: resolved.api.as_str().to_string(),
+            driver: resolved.driver.as_str().to_string(),
             max_tokens: resolved.model.max_tokens,
             context_window: resolved.model.context_window,
             reasoning: resolved.model.reasoning,
@@ -125,7 +125,7 @@ mod tests {
         providers.insert(
             "Zhipu".to_string(),
             ProviderModelsConfig {
-                api: "zhipu".to_string(),
+                driver: "zhipu".to_string(),
                 api_key: "zhipu-key".to_string(),
                 base_url: "https://zhipu.example.com".to_string(),
                 models: vec![ModelEntryConfig {
@@ -141,7 +141,7 @@ mod tests {
         providers.insert(
             "LiteLLM".to_string(),
             ProviderModelsConfig {
-                api: "litellm".to_string(),
+                driver: "litellm".to_string(),
                 api_key: "litellm-key".to_string(),
                 base_url: "https://litellm.example.com".to_string(),
                 models: vec![ModelEntryConfig {
@@ -194,7 +194,7 @@ mod tests {
         let CommandResult::Action(CommandAction::SwitchModel {
             provider_name,
             model_id,
-            api_type,
+            driver,
             reasoning,
             ..
         }) = result
@@ -203,7 +203,7 @@ mod tests {
         };
         assert_eq!(provider_name, "LiteLLM");
         assert_eq!(model_id, "anthropic/claude-opus-4-7");
-        assert_eq!(api_type, "litellm");
+        assert_eq!(driver, "litellm");
         assert_eq!(reasoning, Some(false));
     }
 
@@ -214,7 +214,7 @@ mod tests {
         let CommandResult::Action(CommandAction::SwitchModel {
             provider_name,
             model_id,
-            api_type,
+            driver,
             ..
         }) = result
         else {
@@ -222,6 +222,6 @@ mod tests {
         };
         assert_eq!(provider_name, "Zhipu");
         assert_eq!(model_id, "glm-5.1");
-        assert_eq!(api_type, "zhipu");
+        assert_eq!(driver, "zhipu");
     }
 }

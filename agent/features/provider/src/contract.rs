@@ -21,9 +21,9 @@ pub mod openai_compatible {
     pub use crate::business::providers::openai_compatible::ReasoningConfig;
 }
 
-/// API driver kind. Every model source in config.json maps to one of these via its `api` field.
+/// Provider driver kind. Every model source in config.json maps to one of these via its `driver` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ApiDriverKind {
+pub enum ProviderDriverKind {
     #[default]
     Anthropic,
     OpenAI,
@@ -33,28 +33,28 @@ pub enum ApiDriverKind {
     Ollama,
 }
 
-impl ApiDriverKind {
+impl ProviderDriverKind {
     /// Parse from a config string.
-    pub fn parse(s: &str) -> Option<ApiDriverKind> {
+    pub fn parse(s: &str) -> Option<ProviderDriverKind> {
         match s {
-            "anthropic" => Some(ApiDriverKind::Anthropic),
-            "openai" => Some(ApiDriverKind::OpenAI),
-            "zhipu" => Some(ApiDriverKind::Zhipu),
-            "litellm" => Some(ApiDriverKind::LiteLLM),
-            "volcengine" => Some(ApiDriverKind::Volcengine),
-            "ollama" => Some(ApiDriverKind::Ollama),
+            "anthropic" => Some(ProviderDriverKind::Anthropic),
+            "openai" => Some(ProviderDriverKind::OpenAI),
+            "zhipu" => Some(ProviderDriverKind::Zhipu),
+            "litellm" => Some(ProviderDriverKind::LiteLLM),
+            "volcengine" => Some(ProviderDriverKind::Volcengine),
+            "ollama" => Some(ProviderDriverKind::Ollama),
             _ => None,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            ApiDriverKind::Anthropic => "anthropic",
-            ApiDriverKind::OpenAI => "openai",
-            ApiDriverKind::Zhipu => "zhipu",
-            ApiDriverKind::LiteLLM => "litellm",
-            ApiDriverKind::Volcengine => "volcengine",
-            ApiDriverKind::Ollama => "ollama",
+            ProviderDriverKind::Anthropic => "anthropic",
+            ProviderDriverKind::OpenAI => "openai",
+            ProviderDriverKind::Zhipu => "zhipu",
+            ProviderDriverKind::LiteLLM => "litellm",
+            ProviderDriverKind::Volcengine => "volcengine",
+            ProviderDriverKind::Ollama => "ollama",
         }
     }
 }
@@ -65,72 +65,81 @@ mod tests {
 
     #[test]
     fn test_from_str_openai() {
-        assert_eq!(ApiDriverKind::parse("openai"), Some(ApiDriverKind::OpenAI));
+        assert_eq!(
+            ProviderDriverKind::parse("openai"),
+            Some(ProviderDriverKind::OpenAI)
+        );
     }
 
     #[test]
     fn test_from_str_zhipu() {
-        assert_eq!(ApiDriverKind::parse("zhipu"), Some(ApiDriverKind::Zhipu));
+        assert_eq!(
+            ProviderDriverKind::parse("zhipu"),
+            Some(ProviderDriverKind::Zhipu)
+        );
     }
 
     #[test]
     fn test_from_str_litellm() {
         assert_eq!(
-            ApiDriverKind::parse("litellm"),
-            Some(ApiDriverKind::LiteLLM)
+            ProviderDriverKind::parse("litellm"),
+            Some(ProviderDriverKind::LiteLLM)
         );
     }
 
     #[test]
     fn test_from_str_volcengine() {
         assert_eq!(
-            ApiDriverKind::parse("volcengine"),
-            Some(ApiDriverKind::Volcengine)
+            ProviderDriverKind::parse("volcengine"),
+            Some(ProviderDriverKind::Volcengine)
         );
     }
 
     #[test]
     fn test_from_str_ollama() {
-        assert_eq!(ApiDriverKind::parse("ollama"), Some(ApiDriverKind::Ollama));
+        assert_eq!(
+            ProviderDriverKind::parse("ollama"),
+            Some(ProviderDriverKind::Ollama)
+        );
     }
 
     #[test]
     fn test_as_str_ollama_roundtrip() {
-        assert_eq!(ApiDriverKind::Ollama.as_str(), "ollama");
+        assert_eq!(ProviderDriverKind::Ollama.as_str(), "ollama");
         assert_eq!(
-            ApiDriverKind::parse(ApiDriverKind::Ollama.as_str()),
-            Some(ApiDriverKind::Ollama)
+            ProviderDriverKind::parse(ProviderDriverKind::Ollama.as_str()),
+            Some(ProviderDriverKind::Ollama)
         );
     }
 
     #[test]
     fn test_from_str_rejects_openai_compatible() {
-        assert_eq!(ApiDriverKind::parse("openai-compatible"), None);
-        assert_eq!(ApiDriverKind::parse("openai-completions"), None);
+        assert_eq!(ProviderDriverKind::parse("openai-compatible"), None);
+        assert_eq!(ProviderDriverKind::parse("openai-completions"), None);
     }
 
     #[test]
     fn test_as_str_openai() {
-        assert_eq!(ApiDriverKind::OpenAI.as_str(), "openai");
+        assert_eq!(ProviderDriverKind::OpenAI.as_str(), "openai");
     }
 
     #[test]
     fn test_as_str_anthropic() {
-        assert_eq!(ApiDriverKind::Anthropic.as_str(), "anthropic");
+        assert_eq!(ProviderDriverKind::Anthropic.as_str(), "anthropic");
     }
 
     #[test]
     fn test_as_str_zhipu() {
-        assert_eq!(ApiDriverKind::Zhipu.as_str(), "zhipu");
+        assert_eq!(ProviderDriverKind::Zhipu.as_str(), "zhipu");
     }
 
     #[test]
     fn test_as_str_litellm() {
-        assert_eq!(ApiDriverKind::LiteLLM.as_str(), "litellm");
+        assert_eq!(ProviderDriverKind::LiteLLM.as_str(), "litellm");
     }
 
     #[test]
     fn test_as_str_volcengine() {
-        assert_eq!(ApiDriverKind::Volcengine.as_str(), "volcengine");
+        assert_eq!(ProviderDriverKind::Volcengine.as_str(), "volcengine");
     }
 }
