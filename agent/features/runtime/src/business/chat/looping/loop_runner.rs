@@ -19,7 +19,7 @@ use crate::business::chat::looping::{
 use provider::api::StopReason;
 use share::message::Message;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
@@ -155,8 +155,7 @@ where
     let mut stall_detector = StallDetector::new();
     let mut pending_input = PendingInputBuffer::default();
     let mut loop_fsm = ChatLoopFsm::default();
-    let tool_id_counter = Arc::new(AtomicUsize::new(0));
-
+    let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     loop {
         turn_count += 1;
         loop_fsm.transition(ChatLoopTransition::StartTurn);
@@ -280,7 +279,7 @@ where
         };
 
         let mut handler =
-            RuntimeStreamHandler::with_tool_id_counter(sink.clone(), tool_id_counter.clone());
+            RuntimeStreamHandler::with_tool_identity(sink.clone(), tool_identity.clone());
         log_llm_input(
             &json_logger,
             turn_count,
@@ -347,7 +346,10 @@ where
                     break;
                 }
 
-                let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+                let tool_calls =
+                    Agent::extract_tool_calls_with_ids(&resp.assistant_message, |provider_id| {
+                        tool_identity.runtime_id_for_provider(provider_id)
+                    });
                 log_llm_output_and_tool_calls(
                     &json_logger,
                     turn_count,

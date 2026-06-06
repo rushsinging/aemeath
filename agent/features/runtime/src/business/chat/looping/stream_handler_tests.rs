@@ -1,7 +1,8 @@
 use super::stream_handler::RuntimeStreamHandler;
+use super::tool_identity::ToolIdentityRegistry;
 use super::{ChatEventSink, EventFuture, RuntimeStreamEvent};
 use provider::api::StreamHandler;
-use std::sync::{atomic::AtomicUsize, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
 struct RecordingSink {
@@ -23,9 +24,9 @@ impl ChatEventSink for RecordingSink {
 #[test]
 fn test_stream_handler_keeps_runtime_tool_ids_unique_across_handlers() {
     let sink = RecordingSink::default();
-    let counter = Arc::new(AtomicUsize::new(0));
-    let mut first = RuntimeStreamHandler::with_tool_id_counter(sink.clone(), counter.clone());
-    let mut second = RuntimeStreamHandler::with_tool_id_counter(sink.clone(), counter);
+    let registry = ToolIdentityRegistry::new();
+    let mut first = RuntimeStreamHandler::with_tool_identity(sink.clone(), registry.clone());
+    let mut second = RuntimeStreamHandler::with_tool_identity(sink.clone(), registry);
 
     first.on_tool_use_start("Read", Some("provider-a"), 0);
     second.on_tool_use_start("Read", Some("provider-b"), 0);

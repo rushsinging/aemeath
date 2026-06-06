@@ -1,10 +1,6 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use provider::api::StreamHandler;
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
 
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
 pub struct RuntimeStreamHandler<S: ChatEventSink> {
@@ -12,34 +8,26 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub first_text_time: Option<std::time::Instant>,
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
-    pub next_tool_id: Arc<AtomicUsize>,
-    pub stream_tool_ids: HashMap<usize, String>,
+    pub tool_identity: ToolIdentityRegistry,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
     pub fn new(sink: S) -> Self {
-        Self::with_tool_id_counter(sink, Arc::new(AtomicUsize::new(0)))
+        Self::with_tool_identity(sink, ToolIdentityRegistry::new())
     }
 
-    pub fn with_tool_id_counter(sink: S, next_tool_id: Arc<AtomicUsize>) -> Self {
+    pub fn with_tool_identity(sink: S, tool_identity: ToolIdentityRegistry) -> Self {
         Self {
             sink,
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
-            next_tool_id,
-            stream_tool_ids: HashMap::new(),
+            tool_identity,
         }
     }
 
-    pub fn runtime_tool_id(&mut self, index: usize) -> String {
-        self.stream_tool_ids
-            .entry(index)
-            .or_insert_with(|| {
-                let next = self.next_tool_id.fetch_add(1, Ordering::Relaxed) + 1;
-                format!("tool-{next}")
-            })
-            .clone()
+    pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> String {
+        self.tool_identity.runtime_id_for_stream(index, provider_id)
     }
 }
 
@@ -67,7 +55,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
-        let id = self.runtime_tool_id(index);
+        let id = self.runtime_tool_id(index, provider_id);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
             id,
             provider_id: provider_id.map(str::to_string),
@@ -100,7 +88,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         provider_id: Option<&str>,
         partial_args: &str,
     ) {
-        let id = self.runtime_tool_id(index);
+        let id = self.runtime_tool_id(index, provider_id);
         self.sink
             .try_send_event(RuntimeStreamEvent::ToolArgumentsDelta {
                 id,
