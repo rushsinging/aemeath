@@ -7,7 +7,7 @@ fn resolver_config() -> ModelsConfig {
         ProviderModelsConfig {
             base_url: "https://zhipu.example.com".to_string(),
             api_key: "zhipu-key".to_string(),
-            api: "zhipu".to_string(),
+            driver: "zhipu".to_string(),
             models: vec![ModelEntryConfig {
                 id: "glm-5.1".to_string(),
                 name: "GLM 5.1".to_string(),
@@ -23,7 +23,7 @@ fn resolver_config() -> ModelsConfig {
         ProviderModelsConfig {
             base_url: "https://litellm.example.com".to_string(),
             api_key: "litellm-key".to_string(),
-            api: "litellm".to_string(),
+            driver: "litellm".to_string(),
             models: vec![ModelEntryConfig {
                 id: "anthropic/claude-opus-4-7".to_string(),
                 name: "Claude via LiteLLM".to_string(),
@@ -48,8 +48,8 @@ fn test_resolve_model_selection_zhipu() {
     let resolved = config.resolve_model_selection("zhipu/glm-5.1").unwrap();
     assert_eq!(resolved.source_key, "Zhipu");
     assert_eq!(resolved.model.id, "glm-5.1");
-    assert_eq!(resolved.api, "zhipu");
-    assert_eq!(resolved.source_config.api, "zhipu");
+    assert_eq!(resolved.driver, "zhipu");
+    assert_eq!(resolved.source_config.driver, "zhipu");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_resolve_model_selection_litellm_model_id_with_slash() {
         .unwrap();
     assert_eq!(resolved.source_key, "LiteLLM");
     assert_eq!(resolved.model.id, "anthropic/claude-opus-4-7");
-    assert_eq!(resolved.api, "litellm");
+    assert_eq!(resolved.driver, "litellm");
 }
 
 #[test]
@@ -85,14 +85,14 @@ fn test_resolve_model_selection_unknown_model_lists_available() {
 }
 
 #[test]
-fn test_resolve_model_selection_preserves_api_string() {
+fn test_resolve_model_selection_preserves_driver_string() {
     let mut config = resolver_config();
     let source = config.providers.get_mut("Zhipu").unwrap();
-    source.api = "openai-compatible".to_string();
+    source.driver = "openai-compatible".to_string();
 
     let resolved = config.resolve_model_selection("Zhipu/glm-5.1").unwrap();
 
-    assert_eq!(resolved.api, "openai-compatible");
+    assert_eq!(resolved.driver, "openai-compatible");
 }
 
 #[test]

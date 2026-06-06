@@ -1,11 +1,11 @@
 use super::{OpenAICompatibleProvider, ReasoningConfig};
 use crate::core::client::OpenAIProviderConfig;
-use crate::ApiDriverKind;
+use crate::ProviderDriverKind;
 use share::message::{ContentBlock, Message, Role};
 
 fn provider_with_reasoning() -> OpenAICompatibleProvider {
     OpenAICompatibleProvider::new(
-        OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "DeepSeek"),
+        OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "DeepSeek"),
         "test-key".to_string(),
         None,
         Some("deepseek-v4-pro".to_string()),
@@ -17,7 +17,7 @@ fn provider_with_reasoning() -> OpenAICompatibleProvider {
 
 fn provider_without_reasoning() -> OpenAICompatibleProvider {
     OpenAICompatibleProvider::new(
-        OpenAIProviderConfig::from_api_driver(ApiDriverKind::OpenAI, "DeepSeek"),
+        OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "DeepSeek"),
         "test-key".to_string(),
         None,
         Some("deepseek-v4-pro".to_string()),

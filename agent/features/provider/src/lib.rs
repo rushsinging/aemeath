@@ -10,7 +10,7 @@ pub mod contract;
 mod core;
 pub mod gateway;
 
-pub use contract::ApiDriverKind;
+pub use contract::ProviderDriverKind;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {

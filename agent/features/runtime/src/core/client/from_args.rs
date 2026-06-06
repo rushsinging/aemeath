@@ -16,7 +16,7 @@ use crate::utils::bootstrap::{
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use prompt::api::skill::{load_all_skills, Skill};
-use provider::api::ApiDriverKind;
+use provider::api::ProviderDriverKind;
 use provider::api::SystemBlock;
 use storage::api::TaskStore;
 use tools::api as tools_crate;
@@ -65,7 +65,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .models
         .select_for_run(args.model.as_deref())
         .map_err(|e| SdkError::Init(e.to_string()))?;
-    let api_type = ApiDriverKind::parse(&resolved_model.api).unwrap_or(ApiDriverKind::OpenAI);
+    let driver =
+        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
     // 7. API key
     let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
         SdkError::Init(
@@ -91,7 +92,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     log::info!(
         "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
         resolved_model.source_key,
-        api_type.as_str(),
+        driver.as_str(),
         model,
         runtime_settings.reasoning,
         runtime_settings.reasoning_effort,
@@ -100,7 +101,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 9. LLM client
     let client = Arc::new(bootstrap::build_llm_client(
-        api_type,
+        driver,
         api_key,
         base_url,
         model.clone(),

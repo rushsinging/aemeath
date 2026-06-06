@@ -37,13 +37,13 @@ impl ModelsConfig {
                 available_models: available_model_labels(source_config),
             })?;
 
-        let api = source_config.api.clone();
+        let driver = source_config.driver.clone();
 
         Ok(ResolvedModel {
             source_key: source_key.clone(),
             source_config: source_config.clone(),
             model,
-            api,
+            driver,
         })
     }
 
@@ -64,12 +64,12 @@ impl ModelsConfig {
         let first = candidates.next();
         if let Some((source_key, source_config, model)) = first {
             if candidates.next().is_none() && source_config.models.len() == 1 {
-                let api = source_config.api.clone();
+                let driver = source_config.driver.clone();
                 return Ok(ResolvedModel {
                     source_key: source_key.clone(),
                     source_config: source_config.clone(),
                     model: model.clone(),
-                    api,
+                    driver,
                 });
             }
         }

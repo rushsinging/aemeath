@@ -1,6 +1,6 @@
-//! Chat API driver 抽象：不同供应商的推理字段差异化处理
+//! Chat Provider driver 抽象：不同供应商的推理字段差异化处理
 
-use crate::api::ApiDriverKind;
+use crate::api::ProviderDriverKind;
 
 use super::ReasoningConfig;
 
@@ -117,13 +117,15 @@ impl ChatApiDriver for VolcengineDriver {
     }
 }
 
-pub(crate) fn driver_for_api(api: ApiDriverKind) -> Box<dyn ChatApiDriver + Send + Sync> {
-    match api {
-        ApiDriverKind::OpenAI => Box::new(OpenAiDriver),
-        ApiDriverKind::Zhipu => Box::new(ZhipuDriver),
-        ApiDriverKind::LiteLLM => Box::new(LiteLlmDriver),
-        ApiDriverKind::Volcengine => Box::new(VolcengineDriver),
+pub(crate) fn driver_for_provider_driver(
+    driver: ProviderDriverKind,
+) -> Box<dyn ChatApiDriver + Send + Sync> {
+    match driver {
+        ProviderDriverKind::OpenAI => Box::new(OpenAiDriver),
+        ProviderDriverKind::Zhipu => Box::new(ZhipuDriver),
+        ProviderDriverKind::LiteLLM => Box::new(LiteLlmDriver),
+        ProviderDriverKind::Volcengine => Box::new(VolcengineDriver),
         // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
-        ApiDriverKind::Anthropic | ApiDriverKind::Ollama => Box::new(OpenAiDriver),
+        ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama => Box::new(OpenAiDriver),
     }
 }

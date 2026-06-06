@@ -31,7 +31,7 @@ pub struct ResolvedModel {
     pub source_key: String,
     pub source_config: ProviderModelsConfig,
     pub model: ModelEntryConfig,
-    pub api: String,
+    pub driver: String,
 }
 
 /// Configuration for a single model source within models config.
@@ -45,9 +45,9 @@ pub struct ProviderModelsConfig {
     #[serde(default, rename = "apiKey")]
     pub api_key: String,
 
-    /// API driver: "openai", "anthropic", "zhipu", "litellm", or "volcengine".
+    /// Provider driver: "openai", "anthropic", "zhipu", "litellm", or "volcengine".
     #[serde(default)]
-    pub api: String,
+    pub driver: String,
 
     /// Available models for this source.
     #[serde(default)]
@@ -114,7 +114,7 @@ pub fn volcengine_coding_plan_config() -> ModelsConfig {
         ProviderModelsConfig {
             base_url: VOLCENGINE_BASE_URL.to_string(),
             api_key: String::new(),
-            api: "volcengine".to_string(),
+            driver: "volcengine".to_string(),
             models: default_volcengine_models(),
         },
     );

@@ -3,7 +3,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
-use crate::api::ApiDriverKind;
+use crate::api::ProviderDriverKind;
 use crate::business::providers::openai_compatible::ReasoningConfig;
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::{CallbackHandler, LlmProvider, StreamHandler};
@@ -73,35 +73,35 @@ fn largest_message_summary(messages: &[Message]) -> (usize, String, usize) {
 }
 
 /// Configuration for OpenAI-compatible providers. The source key is used only
-/// for display/logging; API behavior comes from `api`.
+/// for display/logging; API behavior comes from `driver`.
 #[derive(Debug, Clone)]
 pub struct OpenAIProviderConfig {
     pub source_key: String,
-    pub api: ApiDriverKind,
+    pub driver: ProviderDriverKind,
     pub chat_api_suffix: String,
 }
 
 impl OpenAIProviderConfig {
-    pub fn from_api_driver(api: ApiDriverKind, source_key: &str) -> Self {
+    pub fn from_driver(driver: ProviderDriverKind, source_key: &str) -> Self {
         Self {
             source_key: source_key.to_string(),
-            api,
-            chat_api_suffix: match api {
-                ApiDriverKind::Zhipu => "/chat/completions".to_string(),
-                ApiDriverKind::Anthropic => "/v1/messages".to_string(),
-                ApiDriverKind::Volcengine => "/chat/completions".to_string(),
+            driver,
+            chat_api_suffix: match driver {
+                ProviderDriverKind::Zhipu => "/chat/completions".to_string(),
+                ProviderDriverKind::Anthropic => "/v1/messages".to_string(),
+                ProviderDriverKind::Volcengine => "/chat/completions".to_string(),
                 // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容路径；
                 // 兜底归入 OpenAI 风格 suffix。
-                ApiDriverKind::OpenAI | ApiDriverKind::LiteLLM | ApiDriverKind::Ollama => {
-                    "/v1/chat/completions".to_string()
-                }
+                ProviderDriverKind::OpenAI
+                | ProviderDriverKind::LiteLLM
+                | ProviderDriverKind::Ollama => "/v1/chat/completions".to_string(),
             },
         }
     }
 }
 
 pub struct LlmProviderOptions {
-    pub api: ApiDriverKind,
+    pub driver: ProviderDriverKind,
     pub api_key: String,
     pub base_url: Option<String>,
     pub model: Option<String>,
@@ -112,7 +112,7 @@ pub struct LlmProviderOptions {
 }
 
 pub struct LlmConfigOptions {
-    pub api: ApiDriverKind,
+    pub driver: ProviderDriverKind,
     pub api_key: String,
     pub base_url: Option<String>,
     pub model: String,
@@ -136,7 +136,7 @@ impl LlmClient {
 impl LlmClient {
     pub fn new(api_key: String) -> Self {
         Self::with_provider(LlmProviderOptions {
-            api: ApiDriverKind::Anthropic,
+            driver: ProviderDriverKind::Anthropic,
             api_key,
             base_url: None,
             model: None,
@@ -148,8 +148,8 @@ impl LlmClient {
     }
 
     pub fn with_provider(options: LlmProviderOptions) -> Self {
-        let provider_impl: Arc<dyn LlmProvider> = match options.api {
-            ApiDriverKind::Anthropic => {
+        let provider_impl: Arc<dyn LlmProvider> = match options.driver {
+            ProviderDriverKind::Anthropic => {
                 Arc::new(crate::business::providers::AnthropicProvider::new(
                     options.api_key,
                     options.base_url,
@@ -158,19 +158,21 @@ impl LlmClient {
                     options.thinking_max_tokens,
                 ))
             }
-            ApiDriverKind::Ollama => Arc::new(crate::business::providers::OllamaProvider::new(
-                options.api_key,
-                options.base_url,
-                options.model,
-                options.max_tokens,
-                options.reasoning,
-            )),
-            ApiDriverKind::OpenAI
-            | ApiDriverKind::Zhipu
-            | ApiDriverKind::LiteLLM
-            | ApiDriverKind::Volcengine => {
+            ProviderDriverKind::Ollama => {
+                Arc::new(crate::business::providers::OllamaProvider::new(
+                    options.api_key,
+                    options.base_url,
+                    options.model,
+                    options.max_tokens,
+                    options.reasoning,
+                ))
+            }
+            ProviderDriverKind::OpenAI
+            | ProviderDriverKind::Zhipu
+            | ProviderDriverKind::LiteLLM
+            | ProviderDriverKind::Volcengine => {
                 let config =
-                    OpenAIProviderConfig::from_api_driver(options.api, options.api.as_str());
+                    OpenAIProviderConfig::from_driver(options.driver, options.driver.as_str());
                 Arc::new(crate::business::providers::OpenAICompatibleProvider::new(
                     config,
                     options.api_key,
@@ -224,7 +226,7 @@ impl LlmClient {
             )
         } else {
             Self::with_provider(LlmProviderOptions {
-                api: options.api,
+                driver: options.driver,
                 api_key: options.api_key,
                 base_url: options.base_url,
                 model: Some(options.model),

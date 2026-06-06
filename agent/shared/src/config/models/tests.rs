@@ -10,7 +10,7 @@ fn test_config() -> ModelsConfig {
         ProviderModelsConfig {
             base_url: "http://localhost:4000".to_string(),
             api_key: String::new(),
-            api: "openai".to_string(),
+            driver: "openai".to_string(),
             models: vec![ModelEntryConfig {
                 id: "gpt-5.5".to_string(),
                 name: "GPT-5.5".to_string(),
@@ -40,7 +40,7 @@ fn test_default_models_config_includes_volcengine_coding_plan() {
         config.default,
         "Volcengine/doubao-seed-2-0-code-preview-260215"
     );
-    assert_eq!(provider.api, "volcengine");
+    assert_eq!(provider.driver, "volcengine");
     assert_eq!(
         provider.base_url,
         "https://ark.cn-beijing.volces.com/api/coding/v3"
@@ -73,7 +73,7 @@ fn test_default_models_config_resolves_volcengine_default() {
     let resolved = config.resolve_default_model().unwrap();
 
     assert_eq!(resolved.source_key, "Volcengine");
-    assert_eq!(resolved.api, "volcengine");
+    assert_eq!(resolved.driver, "volcengine");
     assert_eq!(resolved.model.id, "doubao-seed-2-0-code-preview-260215");
     assert_eq!(resolved.model.reasoning, Some(true));
     assert_eq!(resolved.model.thinking_max_tokens, 131_072);

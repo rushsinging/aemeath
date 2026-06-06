@@ -98,16 +98,16 @@ pub(super) async fn switch_model_impl(
     params: sdk::ModelSwitchParams,
 ) -> Result<sdk::ModelSwitchResult> {
     use provider::api::openai_compatible::ReasoningConfig;
-    use provider::api::ApiDriverKind;
+    use provider::api::ProviderDriverKind;
 
-    let api_type = ApiDriverKind::parse(&params.api_type).unwrap_or(ApiDriverKind::OpenAI);
-    let openai_config = switch_model_openai_config(api_type, &params.provider_name);
+    let driver = ProviderDriverKind::parse(&params.driver).unwrap_or(ProviderDriverKind::OpenAI);
+    let openai_config = switch_model_openai_config(driver, &params.provider_name);
 
     let reasoning = params.reasoning.unwrap_or(true);
     let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
 
     let new_client = provider::api::LlmClient::from_config(provider::api::LlmConfigOptions {
-        api: api_type,
+        driver,
         api_key: params.api_key,
         base_url: Some(params.base_url),
         model: params.model_id.clone(),
@@ -289,17 +289,17 @@ fn current_timestamp_secs() -> u64 {
 }
 
 fn switch_model_openai_config(
-    api_type: provider::api::ApiDriverKind,
+    driver: provider::api::ProviderDriverKind,
     source_key: &str,
 ) -> Option<provider::api::OpenAIProviderConfig> {
     if matches!(
-        api_type,
-        provider::api::ApiDriverKind::Anthropic | provider::api::ApiDriverKind::Ollama
+        driver,
+        provider::api::ProviderDriverKind::Anthropic | provider::api::ProviderDriverKind::Ollama
     ) {
         None
     } else {
-        Some(provider::api::OpenAIProviderConfig::from_api_driver(
-            api_type, source_key,
+        Some(provider::api::OpenAIProviderConfig::from_driver(
+            driver, source_key,
         ))
     }
 }
@@ -325,7 +325,8 @@ mod tests {
 
     #[test]
     fn test_switch_model_openai_config_skips_ollama() {
-        let result = switch_model_openai_config(provider::api::ApiDriverKind::Ollama, "ollama");
+        let result =
+            switch_model_openai_config(provider::api::ProviderDriverKind::Ollama, "ollama");
 
         assert!(result.is_none());
     }
@@ -333,17 +334,17 @@ mod tests {
     #[test]
     fn test_switch_model_openai_config_skips_anthropic() {
         let result =
-            switch_model_openai_config(provider::api::ApiDriverKind::Anthropic, "anthropic");
+            switch_model_openai_config(provider::api::ProviderDriverKind::Anthropic, "anthropic");
 
         assert!(result.is_none());
     }
 
     #[test]
     fn test_switch_model_openai_config_uses_source_key_for_openai_compatible() {
-        let result = switch_model_openai_config(provider::api::ApiDriverKind::Zhipu, "Zhipu")
+        let result = switch_model_openai_config(provider::api::ProviderDriverKind::Zhipu, "Zhipu")
             .expect("zhipu should use openai-compatible config");
 
         assert_eq!(result.source_key, "Zhipu");
-        assert_eq!(result.api, provider::api::ApiDriverKind::Zhipu);
+        assert_eq!(result.driver, provider::api::ProviderDriverKind::Zhipu);
     }
 }
