@@ -1,5 +1,5 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-use crate::business::chat::looping::hook_ui::HookUi;
+use crate::business::chat::looping::hook_ui::{runtime_hook_event_finished, HookUi};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
@@ -37,7 +37,7 @@ where
             None
         }
         AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
-            let stop_results = hook_ui
+            hook_ui
                 .run_json(
                     hook_runner,
                     HookEvent::StopFailure,
@@ -46,17 +46,6 @@ where
                         turns: outcome.turns,
                     }),
                 )
-                .await;
-            let (system_message, additional_context) = stop_results
-                .into_iter()
-                .find_map(|(_, _, json_output)| json_output)
-                .map(|output| (output.system_message, output.additional_context))
-                .unwrap_or((None, None));
-            let _ = sink
-                .send_event(RuntimeStreamEvent::StopFailureHook {
-                    system_message,
-                    additional_context,
-                })
                 .await;
             let _ = sink.send_event(RuntimeStreamEvent::Done).await;
             None
@@ -85,9 +74,16 @@ where
         )
         .await;
     if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
-        let _ = sink
-            .send_event(RuntimeStreamEvent::SystemMessage(feedback.clone()))
-            .await;
+        if let Some((entry, result, json_output)) = stop_hook_blocking_result(&stop_results) {
+            let _ = sink
+                .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_finished(
+                    "Stop",
+                    entry,
+                    result,
+                    json_output,
+                )))
+                .await;
+        }
         return Some(feedback);
     }
     None
@@ -125,7 +121,26 @@ async fn stop_hook_feedback(
     )],
     session_id: &str,
 ) -> Option<String> {
-    let (entry, result, json) = hook_results
+    let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
+    let details = hook_feedback_details(result, json, session_id, &entry.command).await;
+    Some(format!(
+        "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{}\n{}",
+        entry.command, details
+    ))
+}
+
+fn stop_hook_blocking_result(
+    hook_results: &[(
+        share::config::hooks::HookEntry,
+        HookResult,
+        Option<HookJsonOutput>,
+    )],
+) -> Option<(
+    &share::config::hooks::HookEntry,
+    &HookResult,
+    &Option<HookJsonOutput>,
+)> {
+    hook_results
         .iter()
         .filter(|(_, result, json)| is_stop_blocked(result, json))
         .find(|(_, result, json)| has_hook_feedback(result, json))
@@ -133,12 +148,8 @@ async fn stop_hook_feedback(
             hook_results
                 .iter()
                 .find(|(_, result, json)| is_stop_blocked(result, json))
-        })?;
-    let details = hook_feedback_details(result, json, session_id, &entry.command).await;
-    Some(format!(
-        "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{}\n{}",
-        entry.command, details
-    ))
+        })
+        .map(|(entry, result, json)| (entry, result, json))
 }
 
 fn is_stop_blocked(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
@@ -289,6 +300,7 @@ fn hook_result(
             blocked,
             output: output.to_string(),
             error: error.map(str::to_string),
+            exit_code: if blocked { Some(2) } else { Some(0) },
         },
         None,
     )
@@ -366,6 +378,7 @@ mod tests {
             blocked: true,
             output: long_output,
             error: Some("stderr details".to_string()),
+            exit_code: Some(2),
         };
 
         let feedback = runtime.block_on(hook_feedback_details(
@@ -427,6 +440,7 @@ mod tests {
                 blocked: false,
                 output: String::new(),
                 error: None,
+                exit_code: Some(0),
             },
             Some(HookJsonOutput {
                 decision: Some("block".to_string()),

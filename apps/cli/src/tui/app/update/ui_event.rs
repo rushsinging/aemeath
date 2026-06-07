@@ -1,10 +1,10 @@
-use super::spinner::{short_hook_command, truncate_for_spinner};
 use super::UpdateResult;
+use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::runtime::intent::RuntimeIntent;
-use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
+use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
@@ -93,6 +93,12 @@ impl App {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
                 // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
                 self.spinner_phase(SpinnerPhase::AgentWorking);
+            }
+            UiEvent::HookEvent(event) => {
+                self.spinner_phase(hook_spinner_phase(&event));
+                if let Some(notice) = hook_event_notice(&event) {
+                    self.append_hook_notice(notice);
+                }
             }
             UiEvent::Error(msg) => {
                 log::debug!(
@@ -259,23 +265,6 @@ impl App {
                 }
                 self.spinner_stop();
             }
-            UiEvent::StopFailureHook {
-                system_message,
-                additional_context,
-            } => {
-                if let Some(ref msg) = system_message {
-                    self.append_system_notice(msg.clone());
-                }
-                if let Some(ref ctx) = additional_context {
-                    self.append_system_notice(format!("[Additional Context] {ctx}"));
-                }
-                if let Some(msg) = system_message {
-                    return UpdateResult::one(Effect::RunHook {
-                        message: msg,
-                        name: "system_message".to_string(),
-                    });
-                }
-            }
             UiEvent::DrainQueuedInput { reply_tx } => {
                 let queued = self.input.drain_queue();
                 if !queued.is_empty() {
@@ -288,31 +277,6 @@ impl App {
                     self.spinner_phase(SpinnerPhase::ThinkingQueued);
                 }
                 let _ = reply_tx.send(queued);
-            }
-            UiEvent::HookStart { event, command } => {
-                self.spinner_phase(SpinnerPhase::Hook {
-                    event,
-                    detail: short_hook_command(&command),
-                    outcome: HookOutcome::Running,
-                });
-            }
-            UiEvent::HookEnd {
-                event,
-                blocked,
-                error,
-            } => {
-                let (detail, outcome) = if blocked {
-                    (String::new(), HookOutcome::Blocked)
-                } else if let Some(error) = error {
-                    (truncate_for_spinner(&error, 48), HookOutcome::Failed)
-                } else {
-                    (String::new(), HookOutcome::Done)
-                };
-                self.spinner_phase(SpinnerPhase::Hook {
-                    event,
-                    detail,
-                    outcome,
-                });
             }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });

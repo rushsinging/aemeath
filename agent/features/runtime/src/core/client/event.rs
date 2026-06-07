@@ -1,8 +1,9 @@
+use crate::business::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
 use std::sync::{Arc, Mutex};
 
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChangeSet, ChatEvent,
-    ToolResultImage,
+    HookEventStatus, HookEventView, HookExecutionResultView, ToolResultImage,
 };
 
 #[derive(Clone)]
@@ -183,13 +184,9 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::TurnChanged(turn) => {
             ChatEvent::CurrentTurnChanged(turn)
         }
-        crate::business::chat::RuntimeStreamEvent::StopFailureHook {
-            system_message,
-            additional_context,
-        } => ChatEvent::StopFailureHook {
-            system_message,
-            additional_context,
-        },
+        crate::business::chat::RuntimeStreamEvent::HookEvent(event) => {
+            ChatEvent::HookEvent(runtime_hook_event_to_sdk(event))
+        }
         crate::business::chat::RuntimeStreamEvent::AskUser {
             id,
             question,
@@ -213,18 +210,6 @@ pub(crate) fn runtime_event_to_sdk_event(
                 event: agent_progress_event_to_sdk(event),
             }
         }
-        crate::business::chat::RuntimeStreamEvent::HookStart { event, command } => {
-            ChatEvent::HookStart { event, command }
-        }
-        crate::business::chat::RuntimeStreamEvent::HookEnd {
-            event,
-            blocked,
-            error,
-        } => ChatEvent::HookEnd {
-            event,
-            blocked,
-            error,
-        },
         crate::business::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
             working_root,
@@ -245,6 +230,28 @@ pub(crate) fn runtime_event_to_sdk_event(
             let _ = change_tx.send(previous | ChangeSet::TASKS);
             ChatEvent::TasksChanged
         }
+    }
+}
+
+fn runtime_hook_event_to_sdk(event: RuntimeHookEvent) -> HookEventView {
+    HookEventView {
+        hook_name: event.hook_name,
+        status: match event.status {
+            RuntimeHookEventStatus::Running => HookEventStatus::Running,
+            RuntimeHookEventStatus::Succeeded => HookEventStatus::Succeeded,
+            RuntimeHookEventStatus::Blocked => HookEventStatus::Blocked,
+            RuntimeHookEventStatus::Failed => HookEventStatus::Failed,
+        },
+        matcher: event.matcher,
+        command: event.command,
+        result: event.result.map(|result| HookExecutionResultView {
+            exit_code: result.exit_code,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            decision: result.decision,
+            reason: result.reason,
+            additional_context: result.additional_context,
+        }),
     }
 }
 

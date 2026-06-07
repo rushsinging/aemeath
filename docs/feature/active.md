@@ -317,7 +317,7 @@ enum MemoryCategory {
 
 ### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
 
-**状态**：活动中
+**状态**：待确认
 
 **背景**：Stop hook 阻止结束时，反馈既需要作为 `<system-reminder>` 注入下一轮 LLM 上下文，也需要在 TUI 中提示用户。但当前用户可见提示沿用普通 `SystemMessage`/`SystemNotice` 展示，视觉上接近用户输入；部分场景还可能把 `<system-reminder>` 标签原样展示，造成用户误以为系统内部标签进入了可见对话内容。后续 StopFailure 或其他 hook 也可能产生不同语义的用户可见消息，继续复用普通 SystemMessage 会让样式、文案和脱壳规则分散。
 
@@ -328,10 +328,11 @@ enum MemoryCategory {
 4. Hook 阻止类消息在视觉上应与用户输入明显区分，优先使用 warning/error 语义色或明确前缀。
 
 **建议实现方向**：
-1. 在 runtime/SDK 事件层为 Hook 反馈引入类型化事件或 payload，而不是仅传 `SystemMessage(String)`；短期可先兼容旧 SystemMessage。
-2. 在 TUI adapter/model 层新增 `ConversationBlock::HookNotice` 或等价 block，集中处理 Hook notice 文案、样式和脱壳。
-3. 抽出一个单一 helper 负责剥离完整包裹的 `<system-reminder>` 标签，避免在多个渲染点重复字符串处理。
-4. Stop hook blocked、StopFailure hook output、未来 hook JSON `system_message`/`additional_context` 的用户可见路径统一走 HookNotice。
+1. 已在 SDK/runtime 事件层引入统一 `HookEvent`/`HookEventStatus`，用 `Running`、`Succeeded`、`Blocked`、`Failed` 表达 hook 生命周期和结果。
+2. 已移除旧 `HookStart`、`HookEnd`、`StopFailureHook` 事件路径；所有 hook 执行统一发送 `HookEvent`。
+3. 已在 TUI adapter/model 层新增 `ConversationBlock::HookNotice` 与 `OutputBlockKind::HookNotice`，由 TUI 根据 `HookEvent` 派生 blocked/failed notice 文案和 warning/error 样式。
+4. 已抽出单一 helper 剥离完整包裹的 `<system-reminder>` 标签，并应用到 TUI 可见 SystemNotice/HookNotice 展示。
+5. Stop hook blocked 不再发送普通 `SystemMessage` 作为用户提示，但仍保留返回给 loop 的 feedback，用于继续注入 LLM 上下文。
 
 **验收标准**：
 1. 当用户可见消息文本为完整 `<system-reminder>...</system-reminder>` 包装时，TUI 输出区不显示开始/结束标签。
@@ -344,6 +345,14 @@ enum MemoryCategory {
 1. 不重做所有 SystemNotice 的视觉设计；本 feature 只处理 Hook 类消息和 system-reminder 脱壳。
 2. 不改变 Hook 执行协议、JSON schema 或阻止逻辑。
 3. 不把所有 LLM system reminder 从消息历史中移除；仅区分模型上下文与 TUI 展示。
+
+**验证**：
+- `cargo check`（baseline）
+- `cargo check -p runtime -p sdk`
+- `cargo check -p cli`
+- `cargo test -p cli hook_notice --bins`
+- `cargo test -p cli system_reminder --bins`
+- `cargo test -p runtime stop_hook --lib`
 
 **涉及路径（预计）**：
 - `agent/features/runtime/src/business/chat/looping/finalize.rs`

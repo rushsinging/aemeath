@@ -621,8 +621,9 @@ mod tests {
                         .unwrap_or_default()
                 ),
                 RuntimeStreamEvent::DoneWithDuration(_) => "DoneWithDuration".to_string(),
-                RuntimeStreamEvent::HookStart { event, .. } => format!("HookStart:{event}"),
-                RuntimeStreamEvent::HookEnd { event, .. } => format!("HookEnd:{event}"),
+                RuntimeStreamEvent::HookEvent(event) => {
+                    format!("HookEvent:{}:{:?}", event.hook_name, event.status)
+                }
                 RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
                 RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
                 RuntimeStreamEvent::Text(text) => format!("Text:{text}"),
@@ -637,7 +638,6 @@ mod tests {
                 RuntimeStreamEvent::ToolCall { .. } => "ToolCall".to_string(),
                 RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
                 RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
-                RuntimeStreamEvent::StopFailureHook { .. } => "StopFailureHook".to_string(),
                 RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
                 RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
@@ -922,7 +922,10 @@ mod tests {
         })
         .await;
 
-        assert!(sink.events().iter().any(|event| event == "HookEnd:Stop"));
+        assert!(sink
+            .events()
+            .iter()
+            .any(|event| event == "HookEvent:Stop:Succeeded"));
         let output = std::fs::read_to_string(marker).unwrap();
         let parts: Vec<&str> = output.split('|').collect();
         assert_eq!(parts.len(), 3);

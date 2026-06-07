@@ -142,13 +142,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
             UiEvent::CurrentTurnChanged(turn)
         }
-        sdk::ChatEvent::StopFailureHook {
-            system_message,
-            additional_context,
-        } => UiEvent::StopFailureHook {
-            system_message,
-            additional_context,
-        },
+        sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
         sdk::ChatEvent::AskUser {
             id,
             question,
@@ -169,16 +163,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::AgentProgress { tool_id, event } => {
             UiEvent::AgentProgress { tool_id, event }
         }
-        sdk::ChatEvent::HookStart { event, command } => UiEvent::HookStart { event, command },
-        sdk::ChatEvent::HookEnd {
-            event,
-            blocked,
-            error,
-        } => UiEvent::HookEnd {
-            event,
-            blocked,
-            error,
-        },
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
             working_root,

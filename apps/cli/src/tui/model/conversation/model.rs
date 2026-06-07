@@ -64,6 +64,7 @@ impl ConversationModel {
                 partial_args,
             } => self.observe_tool_arguments(id, provider_id, name, index, partial_args),
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
+            ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
             ConversationIntent::AppendError { text } => self.append_error(text),
             ConversationIntent::QueueSubmission { text } => self.queue_submission(text),
             ConversationIntent::ClearQueuedSubmissions => self.clear_queued_submissions(),

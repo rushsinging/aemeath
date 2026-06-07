@@ -92,24 +92,11 @@ pub enum AppEvent {
         tool_id: String,
         event: sdk::AgentProgressEventView,
     },
-    StopFailureHook {
-        system_message: Option<String>,
-        additional_context: Option<String>,
-    },
+    /// Unified lifecycle hook event.
+    HookEvent(sdk::HookEventView),
     /// Background agent loop requests queued user input before next LLM call.
     DrainQueuedInput {
         reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
-    },
-    /// Lifecycle hook execution started.
-    HookStart {
-        event: String,
-        command: String,
-    },
-    /// Lifecycle hook execution finished.
-    HookEnd {
-        event: String,
-        blocked: bool,
-        error: Option<String>,
     },
     /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentTurnChanged(usize),

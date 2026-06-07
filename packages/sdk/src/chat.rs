@@ -186,6 +186,36 @@ pub struct WorkspaceContextView {
     pub context_stack: Vec<WorkspaceStackEntryView>,
 }
 
+/// Hook 执行状态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookEventStatus {
+    Running,
+    Succeeded,
+    Blocked,
+    Failed,
+}
+
+/// Hook 执行结果视图。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookExecutionResultView {
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub decision: Option<String>,
+    pub reason: Option<String>,
+    pub additional_context: Option<String>,
+}
+
+/// Hook 事件视图。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookEventView {
+    pub hook_name: String,
+    pub status: HookEventStatus,
+    pub matcher: Option<String>,
+    pub command: Option<String>,
+    pub result: Option<HookExecutionResultView>,
+}
+
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
@@ -252,11 +282,8 @@ pub enum ChatEvent {
     TurnChanged(usize),
     /// 记录当前 turn 变化的端口事件。
     CurrentTurnChanged(usize),
-    /// StopFailure hook 结果。
-    StopFailureHook {
-        system_message: Option<String>,
-        additional_context: Option<String>,
-    },
+    /// Hook 事件。
+    HookEvent(HookEventView),
     /// AskUserQuestion 请求。
     AskUser {
         id: String,
@@ -271,14 +298,6 @@ pub enum ChatEvent {
     AgentProgress {
         tool_id: String,
         event: AgentProgressEventView,
-    },
-    /// Hook 开始。
-    HookStart { event: String, command: String },
-    /// Hook 结束。
-    HookEnd {
-        event: String,
-        blocked: bool,
-        error: Option<String>,
     },
     /// 工作目录变化。
     WorkingDirectoryChanged {

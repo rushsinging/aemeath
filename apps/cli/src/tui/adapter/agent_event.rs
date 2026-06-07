@@ -1,3 +1,4 @@
+use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::ConversationIntent;
@@ -143,6 +144,15 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 tool_id: tool_id.clone(),
                 message: format!("{event}"),
             })
+        }
+        UiEvent::HookEvent(event) => {
+            let mut mapping = runtime(RuntimeIntent::SetSpinnerPhase(hook_spinner_phase(event)));
+            if let Some(notice) = hook_event_notice(event) {
+                mapping
+                    .conversation
+                    .push(ConversationIntent::AppendHookNotice { content: notice });
+            }
+            mapping
         }
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
         UiEvent::Done | UiEvent::DoneWithDuration(_) | UiEvent::Cancelled => {

@@ -1,3 +1,5 @@
+use super::block::HookNoticeContent;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationIntent {
     StartChat {
@@ -47,6 +49,9 @@ pub enum ConversationIntent {
     },
     AppendSystemMessage {
         text: String,
+    },
+    AppendHookNotice {
+        content: HookNoticeContent,
     },
     AppendError {
         text: String,

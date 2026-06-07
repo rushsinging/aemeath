@@ -11,6 +11,8 @@ pub struct HookResult {
     pub output: String,
     /// 如果 hook 执行失败，包含错误信息
     pub error: Option<String>,
+    /// hook 进程退出码；进程未正常退出时为空。
+    pub exit_code: Option<i32>,
 }
 
 impl HookResult {
@@ -20,6 +22,7 @@ impl HookResult {
             blocked: false,
             output: String::new(),
             error: Some(message.into()),
+            exit_code: None,
         }
     }
 

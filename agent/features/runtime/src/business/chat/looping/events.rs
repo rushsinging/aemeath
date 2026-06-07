@@ -6,6 +6,33 @@ use std::pin::Pin;
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeHookEventStatus {
+    Running,
+    Succeeded,
+    Blocked,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHookExecutionResult {
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub decision: Option<String>,
+    pub reason: Option<String>,
+    pub additional_context: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHookEvent {
+    pub hook_name: String,
+    pub status: RuntimeHookEventStatus,
+    pub matcher: Option<String>,
+    pub command: Option<String>,
+    pub result: Option<RuntimeHookExecutionResult>,
+}
+
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
     Text(String),
@@ -53,10 +80,7 @@ pub enum RuntimeStreamEvent {
     Cancelled,
     LiveTps(f64),
     TurnChanged(usize),
-    StopFailureHook {
-        system_message: Option<String>,
-        additional_context: Option<String>,
-    },
+    HookEvent(RuntimeHookEvent),
     AskUser {
         id: String,
         question: String,
@@ -69,15 +93,6 @@ pub enum RuntimeStreamEvent {
     AgentProgress {
         tool_id: String,
         event: AgentProgressEvent,
-    },
-    HookStart {
-        event: String,
-        command: String,
-    },
-    HookEnd {
-        event: String,
-        blocked: bool,
-        error: Option<String>,
     },
     WorkingDirectoryChanged {
         path_base: String,
