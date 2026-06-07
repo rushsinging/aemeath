@@ -28,6 +28,40 @@ pub async fn run_reflection(
     .await
 }
 
+pub async fn run_precompact_reflection(
+    config: &share::config::MemoryConfig,
+    messages: &[share::message::Message],
+    cwd: &Path,
+    client: &provider::api::LlmClient,
+    system_prompt_text: &str,
+) -> Option<String> {
+    let compacted_messages =
+        crate::business::compact::messages_selected_for_precompact_memory(messages);
+    if compacted_messages.is_empty() {
+        return None;
+    }
+    run_forced_reflection_with_base_dir(
+        config,
+        &compacted_messages,
+        cwd,
+        client,
+        system_prompt_text,
+        storage::api::memory_base_dir(),
+    )
+    .await
+}
+
+async fn run_forced_reflection_with_base_dir(
+    config: &share::config::MemoryConfig,
+    messages: &[share::message::Message],
+    cwd: &Path,
+    client: &provider::api::LlmClient,
+    system_prompt_text: &str,
+    base_dir: PathBuf,
+) -> Option<String> {
+    run_reflection_core(config, messages, cwd, client, system_prompt_text, base_dir).await
+}
+
 async fn run_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     turn_count: usize,
@@ -41,6 +75,20 @@ async fn run_reflection_with_base_dir(
         return None;
     }
     if !turn_count.is_multiple_of(config.reflection.interval_turns) {
+        return None;
+    }
+    run_reflection_core(config, messages, cwd, client, system_prompt_text, base_dir).await
+}
+
+async fn run_reflection_core(
+    config: &share::config::MemoryConfig,
+    messages: &[share::message::Message],
+    cwd: &Path,
+    client: &provider::api::LlmClient,
+    system_prompt_text: &str,
+    base_dir: PathBuf,
+) -> Option<String> {
+    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
         return None;
     }
 
@@ -69,10 +117,8 @@ async fn run_reflection_with_base_dir(
         Ok(output) => output,
         Err(_) => {
             // Fall back to lightweight if LLM parsing fails
-            return lightweight_reflection_text_with_base_dir(
-                config, turn_count, messages, cwd, base_dir,
-            )
-            .await;
+            return lightweight_reflection_text_with_base_dir(config, messages, cwd, base_dir)
+                .await;
         }
     };
 
@@ -171,15 +217,11 @@ fn extract_json(text: &str) -> Option<String> {
 /// Lightweight reflection fallback: basic checks without LLM call.
 async fn lightweight_reflection_text_with_base_dir(
     config: &share::config::MemoryConfig,
-    turn_count: usize,
     messages: &[share::message::Message],
     cwd: &Path,
     base_dir: PathBuf,
 ) -> Option<String> {
     if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-    if !turn_count.is_multiple_of(config.reflection.interval_turns) {
         return None;
     }
 

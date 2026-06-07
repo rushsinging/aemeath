@@ -4,8 +4,6 @@ const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
 
 use hook::api::HookRunner;
 use share::config::{paths, MemoryConfig};
-use share::memory::MemoryEntry;
-use storage::api::{memory_base_dir, project_file_name_from_path, MemoryStore};
 
 use super::git_context::{collect_git_context, is_git_repo};
 
@@ -57,6 +55,7 @@ fn static_system_prompt_for(cwd_str: &str, is_git: bool) -> String {
  - Do not create files unless they're absolutely necessary for achieving your goal.
  - Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection.
  - Don't add features, refactor code, or make improvements beyond what was asked.
+ - Use the Memory tool to search and manage long-term memory when relevant. Do not assume memory contents unless retrieved.
 
 # Using Agent tool — MANDATORY two-phase approach
 Sub-agents have a small context window (~128K tokens) and max 10 tool rounds. They CANNOT review an entire crate or directory.
@@ -132,7 +131,7 @@ When creating a git commit message:
 pub async fn build_system_prompt_parts(
     context: &PromptContext,
     hook_runner: &HookRunner,
-    memory_config: &MemoryConfig,
+    _memory_config: &MemoryConfig,
 ) -> SystemPromptParts {
     let cwd = &context.cwd;
     let cwd_str = cwd.to_string_lossy();
@@ -159,11 +158,6 @@ pub async fn build_system_prompt_parts(
             dynamic.push_str("\n\n");
             dynamic.push_str(&git_context);
         }
-    }
-
-    if let Some(memory_context) = collect_memory_context(cwd, memory_config).await {
-        dynamic.push_str("\n\n");
-        dynamic.push_str(&memory_context);
     }
 
     // --- Project instructions: will be injected as a separate user-context message ---
@@ -293,78 +287,6 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     }
 
     agents_md
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct MemoryContextOptions {
-    max_entries: usize,
-    max_inject_count: usize,
-    similarity_threshold: f64,
-}
-
-fn memory_context_options_from_config(config: &MemoryConfig) -> MemoryContextOptions {
-    MemoryContextOptions {
-        max_entries: config.max_entries,
-        max_inject_count: if config.enabled {
-            config.max_inject_count
-        } else {
-            0
-        },
-        similarity_threshold: config.similarity_threshold,
-    }
-}
-
-pub async fn collect_memory_context(cwd: &Path, config: &MemoryConfig) -> Option<String> {
-    let options = memory_context_options_from_config(config);
-    collect_memory_context_with_options(cwd, options).await
-}
-
-#[cfg(test)]
-async fn collect_memory_context_with_limit(cwd: &Path, limit: usize) -> Option<String> {
-    let options = MemoryContextOptions {
-        max_entries: 100,
-        max_inject_count: limit,
-        similarity_threshold: 0.8,
-    };
-    collect_memory_context_with_options(cwd, options).await
-}
-
-async fn collect_memory_context_with_options(
-    cwd: &Path,
-    options: MemoryContextOptions,
-) -> Option<String> {
-    if options.max_inject_count == 0 {
-        return None;
-    }
-
-    let mut store = MemoryStore::new(
-        memory_base_dir(),
-        project_file_name_from_path(cwd),
-        options.max_entries,
-        options.similarity_threshold,
-    )
-    .ok()?;
-    let entries = store.top_for_inject(options.max_inject_count).ok()?;
-    format_memory_context(&entries)
-}
-
-fn format_memory_context(entries: &[MemoryEntry]) -> Option<String> {
-    if entries.is_empty() {
-        return None;
-    }
-
-    let mut output = String::from("# Project Memory");
-    let mut bytes = output.len();
-    for entry in entries {
-        let line = format!("\n- [{:?}] {}", entry.category, entry.content.trim());
-        if bytes + line.len() > 4000 {
-            break;
-        }
-        bytes += line.len();
-        output.push_str(&line);
-    }
-
-    Some(output)
 }
 
 #[cfg(test)]

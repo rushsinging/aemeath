@@ -211,10 +211,6 @@ struct MemoryConfigPatch {
     #[serde(default)]
     max_entries: Option<usize>,
     #[serde(default)]
-    max_inject_count: Option<usize>,
-    #[serde(default)]
-    auto_summary_on_session_end: Option<bool>,
-    #[serde(default)]
     similarity_threshold: Option<f64>,
     #[serde(default)]
     reflection: Option<ReflectionConfigPatch>,
@@ -751,12 +747,6 @@ impl ConfigManager {
         if let Some(v) = patch.max_entries {
             base.max_entries = v;
         }
-        if let Some(v) = patch.max_inject_count {
-            base.max_inject_count = v;
-        }
-        if let Some(v) = patch.auto_summary_on_session_end {
-            base.auto_summary_on_session_end = v;
-        }
         if let Some(v) = patch.similarity_threshold {
             base.similarity_threshold = v;
         }
@@ -900,7 +890,6 @@ mod tests {
             },
             memory: share::config::MemoryConfig {
                 enabled: false,
-                auto_summary_on_session_end: false,
                 reflection: ReflectionConfig {
                     enabled: false,
                     auto_apply_suggestions: true,
@@ -934,7 +923,6 @@ mod tests {
         assert!(!merged.storage.persist_sessions);
         assert!(!merged.storage.history);
         assert!(!merged.memory.enabled);
-        assert!(!merged.memory.auto_summary_on_session_end);
         assert!(!merged.memory.reflection.enabled);
         assert!(merged.memory.reflection.auto_apply_suggestions);
         assert!(!merged.logging.sub_agent_log.enabled);
@@ -966,7 +954,6 @@ mod tests {
             },
             memory: share::config::MemoryConfig {
                 enabled: true,
-                auto_summary_on_session_end: true,
                 reflection: ReflectionConfig {
                     enabled: true,
                     auto_apply_suggestions: true,
@@ -1005,7 +992,6 @@ mod tests {
               },
               "memory": {
                 "enabled": false,
-                "auto_summary_on_session_end": false,
                 "reflection": {
                   "enabled": false,
                   "auto_apply_suggestions": false
@@ -1035,7 +1021,6 @@ mod tests {
         assert!(!merged.storage.persist_sessions);
         assert!(!merged.storage.history);
         assert!(!merged.memory.enabled);
-        assert!(!merged.memory.auto_summary_on_session_end);
         assert!(!merged.memory.reflection.enabled);
         assert!(!merged.memory.reflection.auto_apply_suggestions);
         assert!(!merged.logging.sub_agent_log.enabled);

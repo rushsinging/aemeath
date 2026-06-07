@@ -4,8 +4,8 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig/Store/命令/Tool/session reminder；Hook 兜底暂缓 |
-| 9 | 反思系统 | - | 已完成 | 未确认 | 已接入 /reflect、auto_apply、N 轮自动触发；用默认模型，不做独立 reflection model |
+| 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig/Store/命令/Tool/session reminder；system prompt 只保留 Memory tool 提示 |
+| 9 | 反思系统 | - | 已完成 | 未确认 | 已接入 /reflect、auto_apply、N 轮自动触发；Compact 前提取 memory 建议 |
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成；SSE 传输有可靠性问题，MCP 加载暂时禁用待修复 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Messages API 适配（流式/非流式/thinking/重试/tool use） |
 | 42 | 权限管控系统 | 高 | 设计中 | 未确认 | 交互式外部授权 + 统一 PermissionEngine + audit/policy 域；详见 [spec](specs/042-permission-control-system.md) |
@@ -64,28 +64,21 @@ enum MemoryCategory {
 }
 ```
 
-**写入时机**（通过 Hook 触发）：
+**写入时机**：
 
-| 时机 | HookEvent | 写入策略 |
-|------|-----------|---------|
-| 会话结束时 | `SessionEnd` | LLM 总结本会话关键决策和发现，写入 memory |
-| 压缩后 | `PostCompact` | 提取被压缩掉的重要上下文到 memory |
+| 时机 | 入口 | 写入策略 |
+|------|------|---------|
 | 用户主动 | `/memory add <content>` 命令 | 直接写入 |
-| 反思系统 | `ReflectionGenerated`（新事件） | 反思结果写入 |
+| LLM 主动 | `Memory` tool | 搜索/管理长期记忆；system prompt 不再注入详细记忆内容 |
+| 反思系统 | `/reflect` / 自动反思 | 生成建议；`auto_apply_suggestions=true` 时自动写入 |
+| 压缩前 | Compact 前运行时流程 | 基于即将被压缩的 early messages 提取 memory 建议 |
 
-**检索注入**（System Prompt 构建阶段）：
+**检索策略**：
 
-1. `build_system_prompt_parts()` 中新增 memory 检索步骤
-2. 基于当前 cwd 定位项目 memory 目录
-3. 按 `access_count` + `created_at` 加权排序，取 top-N（默认 10 条）
-4. 注入到 system prompt 的 dynamic_part 中：
-    ```
-    # Project Memory
-    - [Decision] 使用 tokio channel 而非 mpsc，因为需要跨 async task 通信
-    - [Pattern] 错误处理统一用 AemeathError，thiserror derive
-    - [Pitfall] bash.rs 中 check_command_safety 不受 allow_all 控制，已修复
-    ```
-5. 更新被注入条目的 `accessed_at` 和 `access_count`
+1. System prompt 只保留 Memory tool 使用提示，不再注入 `# Project Memory` 详细内容。
+2. LLM 需要长期记忆时通过 `Memory` tool 的 `search/list` 主动检索。
+3. `/memory search` 仍可由用户显式检索。
+4. MemoryStore 仍保留 `top_for_inject` 等评分能力，但不用于 system prompt 自动注入。
 
 **新增模块**：
 
@@ -113,10 +106,13 @@ enum MemoryCategory {
 {
    "memory": {
      "enabled": true,
-     "max_entries_per_project": 100,
-     "max_inject_count": 10,
-     "auto_summary_on_session_end": true,
-     "archive_after_days": 90
+     "max_entries": 100,
+     "similarity_threshold": 0.8,
+     "reflection": {
+       "enabled": true,
+       "interval_turns": 10,
+       "auto_apply_suggestions": false
+     }
    }
 }
 ```
@@ -135,7 +131,7 @@ enum MemoryCategory {
 | 两层存储：Global + Project | `memory/store.rs` |
 | 去重（Jaccard 相似度） | `memory/dedup.rs` |
 | 评分（injection_score + eviction_score） | `memory/scoring.rs` |
-| System Prompt 注入（`top_for_inject` → `# Project Memory`，受 `MemoryConfig.max_inject_count` 控制） | `prompt.rs` |
+| System Prompt Memory tool 提示（不注入详细记忆） | `prompt/build/prompt_build.rs` |
 | `/memory` 命令（add/delete/pin/search/compact/stats） | `command/commands/memory.rs` |
 | `MemoryTool`（LLM 可通过 tool call 操作 memory） | `memory_tool.rs` |
 | `SessionReminders`（会话级提醒） | `memory/session_reminder.rs` |
@@ -146,9 +142,9 @@ enum MemoryCategory {
 
 | 需求 | 说明 |
 |------|------|
-| `auto_summary_on_session_end` | 配置项存在但无调用代码，SessionEnd 时没有 LLM 总结写入 memory |
+| `auto_summary_on_session_end` | 已删除；SessionEnd 不做 LLM 总结，不会阻塞退出 |
 | `ReflectionGenerated` Hook 事件 | spec 中提到的 hook 事件不在 `HookEvent` 枚举中 |
-| PostCompact 提取记忆 | PostCompact hook 只记录日志，没有提取被压缩内容到 memory |
+| PostCompact 提取记忆 | 已改为 Compact 前基于即将被压缩的 early messages 提取建议 |
 | 淘汰策略定时触发 | 有 `compact()` + `eviction_candidates()`，但无定时触发逻辑，`archive_after_days` 配置项不在 `MemoryConfig` 中 |
 | LLM 合并相近记忆 | spec 中"超过 100 条时用 LLM 合并"未落地 |
 | SessionReminders 持久化 | `SessionReminders` 仅内存态，不写入文件，会话结束即丢失 |
@@ -172,9 +168,10 @@ enum MemoryCategory {
 | `/reflect` 命令（后台异步触发 + apply/stats/history） | `tui/app/slash/reflection.rs` |
 | pending 建议与 `/reflect apply` 写入 MemoryStore | `tui/app/slash/reflection.rs` |
 | `auto_apply_suggestions` 自动应用 suggested memories 与 outdated markers | `tui/app/update/ui_event.rs` |
-| 自动 N 轮触发（`reflection.interval_turns`，0 禁用） | `tui/app/slash/reflection.rs` |
+| 自动 N 轮触发（`reflection.interval_turns`，0 禁用） | `chat/looping/reflection.rs` |
+| Compact 前基于 early messages 提取 memory 建议，默认不自动写入 | `chat/looping/compact.rs`、`compact/summary.rs` |
 
-**暂缓**：连续工具失败触发、SessionEnd/SubagentStop 反思、独立 reflection model、PostCompact 后反思。
+**暂缓**：连续工具失败触发、SessionEnd/SubagentStop 反思、独立 reflection model、PostCompact 后反思（已改为 Compact 前建议提取）。
 
 **涉及路径**：`reflection/`、`tui/app/slash/reflection.rs`、`tui/app/update/ui_event.rs`
 

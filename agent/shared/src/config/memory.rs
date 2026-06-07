@@ -6,10 +6,6 @@ pub(crate) fn default_max_entries() -> usize {
     100
 }
 
-pub(crate) fn default_max_inject_count() -> usize {
-    10
-}
-
 pub(crate) fn default_similarity_threshold() -> f64 {
     0.8
 }
@@ -29,14 +25,6 @@ pub struct MemoryConfig {
     #[serde(default = "default_max_entries")]
     pub max_entries: usize,
 
-    /// Maximum memory entries injected into system prompt.
-    #[serde(default = "default_max_inject_count")]
-    pub max_inject_count: usize,
-
-    /// Enable automatic summary on session end.
-    #[serde(default = "super::ui::default_true")]
-    pub auto_summary_on_session_end: bool,
-
     /// Similarity threshold for deduplication.
     #[serde(default = "default_similarity_threshold")]
     pub similarity_threshold: f64,
@@ -51,8 +39,6 @@ impl Default for MemoryConfig {
         Self {
             enabled: true,
             max_entries: default_max_entries(),
-            max_inject_count: default_max_inject_count(),
-            auto_summary_on_session_end: true,
             similarity_threshold: default_similarity_threshold(),
             reflection: ReflectionConfig::default(),
         }
@@ -100,20 +86,26 @@ mod tests {
 
         assert!(config.enabled);
         assert_eq!(config.max_entries, 100);
-        assert_eq!(config.max_inject_count, 10);
-        assert!(config.auto_summary_on_session_end);
         assert_eq!(config.similarity_threshold, 0.8);
         assert!(config.reflection.enabled);
     }
 
     #[test]
-    fn test_memory_config_deserialize_empty() {
-        let config: MemoryConfig = serde_json::from_str("{}").unwrap();
+    fn test_memory_config_deserialize_ignores_removed_session_end_summary() {
+        let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+        assert!(empty.enabled);
+        assert_eq!(empty.max_entries, 100);
+        assert_eq!(empty.reflection.interval_turns, 10);
+        assert!(!empty.reflection.auto_apply_suggestions);
+
+        let json = r#"{
+            "enabled": true,
+            "auto_summary_on_session_end": false
+        }"#;
+        let config: MemoryConfig = serde_json::from_str(json).unwrap();
 
         assert!(config.enabled);
         assert_eq!(config.max_entries, 100);
-        assert_eq!(config.reflection.interval_turns, 10);
-        assert!(!config.reflection.auto_apply_suggestions);
     }
 
     #[test]
@@ -121,8 +113,6 @@ mod tests {
         let json = r#"{
             "enabled": false,
             "max_entries": 20,
-            "max_inject_count": 3,
-            "auto_summary_on_session_end": false,
             "similarity_threshold": 0.6,
             "reflection": {
                 "enabled": false,
@@ -135,8 +125,6 @@ mod tests {
 
         assert!(!config.enabled);
         assert_eq!(config.max_entries, 20);
-        assert_eq!(config.max_inject_count, 3);
-        assert!(!config.auto_summary_on_session_end);
         assert_eq!(config.similarity_threshold, 0.6);
         assert!(!config.reflection.enabled);
         assert_eq!(config.reflection.interval_turns, 5);

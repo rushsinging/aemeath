@@ -207,6 +207,8 @@ where
             context_size,
             tool_schema_tokens,
             last_api_input_tokens,
+            &memory_config,
+            &cwd,
             &ctx.client,
         )
         .await;

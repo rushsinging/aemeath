@@ -1,5 +1,4 @@
 use super::*;
-use share::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -30,6 +29,17 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
     assert!(text.contains("call TaskList first"));
     assert!(text.contains("may refer to older task batches"));
     assert!(text.contains("prioritize the latest user request"));
+}
+
+#[test]
+fn test_static_prompt_mentions_memory_tool_without_memory_contents() {
+    let text = static_system_prompt_for_test("/tmp/project", true);
+
+    assert!(
+        text.contains("Use the Memory tool to search and manage long-term memory when relevant")
+    );
+    assert!(text.contains("Do not assume memory contents unless retrieved"));
+    assert!(!text.contains("# Project Memory"));
 }
 
 #[test]
@@ -268,84 +278,4 @@ async fn test_load_agents_md_reads_project_claude_md_without_migration() {
     assert!(!base.join("AGENTS.md").exists());
 
     std::fs::remove_dir_all(base).unwrap();
-}
-
-#[test]
-fn test_format_memory_context_empty() {
-    assert!(format_memory_context(&[]).is_none());
-}
-
-#[test]
-fn test_format_memory_context_with_entries() {
-    let entry = MemoryEntry::new(
-        "memory-1",
-        100,
-        MemoryLayer::Project,
-        MemoryCategory::Decision,
-        "使用 JSON 存储 Memory",
-        MemorySource::User,
-    );
-    let output = format_memory_context(&[entry]).unwrap();
-
-    assert!(output.contains("# Project Memory"));
-    assert!(output.contains("[Decision]"));
-    assert!(output.contains("使用 JSON 存储 Memory"));
-}
-
-#[tokio::test]
-async fn test_collect_memory_context_zero_limit() {
-    let cwd = PathBuf::from("/tmp/aemeath-no-memory");
-
-    assert!(collect_memory_context_with_limit(&cwd, 0).await.is_none());
-}
-
-#[test]
-fn test_memory_context_options_from_config_happy_path() {
-    let config = share::config::MemoryConfig {
-        enabled: true,
-        max_entries: 42,
-        max_inject_count: 3,
-        auto_summary_on_session_end: true,
-        similarity_threshold: 0.7,
-        reflection: Default::default(),
-    };
-    let options = memory_context_options_from_config(&config);
-
-    assert_eq!(options.max_entries, 42);
-    assert_eq!(options.max_inject_count, 3);
-    assert_eq!(options.similarity_threshold, 0.7);
-}
-
-#[test]
-fn test_memory_context_options_from_config_boundary_zero_inject_count() {
-    let config = share::config::MemoryConfig {
-        enabled: true,
-        max_entries: 42,
-        max_inject_count: 0,
-        auto_summary_on_session_end: true,
-        similarity_threshold: 0.7,
-        reflection: Default::default(),
-    };
-    let options = memory_context_options_from_config(&config);
-
-    assert_eq!(options.max_entries, 42);
-    assert_eq!(options.max_inject_count, 0);
-    assert_eq!(options.similarity_threshold, 0.7);
-}
-
-#[test]
-fn test_memory_context_options_from_config_disabled_uses_zero_inject_count() {
-    let config = share::config::MemoryConfig {
-        enabled: false,
-        max_entries: 42,
-        max_inject_count: 3,
-        auto_summary_on_session_end: true,
-        similarity_threshold: 0.7,
-        reflection: Default::default(),
-    };
-    let options = memory_context_options_from_config(&config);
-
-    assert_eq!(options.max_entries, 42);
-    assert_eq!(options.max_inject_count, 0);
-    assert_eq!(options.similarity_threshold, 0.7);
 }
