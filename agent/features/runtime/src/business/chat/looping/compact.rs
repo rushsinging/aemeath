@@ -18,6 +18,8 @@ pub(crate) async fn auto_compact<S>(
     context_size: usize,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
+    memory_config: &share::config::MemoryConfig,
+    cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
 ) -> bool
 where
@@ -90,6 +92,20 @@ where
     ) || (last_api_input_tokens > 0
         && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
     {
+        if let Some(text) = crate::business::chat::looping::reflection::run_precompact_reflection(
+            memory_config,
+            messages,
+            cwd,
+            llm_client.as_ref(),
+            system_prompt_text,
+        )
+        .await
+        {
+            let _ = sink
+                .send_event(RuntimeStreamEvent::SystemMessage(text))
+                .await;
+        }
+
         let (compacted, was_compacted) = compact::compact_messages_with_llm(
             messages,
             system_prompt_text,

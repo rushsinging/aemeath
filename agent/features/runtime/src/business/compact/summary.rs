@@ -71,26 +71,16 @@ pub fn compact_messages(
     }
 
     // 第二步：完整压缩 — 头部/尾部保护
-    // 头部：保护前 2 条消息（初始对话轮次）
-    let head_protect = 2usize.min(total);
-    // 尾部：保留约 30% 作为近期上下文
-    let tail_budget = total * 30 / 100;
-    let keep_recent = tail_budget.max(4).min(total - head_protect);
-    let split_point = total - keep_recent;
-
-    // 不要压缩到头部保护区域
-    let split_point = split_point.max(head_protect);
-
-    if split_point <= head_protect {
+    let Some(window) = compact_window(total) else {
         return (result, false);
-    }
+    };
 
-    let early_messages = &result[head_protect..split_point];
+    let early_messages = &result[window.head_protect..window.split_point];
     let summary = build_summary_text(early_messages);
 
     // 重组：头部 + 摘要 + 近期消息
-    let mut compacted = Vec::with_capacity(head_protect + keep_recent + 3);
-    compacted.extend_from_slice(&result[..head_protect]);
+    let mut compacted = Vec::with_capacity(window.head_protect + window.keep_recent + 3);
+    compacted.extend_from_slice(&result[..window.head_protect]);
 
     let summary_text = format!(
         "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
@@ -104,12 +94,43 @@ pub fn compact_messages(
             text: "I understand. I'll continue from where we left off.".to_string(),
         }],
     });
-    compacted.extend_from_slice(&result[split_point..]);
+    compacted.extend_from_slice(&result[window.split_point..]);
 
     fix_role_alternation(&mut compacted);
     sanitize_tool_pairs(&mut compacted);
 
     (compacted, true)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactWindow {
+    pub head_protect: usize,
+    pub split_point: usize,
+    pub keep_recent: usize,
+}
+
+pub fn compact_window(total: usize) -> Option<CompactWindow> {
+    if total <= 4 {
+        return None;
+    }
+    let head_protect = 2usize.min(total);
+    let tail_budget = total * 30 / 100;
+    let keep_recent = tail_budget.max(4).min(total - head_protect);
+    let split_point = (total - keep_recent).max(head_protect);
+    if split_point <= head_protect {
+        return None;
+    }
+    Some(CompactWindow {
+        head_protect,
+        split_point,
+        keep_recent,
+    })
+}
+
+pub fn messages_selected_for_precompact_memory(messages: &[Message]) -> Vec<Message> {
+    compact_window(messages.len())
+        .map(|window| messages[window.head_protect..window.split_point].to_vec())
+        .unwrap_or_default()
 }
 
 /// 从早期对话历史构建 LLM 压缩请求消息。
@@ -236,16 +257,11 @@ pub async fn compact_messages_with_llm(
     }
 
     // 第二步：完整压缩 — 头部/尾部保护
-    let head_protect = 2usize.min(total);
-    let tail_budget = total * 30 / 100;
-    let keep_recent = tail_budget.max(4).min(total - head_protect);
-    let split_point = (total - keep_recent).max(head_protect);
-
-    if split_point <= head_protect {
+    let Some(window) = compact_window(total) else {
         return (result, false);
-    }
+    };
 
-    let early_messages = &result[head_protect..split_point];
+    let early_messages = &result[window.head_protect..window.split_point];
 
     // 尝试 LLM 摘要，失败则回退到本地
     let summary = match client {
@@ -257,8 +273,8 @@ pub async fn compact_messages_with_llm(
     };
 
     // 重组：头部 + 摘要 + 近期消息
-    let mut compacted = Vec::with_capacity(head_protect + keep_recent + 3);
-    compacted.extend_from_slice(&result[..head_protect]);
+    let mut compacted = Vec::with_capacity(window.head_protect + window.keep_recent + 3);
+    compacted.extend_from_slice(&result[..window.head_protect]);
 
     let summary_text = format!(
         "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
@@ -272,7 +288,7 @@ pub async fn compact_messages_with_llm(
             text: "I understand. I'll continue from where we left off.".to_string(),
         }],
     });
-    compacted.extend_from_slice(&result[split_point..]);
+    compacted.extend_from_slice(&result[window.split_point..]);
 
     fix_role_alternation(&mut compacted);
     sanitize_tool_pairs(&mut compacted);
@@ -314,4 +330,55 @@ async fn llm_compact(
         return Err("LLM returned empty summary".into());
     }
     Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compact_window_boundaries() {
+        assert_eq!(compact_window(4), None);
+        assert_eq!(compact_window(5), None);
+        assert_eq!(compact_window(6), None);
+
+        assert_eq!(
+            compact_window(100),
+            Some(CompactWindow {
+                head_protect: 2,
+                split_point: 70,
+                keep_recent: 30,
+            })
+        );
+    }
+
+    #[test]
+    fn test_messages_selected_for_precompact_memory_uses_same_early_window_as_compact() {
+        let messages = (0..10)
+            .map(|idx| Message::user(format!("message-{idx}")))
+            .collect::<Vec<_>>();
+
+        let selected = messages_selected_for_precompact_memory(&messages);
+
+        let selected_text = selected
+            .iter()
+            .map(Message::text_content)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected_text,
+            vec!["message-2", "message-3", "message-4", "message-5"]
+        );
+    }
+
+    #[test]
+    fn test_messages_selected_for_precompact_memory_returns_empty_for_small_history() {
+        let messages = vec![
+            Message::user("one"),
+            Message::user("two"),
+            Message::user("three"),
+            Message::user("four"),
+        ];
+
+        assert!(messages_selected_for_precompact_memory(&messages).is_empty());
+    }
 }
