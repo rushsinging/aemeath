@@ -7,7 +7,7 @@
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
-| 122 | Tool gutter marker 静态且 summary 等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 未消费动画帧；header 只看 summary，忽略 ToolArgumentsDelta 已更新的 args_preview |
+| 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
 
@@ -57,15 +57,15 @@
 - `apps/cli/src/tui/**`
 - 可能涉及 runtime stream/status 事件路径
 
-### #122 Tool gutter marker 静态且 summary 等 result 才出现
+### #122 Tool gutter marker 闪烁过快且 summary 曾等 result 才出现
 
 **状态**：待确认
 
-**症状**：TUI 中 running/pending tool call 的 gutter marker 始终显示静态 `●`，没有执行中闪烁动画；同时 Read/Edit/Bash/Grep/Skill/TaskCreate 等 tool call 的括号 summary 经常和 result 一起出现，用户看不到 ToolArgumentsDelta 到达后的提前更新。
+**症状**：TUI 中 running/pending tool call 的 gutter marker 首轮修复后可闪烁，但直接按 spinner 90ms 帧奇偶切换，视觉上闪得太快；此前 Read/Edit/Bash/Grep/Skill/TaskCreate 等 tool call 的括号 summary 经常和 result 一起出现，用户看不到 ToolArgumentsDelta 到达后的提前更新。
 
-**根因**：gutter marker 在 `apply_gutter()` 阶段按工具状态静态注入，未接收或消费动画帧；tool call header 只使用最终 `summary` 格式化，忽略 conversation model 已在 `ToolArgumentsDelta` 中维护的 `args_preview`，导致 summary 为空时只能显示裸工具名，直到最终 ToolCall 或 result 绑定后才刷新为带括号标题。
+**根因**：首轮修复让 gutter marker 消费 `spinner_frame`，但直接使用每帧奇偶切换，导致每 90ms 翻转、完整周期 180ms；tool call header 只使用最终 `summary` 格式化，忽略 conversation model 已在 `ToolArgumentsDelta` 中维护的 `args_preview`，导致 summary 为空时只能显示裸工具名，直到最终 ToolCall 或 result 绑定后才刷新为带括号标题。
 
-**修复**：gutter 层新增 `animated_marker_glyph()` 与 `apply_gutter_with_frame()`，running/pending 工具按动画帧在 `●`/`○` 间切换，成功/失败等终态保持静态；输出文档渲染传入 `spinner_frame`，并在 `SpinnerTick` 标记 output dirty 以刷新缓存外 gutter。tool call header 改为优先使用 `summary`，无 summary 时使用可用的 `args_preview` 格式化，保证 ToolArgumentsDelta 后不等 result 即可显示括号/detail。
+**修复**：gutter 层新增闪烁分频，running/pending 工具按 `spinner_frame / 4` 在 `●`/`○` 间切换，即约 360ms 翻转、720ms 完整周期；成功/失败等终态保持静态。tool call header 改为优先使用 `summary`，无 summary 时使用可用的 `args_preview` 格式化，保证 ToolArgumentsDelta 后不等 result 即可显示括号/detail。
 
 **验证**：
 - `cargo test -p cli test_animated_marker_glyph_blinks_running_tool_between_filled_and_open_circle -- --nocapture`

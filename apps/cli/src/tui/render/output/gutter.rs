@@ -11,6 +11,7 @@ use ratatui::text::Span;
 /// marker 列字符宽度（字形 1 + 空格 1）。
 pub const GUTTER_WIDTH: usize = 2;
 const PER_DEPTH_INDENT: usize = 2;
+const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
 
 /// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
 /// `apply_gutter` 按显示宽度补白填满 marker 槽。
@@ -27,7 +28,8 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             ToolSemanticStatus::Cancelled => "–",
             ToolSemanticStatus::Orphaned => "?",
             ToolSemanticStatus::Pending | ToolSemanticStatus::Running => {
-                if animation_frame.is_multiple_of(2) {
+                let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
+                if blink_frame.is_multiple_of(2) {
                     "●"
                 } else {
                     "○"
@@ -146,7 +148,19 @@ mod tests {
     fn test_animated_marker_glyph_blinks_running_tool_between_filled_and_open_circle() {
         let running = tool(ToolSemanticStatus::Running);
         assert_eq!(animated_marker_glyph(&running, 0), "●");
-        assert_eq!(animated_marker_glyph(&running, 1), "○");
+        assert_eq!(animated_marker_glyph(&running, 1), "●");
+        assert_eq!(animated_marker_glyph(&running, 3), "●");
+        assert_eq!(animated_marker_glyph(&running, 4), "○");
+        assert_eq!(animated_marker_glyph(&running, 7), "○");
+        assert_eq!(animated_marker_glyph(&running, 8), "●");
+    }
+
+    #[test]
+    fn test_animated_marker_glyph_blinks_pending_tool_with_same_divisor() {
+        let pending = tool(ToolSemanticStatus::Pending);
+        assert_eq!(animated_marker_glyph(&pending, 0), "●");
+        assert_eq!(animated_marker_glyph(&pending, 4), "○");
+        assert_eq!(animated_marker_glyph(&pending, 8), "●");
     }
 
     #[test]
