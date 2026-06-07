@@ -18,24 +18,35 @@ impl OutputDocumentRenderer {
         view_model: &OutputViewModel,
         width: u16,
         fallback_width: usize,
+        animation_frame: u64,
     ) -> RenderedDocument {
         let render_width = if width > 1 {
             width
         } else {
             u16::try_from(fallback_width.max(1)).unwrap_or(u16::MAX)
         };
-        self.render_tree(view_model, render_width)
+        self.render_tree_with_animation_frame(view_model, render_width, animation_frame)
     }
 
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
     /// gutter（depth 缩进 + marker）在组合期注入。
     pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
+        self.render_tree_with_animation_frame(view_model, width, 0)
+    }
+
+    /// 带动画帧的 render_tree；动画只进入缓存外 gutter，不参与 block 内容缓存。
+    pub fn render_tree_with_animation_frame(
+        &mut self,
+        view_model: &OutputViewModel,
+        width: u16,
+        animation_frame: u64,
+    ) -> RenderedDocument {
         // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
         // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
         let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
         for root in &view_model.roots {
             let mut group = Vec::new();
-            self.render_node(root, width, 0, &mut group);
+            self.render_node(root, width, 0, animation_frame, &mut group);
             groups.push(group);
         }
         let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
@@ -49,6 +60,7 @@ impl OutputDocumentRenderer {
         node: &BlockNode,
         width: u16,
         depth: usize,
+        animation_frame: u64,
         out: &mut Vec<RenderedBlock>,
     ) {
         let key = CacheKey {
@@ -62,8 +74,12 @@ impl OutputDocumentRenderer {
         });
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
-        let mut gutted =
-            crate::tui::render::output::gutter::apply_gutter(&node.kind, depth, rendered.lines);
+        let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
+            &node.kind,
+            depth,
+            rendered.lines,
+            animation_frame,
+        );
         // 每个 root block（depth 0）前加一个空行，分隔相邻对话块（视觉呼吸）；
         // 子块（depth>0，如 tool result）紧贴父块、不额外空行。
         if depth == 0 {
@@ -74,7 +90,7 @@ impl OutputDocumentRenderer {
             lines: gutted,
         });
         for child in &node.children {
-            self.render_node(child, width, depth + 1, out);
+            self.render_node(child, width, depth + 1, animation_frame, out);
         }
     }
 

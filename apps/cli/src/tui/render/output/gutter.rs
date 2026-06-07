@@ -1,5 +1,5 @@
 //! 行首标志槽 gutter：depth 缩进 + marker 列。组合期注入，只进 spans 不进 plain。
-//! marker 静态（按 kind/status），仅首行画，后续行等宽空白。见 spec §6.5。
+//! marker 按 kind/status 决定；运行态工具 marker 可随动画帧闪烁，仅首行画，后续行等宽空白。
 
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
@@ -15,13 +15,24 @@ const PER_DEPTH_INDENT: usize = 2;
 /// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
 /// `apply_gutter` 按显示宽度补白填满 marker 槽。
 pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
+    animated_marker_glyph(kind, 0)
+}
+
+/// 按 block 类型 / 工具状态和动画帧映射 marker 字形。
+pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'static str {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
             ToolSemanticStatus::Cancelled => "–",
             ToolSemanticStatus::Orphaned => "?",
-            ToolSemanticStatus::Pending | ToolSemanticStatus::Running => "●",
+            ToolSemanticStatus::Pending | ToolSemanticStatus::Running => {
+                if animation_frame.is_multiple_of(2) {
+                    "●"
+                } else {
+                    "○"
+                }
+            }
         },
         OutputBlockKind::UserMessage(_) => ">",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
@@ -57,7 +68,17 @@ pub fn apply_gutter(
     depth: usize,
     lines: Vec<RenderedLine>,
 ) -> Vec<RenderedLine> {
-    let glyph = marker_glyph(kind);
+    apply_gutter_with_frame(kind, depth, lines, 0)
+}
+
+/// 为一个 block 的所有行前置带动画帧的 gutter。仅运行态工具 marker 消费动画帧。
+pub fn apply_gutter_with_frame(
+    kind: &OutputBlockKind,
+    depth: usize,
+    lines: Vec<RenderedLine>,
+    animation_frame: u64,
+) -> Vec<RenderedLine> {
+    let glyph = animated_marker_glyph(kind, animation_frame);
     let color = marker_color(kind);
     let indent_n = depth * PER_DEPTH_INDENT;
     lines
@@ -119,6 +140,20 @@ mod tests {
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");
+    }
+
+    #[test]
+    fn test_animated_marker_glyph_blinks_running_tool_between_filled_and_open_circle() {
+        let running = tool(ToolSemanticStatus::Running);
+        assert_eq!(animated_marker_glyph(&running, 0), "●");
+        assert_eq!(animated_marker_glyph(&running, 1), "○");
+    }
+
+    #[test]
+    fn test_animated_marker_glyph_keeps_finished_tool_static() {
+        let success = tool(ToolSemanticStatus::Success);
+        assert_eq!(animated_marker_glyph(&success, 0), "✓");
+        assert_eq!(animated_marker_glyph(&success, 1), "✓");
     }
 
     #[test]

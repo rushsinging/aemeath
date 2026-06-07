@@ -7,6 +7,7 @@
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | spinner verb 使用总 frame，pharse_text 复用同一 elapsed；已拆分 phase_frame 独立阶段计时 |
+| 122 | Tool gutter marker 静态且 summary 等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 未消费动画帧；header 只看 summary，忽略 ToolArgumentsDelta 已更新的 args_preview |
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
 
@@ -54,6 +55,29 @@
 **涉及路径**：
 - `apps/cli/src/tui/**`
 - 可能涉及 runtime stream/status 事件路径
+
+### #122 Tool gutter marker 静态且 summary 等 result 才出现
+
+**状态**：待确认
+
+**症状**：TUI 中 running/pending tool call 的 gutter marker 始终显示静态 `●`，没有执行中闪烁动画；同时 Read/Edit/Bash/Grep/Skill/TaskCreate 等 tool call 的括号 summary 经常和 result 一起出现，用户看不到 ToolArgumentsDelta 到达后的提前更新。
+
+**根因**：gutter marker 在 `apply_gutter()` 阶段按工具状态静态注入，未接收或消费动画帧；tool call header 只使用最终 `summary` 格式化，忽略 conversation model 已在 `ToolArgumentsDelta` 中维护的 `args_preview`，导致 summary 为空时只能显示裸工具名，直到最终 ToolCall 或 result 绑定后才刷新为带括号标题。
+
+**修复**：gutter 层新增 `animated_marker_glyph()` 与 `apply_gutter_with_frame()`，running/pending 工具按动画帧在 `●`/`○` 间切换，成功/失败等终态保持静态；输出文档渲染传入 `spinner_frame`，并在 `SpinnerTick` 标记 output dirty 以刷新缓存外 gutter。tool call header 改为优先使用 `summary`，无 summary 时使用可用的 `args_preview` 格式化，保证 ToolArgumentsDelta 后不等 result 即可显示括号/detail。
+
+**验证**：
+- `cargo test -p cli test_animated_marker_glyph_blinks_running_tool_between_filled_and_open_circle -- --nocapture`
+- `cargo test -p cli test_tool_call_renders_args_detail_from_args_preview_before_summary -- --nocapture`
+- `cargo test -p cli test_output_assembler_tool_arguments_delta_updates_header_before_result -- --nocapture`
+- `cargo test -p cli gutter -- --nocapture`
+- `cargo test -p cli tool_call -- --nocapture`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/gutter.rs`
+- `apps/cli/src/tui/render/output/document_renderer.rs`
+- `apps/cli/src/tui/render/output/blocks/tool_call.rs`
+- `apps/cli/src/tui/app/update.rs`
 
 ---
 
