@@ -6,7 +6,7 @@
 |---|------|--------|------|----------|----------|----------|
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
-| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | spinner verb 使用总 frame，pharse_text 复用同一 elapsed；已拆分 phase_frame 独立阶段计时 |
+| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 静态且 summary 等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 未消费动画帧；header 只看 summary，忽略 ToolArgumentsDelta 已更新的 args_preview |
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
@@ -39,15 +39,16 @@
 
 **症状**：TUI 中 spinner verb 显示的耗时与 `pharse_text` 中显示/记录的计时相同。用户期望二者表达不同阶段或不同来源的计时，但当前界面上两个计时值一致，容易误导为重复显示或计时逻辑复用错误。
 
-**根因**：`LiveStatusAssembler` 同时用 `SpinnerAnim::elapsed_secs()` 填充 spinner 总耗时和 `phase_elapsed_secs`；`SpinnerAnim` 只维护总 `frame` 与 verb，缺少独立的 phase 起点/帧计数，`refresh_live_status_from_model()` 也没有在 phase 切换时重置阶段计时。
+**根因**：首轮修复已将 `LiveStatusAssembler` 改为使用 `SpinnerAnim::phase_elapsed_secs()`，但 `SpinnerAnim::sync_phase()` 的 `same_phase_kind()` 仍只按阶段类型判断：`CallingTool("Read")` → `CallingTool("Edit")` 被视为同一阶段，导致 phase 文案切换但 `phase_frame` 不重置，阶段计时继续累计。
 
-**修复**：在 `SpinnerAnim` 中新增 `phase_frame` 与已同步 `phase`，`advance()` 同时推进总帧和阶段帧；`sync_phase()` 在 phase 类型变化时仅重置 `phase_frame`，保留总 `frame` 与 verb；`LiveStatusAssembler` 改用 `phase_elapsed_secs()` 填充 phase 计时，避免复用总 elapsed。`CallingTools { remaining }` 计数变化不视为阶段切换，避免并行工具数量下降时阶段计时反复归零。
+**修复**：在 `SpinnerAnim` 中保留独立 `phase_frame` 与已同步 `phase`；本轮将 phase 等价判定收窄为显示语义级规则：`CallingTool(name)` 只有工具名相同才不重置，`CallingTools { remaining }` 计数变化仍不视为新阶段，普通固定阶段同 variant 不重置，Hook 完整 phase 相同才不重置。
 
 **验证**：
+- `cargo test -p cli test_spinner_anim_sync_phase_resets_for_calling_tool_name_change -- --nocapture`
 - `cargo test -p cli test_spinner_anim_sync_phase_does_not_reset_for_calling_tools_remaining_change -- --nocapture`
+- `cargo test -p cli test_spinner_anim_sync_phase_does_not_reset_for_same_calling_tool_name -- --nocapture`
 - `cargo test -p cli spinner_anim -- --nocapture`
 - `cargo test -p cli live_status -- --nocapture`
-- `cargo test -p cli tui::view_assembler::live_status -- --nocapture`
 - `cargo fmt --check`
 - `cargo clippy -p cli --all-targets -- -D warnings`
 - `git diff --check`

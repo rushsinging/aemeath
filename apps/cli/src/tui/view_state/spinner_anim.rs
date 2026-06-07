@@ -74,9 +74,9 @@ impl SpinnerAnim {
         self.phase_frame.saturating_mul(90) / 1000
     }
 
-    /// 同步业务 phase；phase 类型变化时只重置 phase 计时，不重置总计时和 verb。
+    /// 同步业务 phase；显示语义变化时只重置 phase 计时，不重置总计时和 verb。
     pub fn sync_phase(&mut self, phase: Option<SpinnerPhase>) {
-        if !same_phase_kind(self.phase.as_ref(), phase.as_ref()) {
+        if !same_phase(self.phase.as_ref(), phase.as_ref()) {
             self.phase_frame = 0;
         }
         self.phase = phase;
@@ -95,7 +95,7 @@ impl SpinnerAnim {
     }
 }
 
-fn same_phase_kind(current: Option<&SpinnerPhase>, next: Option<&SpinnerPhase>) -> bool {
+fn same_phase(current: Option<&SpinnerPhase>, next: Option<&SpinnerPhase>) -> bool {
     match (current, next) {
         (None, None) => true,
         (Some(SpinnerPhase::Thinking), Some(SpinnerPhase::Thinking)) => true,
@@ -103,12 +103,11 @@ fn same_phase_kind(current: Option<&SpinnerPhase>, next: Option<&SpinnerPhase>) 
         (Some(SpinnerPhase::AgentWorking), Some(SpinnerPhase::AgentWorking)) => true,
         (Some(SpinnerPhase::Reflecting), Some(SpinnerPhase::Reflecting)) => true,
         (Some(SpinnerPhase::ThinkingQueued), Some(SpinnerPhase::ThinkingQueued)) => true,
-        (Some(SpinnerPhase::CallingTool(_)), Some(SpinnerPhase::CallingTool(_))) => true,
+        (Some(SpinnerPhase::CallingTool(current)), Some(SpinnerPhase::CallingTool(next))) => {
+            current == next
+        }
         (Some(SpinnerPhase::CallingTools { .. }), Some(SpinnerPhase::CallingTools { .. })) => true,
-        (
-            Some(SpinnerPhase::Hook { event: current, .. }),
-            Some(SpinnerPhase::Hook { event: next, .. }),
-        ) => current == next,
+        (Some(SpinnerPhase::Hook { .. }), Some(SpinnerPhase::Hook { .. })) => current == next,
         _ => false,
     }
 }
@@ -207,6 +206,42 @@ mod tests {
         };
         anim.sync_phase(Some(
             crate::tui::model::runtime::spinner::SpinnerPhase::CallingTools { remaining: 2 },
+        ));
+        assert_eq!(anim.frame, 30);
+        assert_eq!(anim.phase_frame, 20);
+        assert_eq!(anim.verb, "Forging");
+    }
+
+    #[test]
+    fn test_spinner_anim_sync_phase_resets_for_calling_tool_name_change() {
+        let mut anim = SpinnerAnim {
+            frame: 30,
+            phase_frame: 20,
+            phase: Some(
+                crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
+            ),
+            verb: "Forging".to_string(),
+        };
+        anim.sync_phase(Some(
+            crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Edit".to_string()),
+        ));
+        assert_eq!(anim.frame, 30);
+        assert_eq!(anim.phase_frame, 0);
+        assert_eq!(anim.verb, "Forging");
+    }
+
+    #[test]
+    fn test_spinner_anim_sync_phase_does_not_reset_for_same_calling_tool_name() {
+        let mut anim = SpinnerAnim {
+            frame: 30,
+            phase_frame: 20,
+            phase: Some(
+                crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
+            ),
+            verb: "Forging".to_string(),
+        };
+        anim.sync_phase(Some(
+            crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
         ));
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 20);
