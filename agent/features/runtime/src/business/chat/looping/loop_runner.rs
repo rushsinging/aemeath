@@ -75,7 +75,7 @@ where
         user_context,
         mut messages,
         context_size,
-        cwd,
+        cwd: _seed_cwd,
         workspace,
         session_id,
         read_files,
@@ -95,8 +95,7 @@ where
     let hook_ui = HookUi::new(sink.clone());
 
     // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
-    // 这里直接读取当前 root 作为 hook/日志的工作目录基准。
-    let _ = cwd;
+    // 这里直接读取当前 root 作为 hook/日志的工作目录基准（忽略 seed cwd）。
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     hook_runner.set_project_dir(cwd.display().to_string());
     log::info!(

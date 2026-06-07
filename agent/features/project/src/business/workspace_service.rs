@@ -59,6 +59,9 @@ impl WorkspaceControl for WorkspaceService {
     fn set_cwd(&self, path: PathBuf) -> Result<(), WorkspaceError> {
         rules::set_cwd(&mut self.lock(), self.git.as_ref(), path)
     }
+    fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
+        rules::switch_to(&mut self.lock(), self.git.as_ref(), path)
+    }
     fn enter(
         &self,
         path: Option<PathBuf>,

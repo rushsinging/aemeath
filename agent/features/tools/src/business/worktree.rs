@@ -170,8 +170,8 @@ impl Tool for ExitWorktreeTool {
         };
 
         if let Some(path) = args.path {
-            // 直接切到指定路径：等同于 cd，不污染上下文栈（不留多余栈帧）。
-            match ctx.workspace_control().set_cwd(PathBuf::from(&path)) {
+            // 直接切到指定路径：校验存在性 + 同源，不污染上下文栈（不留多余栈帧）。
+            match ctx.workspace_control().switch_to(PathBuf::from(&path)) {
                 Ok(()) => {
                     let path_base = ctx.workspace_read().current_path_base();
                     let working_root = ctx.workspace_read().current_root();

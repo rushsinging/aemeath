@@ -81,6 +81,30 @@ pub fn set_cwd(
     Ok(())
 }
 
+/// Canonicalize `target` and verify it lives in the same repo as `state.working_root`.
+/// Returns `(canonical_path, worktree_root)` on success.
+fn validate_in_repo(
+    state: &WorkspaceState,
+    git: &dyn GitWorktreeOps,
+    target: &Path,
+) -> Result<(PathBuf, PathBuf), WorkspaceError> {
+    let canonical = target
+        .canonicalize()
+        .map_err(|_| WorkspaceError::PathNotFound(target.to_path_buf()))?;
+    let worktree_root = git.show_toplevel(&canonical).map_err(WorkspaceError::Git)?;
+    if let Ok(a) = git.git_common_dir(&state.working_root) {
+        if let Ok(b) = git.git_common_dir(&worktree_root) {
+            if a != b {
+                return Err(WorkspaceError::RepoMismatch {
+                    path: worktree_root,
+                    repo_root: state.working_root.clone(),
+                });
+            }
+        }
+    }
+    Ok((canonical, worktree_root))
+}
+
 pub fn enter(
     state: &mut WorkspaceState,
     git: &dyn GitWorktreeOps,
@@ -102,27 +126,28 @@ pub fn enter(
         git.worktree_add(&state.working_root, &target, &b, DEFAULT_WORKTREE_BASE)
             .map_err(WorkspaceError::Git)?;
     }
-    let canonical = target
-        .canonicalize()
-        .map_err(|_| WorkspaceError::PathNotFound(target.clone()))?;
-    let worktree_root = git.show_toplevel(&canonical).map_err(WorkspaceError::Git)?;
-    if let Ok(a) = git.git_common_dir(&state.working_root) {
-        if let Ok(b) = git.git_common_dir(&worktree_root) {
-            if a != b {
-                return Err(WorkspaceError::RepoMismatch {
-                    path: worktree_root,
-                    repo_root: state.working_root.clone(),
-                });
-            }
-        }
-    }
+    let (canonical, worktree_root) = validate_in_repo(state, git, &target)?;
     let frame = WorkspaceFrame {
         path_base: state.path_base.clone(),
         working_root: state.working_root.clone(),
     };
     state.stack.push(frame.clone());
-    set_cwd(state, git, canonical)?;
+    state.working_root = worktree_root;
+    state.path_base = canonical;
     Ok(frame)
+}
+
+/// Switch the workspace to `path` without pushing a stack frame.
+/// Validates that the path exists and belongs to the same repo as the current root.
+pub fn switch_to(
+    state: &mut WorkspaceState,
+    git: &dyn GitWorktreeOps,
+    path: PathBuf,
+) -> Result<(), WorkspaceError> {
+    let (canonical, worktree_root) = validate_in_repo(state, git, &path)?;
+    state.working_root = worktree_root;
+    state.path_base = canonical;
+    Ok(())
 }
 
 pub fn exit(state: &mut WorkspaceState) -> Result<WorkspaceFrame, WorkspaceError> {
@@ -287,6 +312,95 @@ mod tests {
             enter(&mut s, &git, Some("/other".into()), None),
             Err(WorkspaceError::NestedWorktree)
         );
+    }
+
+    #[test]
+    fn switch_to_rejects_nonexistent_path() {
+        let git = FakeGit::default();
+        let mut s = st("/repo");
+        let result = switch_to(&mut s, &git, PathBuf::from("/does/not/exist/xyz"));
+        assert!(
+            matches!(result, Err(WorkspaceError::PathNotFound(_))),
+            "expected PathNotFound, got {:?}",
+            result
+        );
+        // State must remain unchanged.
+        assert_eq!(s.path_base, PathBuf::from("/repo"));
+        assert_eq!(s.working_root, PathBuf::from("/repo"));
+        assert!(s.stack.is_empty());
+    }
+
+    #[test]
+    fn switch_to_rejects_cross_repo() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let tmp = std::env::temp_dir().join(format!("aemeath_switch_cross_{}", nanos));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let canonical_tmp = tmp.canonicalize().unwrap();
+
+        let mut git = FakeGit::default();
+        // Target: toplevel = /other-repo; common_dir for current root vs other root differ.
+        git.toplevel
+            .insert(canonical_tmp.clone(), PathBuf::from("/other-repo"));
+        git.common_dir
+            .insert(PathBuf::from("/repo"), PathBuf::from("/repo/.git"));
+        git.common_dir.insert(
+            PathBuf::from("/other-repo"),
+            PathBuf::from("/other-repo/.git"),
+        );
+
+        let mut s = st("/repo");
+        let result = switch_to(&mut s, &git, canonical_tmp.clone());
+        assert!(
+            matches!(result, Err(WorkspaceError::RepoMismatch { .. })),
+            "expected RepoMismatch, got {:?}",
+            result
+        );
+        // State must remain unchanged.
+        assert_eq!(s.path_base, PathBuf::from("/repo"));
+        assert_eq!(s.working_root, PathBuf::from("/repo"));
+        assert!(s.stack.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn switch_to_succeeds_same_repo() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let tmp = std::env::temp_dir().join(format!("aemeath_switch_same_{}", nanos));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let canonical_tmp = tmp.canonicalize().unwrap();
+
+        let worktree_root = PathBuf::from("/repo/wt");
+        let common = PathBuf::from("/repo/.git");
+
+        let mut git = FakeGit::default();
+        git.toplevel
+            .insert(canonical_tmp.clone(), worktree_root.clone());
+        git.common_dir
+            .insert(PathBuf::from("/repo"), common.clone());
+        git.common_dir.insert(worktree_root.clone(), common.clone());
+
+        let mut s = st("/repo");
+        switch_to(&mut s, &git, canonical_tmp.clone()).unwrap();
+
+        assert_eq!(s.path_base, canonical_tmp, "path_base should be canonical");
+        assert_eq!(
+            s.working_root, worktree_root,
+            "working_root should be worktree root"
+        );
+        assert!(s.stack.is_empty(), "stack must not be pushed");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
