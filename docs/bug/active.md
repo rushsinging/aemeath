@@ -2,82 +2,11 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 120 | TUI tool call block 跨 turn 串写 | 高 | 待确认 | 待用户确认 | 2026-06 | runtime tool id 仅 stream/message 局部唯一，TUI 全局按裸 id 绑定导致后续工具夺舍前序 block |
-| 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | 高 | 待确认 | 待用户确认 | 2026-06 | ToolCall 绑定时空 summary 覆盖 ToolArgumentsDelta 收集的参数预览 |
-| 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
-| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | 中 | 修复中 | 未确认 | 2026-05 | ReflectionDone 以 System(Muted) 暗色推入完整会话转录；修复改为只推摘要 |
-| 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
-| 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 
-### #120 TUI tool call block 跨 turn 串写
 
-**状态**：待确认
 
-**修复 commits**：待提交
-
-**症状**：会话 `019e7c10-3985-7daa-b002-da5cb1c213aa` 中应有两个 `Skill` tool call：`superpowers:using-superpowers` 与 `superpowers:brainstorming`。TUI 最终显示时后者覆盖前者，后续 `Read` 的内容也可能更新到已有 `Skill`/其他 tool call block 中，表现为 tool call block 串写或“夺舍”。
-
-**根因**：runtime streaming 阶段生成的 tool id 以每次 stream 局部计数为基础，`Agent::extract_tool_calls()` 也会按 assistant message 内位置重新生成 `tool-N`，跨 turn 会重复。TUI conversation model 与 view assembler 使用裸 id 作为全局 block/result 查找键，导致后续 turn 中相同 id 的工具更新到前序 block。早期 `ToolCallStart` / `ToolArgumentsDelta` 事件也没有携带 provider tool id，无法在 streaming 阶段稳定关联。
-
-**修复**：扩展 provider `StreamHandler`，让 tool start 与 arguments delta 透传 `provider_id`；SDK、runtime 与 TUI 事件同步携带 `provider_id`。runtime chat loop 使用共享 `ToolIdentityRegistry` 维护 `provider_id -> runtime_id` 映射，并为同一会话循环内所有 tool call 分配 session 级稳定 runtime id。`ToolCallStart` / `ToolArgumentsDelta`、最终 `ToolCall` 与 `ToolResult` 都通过该 registry 归一化到同一个 runtime id；TUI 继续以 runtime id 为 canonical，`provider_id` 仅作为 runtime 关联外部 provider/tool_result 的辅助键。
-
-**验证**：
-- `cargo test -p runtime stream_handler -- --nocapture`
-- `cargo test -p runtime tool_identity -- --nocapture`
-- `cargo test -p cli tui::model::conversation -- --nocapture`
-- `cargo fmt --check && cargo clippy -p runtime -p cli --all-targets -- -D warnings`
-- 代码审查：待执行。
-
-**涉及路径**：
-- `agent/features/provider/src/core/provider.rs`
-- `agent/features/runtime/src/business/chat/looping/stream_handler.rs`
-- `agent/features/runtime/src/business/chat/looping/tool_identity.rs`
-- `packages/sdk/src/chat.rs`
-- `apps/cli/src/tui/model/conversation/model.rs`
-- `apps/cli/src/tui/model/conversation/model_tests.rs`
-
-### #119 TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失
-
-**状态**：待确认
-
-**修复 commits**：待提交
-
-**症状**：会话 `019e93a2-950d-715d-807b-f98a880902be` 中 TUI 开始显示 `Skill(superpowers:...)` 正确，但工具完成后变成 `Skill(?)`；随后创建 task list 和 task 时，TUI 显示了 task list 的 tool call，但没有显示对应的 `TaskCreate` tool call header。
-
-**根因**：运行时已经向 TUI 发送 `ToolCallStart`、`ToolArgumentsDelta`、`ToolCall` 与 `ToolResult` 事件；问题出在 TUI conversation model 绑定阶段。`ToolArgumentsDelta` 已经把真实入参写入 `args_preview`，但后续 `ToolCall` 到达时若 `summary` 为空，会把已收集参数覆盖为空，渲染层再用空 JSON/Null 调用工具显示 formatter，导致 `Skill` 取不到 `skill` 字段回退为 `?`，任务类工具也失去 subject/description 摘要。
-
-**修复**：`ToolCall::bind` 在收到空 summary 时不再覆盖已有摘要；若已经存在 `args_preview`，则使用流式参数作为 summary fallback。`ConversationModel::observe_tool_call` 同步使用最终 summary 更新 block，并避免用空 summary 清空已有 block 摘要。补充回归测试覆盖 `Skill` 空 summary 保留流式参数，以及 `TaskListCreate` 后紧跟 `TaskCreate` 时两个 tool call block 都保留且摘要正确。
-
-**验证**：
-- `cargo test -p cli test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty -- --nocapture` 先失败、修复后通过
-- `cargo test -p cli test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind -- --nocapture` 先失败、修复后通过
-- `cargo fmt --check && cargo test -p cli tui::model::conversation -- --nocapture && cargo clippy -p cli --all-targets -- -D warnings`
-
-**涉及路径**：
-- `apps/cli/src/tui/model/conversation/model.rs`
-- `apps/cli/src/tui/model/conversation/tool_call.rs`
-- `apps/cli/src/tui/model/conversation/model_tests.rs`
-
-### #118 Hook env 中项目目录仍指向主工作区而非当前 worktree
-
-**状态**：已修复
-
-**修复 commits**：待提交
-
-**症状**：`~/.agents/logs/aemeath.log` 中 hook 匹配阶段已经记录当前 worktree 的 `project_dir`，例如 `.../aemeath/.worktrees/fix-111-tui-column-scroll-padding`；但 hook 脚本 stdout 中提取出的 `[hook-env] AEMEATH_PROJECT_DIR=...` 与 `[hook-env] CLAUDE_PROJECT_DIR=...` 仍是主工作区 `/Users/guoyuqi/Nextcloud/work/claudecode/aemeath`。这会导致 Stop hook / 项目 hook 在 worktree 会话中按主工作区执行检查或输出错误上下文。
-
-**根因**：待定位。初步判断 HookRunner 匹配阶段使用的 `project_dir` 与构造 hook 子进程环境变量时使用的项目根来源不同步，环境变量注入仍取主 checkout 的 project dir。
-
-**修复方向**：检查 hook 执行环境变量注入路径，确保 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR` 使用当前会话/工具上下文的 effective project dir，并与 `hook match` 日志中的 `project_dir` 一致；补充覆盖 worktree 场景的回归测试。
-
-**验证**：`cargo fmt -p runtime`、`cargo test -p runtime test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env -- --nocapture`、`cargo test -p runtime business::chat::looping::loop_runner::tests -- --nocapture`、`cargo clippy -p runtime --all-targets -- -D warnings`。
-
-**涉及路径**：
-- `agent/features/hook/src/business/hook/runner.rs`
-- `agent/features/policy/src/` 或 runtime 调用 HookRunner 的上下文传递路径
-- `specs/policy-hook-audit.md`
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
 
@@ -97,39 +26,7 @@
 - `apps/cli/src/tui/app/update.rs`
 - `apps/cli/src/tui/app.rs`
 
-### #96 EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中"
 
-**状态**：修复中
-
-**症状**：
-1. 用户在 `main` 分支主工作区（`git branch --show-current` → `main`，`pwd` 不在 `.worktrees/` 下），UI 显示也不在 worktree 中。
-2. 调用 `EnterWorktree { branch: "feature/xxx" }`（不给 `path`，走自动创建模式）时报错：`进入 worktree 失败：已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的`。
-3. 直接给 `path` 参数指定已存在的 worktree 路径则成功进入。
-
-**根因**：`enter_worktree()`（`agent/project/src/business/worktree.rs:125-132`）将 `context_stack.is_empty()` 作为"是否在 worktree 中"的**唯一判断依据**，完全不校验 git 实际状态。
-
-`context_stack` 是内存 `Arc<Mutex<Vec<WorkingContext>>>`，通过 `workspace_context_from_tool_context()` → `WorkingDirectoryChanged` 事件持久化到会话存储。会话恢复时从 `WorkspaceContext.context_stack` 还原。
-
-触发链条：
-1. Session N：EnterWorktree 成功 → context_stack.push → 会话自动持久化时栈非空
-2. Session N 异常结束 / 未调用 ExitWorktree → 残留条目持久化
-3. Session N+1：恢复到 main，但 context_stack 从持久化恢复后仍非空 → `enter_worktree()` 误判为"已在 worktree 中"
-
-**修复方向**：`enter_worktree()` 栈非空时，通过 `git rev-parse --git-dir` 校验当前路径是否真实在 `.worktrees/` 下。若栈非空但 git 确认在主工作区，自动清理残留栈并允许进入；仅当 git 也确认在 worktree 中时才拒绝嵌套。
-
-**涉及路径**：`agent/project/src/business/worktree.rs:125-132`（`enter_worktree` 的栈校验逻辑）
-
-### #74 TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
-
-**状态**：修复中
-
-**症状**：在 TUI 中执行 `/reflect` 后，reflection 输出及其**后续的普通/assistant 文本**全部呈现暗灰蓝色（System 样式）。
-
-**根因**：`ReflectionDone` 在 `ui_event.rs:168` 将 `output.content`（包含完整会话转录 `[User]:`/`[Assistant]:`、markdown 等内容）以 `append_system_notice` → `System(Muted)` 暗色推入输出区。大段暗色文本占据输出区大部分可见区域，视觉上后续 assistant 回复也"看起来暗了"。渲染管线本身无颜色泄漏（每个 block 独立渲染，ASSISTANT 色与 MUTED 色不同），但 reflection 完整内容中的 `[Assistant]:` 转录以 Muted 暗色渲染，混淆了用户对"assistant 回复变暗"的判断。
-
-**修复方向 / 当前状态**：修复中。只推送简短摘要（建议数 + 过时数），不推送完整 reflection 内容。完整内容保留在 `pending_reflection` 中，用户可通过 `/reflect apply` 查看。回归测试覆盖 System block 后 Assistant block 颜色正确性。
-
-**涉及路径**：`apps/cli/src/tui/app/update/ui_event.rs`（`ReflectionDone` 处理）
 
 ### #1 Resume 时 Markdown 渲染换行丢失（已修复）
 **症状**：Session resume 后 assistant 多段落文本连成一块，streaming 路径正常。

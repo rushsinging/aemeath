@@ -58,6 +58,7 @@
 | 71 | TUI 渲染缓存越界 panic（len 10000 / index 10000）+ unsafe string guard 覆盖不全 | [archived/071-render-cache-out-of-bounds.md](archived/071-render-cache-out-of-bounds.md) |
 | 72 | agent 双层循环中一轮结束后不自动读取 input queue | [archived/072-agent-loop-input-queue-drain.md](archived/072-agent-loop-input-queue-drain.md) |
 | 73 | EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout | [archived/073-enter-worktree-create.md](archived/073-enter-worktree-create.md) |
+| 74 | TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏） | [archived/074-reflect-system-color-leak.md](archived/074-reflect-system-color-leak.md) |
 | 75 | 中文输入法下 input area 输入顺序错乱（查看 → 看查） | [archived/075-ime-cjk-input-order.md](archived/075-ime-cjk-input-order.md) |
 | 76 | reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效 | [archived/076-reasoning-grep-flat-render.md](archived/076-reasoning-grep-flat-render.md) |
 | 77 | @/ / 补全后按空格回退删除字符 | [archived/077-completion-model-stale-overwrite.md](archived/077-completion-model-stale-overwrite.md) |
@@ -78,7 +79,9 @@
 | 93 | TUI 工具结果块内重复显示工具名和图标 | [archived/093-tool-result-header-duplicate.md](archived/093-tool-result-header-duplicate.md) |
 | 94 | Bash 工具运行时阻塞 LLM 流式渲染 | [archived/094-bash-blocks-streaming.md](archived/094-bash-blocks-streaming.md) |
 | 95 | Agent tool result 被归为 orphan | [archived/095-agent-tool-result-orphan.md](archived/095-agent-tool-result-orphan.md) |
+| 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | [archived/096-worktree-stack-stale.md](archived/096-worktree-stack-stale.md) |
 | 97 | /clear 未清空 task store 和 task list window | [archived/097-clear-tasks-window.md](archived/097-clear-tasks-window.md) |
+| 98 | resume 时没有加载 worktree 配置 | [archived/098-resume-workspace-restore.md](archived/098-resume-workspace-restore.md) |
 | 99 | input area 里上下键始终翻看历史，无法上下移动光标 | [archived/099-input-up-down-cursor.md](archived/099-input-up-down-cursor.md) |
 | 101 | HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令 | [archived/101-hook-start-per-hook.md](archived/101-hook-start-per-hook.md) |
 | 102 | 长工具调用内容导致 TUI 画面完全不刷新、按键无响应 | [archived/102-tool-content-tui-block.md](archived/102-tool-content-tui-block.md) |
@@ -95,3 +98,6 @@
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | [archived/115-check-unit-tests-filter.md](archived/115-check-unit-tests-filter.md) |
 | 116 | TaskListCreate 工具返回未带 task list ID | [archived/116-tasklistcreate-no-id.md](archived/116-tasklistcreate-no-id.md) |
 | 117 | 创建 task list 和 task 时，TUI task list window 没有更新 | [archived/117-tui-task-list-refresh.md](archived/117-tui-task-list-refresh.md) |
+| 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | [archived/118-hook-project-dir-env.md](archived/118-hook-project-dir-env.md) |
+| 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | [archived/119-tool-call-streaming-summary.md](archived/119-tool-call-streaming-summary.md) |
+| 120 | TUI tool call block 跨 turn 串写 | [archived/120-tool-call-block-cross-turn.md](archived/120-tool-call-block-cross-turn.md) |

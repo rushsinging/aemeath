@@ -1,0 +1,33 @@
+# Bug #74：TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 发现日期 | 2026-05 |
+| 归档日期 | 2026-06-04 |
+| 状态 | 已确认修复 |
+| 修复 | 55fdba7 |
+
+## 症状
+
+在 TUI 中执行 `/reflect` 后，reflection 输出及其后续的普通/assistant 文本全部呈现暗灰蓝色（System 样式）。
+
+## 根因
+
+`ReflectionDone` 在 `ui_event.rs:168` 将 `output.content`（包含完整会话转录 `[User]:`/`[Assistant]:`、markdown 等内容）以 `append_system_notice` → `System(Muted)` 暗色推入输出区。大段暗色文本占据输出区大部分可见区域，视觉上后续 assistant 回复也"看起来暗了"。渲染管线本身无颜色泄漏（每个 block 独立渲染，ASSISTANT 色与 MUTED 色不同），但 reflection 完整内容中的 `[Assistant]:` 转录以 Muted 暗色渲染，混淆了用户对"assistant 回复变暗"的判断。
+
+## 修复
+
+只推送简短摘要（建议数 + 过时数），不推送完整 reflection 内容。完整内容保留在 `pending_reflection` 中，用户可通过 `/reflect apply` 查看。回归测试覆盖 System block 后 Assistant block 颜色正确性。
+
+## 验证
+
+- 用户确认修复。
+
+## 涉及路径
+
+- `apps/cli/src/tui/app/update/ui_event.rs`（`ReflectionDone` 处理）
+
+## 关联提交
+
+- `55fdba7 merge: docs/archive-features-batch — 归档 #70 #72 #73 #74 #76 (refs #70 #72 #73 #74 #76)`
