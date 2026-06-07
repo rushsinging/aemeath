@@ -1,195 +1,23 @@
 # 活动中 Feature
 
+> 排序规范：表格行和详情区块均按 ID 升序排列。
+
 | # | 标题 | 优先级 | 状态 | 确认结果 | 目标 |
 |---|------|--------|------|----------|------|
-| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
-| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | Stop hook 脚本输出 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，便于排查路径 |
 | 8 | Memory 系统 | - | 已完成 | 未确认 | MVP 已落地：MemoryConfig/Store/命令/Tool/session reminder；Hook 兜底暂缓 |
 | 9 | 反思系统 | - | 已完成 | 未确认 | 已接入 /reflect、auto_apply、N 轮自动触发；用默认模型，不做独立 reflection model |
-| 68 | 项目指令搜索增强：全局 fallback + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局 fallback `~/.claude/CLAUDE.md`；项目指令向上 5 级搜索，不向下递归 |
-| 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
-| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
-| 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
 | 28 | MCP 系统完善 | 高 | 🔧 未完成 | 未确认 | P0+P1 已完成；SSE 传输有可靠性问题，MCP 加载暂时禁用待修复 |
 | 34 | Anthropic Claude 原生 Provider | 高 | ✅ 已完成 | 未确认 | 原生 Anthropic Messages API 适配（流式/非流式/thinking/重试/tool use） |
 | 42 | 权限管控系统 | 高 | 设计中 | 未确认 | 交互式外部授权 + 统一 PermissionEngine + audit/policy 域；详见 [spec](specs/042-permission-control-system.md) |
 | 49 | AskUserQuestion 增加 All/Chat 选项 | 中 | ✅ 已完成 | 未确认 | 已实现 All/Chat 内建选项、chat about this 自由输入态、选项双行渲染 |
 | 52 | Tool 描述英文化 | 中 | 未开始 | 未确认 | 将 EnterWorktree/ExitWorktree 两个 tool 的中文描述统一为英文 |
+| 68 | 项目指令搜索增强：全局 fallback + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局 fallback `~/.claude/CLAUDE.md`；项目指令向上 5 级搜索，不向下递归 |
+| 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
+| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | Stop hook 脚本输出 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，便于排查路径 |
 | 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 为 worktree 工具单独放宽 result 展示行数，不再被截断 |
-
-### #75 EnterWorktree/ExitWorktree result 不截断
-
-**状态**：待确认
-
-**背景**：EnterWorktree / ExitWorktree 的工具结果是固定的工作区上下文提示，通常只有少量行；默认 `TOOL_RESULT_MAX_LINES = 5` 会导致 TUI 输出区显示 `... (n lines omitted)`，隐藏后续关于 path_base / working_root 使用约束的关键提示。
-
-**实现**：
-1. 保持全局默认工具结果预览行数不变，避免影响 Bash / Read / Grep 等可能产生大输出的工具。
-2. 为 `EnterWorktreeDisplay` 与 `ExitWorktreeDisplay` 单独覆盖 `result_max_lines()`，允许完整展示固定上下文结果。
-3. 新增回归测试覆盖 EnterWorktree / ExitWorktree 结果不出现 `lines omitted`，且仍展示最后一条工作区路径使用提示。
-
-**验证**：
-- `cargo test -p cli test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result`
-- `cargo test -p cli tool_result`
-- `cargo fmt --check`
-- `cargo check -p cli`
-
-**涉及路径**：
-- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
-- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
-
-### #77 diff removed 行不语法高亮，只显示纯红色
-
-**状态**：待确认
-
-**背景**：diff removed/delete 行当前会把正文交给 syntect 语法高亮，导致删除行中出现关键字、标点等语法色。Feature #77 要求删除语义行保持单一删除色，避免红色删除语义被语法色冲淡。
-
-**设计**：
-1. 采用 deleted/removed 专用 helper，而不是给通用高亮 helper 增加开关。
-2. unified diff 的 `DiffLineKind::Removed` 只保留 `-` prefix 与纯 `DIFF_REMOVE_FG` 正文 span。
-3. 普通 diff 的 `build_delete_line` 不再接收 `syntax_ref`，避免误用语法高亮。
-4. added/context 行继续沿用现有 syntect 高亮逻辑。
-
-**验证**：
-- `cargo test -p cli unified_diff -- --nocapture`
-- `cargo test -p cli diff -- --nocapture`
-
-**涉及路径**：
-- `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
-- `apps/cli/src/tui/render/output/diff.rs`
-
-### #71 Stop hook 日志输出项目目录上下文
-
-**状态**：待确认
-
-**背景**：排查 Stop hook 在 main 与 git worktree 中的耗时时，需要明确 hook 实际使用的项目根目录，以及 Claude Code 兼容环境变量是否与 Aemeath 项目目录一致。当前 Stop hook 输出只显示检查结果，不直接打印 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，定位路径问题时需要额外手动执行命令。
-
-**实现**：
-1. `check-architecture-guards.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与解析后的 `ROOT`。
-2. `check-unit-tests.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、解析后的 `ROOT` 与 `PWD`。
-3. `build_cli.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与 `PWD`。
-4. 输出格式统一为 `[hook-env] KEY=value`，未设置时显示 `<unset>`。
-5. 不改变 hook 的检查语义、退出码和构建/测试目标目录策略。
-
-**验证**：
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-unit-tests.sh`
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" ./build_cli.sh`
-
-**涉及路径**：
-- `.agents/hooks/check-architecture-guards.sh`
-- `.agents/hooks/check-unit-tests.sh`
-- `build_cli.sh`
-
-### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
-
-**状态**：活动中
-
-**背景**：Stop hook 阻止结束时，反馈既需要作为 `<system-reminder>` 注入下一轮 LLM 上下文，也需要在 TUI 中提示用户。但当前用户可见提示沿用普通 `SystemMessage`/`SystemNotice` 展示，视觉上接近用户输入；部分场景还可能把 `<system-reminder>` 标签原样展示，造成用户误以为系统内部标签进入了可见对话内容。后续 StopFailure 或其他 hook 也可能产生不同语义的用户可见消息，继续复用普通 SystemMessage 会让样式、文案和脱壳规则分散。
-
-**目标**：
-1. TUI 展示层对 `<system-reminder>...</system-reminder>` 包装做统一脱壳，只展示内部的人类可读内容。
-2. 新增 Hook 类用户可见消息，避免 Hook 反馈混用普通 SystemNotice；Hook 消息应能承载来源事件或语义类型，便于 Stop、StopFailure 和未来 Hook 使用不同文案/样式。
-3. 保留 LLM 上下文注入中的 `<system-reminder>` 语义，不改变模型可见系统提醒协议；脱壳仅作用于 TUI 可见展示。
-4. Hook 阻止类消息在视觉上应与用户输入明显区分，优先使用 warning/error 语义色或明确前缀。
-
-**建议实现方向**：
-1. 在 runtime/SDK 事件层为 Hook 反馈引入类型化事件或 payload，而不是仅传 `SystemMessage(String)`；短期可先兼容旧 SystemMessage。
-2. 在 TUI adapter/model 层新增 `ConversationBlock::HookNotice` 或等价 block，集中处理 Hook notice 文案、样式和脱壳。
-3. 抽出一个单一 helper 负责剥离完整包裹的 `<system-reminder>` 标签，避免在多个渲染点重复字符串处理。
-4. Stop hook blocked、StopFailure hook output、未来 hook JSON `system_message`/`additional_context` 的用户可见路径统一走 HookNotice。
-
-**验收标准**：
-1. 当用户可见消息文本为完整 `<system-reminder>...</system-reminder>` 包装时，TUI 输出区不显示开始/结束标签。
-2. Hook 反馈以 Hook notice 类型进入 conversation/view model，不再只依赖普通 SystemNotice。
-3. Stop hook blocked 提示仍会显示命令和失败详情；长输出写入文件路径等信息不丢失。
-4. LLM messages 中用于继续对话的 `<system-reminder>` 包装保持不变。
-5. 单元测试覆盖：脱壳正常路径、无标签边界、标签不完整/嵌入普通文本时不误删，以及 Hook notice 的样式/类型映射。
-
-**明确不做**：
-1. 不重做所有 SystemNotice 的视觉设计；本 feature 只处理 Hook 类消息和 system-reminder 脱壳。
-2. 不改变 Hook 执行协议、JSON schema 或阻止逻辑。
-3. 不把所有 LLM system reminder 从消息历史中移除；仅区分模型上下文与 TUI 展示。
-
-**涉及路径（预计）**：
-- `agent/features/runtime/src/business/chat/looping/finalize.rs`
-- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
-- `packages/sdk/src/*`（如需新增 ChatEvent 类型）
-- `apps/cli/src/tui/effect/session/processing.rs`
-- `apps/cli/src/tui/adapter/agent_event.rs`
-- `apps/cli/src/tui/model/conversation/*`
-- `apps/cli/src/tui/view_assembler/output.rs`
-- `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
-
-### #49 AskUserQuestion 增强——title+description 选项、智能 All/None、Type something 输入框
-
-**状态**：已完成（c98c26c），待确认
-
-**实现**：
-1. **OptionItem 类型**：sdk 层新增 `OptionItem { title, description }`，向后兼容纯字符串
-2. **智能内建选项**：≥2 LLM 选项时追加 All/None/Type something；1 个追加 None/Type something；0 个纯自由输入
-3. **Type something 输入框**：选中后进入行内编辑态，Up 返回选项列表，Enter 提交，Esc 取消
-4. **选项渲染**：title 加粗 + description 灰色缩进双行布局
-5. **工具 schema 更新**：options 支持 `oneOf(string, object { title, description })`
-
-**变更范围**：sdk, runtime, tools, TUI 全链路（18 files, +404 -96）
-
-**涉及路径**：AskUserQuestion options 渲染、输入态切换、回答构造、文案常量
-
-**验收标准**：选项末尾稳定出现 All/Chat；All 回传结构化选项集合；Chat 进入自由输入态；内建选项不与 LLM option 重名冲突
-
----
-
-### #42 权限管控系统
-
-**状态**：设计中
-
-**目标**：AllowAll 模式下 Glob/Grep 访问 workspace 外路径仍被拦截。升级为完整权限管控：交互式授权 + 统一 `PermissionEngine`（action/resource/risk → Allow/Ask/Deny）；权限模式 AskMe/Auto/Plan/AllowAll。详见 [spec](specs/042-permission-control-system.md)。
-
-**范围**：
-1. `PermissionEngine` + 统一权限模型
-2. 外部路径授权 → TUI 交互式选择
-3. `ToolContext` 保存 session 级授权 scope
-4. Read/Glob/Grep 先接入；Edit/Write 后续接入
-5. AllowAll 下允许 workspace 内外读写，仅审计
-
-**涉及路径**：`permission.rs`、`tool.rs`、`path_security.rs`、`file_read/glob/grep/file_edit/file_write.rs`、TUI `permissions.rs`/`tools.rs`
-
----
-
-### #28 MCP 系统完善
-
-**目标**：完善 MCP 系统的配置、连接管理、工具发现注册和 CLI 操作路径，覆盖本轮 P0+P1 基础能力；P2 不在本轮范围，待后续单独规划。
-
-#### 本轮已完成的 P0+P1 改动
-
-- `McpServerConfig` 支持 stdio 可用配置；SSE/Streamable HTTP 仅完成配置解析与 URL 安全校验，传输实现仍为占位存根；header 脱敏已完成。
-- McpConnectionManager 接入启动加载路径，统一管理连接/tool 发现/注册。
-- ToolRegistry 注销与查询接口。
-- Manager tool diff、snapshot refresh、`health_check_once` API 和状态转换；未暗示后台定时 health check loop 已启动。
-- `/mcp` 独立命令模块已落地，支持 list/tools/restart/add/remove 的解析与预览输出；实际运行时操作待 runtime bridge 接入。
-- MCP tool result 默认 1MB 响应大小限制。
-
-#### 已知限制
-
-- SSE 传输存在可靠性问题：z.ai 等远程 MCP server 的 SSE response 在 tools/list 时经常出现超时或不完整（2890 bytes 后 SSE stream 停止发送，缺少 `\n\n` 终结符）。已尝试 POST body 消费、独立 client、incomplete event fallback 等方案，均未根本解决。
-- **MCP 加载已从 TUI 启动流程中禁用**（`run_orchestration.rs` 中 `spawn_mcp_connect` 调用已注释），避免启动时因 MCP 连接超时阻塞。
-- `/mcp` restart/add/remove/list/tools 暂未接入 runtime manager bridge，仅返回状态/预览提示。
-- Streamable HTTP 传输未实现。
-- 健康检查已有单次 API，后台定时 loop 尚未接入。
-
-#### 待修复方向
-
-- SSE stream 可靠性：考虑改用 Streamable HTTP 传输（单 POST 请求返回完整 JSON-RPC response，不依赖 SSE event stream）。
-- 或者在 SSE transport 中增加更健壮的重试机制和超时策略。
-- 需要测试更多 MCP SSE server 以确认是 z.ai 特定问题还是通用问题。
-
-#### 关联
-
-- Feature #28 MCP P0+P1 实施任务 1-9 已完成并 review 通过
-- 用户确认后再归档；确认前保留在 active.md
-
----
+| 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
+| 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
+| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
 
 ### #8 Memory 系统
 
@@ -251,12 +79,12 @@ enum MemoryCategory {
 2. 基于当前 cwd 定位项目 memory 目录
 3. 按 `access_count` + `created_at` 加权排序，取 top-N（默认 10 条）
 4. 注入到 system prompt 的 dynamic_part 中：
-   ```
-   # Project Memory
-   - [Decision] 使用 tokio channel 而非 mpsc，因为需要跨 async task 通信
-   - [Pattern] 错误处理统一用 AemeathError，thiserror derive
-   - [Pitfall] bash.rs 中 check_command_safety 不受 allow_all 控制，已修复
-   ```
+    ```
+    # Project Memory
+    - [Decision] 使用 tokio channel 而非 mpsc，因为需要跨 async task 通信
+    - [Pattern] 错误处理统一用 AemeathError，thiserror derive
+    - [Pitfall] bash.rs 中 check_command_safety 不受 allow_all 控制，已修复
+    ```
 5. 更新被注入条目的 `accessed_at` 和 `access_count`
 
 **新增模块**：
@@ -283,13 +111,13 @@ enum MemoryCategory {
 
 ```json
 {
-  "memory": {
-    "enabled": true,
-    "max_entries_per_project": 100,
-    "max_inject_count": 10,
-    "auto_summary_on_session_end": true,
-    "archive_after_days": 90
-  }
+   "memory": {
+     "enabled": true,
+     "max_entries_per_project": 100,
+     "max_inject_count": 10,
+     "auto_summary_on_session_end": true,
+     "archive_after_days": 90
+   }
 }
 ```
 
@@ -352,6 +180,40 @@ enum MemoryCategory {
 
 ---
 
+### #28 MCP 系统完善
+
+**目标**：完善 MCP 系统的配置、连接管理、工具发现注册和 CLI 操作路径，覆盖本轮 P0+P1 基础能力；P2 不在本轮范围，待后续单独规划。
+
+#### 本轮已完成的 P0+P1 改动
+
+- `McpServerConfig` 支持 stdio 可用配置；SSE/Streamable HTTP 仅完成配置解析与 URL 安全校验，传输实现仍为占位存根；header 脱敏已完成。
+- McpConnectionManager 接入启动加载路径，统一管理连接/tool 发现/注册。
+- ToolRegistry 注销与查询接口。
+- Manager tool diff、snapshot refresh、`health_check_once` API 和状态转换；未暗示后台定时 health check loop 已启动。
+- `/mcp` 独立命令模块已落地，支持 list/tools/restart/add/remove 的解析与预览输出；实际运行时操作待 runtime bridge 接入。
+- MCP tool result 默认 1MB 响应大小限制。
+
+#### 已知限制
+
+- SSE 传输存在可靠性问题：z.ai 等远程 MCP server 的 SSE response 在 tools/list 时经常出现超时或不完整（2890 bytes 后 SSE stream 停止发送，缺少 `\n\n` 终结符）。已尝试 POST body 消费、独立 client、incomplete event fallback 等方案，均未根本解决。
+- **MCP 加载已从 TUI 启动流程中禁用**（`run_orchestration.rs` 中 `spawn_mcp_connect` 调用已注释），避免启动时因 MCP 连接超时阻塞。
+- `/mcp` restart/add/remove/list/tools 暂未接入 runtime manager bridge，仅返回状态/预览提示。
+- Streamable HTTP 传输未实现。
+- 健康检查已有单次 API，后台定时 loop 尚未接入。
+
+#### 待修复方向
+
+- SSE stream 可靠性：考虑改用 Streamable HTTP 传输（单 POST 请求返回完整 JSON-RPC response，不依赖 SSE event stream）。
+- 或者在 SSE transport 中增加更健壮的重试机制和超时策略。
+- 需要测试更多 MCP SSE server 以确认是 z.ai 特定问题还是通用问题。
+
+#### 关联
+
+- Feature #28 MCP P0+P1 实施任务 1-9 已完成并 review 通过
+- 用户确认后再归档；确认前保留在 active.md
+
+---
+
 ### #34 Anthropic Claude 原生 Provider
 
 **目标**：作为独立 LLM provider，支持直接调用 Anthropic Claude Messages API，与现有 OpenAI/OpenRouter/DeepSeek 等并列。
@@ -360,12 +222,12 @@ enum MemoryCategory {
 
 1. **ApiDriverKind::Anthropic**：`aemeath-core/src/provider.rs` 新增 `Anthropic` 变体，且为默认 provider。
 2. **AnthropicProvider**（`aemeath-llm/src/providers/anthropic/`）：
-   - 原生 Messages API 调用（`POST /v1/messages`）
-   - 流式响应解析 + 非流式 fallback（streaming 失败且无 partial output 时自动降级）
-   - Thinking budget（extended thinking）：`thinking_max_tokens > 0` 时自动开启 `thinking.type=enabled`
-   - 指数退避重试（最多 10 次），支持 429 / 5xx 自动重试
-   - 用户取消（CancellationToken）全路径支持
-   - Prompt caching beta header（`anthropic-beta: prompt-caching-2024-07-31`）
+    - 原生 Messages API 调用（`POST /v1/messages`）
+    - 流式响应解析 + 非流式 fallback（streaming 失败且无 partial output 时自动降级）
+    - Thinking budget（extended thinking）：`thinking_max_tokens > 0` 时自动开启 `thinking.type=enabled`
+    - 指数退避重试（最多 10 次），支持 429 / 5xx 自动重试
+    - 用户取消（CancellationToken）全路径支持
+    - Prompt caching beta header（`anthropic-beta: prompt-caching-2024-07-31`）
 3. **消息转换**（`anthropic/message_conversion.rs`）：TrackingHandler 检测 partial output 避免非流式 fallback 重复输出。
 4. **请求构造**（`types.rs::CreateMessageRequest`）：thinking budget 序列化、tool schema 嵌入。
 5. **池化集成**（`pool.rs`）：Anthropic driver 走独立 provider 分支，不经过 OpenAICompatible wrapper。
@@ -379,6 +241,42 @@ enum MemoryCategory {
 - `aemeath-llm/src/types.rs`（CreateMessageRequest thinking 序列化）
 
 **测试**：`anthropic_request_serializes_thinking_budget`、`anthropic_request_omits_thinking_when_budget_zero` + `provider.rs` 6 个单元测试。
+
+---
+
+### #42 权限管控系统
+
+**状态**：设计中
+
+**目标**：AllowAll 模式下 Glob/Grep 访问 workspace 外路径仍被拦截。升级为完整权限管控：交互式授权 + 统一 `PermissionEngine`（action/resource/risk → Allow/Ask/Deny）；权限模式 AskMe/Auto/Plan/AllowAll。详见 [spec](specs/042-permission-control-system.md)。
+
+**范围**：
+1. `PermissionEngine` + 统一权限模型
+2. 外部路径授权 → TUI 交互式选择
+3. `ToolContext` 保存 session 级授权 scope
+4. Read/Glob/Grep 先接入；Edit/Write 后续接入
+5. AllowAll 下允许 workspace 内外读写，仅审计
+
+**涉及路径**：`permission.rs`、`tool.rs`、`path_security.rs`、`file_read/glob/grep/file_edit/file_write.rs`、TUI `permissions.rs`/`tools.rs`
+
+---
+
+### #49 AskUserQuestion 增强——title+description 选项、智能 All/None、Type something 输入框
+
+**状态**：已完成（c98c26c），待确认
+
+**实现**：
+1. **OptionItem 类型**：sdk 层新增 `OptionItem { title, description }`，向后兼容纯字符串
+2. **智能内建选项**：≥2 LLM 选项时追加 All/None/Type something；1 个追加 None/Type something；0 个纯自由输入
+3. **Type something 输入框**：选中后进入行内编辑态，Up 返回选项列表，Enter 提交，Esc 取消
+4. **选项渲染**：title 加粗 + description 灰色缩进双行布局
+5. **工具 schema 更新**：options 支持 `oneOf(string, object { title, description })`
+
+**变更范围**：sdk, runtime, tools, TUI 全链路（18 files, +404 -96）
+
+**涉及路径**：AskUserQuestion options 渲染、输入态切换、回答构造、文案常量
+
+**验收标准**：选项末尾稳定出现 All/Chat；All 回传结构化选项集合；Chat 进入自由输入态；内建选项不与 LLM option 重名冲突
 
 ---
 
@@ -420,3 +318,107 @@ enum MemoryCategory {
 - `agent/shared/src/config/paths.rs`：新增 `INSTRUCTION_SEARCH_DEPTH` 常量
 - `agent/features/runtime/src/business/prompt/build/prompt_build.rs`：`load_agents_md` 全局双路径 fallback + `project_instruction_walk` / `push_instruction_paths_for_dir` 函数
 - `agent/features/runtime/src/business/prompt/build/prompt_build_tests.rs`：3 个 walk 测试
+
+### #69 TUI Hook 消息类型化与 system-reminder 展示脱壳
+
+**状态**：活动中
+
+**背景**：Stop hook 阻止结束时，反馈既需要作为 `<system-reminder>` 注入下一轮 LLM 上下文，也需要在 TUI 中提示用户。但当前用户可见提示沿用普通 `SystemMessage`/`SystemNotice` 展示，视觉上接近用户输入；部分场景还可能把 `<system-reminder>` 标签原样展示，造成用户误以为系统内部标签进入了可见对话内容。后续 StopFailure 或其他 hook 也可能产生不同语义的用户可见消息，继续复用普通 SystemMessage 会让样式、文案和脱壳规则分散。
+
+**目标**：
+1. TUI 展示层对 `<system-reminder>...</system-reminder>` 包装做统一脱壳，只展示内部的人类可读内容。
+2. 新增 Hook 类用户可见消息，避免 Hook 反馈混用普通 SystemNotice；Hook 消息应能承载来源事件或语义类型，便于 Stop、StopFailure 和未来 Hook 使用不同文案/样式。
+3. 保留 LLM 上下文注入中的 `<system-reminder>` 语义，不改变模型可见系统提醒协议；脱壳仅作用于 TUI 可见展示。
+4. Hook 阻止类消息在视觉上应与用户输入明显区分，优先使用 warning/error 语义色或明确前缀。
+
+**建议实现方向**：
+1. 在 runtime/SDK 事件层为 Hook 反馈引入类型化事件或 payload，而不是仅传 `SystemMessage(String)`；短期可先兼容旧 SystemMessage。
+2. 在 TUI adapter/model 层新增 `ConversationBlock::HookNotice` 或等价 block，集中处理 Hook notice 文案、样式和脱壳。
+3. 抽出一个单一 helper 负责剥离完整包裹的 `<system-reminder>` 标签，避免在多个渲染点重复字符串处理。
+4. Stop hook blocked、StopFailure hook output、未来 hook JSON `system_message`/`additional_context` 的用户可见路径统一走 HookNotice。
+
+**验收标准**：
+1. 当用户可见消息文本为完整 `<system-reminder>...</system-reminder>` 包装时，TUI 输出区不显示开始/结束标签。
+2. Hook 反馈以 Hook notice 类型进入 conversation/view model，不再只依赖普通 SystemNotice。
+3. Stop hook blocked 提示仍会显示命令和失败详情；长输出写入文件路径等信息不丢失。
+4. LLM messages 中用于继续对话的 `<system-reminder>` 包装保持不变。
+5. 单元测试覆盖：脱壳正常路径、无标签边界、标签不完整/嵌入普通文本时不误删，以及 Hook notice 的样式/类型映射。
+
+**明确不做**：
+1. 不重做所有 SystemNotice 的视觉设计；本 feature 只处理 Hook 类消息和 system-reminder 脱壳。
+2. 不改变 Hook 执行协议、JSON schema 或阻止逻辑。
+3. 不把所有 LLM system reminder 从消息历史中移除；仅区分模型上下文与 TUI 展示。
+
+**涉及路径（预计）**：
+- `agent/features/runtime/src/business/chat/looping/finalize.rs`
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
+- `packages/sdk/src/*`（如需新增 ChatEvent 类型）
+- `apps/cli/src/tui/effect/session/processing.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/*`
+- `apps/cli/src/tui/view_assembler/output.rs`
+- `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
+
+### #71 Stop hook 日志输出项目目录上下文
+
+**状态**：待确认
+
+**背景**：排查 Stop hook 在 main 与 git worktree 中的耗时时，需要明确 hook 实际使用的项目根目录，以及 Claude Code 兼容环境变量是否与 Aemeath 项目目录一致。当前 Stop hook 输出只显示检查结果，不直接打印 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，定位路径问题时需要额外手动执行命令。
+
+**实现**：
+1. `check-architecture-guards.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与解析后的 `ROOT`。
+2. `check-unit-tests.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、解析后的 `ROOT` 与 `PWD`。
+3. `build_cli.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与 `PWD`。
+4. 输出格式统一为 `[hook-env] KEY=value`，未设置时显示 `<unset>`。
+5. 不改变 hook 的检查语义、退出码和构建/测试目标目录策略。
+
+**验证**：
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-unit-tests.sh`
+- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" ./build_cli.sh`
+
+**涉及路径**：
+- `.agents/hooks/check-architecture-guards.sh`
+- `.agents/hooks/check-unit-tests.sh`
+- `build_cli.sh`
+
+### #75 EnterWorktree/ExitWorktree result 不截断
+
+**状态**：待确认
+
+**背景**：EnterWorktree / ExitWorktree 的工具结果是固定的工作区上下文提示，通常只有少量行；默认 `TOOL_RESULT_MAX_LINES = 5` 会导致 TUI 输出区显示 `... (n lines omitted)`，隐藏后续关于 path_base / working_root 使用约束的关键提示。
+
+**实现**：
+1. 保持全局默认工具结果预览行数不变，避免影响 Bash / Read / Grep 等可能产生大输出的工具。
+2. 为 `EnterWorktreeDisplay` 与 `ExitWorktreeDisplay` 单独覆盖 `result_max_lines()`，允许完整展示固定上下文结果。
+3. 新增回归测试覆盖 EnterWorktree / ExitWorktree 结果不出现 `lines omitted`，且仍展示最后一条工作区路径使用提示。
+
+**验证**：
+- `cargo test -p cli test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result`
+- `cargo test -p cli tool_result`
+- `cargo fmt --check`
+- `cargo check -p cli`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
+- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
+
+### #77 diff removed 行不语法高亮，只显示纯红色
+
+**状态**：待确认
+
+**背景**：diff removed/delete 行当前会把正文交给 syntect 语法高亮，导致删除行中出现关键字、标点等语法色。Feature #77 要求删除语义行保持单一删除色，避免红色删除语义被语法色冲淡。
+
+**设计**：
+1. 采用 deleted/removed 专用 helper，而不是给通用高亮 helper 增加开关。
+2. unified diff 的 `DiffLineKind::Removed` 只保留 `-` prefix 与纯 `DIFF_REMOVE_FG` 正文 span。
+3. 普通 diff 的 `build_delete_line` 不再接收 `syntax_ref`，避免误用语法高亮。
+4. added/context 行继续沿用现有 syntect 高亮逻辑。
+
+**验证**：
+- `cargo test -p cli unified_diff -- --nocapture`
+- `cargo test -p cli diff -- --nocapture`
+
+**涉及路径**：
+- `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
+- `apps/cli/src/tui/render/output/diff.rs`

@@ -1,5 +1,7 @@
 # 已归档 Feature
 
+> 排序规范：表格行均按 ID 升序排列。同一 ID 对应多个归档文件时，各保留一行，行间顺序不限。
+
 | # | 标题 | 归档文件 |
 |---|------|----------|
 | 1 | Hook 功能（参考 Claude Code 设计） | [archived/001-hook-system.md](archived/001-hook-system.md) |

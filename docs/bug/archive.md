@@ -1,5 +1,7 @@
 # 已归档 Bug
 
+> 排序规范：表格行均按 ID 升序排列。
+
 | # | 标题 | 归档文件 |
 |---|------|----------|
 | 3 | 优化 tool call TUI 显示 | [archived/003-tool-call-tui-display.md](archived/003-tool-call-tui-display.md) |
