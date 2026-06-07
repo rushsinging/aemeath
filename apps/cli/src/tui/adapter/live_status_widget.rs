@@ -22,6 +22,8 @@ mod tests {
         ]));
         let anim = SpinnerAnim {
             frame: 12,
+            phase_frame: 4,
+            phase: Some(SpinnerPhase::Thinking),
             verb: "Forging".to_string(),
         };
         let queued = vec!["queued input".to_string()];
@@ -32,7 +34,7 @@ mod tests {
         assert_eq!(spinner.frame, 12);
         assert_eq!(spinner.verb, "Forging");
         assert_eq!(spinner.elapsed_secs, 1);
-        assert_eq!(spinner.phase_elapsed_secs, 1);
+        assert_eq!(spinner.phase_elapsed_secs, 0);
         assert_eq!(spinner.phase_text.as_deref(), Some("🧠 Thinking..."));
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]);
         assert_eq!(vm.queued_lines, vec!["> queued input"]);

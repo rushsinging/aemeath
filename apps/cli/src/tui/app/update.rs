@@ -238,6 +238,7 @@ impl App {
 
     /// 渲染前维护 live-status 相关 view_state：
     /// - active 且 verb 为空时选择动词；
+    /// - active 时同步 phase，phase 变化只重置 phase 计时；
     /// - inactive 时清空动画状态，保证下次激活重新计时。
     ///
     /// OutputArea render 直接消费 `live_status_view_model()`，不再写 widget mirror。
@@ -250,6 +251,9 @@ impl App {
             if self.view_state.spinner.verb.is_empty() {
                 self.view_state.spinner.pick_verb();
             }
+            self.view_state
+                .spinner
+                .sync_phase(self.model.runtime.spinner.phase.clone());
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }

@@ -6,7 +6,7 @@
 |---|------|--------|------|----------|----------|----------|
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
 | 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
-| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 活动中 | 未确认 | 2026-06 | spinner verb 的耗时显示与 pharse_text 中记录/渲染的计时来源相同，无法区分阶段耗时 |
+| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | spinner verb 使用总 frame，pharse_text 复用同一 elapsed；已拆分 phase_frame 独立阶段计时 |
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
 
@@ -34,15 +34,22 @@
 
 ### #121 Spinner verb 与 pharse_text 计时显示相同
 
-**状态**：活动中
+**状态**：待确认
 
 **症状**：TUI 中 spinner verb 显示的耗时与 `pharse_text` 中显示/记录的计时相同。用户期望二者表达不同阶段或不同来源的计时，但当前界面上两个计时值一致，容易误导为重复显示或计时逻辑复用错误。
 
-**根因**：待定位。初步怀疑 spinner verb 与 `pharse_text` 复用了同一个起始时间或同一个 elapsed 计算来源，导致阶段性计时没有独立维护。
+**根因**：`LiveStatusAssembler` 同时用 `SpinnerAnim::elapsed_secs()` 填充 spinner 总耗时和 `phase_elapsed_secs`；`SpinnerAnim` 只维护总 `frame` 与 verb，缺少独立的 phase 起点/帧计数，`refresh_live_status_from_model()` 也没有在 phase 切换时重置阶段计时。
 
-**修复方向**：检查 spinner verb 生成、`pharse_text` 计时记录/渲染路径以及对应状态模型，明确两类计时的语义边界；若确实应表达不同阶段，拆分计时起点或显示字段，并补充回归测试覆盖两个计时来源不同步时的显示。
+**修复**：在 `SpinnerAnim` 中新增 `phase_frame` 与已同步 `phase`，`advance()` 同时推进总帧和阶段帧；`sync_phase()` 在 phase 类型变化时仅重置 `phase_frame`，保留总 `frame` 与 verb；`LiveStatusAssembler` 改用 `phase_elapsed_secs()` 填充 phase 计时，避免复用总 elapsed。`CallingTools { remaining }` 计数变化不视为阶段切换，避免并行工具数量下降时阶段计时反复归零。
 
-**验证**：待补充。
+**验证**：
+- `cargo test -p cli test_spinner_anim_sync_phase_does_not_reset_for_calling_tools_remaining_change -- --nocapture`
+- `cargo test -p cli spinner_anim -- --nocapture`
+- `cargo test -p cli live_status -- --nocapture`
+- `cargo test -p cli tui::view_assembler::live_status -- --nocapture`
+- `cargo fmt --check`
+- `cargo clippy -p cli --all-targets -- -D warnings`
+- `git diff --check`
 
 **涉及路径**：
 - `apps/cli/src/tui/**`

@@ -26,7 +26,7 @@ impl LiveStatusAssembler {
                 frame: anim.frame,
                 verb: anim.verb.clone(),
                 elapsed_secs: anim.elapsed_secs(),
-                phase_elapsed_secs: anim.elapsed_secs(),
+                phase_elapsed_secs: anim.phase_elapsed_secs(),
                 phase_text: runtime.spinner.phase.as_ref().map(phase_text),
             })
         } else {
@@ -87,6 +87,8 @@ mod tests {
         let runtime = runtime_with_spinner(false, Some(SpinnerPhase::Thinking));
         let anim = SpinnerAnim {
             frame: 5,
+            phase_frame: 5,
+            phase: Some(SpinnerPhase::Thinking),
             verb: "Brewing".to_string(),
         };
         let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
@@ -98,6 +100,8 @@ mod tests {
         let runtime = runtime_with_spinner(true, None);
         let anim = SpinnerAnim {
             frame: 12,
+            phase_frame: 3,
+            phase: None,
             verb: "Forging".to_string(),
         };
         let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
@@ -105,8 +109,24 @@ mod tests {
         assert_eq!(view.frame, 12);
         assert_eq!(view.verb, "Forging");
         assert_eq!(view.elapsed_secs, 1);
-        assert_eq!(view.phase_elapsed_secs, 1);
+        assert_eq!(view.phase_elapsed_secs, 0);
         assert_eq!(view.phase_text, None);
+    }
+
+    #[test]
+    fn test_assemble_uses_independent_phase_elapsed() {
+        let runtime = runtime_with_spinner(true, Some(SpinnerPhase::Generating));
+        let anim = SpinnerAnim {
+            frame: 30,
+            phase_frame: 5,
+            phase: Some(SpinnerPhase::Generating),
+            verb: "Forging".to_string(),
+        };
+        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
+        let view = vm.spinner.expect("spinner present");
+        assert_eq!(view.elapsed_secs, 2);
+        assert_eq!(view.phase_elapsed_secs, 0);
+        assert_ne!(view.elapsed_secs, view.phase_elapsed_secs);
     }
 
     #[test]
