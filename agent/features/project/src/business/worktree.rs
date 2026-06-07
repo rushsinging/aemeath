@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
 use share::tool::WorkingContext;
 
+use super::git_ops::GitWorktreeOps;
 use super::working_paths::{current_path, set_working_directory};
 
 /// worktree 操作所需的工作上下文事实（由调用方从其执行上下文投影而来）。
@@ -22,45 +23,13 @@ pub fn is_same_git_repo(a: &Path, b: &Path) -> Result<bool, String> {
 }
 
 pub fn get_git_common_dir(path: &Path) -> Result<PathBuf, String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
-        .current_dir(path)
-        .output()
-        .map_err(|e| format!("git rev-parse --git-common-dir 执行失败: {}", e))?;
-
-    if !output.status.success() {
-        return Err("无法获取 git common dir".to_string());
-    }
-
-    let git_common_dir_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let git_common_dir = PathBuf::from(&git_common_dir_str);
-    if git_common_dir.is_absolute() {
-        Ok(git_common_dir.canonicalize().unwrap_or(git_common_dir))
-    } else {
-        Ok(path
-            .join(&git_common_dir_str)
-            .canonicalize()
-            .unwrap_or_else(|_| path.join(&git_common_dir_str)))
-    }
+    crate::business::git_ops::GitCli.git_common_dir(path)
 }
 
 /// 判断指定路径是否位于 git worktree 中（而非主 checkout）。
 /// 在 worktree 中时，`git rev-parse --git-dir` 会返回包含 `.git/worktrees/` 的路径。
 fn in_worktree(path: &Path) -> bool {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--git-dir"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                let git_dir = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                Some(git_dir.contains("/.git/worktrees/"))
-            } else {
-                None
-            }
-        })
-        .unwrap_or(false)
+    crate::business::git_ops::GitCli.in_worktree(path)
 }
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
@@ -120,31 +89,7 @@ fn create_worktree(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "创建新 worktree 时必须提供 branch".to_string())?;
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("创建 worktree 父目录失败 {}: {}", parent.display(), e))?;
-    }
-
-    let output = std::process::Command::new("git")
-        .args(["worktree", "add"])
-        .arg(path)
-        .args(["-b", branch.as_str(), DEFAULT_WORKTREE_BASE])
-        .current_dir(&repo_root)
-        .output()
-        .map_err(|e| format!("git worktree add 执行失败: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "创建 worktree 失败：git worktree add {} -b {} {}\nstdout: {}\nstderr: {}",
-            path.display(),
-            branch,
-            DEFAULT_WORKTREE_BASE,
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(())
+    crate::business::git_ops::GitCli.worktree_add(&repo_root, path, &branch, DEFAULT_WORKTREE_BASE)
 }
 
 /// 进入指定 worktree：目标不存在时自动创建，push 当前上下文，然后切换 path_base/working_root
@@ -182,21 +127,7 @@ pub fn enter_worktree(
         .canonicalize()
         .map_err(|e| format!("路径不存在或无法访问 {}: {}", path.display(), e))?;
 
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(&canonical)
-        .output()
-        .map_err(|e| format!("git rev-parse 执行失败: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "路径 {} 不是 git 仓库或 worktree",
-            canonical.display()
-        ));
-    }
-
-    let worktree_root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let worktree_root = PathBuf::from(&worktree_root);
+    let worktree_root = crate::business::git_ops::GitCli.show_toplevel(&canonical)?;
 
     // 校验是否与当前 repo 同源（同一 git common dir）
     let current_root = current_path(&ctx.working_root);

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
+
+use super::git_ops::GitWorktreeOps;
 
 pub fn new_working_paths(cwd: PathBuf) -> (PathBuf, Arc<Mutex<PathBuf>>, Arc<Mutex<PathBuf>>) {
     let working_root = Arc::new(Mutex::new(cwd.clone()));
@@ -32,16 +33,9 @@ fn set_path(target: &Arc<Mutex<PathBuf>>, path: PathBuf) {
 }
 
 fn detect_working_root(path: &std::path::Path) -> PathBuf {
-    Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|stdout| PathBuf::from(stdout.trim()))
-        .filter(|root| !root.as_os_str().is_empty())
-        .unwrap_or_else(|| path.to_path_buf())
+    crate::business::git_ops::GitCli
+        .show_toplevel(path)
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
