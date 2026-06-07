@@ -2,6 +2,7 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
+| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 活动中 | 未确认 | 2026-06 | spinner verb 的耗时显示与 pharse_text 中记录/渲染的计时来源相同，无法区分阶段耗时 |
 | 120 | TUI tool call block 跨 turn 串写 | 高 | 待确认 | 待用户确认 | 2026-06 | runtime tool id 仅 stream/message 局部唯一，TUI 全局按裸 id 绑定导致后续工具夺舍前序 block |
 | 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | 高 | 待确认 | 待用户确认 | 2026-06 | ToolCall 绑定时空 summary 覆盖 ToolArgumentsDelta 收集的参数预览 |
 | 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | 高 | 活动中 | 未确认 | 2026-06 | HookRunner 注入给 hook 子进程的 AEMEATH_PROJECT_DIR/CLAUDE_PROJECT_DIR 与匹配阶段 project_dir 不一致 |
@@ -10,6 +11,22 @@
 | 96 | EnterWorktree 上下文栈与 git 实际状态不一致，导致误报"已在 worktree 中" | 中 | 活动中 | 未确认 | 2026-05 | EnterWorktree 上下文栈与 git 实际状态不同步时误判"已在 worktree 中" |
 | 98 | resume 时没有加载 worktree 配置 | 高 | 修复中 | 未确认 | 2026-05 | load_session_impl 丢弃 workspace 上下文，runtime handle 未同步更新 |
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
+
+### #121 Spinner verb 与 pharse_text 计时显示相同
+
+**状态**：活动中
+
+**症状**：TUI 中 spinner verb 显示的耗时与 `pharse_text` 中显示/记录的计时相同。用户期望二者表达不同阶段或不同来源的计时，但当前界面上两个计时值一致，容易误导为重复显示或计时逻辑复用错误。
+
+**根因**：待定位。初步怀疑 spinner verb 与 `pharse_text` 复用了同一个起始时间或同一个 elapsed 计算来源，导致阶段性计时没有独立维护。
+
+**修复方向**：检查 spinner verb 生成、`pharse_text` 计时记录/渲染路径以及对应状态模型，明确两类计时的语义边界；若确实应表达不同阶段，拆分计时起点或显示字段，并补充回归测试覆盖两个计时来源不同步时的显示。
+
+**验证**：待补充。
+
+**涉及路径**：
+- `apps/cli/src/tui/**`
+- 可能涉及 runtime stream/status 事件路径
 
 ### #120 TUI tool call block 跨 turn 串写
 
