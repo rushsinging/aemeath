@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::utils::path_security::validate_and_normalize_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -29,15 +29,15 @@ impl Tool for FileEditTool {
         false
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: file_path"),
         };
 
         // Validate path is within workspace boundary (includes traversal check)
-        let path_base = project::api::current_path(&ctx.path_base);
-        let working_root = project::api::current_path(&ctx.working_root);
+        let path_base = ctx.workspace_read().current_path_base();
+        let working_root = ctx.workspace_read().current_root();
         let path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,
@@ -271,13 +271,12 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
-    fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolContext {
+    fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
         let mut read_files = HashSet::new();
         read_files.insert(read_file);
-        ToolContext {
+        ToolExecutionContext {
             cwd: root.clone(),
-            working_root: Arc::new(Mutex::new(root.clone())),
-            path_base: Arc::new(Mutex::new(root)),
+            workspace: project::api::WorkspaceService::new(root),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: Arc::new(Mutex::new(read_files)),
             agent_runner: None,
@@ -290,7 +289,6 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            context_stack: Arc::new(Mutex::new(Vec::new())),
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -46,7 +46,7 @@ impl Tool for BriefTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let format = input["format"].as_str().unwrap_or("markdown");
         let title = input["title"].as_str().unwrap_or("Session Brief");
         let include: Vec<&str> = if let Some(arr) = input["include"].as_array() {

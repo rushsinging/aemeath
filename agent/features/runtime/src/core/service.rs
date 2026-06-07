@@ -53,7 +53,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::api::TaskStore;
-    use tools::api::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
+    use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -69,7 +69,12 @@ mod tests {
             String::new()
         }
 
-        async fn complete(&self, _prompt: &str, _system: &str, _ctx: &ToolContext) -> String {
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _system: &str,
+            _ctx: &ToolExecutionContext,
+        ) -> String {
             String::new()
         }
     }

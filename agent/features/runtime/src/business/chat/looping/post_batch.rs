@@ -2,22 +2,18 @@ use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use hook::api::{HookData, StopHookData};
 use share::config::hooks::HookEvent;
-use tools::api::ToolContext;
+use tools::api::ToolExecutionContext;
 
 pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    ctx: &ToolContext,
+    ctx: &ToolExecutionContext,
     turn_count: usize,
 ) where
     S: ChatEventSink,
 {
-    hook_runner.set_project_dir(
-        project::api::current_path(&ctx.working_root)
-            .display()
-            .to_string(),
-    );
+    hook_runner.set_project_dir(ctx.workspace_read().current_root().display().to_string());
     let post_batch_results = hook_ui
         .run_json(
             hook_runner,

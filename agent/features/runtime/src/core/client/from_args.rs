@@ -221,6 +221,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     // 19. 构建 handle
     let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
     let current_client = context.client.clone();
+    let workspace = project::api::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
         context,
         cwd,
@@ -233,7 +234,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         cancel_token: Arc::new(AtomicBool::new(false)),
         current_cancel: Arc::new(Mutex::new(None)),
         current_messages: Arc::new(Mutex::new(Vec::new())),
-        workspace_context: Arc::new(Mutex::new(None)),
+        workspace,
         change_tx,
         change_rx,
         hook_runner: Some(hook_runner_before.clone()),

@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -34,7 +34,7 @@ impl Tool for ToolSearchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
 
         // 预定义的工具列表及其描述

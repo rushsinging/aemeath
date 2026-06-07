@@ -9,7 +9,7 @@ fn safe_slice(s: &str, max_bytes: usize) -> &str {
     }
     &s[..end]
 }
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
@@ -56,7 +56,7 @@ impl Tool for LspTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let operation = match input.get("operation").and_then(|v| v.as_str()) {
             Some(op) => op,
             None => return ToolResult::error("missing required parameter: operation"),
@@ -73,8 +73,8 @@ impl Tool for LspTool {
             .map(|s| s.to_string())
             .unwrap_or_else(|| detect_language(file_path));
 
-        let path_base = project::api::current_path(&ctx.path_base);
-        let working_root = project::api::current_path(&ctx.working_root);
+        let path_base = ctx.workspace_read().current_path_base();
+        let working_root = ctx.workspace_read().current_root();
         let file_path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,

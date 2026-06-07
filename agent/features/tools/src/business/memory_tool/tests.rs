@@ -1,5 +1,5 @@
 use super::helpers::*;
-use crate::api::ToolContext;
+use crate::api::ToolExecutionContext;
 use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -7,11 +7,10 @@ use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-fn test_ctx(cwd: PathBuf) -> ToolContext {
-    ToolContext {
+fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
+    ToolExecutionContext {
         cwd: cwd.clone(),
-        working_root: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
-        path_base: std::sync::Arc::new(std::sync::Mutex::new(cwd.clone())),
+        workspace: project::api::WorkspaceService::new(cwd.clone()),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: None,
@@ -24,7 +23,6 @@ fn test_ctx(cwd: PathBuf) -> ToolContext {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: Some("test-session".to_string()),
-        context_stack: Arc::new(Mutex::new(Vec::new())),
     }
 }
 

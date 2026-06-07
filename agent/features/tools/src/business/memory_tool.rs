@@ -5,7 +5,7 @@ mod schema;
 #[cfg(test)]
 mod tests;
 
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -33,7 +33,7 @@ impl Tool for MemoryTool {
         false
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let action = input
             .get("action")
             .and_then(|value| value.as_str())

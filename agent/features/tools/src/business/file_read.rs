@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::utils::path_security::validate_and_normalize_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -32,15 +32,15 @@ impl Tool for FileReadTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: file_path"),
         };
 
         // Validate path is within workspace boundary
-        let path_base = project::api::current_path(&ctx.path_base);
-        let working_root = project::api::current_path(&ctx.working_root);
+        let path_base = ctx.workspace_read().current_path_base();
+        let working_root = ctx.workspace_read().current_root();
         let path = match validate_and_normalize_path_from_base(
             file_path,
             &path_base,

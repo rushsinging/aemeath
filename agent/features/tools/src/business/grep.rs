@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::utils::path_security::validate_search_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -32,14 +32,14 @@ impl Tool for GrepTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: pattern"),
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let path_base = project::api::current_path(&ctx.path_base);
-        let working_root = project::api::current_path(&ctx.working_root);
+        let path_base = ctx.workspace_read().current_path_base();
+        let working_root = ctx.workspace_read().current_root();
         let search_path = match validate_search_path_from_base(path_str, &path_base, &working_root)
         {
             Ok(p) => p,

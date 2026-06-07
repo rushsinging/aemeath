@@ -22,16 +22,15 @@ impl AgentRunner for StubRunner {
         request.prompt.to_string()
     }
 
-    async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolContext) -> String {
+    async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
         prompt.to_string()
     }
 }
 
-fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
-    ToolContext {
+fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
+    ToolExecutionContext {
         cwd: PathBuf::from("."),
-        working_root: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),
-        path_base: std::sync::Arc::new(std::sync::Mutex::new(PathBuf::from("."))),
+        workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         agent_runner: Some(runner),
@@ -44,11 +43,10 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
         agent_semaphore: Arc::new(Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
-        context_stack: Arc::new(Mutex::new(Vec::new())),
     }
 }
 
-fn test_ctx() -> ToolContext {
+fn test_ctx() -> ToolExecutionContext {
     test_ctx_with_runner(Arc::new(StubRunner::default()))
 }
 
@@ -295,4 +293,52 @@ fn test_is_agent_failure_normal_result_is_not_failure() {
     assert!(!is_agent_failure("Successfully refactored the module."));
     assert!(!is_agent_failure(""));
     assert!(!is_agent_failure("No issues found in the reviewed files."));
+}
+
+/// 回归：子 agent 的 workspace 必须从父快照派生为独立实例（继承位置、空栈、独立 Arc/锁），
+/// 子的 worktree 进出不得影响父（修隔离 bug）。
+#[test]
+fn sub_agent_workspace_isolated() {
+    use project::api::{WorkspaceControl, WorkspaceError, WorkspacePersist, WorkspaceRead};
+    use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
+
+    // 用真实存在的临时目录满足 restore 的路径校验。
+    let main_dir = tempfile::tempdir().unwrap();
+    let wt_dir = tempfile::tempdir().unwrap();
+
+    // 父：进入一个伪 worktree（path_base/working_root = wt，栈里压入 main 帧）。
+    let parent = project::api::WorkspaceService::new(main_dir.path().to_path_buf());
+    let dto = PersistedWorkspaceContext {
+        path_base: wt_dir.path().display().to_string(),
+        working_root: wt_dir.path().display().to_string(),
+        context_stack: vec![PersistedWorkspaceFrame {
+            path_base: main_dir.path().display().to_string(),
+            working_root: main_dir.path().display().to_string(),
+        }],
+    };
+    WorkspacePersist::restore(parent.as_ref(), &dto).expect("restore parent workspace");
+
+    // 子：从父快照派生。
+    let child = parent.seed_isolated();
+
+    // 1) 不是同一个 Arc。
+    assert!(
+        !Arc::ptr_eq(&parent, &child),
+        "child workspace 必须是独立 Arc 实例"
+    );
+
+    // 2) 子继承父当前位置。
+    assert_eq!(child.current_path_base(), wt_dir.path());
+    assert_eq!(child.current_root(), wt_dir.path());
+
+    // 3) 子栈独立为空：exit 报 EmptyStack。
+    assert_eq!(
+        WorkspaceControl::exit(child.as_ref()),
+        Err(WorkspaceError::EmptyStack)
+    );
+
+    // 4) 父栈不受子影响：父仍可 exit 回到 main。
+    let prev = WorkspaceControl::exit(parent.as_ref()).expect("parent still has a frame");
+    assert_eq!(prev.path_base, main_dir.path());
+    assert_eq!(parent.current_path_base(), main_dir.path());
 }

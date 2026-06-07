@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ impl Tool for TaskOutputTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let all = input["all"].as_bool().unwrap_or(false);
         let limit = input["limit"].as_i64().unwrap_or(10) as usize;
 

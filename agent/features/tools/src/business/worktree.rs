@@ -3,10 +3,8 @@
 //! These tools allow the agent to switch between git worktree directories
 //! while maintaining a context stack for nested worktree navigation.
 
-use crate::api::WorktreeContextExt;
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
-use project::api as worktree_ops;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -34,20 +32,12 @@ pub struct ExitWorktreeInput {
     pub path: Option<String>,
 }
 
-/// 用 `git rev-parse --abbrev-ref HEAD` 获取当前分支名
+/// 获取当前分支名；detached HEAD / 无法获取时返回 "(unknown)"。
+/// git 调用收敛在 project 的 `GitCli`（GitWorktreeOps port）。
 fn get_current_branch(dir: &Path) -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(dir)
-        .output()
+    project::api::GitWorktreeOps::current_branch(&project::api::GitCli, dir)
         .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+        .flatten()
         .unwrap_or_else(|| "(unknown)".to_string())
 }
 
@@ -98,7 +88,7 @@ impl Tool for EnterWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
@@ -111,15 +101,13 @@ impl Tool for EnterWorktreeTool {
                 .unwrap_or_else(|| "未指定目标".to_string())
         });
 
-        let wc = ctx.worktree_working_context();
-        match worktree_ops::enter_worktree(
-            &wc,
-            args.path.as_ref().map(PathBuf::from),
-            args.branch.clone(),
-        ) {
-            Ok(_snapshot) => {
-                let path_base = project::api::current_path(&ctx.path_base);
-                let working_root = project::api::current_path(&ctx.working_root);
+        match ctx
+            .workspace_control()
+            .enter(args.path.as_ref().map(PathBuf::from), args.branch.clone())
+        {
+            Ok(_frame) => {
+                let path_base = ctx.workspace_read().current_path_base();
+                let working_root = ctx.workspace_read().current_root();
                 let branch = get_current_branch(&working_root);
                 ToolResult::success(format_workspace_context_result(
                     &format!("已进入 worktree：{}", display_target),
@@ -167,20 +155,18 @@ impl Tool for ExitWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
         if let Some(path) = args.path {
-            let wc = ctx.worktree_working_context();
-            // 直接切到指定路径：先 enter，再 pop 栈顶（enter push 了一层）
-            match worktree_ops::enter_worktree(&wc, Some(PathBuf::from(&path)), None) {
-                Ok(_) => {
-                    let _ = wc.context_stack.lock().map(|mut s| s.pop());
-                    let path_base = project::api::current_path(&ctx.path_base);
-                    let working_root = project::api::current_path(&ctx.working_root);
+            // 直接切到指定路径：校验存在性 + 同源，不污染上下文栈（不留多余栈帧）。
+            match ctx.workspace_control().switch_to(PathBuf::from(&path)) {
+                Ok(()) => {
+                    let path_base = ctx.workspace_read().current_path_base();
+                    let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     ToolResult::success(format_workspace_context_result(
                         &format!("已切换到：{}", path),
@@ -192,12 +178,11 @@ impl Tool for ExitWorktreeTool {
                 Err(e) => ToolResult::error(format!("切换路径失败：{}", e)),
             }
         } else {
-            let wc = ctx.worktree_working_context();
             // 恢复上一上下文
-            match worktree_ops::exit_worktree(&wc) {
+            match ctx.workspace_control().exit() {
                 Ok(prev) => {
-                    let path_base = project::api::current_path(&ctx.path_base);
-                    let working_root = project::api::current_path(&ctx.working_root);
+                    let path_base = ctx.workspace_read().current_path_base();
+                    let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     ToolResult::success(format_workspace_context_result(
                         &format!("已退出 worktree，恢复到：{}", prev.path_base.display()),

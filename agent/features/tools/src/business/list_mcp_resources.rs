@@ -1,6 +1,6 @@
 //! List resources from connected MCP servers
 
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ impl Tool for ListMcpResourcesTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let server_filter = input.get("server").and_then(|s| s.as_str());
 
         let clients = self.clients.lock().await;

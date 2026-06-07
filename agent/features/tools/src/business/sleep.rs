@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -33,7 +33,7 @@ impl Tool for SleepTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let duration_ms = input["duration_ms"].as_u64().unwrap_or(1000);
 
         // Limit sleep duration to 60 seconds

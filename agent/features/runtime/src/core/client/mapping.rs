@@ -160,7 +160,7 @@ fn format_task_status_line(
 }
 
 pub(super) fn workspace_context_to_sdk(
-    workspace: crate::business::session::WorkspaceContext,
+    workspace: crate::business::session::PersistedWorkspaceContext,
 ) -> WorkspaceContextView {
     WorkspaceContextView {
         path_base: workspace.path_base.into(),

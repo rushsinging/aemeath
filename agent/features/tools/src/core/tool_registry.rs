@@ -69,7 +69,7 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{ToolContext, ToolResult};
+    use crate::contract::{ToolExecutionContext, ToolResult};
     use async_trait::async_trait;
 
     struct DummyTool {
@@ -100,7 +100,7 @@ mod tests {
             serde_json::json!({"type": "object"})
         }
 
-        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
             ToolResult::success("ok")
         }
     }

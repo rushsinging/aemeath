@@ -1,13 +1,13 @@
 use share::message::{ContentBlock, Message};
 use share::tool::{ImageData, ToolResult};
-use tools::api::{Tool, ToolContext, ToolRegistry};
+use tools::api::{Tool, ToolExecutionContext, ToolRegistry};
 
 /// (runtime_id, provider_id, output_text, is_error, images)
 pub type ToolResultTuple = (String, String, String, bool, Vec<ImageData>);
 
 pub struct Agent<'a> {
     pub registry: &'a ToolRegistry,
-    pub ctx: ToolContext,
+    pub ctx: ToolExecutionContext,
 }
 
 pub struct ToolCall {
@@ -29,7 +29,7 @@ async fn call_tool_with_timeout(
     tool: std::sync::Arc<dyn Tool>,
     name: &str,
     input: serde_json::Value,
-    ctx: &ToolContext,
+    ctx: &ToolExecutionContext,
 ) -> Result<ToolResult, String> {
     let timeout = tool.timeout_secs();
     let started = std::time::Instant::now();

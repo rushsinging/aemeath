@@ -34,12 +34,9 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
             Some(snap)
         }
     };
-    let workspace = me
-        .inner
-        .workspace_context
-        .lock()
-        .map_err(|_| SdkError::Internal("当前工作区上下文锁已损坏".to_string()))?
-        .clone();
+    let workspace = Some(project::api::WorkspacePersist::snapshot(
+        me.inner.workspace.as_ref(),
+    ));
     let mut session = crate::business::session::Session::new(
         me.inner.session_id.clone(),
         me.inner.cwd.to_string_lossy().to_string(),
@@ -93,11 +90,9 @@ pub(super) async fn load_session_impl(
                 .workspace
                 .as_ref()
                 .map(|ws| mapping::workspace_context_to_sdk(ws.clone()));
-            // 恢复 runtime handle 的 workspace_context，使后续 chat() 调用使用正确的 worktree 路径
+            // 恢复 runtime handle 的 workspace 服务状态，使后续 chat() 调用使用正确的 worktree 路径
             if let Some(ref ws) = session.workspace {
-                if let Ok(mut guard) = me.inner.workspace_context.lock() {
-                    *guard = Some(ws.clone());
-                }
+                let _ = project::api::WorkspacePersist::restore(me.inner.workspace.as_ref(), ws);
             }
             Ok(SessionSnapshot {
                 id: session.id,

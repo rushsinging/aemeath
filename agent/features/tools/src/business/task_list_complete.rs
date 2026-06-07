@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         match self.store.complete_list().await {
             Some(batch) => ToolResult::success(format!("Task list #{} completed", batch.id)),
             None => ToolResult::error("no active task list"),
@@ -43,11 +43,10 @@ mod tests {
     use super::*;
     use storage::api::BatchStatus;
 
-    fn test_ctx() -> ToolContext {
-        ToolContext {
+    fn test_ctx() -> ToolExecutionContext {
+        ToolExecutionContext {
             cwd: std::path::PathBuf::from("."),
-            working_root: std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("."))),
-            path_base: std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("."))),
+            workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -62,7 +61,6 @@ mod tests {
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            context_stack: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 

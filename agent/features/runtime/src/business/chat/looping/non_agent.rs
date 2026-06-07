@@ -5,7 +5,6 @@ use hook::api::{HookData, ToolHookData};
 use logging::JsonLogger;
 use share::config::hooks::HookEvent;
 use std::sync::Arc;
-use tools::api::WorktreeContextExt;
 
 use super::tools::{
     emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result, UiToolResult,
@@ -218,9 +217,9 @@ where
         return vec![result];
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
-    let working_root = project::api::current_path(&agent.ctx.working_root);
+    let working_root = agent.ctx.workspace_read().current_root();
     hook_runner.set_project_dir(working_root.display().to_string());
-    let workspace = agent.ctx.workspace_context();
+    let workspace = project::api::WorkspacePersist::snapshot(agent.ctx.workspace.as_ref());
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),

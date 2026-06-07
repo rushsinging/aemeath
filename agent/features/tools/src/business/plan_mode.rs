@@ -3,7 +3,7 @@
 //! Plan mode allows the agent to create a detailed plan before executing actions.
 //! In plan mode, tool calls are only simulated and not actually executed.
 
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,7 @@ impl Tool for EnterPlanModeTool {
         })
     }
 
-    async fn call(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, ctx: &ToolExecutionContext) -> ToolResult {
         let _args: PlanModeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
@@ -102,7 +102,7 @@ impl Tool for ExitPlanModeTool {
         })
     }
 
-    async fn call(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: ExitPlanModeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),

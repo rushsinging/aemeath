@@ -14,8 +14,8 @@ pub use storage::{
     delete_session, list_sessions, load_session, save_session, update_session_metadata,
 };
 pub use types::{
-    extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id, Session,
-    SessionFilter, SessionMetadata, WorkspaceContext, WorkspaceStackEntry,
+    extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id,
+    PersistedWorkspaceContext, PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
 };
 
 #[cfg(test)]

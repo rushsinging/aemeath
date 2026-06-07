@@ -49,48 +49,22 @@ pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusV
 }
 
 pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
-    let workspace = me
-        .inner
-        .workspace_context
-        .lock()
-        .ok()
-        .and_then(|g| g.clone());
-    let cwd = workspace
-        .as_ref()
-        .map(|ctx| ctx.path_base.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
-    let path_base = workspace
-        .as_ref()
-        .map(|ctx| ctx.path_base.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
-    let working_root = workspace
-        .as_ref()
-        .map(|ctx| ctx.working_root.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
-    let git_branch = current_git_branch(std::path::Path::new(&path_base));
+    let workspace = project::api::WorkspacePersist::snapshot(me.inner.workspace.as_ref());
+    let cwd = workspace.path_base.clone();
+    let path_base = workspace.path_base.clone();
+    let working_root = workspace.working_root.clone();
+    let git_branch = project::api::GitWorktreeOps::current_branch(
+        &project::api::GitCli,
+        std::path::Path::new(&path_base),
+    )
+    .ok()
+    .flatten();
 
     ProjectContext {
         cwd,
         path_base,
         working_root,
         git_branch,
-    }
-}
-
-fn current_git_branch(dir: &std::path::Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(dir)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() || branch == "HEAD" {
-        None
-    } else {
-        Some(branch)
     }
 }
 

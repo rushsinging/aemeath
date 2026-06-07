@@ -12,14 +12,14 @@ use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
-use tools::api::ToolContext;
+use tools::api::ToolExecutionContext;
 
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
     pub runner: &'a CliAgentRunner,
     pub prompt: &'a str,
     pub system: String,
-    pub ctx: &'a ToolContext,
+    pub ctx: &'a ToolExecutionContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
     pub hook_runner: hook::api::HookRunner,

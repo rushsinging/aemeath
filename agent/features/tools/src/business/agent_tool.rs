@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::Path;
@@ -65,7 +65,7 @@ impl Tool for AgentTool {
         600 // 10 minutes — sub-agents run multi-turn LLM conversations
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: prompt"),
@@ -85,7 +85,7 @@ impl Tool for AgentTool {
         // We deliberately do NOT route these through `log::*` because that
         // would either corrupt the TUI (if stderr) or go to a file nobody
         // reads. Advisory UI messages belong in the UI channel.
-        let cwd = project::api::current_path(&ctx.path_base);
+        let cwd = ctx.workspace_read().current_path_base();
         let scope = analyze_task_scope(prompt, &cwd);
 
         // Scope analysis may produce warnings but never blocks — the calling
