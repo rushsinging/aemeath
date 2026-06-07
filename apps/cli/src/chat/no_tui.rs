@@ -90,8 +90,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)
         | sdk::ChatEvent::CurrentTurnChanged(_)
-        | sdk::ChatEvent::HookStart { .. }
-        | sdk::ChatEvent::HookEnd { .. }
+        | sdk::ChatEvent::HookEvent(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::TasksChanged => {}
         sdk::ChatEvent::ToolCall { name, summary, .. } => {
@@ -123,14 +122,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
             eprintln!("[tool:start] {name}");
         }
         sdk::ChatEvent::ToolArgumentsDelta { .. } => {}
-        sdk::ChatEvent::StopFailureHook {
-            system_message,
-            additional_context,
-        } => {
-            if let Some(message) = system_message.or(additional_context) {
-                eprintln!("{message}");
-            }
-        }
         sdk::ChatEvent::AskUser {
             question,
             options,

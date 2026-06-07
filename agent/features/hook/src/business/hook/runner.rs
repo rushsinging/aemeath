@@ -205,6 +205,7 @@ impl HookRunner {
                     } else {
                         None
                     },
+                    exit_code: Some(code),
                 }
             }
             Ok(Err(e)) => {

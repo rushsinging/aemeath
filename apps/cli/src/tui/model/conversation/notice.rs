@@ -1,6 +1,7 @@
-use super::block::ConversationBlock;
+use super::block::{ConversationBlock, HookNoticeContent};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
+use super::system_reminder::strip_system_reminder_envelope_owned;
 
 /// 启动横幅文本，作为对话起始的 System block 注入单一真相源。
 pub const BANNER_LINES: [&str; 4] = [
@@ -25,7 +26,24 @@ impl ConversationModel {
         let block_id = self.next_block_id("system");
         self.blocks.push(ConversationBlock::System {
             id: block_id.clone(),
-            text,
+            text: strip_system_reminder_envelope_owned(text),
+        });
+        vec![
+            ConversationChange::SystemMessageAppended { block_id },
+            ConversationChange::StyleBoundaryResetRequired,
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    pub(super) fn append_hook_notice(
+        &mut self,
+        content: HookNoticeContent,
+    ) -> Vec<ConversationChange> {
+        self.clear_active_text_blocks();
+        let block_id = self.next_block_id("hook");
+        self.blocks.push(ConversationBlock::HookNotice {
+            id: block_id.clone(),
+            content,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },

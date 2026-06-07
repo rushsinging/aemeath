@@ -1,5 +1,20 @@
 use super::ids::ToolCallId;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum HookNoticeKind {
+    Blocked,
+    Failed,
+    Info,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct HookNoticeContent {
+    pub kind: HookNoticeKind,
+    pub title: String,
+    pub body: String,
+    pub details: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationBlock {
     UserMessage {
@@ -29,6 +44,10 @@ pub enum ConversationBlock {
     System {
         id: String,
         text: String,
+    },
+    HookNotice {
+        id: String,
+        content: HookNoticeContent,
     },
     Error {
         id: String,
@@ -85,6 +104,7 @@ impl ConversationBlock {
             | ConversationBlock::AssistantText { id, .. }
             | ConversationBlock::Thinking { id, .. }
             | ConversationBlock::System { id, .. }
+            | ConversationBlock::HookNotice { id, .. }
             | ConversationBlock::Error { id, .. }
             | ConversationBlock::QueuedUserMessage { id, .. }
             | ConversationBlock::AgentProgress { id, .. }

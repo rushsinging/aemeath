@@ -5,8 +5,8 @@ use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
 use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
-    AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView,
-    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    AskUserBlockView, BlockNode, HookNoticeBlockView, OutputBlockKind, OutputViewModel,
+    SemanticStyle, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 
 pub struct OutputViewAssembler;
@@ -108,6 +108,29 @@ impl OutputViewAssembler {
                             key: id.clone(),
                             text: text.clone(),
                             style: SemanticStyle::Muted,
+                        }),
+                    ));
+                }
+                ConversationBlock::HookNotice { id, content } => {
+                    roots.push(leaf(
+                        id.clone(),
+                        OutputBlockKind::HookNotice(HookNoticeBlockView {
+                            key: id.clone(),
+                            kind: content.kind,
+                            title: content.title.clone(),
+                            body: content.body.clone(),
+                            details: content.details.clone(),
+                            style: match content.kind {
+                                crate::tui::model::conversation::block::HookNoticeKind::Blocked => {
+                                    SemanticStyle::Warning
+                                }
+                                crate::tui::model::conversation::block::HookNoticeKind::Failed => {
+                                    SemanticStyle::Error
+                                }
+                                crate::tui::model::conversation::block::HookNoticeKind::Info => {
+                                    SemanticStyle::Muted
+                                }
+                            },
                         }),
                     ));
                 }

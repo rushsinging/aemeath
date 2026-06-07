@@ -22,7 +22,10 @@ mod task_reminder;
 mod tool_identity;
 mod tools;
 
-pub use events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
+pub use events::{
+    ChatEventSink, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
+    RuntimeHookExecutionResult, RuntimeStreamEvent,
+};
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,
     EmptyInputEventDrainPort, EmptyQueueDrainPort, GateDecision, GateKind, GateOutcome,

@@ -14,8 +14,8 @@ pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
 pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use output::{
-    AskUserBlockView, BlockNode, OutputBlockKind, OutputViewModel, TextBlockView,
-    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    AskUserBlockView, BlockNode, HookNoticeBlockView, OutputBlockKind, OutputViewModel,
+    TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
