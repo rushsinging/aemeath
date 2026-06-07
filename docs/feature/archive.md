@@ -62,6 +62,7 @@
 | 66 | 去除 mod.rs 旧写法 + 架构 guard | [archived/066-no-mod-rs-guard.md](archived/066-no-mod-rs-guard.md) |
 | 67 | Task/project window 改为 ChangeSet 驱动刷新 | [archived/067-changeset-task-project-refresh.md](archived/067-changeset-task-project-refresh.md) |
 | 70 | 统一 input_queue 到事件驱动 | [archived/070-unify-input-queue-event-driven.md](archived/070-unify-input-queue-event-driven.md) |
+| 71 | Stop hook 日志输出项目目录上下文 | [archived/071-stop-hook-project-dir-context.md](archived/071-stop-hook-project-dir-context.md) |
 | 72 | Edit diff 显示真实文件行号 | [archived/072-edit-diff-real-line-numbers.md](archived/072-edit-diff-real-line-numbers.md) |
 | 73 | AGENTS.md 渐进式披露重构 | [archived/073-agents-md-progressive-disclosure.md](archived/073-agents-md-progressive-disclosure.md) |
 | 74 | Guidance — 任务执行期间用户提问时同步更新 task list | [archived/074-task-list-scope-change-guidance.md](archived/074-task-list-scope-change-guidance.md) |

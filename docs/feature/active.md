@@ -13,7 +13,6 @@
 | 52 | Tool 描述英文化 | 中 | 未开始 | 未确认 | 将 EnterWorktree/ExitWorktree 两个 tool 的中文描述统一为英文 |
 | 68 | 项目指令搜索增强：全局 fallback + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局 fallback `~/.claude/CLAUDE.md`；项目指令向上 5 级搜索，不向下递归 |
 | 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
-| 71 | Stop hook 日志输出项目目录上下文 | 低 | 待确认 | 待用户确认 | Stop hook 脚本输出 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，便于排查路径 |
 | 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 为 worktree 工具单独放宽 result 展示行数，不再被截断 |
 | 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
@@ -355,29 +354,6 @@ enum MemoryCategory {
 - `apps/cli/src/tui/model/conversation/*`
 - `apps/cli/src/tui/view_assembler/output.rs`
 - `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
-
-### #71 Stop hook 日志输出项目目录上下文
-
-**状态**：待确认
-
-**背景**：排查 Stop hook 在 main 与 git worktree 中的耗时时，需要明确 hook 实际使用的项目根目录，以及 Claude Code 兼容环境变量是否与 Aemeath 项目目录一致。当前 Stop hook 输出只显示检查结果，不直接打印 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`，定位路径问题时需要额外手动执行命令。
-
-**实现**：
-1. `check-architecture-guards.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与解析后的 `ROOT`。
-2. `check-unit-tests.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR`、解析后的 `ROOT` 与 `PWD`。
-3. `build_cli.sh` 启动时输出 `AEMEATH_PROJECT_DIR`、`CLAUDE_PROJECT_DIR` 与 `PWD`。
-4. 输出格式统一为 `[hook-env] KEY=value`，未设置时显示 `<unset>`。
-5. 不改变 hook 的检查语义、退出码和构建/测试目标目录策略。
-
-**验证**：
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-architecture-guards.sh`
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" .agents/hooks/check-unit-tests.sh`
-- `AEMEATH_PROJECT_DIR="$PWD" CLAUDE_PROJECT_DIR="$PWD" ./build_cli.sh`
-
-**涉及路径**：
-- `.agents/hooks/check-architecture-guards.sh`
-- `.agents/hooks/check-unit-tests.sh`
-- `build_cli.sh`
 
 ### #75 EnterWorktree/ExitWorktree result 不截断
 
