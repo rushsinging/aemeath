@@ -30,7 +30,7 @@ pub struct SessionMetadata {
     pub project: Option<String>,
 }
 
-pub use share::session_types::{WorkspaceContext, WorkspaceStackEntry};
+pub use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
 #[derive(Serialize, Deserialize)]
 pub struct Session {
@@ -46,7 +46,7 @@ pub struct Session {
     #[serde(default)]
     pub tasks: Option<TaskSnapshot>,
     #[serde(default)]
-    pub workspace: Option<WorkspaceContext>,
+    pub workspace: Option<PersistedWorkspaceContext>,
 }
 
 impl Session {

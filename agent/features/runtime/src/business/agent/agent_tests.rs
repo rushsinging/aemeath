@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-use tools::api::{Tool, ToolContext, ToolRegistry, ToolResult};
+use tools::api::{Tool, ToolExecutionContext, ToolRegistry, ToolResult};
 
 /// A tool that records the start time and sleeps briefly.
 /// Marked as concurrency-safe or not depending on constructor.
@@ -29,7 +29,7 @@ impl Tool for TimedTool {
     fn is_concurrency_safe(&self) -> bool {
         self.safe
     }
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -40,9 +40,9 @@ impl Tool for TimedTool {
     }
 }
 
-fn test_ctx() -> ToolContext {
+fn test_ctx() -> ToolExecutionContext {
     let cwd = std::env::current_dir().unwrap();
-    ToolContext {
+    ToolExecutionContext {
         cwd: cwd.clone(),
         workspace: project::api::WorkspaceService::new(cwd),
         cancel: tokio_util::sync::CancellationToken::new(),
@@ -201,7 +201,7 @@ async fn test_execute_tools_preserves_original_order() {
         fn is_concurrency_safe(&self) -> bool {
             true
         }
-        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
             let seq = self.order_counter.fetch_add(1, AtomicOrdering::SeqCst);
             self.results.lock().unwrap().push((self.name.clone(), seq));
             ToolResult::success(format!("seq={seq}"))
@@ -294,7 +294,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
         fn timeout_secs(&self) -> u64 {
             0
         }
-        async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             ToolResult::success("too late")
         }

@@ -1,4 +1,4 @@
-use crate::api::ToolContext;
+use crate::api::ToolExecutionContext;
 use serde_json::Value;
 use share::memory_ops::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
 use std::path::PathBuf;
@@ -8,12 +8,12 @@ pub(super) const MAX_CONTENT_CHARS: usize = 500;
 pub(super) const MAX_TAGS: usize = 10;
 pub(super) const MAX_TAG_CHARS: usize = 32;
 
-pub(super) fn open_store(ctx: &ToolContext) -> Result<MemoryStore, String> {
+pub(super) fn open_store(ctx: &ToolExecutionContext) -> Result<MemoryStore, String> {
     open_store_with_base(ctx, memory_base_dir())
 }
 
 pub(super) fn open_store_with_base(
-    ctx: &ToolContext,
+    ctx: &ToolExecutionContext,
     base_dir: PathBuf,
 ) -> Result<MemoryStore, String> {
     MemoryStore::new(

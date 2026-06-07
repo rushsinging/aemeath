@@ -1,12 +1,3 @@
-use std::path::PathBuf;
-
-/// 保存进入 worktree 前的工作上下文快照
-#[derive(Debug, Clone)]
-pub struct WorkingContext {
-    pub path_base: PathBuf,
-    pub working_root: PathBuf,
-}
-
 #[derive(Debug, Clone)]
 pub struct ImageData {
     pub base64: String,

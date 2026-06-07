@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ impl Tool for TaskListCreateTool {
         5
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => return ToolResult::error("missing required parameter: subject"),
@@ -64,8 +64,8 @@ impl Tool for TaskListCreateTool {
 mod tests {
     use super::*;
 
-    fn test_ctx() -> ToolContext {
-        ToolContext {
+    fn test_ctx() -> ToolExecutionContext {
+        ToolExecutionContext {
             cwd: std::path::PathBuf::from("."),
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
             cancel: tokio_util::sync::CancellationToken::new(),

@@ -3,7 +3,7 @@
 //! These tools allow the agent to switch between git worktree directories
 //! while maintaining a context stack for nested worktree navigation.
 
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
@@ -32,20 +32,12 @@ pub struct ExitWorktreeInput {
     pub path: Option<String>,
 }
 
-/// 用 `git rev-parse --abbrev-ref HEAD` 获取当前分支名
+/// 获取当前分支名；detached HEAD / 无法获取时返回 "(unknown)"。
+/// git 调用收敛在 project 的 `GitCli`（GitWorktreeOps port）。
 fn get_current_branch(dir: &Path) -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(dir)
-        .output()
+    project::api::GitWorktreeOps::current_branch(&project::api::GitCli, dir)
         .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+        .flatten()
         .unwrap_or_else(|| "(unknown)".to_string())
 }
 
@@ -96,7 +88,7 @@ impl Tool for EnterWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
@@ -163,7 +155,7 @@ impl Tool for ExitWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),

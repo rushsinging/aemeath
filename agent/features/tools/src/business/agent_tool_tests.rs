@@ -22,13 +22,13 @@ impl AgentRunner for StubRunner {
         request.prompt.to_string()
     }
 
-    async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolContext) -> String {
+    async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
         prompt.to_string()
     }
 }
 
-fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
-    ToolContext {
+fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
+    ToolExecutionContext {
         cwd: PathBuf::from("."),
         workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
         cancel: CancellationToken::new(),
@@ -46,7 +46,7 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolContext {
     }
 }
 
-fn test_ctx() -> ToolContext {
+fn test_ctx() -> ToolExecutionContext {
     test_ctx_with_runner(Arc::new(StubRunner::default()))
 }
 

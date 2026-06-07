@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         match self.store.complete_list().await {
             Some(batch) => ToolResult::success(format!("Task list #{} completed", batch.id)),
             None => ToolResult::error("no active task list"),
@@ -43,8 +43,8 @@ mod tests {
     use super::*;
     use storage::api::BatchStatus;
 
-    fn test_ctx() -> ToolContext {
-        ToolContext {
+    fn test_ctx() -> ToolExecutionContext {
+        ToolExecutionContext {
             cwd: std::path::PathBuf::from("."),
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
             cancel: tokio_util::sync::CancellationToken::new(),

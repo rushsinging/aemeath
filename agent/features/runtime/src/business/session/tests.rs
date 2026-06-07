@@ -115,10 +115,10 @@ fn workspace_context_round_trips_through_json() {
         "019e0000-0000-7000-8000-000000000001".to_string(),
         "/tmp/project".to_string(),
     );
-    sess.workspace = Some(WorkspaceContext {
+    sess.workspace = Some(PersistedWorkspaceContext {
         path_base: "/tmp/project/subdir".to_string(),
         working_root: "/tmp/project-worktree".to_string(),
-        context_stack: vec![WorkspaceStackEntry {
+        context_stack: vec![PersistedWorkspaceFrame {
             path_base: "/tmp/project".to_string(),
             working_root: "/tmp/project".to_string(),
         }],

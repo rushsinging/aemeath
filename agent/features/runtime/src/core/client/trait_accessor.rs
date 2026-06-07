@@ -53,30 +53,18 @@ pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
     let cwd = workspace.path_base.clone();
     let path_base = workspace.path_base.clone();
     let working_root = workspace.working_root.clone();
-    let git_branch = current_git_branch(std::path::Path::new(&path_base));
+    let git_branch = project::api::GitWorktreeOps::current_branch(
+        &project::api::GitCli,
+        std::path::Path::new(&path_base),
+    )
+    .ok()
+    .flatten();
 
     ProjectContext {
         cwd,
         path_base,
         working_root,
         git_branch,
-    }
-}
-
-fn current_git_branch(dir: &std::path::Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(dir)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() || branch == "HEAD" {
-        None
-    } else {
-        Some(branch)
     }
 }
 

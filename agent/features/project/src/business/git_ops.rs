@@ -12,6 +12,8 @@ pub trait GitWorktreeOps: Send + Sync {
         branch: &str,
         base: &str,
     ) -> Result<(), String>;
+    /// 当前分支名。detached HEAD / 无分支时返回 `Ok(None)`。
+    fn current_branch(&self, path: &Path) -> Result<Option<String>, String>;
 }
 
 /// Production git adapter. Spawns the `git` CLI (project may spawn; share may not).
@@ -99,6 +101,23 @@ impl GitWorktreeOps for GitCli {
         }
         Ok(())
     }
+
+    fn current_branch(&self, path: &Path) -> Result<Option<String>, String> {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(path)
+            .output()
+            .map_err(|e| format!("git rev-parse --abbrev-ref HEAD 执行失败: {}", e))?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if branch.is_empty() || branch == "HEAD" {
+            Ok(None)
+        } else {
+            Ok(Some(branch))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -114,6 +133,8 @@ pub mod tests {
         pub toplevel: HashMap<PathBuf, PathBuf>,
         pub worktrees: HashSet<PathBuf>,
         pub added: Mutex<Vec<PathBuf>>,
+        /// 按路径返回的当前分支名（缺省时返回 `Ok(None)`）。
+        pub branches: HashMap<PathBuf, String>,
     }
 
     impl GitWorktreeOps for FakeGit {
@@ -141,6 +162,9 @@ pub mod tests {
         ) -> Result<(), String> {
             self.added.lock().unwrap().push(path.to_path_buf());
             Ok(())
+        }
+        fn current_branch(&self, path: &Path) -> Result<Option<String>, String> {
+            Ok(self.branches.get(path).cloned())
         }
     }
 

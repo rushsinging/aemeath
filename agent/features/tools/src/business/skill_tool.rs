@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::skill_ops::Skill;
@@ -45,7 +45,7 @@ impl Tool for SkillTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => return ToolResult::error("missing required parameter: skill"),

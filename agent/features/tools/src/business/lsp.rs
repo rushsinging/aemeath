@@ -9,7 +9,7 @@ fn safe_slice(s: &str, max_bytes: usize) -> &str {
     }
     &s[..end]
 }
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
@@ -56,7 +56,7 @@ impl Tool for LspTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let operation = match input.get("operation").and_then(|v| v.as_str()) {
             Some(op) => op,
             None => return ToolResult::error("missing required parameter: operation"),

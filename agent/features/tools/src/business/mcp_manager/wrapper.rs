@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use crate::business::mcp_manager::McpConnectionManager;
 use async_trait::async_trait;
@@ -86,7 +86,7 @@ impl Tool for McpToolWrapper {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
             log::warn!("MCP tool {} input validation failed: {}", self.tool_name, e);

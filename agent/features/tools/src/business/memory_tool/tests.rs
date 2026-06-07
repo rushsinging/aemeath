@@ -1,5 +1,5 @@
 use super::helpers::*;
-use crate::api::ToolContext;
+use crate::api::ToolExecutionContext;
 use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-fn test_ctx(cwd: PathBuf) -> ToolContext {
-    ToolContext {
+fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
+    ToolExecutionContext {
         cwd: cwd.clone(),
         workspace: project::api::WorkspaceService::new(cwd.clone()),
         cancel: CancellationToken::new(),

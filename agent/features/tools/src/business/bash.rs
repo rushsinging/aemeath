@@ -1,6 +1,6 @@
 mod safety;
 
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
 
@@ -49,7 +49,7 @@ impl Tool for BashTool {
         600
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
             None => return ToolResult::error("missing required parameter: command"),
@@ -227,7 +227,7 @@ mod tests {
         let worktree = workspace.path().join(".worktrees/bug35");
         std::fs::create_dir_all(&worktree).unwrap();
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
-        let ctx = ToolContext {
+        let ctx = ToolExecutionContext {
             cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),

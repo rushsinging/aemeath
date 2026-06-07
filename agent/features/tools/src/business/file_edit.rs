@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolContext, ToolResult};
+use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::utils::path_security::validate_and_normalize_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -29,7 +29,7 @@ impl Tool for FileEditTool {
         false
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: file_path"),
@@ -271,10 +271,10 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
-    fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolContext {
+    fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
         let mut read_files = HashSet::new();
         read_files.insert(read_file);
-        ToolContext {
+        ToolExecutionContext {
             cwd: root.clone(),
             workspace: project::api::WorkspaceService::new(root),
             cancel: tokio_util::sync::CancellationToken::new(),

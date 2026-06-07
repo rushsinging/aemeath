@@ -6,13 +6,13 @@ use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tools::api::{ToolContext, ToolRegistry};
+use tools::api::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
     agent_approved: &[&ToolCall],
     registry: &Arc<ToolRegistry>,
-    agent_ctx: &ToolContext,
+    agent_ctx: &ToolExecutionContext,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -61,7 +61,7 @@ async fn execute_one_agent<S>(
     hook_ui: HookUi<S>,
     hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
-    ag_ctx: &mut ToolContext,
+    ag_ctx: &mut ToolExecutionContext,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,

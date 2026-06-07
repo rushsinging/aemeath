@@ -6,7 +6,7 @@ use provider::api::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use storage::api::TaskStore;
-use tools::api::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
+use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -161,7 +161,7 @@ impl AgentRunner for CliAgentRunner {
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
         };
-        let sub_ctx = ToolContext {
+        let sub_ctx = ToolExecutionContext {
             cwd: ctx.cwd.clone(),
             // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
             // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
@@ -223,7 +223,7 @@ impl AgentRunner for CliAgentRunner {
         .await
     }
 
-    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolContext) -> String {
+    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolExecutionContext) -> String {
         let system_blocks = vec![SystemBlock::cached(system.to_string())];
         let messages = vec![Message::user(prompt)];
         let mut handler = SilentHandler;

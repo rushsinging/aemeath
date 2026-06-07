@@ -48,6 +48,3 @@ impl ToolExecutionContext {
         self.workspace.as_ref()
     }
 }
-
-/// 迁移期别名（P5 删除）。
-pub type ToolContext = ToolExecutionContext;

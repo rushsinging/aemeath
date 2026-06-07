@@ -1,4 +1,4 @@
-use crate::api::{ToolContext, ToolResult};
+use crate::api::{ToolExecutionContext, ToolResult};
 use serde_json::Value;
 use share::memory_ops::{
     format_add_result, format_memory_list, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource,
@@ -9,7 +9,7 @@ use super::helpers::{
     open_store, optional_category, optional_layer, parse_tags, required_string, validate_content,
 };
 
-pub(super) fn add_memory(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn add_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let content = match input.get("content").and_then(|value| value.as_str()) {
         Some(content) => content.trim(),
         None => return ToolResult::error("缺少必需参数: content"),
@@ -59,7 +59,7 @@ pub(super) fn add_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
-pub(super) fn delete_memory(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn delete_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
         Err(error) => return ToolResult::error(error),
@@ -75,7 +75,7 @@ pub(super) fn delete_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
-pub(super) fn search_memory(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn search_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let query = match required_string(&input, "query") {
         Ok(query) => query,
         Err(error) => return ToolResult::error(error),
@@ -95,7 +95,7 @@ pub(super) fn search_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
-pub(super) fn pin_memory(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn pin_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
         Err(error) => return ToolResult::error(error),
@@ -116,7 +116,7 @@ pub(super) fn pin_memory(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
-pub(super) fn list_memory(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn list_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let layer = match optional_layer(&input) {
         Ok(layer) => layer,
         Err(error) => return ToolResult::error(error),
@@ -139,7 +139,7 @@ fn current_timestamp_secs() -> u64 {
         .unwrap_or(0)
 }
 
-pub(super) fn add_reminder(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn add_reminder(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let content = match required_string(&input, "content") {
         Ok(content) => content,
         Err(error) => return ToolResult::error(error),
@@ -170,7 +170,7 @@ pub(super) fn add_reminder(input: Value, ctx: &ToolContext) -> ToolResult {
     }
 }
 
-pub(super) fn complete_reminder(input: Value, ctx: &ToolContext) -> ToolResult {
+pub(super) fn complete_reminder(input: Value, ctx: &ToolExecutionContext) -> ToolResult {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
         Err(error) => return ToolResult::error(error),

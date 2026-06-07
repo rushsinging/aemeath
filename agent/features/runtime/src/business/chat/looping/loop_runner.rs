@@ -859,10 +859,10 @@ mod tests {
         let working_root = tempfile::tempdir().unwrap();
         let marker = path_base.path().join("stop-hook-env.txt");
         let marker_path = marker.display().to_string();
-        let workspace_dto = crate::business::session::WorkspaceContext {
+        let workspace_dto = crate::business::session::PersistedWorkspaceContext {
             path_base: path_base.path().display().to_string(),
             working_root: working_root.path().display().to_string(),
-            context_stack: vec![crate::business::session::WorkspaceStackEntry {
+            context_stack: vec![crate::business::session::PersistedWorkspaceFrame {
                 path_base: path_base.path().display().to_string(),
                 working_root: path_base.path().display().to_string(),
             }],

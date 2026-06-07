@@ -8,7 +8,7 @@ pub mod context;
 pub mod tool;
 
 pub use agent_port::{AgentRunRequest, AgentRunner};
-pub use context::{ToolContext, ToolExecutionContext};
+pub use context::ToolExecutionContext;
 pub use share::tool::{AgentToolCallProgress, ImageData, ToolResult};
 pub use tool::Tool;
 

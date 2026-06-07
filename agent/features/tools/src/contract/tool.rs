@@ -1,4 +1,4 @@
-use super::ToolContext;
+use super::ToolExecutionContext;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::ToolResult;
@@ -22,5 +22,5 @@ pub trait Tool: Send + Sync {
         120
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> ToolResult;
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult;
 }

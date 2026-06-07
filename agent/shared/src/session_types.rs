@@ -21,10 +21,6 @@ pub struct PersistedWorkspaceFrame {
     pub working_root: String,
 }
 
-/// 迁移期兼容别名（后续阶段删除）。
-pub type WorkspaceContext = PersistedWorkspaceContext;
-pub type WorkspaceStackEntry = PersistedWorkspaceFrame;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -37,7 +33,7 @@ mod tests {
         assert_eq!(ctx.working_root, "/b");
         assert_eq!(ctx.context_stack.len(), 1);
         assert_eq!(ctx.context_stack[0].path_base, "/c");
-        let _legacy: WorkspaceContext = ctx.clone();
+        let _legacy: PersistedWorkspaceContext = ctx.clone();
         let back = serde_json::to_string(&ctx).unwrap();
         assert_eq!(back, json);
     }
