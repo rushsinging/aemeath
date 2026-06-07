@@ -9,7 +9,6 @@ use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
 use crate::business::chat::looping::stall::StallDetector;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
-use crate::business::chat::looping::tool_context::{build_tool_context, ToolContextParts};
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
@@ -20,7 +19,7 @@ use provider::api::StopReason;
 use share::message::Message;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
@@ -41,7 +40,7 @@ where
     pub messages: Vec<Message>,
     pub context_size: usize,
     pub cwd: PathBuf,
-    pub workspace_context: Option<crate::business::session::WorkspaceContext>,
+    pub workspace: Arc<project::api::WorkspaceService>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
@@ -77,7 +76,7 @@ where
         mut messages,
         context_size,
         cwd,
-        workspace_context,
+        workspace,
         session_id,
         read_files,
         session_reminders,
@@ -95,32 +94,10 @@ where
     } = ctx;
     let hook_ui = HookUi::new(sink.clone());
 
-    let (cwd, working_root, path_base, context_stack) = if let Some(workspace) = workspace_context {
-        let cwd = PathBuf::from(&workspace.working_root);
-        (
-            cwd,
-            Arc::new(Mutex::new(PathBuf::from(&workspace.working_root))),
-            Arc::new(Mutex::new(PathBuf::from(&workspace.path_base))),
-            Arc::new(Mutex::new(
-                workspace
-                    .context_stack
-                    .into_iter()
-                    .map(|entry| share::tool::WorkingContext {
-                        path_base: PathBuf::from(entry.path_base),
-                        working_root: PathBuf::from(entry.working_root),
-                    })
-                    .collect(),
-            )),
-        )
-    } else {
-        let (cwd, working_root, path_base) = project::api::new_working_paths(cwd.clone());
-        (
-            cwd,
-            working_root,
-            path_base,
-            Arc::new(Mutex::new(Vec::new())),
-        )
-    };
+    // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
+    // 这里直接读取当前 root 作为 hook/日志的工作目录基准。
+    let _ = cwd;
+    let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     hook_runner.set_project_dir(cwd.display().to_string());
     log::info!(
         "chat loop hook runner ready: project_dir={} configured_events={}",
@@ -129,22 +106,22 @@ where
     );
     let agent = Agent {
         registry: &registry,
-        ctx: build_tool_context(ToolContextParts {
+        ctx: tools::api::ToolExecutionContext {
             cwd: cwd.clone(),
-            working_root,
-            path_base,
+            workspace: workspace.clone(),
             cancel: cancel.clone(),
             read_files: read_files.clone(),
             agent_runner: agent_runner.clone(),
-            session_reminders: session_reminders.clone(),
+            session_reminders: Some(session_reminders.clone()),
             memory_config: memory_config.clone(),
+            plan_mode: None,
             allow_all,
             max_tool_concurrency,
             max_agent_concurrency,
             agent_semaphore,
-            session_id: session_id.clone(),
-            context_stack,
-        }),
+            progress_tx: None,
+            parent_session_id: Some(session_id.clone()),
+        },
     };
 
     let messages_at_start = messages.len();
@@ -579,6 +556,7 @@ mod tests {
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
     use tokio_util::sync::CancellationToken;
 
     #[derive(Clone)]
@@ -829,7 +807,7 @@ mod tests {
             messages: vec![Message::user("hello")],
             context_size: 200_000,
             cwd: std::env::current_dir().unwrap(),
-            workspace_context: None,
+            workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
             session_id: "test-stop-hook-blocked".to_string(),
             read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             session_reminders: Arc::new(
@@ -882,7 +860,7 @@ mod tests {
         let working_root = tempfile::tempdir().unwrap();
         let marker = path_base.path().join("stop-hook-env.txt");
         let marker_path = marker.display().to_string();
-        let workspace = crate::business::session::WorkspaceContext {
+        let workspace_dto = crate::business::session::WorkspaceContext {
             path_base: path_base.path().display().to_string(),
             working_root: working_root.path().display().to_string(),
             context_stack: vec![crate::business::session::WorkspaceStackEntry {
@@ -890,6 +868,9 @@ mod tests {
                 working_root: path_base.path().display().to_string(),
             }],
         };
+        let workspace = project::api::WorkspaceService::new(path_base.path().to_path_buf());
+        project::api::WorkspacePersist::restore(workspace.as_ref(), &workspace_dto)
+            .expect("restore workspace dto");
         let mut events = HashMap::new();
         events.insert(
             HookEvent::Stop,
@@ -917,7 +898,7 @@ mod tests {
             messages: vec![Message::user("hello")],
             context_size: 200_000,
             cwd: path_base.path().to_path_buf(),
-            workspace_context: Some(workspace),
+            workspace,
             session_id: "test-worktree-stop-hook-env".to_string(),
             read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             session_reminders: Arc::new(
@@ -974,7 +955,7 @@ mod tests {
             messages: vec![Message::user("hello")],
             context_size: 200_000,
             cwd: std::env::current_dir().unwrap(),
-            workspace_context: None,
+            workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
             session_id: "test-session".to_string(),
             read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             session_reminders: Arc::new(

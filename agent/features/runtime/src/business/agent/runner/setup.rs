@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use provider::api::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
-use std::sync::{Arc, Mutex};
 use storage::api::TaskStore;
 use tools::api::{AgentRunRequest, AgentRunner, ToolContext, ToolRegistry};
 
@@ -164,8 +163,9 @@ impl AgentRunner for CliAgentRunner {
         };
         let sub_ctx = ToolContext {
             cwd: ctx.cwd.clone(),
-            working_root: std::sync::Arc::clone(&ctx.working_root),
-            path_base: std::sync::Arc::clone(&ctx.path_base),
+            // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
+            // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
+            workspace: ctx.workspace.seed_isolated(),
             cancel: ctx.cancel.clone(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -177,10 +177,9 @@ impl AgentRunner for CliAgentRunner {
             allow_all: ctx.allow_all,
             max_tool_concurrency: ctx.max_tool_concurrency,
             max_agent_concurrency: ctx.max_agent_concurrency,
-            agent_semaphore: ctx.agent_semaphore.clone(),
-            progress_tx: None, // sub-agents don't stream progress (yet)
+            agent_semaphore: ctx.agent_semaphore.clone(), // 全局限流共享
+            progress_tx: None,                            // sub-agents don't stream progress (yet)
             parent_session_id: ctx.parent_session_id.clone(),
-            context_stack: Arc::new(Mutex::new(Vec::new())),
         };
         let agent = Agent {
             registry: &sub_registry,

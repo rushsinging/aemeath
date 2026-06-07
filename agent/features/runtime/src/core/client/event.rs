@@ -9,7 +9,6 @@ use sdk::{
 pub(crate) struct SdkChatEventSink {
     pub(super) tx: tokio::sync::mpsc::UnboundedSender<ChatEvent>,
     pub(super) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
-    pub(super) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
     pub(super) change_tx: tokio::sync::watch::Sender<ChangeSet>,
 }
 
@@ -22,7 +21,6 @@ impl crate::business::chat::ChatEventSink for SdkChatEventSink {
             let _ = self.tx.send(runtime_event_to_sdk_event(
                 event,
                 &self.current_messages,
-                &self.workspace_context,
                 &self.change_tx,
             ));
         })
@@ -32,7 +30,6 @@ impl crate::business::chat::ChatEventSink for SdkChatEventSink {
         let _ = self.tx.send(runtime_event_to_sdk_event(
             event,
             &self.current_messages,
-            &self.workspace_context,
             &self.change_tx,
         ));
     }
@@ -85,7 +82,6 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
-    workspace_context: &Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
     change_tx: &tokio::sync::watch::Sender<ChangeSet>,
 ) -> ChatEvent {
     match event {
@@ -234,9 +230,8 @@ pub(crate) fn runtime_event_to_sdk_event(
             working_root,
             workspace,
         } => {
-            if let Ok(mut guard) = workspace_context.lock() {
-                *guard = Some(workspace.clone());
-            }
+            // service 已是单一可变源，工具调用时已直接更新它；此处仅作 UI/SDK 通知，
+            // 事件自带快照 DTO，无需回写任何 runtime 状态。
             let previous = *change_tx.borrow();
             let _ = change_tx.send(previous | ChangeSet::PROJECT);
             ChatEvent::WorkingDirectoryChanged {
@@ -306,13 +301,11 @@ mod tests {
     fn test_runtime_tasks_changed_emits_sdk_event_and_change_set() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
         let current_messages = Arc::new(Mutex::new(Vec::new()));
-        let workspace_context = Arc::new(Mutex::new(None));
         let (change_tx, mut change_rx) = tokio::sync::watch::channel(ChangeSet::empty());
 
         let event = runtime_event_to_sdk_event(
             crate::business::chat::RuntimeStreamEvent::TasksChanged,
             &current_messages,
-            &workspace_context,
             &change_tx,
         );
 

@@ -49,24 +49,10 @@ pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusV
 }
 
 pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
-    let workspace = me
-        .inner
-        .workspace_context
-        .lock()
-        .ok()
-        .and_then(|g| g.clone());
-    let cwd = workspace
-        .as_ref()
-        .map(|ctx| ctx.path_base.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
-    let path_base = workspace
-        .as_ref()
-        .map(|ctx| ctx.path_base.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
-    let working_root = workspace
-        .as_ref()
-        .map(|ctx| ctx.working_root.clone())
-        .unwrap_or_else(|| me.inner.cwd.to_string_lossy().to_string());
+    let workspace = project::api::WorkspacePersist::snapshot(me.inner.workspace.as_ref());
+    let cwd = workspace.path_base.clone();
+    let path_base = workspace.path_base.clone();
+    let working_root = workspace.working_root.clone();
     let git_branch = current_git_branch(std::path::Path::new(&path_base));
 
     ProjectContext {

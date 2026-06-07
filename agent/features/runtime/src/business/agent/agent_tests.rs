@@ -44,8 +44,7 @@ fn test_ctx() -> ToolContext {
     let cwd = std::env::current_dir().unwrap();
     ToolContext {
         cwd: cwd.clone(),
-        working_root: Arc::new(std::sync::Mutex::new(cwd.clone())),
-        path_base: Arc::new(std::sync::Mutex::new(cwd)),
+        workspace: project::api::WorkspaceService::new(cwd),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         agent_runner: None,
@@ -58,7 +57,6 @@ fn test_ctx() -> ToolContext {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
-        context_stack: Arc::new(std::sync::Mutex::new(Vec::new())),
     }
 }
 

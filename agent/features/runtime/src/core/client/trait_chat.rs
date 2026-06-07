@@ -33,7 +33,6 @@ pub(super) async fn chat_impl(
     let sink = SdkChatEventSink {
         tx,
         current_messages: me.inner.current_messages.clone(),
-        workspace_context: me.inner.workspace_context.clone(),
         change_tx: me.inner.change_tx.clone(),
     };
     let inner = me.inner.clone();
@@ -50,7 +49,7 @@ pub(super) async fn chat_impl(
             messages,
             context_size: inner.context.context_size,
             cwd: inner.cwd.clone(),
-            workspace_context: inner.workspace_context.lock().ok().and_then(|g| g.clone()),
+            workspace: inner.workspace.clone(),
             session_id: inner.session_id.clone(),
             read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
             session_reminders: Arc::new(Mutex::new(Default::default())),

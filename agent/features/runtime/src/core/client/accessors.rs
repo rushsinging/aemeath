@@ -40,7 +40,7 @@ pub struct RuntimeHandle {
     pub(crate) cancel_token: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
     pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
-    pub(crate) workspace_context: Arc<Mutex<Option<crate::business::session::WorkspaceContext>>>,
+    pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
     pub(crate) change_rx: watch::Receiver<ChangeSet>,
 

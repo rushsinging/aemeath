@@ -13,11 +13,7 @@ pub(crate) async fn run_post_tool_batch<S>(
 ) where
     S: ChatEventSink,
 {
-    hook_runner.set_project_dir(
-        project::api::current_path(&ctx.working_root)
-            .display()
-            .to_string(),
-    );
+    hook_runner.set_project_dir(ctx.workspace_read().current_root().display().to_string());
     let post_batch_results = hook_ui
         .run_json(
             hook_runner,

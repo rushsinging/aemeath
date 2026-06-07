@@ -85,7 +85,7 @@ impl Tool for AgentTool {
         // We deliberately do NOT route these through `log::*` because that
         // would either corrupt the TUI (if stderr) or go to a file nobody
         // reads. Advisory UI messages belong in the UI channel.
-        let cwd = project::api::current_path(&ctx.path_base);
+        let cwd = ctx.workspace_read().current_path_base();
         let scope = analyze_task_scope(prompt, &cwd);
 
         // Scope analysis may produce warnings but never blocks — the calling

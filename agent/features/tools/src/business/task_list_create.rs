@@ -67,8 +67,7 @@ mod tests {
     fn test_ctx() -> ToolContext {
         ToolContext {
             cwd: std::path::PathBuf::from("."),
-            working_root: std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("."))),
-            path_base: std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::from("."))),
+            workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -83,7 +82,6 @@ mod tests {
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            context_stack: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 

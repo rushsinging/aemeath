@@ -1,18 +1,17 @@
 use super::AgentRunner;
-use share::tool::{AgentProgressEvent, SessionReminders, WorkingContext};
+use project::api::{WorkspaceControl, WorkspaceRead, WorkspaceService};
+use share::tool::{AgentProgressEvent, SessionReminders};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
-pub struct ToolContext {
+pub struct ToolExecutionContext {
     /// Initial workspace root, kept for compatibility with existing callers.
     pub cwd: PathBuf,
-    /// Active workspace root used as the security boundary for file/search tools.
-    pub working_root: Arc<Mutex<PathBuf>>,
-    /// Base directory used to resolve relative file/tool paths.
-    pub path_base: Arc<Mutex<PathBuf>>,
+    /// 唯一 workspace 状态源句柄（project 拥有）。
+    pub workspace: Arc<WorkspaceService>,
     pub cancel: CancellationToken,
     pub read_files: Arc<Mutex<HashSet<String>>>,
     pub agent_runner: Option<Arc<dyn AgentRunner>>,
@@ -37,6 +36,18 @@ pub struct ToolContext {
     /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
     /// back to the user-visible session.
     pub parent_session_id: Option<String>,
-    /// 上下文栈：EnterWorktree push，ExitWorktree pop
-    pub context_stack: Arc<Mutex<Vec<WorkingContext>>>,
 }
+
+impl ToolExecutionContext {
+    /// 只读 workspace 能力（所有 tool）。
+    pub fn workspace_read(&self) -> &dyn WorkspaceRead {
+        self.workspace.as_ref()
+    }
+    /// 变更 workspace 能力（仅 bash + worktree 工具；由 guard 约束调用方）。
+    pub fn workspace_control(&self) -> &dyn WorkspaceControl {
+        self.workspace.as_ref()
+    }
+}
+
+/// 迁移期别名（P5 删除）。
+pub type ToolContext = ToolExecutionContext;
