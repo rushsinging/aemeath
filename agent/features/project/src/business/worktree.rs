@@ -250,7 +250,7 @@ mod tests {
 
     fn new_test_context() -> WorktreeWorkingContext {
         let cwd = std::env::current_dir().unwrap();
-        let (_, working_root, path_base) = crate::api::new_working_paths(cwd);
+        let (_, working_root, path_base) = crate::business::working_paths::new_working_paths(cwd);
         new_test_context_with_paths(working_root, path_base)
     }
 

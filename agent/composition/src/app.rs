@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use project::api::ProjectGateway;
 use provider::api::LlmProviderGateway;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
 use tools::api::ToolCatalogGateway;
@@ -30,28 +29,15 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 pub struct FeatureGateways {
     pub tools: Arc<dyn ToolCatalogGateway>,
     pub provider: Arc<dyn LlmProviderGateway>,
-    pub project: Arc<dyn ProjectGateway>,
 }
 
 impl FeatureGateways {
-    pub fn new(
-        tools: Arc<dyn ToolCatalogGateway>,
-        provider: Arc<dyn LlmProviderGateway>,
-        project: Arc<dyn ProjectGateway>,
-    ) -> Self {
-        Self {
-            tools,
-            provider,
-            project,
-        }
+    pub fn new(tools: Arc<dyn ToolCatalogGateway>, provider: Arc<dyn LlmProviderGateway>) -> Self {
+        Self { tools, provider }
     }
 
     pub fn wire_default() -> Self {
-        Self::new(
-            crate::tools::wire_tools(),
-            crate::provider::wire_provider(),
-            crate::project::wire_project(),
-        )
+        Self::new(crate::tools::wire_tools(), crate::provider::wire_provider())
     }
 }
 
