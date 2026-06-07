@@ -2,3 +2,4 @@
 pub mod git_ops;
 pub mod workspace_service;
 pub mod workspace_state;
+pub mod workspace_types;

@@ -5,7 +5,7 @@ use share::session_types::PersistedWorkspaceContext;
 
 use crate::business::git_ops::{GitCli, GitWorktreeOps};
 use crate::business::workspace_state::{self as rules, WorkspaceState};
-use crate::contract::{
+use crate::business::workspace_types::{
     WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
 };
 

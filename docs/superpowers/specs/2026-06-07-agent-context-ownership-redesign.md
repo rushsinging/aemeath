@@ -55,10 +55,11 @@ composition → runtime,tools,provider,project,sdk
 - **`WorkspaceService`** —— 包 `Arc<Mutex<WorkspaceState>>`,后面**一把锁**,enter/exit 原子切换 root/base/stack(修掉撕裂读)。实现下述三个 trait;并提供 `seed_isolated()`:从当前快照派生独立实例(继承当前 root/base、空栈、新锁),供子 agent。
 - **三个 inbound 能力 trait(port,定义在 project,被 tools/runtime 消费)**:
   - `WorkspaceRead` = `current_root()` / `current_path_base()` / `resolve(rel)`
-  - `WorkspaceControl` = `set_cwd(path)` / `enter(path, branch)` / `exit()`
+  - `WorkspaceControl` = `set_cwd(path)` / `switch_to(path)` / `enter(path, branch)` / `exit()`
+    （`switch_to` 做存在性 + 同源校验后的跳转、不压栈帧，供 `ExitWorktree{path}` 使用——比 `set_cwd` 多一层校验）
   - `WorkspacePersist` = `snapshot()` / `restore(dto)`
   - 注:`set_cwd` 是 bash `cd` 的落点(`bash.rs:158` 现调 `set_working_directory`,持久化到 path_base)。因此 `WorkspaceControl` 的消费者 = **bash + EnterWorktree/ExitWorktree**,不含 session 边界(后者只用 `WorkspacePersist`)。
-- **`GitWorktreeOps`** —— outbound port,trait **与默认实现 `GitCli` 均在 project**(project 允许 spawn,`worktree.rs`/`working_paths.rs` 现已直接 spawn);测试注入 `FakeGit`。方法覆盖现有内联 git 调用:`git_common_dir` / `show_toplevel` / `in_worktree` / `worktree_add`。`set_cwd` 的根探测(`detect_working_root`,现也内联 git)改走 `show_toplevel`。
+- **`GitWorktreeOps`** —— outbound port,trait **与默认实现 `GitCli` 均在 project**(project 允许 spawn,`worktree.rs`/`working_paths.rs` 现已直接 spawn);测试注入 `FakeGit`。方法覆盖现有内联 git 调用:`git_common_dir` / `show_toplevel` / `in_worktree` / `worktree_add` / `current_branch`(`current_branch` 供 tools 的 worktree 展示与 runtime 分支查询使用,二者均经 `GitCli` 路由)。`set_cwd` 的根探测(`detect_working_root`,现也内联 git)改走 `show_toplevel`。
 - **转换规则改为纯函数**:`enter(&mut WorkspaceState, &dyn GitWorktreeOps, path, branch)` / `exit(&mut WorkspaceState)` / `set_cwd(&mut WorkspaceState, &dyn GitWorktreeOps, path)` 及校验 helper。锁由 `WorkspaceService` 在边界取一次,内部纯逻辑,不再到处穿 `Arc<Mutex>`。
 - **`WorkspaceError`** 枚举,集中 workspace 错误,中文用户消息。
 - **退役**:`WorktreeWorkingContext`、`ProjectGateway` / `DefaultProjectGateway`(其 path 方法折进 `WorkspaceService` 构造与 `WorkspaceRead`)。
@@ -117,12 +118,15 @@ composition → runtime,tools,provider,project,sdk
 
 ## 架构 Guard(接入 `.agents/hooks/check-architecture-guards.sh`)
 
-- `ToolExecutionContext` 不得含 `working_root` / `path_base` / `context_stack` 字段。
-- tools 不得直接引用 `PersistedWorkspaceContext`(DTO 只在 session 边界)。
-- 仅 project 可定义 `WorkspaceState`;任何 crate 不得再定义包裹这三字段的 struct(防 `WorktreeWorkingContext` 复活)。
-- 仅 bash + worktree 工具可调 `WorkspaceControl`;仅 runtime session 边界可调 `WorkspacePersist`。
-- git 仅经 `GitWorktreeOps`;project 的 `GitCli` adapter 之外不得出现 `Command::new("git")`(含现 `worktree.rs`/`working_paths.rs` 内联调用)。
-- **替换** `check-crate-api-boundary.sh` 中针对 `WorktreeContextExt` 的旧豁免(`TOOLS_PROJECT_CONTEXT_API_NAMES` 等,行 37-42 / 159-188):投影删除后该豁免失效,改为本节新规则。
+规则落在独立守卫 `.agents/hooks/check-context-architecture.sh`(R1–R6),由 `check-architecture-guards.sh` 串联调用:
+
+- **R1** `ToolExecutionContext` 不得含 `working_root` / `path_base` / `context_stack` 字段。
+- **R2** tools 不得直接引用 `PersistedWorkspaceContext` 或 `WorkspacePersist`(DTO / 持久化只在 session 边界)。
+- **R3** 仅 project 可定义 `WorkspaceState`;`agent/features` 内(project 除外)任何 struct 不得同时打包 `working_root` + `path_base` + (`context_stack`|`stack`)(防 `WorktreeWorkingContext` 复活)。**narrowing**:triple-bundle 检测不扫 `agent/shared`(持久化 DTO `PersistedWorkspaceContext`)与 `packages/sdk`(`WorkspaceContextView` 视图),二者是设计允许的序列化/投影形态,而非运行期可变三元组。
+- **R4** 生产代码调 `.workspace_control()` 仅限 tools 的 `business/bash.rs` 与 `business/worktree.rs`。
+- **R5** git 仅经 `GitWorktreeOps`;**在 `agent/features/project/` 范围内**,`Command::new("git")` 仅可出现在 `business/git_ops.rs`(`GitCli` adapter)。该规则 **SCOPED 到 project**,不做全仓库 git 禁令——runtime 另有与本重构无关的生产 git spawn(`business/prompt/build/git_context.rs` 的 prompt git 上下文、`core/command/commands/git.rs` 的 `/git` slash 命令),不在本重构范围内。
+- **R6** `WorkspacePersist` 仅可出现在 project(def/impl)与 **runtime(广泛允许,不限于 `core/client/`——`business/chat/looping/{agent_calls,non_agent,post_batch}.rs` 等亦调 `snapshot`)**;tools 禁用(与 R2 重叠)。
+- **替换** `check-crate-api-boundary.sh` 中针对 `WorktreeContextExt` 的旧豁免(`TOOLS_PROJECT_CONTEXT_API_NAMES` 等):投影删除后该豁免失效,已删除,改为本节 R1–R6 新规则。
 - 触发范围:diff 命中 `agent/features/runtime/**`、`agent/features/tools/**`、`agent/features/project/**`、`agent/shared/src/session_types.rs`、`agent/shared/src/tool.rs`。
 - 原则:CI / 本地 / Stop hook 复用同一检查入口;hook 只调用,不内嵌规则;失败消息须说明违反的约束与修复方向。
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
 use crate::business::git_ops::GitWorktreeOps;
-use crate::contract::{WorkspaceError, WorkspaceFrame};
+use crate::business::workspace_types::{WorkspaceError, WorkspaceFrame};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
