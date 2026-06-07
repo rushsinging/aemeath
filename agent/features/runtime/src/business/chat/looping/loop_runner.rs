@@ -832,8 +832,15 @@ mod tests {
         let events = sink.events();
         let feedback_sync = events
             .iter()
-            .position(|event| event.contains("你 MUST 先满足下面 Stop hook 的要求"))
+            .position(|event| {
+                event.starts_with("MessagesSync:")
+                    && event.contains("你 MUST 先满足下面 Stop hook 的要求")
+            })
             .expect("blocked Stop hook feedback should be synced into messages");
+        let hook_notice = events
+            .iter()
+            .position(|event| event == "HookEvent:Stop:Blocked")
+            .expect("blocked Stop hook should emit typed hook event");
         let second_text = events
             .iter()
             .position(|event| event == "Text:after hook feedback")
@@ -843,6 +850,7 @@ mod tests {
             .position(|event| event == "DoneWithDuration")
             .expect("loop should finish after Stop hook succeeds");
 
+        assert!(hook_notice < feedback_sync);
         assert!(feedback_sync < second_text);
         assert!(second_text < done);
         assert_eq!(
