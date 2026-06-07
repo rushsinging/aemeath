@@ -5,8 +5,9 @@ use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
 use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
-    AskUserBlockView, BlockNode, HookNoticeBlockView, OutputBlockKind, OutputViewModel,
-    SemanticStyle, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
+    OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView, ToolResultBlockView,
+    ToolSemanticStatus,
 };
 
 pub struct OutputViewAssembler;
@@ -112,25 +113,26 @@ impl OutputViewAssembler {
                     ));
                 }
                 ConversationBlock::HookNotice { id, content } => {
+                    let (kind, style) = match content.kind {
+                        crate::tui::model::conversation::block::HookNoticeKind::Blocked => {
+                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Warning)
+                        }
+                        crate::tui::model::conversation::block::HookNoticeKind::Failed => {
+                            (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
+                        }
+                        crate::tui::model::conversation::block::HookNoticeKind::Info => {
+                            (HookNoticeSemanticKind::Info, SemanticStyle::Muted)
+                        }
+                    };
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::HookNotice(HookNoticeBlockView {
                             key: id.clone(),
-                            kind: content.kind,
+                            kind,
                             title: content.title.clone(),
                             body: content.body.clone(),
                             details: content.details.clone(),
-                            style: match content.kind {
-                                crate::tui::model::conversation::block::HookNoticeKind::Blocked => {
-                                    SemanticStyle::Warning
-                                }
-                                crate::tui::model::conversation::block::HookNoticeKind::Failed => {
-                                    SemanticStyle::Error
-                                }
-                                crate::tui::model::conversation::block::HookNoticeKind::Info => {
-                                    SemanticStyle::Muted
-                                }
-                            },
+                            style,
                         }),
                     ));
                 }

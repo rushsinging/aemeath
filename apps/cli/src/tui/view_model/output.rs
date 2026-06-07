@@ -1,5 +1,4 @@
 use super::style::SemanticStyle;
-use crate::tui::model::conversation::block::HookNoticeKind;
 use std::hash::Hash;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,10 +73,17 @@ pub struct TextBlockView {
     pub style: SemanticStyle,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum HookNoticeSemanticKind {
+    Blocked,
+    Failed,
+    Info,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HookNoticeBlockView {
     pub key: String,
-    pub kind: HookNoticeKind,
+    pub kind: HookNoticeSemanticKind,
     pub title: String,
     pub body: String,
     pub details: Option<String>,

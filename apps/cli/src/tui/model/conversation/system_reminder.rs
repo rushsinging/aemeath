@@ -9,7 +9,7 @@ pub fn strip_system_reminder_envelope(text: &str) -> Cow<'_, str> {
         return Cow::Borrowed(text);
     }
 
-    let inner = &trimmed[OPEN_TAG.len()..trimmed.len() - CLOSE_TAG.len()];
+    let inner = &trimmed[OPEN_TAG.len()..trimmed.len() - CLOSE_TAG.len()]; // allow unsafe_text_op: ASCII system-reminder tag boundaries validated by starts_with/ends_with
     Cow::Owned(inner.trim().to_string())
 }
 
