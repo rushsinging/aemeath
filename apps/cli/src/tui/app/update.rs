@@ -139,7 +139,12 @@ impl App {
             TuiMsg::SpinnerTick => {
                 // 动画帧真相归 view_state；spinner 是否可见由 Model 决定，
                 // 镜像写回统一在每帧渲染前的 refresh_live_status_from_model。
+                self.view_state.animation.spinner_frame =
+                    self.view_state.animation.spinner_frame.wrapping_add(1);
+                self.view_state.animation.version =
+                    self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
+                self.mark_output_dirty();
                 UpdateResult::none()
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
@@ -193,6 +198,7 @@ impl App {
             &view_model,
             width,
             self.output_area.term_width,
+            self.view_state.animation.spinner_frame,
         );
         self.output_area.replace_document(document);
     }

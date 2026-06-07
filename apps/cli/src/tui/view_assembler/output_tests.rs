@@ -266,6 +266,55 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
 }
 
 #[test]
+fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "read file".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+        partial_args: r#"{"file_path":"src/lib.rs"}"#.to_string(),
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let tool = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block");
+
+    assert_eq!(tool.title, "Read");
+    assert_eq!(tool.summary, None, "最终 ToolCall 尚未到达");
+    assert_eq!(
+        tool.args_preview.as_deref(),
+        Some(r#"{"file_path":"src/lib.rs"}"#)
+    );
+    assert!(tool.result_summary.is_none(), "ToolResult 尚未到达");
+    let rendered = OutputBlockKind::ToolCall(tool.clone())
+        .component()
+        .render_self("tool-1", &RenderCtx { width: 80 });
+    assert!(
+        rendered
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("src/lib.rs")),
+        "summary 尚未到达、result 尚未到达时，应使用 args_preview 提前渲染 header/detail"
+    );
+}
+
+#[test]
 fn test_output_assembler_pending_tool_has_no_result_child() {
     // 边界：未产出结果（仅 ToolCallStart，无 ObserveToolResult）的工具不附结果子块。
     let mut conversation = ConversationModel::default();

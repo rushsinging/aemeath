@@ -15,9 +15,8 @@ pub fn render_tool_call(
     view: &ToolCallBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let (header_text, detail_lines) = view
-        .summary
-        .as_deref()
+    let header_input = view.summary.as_deref().or(view.args_preview.as_deref());
+    let (header_text, detail_lines) = header_input
         .map(|summary| format_tool_call(&view.title, summary))
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
     let icon_color = semantic_color(view.style);
@@ -140,12 +139,32 @@ mod tests {
     }
 
     #[test]
+    fn test_tool_call_renders_args_detail_from_args_preview_before_summary() {
+        let mut view = tool(ToolSemanticStatus::Running);
+        view.title = "Read".into();
+        view.args_preview = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+        view.summary = None;
+
+        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+
+        assert!(block.lines[0].plain.contains("Read"));
+        assert!(
+            block
+                .lines
+                .iter()
+                .any(|line| line.plain.contains("src/lib.rs")),
+            "ToolArgumentsDelta 后应不等 ToolResult/最终 summary 就显示括号/detail"
+        );
+    }
+
+    #[test]
     fn test_tool_call_renders_header_only_no_result_lines() {
         // 结果已升为独立子块（ToolResult），tool_call 仅渲染 header（+ args detail）。
         // 即使 result_summary 有值，也不应出现在本块内。
         let mut view = tool(ToolSemanticStatus::Success);
         view.title = "Bash".into();
         view.result_summary = Some("done: 3 matches".into());
+        view.args_preview = None;
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
