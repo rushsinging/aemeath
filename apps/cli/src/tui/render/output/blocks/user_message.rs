@@ -9,7 +9,7 @@ pub fn render_user_message(
     view: &TextBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let style = Style::default().fg(theme::USER);
+    let style = Style::default().fg(theme::USER).bg(theme::USER_BG);
     // 前导 `> ` marker 与续行缩进现由 gutter 注入（UserMessage → ">"），组件只渲染原文。
     let mut lines = Vec::new();
     for line in view.text.lines() {
@@ -33,8 +33,8 @@ mod tests {
     use crate::tui::view_model::style::SemanticStyle;
 
     #[test]
-    fn test_user_message_renders_raw_text_with_user_color() {
-        // 前导 `> ` marker 现由 gutter 注入；组件只渲染原文，颜色仍为 USER。
+    fn test_user_message_renders_raw_text_with_user_style() {
+        // 前导 `> ` marker 现由 gutter 注入；组件只渲染原文，使用 USER 前景和 USER_BG 背景。
         let view = TextBlockView {
             key: "u".into(),
             text: "hello".into(),
@@ -44,6 +44,7 @@ mod tests {
 
         assert_eq!(block.lines[0].plain, "hello");
         assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::USER));
+        assert_eq!(block.lines[0].spans[0].style.bg, Some(theme::USER_BG));
     }
 
     #[test]
@@ -57,5 +58,7 @@ mod tests {
 
         assert_eq!(block.lines[0].plain, "a");
         assert_eq!(block.lines[1].plain, "b");
+        assert_eq!(block.lines[0].spans[0].style.bg, Some(theme::USER_BG));
+        assert_eq!(block.lines[1].spans[0].style.bg, Some(theme::USER_BG));
     }
 }

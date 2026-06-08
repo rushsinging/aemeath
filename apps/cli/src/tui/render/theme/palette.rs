@@ -82,6 +82,8 @@ pub const SELECTION_FG: Color = TEXT;
 
 /// 用户消息色。
 pub const USER: Color = BLUE;
+/// 用户消息背景色。
+pub const USER_BG: Color = Color::Rgb(31, 43, 68);
 /// 助手消息色。
 pub const ASSISTANT: Color = TEXT;
 /// 工具运行中色。
