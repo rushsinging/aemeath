@@ -8,6 +8,7 @@ use sdk::CharIdx;
 
 use super::OutputArea;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
+use crate::tui::render::theme;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
 
@@ -51,6 +52,7 @@ impl OutputArea {
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
+        let mut user_line_backgrounds = Vec::new();
 
         for idx in start..end {
             let Some(line) = document_lines.get(idx) else {
@@ -64,18 +66,22 @@ impl OutputArea {
             screen_map.push((idx, CharIdx::ZERO, char_end));
             rendered_content.insert(idx, plain);
             let spans = apply_selection_overlay(line, sel_range_for_line(view, line, idx));
+            user_line_backgrounds.push(is_user_message_line(line));
             display_lines.push(Line::from(spans));
         }
 
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
         self.append_status_lines(&mut display_lines, &spinner_line, live_status, view);
+        user_line_backgrounds.resize(display_lines.len(), false);
+        let user_line_backgrounds = trim_line_flags(user_line_backgrounds, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(display_lines);
             paragraph.render(content_area, buf);
         }));
+        paint_user_message_line_background(content_area, buf, &user_line_backgrounds);
 
         let total_rendered = self.screen_line_map.len();
         if total_rendered > 0 {
@@ -172,6 +178,45 @@ fn clear_area(area: Rect, buf: &mut ratatui::buffer::Buffer) {
             buf[(x, y)].reset();
         }
     }
+}
+
+fn paint_user_message_line_background(
+    area: Rect,
+    buf: &mut ratatui::buffer::Buffer,
+    user_line_backgrounds: &[bool],
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    for (row, should_paint) in user_line_backgrounds.iter().enumerate() {
+        if row >= area.height as usize {
+            break;
+        }
+        if !should_paint {
+            continue;
+        }
+        let y = area.y + row as u16;
+        for x in area.left()..area.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_bg(theme::USER_BG);
+            }
+        }
+    }
+}
+
+fn trim_line_flags(flags: Vec<bool>, height: usize) -> Vec<bool> {
+    let len = flags.len();
+    if len > height {
+        flags.into_iter().skip(len - height).collect()
+    } else {
+        flags
+    }
+}
+
+fn is_user_message_line(line: &crate::tui::render::output::rendered::RenderedLine) -> bool {
+    line.spans
+        .iter()
+        .any(|span| span.style.bg == Some(theme::USER_BG))
 }
 
 fn render_scrollbar(
@@ -297,6 +342,47 @@ mod tests {
         assert_eq!(buf[(2, 0)].bg, theme::SELECTION_BG, "内容首字符 h 高亮");
         assert_eq!(buf[(4, 0)].bg, theme::SELECTION_BG, "内容第三字符 l 高亮");
         assert_ne!(buf[(5, 0)].bg, theme::SELECTION_BG, "第四字符 l 不在选区");
+    }
+
+    #[test]
+    fn test_render_user_message_paints_full_visible_line_background() {
+        let mut line = RenderedLine::with_plain(
+            vec![
+                Span::styled("> ", ratatui::style::Style::default().fg(theme::USER)),
+                Span::styled(
+                    "hello",
+                    ratatui::style::Style::default()
+                        .fg(theme::USER)
+                        .bg(theme::USER_BG),
+                ),
+            ],
+            "hello".into(),
+        );
+        line.gutter_cols = 2;
+        let mut area = OutputArea::new();
+        area.replace_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "u".into(),
+                lines: vec![line],
+            }],
+        });
+        let area_rect = Rect::new(0, 0, 12, 2);
+        let view = OutputViewState {
+            last_visible_height: 2,
+            ..Default::default()
+        };
+        let mut buf = Buffer::empty(area_rect);
+
+        area.render(area_rect, &mut buf, &view, &no_live_status());
+
+        assert_eq!(buf[(0, 0)].bg, theme::USER_BG, "gutter 也应有用户消息背景");
+        assert_eq!(buf[(2, 0)].bg, theme::USER_BG, "正文应有用户消息背景");
+        assert_eq!(
+            buf[(10, 0)].bg,
+            theme::USER_BG,
+            "行尾空白也应有用户消息背景"
+        );
+        assert_ne!(buf[(0, 1)].bg, theme::USER_BG, "非用户消息行不应被背景污染");
     }
 
     #[test]
