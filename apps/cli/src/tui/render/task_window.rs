@@ -1,10 +1,10 @@
 //! Task list 窗口化显示
 //!
 //! 排序策略：
-//!   completed → 按 updated_at 降序（最近完成在前，反映实际执行顺序）
+//!   completed → 按 updated_at 升序；窗口内最多显示最近完成的一条
 //!   in_progress → 按 updated_at 升序（最早开始的在前）
 //!   pending → 按 display_number 升序（稳定序）
-//! 窗口化：超出 max_lines 时截断并显示折叠提示
+//! 窗口化：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 max_lines。
 
 #[cfg(test)]
 use sdk::{TaskState, TaskSummary};
@@ -15,8 +15,8 @@ use std::collections::HashMap;
 ///
 /// 规则：
 /// 1. 摘要行 `━━ Tasks: completed/total ━━` 反映全量
-/// 2. 按状态分组排序：completed → in_progress → pending
-///    - completed 组内按 updated_at 降序（最近完成在前）
+/// 2. 窗口策略：上一条 completed + 所有 in_progress + 后续 pending
+///    - completed 组内按 updated_at 升序，窗口内取最近完成的一条
 ///    - in_progress 组内按 updated_at 升序（最早开始的在前）
 ///    - pending 组内按 display_number 升序
 /// 3. 最多显示 `max_lines` 条 task 行
@@ -32,7 +32,10 @@ pub fn build_task_window(
         return Vec::new();
     }
 
-    let total = tasks.len();
+    let total = tasks
+        .iter()
+        .filter(|t| t.state != TaskState::Deleted)
+        .count();
     let completed_count = tasks
         .iter()
         .filter(|t| t.state == TaskState::Completed)
@@ -54,23 +57,18 @@ pub fn build_task_window(
         }
     }
 
-    // completed: 最近完成在前
-    completed.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    // completed: 按完成时间升序，窗口内取最后一条作为“上一条 completed”
+    completed.sort_by_key(|t| t.updated_at);
     // in_progress: 最早开始在前
     in_progress.sort_by_key(|t| t.updated_at);
     // pending: 按 display_number 稳定序
     sort_by_display_number(&mut pending, display_map);
 
-    let ordered: Vec<&TaskSummary> = completed
-        .into_iter()
-        .chain(in_progress)
-        .chain(pending)
-        .collect();
+    let visible = select_task_window(completed, in_progress, pending, max_lines);
+    let shown_count = visible.len();
+    let hidden_count = total.saturating_sub(shown_count);
 
-    let shown_count = ordered.len().min(max_lines);
-    let hidden_count = ordered.len() - shown_count;
-
-    for t in ordered.iter().take(shown_count) {
+    for t in visible {
         lines.push(format_task_line(t, display_map));
     }
 
@@ -79,6 +77,36 @@ pub fn build_task_window(
     }
 
     lines
+}
+
+#[cfg(test)]
+fn select_task_window<'a>(
+    completed: Vec<&'a TaskSummary>,
+    in_progress: Vec<&'a TaskSummary>,
+    pending: Vec<&'a TaskSummary>,
+    max_lines: usize,
+) -> Vec<&'a TaskSummary> {
+    let mut visible = Vec::with_capacity(max_lines);
+    if max_lines == 0 {
+        return visible;
+    }
+
+    let reserved_for_pending = usize::from(!pending.is_empty());
+    let in_progress_capacity = max_lines.saturating_sub(reserved_for_pending);
+    let shown_in_progress = in_progress.len().min(in_progress_capacity);
+    let can_show_completed = !completed.is_empty() && shown_in_progress < in_progress_capacity;
+
+    if can_show_completed {
+        if let Some(task) = completed.last() {
+            visible.push(*task);
+        }
+    }
+
+    visible.extend(in_progress.into_iter().take(shown_in_progress));
+
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(pending.into_iter().take(remaining));
+    visible
 }
 
 #[cfg(test)]
@@ -100,7 +128,30 @@ fn format_task_line(t: &TaskSummary, display_map: &HashMap<String, usize>) -> St
         .as_deref()
         .map(|o| format!(" (@{})", o))
         .unwrap_or_default();
-    format!("{} #{} {}{}", icon, display_id, t.subject, owner)
+    let blocked_by = format_blocked_by(&t.blocked_by, display_map);
+    format!(
+        "{} #{} {}{}{}",
+        icon, display_id, t.subject, owner, blocked_by
+    )
+}
+
+#[cfg(test)]
+fn format_blocked_by(blocked_by: &[String], display_map: &HashMap<String, usize>) -> String {
+    if blocked_by.is_empty() {
+        return String::new();
+    }
+
+    let deps = blocked_by
+        .iter()
+        .map(|id| {
+            display_map
+                .get(id)
+                .map(|display_id| format!("#{}", display_id))
+                .unwrap_or_else(|| format!("#{}", id))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(" (blocked by {deps})")
 }
 
 #[cfg(test)]

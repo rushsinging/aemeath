@@ -14,6 +14,7 @@ pub(crate) fn make_task_with_ts(id: &str, subject: &str, state: TaskState, ts: u
         state,
         priority: "normal".to_string(),
         owner: None,
+        blocked_by: Vec::new(),
         updated_at: ts,
     }
 }
