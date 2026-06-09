@@ -18,6 +18,7 @@
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
 | 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
 | 80 | Agent context 所有权重构（project 拥有 WorkspaceState） | 高 | ✅ 已完成 | 未确认 | workspace 可变状态收敛为 project 单一 WorkspaceState，feature 经能力 trait 访问，子 agent 隔离，git 抽 outbound port |
+| 81 | TUI assistant 文本与 spinner phase 视觉调整 | 低 | 待确认 | 未确认 | spinner phase 移除 emoji；assistant 文本前增加白色圆点 gutter |
 
 ### #8 Memory 系统
 
@@ -438,3 +439,30 @@ enum MemoryCategory {
 - `agent/features/runtime/src/core/client/{accessors,from_args,trait_chat,trait_session,trait_accessor,event,mapping}.rs`、`business/chat/looping/{loop_runner,agent_calls,non_agent,post_batch}.rs`、`business/agent/runner/setup.rs`
 - `agent/composition/src/{app,lib}.rs`、`agent/shared/src/{session_types,tool}.rs`
 - `.agents/hooks/check-context-architecture.sh`、`.agents/hooks/check-architecture-guards.sh`、`.agents/hooks/check-crate-api-boundary.sh`
+
+### #81 TUI assistant 文本与 spinner phase 视觉调整
+
+**状态**：待确认
+
+**症状 / 目标**：spinner phase 文案前的 emoji 造成状态行视觉噪音；assistant 正文当前没有行首标识，和周边 block 的层级提示不一致。目标是 spinner phase 只显示纯文本，同时 assistant 文本首行前显示白色圆点 gutter。
+
+**根因 / 设计点**：
+1. Spinner phase 文案集中在 `LiveStatusAssembler::phase_text()`，该函数直接拼入 emoji 前缀。
+2. 输出区 gutter 的 marker 由 `marker_glyph()` 按 `OutputBlockKind` 映射；`AssistantMessage` 当前落入默认空 marker。
+
+**实现**：
+1. 将 spinner phase 文案改为纯文本：`Thinking...`、`Generating...`、`Calling <tool>...`、`Hook <event>...`。
+2. 为 `OutputBlockKind::AssistantMessage` 映射静态 `●` marker，颜色使用 `theme::ASSISTANT`。
+3. 保持 gutter 只进入 spans、不进入 plain；续行继续使用等宽空白，不影响复制和选区坐标。
+
+**验证**：
+- `CARGO_TARGET_DIR=target cargo test -p cli live_status`
+- `CARGO_TARGET_DIR=target cargo test -p cli gutter`
+- `cargo fmt --check`
+- `CARGO_TARGET_DIR=target cargo check -p cli`
+- `CARGO_TARGET_DIR=target cargo clippy -p cli --all-targets -- -D warnings`
+
+**涉及路径**：
+- `apps/cli/src/tui/view_assembler/live_status.rs`
+- `apps/cli/src/tui/adapter/live_status_widget.rs`
+- `apps/cli/src/tui/render/output/gutter.rs`
