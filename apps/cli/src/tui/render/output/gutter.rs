@@ -37,6 +37,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             }
         },
         OutputBlockKind::UserMessage(_) => ">",
+        OutputBlockKind::AssistantMessage(_) => "●",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
         OutputBlockKind::ThinkingMessage(_) => "💭",
         _ => " ",
@@ -54,6 +55,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
             ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
+        OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
         OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         _ => theme::TEXT_MUTED,
     }
@@ -142,6 +144,18 @@ mod tests {
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");
+    }
+
+    #[test]
+    fn test_marker_glyph_for_assistant_message_is_filled_circle() {
+        let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+            key: "a".into(),
+            text: "answer".into(),
+            style: SemanticStyle::Normal,
+        });
+
+        assert_eq!(marker_glyph(&kind), "●");
+        assert_eq!(marker_color(&kind), theme::ASSISTANT);
     }
 
     #[test]
