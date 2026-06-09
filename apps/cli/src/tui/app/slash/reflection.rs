@@ -9,7 +9,12 @@ impl super::super::App {
         }
 
         match args.trim() {
-            "" => self.prepare_llm_reflection(true).into_iter().collect(),
+            "" => {
+                if self.chat.pending_reflection.is_some() {
+                    self.append_system_notice("已有未应用建议，本次将刷新");
+                }
+                self.prepare_llm_reflection(true).into_iter().collect()
+            }
             "apply" => self.apply_pending_reflection().into_iter().collect(),
             "stats" | "history" => {
                 self.append_system_notice("Reflection stats/history 将在打磨阶段支持。");
@@ -40,14 +45,22 @@ impl super::super::App {
     }
 
     fn apply_pending_reflection(&mut self) -> Option<Effect> {
-        let Some(output) = self.chat.pending_reflection.clone() else {
+        if self.chat.applying_reflection.is_some() {
+            self.append_system_notice("Reflection apply 正在进行中");
+            return None;
+        }
+
+        let Some(output) = self.chat.pending_reflection.take() else {
             self.append_system_notice("没有待应用的 Reflection 建议。");
             return None;
         };
 
-        let effect = self.apply_reflection_output(output);
+        let effect = self.apply_reflection_output(output.clone());
         if effect.is_some() {
-            self.chat.pending_reflection = None;
+            self.chat.applying_reflection = Some(output);
+            self.append_system_notice("[reflection apply 已提交给 SDK memory 能力]");
+        } else {
+            self.chat.pending_reflection = Some(output);
         }
         effect
     }
@@ -84,7 +97,6 @@ impl super::super::App {
             self.append_error_notice("当前没有可用的 SDK agent client，无法应用 Reflection。");
             return None;
         }
-        self.append_system_notice("[reflection apply 已提交给 SDK memory 能力]");
         Some(Effect::ApplyReflection { output })
     }
 }
@@ -125,6 +137,7 @@ mod tests {
             outdated_memories: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
+            auto_applied: false,
         });
         assert!(effect.is_none());
     }

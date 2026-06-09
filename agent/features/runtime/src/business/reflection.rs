@@ -1,9 +1,11 @@
 pub mod apply;
 pub mod format;
 pub mod prompt;
+pub mod runner;
 pub mod store;
 pub mod types;
 
+pub use runner::{run_complete_reflection, CompleteReflectionResult, ReflectionRunMode};
 pub use types::{
     MemorySuggestion, ReflectionApplyResult, ReflectionEngine, ReflectionError, ReflectionOutput,
     ReflectionResult,

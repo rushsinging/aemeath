@@ -1,5 +1,7 @@
-use super::types::{MemorySuggestion, ReflectionApplyResult, ReflectionOutput, ReflectionResult};
-use share::memory::{MemoryEntry, MemoryLayer, MemorySource};
+use super::types::{
+    MemorySuggestion, ReflectionApplyResult, ReflectionError, ReflectionOutput, ReflectionResult,
+};
+use share::memory::{AddResult, MemoryEntry, MemorySource};
 use storage::api::MemoryStore;
 
 pub fn apply_suggestions(
@@ -12,16 +14,38 @@ pub fn apply_suggestions(
         let mut entry = MemoryEntry::new(
             uuid::Uuid::now_v7().to_string(),
             now,
-            MemoryLayer::Project,
+            suggestion.layer,
             suggestion.category,
             suggestion.content.clone(),
             MemorySource::Llm,
         );
         entry.tags = suggestion.tags.clone();
-        store.add(entry)?;
-        added += 1;
+        if add_with_eviction_retry(store, entry)? {
+            added += 1;
+        }
     }
     Ok(added)
+}
+
+fn add_with_eviction_retry(store: &mut MemoryStore, entry: MemoryEntry) -> ReflectionResult<bool> {
+    match store.add(entry.clone())? {
+        AddResult::Added { .. } | AddResult::Merged { .. } => Ok(true),
+        AddResult::NeedsEviction { candidates } => {
+            let ids = candidates
+                .into_iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>();
+            store.evict(&ids)?;
+            match store.add(entry)? {
+                AddResult::Added { .. } | AddResult::Merged { .. } => Ok(true),
+                AddResult::NeedsEviction { candidates } => Err(ReflectionError::Apply(format!(
+                    "store still requires eviction after evicting {} candidate(s); {} new candidate(s) remain",
+                    ids.len(),
+                    candidates.len()
+                ))),
+            }
+        }
+    }
 }
 
 fn current_timestamp_secs() -> u64 {

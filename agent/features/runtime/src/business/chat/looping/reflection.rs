@@ -1,8 +1,9 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
 
-use crate::business::reflection::ReflectionEngine;
+use crate::business::reflection::runner::run_complete_reflection_with_base_dir;
+use crate::business::reflection::ReflectionRunMode;
+use provider::api::StopReason;
 use std::path::{Path, PathBuf};
-use storage::api::MemoryStore;
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
 ///
@@ -51,6 +52,26 @@ pub async fn run_precompact_reflection(
     .await
 }
 
+pub(crate) fn should_run_turn_reflection(
+    config: &share::config::MemoryConfig,
+    turn_count: usize,
+    has_tool_calls: bool,
+    stop_reason: &StopReason,
+    before_finish_gate_continue: bool,
+) -> bool {
+    if before_finish_gate_continue
+        || !config.enabled
+        || !config.reflection.enabled
+        || config.reflection.interval_turns == 0
+    {
+        return false;
+    }
+    if has_tool_calls && stop_reason != &StopReason::EndTurn {
+        return false;
+    }
+    turn_count.is_multiple_of(config.reflection.interval_turns)
+}
+
 async fn run_forced_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
@@ -59,9 +80,18 @@ async fn run_forced_reflection_with_base_dir(
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
-    run_reflection_core(config, messages, cwd, client, system_prompt_text, base_dir).await
+    run_complete_reflection_with_base_dir(
+        ReflectionRunMode::Forced,
+        config,
+        messages,
+        cwd,
+        client,
+        system_prompt_text,
+        base_dir,
+    )
+    .await
+    .map(|result| result.formatted_content)
 }
-
 async fn run_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     turn_count: usize,
@@ -71,186 +101,18 @@ async fn run_reflection_with_base_dir(
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-    if !turn_count.is_multiple_of(config.reflection.interval_turns) {
-        return None;
-    }
-    run_reflection_core(config, messages, cwd, client, system_prompt_text, base_dir).await
-}
-
-async fn run_reflection_core(
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    cwd: &Path,
-    client: &provider::api::LlmClient,
-    system_prompt_text: &str,
-    base_dir: PathBuf,
-) -> Option<String> {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-
-    let mut store = MemoryStore::new(
-        base_dir.clone(),
-        storage::api::project_file_name_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .ok()?;
-
-    let entries = store
-        .list(Some(share::memory::MemoryLayer::Project))
-        .ok()
-        .unwrap_or_default();
-
-    let project_memory = ReflectionEngine::memory_summary(&entries);
-    let recent_summary = ReflectionEngine::recent_messages_summary(messages, 4000);
-    let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
-
-    // Call LLM with reflection prompt
-    let full_response = call_llm_for_reflection(client, &prompt, system_prompt_text).await?;
-
-    // Parse the JSON response
-    let output = match ReflectionEngine::parse_output(&full_response) {
-        Ok(output) => output,
-        Err(_) => {
-            // Fall back to lightweight if LLM parsing fails
-            return lightweight_reflection_text_with_base_dir(config, messages, cwd, base_dir)
-                .await;
-        }
-    };
-
-    if config.reflection.auto_apply_suggestions {
-        return match ReflectionEngine::apply_output(&output, &mut store) {
-            Ok(result) => {
-                let mut text = ReflectionEngine::format_output(&output);
-                text.push_str(&format!(
-                    "\n已自动应用 Reflection：新增/合并 {} 条记忆，标记 {} 条过时记忆。",
-                    result.suggestions_added, result.outdated_marked
-                ));
-                Some(text)
-            }
-            Err(error) => {
-                log::warn!("Reflection auto apply failed: {error}");
-                Some(ReflectionEngine::format_output(&output))
-            }
-        };
-    }
-
-    Some(ReflectionEngine::format_output(&output))
-}
-
-/// Call LLM with a simple prompt and return the full text response.
-async fn call_llm_for_reflection(
-    client: &provider::api::LlmClient,
-    prompt: &str,
-    system_prompt_text: &str,
-) -> Option<String> {
-    use provider::api::StreamHandler;
-    use provider::api::SystemBlock;
-
-    let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
-    let messages = vec![share::message::Message::user(prompt)];
-
-    struct CollectHandler {
-        text: String,
-    }
-    impl StreamHandler for CollectHandler {
-        fn on_text(&mut self, text: &str) {
-            self.text.push_str(text);
-        }
-        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
-        fn on_error(&mut self, _error: &str) {}
-    }
-
-    let mut handler = CollectHandler {
-        text: String::new(),
-    };
-    let cancel = tokio_util::sync::CancellationToken::new();
-
-    match client
-        .stream_message(&system_blocks, &messages, &[], &mut handler, &cancel)
-        .await
-    {
-        Ok(_resp) => {
-            let text = handler.text.trim().to_string();
-            if text.is_empty() {
-                None
-            } else {
-                // Extract JSON from possible markdown code blocks
-                Some(extract_json(&text).unwrap_or(text))
-            }
-        }
-        Err(e) => {
-            log::debug!("Reflection LLM call failed: {e}");
-            None
-        }
-    }
-}
-
-/// Extract JSON object from a response that may be wrapped in ```json ... ``` blocks.
-fn extract_json(text: &str) -> Option<String> {
-    let text = text.trim();
-    // Try to find JSON between ```json and ```
-    if let Some(start) = text.find("```json") {
-        let after = &text[start + 7..];
-        if let Some(end) = after.find("```") {
-            return Some(after[..end].trim().to_string());
-        }
-    }
-    // Try to find JSON between ``` and ```
-    if text.starts_with("```") && text.ends_with("```") {
-        let inner = &text[3..text.len() - 3];
-        if inner.trim().starts_with('{') {
-            return Some(inner.trim().to_string());
-        }
-    }
-    // If the text itself starts with {, return as-is
-    if text.starts_with('{') {
-        return Some(text.to_string());
-    }
-    None
-}
-
-/// Lightweight reflection fallback: basic checks without LLM call.
-async fn lightweight_reflection_text_with_base_dir(
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    cwd: &Path,
-    base_dir: PathBuf,
-) -> Option<String> {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return None;
-    }
-
-    let store = MemoryStore::new(
+    run_complete_reflection_with_base_dir(
+        ReflectionRunMode::Interval { turn_count },
+        config,
+        messages,
+        cwd,
+        client,
+        system_prompt_text,
         base_dir,
-        storage::api::project_file_name_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
     )
-    .ok()?;
-    let entries = store.list(Some(share::memory::MemoryLayer::Project)).ok()?;
-    let mut output = crate::business::reflection::ReflectionOutput {
-        deviations: Vec::new(),
-        suggested_memories: Vec::new(),
-        outdated_memories: entries
-            .iter()
-            .filter(|entry| entry.outdated)
-            .map(|entry| entry.id.clone())
-            .collect(),
-        user_alert: None,
-    };
-    if entries.is_empty() && !messages.is_empty() {
-        output
-            .deviations
-            .push("当前项目没有长期记忆，建议在关键决策后写入 Memory。".to_string());
-    }
-    Some(ReflectionEngine::format_output(&output))
+    .await
+    .map(|result| result.formatted_content)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,10 +121,12 @@ mod tests {
     use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
     use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
     use std::sync::Arc;
+    use storage::api::MemoryStore;
     use tokio_util::sync::CancellationToken;
 
     struct StaticReflectionProvider {
         response: String,
+        usage: Usage,
     }
 
     #[async_trait]
@@ -280,10 +144,7 @@ mod tests {
                 assistant_message: share::message::Message::placeholder(
                     share::message::Role::Assistant,
                 ),
-                usage: Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                },
+                usage: self.usage.clone(),
                 stop_reason: StopReason::EndTurn,
             })
         }
@@ -304,13 +165,218 @@ mod tests {
     }
 
     fn build_client(response: &str) -> provider::api::LlmClient {
+        build_client_with_usage(response, 0, 0)
+    }
+
+    fn build_client_with_usage(
+        response: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+    ) -> provider::api::LlmClient {
         provider::api::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
             response: response.to_string(),
+            usage: Usage {
+                input_tokens,
+                output_tokens,
+            },
         }))
     }
 
     fn temp_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("aemeath-{name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_on_interval_completed_without_tool_calls() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 3;
+
+        assert!(should_run_turn_reflection(
+            &config,
+            6,
+            false,
+            &StopReason::MaxTokens,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_on_interval_end_turn_with_tool_calls() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 3;
+
+        assert!(should_run_turn_reflection(
+            &config,
+            6,
+            true,
+            &StopReason::EndTurn,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_not_interval() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 3;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            5,
+            false,
+            &StopReason::EndTurn,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_memory_disabled() {
+        let mut config = share::config::MemoryConfig::default();
+        config.enabled = false;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            10,
+            false,
+            &StopReason::EndTurn,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_reflection_disabled() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.enabled = false;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            10,
+            false,
+            &StopReason::EndTurn,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_interval_zero() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 0;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            10,
+            false,
+            &StopReason::EndTurn,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_tool_calls_not_end_turn() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 3;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            6,
+            true,
+            &StopReason::ToolUse,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_run_turn_reflection_false_when_before_finish_gate_continues() {
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 3;
+
+        assert!(!should_run_turn_reflection(
+            &config,
+            6,
+            false,
+            &StopReason::EndTurn,
+            true,
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_reflection_disabled_returns_none() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let client = build_client(r#"{"suggested_memories":[]}"#);
+        let mut config = share::config::MemoryConfig::default();
+        config.enabled = false;
+
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Interval { turn_count: 10 },
+            &config,
+            &[share::message::Message::user("不会运行")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await;
+
+        assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_reflection_interval_miss_returns_none() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let client = build_client(r#"{"suggested_memories":[]}"#);
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 5;
+
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Interval { turn_count: 4 },
+            &config,
+            &[share::message::Message::user("未命中 interval")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await;
+
+        assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_reflection_forced_skips_interval_hit_check() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let response = r#"{"deviations":["forced 已运行"],"suggested_memories":[]}"#;
+        let client = build_client_with_usage(response, 12, 34);
+        let mut config = share::config::MemoryConfig::default();
+        config.reflection.interval_turns = 5;
+
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Forced,
+            &config,
+            &[share::message::Message::user("不需要命中 interval")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.formatted_content.contains("forced 已运行"));
+        assert_eq!(result.input_tokens, 12);
+        assert_eq!(result.output_tokens, 34);
+        assert!(!result.auto_applied);
+        assert_eq!(result.output.deviations, vec!["forced 已运行"]);
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
     }
 
     #[tokio::test]
@@ -333,9 +399,9 @@ mod tests {
         config.reflection.interval_turns = 2;
         config.reflection.auto_apply_suggestions = true;
 
-        let text = run_reflection_with_base_dir(
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Forced,
             &config,
-            2,
             &[share::message::Message::user("请记住这个决策")],
             &cwd,
             &client,
@@ -344,6 +410,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let text = result.formatted_content.clone();
         let store = MemoryStore::new(
             &base_dir,
             storage::api::project_file_name_from_path(&cwd),
@@ -355,6 +422,7 @@ mod tests {
 
         assert!(text.contains("后台 reflection 自动写入 memory"));
         assert!(text.contains("已自动应用 Reflection：新增/合并 1 条记忆，标记 0 条过时记忆。"));
+        assert!(result.auto_applied);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, MemoryCategory::Decision);
         assert_eq!(entries[0].content, "后台 reflection 自动写入 memory");

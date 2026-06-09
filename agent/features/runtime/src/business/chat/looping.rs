@@ -12,7 +12,7 @@ mod non_agent;
 mod permissions;
 mod post_batch;
 mod queue;
-mod reflection;
+pub(crate) mod reflection;
 mod stall;
 mod state;
 mod stream_handler;

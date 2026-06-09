@@ -2,12 +2,18 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySuggestion {
+    #[serde(default = "default_memory_layer")]
+    pub layer: share::memory::MemoryLayer,
     pub category: share::memory::MemoryCategory,
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub reason: String,
+}
+
+fn default_memory_layer() -> share::memory::MemoryLayer {
+    share::memory::MemoryLayer::Project
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +40,8 @@ pub enum ReflectionError {
     Parse(#[from] serde_json::Error),
     #[error(transparent)]
     Memory(#[from] share::memory::MemoryError),
+    #[error("failed to apply reflection memory suggestion: {0}")]
+    Apply(String),
 }
 
 pub type ReflectionResult<T> = Result<T, ReflectionError>;

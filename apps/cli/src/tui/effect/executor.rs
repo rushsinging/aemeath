@@ -28,7 +28,7 @@ impl App {
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx).await,
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx).await,
             Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
-            Effect::ApplyReflection { output } => self.apply_reflection_effect(output),
+            Effect::ApplyReflection { output } => self.apply_reflection_effect(output, ui_tx),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::FetchTaskStatus => self.update_task_status(self.chat.is_processing).await,
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
@@ -193,12 +193,23 @@ impl App {
     }
 
     /// 将 reflection 输出应用到 SDK memory 能力（后台 spawn）。
-    fn apply_reflection_effect(&mut self, output: sdk::ReflectionOutputView) {
+    fn apply_reflection_effect(
+        &mut self,
+        output: sdk::ReflectionOutputView,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
         let Some(agent_client) = self.agent_client.clone() else {
             return;
         };
+        let tx = ui_tx.clone();
         tokio::spawn(async move {
-            let _ = agent_client.apply_reflection(output).await;
+            let result = agent_client
+                .apply_reflection(output.clone())
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx
+                .send(UiEvent::ReflectionApplyDone { output, result })
+                .await;
         });
     }
 

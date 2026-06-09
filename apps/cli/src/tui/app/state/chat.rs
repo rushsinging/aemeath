@@ -11,6 +11,7 @@ pub(crate) struct ChatState {
     pub active_tool_call_ids: std::collections::HashSet<String>,
     pub turn_count: usize,
     pub pending_reflection: Option<sdk::ReflectionOutputView>,
+    pub applying_reflection: Option<sdk::ReflectionOutputView>,
     pub input_event_buffer: Option<std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>>,
     pub is_processing: bool,
 }
@@ -89,6 +90,7 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
         self.pending_reflection = None;
+        self.applying_reflection = None;
         self.clear_input_event_buffer();
         self.turn_count = 0;
     }
@@ -114,6 +116,7 @@ impl Default for ChatState {
             active_tool_call_ids: std::collections::HashSet::new(),
             turn_count: 0,
             pending_reflection: None,
+            applying_reflection: None,
             input_event_buffer: None,
             is_processing: false,
         }

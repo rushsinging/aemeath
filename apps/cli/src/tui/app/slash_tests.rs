@@ -1,4 +1,5 @@
 use super::App;
+use crate::tui::effect::effect::Effect;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,6 +9,8 @@ pub(super) struct BlockingReflectionClient {
     pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
     pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
     pub(super) clear_tasks_calls: AtomicUsize,
+    pub(super) apply_reflection_calls: AtomicUsize,
+    pub(super) apply_reflection_should_fail: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -108,8 +111,11 @@ impl sdk::AgentClient for BlockingReflectionClient {
             suggested_memories: vec![sdk::ReflectionMemorySuggestionView {
                 content: "记住 /reflect 后台执行".to_string(),
                 layer: "project".to_string(),
+                category: "decision".to_string(),
+                tags: Vec::new(),
             }],
             outdated_memories: Vec::new(),
+            auto_applied: false,
         })
     }
 
@@ -117,7 +123,15 @@ impl sdk::AgentClient for BlockingReflectionClient {
         &self,
         _output: sdk::ReflectionOutputView,
     ) -> Result<String, sdk::SdkError> {
-        Ok("applied".to_string())
+        self.apply_reflection_calls.fetch_add(1, Ordering::SeqCst);
+        if self
+            .apply_reflection_should_fail
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            Err(sdk::SdkError::Internal("apply failed".to_string()))
+        } else {
+            Ok("applied".to_string())
+        }
     }
 
     async fn execute_command(
@@ -214,6 +228,8 @@ pub(super) fn app_with_blocking_reflection_client_handle() -> (
         started_tx: Mutex::new(Some(started_tx)),
         finish_rx: Mutex::new(Some(finish_rx)),
         clear_tasks_calls: AtomicUsize::new(0),
+        apply_reflection_calls: AtomicUsize::new(0),
+        apply_reflection_should_fail: std::sync::atomic::AtomicBool::new(false),
     });
     let mut app = App::new(
         "test-session".to_string(),
@@ -224,6 +240,265 @@ pub(super) fn app_with_blocking_reflection_client_handle() -> (
     app.session.memory_config.enabled = true;
     app.session.memory_config.reflection.enabled = true;
     (app, started_rx, finish_tx, client)
+}
+
+fn reflection_output(content: &str, auto_applied: bool) -> sdk::ReflectionOutputView {
+    sdk::ReflectionOutputView {
+        content: content.to_string(),
+        input_tokens: 3,
+        output_tokens: 5,
+        suggested_memories: vec![sdk::ReflectionMemorySuggestionView {
+            content: "记住 /reflect 后台执行".to_string(),
+            layer: "project".to_string(),
+            category: "decision".to_string(),
+            tags: Vec::new(),
+        }],
+        outdated_memories: Vec::new(),
+        auto_applied,
+    }
+}
+
+fn system_texts(app: &App) -> Vec<&str> {
+    app.model
+        .conversation
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            crate::tui::model::conversation::block::ConversationBlock::System { text, .. } => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn error_texts(app: &App) -> Vec<&str> {
+    app.model
+        .conversation
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            crate::tui::model::conversation::block::ConversationBlock::Error { text, .. } => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn apply_ui_event(app: &mut App, event: super::event::UiEvent) -> Vec<Effect> {
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    let spawn_refs =
+        crate::tui::effect::session::processing::SpawnContextRefs { agent_client: None };
+    app.update(crate::tui::update::msg::TuiMsg::Ui(event), &tx, &spawn_refs)
+        .effects
+}
+
+#[tokio::test]
+async fn test_reflection_done_auto_complete_display_and_pending() {
+    let (mut app, _started_rx, finish_tx) = app_with_blocking_reflection_client();
+    let output = reflection_output("完整 reflection 内容", false);
+
+    let effects = apply_ui_event(&mut app, super::event::UiEvent::ReflectionDone { output });
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.chat
+            .pending_reflection
+            .as_ref()
+            .map(|o| o.content.as_str()),
+        Some("完整 reflection 内容")
+    );
+    let texts = system_texts(&app);
+    assert!(texts
+        .iter()
+        .any(|text| text.contains("完整 reflection 内容")));
+    assert!(texts
+        .iter()
+        .any(|text| text.contains("可运行 /reflect apply 应用这些 memory 建议")));
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_reflection_done_auto_applied_does_not_save_pending() {
+    let (mut app, _started_rx, finish_tx) = app_with_blocking_reflection_client();
+    let output = reflection_output("已自动应用的完整内容", true);
+
+    let effects = apply_ui_event(&mut app, super::event::UiEvent::ReflectionDone { output });
+
+    assert!(effects.is_empty(), "auto_applied=true 不应再次 apply");
+    assert!(app.chat.pending_reflection.is_none());
+    let texts = system_texts(&app);
+    assert!(texts
+        .iter()
+        .any(|text| text.contains("已自动应用的完整内容")));
+    assert!(texts.iter().any(|text| text.contains("已自动应用")));
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_handle_reflect_command_with_pending_warns_refresh() {
+    let (mut app, _started_rx, finish_tx) = app_with_blocking_reflection_client();
+    app.chat.pending_reflection = Some(reflection_output("旧建议", false));
+
+    let effects = app.handle_reflect_command("");
+
+    assert!(matches!(
+        effects.first(),
+        Some(Effect::RunReflection { foreground: true })
+    ));
+    assert!(system_texts(&app)
+        .iter()
+        .any(|text| text.contains("已有未应用建议，本次将刷新")));
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_apply_reflection_success_clears_pending_via_ui_event() {
+    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+    app.chat.pending_reflection = Some(reflection_output("待应用", false));
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+
+    let effects = app.handle_reflect_command("apply");
+    assert!(app.chat.pending_reflection.is_none());
+    assert_eq!(
+        app.chat.applying_reflection.as_ref().unwrap().content,
+        "待应用"
+    );
+    for effect in effects {
+        app.execute_effect(effect, &tx).await;
+    }
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("apply 应回传 UI event")
+        .expect("apply event should exist");
+    let effects = apply_ui_event(&mut app, event);
+
+    assert!(effects.is_empty());
+    assert!(app.chat.pending_reflection.is_none());
+    assert!(app.chat.applying_reflection.is_none());
+    assert_eq!(client.apply_reflection_calls.load(Ordering::SeqCst), 1);
+    assert!(system_texts(&app)
+        .iter()
+        .any(|text| text.contains("reflection apply 成功")));
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_apply_reflection_failure_keeps_pending_via_ui_event() {
+    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+    client
+        .apply_reflection_should_fail
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    app.chat.pending_reflection = Some(reflection_output("待重试", false));
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+
+    let effects = app.handle_reflect_command("apply");
+    assert!(app.chat.pending_reflection.is_none());
+    assert_eq!(
+        app.chat.applying_reflection.as_ref().unwrap().content,
+        "待重试"
+    );
+    for effect in effects {
+        app.execute_effect(effect, &tx).await;
+    }
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("apply 失败应回传 UI event")
+        .expect("apply event should exist");
+    let effects = apply_ui_event(&mut app, event);
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.chat
+            .pending_reflection
+            .as_ref()
+            .map(|o| o.content.as_str()),
+        Some("待重试")
+    );
+    assert_eq!(client.apply_reflection_calls.load(Ordering::SeqCst), 1);
+    assert!(app.chat.applying_reflection.is_none());
+    assert!(error_texts(&app)
+        .iter()
+        .any(|text| text.contains("Reflection apply 失败")));
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_apply_reflection_duplicate_apply_is_rejected_while_in_flight() {
+    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+    app.chat.pending_reflection = Some(reflection_output("待应用一次", false));
+
+    let effects = app.handle_reflect_command("apply");
+    assert_eq!(effects.len(), 1);
+    assert!(app.chat.pending_reflection.is_none());
+    assert_eq!(
+        app.chat
+            .applying_reflection
+            .as_ref()
+            .map(|output| output.content.as_str()),
+        Some("待应用一次")
+    );
+
+    let duplicate_effects = app.handle_reflect_command("apply");
+
+    assert!(duplicate_effects.is_empty());
+    assert!(system_texts(&app)
+        .iter()
+        .any(|text| text.contains("Reflection apply 正在进行中")));
+    assert_eq!(client.apply_reflection_calls.load(Ordering::SeqCst), 0);
+    let _ = finish_tx.send(());
+}
+
+#[tokio::test]
+async fn test_apply_reflection_success_keeps_new_pending_created_while_in_flight() {
+    let (mut app, _started_rx, finish_tx, _client) = app_with_blocking_reflection_client_handle();
+    let old_output = reflection_output("旧待应用", false);
+    app.chat.pending_reflection = Some(old_output.clone());
+
+    let effects = app.handle_reflect_command("apply");
+    assert_eq!(effects.len(), 1);
+    assert!(app.chat.pending_reflection.is_none());
+    assert_eq!(
+        app.chat
+            .applying_reflection
+            .as_ref()
+            .map(|output| output.content.as_str()),
+        Some("旧待应用")
+    );
+
+    apply_ui_event(
+        &mut app,
+        super::event::UiEvent::ReflectionDone {
+            output: reflection_output("新建议", false),
+        },
+    );
+    assert_eq!(
+        app.chat
+            .pending_reflection
+            .as_ref()
+            .map(|output| output.content.as_str()),
+        Some("新建议")
+    );
+
+    let effects = apply_ui_event(
+        &mut app,
+        super::event::UiEvent::ReflectionApplyDone {
+            output: old_output,
+            result: Ok("applied".to_string()),
+        },
+    );
+
+    assert!(effects.is_empty());
+    assert!(app.chat.applying_reflection.is_none());
+    assert_eq!(
+        app.chat
+            .pending_reflection
+            .as_ref()
+            .map(|output| output.content.as_str()),
+        Some("新建议")
+    );
+    let _ = finish_tx.send(());
 }
 
 #[tokio::test]
@@ -379,6 +654,7 @@ async fn test_auto_reflection_boundary_pending_reflection_does_not_trigger() {
         output_tokens: 0,
         suggested_memories: Vec::new(),
         outdated_memories: Vec::new(),
+        auto_applied: false,
     });
 
     let (_tx, _rx) = tokio::sync::mpsc::channel::<super::event::UiEvent>(8);

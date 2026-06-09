@@ -144,7 +144,7 @@ enum MemoryCategory {
 |------|------|
 | `auto_summary_on_session_end` | 已删除；SessionEnd 不做 LLM 总结，不会阻塞退出 |
 | `ReflectionGenerated` Hook 事件 | spec 中提到的 hook 事件不在 `HookEvent` 枚举中 |
-| PostCompact 提取记忆 | 已改为 Compact 前基于即将被压缩的 early messages 提取建议 |
+| PostCompact 提取记忆 | 不再作为目标；已改为 Compact 前基于即将被压缩的 early messages 提取建议 |
 | 淘汰策略定时触发 | 有 `compact()` + `eviction_candidates()`，但无定时触发逻辑，`archive_after_days` 配置项不在 `MemoryConfig` 中 |
 | LLM 合并相近记忆 | spec 中"超过 100 条时用 LLM 合并"未落地 |
 | SessionReminders 持久化 | `SessionReminders` 仅内存态，不写入文件，会话结束即丢失 |
@@ -164,14 +164,19 @@ enum MemoryCategory {
 | 组件 | 位置 |
 |------|------|
 | `ReflectionEngine`（解析 JSON、格式化输出） | `reflection/` |
+| 完整 LLM reflection runner（Prompt 构建、调用 provider、解析结果） | `reflection/runner.rs` |
 | Prompt 模板（偏差检测 + 建议记忆 + 过时记忆） | `reflection/prompt.rs` |
-| `/reflect` 命令（后台异步触发 + apply/stats/history） | `tui/app/slash/reflection.rs` |
-| pending 建议与 `/reflect apply` 写入 MemoryStore | `tui/app/slash/reflection.rs` |
-| `auto_apply_suggestions` 自动应用 suggested memories 与 outdated markers | `tui/app/update/ui_event.rs` |
-| 自动 N 轮触发（`reflection.interval_turns`，0 禁用） | `chat/looping/reflection.rs` |
-| Compact 前基于 early messages 提取 memory 建议，默认不自动写入 | `chat/looping/compact.rs`、`compact/summary.rs` |
+| 主循环 N 轮自动触发（`reflection.interval_turns`，0 禁用） | `chat/looping/reflection.rs` |
+| Compact 前基于 early messages 提取 memory 建议，默认不自动写入；PostCompact 不再作为目标 | `chat/looping/compact.rs`、`compact/summary.rs` |
+| SDK/TUI `/reflect` 调用完整 LLM reflection runner | `packages/sdk/src/tui.rs`、`tui/app/slash/reflection.rs` |
+| `/reflect apply` 将 pending 建议写入 MemoryStore | `tui/app/slash/reflection.rs` |
+| `auto_apply_suggestions` 自动应用 suggested memories 与 outdated markers | `reflection/apply.rs`、`tui/app/update/ui_event.rs` |
+| TUI 自动 reflection 完整展示结果，并保留 pending 建议 | `tui/app/update/ui_event.rs` |
+| 手动 `/reflect` 刷新 pending，支持后续 `/reflect apply` | `tui/app/slash/reflection.rs` |
 
-**暂缓**：连续工具失败触发、SessionEnd/SubagentStop 反思、独立 reflection model、PostCompact 后反思（已改为 Compact 前建议提取）。
+**暂缓/未实现**：连续工具失败、SessionEnd/SubagentStop、独立 reflection model、`ReflectionGenerated` hook、stats/history 持久化。
+
+**说明**：PostCompact 不再作为目标；当前已改为 Compact 前基于即将被压缩的 early messages 提取 memory 建议。
 
 **涉及路径**：`reflection/`、`tui/app/slash/reflection.rs`、`tui/app/update/ui_event.rs`
 
