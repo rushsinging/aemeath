@@ -44,7 +44,7 @@ fn test_single_completed() {
 
 #[test]
 fn test_status_group_ordering() {
-    // completed 按 updated_at 降序：task 7 (ts=700) → task 3 (ts=300) → task 1 (ts=100)
+    // completed 按 updated_at 升序，窗口内只显示上一条 completed：task 7 (ts=700)
     // in_progress 按 updated_at 升序：task 4 (ts=400)
     // pending 按 display_number 升序：task 2 (display=2) → task 5 (display=5)
     let tasks = vec![
@@ -57,17 +57,13 @@ fn test_status_group_ordering() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 7); // summary + 6 tasks
+    assert_eq!(result.len(), 6); // summary + 1 completed + 1 in_progress + 2 pending + fold hint
     assert!(result[0].contains("3/6"));
-    // completed group: updated_at desc → #6(done z,ts=700), #3(done y,ts=300), #1(done x,ts=100)
     assert!(result[1].contains("✓ #6 done z"));
-    assert!(result[2].contains("✓ #3 done y"));
-    assert!(result[3].contains("✓ #1 done x"));
-    // in_progress group
-    assert!(result[4].contains("■ #4 doing a"));
-    // pending group: display_number asc → #2, #5
-    assert!(result[5].contains("□ #2 pending a"));
-    assert!(result[6].contains("□ #5 pending b"));
+    assert!(result[2].contains("■ #4 doing a"));
+    assert!(result[3].contains("□ #2 pending a"));
+    assert!(result[4].contains("□ #5 pending b"));
+    assert!(result[5].contains("+2 more"));
 }
 
 #[test]
@@ -85,18 +81,16 @@ fn test_truncation_with_fold_hint() {
 
 #[test]
 fn test_all_completed() {
-    // make_task uses id as updated_at, so higher id = more recent → desc order
+    // completed 按 updated_at 升序，窗口内只显示上一条 completed
     let tasks: Vec<TaskSummary> = (1..=10)
         .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 9); // summary + 7 + fold
+    assert_eq!(result.len(), 3); // summary + 1 completed + fold
     assert!(result[0].contains("10/10"));
-    // completed sorted by updated_at desc → #10, #9, #8, ...
     assert!(result[1].contains("✓ #10"));
-    assert!(result[2].contains("✓ #9"));
-    assert!(result.last().unwrap().contains("+3 more"));
+    assert!(result.last().unwrap().contains("+9 more"));
 }
 
 #[test]
@@ -128,10 +122,10 @@ fn test_deleted_tasks_excluded() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    let task_lines: Vec<_> = result.iter().skip(1).collect();
-    assert_eq!(task_lines.len(), 2);
-    assert!(task_lines[0].contains("✓ #1"));
-    assert!(task_lines[1].contains("□ #2"));
+    assert!(result[0].contains("1/2"));
+    assert!(result[1].contains("✓ #1"));
+    assert!(result[2].contains("□ #2"));
+    assert!(!result.iter().any(|line| line.contains("deleted")));
 }
 
 #[test]
@@ -145,7 +139,7 @@ fn test_owner_display() {
 }
 
 #[test]
-fn test_window_truncates_across_groups() {
+fn test_window_prefers_feature_24_shape() {
     let mut tasks: Vec<TaskSummary> = (1..=5)
         .map(|i| make_task(&i.to_string(), &format!("done {}", i), TaskState::Completed))
         .collect();
@@ -153,12 +147,11 @@ fn test_window_truncates_across_groups() {
     tasks.push(make_task("7", "pending", TaskState::Pending));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 4);
-    // summary + 4 tasks + fold hint
-    assert_eq!(result.len(), 6);
-    // completed sorted by updated_at desc → #5, #4, #3, #2 (first 4 shown)
+    assert_eq!(result.len(), 5); // summary + previous completed + in_progress + pending + fold hint
     assert!(result[1].contains("✓ #5 done 5"));
-    assert!(result[4].contains("✓ #2 done 2"));
-    assert!(result[5].contains("+3 more"));
+    assert!(result[2].contains("■ #6 doing"));
+    assert!(result[3].contains("□ #7 pending"));
+    assert!(result[4].contains("+4 more"));
 }
 
 #[test]
@@ -172,9 +165,19 @@ fn test_recent_completed_before_older() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 3);
-    // 5 ordered tasks, max_lines=3 → show 3 most recent completed + fold hint
     assert!(result[1].contains("✓ #3 newest completed"));
-    assert!(result[2].contains("✓ #2 middle completed"));
-    assert!(result[3].contains("✓ #1 old completed"));
+    assert!(result[2].contains("■ #4 current"));
+    assert!(result[3].contains("□ #5 next"));
     assert!(result[4].contains("+2 more"));
+}
+
+#[test]
+fn test_blocked_by_display_uses_batch_local_numbers() {
+    let completed = make_task_with_ts("1", "setup", TaskState::Completed, 100);
+    let mut pending = make_task_with_ts("2", "follow up", TaskState::Pending, 200);
+    pending.blocked_by = vec!["1".to_string(), "999".to_string()];
+    let tasks = vec![completed, pending];
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert!(result[2].contains("□ #2 follow up (blocked by #1, #999)"));
 }

@@ -176,6 +176,8 @@ pub struct TaskSummary {
     pub priority: String,
     /// 负责人。
     pub owner: Option<String>,
+    /// 阻塞当前任务的依赖任务 ID。
+    pub blocked_by: Vec<String>,
     /// 更新时间戳。
     pub updated_at: u64,
 }
@@ -189,6 +191,7 @@ impl TaskSummary {
             state: TaskState::Pending,
             priority: "normal".to_string(),
             owner: None,
+            blocked_by: Vec::new(),
             updated_at: 0,
         }
     }

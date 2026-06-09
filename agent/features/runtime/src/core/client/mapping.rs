@@ -102,7 +102,10 @@ pub(crate) fn task_status_lines(
         return Vec::new();
     }
 
-    let total = tasks.len();
+    let total = tasks
+        .iter()
+        .filter(|t| t.status != TaskStatus::Deleted)
+        .count();
     let completed_count = tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Completed)
@@ -120,24 +123,49 @@ pub(crate) fn task_status_lines(
             TaskStatus::Deleted => {}
         }
     }
-    completed.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    completed.sort_by_key(|t| t.updated_at);
     in_progress.sort_by_key(|t| t.updated_at);
     pending.sort_by_key(|t| display_map.get(&t.id).copied().unwrap_or(usize::MAX));
 
-    let ordered: Vec<_> = completed
-        .into_iter()
-        .chain(in_progress)
-        .chain(pending)
-        .collect();
-    let shown_count = ordered.len().min(max_lines);
-    let hidden_count = ordered.len() - shown_count;
-    for task in ordered.iter().take(shown_count) {
+    let visible = select_task_window(completed, in_progress, pending, max_lines);
+    let shown_count = visible.len();
+    let hidden_count = total.saturating_sub(shown_count);
+    for task in visible {
         lines.push(format_task_status_line(task, display_map));
     }
     if hidden_count > 0 {
         lines.push(format!("… +{} more", hidden_count));
     }
     lines
+}
+
+fn select_task_window<'a>(
+    completed: Vec<&'a storage::api::Task>,
+    in_progress: Vec<&'a storage::api::Task>,
+    pending: Vec<&'a storage::api::Task>,
+    max_lines: usize,
+) -> Vec<&'a storage::api::Task> {
+    let mut visible = Vec::with_capacity(max_lines);
+    if max_lines == 0 {
+        return visible;
+    }
+
+    let reserved_for_pending = usize::from(!pending.is_empty());
+    let in_progress_capacity = max_lines.saturating_sub(reserved_for_pending);
+    let shown_in_progress = in_progress.len().min(in_progress_capacity);
+    let can_show_completed = !completed.is_empty() && shown_in_progress < in_progress_capacity;
+
+    if can_show_completed {
+        if let Some(task) = completed.last() {
+            visible.push(*task);
+        }
+    }
+
+    visible.extend(in_progress.into_iter().take(shown_in_progress));
+
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(pending.into_iter().take(remaining));
+    visible
 }
 
 fn format_task_status_line(
@@ -156,7 +184,32 @@ fn format_task_status_line(
         .as_deref()
         .map(|owner| format!(" (@{})", owner))
         .unwrap_or_default();
-    format!("{} #{} {}{}", icon, display_id, task.subject, owner)
+    let blocked_by = format_blocked_by(&task.blocked_by, display_map);
+    format!(
+        "{} #{} {}{}{}",
+        icon, display_id, task.subject, owner, blocked_by
+    )
+}
+
+fn format_blocked_by(
+    blocked_by: &[String],
+    display_map: &std::collections::HashMap<String, usize>,
+) -> String {
+    if blocked_by.is_empty() {
+        return String::new();
+    }
+
+    let deps = blocked_by
+        .iter()
+        .map(|id| {
+            display_map
+                .get(id)
+                .map(|display_id| format!("#{}", display_id))
+                .unwrap_or_else(|| format!("#{}", id))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(" (blocked by {deps})")
 }
 
 pub(super) fn workspace_context_to_sdk(
