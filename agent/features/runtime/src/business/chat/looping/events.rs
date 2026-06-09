@@ -4,6 +4,21 @@ use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
 use std::pin::Pin;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeTurnContext {
+    pub chat_id: String,
+    pub turn_id: String,
+}
+
+impl RuntimeTurnContext {
+    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+        Self {
+            chat_id: chat_id.into(),
+            turn_id: turn_id.into(),
+        }
+    }
+}
+
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,16 +50,27 @@ pub struct RuntimeHookEvent {
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
-    Text(String),
-    Thinking(String),
-    TextBlockComplete(String),
+    Text {
+        context: RuntimeTurnContext,
+        text: String,
+    },
+    Thinking {
+        context: RuntimeTurnContext,
+        text: String,
+    },
+    TextBlockComplete {
+        context: RuntimeTurnContext,
+        text: String,
+    },
     ToolCallStart {
+        context: RuntimeTurnContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolArgumentsDelta {
+        context: RuntimeTurnContext,
         id: String,
         provider_id: Option<String>,
         index: usize,
@@ -52,6 +78,7 @@ pub enum RuntimeStreamEvent {
         partial_args: String,
     },
     ToolCall {
+        context: RuntimeTurnContext,
         id: String,
         provider_id: String,
         name: String,
@@ -59,6 +86,7 @@ pub enum RuntimeStreamEvent {
         summary: String,
     },
     ToolResult {
+        context: RuntimeTurnContext,
         id: String,
         provider_id: String,
         tool_name: String,

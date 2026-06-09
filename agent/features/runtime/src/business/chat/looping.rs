@@ -24,7 +24,7 @@ mod tools;
 
 pub use events::{
     ChatEventSink, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
-    RuntimeHookExecutionResult, RuntimeStreamEvent,
+    RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeTurnContext,
 };
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,

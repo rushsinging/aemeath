@@ -1,4 +1,20 @@
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UiTurnContext {
+    pub chat_id: ChatId,
+    pub turn_id: ChatTurnId,
+}
+
+impl From<sdk::ChatEventContext> for UiTurnContext {
+    fn from(context: sdk::ChatEventContext) -> Self {
+        Self {
+            chat_id: ChatId::new(context.chat_id),
+            turn_id: ChatTurnId::new(context.turn_id),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusContextUpdate {
@@ -14,16 +30,27 @@ pub struct StatusContextUpdate {
 /// Events sent from background task to UI
 #[derive(Debug)]
 pub enum AppEvent {
-    Text(String),
-    Thinking(String),
-    TextBlockComplete(String),
+    Text {
+        context: UiTurnContext,
+        text: String,
+    },
+    Thinking {
+        context: UiTurnContext,
+        text: String,
+    },
+    TextBlockComplete {
+        context: UiTurnContext,
+        text: String,
+    },
     ToolCallStart {
+        context: UiTurnContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolArgumentsDelta {
+        context: UiTurnContext,
         id: String,
         provider_id: Option<String>,
         index: usize,
@@ -31,6 +58,7 @@ pub enum AppEvent {
         partial_args: String,
     },
     ToolCall {
+        context: UiTurnContext,
         id: String,
         provider_id: String,
         name: String,
@@ -38,6 +66,7 @@ pub enum AppEvent {
         summary: String,
     },
     ToolResult {
+        context: UiTurnContext,
         id: String,
         provider_id: String,
         tool_name: String,

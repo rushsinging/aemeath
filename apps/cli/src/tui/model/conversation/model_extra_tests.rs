@@ -1,6 +1,8 @@
 //! ConversationModel 辅助功能测试（reset、append_user_message）。
 
+use super::block::ConversationBlock;
 use super::change::ConversationChange;
+use super::ids::{ChatId, ChatTurnId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 
@@ -89,18 +91,37 @@ fn test_conversation_reset_on_empty_is_noop() {
 }
 
 #[test]
-fn test_conversation_reset_allows_fresh_chat_afterwards() {
+fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat() {
     let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::StartChat {
-        submission: "first".to_string(),
+
+    model.apply(ConversationIntent::BindRuntimeTurn {
+        chat_id: ChatId::new("runtime-chat-1"),
+        turn_id: ChatTurnId::new("runtime-turn-1"),
     });
-    model.reset();
-    model.apply(ConversationIntent::AppendSystemMessage {
-        text: "[conversation cleared]".to_string(),
+    let changes = model.apply(ConversationIntent::ObserveToolCallStart {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
     });
-    assert_eq!(model.blocks.len(), 1);
+    model.apply(ConversationIntent::ObserveToolArguments {
+        id: "tool-1".to_string(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+        partial_args: r#"{"command":"pwd"}"#.to_string(),
+    });
+
+    assert_eq!(
+        model.active_chat_id.as_ref().map(AsRef::as_ref),
+        Some("runtime-chat-1")
+    );
+    assert!(changes
+        .iter()
+        .any(|change| matches!(change, ConversationChange::ToolCallObserved { name, .. } if name == "Bash")));
     assert!(model.blocks.iter().any(|block| matches!(
         block,
-        super::block::ConversationBlock::System { text, .. } if text == "[conversation cleared]"
+        ConversationBlock::ToolCall { id, name, args_preview, .. }
+            if id.as_ref() == "tool-1" && name == "Bash" && args_preview.contains("pwd")
     )));
 }

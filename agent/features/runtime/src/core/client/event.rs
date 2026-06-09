@@ -1,9 +1,10 @@
 use crate::business::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
 use std::sync::{Arc, Mutex};
 
+use crate::business::chat::looping::RuntimeTurnContext;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChangeSet, ChatEvent,
-    HookEventStatus, HookEventView, HookExecutionResultView, ToolResultImage,
+    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, ToolResultImage,
 };
 
 #[derive(Clone)]
@@ -80,35 +81,57 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
     }
 }
 
+fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
+    ChatEventContext {
+        chat_id: context.chat_id,
+        turn_id: context.turn_id,
+    }
+}
+
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
     change_tx: &tokio::sync::watch::Sender<ChangeSet>,
 ) -> ChatEvent {
     match event {
-        crate::business::chat::RuntimeStreamEvent::Text(text) => ChatEvent::Token(text),
-        crate::business::chat::RuntimeStreamEvent::Thinking(text) => ChatEvent::Thinking(text),
-        crate::business::chat::RuntimeStreamEvent::TextBlockComplete(text) => {
-            ChatEvent::TextBlockComplete(text)
+        crate::business::chat::RuntimeStreamEvent::Text { context, text } => ChatEvent::Token {
+            context: turn_context_to_sdk(context),
+            text,
+        },
+        crate::business::chat::RuntimeStreamEvent::Thinking { context, text } => {
+            ChatEvent::Thinking {
+                context: turn_context_to_sdk(context),
+                text,
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::TextBlockComplete { context, text } => {
+            ChatEvent::TextBlockComplete {
+                context: turn_context_to_sdk(context),
+                text,
+            }
         }
         crate::business::chat::RuntimeStreamEvent::ToolCallStart {
+            context,
             id,
             provider_id,
             name,
             index,
         } => ChatEvent::ToolCallStart {
+            context: turn_context_to_sdk(context),
             id,
             provider_id,
             name,
             index,
         },
         crate::business::chat::RuntimeStreamEvent::ToolArgumentsDelta {
+            context,
             id,
             provider_id,
             index,
             name,
             partial_args,
         } => ChatEvent::ToolArgumentsDelta {
+            context: turn_context_to_sdk(context),
             id,
             provider_id,
             index,
@@ -116,12 +139,14 @@ pub(crate) fn runtime_event_to_sdk_event(
             partial_args,
         },
         crate::business::chat::RuntimeStreamEvent::ToolCall {
+            context,
             id,
             provider_id,
             name,
             index,
             summary,
         } => ChatEvent::ToolCall {
+            context: turn_context_to_sdk(context),
             id,
             provider_id,
             name,
@@ -129,6 +154,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             summary,
         },
         crate::business::chat::RuntimeStreamEvent::ToolResult {
+            context,
             id,
             provider_id,
             tool_name,
@@ -136,6 +162,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             is_error,
             images,
         } => ChatEvent::ToolResult {
+            context: turn_context_to_sdk(context),
             id,
             provider_id,
             tool_name,

@@ -1,4 +1,6 @@
-use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::events::{
+    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
+};
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use provider::api::StreamHandler;
 
@@ -9,20 +11,30 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
+    pub context: RuntimeTurnContext,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
     pub fn new(sink: S) -> Self {
-        Self::with_tool_identity(sink, ToolIdentityRegistry::new())
+        Self::with_tool_identity(
+            sink,
+            ToolIdentityRegistry::new(),
+            RuntimeTurnContext::new("runtime-chat-1", "turn-1"),
+        )
     }
 
-    pub fn with_tool_identity(sink: S, tool_identity: ToolIdentityRegistry) -> Self {
+    pub fn with_tool_identity(
+        sink: S,
+        tool_identity: ToolIdentityRegistry,
+        context: RuntimeTurnContext,
+    ) -> Self {
         Self {
             sink,
             first_text_time: None,
             total_chars: 0,
             last_tps_update: std::time::Instant::now(),
             tool_identity,
+            context,
         }
     }
 
@@ -33,8 +45,10 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
 
 impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_text(&mut self, text: &str) {
-        self.sink
-            .try_send_event(RuntimeStreamEvent::Text(text.to_string()));
+        self.sink.try_send_event(RuntimeStreamEvent::Text {
+            context: self.context.clone(),
+            text: text.to_string(),
+        });
         let now = std::time::Instant::now();
         if self.first_text_time.is_none() {
             self.first_text_time = Some(now);
@@ -57,6 +71,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
         let id = self.runtime_tool_id(index, provider_id);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
+            context: self.context.clone(),
             id,
             provider_id: provider_id.map(str::to_string),
             name: name.to_string(),
@@ -73,12 +88,17 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
 
     fn on_text_block_complete(&mut self, text: &str) {
         self.sink
-            .try_send_event(RuntimeStreamEvent::TextBlockComplete(text.to_string()));
+            .try_send_event(RuntimeStreamEvent::TextBlockComplete {
+                context: self.context.clone(),
+                text: text.to_string(),
+            });
     }
 
     fn on_thinking(&mut self, text: &str) {
-        self.sink
-            .try_send_event(RuntimeStreamEvent::Thinking(text.to_string()));
+        self.sink.try_send_event(RuntimeStreamEvent::Thinking {
+            context: self.context.clone(),
+            text: text.to_string(),
+        });
     }
 
     fn on_tool_arguments_delta(
@@ -91,6 +111,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
             .try_send_event(RuntimeStreamEvent::ToolArgumentsDelta {
+                context: self.context.clone(),
                 id,
                 provider_id: provider_id.map(str::to_string),
                 index,

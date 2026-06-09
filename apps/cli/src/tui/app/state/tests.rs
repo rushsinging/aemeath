@@ -332,26 +332,39 @@ mod tests {
         }
     }
 
+    fn test_turn_context() -> crate::tui::app::event::UiTurnContext {
+        crate::tui::app::event::UiTurnContext {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-test"),
+        }
+    }
+
     fn grep_after_thinking_events() -> Vec<UiEvent> {
         vec![
-            UiEvent::Thinking("thinking".to_string()),
-            UiEvent::TextBlockComplete("thinking".to_string()),
+            UiEvent::Thinking {
+                context: test_turn_context(),
+                text: "thinking".to_string(),
+            },
+            UiEvent::TextBlockComplete {
+                context: test_turn_context(),
+                text: "thinking".to_string(),
+            },
             UiEvent::ToolCallStart {
-                id: "grep-1".to_string(),
-                provider_id: Some("provider-grep-1".to_string()),
+                context: test_turn_context(),
+                id: "grep-1".to_string(),                provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
             },
             UiEvent::ToolCall {
-                id: "grep-1".to_string(),
-                provider_id: "provider-grep-1".to_string(),
+                context: test_turn_context(),
+                id: "grep-1".to_string(),                provider_id: "provider-grep-1".to_string(),
                 name: "Grep".to_string(),
                 index: Some(1),
                 summary: r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string(),
             },
             UiEvent::ToolResult {
-                id: "grep-1".to_string(),
-                provider_id: "provider-grep-1".to_string(),
+                context: test_turn_context(),
+                id: "grep-1".to_string(),                provider_id: "provider-grep-1".to_string(),
                 tool_name: "Grep".to_string(),                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
                 is_error: false,
                 images: Vec::new(),

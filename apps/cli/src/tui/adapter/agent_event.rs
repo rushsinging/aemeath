@@ -26,75 +26,134 @@ pub struct AgentEventMapping {
 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     match event {
-        UiEvent::Text(text) => {
-            let mut mapping =
-                conversation(ConversationIntent::ObserveAssistantText { text: text.clone() });
+        UiEvent::Text { context, text } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveAssistantText { text: text.clone() });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
             mapping
         }
-        UiEvent::Thinking(text) => {
-            let mut mapping =
-                conversation(ConversationIntent::ObserveThinkingText { text: text.clone() });
+        UiEvent::Thinking { context, text } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveThinkingText { text: text.clone() });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
             mapping
         }
-        UiEvent::TextBlockComplete(_) => conversation(ConversationIntent::CompleteTextBlock),
+        UiEvent::TextBlockComplete { context, .. } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::CompleteTextBlock);
+            mapping
+        }
         UiEvent::ToolCallStart {
+            context,
             id,
             provider_id,
             name,
             index,
-        } => conversation(ConversationIntent::ObserveToolCallStart {
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            name: name.clone(),
-            index: *index,
-        }),
+        } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveToolCallStart {
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    name: name.clone(),
+                    index: *index,
+                });
+            mapping
+        }
         UiEvent::ToolArgumentsDelta {
+            context,
             id,
             provider_id,
             index,
             name,
             partial_args,
-        } => conversation(ConversationIntent::ObserveToolArguments {
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            name: name.clone(),
-            index: *index,
-            partial_args: sanitize_tool_arguments_delta(name, partial_args),
-        }),
+        } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveToolArguments {
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    name: name.clone(),
+                    index: *index,
+                    partial_args: sanitize_tool_arguments_delta(name, partial_args),
+                });
+            mapping
+        }
         UiEvent::ToolCall {
+            context,
             id,
             provider_id,
             name,
             index,
             summary,
-        } => conversation(ConversationIntent::ObserveToolCall {
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            name: name.clone(),
-            index: index.unwrap_or(0),
-            summary: sanitize_tool_summary(name, summary),
-        }),
+        } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveToolCall {
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    name: name.clone(),
+                    index: index.unwrap_or(0),
+                    summary: sanitize_tool_summary(name, summary),
+                });
+            mapping
+        }
         UiEvent::ToolResult {
+            context,
             id,
             provider_id,
             tool_name,
             output,
             is_error,
             images,
-        } => conversation(ConversationIntent::ObserveToolResult {
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            tool_name: tool_name.clone(),
-            output: sanitize_tool_output(tool_name, output),
-            is_error: *is_error,
-            image_count: images.len(),
-        }),
+        } => {
+            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            });
+            mapping
+                .conversation
+                .push(ConversationIntent::ObserveToolResult {
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    tool_name: tool_name.clone(),
+                    output: sanitize_tool_output(tool_name, output),
+                    is_error: *is_error,
+                    image_count: images.len(),
+                });
+            mapping
+        }
         UiEvent::Usage {
             input,
             output,
@@ -296,22 +355,44 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::event::UiTurnContext;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+
+    fn ctx() -> UiTurnContext {
+        UiTurnContext {
+            chat_id: ChatId::new("chat-test"),
+            turn_id: ChatTurnId::new("turn-test"),
+        }
+    }
+
+    fn first_observation(mapping: &AgentEventMapping) -> Option<&ConversationIntent> {
+        mapping
+            .conversation
+            .iter()
+            .find(|intent| !matches!(intent, ConversationIntent::BindRuntimeTurn { .. }))
+    }
 
     #[test]
     fn test_map_agent_event_text_to_conversation_intent() {
-        let mapping = map_agent_event(&UiEvent::Text("hello".to_string()));
+        let mapping = map_agent_event(&UiEvent::Text {
+            context: ctx(),
+            text: "hello".to_string(),
+        });
         assert!(matches!(
-            mapping.conversation.first(),
+            first_observation(&mapping),
             Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
         ));
     }
 
     #[test]
     fn test_map_agent_event_text_sets_generating_phase_with_text_update() {
-        let mapping = map_agent_event(&UiEvent::Text("hello".to_string()));
+        let mapping = map_agent_event(&UiEvent::Text {
+            context: ctx(),
+            text: "hello".to_string(),
+        });
 
         assert!(matches!(
-            mapping.conversation.first(),
+            first_observation(&mapping),
             Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
         ));
         assert_eq!(
@@ -322,10 +403,13 @@ mod tests {
 
     #[test]
     fn test_map_agent_event_thinking_sets_thinking_phase_with_text_update() {
-        let mapping = map_agent_event(&UiEvent::Thinking("reason".to_string()));
+        let mapping = map_agent_event(&UiEvent::Thinking {
+            context: ctx(),
+            text: "reason".to_string(),
+        });
 
         assert!(matches!(
-            mapping.conversation.first(),
+            first_observation(&mapping),
             Some(ConversationIntent::ObserveThinkingText { text }) if text == "reason"
         ));
         assert_eq!(
@@ -367,6 +451,7 @@ mod tests {
     #[test]
     fn test_map_agent_event_tool_arguments_delta_truncates_large_stream() {
         let event = UiEvent::ToolArgumentsDelta {
+            context: ctx(),
             id: "tool-1".to_string(),
             provider_id: Some("provider-1".to_string()),
             index: 0,
@@ -376,7 +461,7 @@ mod tests {
 
         let mapping = map_agent_event(&event);
 
-        match mapping.conversation.first() {
+        match first_observation(&mapping) {
             Some(ConversationIntent::ObserveToolArguments { partial_args, .. }) => {
                 assert!(partial_args.len() < TOOL_STREAM_PREVIEW_LIMIT + 128);
                 assert!(partial_args.contains("omitted from TUI preview for Edit"));
@@ -390,6 +475,7 @@ mod tests {
         let large_old = "旧".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
         let large_new = "新".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
         let event = UiEvent::ToolCall {
+            context: ctx(),
             id: "tool-1".to_string(),
             provider_id: "provider-1".to_string(),
             name: "Edit".to_string(),
@@ -404,7 +490,7 @@ mod tests {
 
         let mapping = map_agent_event(&event);
 
-        match mapping.conversation.first() {
+        match first_observation(&mapping) {
             Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
                 assert!(summary.contains("src/lib.rs"));
                 assert!(summary.contains("Edit.old_string"));
@@ -423,6 +509,7 @@ mod tests {
     fn test_map_agent_event_tool_call_summarizes_agent_prompt_and_bash_command() {
         for (tool_name, field) in [("Agent", "prompt"), ("Bash", "command")] {
             let event = UiEvent::ToolCall {
+                context: ctx(),
                 id: "tool-1".to_string(),
                 provider_id: "provider-1".to_string(),
                 name: tool_name.to_string(),
@@ -434,7 +521,7 @@ mod tests {
 
             let mapping = map_agent_event(&event);
 
-            match mapping.conversation.first() {
+            match first_observation(&mapping) {
                 Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
                     assert!(summary.contains(&format!("{tool_name}.{field}")));
                     assert!(
@@ -451,6 +538,7 @@ mod tests {
     #[test]
     fn test_map_agent_event_tool_result_truncates_large_output() {
         let event = UiEvent::ToolResult {
+            context: ctx(),
             id: "tool-1".to_string(),
             provider_id: "provider-1".to_string(),
             tool_name: "Bash".to_string(),
@@ -461,7 +549,7 @@ mod tests {
 
         let mapping = map_agent_event(&event);
 
-        match mapping.conversation.first() {
+        match first_observation(&mapping) {
             Some(ConversationIntent::ObserveToolResult { output, .. }) => {
                 assert!(output.len() < TOOL_TEXT_PREVIEW_LIMIT + 128);
                 assert!(output.contains("omitted from TUI preview for Bash"));

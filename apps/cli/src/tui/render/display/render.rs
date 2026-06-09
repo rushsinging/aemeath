@@ -1,3 +1,4 @@
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use crate::tui::model::conversation::intent::ConversationIntent;
 
 impl crate::tui::app::App {
@@ -35,6 +36,16 @@ impl crate::tui::app::App {
         msg: &sdk::ChatMessage,
         subsequent_msg: Option<&sdk::ChatMessage>,
     ) {
+        let chat_id = self
+            .model
+            .conversation
+            .active_chat_id
+            .clone()
+            .unwrap_or_else(|| ChatId::new("history-chat"));
+        let turn_id = ChatTurnId::new("turn-1");
+        self.model
+            .conversation
+            .ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         let tool_results = collect_following_tool_results(subsequent_msg);
         for (index, block) in msg.content.as_array().into_iter().flatten().enumerate() {
             match block.get("type").and_then(|value| value.as_str()) {

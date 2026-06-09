@@ -18,14 +18,14 @@ impl App {
     ) -> UpdateResult {
         let mut effects = Vec::new();
         match ev {
-            UiEvent::Text(_text) => {
+            UiEvent::Text { .. } => {
                 if self.chat.tool_call_active {
                     log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
                     self.chat.clear_tool_activity();
                 }
                 self.spinner_phase(SpinnerPhase::Generating);
             }
-            UiEvent::Thinking(_text) => {
+            UiEvent::Thinking { .. } => {
                 if self.chat.tool_call_active {
                     log::debug!(
                         "[SPINNER] Thinking: tool_call_active was true, resetting to false"
@@ -34,7 +34,9 @@ impl App {
                 }
                 self.spinner_phase(SpinnerPhase::Thinking);
             }
-            UiEvent::TextBlockComplete(_text) => {}
+            UiEvent::TextBlockComplete { context, text } => {
+                let _ = (context, text);
+            }
             UiEvent::ToolCallStart { name, index, .. } => {
                 log::debug!(
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",

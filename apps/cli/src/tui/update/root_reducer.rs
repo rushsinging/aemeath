@@ -257,6 +257,13 @@ mod tests {
         assert_eq!(model.conversation.queued_submissions.len(), 1);
     }
 
+    fn test_turn_context() -> crate::tui::app::event::UiTurnContext {
+        crate::tui::app::event::UiTurnContext {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-test"),
+        }
+    }
+
     #[test]
     fn test_update_agent_text_marks_output_dirty() {
         let mut model = TuiModel::default();
@@ -264,7 +271,10 @@ mod tests {
         let result = update(
             &mut model,
             &mut view_state,
-            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text("hi".into())),
+            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text {
+                context: test_turn_context(),
+                text: "hi".into(),
+            }),
         );
         assert!(result.dirty.output);
     }
@@ -276,7 +286,10 @@ mod tests {
         let result = update(
             &mut model,
             &mut view_state,
-            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text("hi".into())),
+            TuiMsg::AgentEvent(crate::tui::app::event::UiEvent::Text {
+                context: test_turn_context(),
+                text: "hi".into(),
+            }),
         );
 
         assert!(result.dirty.output);

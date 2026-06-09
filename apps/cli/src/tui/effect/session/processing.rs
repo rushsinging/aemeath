@@ -61,21 +61,33 @@ impl sdk::ChatInputEventPort for TuiInputEventPort {
 
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
-        sdk::ChatEvent::Token(text) => UiEvent::Text(text),
-        sdk::ChatEvent::Thinking(text) => UiEvent::Thinking(text),
-        sdk::ChatEvent::TextBlockComplete(text) => UiEvent::TextBlockComplete(text),
+        sdk::ChatEvent::Token { context, text } => UiEvent::Text {
+            context: context.into(),
+            text,
+        },
+        sdk::ChatEvent::Thinking { context, text } => UiEvent::Thinking {
+            context: context.into(),
+            text,
+        },
+        sdk::ChatEvent::TextBlockComplete { context, text } => UiEvent::TextBlockComplete {
+            context: context.into(),
+            text,
+        },
         sdk::ChatEvent::ToolCallStart {
+            context,
             id,
             provider_id,
             name,
             index,
         } => UiEvent::ToolCallStart {
+            context: context.into(),
             id,
             provider_id,
             name,
             index,
         },
         sdk::ChatEvent::ToolArgumentsDelta {
+            context,
             id,
             provider_id,
             index,
@@ -83,6 +95,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             partial_args,
             ..
         } => UiEvent::ToolArgumentsDelta {
+            context: context.into(),
             id,
             provider_id,
             index,
@@ -90,6 +103,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             partial_args,
         },
         sdk::ChatEvent::ToolCall {
+            context,
             id,
             provider_id,
             name,
@@ -97,6 +111,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             summary,
             ..
         } => UiEvent::ToolCall {
+            context: context.into(),
             id,
             provider_id,
             name,
@@ -104,6 +119,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             summary,
         },
         sdk::ChatEvent::ToolResult {
+            context,
             id,
             provider_id,
             tool_name,
@@ -112,6 +128,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             images,
             ..
         } => UiEvent::ToolResult {
+            context: context.into(),
             id,
             provider_id,
             tool_name,
@@ -177,7 +194,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             workspace,
         }),
         sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
-        sdk::ChatEvent::Result(result) => UiEvent::Text(result.text),
+        sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }
 
@@ -244,12 +261,19 @@ pub fn spawn_processing(ctx: SpawnContext) {
 mod tests {
     use super::*;
 
+    fn test_sdk_event_context() -> sdk::ChatEventContext {
+        sdk::ChatEventContext::new("chat-test", "turn-test")
+    }
+
     #[test]
     fn test_sdk_event_to_ui_event_maps_token() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::Token("hello".to_string()));
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::Token {
+            context: test_sdk_event_context(),
+            text: "hello".to_string(),
+        });
 
         match event {
-            UiEvent::Text(text) => assert_eq!(text, "hello"),
+            UiEvent::Text { text, .. } => assert_eq!(text, "hello"),
             other => panic!("unexpected event: {other:?}"),
         }
     }

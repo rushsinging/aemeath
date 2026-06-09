@@ -1,6 +1,6 @@
 use crate::business::agent::{Agent, ToolCall};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use logging::JsonLogger;
 use share::config::hooks::HookEvent;
@@ -12,6 +12,7 @@ use super::tools::{
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
+    context: &RuntimeTurnContext,
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
@@ -35,6 +36,7 @@ where
 
     if other_calls.len() == 1 {
         return execute_one_non_agent(
+            context,
             agent,
             sink,
             hook_ui,
@@ -48,6 +50,7 @@ where
     }
 
     execute_multiple_non_agent(
+        context,
         agent,
         sink,
         hook_ui,
@@ -62,6 +65,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_multiple_non_agent<S>(
+    context: &RuntimeTurnContext,
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
@@ -89,9 +93,11 @@ where
                 let hook_runner = hook_runner.clone();
                 let json_logger = json_logger.clone();
                 let sem = semaphore.clone();
+                let context = context.clone();
                 async move {
                     let _permit = sem.acquire().await.expect("semaphore closed");
                     let result = execute_one_non_agent(
+                        &context,
                         agent,
                         &sink,
                         &hook_ui,
@@ -116,6 +122,7 @@ where
     for &pos in &sequential_positions {
         let call = other_calls[pos];
         let result_vec = execute_one_non_agent(
+            context,
             agent,
             sink,
             hook_ui,
@@ -162,6 +169,7 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_non_agent<S>(
+    context: &RuntimeTurnContext,
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
@@ -213,7 +221,7 @@ where
             true,
             Vec::new(),
         );
-        send_tool_result(sink, &owned_call, &result).await;
+        send_tool_result(sink, context, &owned_call, &result).await;
         return vec![result];
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
@@ -244,7 +252,7 @@ where
         if task_store_mutation_succeeded(&owned_call.name, result.3) {
             let _ = sink.send_event(RuntimeStreamEvent::TasksChanged).await;
         }
-        send_tool_result(sink, &owned_call, &result).await;
+        send_tool_result(sink, context, &owned_call, &result).await;
         out.push(result);
     }
     out

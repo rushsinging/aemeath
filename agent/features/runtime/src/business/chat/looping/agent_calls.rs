@@ -1,7 +1,7 @@
 use crate::business::agent::ToolCall;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,6 +10,7 @@ use tools::api::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
+    context: &RuntimeTurnContext,
     agent_approved: &[&ToolCall],
     registry: &Arc<ToolRegistry>,
     agent_ctx: &ToolExecutionContext,
@@ -43,9 +44,18 @@ where
                 let mut ag_ctx = agent_ctx.clone();
                 let hook_runner = hook_runner.clone();
                 let registry_ref = registry.clone();
+                let context = context.clone();
                 async move {
-                    execute_one_agent(call, sink, hook_ui, hook_runner, registry_ref, &mut ag_ctx)
-                        .await
+                    execute_one_agent(
+                        &context,
+                        call,
+                        sink,
+                        hook_ui,
+                        hook_runner,
+                        registry_ref,
+                        &mut ag_ctx,
+                    )
+                    .await
                 }
             })
             .collect();
@@ -56,6 +66,7 @@ where
 }
 
 async fn execute_one_agent<S>(
+    context: &RuntimeTurnContext,
     call: ToolCall,
     sink: S,
     hook_ui: HookUi<S>,
@@ -87,7 +98,7 @@ where
             true,
             Vec::new(),
         );
-        send_tool_result(&sink, &call, &result).await;
+        send_tool_result(&sink, context, &call, &result).await;
         return vec![result];
     }
 
@@ -134,6 +145,7 @@ where
         run_post_tool_hooks(&sink, &hook_ui, &hook_runner, &call, output, *is_error).await;
         send_tool_result(
             &sink,
+            context,
             &call,
             &(
                 id.clone(),
