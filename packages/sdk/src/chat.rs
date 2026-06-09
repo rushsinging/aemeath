@@ -374,14 +374,22 @@ mod tests {
     #[tokio::test]
     async fn test_chat_stream_recv_returns_sent_event() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tx.send(ChatEvent::Token("hello".to_string())).unwrap();
+        tx.send(ChatEvent::Token {
+            context: ChatEventContext::new("chat-1", "turn-1"),
+            text: "hello".to_string(),
+        })
+        .unwrap();
         drop(tx);
         let mut stream = ChatStream::new(rx);
 
         let event = stream.recv().await;
 
         match event {
-            Some(ChatEvent::Token(text)) => assert_eq!(text, "hello"),
+            Some(ChatEvent::Token { context, text }) => {
+                assert_eq!(context.chat_id, "chat-1");
+                assert_eq!(context.turn_id, "turn-1");
+                assert_eq!(text, "hello");
+            }
             other => panic!("unexpected event: {other:?}"),
         }
     }
