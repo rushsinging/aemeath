@@ -2,7 +2,8 @@ use super::agent_progress::AgentProgressEntry;
 use super::block::ConversationBlock;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
-use super::ids::{ChatId, ToolCallId};
+use super::chat_turn::ChatTurn;
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::queued_submission::QueuedSubmission;
 
@@ -97,6 +98,10 @@ impl ConversationModel {
             ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
             ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
             ConversationIntent::AnswerAskUser { answer } => self.answer_ask_user(answer),
+            ConversationIntent::BindRuntimeTurn { chat_id, turn_id } => {
+                self.ensure_runtime_turn(chat_id, turn_id);
+                Vec::new()
+            }
         }
     }
 
@@ -136,6 +141,50 @@ impl ConversationModel {
         ]
     }
 
+    pub(crate) fn ensure_runtime_turn(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+    ) -> (ChatId, ChatTurnId) {
+        self.active_chat_id = Some(chat_id.clone());
+        if let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) {
+            chat.status = ChatStatus::Running;
+            if !chat.turns.iter().any(|turn| turn.id == turn_id) {
+                let sequence = chat.turns.len();
+                chat.turns.push(ChatTurn::new(turn_id.clone(), sequence));
+            }
+            return (chat_id, turn_id);
+        }
+        let mut chat = Chat::new(chat_id.clone(), String::new());
+        chat.turns.clear();
+        chat.turns.push(ChatTurn::new(turn_id.clone(), 0));
+        self.chats.push(chat);
+        (chat_id, turn_id)
+    }
+
+    fn runtime_turn_mut(
+        &mut self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+    ) -> Option<&mut ChatTurn> {
+        self.chats
+            .iter_mut()
+            .find(|chat| &chat.id == chat_id)
+            .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
+    }
+
+    fn current_runtime_turn(&mut self) -> Option<(ChatId, ChatTurnId)> {
+        let chat_id = self.active_chat_id.clone()?;
+        let turn_id = self
+            .chats
+            .iter()
+            .find(|chat| chat.id == chat_id)?
+            .active_turn()?
+            .id
+            .clone();
+        Some((chat_id, turn_id))
+    }
+
     fn observe_tool_call_start(
         &mut self,
         id: String,
@@ -143,14 +192,12 @@ impl ConversationModel {
         name: String,
         index: usize,
     ) -> Vec<ConversationChange> {
-        let tool_call_id = ToolCallId::new(id.clone());
-        let Some(chat_id) = self.active_chat_id.clone() else {
+        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
             return Vec::new();
         };
-        if let Some(chat) = self.active_chat_mut() {
-            if let Some(turn) = chat.active_turn_mut() {
-                turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
-            }
+        let tool_call_id = ToolCallId::new(id.clone());
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
         }
         self.insert_tool_call_block_before_active_text(
             tool_call_id,
@@ -171,49 +218,47 @@ impl ConversationModel {
         index: usize,
         summary: String,
     ) -> Vec<ConversationChange> {
+        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
+            return Vec::new();
+        };
         let candidate_ids = [id.as_str(), provider_id.as_str()];
         let mut args_preview = String::new();
         let mut final_summary = summary.clone();
         let mut bound_id = id.clone();
         let mut bound = false;
-        if let Some(chat) = self.active_chat_mut() {
-            if let Some(turn) = chat.active_turn_mut() {
-                for candidate_id in candidate_ids {
-                    if let Some(preview) = turn.bind_tool(candidate_id, summary.clone()) {
-                        args_preview = preview;
-                        bound_id = candidate_id.to_string();
-                        if final_summary.is_empty() {
-                            if let Some(call) = turn.tool_calls.iter().find(|call| {
-                                call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id)
-                            }) {
-                                final_summary = call.summary.clone().unwrap_or_default();
-                            }
-                        }
-                        bound = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if !bound {
-            let Some(chat_id) = self.active_chat_id.clone() else {
-                return Vec::new();
-            };
-            if let Some(chat) = self.active_chat_mut() {
-                if let Some(turn) = chat.active_turn_mut() {
-                    let tool_call_id = ToolCallId::new(id.clone());
-                    turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
-                    let _ = turn.bind_tool(&id, summary.clone());
-                    bound_id = id.clone();
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            for candidate_id in candidate_ids {
+                if let Some(preview) = turn.bind_tool(candidate_id, summary.clone()) {
+                    args_preview = preview;
+                    bound_id = candidate_id.to_string();
                     if final_summary.is_empty() {
                         if let Some(call) = turn
                             .tool_calls
                             .iter()
-                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id))
                         {
-                            args_preview = call.args_preview.clone();
                             final_summary = call.summary.clone().unwrap_or_default();
                         }
+                    }
+                    bound = true;
+                    break;
+                }
+            }
+        }
+        if !bound {
+            if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+                let tool_call_id = ToolCallId::new(id.clone());
+                turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
+                let _ = turn.bind_tool(&id, summary.clone());
+                bound_id = id.clone();
+                if final_summary.is_empty() {
+                    if let Some(call) = turn
+                        .tool_calls
+                        .iter()
+                        .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                    {
+                        args_preview = call.args_preview.clone();
+                        final_summary = call.summary.clone().unwrap_or_default();
                     }
                 }
             }
@@ -271,8 +316,8 @@ impl ConversationModel {
     }
 
     fn append_assistant_text(&mut self, text: String) -> Vec<ConversationChange> {
-        if let Some(chat) = self.active_chat_mut() {
-            if let Some(turn) = chat.active_turn_mut() {
+        if let Some((chat_id, turn_id)) = self.current_runtime_turn() {
+            if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.assistant_stream.push_str(&text);
             }
         }
@@ -313,34 +358,30 @@ impl ConversationModel {
         index: usize,
         partial_args: String,
     ) -> Vec<ConversationChange> {
+        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
+            return Vec::new();
+        };
         let tool_call_id = ToolCallId::new(id.clone());
         let mut found_call = false;
-        if let Some(chat) = self.active_chat_mut() {
-            if let Some(turn) = chat.active_turn_mut() {
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            if let Some(call) = turn
+                .tool_calls
+                .iter_mut()
+                .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+            {
+                call.update_args(partial_args.clone());
+                found_call = true;
+            }
+        }
+        if !found_call {
+            if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+                turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
                 if let Some(call) = turn
                     .tool_calls
                     .iter_mut()
                     .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
                 {
                     call.update_args(partial_args.clone());
-                    found_call = true;
-                }
-            }
-        }
-        if !found_call {
-            let Some(chat_id) = self.active_chat_id.clone() else {
-                return Vec::new();
-            };
-            if let Some(chat) = self.active_chat_mut() {
-                if let Some(turn) = chat.active_turn_mut() {
-                    turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
-                    if let Some(call) = turn
-                        .tool_calls
-                        .iter_mut()
-                        .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
-                    {
-                        call.update_args(partial_args.clone());
-                    }
                 }
             }
             self.insert_tool_call_block_before_active_text(

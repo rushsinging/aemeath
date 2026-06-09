@@ -5,7 +5,7 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 长行已自动换行；本轮继续将输出文档宽度额外缩小 2 列，增加正文与 scrollbar 的右侧安全留白 |
-| 112 | TUI 输出区更新滞后 | 中 | 待确认 | 待用户确认 | 2026-06 | UiEvent 每个 chunk 同步刷新拖慢主循环；已改为 dirty 标记+按帧批量刷新 |
+| 112 | TUI tool call spinner 有状态但输出区不显示 tool card | 中 | 待确认 | 待用户确认 | 2026-06 | runtime tool 事件携带 chat/turn context，TUI 按上下文绑定 conversation |
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
 
@@ -27,11 +27,34 @@
 - `apps/cli/src/tui/app/update.rs`
 - `apps/cli/src/tui/app.rs`
 
-### #112 TUI 输出区更新滞后
+### #112 TUI tool call spinner 有状态但输出区不显示 tool card
 
 **状态**：待确认
 
-（详情待补充）
+**症状**：运行时已进入 tool call 阶段，spinner phase 会显示类似 `call Bash` 的工具调用状态，但 TUI 输出区没有出现对应的 tool call card，用户只能从状态栏感知到工具正在调用。
+
+**根因**：spinner 走旧状态路径消费 `ToolCallStart` 并更新 `SpinnerPhase::CallingTool(name)`；tool card 渲染则依赖 `ConversationModel.active_chat_id`。当 streaming tool event 到达时本地没有可用 active chat/turn，`ConversationModel` 在处理 `ToolCallStart` / `ToolArgumentsDelta` 等事件时直接返回，导致没有创建 tool block。根因是 TUI 用本地 active chat 作为 streaming runtime 事件归属来源，而不是使用 runtime 会话自身的 chat/turn 上下文。
+
+**修复**：runtime stream 事件新增 `RuntimeTurnContext { chat_id, turn_id }`，并经 SDK `ChatEvent`、TUI `UiEvent` 全链路透传。TUI adapter 在处理 text/thinking/tool event 前先发送 `BindRuntimeTurn`，让 `ConversationModel` 以 runtime context 建立或切换目标 chat/turn，再创建/更新 tool block。历史消息加载继续显式绑定 history turn，保持 resume 渲染路径可用。
+
+**验证**：
+- `cargo test -p cli tui::model::conversation::model_extra_tests::test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat`
+- `cargo test -p cli tui::model::conversation`
+- `cargo test -p runtime --lib`
+- `cargo fmt --check`
+- `cargo clippy -p cli --all-targets -- -D warnings`
+- `.agents/hooks/check-unit-tests.sh`
+
+**涉及路径**：
+- `agent/features/runtime/src/business/chat/looping/**`
+- `agent/features/runtime/src/core/client/event.rs`
+- `packages/sdk/src/chat.rs`
+- `apps/cli/src/chat/no_tui.rs`
+- `apps/cli/src/tui/app/**`
+- `apps/cli/src/tui/effect/session/processing.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/**`
+- `apps/cli/src/tui/render/display/render.rs`
 
 ### #121 Spinner verb 与 pharse_text 计时显示相同
 

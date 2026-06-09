@@ -216,17 +216,43 @@ pub struct HookEventView {
     pub result: Option<HookExecutionResultView>,
 }
 
+/// Runtime stream context used to bind UI events to the authoritative chat/turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEventContext {
+    pub chat_id: String,
+    pub turn_id: String,
+}
+
+impl ChatEventContext {
+    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+        Self {
+            chat_id: chat_id.into(),
+            turn_id: turn_id.into(),
+        }
+    }
+}
+
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
     /// LLM 返回的文本 token。
-    Token(String),
+    Token {
+        context: ChatEventContext,
+        text: String,
+    },
     /// LLM reasoning / thinking token。
-    Thinking(String),
+    Thinking {
+        context: ChatEventContext,
+        text: String,
+    },
     /// 文本块完成。
-    TextBlockComplete(String),
+    TextBlockComplete {
+        context: ChatEventContext,
+        text: String,
+    },
     /// 工具调用开始。
     ToolCallStart {
+        context: ChatEventContext,
         id: String,
         provider_id: Option<String>,
         name: String,
@@ -234,6 +260,7 @@ pub enum ChatEvent {
     },
     /// 工具参数增量。
     ToolArgumentsDelta {
+        context: ChatEventContext,
         id: String,
         provider_id: Option<String>,
         index: usize,
@@ -242,6 +269,7 @@ pub enum ChatEvent {
     },
     /// 工具调用确认。
     ToolCall {
+        context: ChatEventContext,
         id: String,
         provider_id: String,
         name: String,
@@ -250,6 +278,7 @@ pub enum ChatEvent {
     },
     /// 工具执行结果。
     ToolResult {
+        context: ChatEventContext,
         id: String,
         provider_id: String,
         tool_name: String,

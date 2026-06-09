@@ -18,10 +18,10 @@ pub mod types;
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent, ChatInput,
-    ChatInputEvent, ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView,
-    HookExecutionResultView, OptionItem, ToolResultImage, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
+    ChatEventContext, ChatInput, ChatInputEvent, ChatRequest, ChatResult, ChatStream,
+    HookEventStatus, HookEventView, HookExecutionResultView, OptionItem, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;

@@ -1,12 +1,13 @@
 use crate::business::agent::ToolCall;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::HookData;
 use sdk::OptionItem;
 use share::config::hooks::HookEvent;
 
 pub(crate) async fn ask_user<S>(
+    context: &RuntimeTurnContext,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -99,7 +100,7 @@ where
             false,
             Vec::new(),
         );
-        send_tool_result(sink, call, &result).await;
+        send_tool_result(sink, context, call, &result).await;
         ask_user_results.push(result);
     }
     ask_user_results

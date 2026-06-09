@@ -145,10 +145,7 @@ fn hook_spinner_detail(event: &sdk::HookEventView) -> String {
 }
 
 fn first_non_empty<const N: usize>(values: [Option<&str>; N]) -> Option<String> {
-    values
-        .into_iter()
-        .flatten()
-        .find_map(|value| non_empty(value))
+    values.into_iter().flatten().find_map(non_empty)
 }
 
 fn push_field(lines: &mut Vec<String>, label: &str, value: Option<&str>) {

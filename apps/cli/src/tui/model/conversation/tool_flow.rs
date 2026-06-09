@@ -24,7 +24,7 @@ impl ConversationModel {
             return;
         };
         if self
-            .complete_active_tool(id, output.clone(), is_error)
+            .complete_tool_in_context(id, output.clone(), is_error)
             .is_some()
         {
             self.insert_tool_result_after_tool_call(
@@ -45,7 +45,7 @@ impl ConversationModel {
         is_error: bool,
         image_count: usize,
     ) -> Vec<ConversationChange> {
-        if let Some(status) = self.complete_active_tool(&id, output.clone(), is_error) {
+        if let Some(status) = self.complete_tool_in_context(&id, output.clone(), is_error) {
             self.insert_tool_result_after_tool_call(
                 ToolCallId::new(id.clone()),
                 output,
@@ -70,14 +70,23 @@ impl ConversationModel {
             ConversationChange::OutputDirty,
         ]
     }
-    pub(super) fn complete_active_tool(
+    pub(super) fn complete_tool_in_context(
         &mut self,
         id: &str,
         output: String,
         is_error: bool,
     ) -> Option<ToolCallStatus> {
-        let chat = self.active_chat_mut()?;
-        let turn = chat.active_turn_mut()?;
-        turn.complete_tool(id, output, is_error)
+        for chat in &mut self.chats {
+            if let Some(turn) = chat.turns.iter_mut().find(|turn| {
+                turn.tool_calls.iter().any(|call| {
+                    call.id
+                        .as_ref()
+                        .is_some_and(|call_id| call_id.as_ref() == id)
+                })
+            }) {
+                return turn.complete_tool(id, output, is_error);
+            }
+        }
+        None
     }
 }

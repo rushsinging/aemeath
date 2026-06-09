@@ -4,7 +4,7 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::split_approved_calls;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use logging::JsonLogger;
 use share::config::hooks::HookEvent;
@@ -16,6 +16,7 @@ pub(crate) type UiToolResult = (String, String, String, bool, Vec<ImageData>);
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
+    context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
     registry: &Arc<ToolRegistry>,
     allow_all: bool,
@@ -33,12 +34,13 @@ where
     S: ChatEventSink,
 {
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
-    let denied_results = deny_tool_calls(&denied, sink, hook_ui, hook_runner).await;
+    let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCall {
+                context: context.clone(),
                 id: call.id.clone(),
                 provider_id: call.provider_id.clone(),
                 name: call.name.clone(),
@@ -61,8 +63,9 @@ where
         })
         .collect();
 
-    let ask_user_results = ask_user(sink, hook_ui, hook_runner, &non_agent_calls).await;
+    let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_calls).await;
     let non_agent_results = execute_non_agent(
+        context,
         agent,
         sink,
         hook_ui,
@@ -74,6 +77,7 @@ where
     )
     .await;
     let agent_results = execute_agent_calls(
+        context,
         &agent_approved,
         registry,
         &agent.ctx,
@@ -96,6 +100,7 @@ where
 async fn deny_tool_calls<S>(
     denied: &[&ToolCall],
     sink: &S,
+    context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
 ) -> Vec<UiToolResult>
@@ -119,6 +124,7 @@ where
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCall {
+                context: context.clone(),
                 id: call.id.clone(),
                 provider_id: call.provider_id.clone(),
                 name: call.name.clone(),
@@ -136,7 +142,7 @@ where
             true,
             Vec::new(),
         );
-        send_tool_result(sink, call, &result).await;
+        send_tool_result(sink, context, call, &result).await;
         denied_results.push(result);
     }
     denied_results
@@ -216,12 +222,17 @@ pub(crate) async fn emit_json_hook_context<S>(
     }
 }
 
-pub(crate) async fn send_tool_result<S>(sink: &S, call: &ToolCall, result: &UiToolResult)
-where
+pub(crate) async fn send_tool_result<S>(
+    sink: &S,
+    context: &RuntimeTurnContext,
+    call: &ToolCall,
+    result: &UiToolResult,
+) where
     S: ChatEventSink,
 {
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {
+            context: context.clone(),
             id: result.0.clone(),
             provider_id: result.1.clone(),
             tool_name: call.name.clone(),

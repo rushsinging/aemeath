@@ -32,7 +32,7 @@ pub fn render_hook_notice(
         .as_deref()
         .filter(|details| !details.trim().is_empty())
     {
-        text.push_str("\n");
+        text.push('\n');
         text.push_str(details);
     }
     render_text_lines(block_id, &text, view.style)

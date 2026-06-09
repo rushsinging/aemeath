@@ -13,7 +13,7 @@ use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
     InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
-    RuntimeStreamHandler,
+    RuntimeStreamHandler, RuntimeTurnContext,
 };
 use provider::api::StopReason;
 use share::message::Message;
@@ -132,13 +132,14 @@ where
     let mut pending_input = PendingInputBuffer::default();
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
+    let chat_id = format!("session-{session_id}");
     loop {
         turn_count += 1;
+        let turn_context = RuntimeTurnContext::new(chat_id.clone(), format!("turn-{turn_count}"));
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
-            .await;
-        // Refresh tool schemas each turn so dynamically registered MCP tools
-        // are visible to the LLM once the background connector finishes.
+            .await; // Refresh tool schemas each turn so dynamically registered MCP tools
+                    // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
         let tool_schema_tokens =
             crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
@@ -256,8 +257,11 @@ where
             api_msgs
         };
 
-        let mut handler =
-            RuntimeStreamHandler::with_tool_identity(sink.clone(), tool_identity.clone());
+        let mut handler = RuntimeStreamHandler::with_tool_identity(
+            sink.clone(),
+            tool_identity.clone(),
+            turn_context.clone(),
+        );
         log_llm_input(
             &json_logger,
             turn_count,
@@ -417,6 +421,7 @@ where
                 {
                     loop_fsm.transition(ChatLoopTransition::AwaitTool);
                     let all_results = execute_tool_round(
+                        &turn_context,
                         &tool_calls,
                         &registry,
                         allow_all,
@@ -626,13 +631,13 @@ mod tests {
                 }
                 RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
                 RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
-                RuntimeStreamEvent::Text(text) => format!("Text:{text}"),
+                RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
                 RuntimeStreamEvent::Done => "Done".to_string(),
                 RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
                 RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
                 RuntimeStreamEvent::Cancelled => "Cancelled".to_string(),
-                RuntimeStreamEvent::Thinking(_) => "Thinking".to_string(),
-                RuntimeStreamEvent::TextBlockComplete(_) => "TextBlockComplete".to_string(),
+                RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
+                RuntimeStreamEvent::TextBlockComplete { .. } => "TextBlockComplete".to_string(),
                 RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
                 RuntimeStreamEvent::ToolArgumentsDelta { .. } => "ToolArgumentsDelta".to_string(),
                 RuntimeStreamEvent::ToolCall { .. } => "ToolCall".to_string(),

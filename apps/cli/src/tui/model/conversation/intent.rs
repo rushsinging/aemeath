@@ -98,5 +98,10 @@ pub enum ConversationIntent {
     DeleteAskUserChatChar,
     /// 移除 AskUser 交互块（用户提交答案或取消后折叠）。
     DismissAskUser,
+    /// Bind subsequent streaming observation events to the runtime chat/turn context.
+    BindRuntimeTurn {
+        chat_id: super::ids::ChatId,
+        turn_id: super::ids::ChatTurnId,
+    },
     CompleteChat,
 }
