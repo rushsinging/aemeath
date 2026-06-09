@@ -3,6 +3,7 @@
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
 use crate::tui::render::output_area::types::MAX_LINES;
+use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 
 #[derive(Default)]
@@ -80,6 +81,12 @@ impl OutputDocumentRenderer {
             rendered.lines,
             animation_frame,
         );
+        if matches!(
+            node.kind,
+            crate::tui::view_model::output::OutputBlockKind::UserMessage(_)
+        ) {
+            wrap_user_message_card_lines(&mut gutted);
+        }
         // 每个 root block（depth 0）前加一个空行，分隔相邻对话块（视觉呼吸）；
         // 子块（depth>0，如 tool result）紧贴父块、不额外空行。
         if depth == 0 {
@@ -102,6 +109,25 @@ impl OutputDocumentRenderer {
 
 fn collect_rendered_block_ids(blocks: &[RenderedBlock]) -> Vec<String> {
     blocks.iter().map(|block| block.block_id.clone()).collect()
+}
+
+fn wrap_user_message_card_lines(lines: &mut Vec<RenderedLine>) {
+    let gutter_cols = lines.first().map(|line| line.gutter_cols).unwrap_or(0);
+    let spacer = user_message_card_spacer_line(gutter_cols);
+    lines.insert(0, spacer.clone());
+    lines.push(spacer);
+}
+
+fn user_message_card_spacer_line(gutter_cols: usize) -> RenderedLine {
+    let mut line = RenderedLine::new(vec![ratatui::text::Span::styled(
+        " ".repeat(gutter_cols),
+        ratatui::style::Style::default()
+            .fg(theme::USER)
+            .bg(theme::USER_BG),
+    )]);
+    line.plain.clear();
+    line.gutter_cols = gutter_cols;
+    line
 }
 
 /// 按 root 子树整组裁剪：从尾部（最新）向前累计每个 group 的总行数，
@@ -268,6 +294,35 @@ mod tests {
                 .all(|s| s.style.fg != Some(theme::CODE)),
             "兄弟 AssistantMessage 首行不应残留工具结果 fence 的 CODE 色（#65）"
         );
+    }
+
+    #[test]
+    fn test_renderer_adds_user_message_card_spacers() {
+        let kind = OutputBlockKind::UserMessage(TextBlockView {
+            key: "u".into(),
+            text: "hello".into(),
+            style: SemanticStyle::Normal,
+        });
+        let user = BlockNode {
+            block_id: "u".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: Vec::new(),
+        };
+        let vm = vm_with_roots(vec![user]);
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
+        let lines = &doc.blocks[0].lines;
+
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0].plain, "", "root 分隔空行保持无样式");
+        assert_eq!(lines[1].plain, "", "用户消息上方应有背景空行");
+        assert_eq!(lines[2].plain, "hello");
+        assert_eq!(lines[3].plain, "", "用户消息下方应有背景空行");
+        assert_eq!(lines[1].spans[0].style.bg, Some(theme::USER_BG));
+        assert_eq!(lines[2].spans[1].style.bg, Some(theme::USER_BG));
+        assert_eq!(lines[3].spans[0].style.bg, Some(theme::USER_BG));
+        assert_eq!(lines[2].spans[1].style.fg, Some(theme::USER));
     }
 
     fn rb(id: &str, lines: usize) -> RenderedBlock {

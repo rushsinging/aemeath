@@ -376,7 +376,9 @@ mod tests {
         area.render(area_rect, &mut buf, &view, &no_live_status());
 
         assert_eq!(buf[(0, 0)].bg, theme::USER_BG, "gutter 也应有用户消息背景");
+        assert_eq!(buf[(0, 0)].fg, theme::USER, "gutter 应使用深色用户消息前景");
         assert_eq!(buf[(2, 0)].bg, theme::USER_BG, "正文应有用户消息背景");
+        assert_eq!(buf[(2, 0)].fg, theme::USER, "正文应使用深色用户消息前景");
         assert_eq!(
             buf[(10, 0)].bg,
             theme::USER_BG,
