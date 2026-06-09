@@ -183,27 +183,18 @@ impl App {
                 // token/api 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::ReflectionDone { output } => {
-                // 只推送摘要（建议数 + 过时数），不把完整 reflection 输出
-                // （含会话转录）以 System(Muted) 暗色刷出——完整内容对用户无直接价值，
-                // 且大段暗色文本会让后续 assistant 回复在视觉上"看起来也暗了"（#74）。
-                let suggestion_count = output.suggested_memories.len();
-                let outdated_count = output.outdated_memories.len();
-                let summary = if suggestion_count > 0 || outdated_count > 0 {
-                    format!(
-                        "[reflection: {suggestion_count} 条建议记忆、{outdated_count} 条过时标记]"
-                    )
+                self.append_system_notice(output.content.clone());
+                if output.auto_applied {
+                    self.chat.pending_reflection = None;
+                    self.append_system_notice(
+                        "[reflection: memory 建议已自动应用，无需重复 /reflect apply]",
+                    );
                 } else {
-                    "[reflection: 无新发现]".to_string()
-                };
-                self.append_system_notice(summary);
-                if self.session.memory_config.reflection.auto_apply_suggestions {
-                    if let Some(effect) = self.apply_reflection_output(output) {
-                        effects.push(effect);
-                    }
-                } else {
+                    let suggestion_count = output.suggested_memories.len();
+                    let outdated_count = output.outdated_memories.len();
                     self.chat.pending_reflection = Some(output);
                     if suggestion_count > 0 || outdated_count > 0 {
-                        self.append_system_notice("[运行 /reflect apply 应用建议]");
+                        self.append_system_notice("可运行 /reflect apply 应用这些 memory 建议");
                     }
                 }
                 self.spinner_stop();
@@ -214,6 +205,25 @@ impl App {
                         "Ready",
                     )));
             }
+            UiEvent::ReflectionApplyDone { output, result } => match result {
+                Ok(message) => {
+                    if reflection_outputs_same(self.chat.applying_reflection.as_ref(), &output) {
+                        self.chat.applying_reflection = None;
+                    }
+                    self.append_system_notice(format!("[reflection apply 成功: {message}]"));
+                }
+                Err(message) => {
+                    if reflection_outputs_same(self.chat.applying_reflection.as_ref(), &output) {
+                        self.chat.applying_reflection = None;
+                        if self.chat.pending_reflection.is_none() {
+                            self.chat.pending_reflection = Some(output);
+                        }
+                    }
+                    self.append_error_notice(format!(
+                        "Reflection apply 失败: {message}。已保留待应用建议，可重试 /reflect apply"
+                    ));
+                }
+            },
             UiEvent::AskUser {
                 id,
                 question,
@@ -331,4 +341,11 @@ impl App {
             pending_slash: None,
         }
     }
+}
+
+fn reflection_outputs_same(
+    left: Option<&sdk::ReflectionOutputView>,
+    right: &sdk::ReflectionOutputView,
+) -> bool {
+    left.is_some_and(|left| format!("{left:?}") == format!("{right:?}"))
 }

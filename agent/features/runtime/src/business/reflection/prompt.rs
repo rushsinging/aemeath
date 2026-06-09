@@ -4,6 +4,7 @@ pub fn build_reflection_prompt(project_memory: &str, recent_summary: &str) -> St
 
 要求：
 - 只输出 JSON，不要输出 Markdown。
+- suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
 - outdated_memories 使用已有 memory id。
 - 没有内容时输出空数组或 null。
@@ -11,7 +12,7 @@ pub fn build_reflection_prompt(project_memory: &str, recent_summary: &str) -> St
 JSON 格式：
 {{
     "deviations": ["偏差描述"],
-    "suggested_memories": [{{"category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加"}}],
+    "suggested_memories": [{{"layer":"project","category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加"}}],
     "outdated_memories": ["memory-id"],
     "user_alert": "可选用户提示"
 }}

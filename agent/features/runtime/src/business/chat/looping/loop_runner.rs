@@ -7,6 +7,7 @@ use crate::business::chat::looping::finalize::{
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
+use crate::business::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::business::chat::looping::stall::StallDetector;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
@@ -348,22 +349,32 @@ where
                         &mut messages,
                     )
                     .await;
-                    if gate.decision == GateDecision::ContinueNextTurn {
+                    let before_finish_gate_continue =
+                        gate.decision == GateDecision::ContinueNextTurn;
+                    if before_finish_gate_continue {
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
-                    if let Some(text) = crate::business::chat::looping::reflection::run_reflection(
+                    if should_run_turn_reflection(
                         &memory_config,
                         turn_count,
-                        &messages,
-                        &cwd,
-                        client,
-                        &system_prompt_text,
-                    )
-                    .await
-                    {
-                        sink.send_event(RuntimeStreamEvent::SystemMessage(text))
-                            .await;
+                        !tool_calls.is_empty(),
+                        &resp.stop_reason,
+                        before_finish_gate_continue,
+                    ) {
+                        if let Some(text) = run_reflection(
+                            &memory_config,
+                            turn_count,
+                            &messages,
+                            &cwd,
+                            client,
+                            &system_prompt_text,
+                        )
+                        .await
+                        {
+                            sink.send_event(RuntimeStreamEvent::SystemMessage(text))
+                                .await;
+                        }
                     }
                     let outcome = AgentRunOutcome {
                         status: AgentRunStatus::Completed,

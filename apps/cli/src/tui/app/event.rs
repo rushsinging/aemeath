@@ -76,6 +76,11 @@ pub enum AppEvent {
     ReflectionDone {
         output: sdk::ReflectionOutputView,
     },
+    /// Reflection apply 完成/失败结果。携带提交时的 output，用于只清理对应 in-flight。
+    ReflectionApplyDone {
+        output: sdk::ReflectionOutputView,
+        result: Result<String, String>,
+    },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {
         id: String,

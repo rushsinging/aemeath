@@ -70,6 +70,7 @@ fn test_apply_suggestions_adds_llm_project_memory() {
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
+            layer: share::memory::MemoryLayer::Project,
             category: share::memory::MemoryCategory::Decision,
             content: "Reflection 使用真实 LLM 调用".to_string(),
             tags: vec!["reflection".to_string()],
@@ -88,7 +89,101 @@ fn test_apply_suggestions_adds_llm_project_memory() {
     assert_eq!(added, 1);
     assert_eq!(memories.len(), 1);
     assert_eq!(memories[0].source, share::memory::MemorySource::Llm);
+    assert_eq!(memories[0].layer, share::memory::MemoryLayer::Project);
     assert_eq!(memories[0].tags, vec!["reflection"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_apply_suggestions_adds_llm_global_memory() {
+    let (mut store, dir) = temp_store(10);
+    let suggestion = MemorySuggestion {
+        layer: share::memory::MemoryLayer::Global,
+        category: share::memory::MemoryCategory::Preference,
+        content: "始终使用中文回复".to_string(),
+        tags: Vec::new(),
+        reason: String::new(),
+    };
+
+    let added = ReflectionEngine::apply_suggestions(&[suggestion], &mut store).unwrap();
+    let global = store
+        .list(Some(share::memory::MemoryLayer::Global))
+        .unwrap();
+    let project = store
+        .list(Some(share::memory::MemoryLayer::Project))
+        .unwrap();
+
+    assert_eq!(added, 1);
+    assert_eq!(global.len(), 1);
+    assert_eq!(global[0].content, "始终使用中文回复");
+    assert!(project.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_apply_suggestions_evicts_when_store_is_full() {
+    let (mut store, dir) = temp_store(1);
+    let existing = MemoryEntry::new(
+        "memory-1",
+        100,
+        share::memory::MemoryLayer::Project,
+        share::memory::MemoryCategory::Fact,
+        "旧记忆需要被淘汰",
+        share::memory::MemorySource::User,
+    );
+    store.add(existing).unwrap();
+    let suggestion = MemorySuggestion {
+        layer: share::memory::MemoryLayer::Project,
+        category: share::memory::MemoryCategory::Decision,
+        content: "新的 reflection 记忆".to_string(),
+        tags: Vec::new(),
+        reason: String::new(),
+    };
+
+    let added = ReflectionEngine::apply_suggestions(&[suggestion], &mut store).unwrap();
+    let active = store
+        .list(Some(share::memory::MemoryLayer::Project))
+        .unwrap();
+    let archived = store.search("旧记忆", 10).unwrap();
+
+    assert_eq!(added, 1);
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].content, "新的 reflection 记忆");
+    assert_eq!(archived.len(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_apply_suggestions_returns_error_when_eviction_cannot_free_space() {
+    let (mut store, dir) = temp_store(1);
+    let mut existing = MemoryEntry::new(
+        "memory-1",
+        100,
+        share::memory::MemoryLayer::Project,
+        share::memory::MemoryCategory::Fact,
+        "被 pin 的旧记忆",
+        share::memory::MemorySource::User,
+    );
+    existing.pinned = true;
+    store.add(existing).unwrap();
+    let suggestion = MemorySuggestion {
+        layer: share::memory::MemoryLayer::Project,
+        category: share::memory::MemoryCategory::Decision,
+        content: "无法写入的新记忆".to_string(),
+        tags: Vec::new(),
+        reason: String::new(),
+    };
+
+    let result = ReflectionEngine::apply_suggestions(&[suggestion], &mut store);
+
+    assert!(matches!(result, Err(ReflectionError::Apply(_))));
+    assert_eq!(
+        store
+            .list(Some(share::memory::MemoryLayer::Project))
+            .unwrap()
+            .len(),
+        1
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -108,6 +203,7 @@ fn test_apply_output_marks_outdated_and_adds_suggestions() {
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
+            layer: share::memory::MemoryLayer::Project,
             category: share::memory::MemoryCategory::Pattern,
             content: "先写测试再实现".to_string(),
             tags: Vec::new(),

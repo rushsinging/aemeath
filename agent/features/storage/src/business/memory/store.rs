@@ -54,9 +54,7 @@ impl MemoryStore {
 
         if entries.len() >= self.max_entries {
             let candidates = self.eviction_candidates_from_entries(&entries, 3);
-            if !candidates.is_empty() {
-                return Ok(AddResult::NeedsEviction { candidates });
-            }
+            return Ok(AddResult::NeedsEviction { candidates });
         }
 
         if entry.id.trim().is_empty() {
@@ -163,6 +161,10 @@ impl MemoryStore {
             }
         }
         Ok(())
+    }
+
+    pub fn evict(&mut self, ids: &[String]) -> MemoryResult<()> {
+        self.archive_entries(ids)
     }
 
     pub fn compact(&mut self) -> MemoryResult<CompactResult> {
@@ -417,6 +419,25 @@ mod tests {
         let candidates = store.eviction_candidates(MemoryLayer::Project, 2).unwrap();
 
         assert!(candidates.iter().all(|entry| entry.id != first_id));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_memory_store_mark_outdated_sets_flag() {
+        let (mut store, dir) = temp_store(10);
+        let entry = project_entry("stale memory");
+        let id = entry.id.clone();
+        store.add(entry).unwrap();
+
+        store.mark_outdated(&id).unwrap();
+        let stored = store
+            .list(Some(MemoryLayer::Project))
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+
+        assert!(stored.outdated);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -63,20 +63,23 @@ impl From<ClipboardImageView> for crate::ToolResultImage {
 }
 
 /// Reflection 建议记忆视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReflectionMemorySuggestionView {
     pub content: String,
     pub layer: String,
+    pub category: String,
+    pub tags: Vec<String>,
 }
 
 /// Reflection 输出视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReflectionOutputView {
     pub content: String,
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub suggested_memories: Vec<ReflectionMemorySuggestionView>,
     pub outdated_memories: Vec<String>,
+    pub auto_applied: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -211,8 +214,11 @@ mod tests {
             suggested_memories: vec![ReflectionMemorySuggestionView {
                 content: "remember".to_string(),
                 layer: "project".to_string(),
+                category: "decision".to_string(),
+                tags: Vec::new(),
             }],
             outdated_memories: vec!["old".to_string()],
+            auto_applied: false,
         };
 
         assert_eq!(output.suggested_memories.len(), 1);

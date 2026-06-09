@@ -4,6 +4,7 @@ use sdk::{
 };
 
 use prompt::api::skill::Skill;
+use share::memory::{MemoryCategory, MemoryLayer};
 use storage::api::TaskStatus;
 
 pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {
@@ -42,13 +43,15 @@ pub(crate) fn processed_image_to_sdk(
     }
 }
 
-pub(crate) fn reflection_output_to_sdk(
+pub(crate) fn reflection_output_to_sdk_with_content(
     output: crate::business::reflection::ReflectionOutput,
+    content: String,
     input_tokens: u32,
     output_tokens: u32,
+    auto_applied: bool,
 ) -> ReflectionOutputView {
     ReflectionOutputView {
-        content: crate::business::reflection::ReflectionEngine::format_output(&output),
+        content,
         input_tokens,
         output_tokens,
         suggested_memories: output
@@ -56,10 +59,30 @@ pub(crate) fn reflection_output_to_sdk(
             .into_iter()
             .map(|memory| ReflectionMemorySuggestionView {
                 content: memory.content,
-                layer: format!("{:?}", memory.category).to_lowercase(),
+                layer: memory_layer_to_sdk(memory.layer).to_string(),
+                category: memory_category_to_sdk(memory.category).to_string(),
+                tags: memory.tags,
             })
             .collect(),
         outdated_memories: output.outdated_memories,
+        auto_applied,
+    }
+}
+
+fn memory_layer_to_sdk(layer: MemoryLayer) -> &'static str {
+    match layer {
+        MemoryLayer::Global => "global",
+        MemoryLayer::Project => "project",
+    }
+}
+
+fn memory_category_to_sdk(category: MemoryCategory) -> &'static str {
+    match category {
+        MemoryCategory::Fact => "fact",
+        MemoryCategory::Decision => "decision",
+        MemoryCategory::Preference => "preference",
+        MemoryCategory::Pattern => "pattern",
+        MemoryCategory::Pitfall => "pitfall",
     }
 }
 
