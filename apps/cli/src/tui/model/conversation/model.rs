@@ -323,6 +323,9 @@ impl ConversationModel {
     }
 
     fn append_assistant_text(&mut self, text: String) -> Vec<ConversationChange> {
+        if text.is_empty() {
+            return Vec::new();
+        }
         if let Some((chat_id, turn_id)) = self.current_runtime_turn() {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.assistant_stream.push_str(&text);
@@ -337,6 +340,9 @@ impl ConversationModel {
     }
 
     fn append_thinking_text(&mut self, text: String) -> Vec<ConversationChange> {
+        if text.is_empty() {
+            return Vec::new();
+        }
         self.active_text_block_id = None;
         let block_id = self.append_or_extend_text_block(text, true);
         vec![
