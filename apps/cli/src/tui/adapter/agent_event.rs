@@ -552,6 +552,7 @@ mod tests {
             provider_id: "provider-1".to_string(),
             tool_name: "Bash".to_string(),
             output: "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2),
+            content: serde_json::json!({ "text": "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2) }),
             is_error: false,
             images: Vec::new(),
         };

@@ -157,6 +157,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         tool_name: "Edit".to_string(),
         output: "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew"
             .to_string(),
+        content: serde_json::json!({ "text": "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew" }),
         is_error: false,
         image_count: 0,
     });
@@ -409,6 +410,7 @@ fn add_completed_tool(
         id: id.to_string(),
         tool_name: name.to_string(),
         output: output.to_string(),
+        content: serde_json::json!({ "text": output }),
         is_error,
         image_count: 0,
     });

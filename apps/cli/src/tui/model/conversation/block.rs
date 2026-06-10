@@ -150,6 +150,7 @@ mod tests {
             id: "missing".to_string(),
             tool_name: "Read".to_string(),
             output: "late".to_string(),
+            content: serde_json::json!({ "text": "late" }),
             is_error: false,
         };
         assert!(matches!(block, ConversationBlock::OrphanToolResult { .. }));

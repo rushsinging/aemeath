@@ -364,8 +364,11 @@ mod tests {
             },
             UiEvent::ToolResult {
                 context: test_turn_context(),
-                id: "grep-1".to_string(),                provider_id: "provider-grep-1".to_string(),
-                tool_name: "Grep".to_string(),                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
+                id: "grep-1".to_string(),
+                provider_id: "provider-grep-1".to_string(),
+                tool_name: "Grep".to_string(),
+                output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),
+                content: serde_json::json!({ "text": "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted" }),
                 is_error: false,
                 images: Vec::new(),
             },
