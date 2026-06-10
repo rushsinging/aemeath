@@ -66,4 +66,5 @@
 | 72 | Edit diff 显示真实文件行号 | [archived/072-edit-diff-real-line-numbers.md](archived/072-edit-diff-real-line-numbers.md) |
 | 73 | AGENTS.md 渐进式披露重构 | [archived/073-agents-md-progressive-disclosure.md](archived/073-agents-md-progressive-disclosure.md) |
 | 74 | Guidance — 任务执行期间用户提问时同步更新 task list | [archived/074-task-list-scope-change-guidance.md](archived/074-task-list-scope-change-guidance.md) |
+| 75 | EnterWorktree/ExitWorktree result 不截断 | [archived/075-enter-exit-worktree-result-no-truncate.md](archived/075-enter-exit-worktree-result-no-truncate.md) |
 | 76 | TUI spinner 时长显示改进 | [archived/076-spinner-duration-display.md](archived/076-spinner-duration-display.md) |

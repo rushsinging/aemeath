@@ -13,12 +13,12 @@
 | 52 | Tool 描述英文化 | 中 | 未开始 | 未确认 | 将 EnterWorktree/ExitWorktree 两个 tool 的中文描述统一为英文 |
 | 68 | 项目指令搜索增强：全局 fallback + 向上 5 级目录搜索 | 中 | 修复中 | 未确认 | 全局 fallback `~/.claude/CLAUDE.md`；项目指令向上 5 级搜索，不向下递归 |
 | 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
-| 75 | EnterWorktree/ExitWorktree result 不截断 | 低 | 待确认 | 未确认 | 为 worktree 工具单独放宽 result 展示行数，不再被截断 |
 | 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
 | 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
 | 80 | Agent context 所有权重构（project 拥有 WorkspaceState） | 高 | ✅ 已完成 | 未确认 | workspace 可变状态收敛为 project 单一 WorkspaceState，feature 经能力 trait 访问，子 agent 隔离，git 抽 outbound port |
 | 81 | TUI assistant 文本与 spinner phase 视觉调整 | 低 | 待确认 | 未确认 | spinner phase 移除 emoji；assistant 文本前增加白色圆点 gutter |
+| 82 | Tool result 统一结构化 JSON | 高 | 设计中 | 未确认 | 所有 tool 返回统一 JSON payload，LLM 保留完整结构，TUI 按工具选择字段展示 |
 
 ### #8 Memory 系统
 
@@ -371,27 +371,6 @@ enum MemoryCategory {
 - `apps/cli/src/tui/view_assembler/output.rs`
 - `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或新增 Hook notice renderer
 
-### #75 EnterWorktree/ExitWorktree result 不截断
-
-**状态**：待确认
-
-**背景**：EnterWorktree / ExitWorktree 的工具结果是固定的工作区上下文提示，通常只有少量行；默认 `TOOL_RESULT_MAX_LINES = 5` 会导致 TUI 输出区显示 `... (n lines omitted)`，隐藏后续关于 path_base / working_root 使用约束的关键提示。
-
-**实现**：
-1. 保持全局默认工具结果预览行数不变，避免影响 Bash / Read / Grep 等可能产生大输出的工具。
-2. 为 `EnterWorktreeDisplay` 与 `ExitWorktreeDisplay` 单独覆盖 `result_max_lines()`，允许完整展示固定上下文结果。
-3. 新增回归测试覆盖 EnterWorktree / ExitWorktree 结果不出现 `lines omitted`，且仍展示最后一条工作区路径使用提示。
-
-**验证**：
-- `cargo test -p cli test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result`
-- `cargo test -p cli tool_result`
-- `cargo fmt --check`
-- `cargo check -p cli`
-
-**涉及路径**：
-- `apps/cli/src/tui/render/output/tool_display/tool_impls.rs`
-- `apps/cli/src/tui/render/output/blocks/tool_result.rs`
-
 ### #77 diff removed 行不语法高亮，只显示纯红色
 
 **状态**：待确认
@@ -471,3 +450,42 @@ enum MemoryCategory {
 - `apps/cli/src/tui/view_assembler/live_status.rs`
 - `apps/cli/src/tui/adapter/live_status_widget.rs`
 - `apps/cli/src/tui/render/output/gutter.rs`
+
+### #82 Tool result 统一结构化 JSON
+
+**状态**：设计中
+
+**症状 / 目标**：当前工具执行结果在 `ToolResult.output`、runtime stream event、TUI conversation model 中主要以纯文本 `String` 流转；虽然共享消息层的 `ContentBlock::ToolResult.content` 已支持 `serde_json::Value`，但工具层没有统一结构化 payload，导致 LLM 只能收到非结构化文本，TUI 也只能按行截断或做工具名特判。目标是所有 tool result 统一返回 JSON payload：LLM 获得完整结构，TUI 可按工具选择字段展示。
+
+**根因 / 设计点**：
+1. `agent/shared/src/tool.rs` 的 `ToolResult` 以 `output: String` 为主，缺少结构化字段。
+2. runtime 在 `RuntimeStreamEvent::ToolResult` / `UiToolResult` / `Message::tool_results_rich` 路径中把结果退化为文本。
+3. provider conversion 对非 String `content` 已具备 stringify fallback，但当前工具层没有稳定 JSON schema 可依赖。
+4. TUI 的 `ToolResultBlockView.result_text` 只保存字符串，缺少按字段展示的统一解析入口。
+
+**实现方向**：
+1. 为 `ToolResult` 增加统一结构化 JSON payload，并保留文本 fallback，所有现有工具默认映射为 `{ "text": "..." }`，避免一次性破坏兼容性。
+2. 修改 runtime 消息流和发给 LLM 的 tool result 构造逻辑，使 LLM 看到结构化 JSON；provider 层按各 API 能力使用原生 JSON 或 JSON string。
+3. 改造所有内置工具返回明确 JSON schema；通用字段建议包括 `status`、`message`、`data`、`diagnostics`、`display`，工具专属字段放入 `data`。
+4. `EnterWorktree` / `ExitWorktree` 优先落地结构化 result：保留 `message`、`branch`、`path_base`、`working_root`、路径使用 guidance；TUI 仅展示 `message` 与 `当前分支：{branch}`。
+5. TUI 增加结构化 result 展示选择层：优先读取 JSON 中的 display 字段或工具专属字段，解析失败时回退现有纯文本渲染。
+6. 更新 session/history/storage 中 tool result 持久化兼容逻辑，确保旧会话纯文本 result 可继续 resume。
+
+**验证**：
+- 增加共享 `ToolResult` JSON serialization / fallback 单元测试。
+- 增加 runtime tool result → LLM message 的结构化 content 测试。
+- 增加 TUI 对结构化 worktree result 的字段选择渲染测试。
+- 对代表性工具（文件、bash、搜索、任务、agent、worktree）补充 result JSON schema 回归测试。
+- 运行 `cargo fmt --check`、`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`。
+
+**涉及路径**：
+- `agent/shared/src/tool.rs`
+- `agent/shared/src/message/*`
+- `agent/features/runtime/src/business/chat/looping/*`
+- `agent/features/tools/src/**`
+- `agent/features/provider/src/business/providers/**/message_conversion.rs`
+- `packages/sdk/src/tui.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/tool_call.rs`
+- `apps/cli/src/tui/view_assembler/output.rs`
+- `apps/cli/src/tui/render/output/**`
