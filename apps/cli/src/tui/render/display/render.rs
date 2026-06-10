@@ -93,6 +93,7 @@ impl crate::tui::app::App {
                                 provider_id: id.clone(),
                                 tool_name: name,
                                 output: tool_result_content_to_string(result.content),
+                                content: normalize_tool_result_content(result.content),
                                 is_error: result.is_error,
                                 image_count: tool_result_image_count(result.content),
                             });
@@ -347,6 +348,21 @@ fn tool_result_content_to_string(content: &serde_json::Value) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => content.to_string(),
+    }
+}
+
+fn normalize_tool_result_content(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::String(text) => serde_json::json!({ "text": text }),
+        serde_json::Value::Array(arr) => {
+            let text = arr
+                .iter()
+                .filter_map(|value| value.get("text").and_then(|text| text.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            serde_json::json!({ "text": text })
+        }
+        value => value.clone(),
     }
 }
 

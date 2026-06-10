@@ -75,6 +75,7 @@ impl OutputViewAssembler {
                 ConversationBlock::ToolResult {
                     id,
                     output,
+                    content,
                     is_error,
                     image_count,
                 } => {
@@ -82,8 +83,13 @@ impl OutputViewAssembler {
                         continue;
                     }
                     let tool_name = find_tool_name_by_id(conversation, id);
-                    let text =
-                        summarize_non_embedded_result(tool_name.as_deref(), output, *is_error);
+                    let display_output =
+                        display_text_for_tool_result(tool_name.as_deref(), output, content);
+                    let text = summarize_non_embedded_result(
+                        tool_name.as_deref(),
+                        &display_output,
+                        *is_error,
+                    );
                     let text = if *image_count > 0 {
                         format!("{text}\n[图片: {image_count}]")
                     } else {
@@ -197,11 +203,15 @@ impl OutputViewAssembler {
                     id,
                     tool_name,
                     output,
+                    content,
                     is_error,
                 } => {
                     // 与非嵌入路径一致（DRY）：只展示工具摘要（如 `✓ Read completed`），
                     // 绝不把完整原始 output 当正文逐行刷出；颜色随成功/失败而非 Warning（#87）。
-                    let text = summarize_non_embedded_result(Some(tool_name), output, *is_error);
+                    let display_output =
+                        display_text_for_tool_result(Some(tool_name), output, content);
+                    let text =
+                        summarize_non_embedded_result(Some(tool_name), &display_output, *is_error);
                     if text.is_empty() {
                         continue;
                     }
@@ -327,7 +337,13 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                         .result
                         .as_deref()
                         .filter(|result| !result.is_empty())
-                        .map(str::to_string),
+                        .map(|result| {
+                            find_tool_result_content(conversation, tool_id)
+                                .map(|content| {
+                                    display_text_for_tool_result(Some(&call.name), result, content)
+                                })
+                                .unwrap_or_else(|| result.to_string())
+                        }),
                     collapsible: true,
                     collapsed: false,
                 });
@@ -335,6 +351,50 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
         }
     }
     None
+}
+
+fn find_tool_result_content<'a>(
+    conversation: &'a ConversationModel,
+    tool_id: &str,
+) -> Option<&'a serde_json::Value> {
+    conversation.blocks.iter().find_map(|block| match block {
+        ConversationBlock::ToolResult { id, content, .. } if id.as_ref() == tool_id => {
+            Some(content)
+        }
+        ConversationBlock::OrphanToolResult { id, content, .. } if id == tool_id => Some(content),
+        _ => None,
+    })
+}
+
+fn display_text_for_tool_result(
+    tool_name: Option<&str>,
+    fallback_output: &str,
+    content: &serde_json::Value,
+) -> String {
+    if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
+        let message = content
+            .get("message")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty());
+        let branch = content
+            .get("branch")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty());
+        match (message, branch) {
+            (Some(message), Some(branch)) => {
+                return format!("{message}\n当前分支：{branch}");
+            }
+            (Some(message), None) => return message.to_string(),
+            _ => {}
+        }
+    }
+    content
+        .get("display")
+        .and_then(|value| value.as_str())
+        .or_else(|| content.get("message").and_then(|value| value.as_str()))
+        .or_else(|| content.get("text").and_then(|value| value.as_str()))
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback_output.to_string())
 }
 
 fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {

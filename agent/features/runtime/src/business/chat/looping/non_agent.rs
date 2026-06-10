@@ -218,6 +218,7 @@ where
             owned_call.id.clone(),
             owned_call.provider_id.clone(),
             "Blocked by PreToolUse hook".to_string(),
+            serde_json::json!({ "text": "Blocked by PreToolUse hook" }),
             true,
             Vec::new(),
         );
@@ -236,7 +237,7 @@ where
         })
         .await;
     let mut out = Vec::new();
-    for (id, provider_id, output, is_error, images) in exec_results {
+    for (id, provider_id, output, content, is_error, images) in exec_results {
         log_tool_result(
             json_logger,
             turn_count,
@@ -248,8 +249,8 @@ where
         );
         run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        let result = (id, provider_id, output, is_error, images);
-        if task_store_mutation_succeeded(&owned_call.name, result.3) {
+        let result = (id, provider_id, output, content, is_error, images);
+        if task_store_mutation_succeeded(&owned_call.name, result.4) {
             let _ = sink.send_event(RuntimeStreamEvent::TasksChanged).await;
         }
         send_tool_result(sink, context, &owned_call, &result).await;

@@ -135,6 +135,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             provider_id,
             tool_name,
             output,
+            content,
             is_error,
             images,
         } => {
@@ -149,6 +150,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                     provider_id: provider_id.clone(),
                     tool_name: tool_name.clone(),
                     output: sanitize_tool_output(tool_name, output),
+                    content: sanitize_tool_result_content(tool_name, content.clone()),
                     is_error: *is_error,
                     image_count: images.len(),
                 });
@@ -234,6 +236,13 @@ fn sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
 
 fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
     truncate_large_tool_text(output, Some(tool_name))
+}
+
+fn sanitize_tool_result_content(tool_name: &str, content: Value) -> Value {
+    match content {
+        Value::Object(object) => sanitize_tool_value(tool_name, Value::Object(object)),
+        value => truncate_json_value(value, tool_name, "content"),
+    }
 }
 
 fn sanitize_tool_value(tool_name: &str, value: Value) -> Value {
@@ -543,6 +552,7 @@ mod tests {
             provider_id: "provider-1".to_string(),
             tool_name: "Bash".to_string(),
             output: "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2),
+            content: serde_json::json!({ "text": "x".repeat(TOOL_TEXT_PREVIEW_LIMIT * 2) }),
             is_error: false,
             images: Vec::new(),
         };

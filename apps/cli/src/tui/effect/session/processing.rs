@@ -124,6 +124,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             provider_id,
             tool_name,
             output,
+            content,
             is_error,
             images,
             ..
@@ -133,6 +134,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             provider_id,
             tool_name,
             output,
+            content,
             is_error,
             images,
         },

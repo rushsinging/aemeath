@@ -12,7 +12,14 @@ use share::tool::ImageData;
 use std::sync::Arc;
 use tools::api::ToolRegistry;
 
-pub(crate) type UiToolResult = (String, String, String, bool, Vec<ImageData>);
+pub(crate) type UiToolResult = (
+    String,
+    String,
+    String,
+    serde_json::Value,
+    bool,
+    Vec<ImageData>,
+);
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -139,6 +146,13 @@ where
                 "Tool {} denied: use --allow-all to permit write operations",
                 call.name
             ),
+            serde_json::json!({
+                "status": "error",
+                "message": format!(
+                    "Tool {} denied: use --allow-all to permit write operations",
+                    call.name
+                )
+            }),
             true,
             Vec::new(),
         );
@@ -237,8 +251,9 @@ pub(crate) async fn send_tool_result<S>(
             provider_id: result.1.clone(),
             tool_name: call.name.clone(),
             output: result.2.clone(),
-            is_error: result.3,
-            images: result.4.clone(),
+            content: result.3.clone(),
+            is_error: result.4,
+            images: result.5.clone(),
         })
         .await;
 }
@@ -249,9 +264,11 @@ pub(crate) fn tool_results_for_api(
 ) -> share::message::Message {
     let mut provider_results: Vec<_> = results
         .drain(..)
-        .map(|(_runtime_id, provider_id, output, is_error, images)| {
-            (provider_id, output, is_error, images)
-        })
+        .map(
+            |(_runtime_id, provider_id, output, content, is_error, images)| {
+                (provider_id, output, content, is_error, images)
+            },
+        )
         .collect();
     storage::api::persist_oversized_results(session_id, &mut provider_results);
     share::message::Message::tool_results_rich(provider_results)
@@ -292,6 +309,7 @@ mod tests {
             "runtime-id".to_string(),
             "provider-id".to_string(),
             "ok".to_string(),
+            serde_json::json!({ "text": "ok" }),
             false,
             Vec::new(),
         )];
@@ -311,6 +329,7 @@ mod tests {
             "tool-1".to_string(),
             "provider-oversized".to_string(),
             oversized,
+            serde_json::json!({ "text": "oversized" }),
             false,
             Vec::new(),
         )];
@@ -319,7 +338,14 @@ mod tests {
         let [ContentBlock::ToolResult { content, .. }] = message.content.as_slice() else {
             panic!("expected one tool result");
         };
-        let text = content.as_str().expect("tool result should be string");
+        let content = match content {
+            serde_json::Value::Object(map) => map,
+            other => panic!("tool result should be json object, got {other:?}"),
+        };
+        let text = content
+            .get("text")
+            .and_then(|value| value.as_str())
+            .expect("persisted reference should be in text field");
         assert!(text.contains("<persisted-output>"));
         assert!(text.len() < MAX_TOOL_RESULT_CHARS);
         assert!(text.contains(&session_id));

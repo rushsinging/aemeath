@@ -96,7 +96,8 @@ where
         let result = (
             call.id.clone(),
             call.provider_id.clone(),
-            answer,
+            answer.clone(),
+            serde_json::json!({ "text": answer }),
             false,
             Vec::new(),
         );

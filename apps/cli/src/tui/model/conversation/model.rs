@@ -48,11 +48,18 @@ impl ConversationModel {
                 provider_id,
                 tool_name,
                 output,
+                content,
                 is_error,
                 image_count,
-            } => {
-                self.observe_tool_result(id, provider_id, tool_name, output, is_error, image_count)
-            }
+            } => self.observe_tool_result(
+                id,
+                provider_id,
+                tool_name,
+                output,
+                content,
+                is_error,
+                image_count,
+            ),
             ConversationIntent::CompleteChat => self.complete_chat(),
             ConversationIntent::ObserveAssistantText { text } => self.append_assistant_text(text),
             ConversationIntent::ObserveThinkingText { text } => self.append_thinking_text(text),

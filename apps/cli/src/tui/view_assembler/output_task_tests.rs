@@ -122,6 +122,7 @@ fn add_task_tool(
         id: id.to_string(),
         tool_name: name.to_string(),
         output: output.to_string(),
+        content: serde_json::json!({ "text": output }),
         is_error: false,
         image_count: 0,
     });

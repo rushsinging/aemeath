@@ -54,17 +54,23 @@ impl Message {
     }
 
     /// Create tool results with optional image attachments.
-    /// Each result is (tool_use_id, text_content, is_error, images).
+    /// Each result is (tool_use_id, text_content, json_content, is_error, images).
     pub fn tool_results_rich(
-        results: Vec<(String, String, bool, Vec<crate::tool::ImageData>)>,
+        results: Vec<(
+            String,
+            String,
+            serde_json::Value,
+            bool,
+            Vec<crate::tool::ImageData>,
+        )>,
     ) -> Self {
         Self {
             role: Role::User,
             content: results
                 .into_iter()
-                .map(|(tool_use_id, text, is_error, images)| {
+                .map(|(tool_use_id, text, json_content, is_error, images)| {
                     let content = if images.is_empty() {
-                        serde_json::Value::String(text)
+                        json_content
                     } else {
                         let mut blocks: Vec<serde_json::Value> = images
                             .into_iter()
@@ -82,6 +88,10 @@ impl Message {
                         blocks.push(serde_json::json!({
                             "type": "text",
                             "text": text,
+                        }));
+                        blocks.push(serde_json::json!({
+                            "type": "json",
+                            "json": json_content,
                         }));
                         serde_json::Value::Array(blocks)
                     };

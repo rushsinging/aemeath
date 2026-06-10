@@ -31,6 +31,7 @@ fn test_conversation_observes_tool_lifecycle() {
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "ok".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -52,6 +53,7 @@ fn test_conversation_reports_orphan_tool_result() {
         id: "missing".to_string(),
         tool_name: "Read".to_string(),
         output: "late".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -165,6 +167,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         provider_id: "call-read".to_string(),
         tool_name: "Read".to_string(),
         output: "//! Configuration file management".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -359,6 +362,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "line1\nline2".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -518,6 +522,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "file contents".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -583,6 +588,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "file contents".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -734,6 +740,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         id: "call_agent_1".to_string(),
         tool_name: "Agent".to_string(),
         output: "审查报告".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -785,6 +792,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         id: "call_abc".to_string(),
         tool_name: "Agent".to_string(),
         output: "报告".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -819,6 +827,7 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         id: "call_agent_no_start".to_string(),
         tool_name: "Agent".to_string(),
         output: "审查报告".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });

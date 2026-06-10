@@ -2,8 +2,15 @@ use share::message::{ContentBlock, Message};
 use share::tool::{ImageData, ToolResult};
 use tools::api::{Tool, ToolExecutionContext, ToolRegistry};
 
-/// (runtime_id, provider_id, output_text, is_error, images)
-pub type ToolResultTuple = (String, String, String, bool, Vec<ImageData>);
+/// (runtime_id, provider_id, output_text, json_content, is_error, images)
+pub type ToolResultTuple = (
+    String,
+    String,
+    String,
+    serde_json::Value,
+    bool,
+    Vec<ImageData>,
+);
 
 pub struct Agent<'a> {
     pub registry: &'a ToolRegistry,
@@ -141,10 +148,19 @@ impl<'a> Agent<'a> {
                                     id,
                                     provider_id,
                                     result.output,
+                                    result.content,
                                     result.is_error,
                                     result.images,
                                 ),
-                                Err(message) => (pos, id, provider_id, message, true, Vec::new()),
+                                Err(message) => (
+                                    pos,
+                                    id,
+                                    provider_id,
+                                    message.clone(),
+                                    serde_json::json!({ "text": message }),
+                                    true,
+                                    Vec::new(),
+                                ),
                             }
                         }
                     })
@@ -152,8 +168,8 @@ impl<'a> Agent<'a> {
                 .collect();
 
             let concurrent_results = futures::future::join_all(futures).await;
-            for (pos, id, provider_id, output, is_error, images) in concurrent_results {
-                results[pos] = Some((id, provider_id, output, is_error, images));
+            for (pos, id, provider_id, output, content, is_error, images) in concurrent_results {
+                results[pos] = Some((id, provider_id, output, content, is_error, images));
             }
         }
 
@@ -165,6 +181,7 @@ impl<'a> Agent<'a> {
                     call.id.clone(),
                     call.provider_id.clone(),
                     "Cancelled by user".to_string(),
+                    serde_json::json!({ "text": "Cancelled by user" }),
                     true,
                     Vec::new(),
                 ));
@@ -178,6 +195,7 @@ impl<'a> Agent<'a> {
                             call.id.clone(),
                             call.provider_id.clone(),
                             result.output,
+                            result.content,
                             result.is_error,
                             result.images,
                         ));
@@ -186,7 +204,8 @@ impl<'a> Agent<'a> {
                         results[pos] = Some((
                             call.id.clone(),
                             call.provider_id.clone(),
-                            message,
+                            message.clone(),
+                            serde_json::json!({ "text": message }),
                             true,
                             Vec::new(),
                         ));
@@ -197,6 +216,7 @@ impl<'a> Agent<'a> {
                     call.id.clone(),
                     call.provider_id.clone(),
                     format!("unknown tool: {}", call.name),
+                    serde_json::json!({ "text": format!("unknown tool: {}", call.name) }),
                     true,
                     Vec::new(),
                 ));

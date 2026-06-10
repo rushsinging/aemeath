@@ -121,12 +121,27 @@ pub fn format_persisted_reference(result: &PersistedResult) -> String {
 /// replacing their output with a reference. Returns the number of results persisted.
 pub fn persist_oversized_results(
     session_id: &str,
-    results: &mut [(String, String, bool, Vec<share::tool::ImageData>)],
+    results: &mut [(
+        String,
+        String,
+        serde_json::Value,
+        bool,
+        Vec<share::tool::ImageData>,
+    )],
 ) -> usize {
     let mut count = 0;
-    for (tool_use_id, output, _is_error, _images) in results.iter_mut() {
+    for (tool_use_id, output, content, _is_error, _images) in results.iter_mut() {
         if let Some(persisted) = persist_tool_result(session_id, tool_use_id, output) {
-            *output = format_persisted_reference(&persisted);
+            let reference = format_persisted_reference(&persisted);
+            *output = reference.clone();
+            *content = serde_json::json!({
+                "text": reference,
+                "persisted": {
+                    "path": persisted.filepath,
+                    "original_size": persisted.original_size,
+                    "preview": persisted.preview,
+                }
+            });
             count += 1;
         }
     }

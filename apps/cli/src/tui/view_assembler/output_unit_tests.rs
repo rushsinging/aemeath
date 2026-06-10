@@ -19,6 +19,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         id: "tool-orphan".to_string(),
         tool_name: "Read".to_string(),
         output: "1\t# 活动中 Feature\n2\t\n3\t|#|标题|\n4\t---\n5\t|8|Memory|".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -75,6 +76,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
         output: "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8".to_string(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -98,14 +100,16 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
     conversation.apply(ConversationIntent::StartChat {
         submission: "search".to_string(),
     });
+    let output = (1..=100)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     conversation.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),
         id: "tool-orphan".to_string(),
         tool_name: "Bash".to_string(),
-        output: (1..=100)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        output: output.clone(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
@@ -193,12 +197,14 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
 
     let mut conversation = ConversationModel::default();
     // chats 为空 → 没有任何 tool_call 与该 ToolResult id 匹配（模拟 id 错位）。
+    let output = (1..=1295)
+        .map(|i| format!("{i}\t# 活动中 Bug 行"))
+        .collect::<Vec<_>>()
+        .join("\n");
     conversation.blocks.push(ConversationBlock::ToolResult {
         id: ToolCallId::new("call_orphaned"),
-        output: (1..=1295)
-            .map(|i| format!("{i}\t# 活动中 Bug 行"))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        output: output.clone(),
+        content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
     });
