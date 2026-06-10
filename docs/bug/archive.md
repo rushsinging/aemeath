@@ -95,6 +95,7 @@
 | 108 | TUI diff 代码块没有统一走 syntect 高亮 | [archived/108-diff-syntect-highlight.md](archived/108-diff-syntect-highlight.md) |
 | 109 | TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致 | [archived/109-syntect-theme-macchiato.md](archived/109-syntect-theme-macchiato.md) |
 | 110 | Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log | [archived/110-hook-env-log.md](archived/110-hook-env-log.md) |
+| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | [archived/111-thinking-long-line-truncated.md](archived/111-thinking-long-line-truncated.md) |
 | 113 | AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方；AskUser 块本身固定在初始位置 | [archived/113-askuser-output-order.md](archived/113-askuser-output-order.md) |
 | 114 | Stop hook blocked 缺少显式 chat loop 停止状态表达 | [archived/114-stop-hook-blocked-chat-loop-state.md](archived/114-stop-hook-blocked-chat-loop-state.md) |
 | 115 | check-unit-tests 测试过滤参数误用导致误报失败 | [archived/115-check-unit-tests-filter.md](archived/115-check-unit-tests-filter.md) |

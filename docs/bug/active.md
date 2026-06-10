@@ -4,31 +4,10 @@
 
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
-| 111 | LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失 | 中 | 待确认 | 待用户确认 | 2026-06 | thinking/reasoning block 现按渲染宽度预换行，避免长行截断 |
 | 112 | TUI tool call spinner 有状态但输出区不显示 tool card | 中 | 待确认 | 待用户确认 | 2026-06 | runtime tool 事件携带 chat/turn context，TUI 按上下文绑定 conversation |
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
 | 123 | TUI input queue 不识别换行符 | 中 | 活动中 | 待用户确认 | 2026-06 | input queue 对排队消息中的换行符识别/展示异常，需定位处理路径 |
-
-### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
-
-**状态**：待确认
-
-**症状**：LLM 输出长行在 TUI 中曾只显示到屏幕宽度，超出部分不可见；首轮修复后普通正文长行可换行，但 reasoning/thinking 文本仍会被截断。例如中文问候触发的 reasoning 内容只显示到 `The user is greeting me in Chinese... a simple g`，后续内容没有自动换行显示。
-
-**根因**：首轮修复只统一了 output document 渲染宽度并预留 scrollbar 右侧安全留白。普通 assistant message 走 markdown/fenced markdown 渲染，会按 `ctx.width` 预换行；但 `thinking.rs` 直接按原始 `text.lines()` 生成 `RenderedLine`，完全未使用 `ctx.width`，长 reasoning 行交给 ratatui `Paragraph` 后被当前可见宽度截断。
-
-**修复**：thinking block 复用 inline markdown 的显示宽度换行逻辑，保留 `theme::THINKING` 样式和 gutter marker 语义；补充窄宽度下长 reasoning 文本会拆成多行且每行不超过渲染宽度的回归测试。
-
-**验证**：
-- `cargo fmt --check`
-- `git diff --check`
-- `cargo test -p cli thinking`
-- `cargo test -p cli assistant`
-
-**涉及路径**：
-- `apps/cli/src/tui/app/update.rs`
-- `apps/cli/src/tui/app.rs`
 
 ### #112 TUI tool call spinner 有状态但输出区不显示 tool card
 
