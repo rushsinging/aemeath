@@ -8,6 +8,7 @@
 | 112 | TUI tool call spinner 有状态但输出区不显示 tool card | 中 | 待确认 | 待用户确认 | 2026-06 | runtime tool 事件携带 chat/turn context，TUI 按上下文绑定 conversation |
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
+| 123 | TUI input queue 不识别换行符 | 中 | 活动中 | 待用户确认 | 2026-06 | input queue 对排队消息中的换行符识别/展示异常，需定位处理路径 |
 
 ### #111 LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失
 
@@ -102,6 +103,22 @@
 - `apps/cli/src/tui/render/output/document_renderer.rs`
 - `apps/cli/src/tui/render/output/blocks/tool_call.rs`
 - `apps/cli/src/tui/app/update.rs`
+
+### #123 TUI input queue 不识别换行符
+
+**状态**：活动中
+
+**症状**：TUI 对话处理中继续输入多行内容进入 input queue 后，queue 对消息中的换行符识别/展示异常；多行内容可能被当成单行、丢失换行语义，或后续发送时不能按原多行内容处理。
+
+**根因**：待定位。疑似 input queue 入队、展示或 drain 路径对 queued message 使用单行文本假设，未统一保留并按 `\n` 拆分/传递。
+
+**修复/实现**：待修复。需要定位 input queue 入队、渲染和消费路径，补充覆盖换行符的回归测试，再统一保留多行消息语义。
+
+**验证**：待补充。
+
+**涉及路径**：
+- `apps/cli/src/tui/**`
+- 可能涉及 runtime/input queue drain 路径
 
 ---
 

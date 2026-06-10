@@ -20,6 +20,7 @@
 | 81 | TUI assistant 文本与 spinner phase 视觉调整 | 低 | 待确认 | 未确认 | spinner phase 移除 emoji；assistant 文本前增加白色圆点 gutter |
 | 82 | Provider/Config 设计债收口 | 中 | 未开始 | 未确认 | 统一 API key 解析与 pool 配置路径、unknown driver 显式报错、默认值收口、spec 同步 |
 | 83 | Tool result 统一结构化 JSON | 高 | 设计中 | 未确认 | 所有 tool 返回统一 JSON payload，LLM 保留完整结构，TUI 按工具选择字段展示 |
+| 84 | Stop hook 命令显示短路径 | 低 | ✅ 已完成 | 未确认 | TUI 显示 hook stop 命令时只展示脚本名，避免完整项目路径过长 |
 
 ### #8 Memory 系统
 
@@ -523,3 +524,30 @@ enum MemoryCategory {
 - `apps/cli/src/tui/model/conversation/tool_call.rs`
 - `apps/cli/src/tui/view_assembler/output.rs`
 - `apps/cli/src/tui/render/output/**`
+
+### #84 Stop hook 命令显示短路径
+
+**状态**：✅ 已完成
+
+**背景 / 目标**：Stop hook 在 TUI 中显示执行命令时，当前会展示类似 `{AEMEATH_PROJECT_DIR}/build_cli.sh` 的完整模板路径，内容过长且项目路径变量对用户定位脚本帮助有限。目标是在用户可见的 hook stop 提示中只显示最后一级命令/脚本名，例如 `build_cli.sh`。
+
+**设计方向**：
+1. 仅调整 TUI/用户可见展示文本，不改变 hook 实际执行命令、环境变量注入或日志中的原始命令。
+2. 对 hook 命令展示做路径 basename 化：包含 `/` 的命令只取最后一段；不含 `/` 的命令保持原样。
+3. 需要覆盖 `{AEMEATH_PROJECT_DIR}/build_cli.sh`、绝对路径、相对路径、普通命令名等场景；必要时保留 tooltip/detail 或日志里的完整命令用于排查。
+
+**验收标准**：
+1. Stop hook 运行/阻止提示中显示 `build_cli.sh`，不再直接显示 `{AEMEATH_PROJECT_DIR}/build_cli.sh` 这类长路径。
+2. Hook 执行行为不变，`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` 注入不受影响。
+3. 完整命令仍可在日志或内部结果中用于调试，不因展示缩短而丢失执行信息。
+
+**验证**：
+- `CARGO_TARGET_DIR=target cargo test -p cli hook_notice`
+- `CARGO_TARGET_DIR=target cargo check -p cli`
+- `CARGO_TARGET_DIR=target cargo clippy -p cli --all-targets -- -D warnings`
+- `cargo fmt --check`
+- `git diff --check`
+
+**涉及路径**：
+- `apps/cli/src/tui/**`
+- `agent/features/hook/src/business/hook/**`

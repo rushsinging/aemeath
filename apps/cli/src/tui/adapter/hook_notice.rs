@@ -128,7 +128,7 @@ fn hook_details(
 
 fn hook_spinner_detail(event: &sdk::HookEventView) -> String {
     if let Some(command) = event.command.as_deref().and_then(non_empty) {
-        return truncate_for_spinner(&command, 48);
+        return truncate_for_spinner(&display_command_name(&command), 48);
     }
     event
         .result
@@ -142,6 +142,15 @@ fn hook_spinner_detail(event: &sdk::HookEventView) -> String {
                 .map(|text| truncate_for_spinner(&text, 48))
         })
         .unwrap_or_default()
+}
+
+fn display_command_name(command: &str) -> String {
+    command
+        .rsplit('/')
+        .find(|segment| !segment.trim().is_empty())
+        .unwrap_or(command)
+        .trim()
+        .to_string()
 }
 
 fn first_non_empty<const N: usize>(values: [Option<&str>; N]) -> Option<String> {
@@ -219,6 +228,28 @@ mod tests {
     #[test]
     fn succeeded_event_does_not_build_notice() {
         assert!(hook_event_notice(&event(sdk::HookEventStatus::Succeeded, result())).is_none());
+    }
+
+    #[test]
+    fn spinner_detail_displays_command_basename_for_project_template_path() {
+        let event = sdk::HookEventView {
+            hook_name: "Stop".to_string(),
+            status: sdk::HookEventStatus::Running,
+            matcher: None,
+            command: Some("{AEMEATH_PROJECT_DIR}/build_cli.sh".to_string()),
+            result: None,
+        };
+
+        let phase = hook_spinner_phase(&event);
+
+        assert_eq!(
+            phase,
+            crate::tui::model::runtime::spinner::SpinnerPhase::Hook {
+                event: "Stop".to_string(),
+                detail: "build_cli.sh".to_string(),
+                outcome: crate::tui::model::runtime::spinner::HookOutcome::Running,
+            }
+        );
     }
 
     #[test]
