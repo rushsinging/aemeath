@@ -1,10 +1,10 @@
 //! Task list 窗口化显示
 //!
 //! 排序策略：
-//!   completed → 按 updated_at 升序；窗口内最多显示最近完成的一条
+//!   completed → 按 updated_at 升序；折叠窗口内固定显示最近完成的一条
 //!   in_progress → 按 updated_at 升序（最早开始的在前）
 //!   pending → 按 display_number 升序（稳定序）
-//! 窗口化：上一条 completed + 所有 in_progress + 后续 pending，总数封顶 max_lines。
+//! 窗口化：不超过 max_lines 时完整显示；超出时最近 completed + 尽量 in_progress + pending。
 
 #[cfg(test)]
 use sdk::{TaskState, TaskSummary};
@@ -15,13 +15,14 @@ use std::collections::HashMap;
 ///
 /// 规则：
 /// 1. 摘要行 `━━ Tasks: completed/total ━━` 反映全量
-/// 2. 窗口策略：上一条 completed + 所有 in_progress + 后续 pending
-///    - completed 组内按 updated_at 升序，窗口内取最近完成的一条
+/// 2. `total <= max_lines` 时完整显示所有未删除任务，不折叠
+/// 3. `total > max_lines` 时使用窗口策略：最近 completed + 尽量 in_progress + pending
+///    - completed 组内按 updated_at 升序，折叠窗口内取最近完成的一条
 ///    - in_progress 组内按 updated_at 升序（最早开始的在前）
 ///    - pending 组内按 display_number 升序
-/// 3. 最多显示 `max_lines` 条 task 行
-/// 4. 超出部分折叠提示 `… +N more`
-/// 5. 空输入返回空 Vec
+/// 4. 最多显示 `max_lines` 条 task 行
+/// 5. 超出部分折叠提示 `… +N more`
+/// 6. 空输入返回空 Vec
 #[cfg(test)]
 pub fn build_task_window(
     tasks: &[TaskSummary],
@@ -64,7 +65,11 @@ pub fn build_task_window(
     // pending: 按 display_number 稳定序
     sort_by_display_number(&mut pending, display_map);
 
-    let visible = select_task_window(completed, in_progress, pending, max_lines);
+    let visible = if total <= max_lines {
+        ordered_tasks(completed, in_progress, pending)
+    } else {
+        select_task_window(completed, in_progress, pending, max_lines)
+    };
     let shown_count = visible.len();
     let hidden_count = total.saturating_sub(shown_count);
 
@@ -80,6 +85,19 @@ pub fn build_task_window(
 }
 
 #[cfg(test)]
+fn ordered_tasks<'a>(
+    completed: Vec<&'a TaskSummary>,
+    in_progress: Vec<&'a TaskSummary>,
+    pending: Vec<&'a TaskSummary>,
+) -> Vec<&'a TaskSummary> {
+    completed
+        .into_iter()
+        .chain(in_progress)
+        .chain(pending)
+        .collect()
+}
+
+#[cfg(test)]
 fn select_task_window<'a>(
     completed: Vec<&'a TaskSummary>,
     in_progress: Vec<&'a TaskSummary>,
@@ -91,18 +109,12 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    let reserved_for_pending = usize::from(!pending.is_empty());
-    let in_progress_capacity = max_lines.saturating_sub(reserved_for_pending);
-    let shown_in_progress = in_progress.len().min(in_progress_capacity);
-    let can_show_completed = !completed.is_empty() && shown_in_progress < in_progress_capacity;
-
-    if can_show_completed {
-        if let Some(task) = completed.last() {
-            visible.push(*task);
-        }
+    if let Some(task) = completed.last() {
+        visible.push(*task);
     }
 
-    visible.extend(in_progress.into_iter().take(shown_in_progress));
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(in_progress.into_iter().take(remaining));
 
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(pending.into_iter().take(remaining));
