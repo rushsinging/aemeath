@@ -68,6 +68,35 @@ fn test_default_models_config_keeps_latest_vendor_models() {
 }
 
 #[test]
+fn test_default_models_config_includes_minimax_m3() {
+    let config = volcengine_coding_plan_config();
+    let provider = config.providers.get("Minimax").unwrap();
+
+    assert_eq!(provider.driver, "minimax");
+    assert_eq!(provider.base_url, "https://api.minimaxi.com/v1");
+    assert!(provider.api_key.is_empty());
+    let model = provider
+        .models
+        .iter()
+        .find(|m| m.id == "MiniMax-M3")
+        .unwrap();
+    assert_eq!(model.name, "MiniMax-M3");
+    assert_eq!(model.reasoning, Some(true));
+}
+
+#[test]
+fn test_default_models_config_resolves_minimax_m3() {
+    let config = volcengine_coding_plan_config();
+    let resolved = config
+        .resolve_model_selection("Minimax/MiniMax-M3")
+        .unwrap();
+
+    assert_eq!(resolved.source_key, "Minimax");
+    assert_eq!(resolved.driver, "minimax");
+    assert_eq!(resolved.model.id, "MiniMax-M3");
+}
+
+#[test]
 fn test_default_models_config_resolves_volcengine_default() {
     let config = volcengine_coding_plan_config();
     let resolved = config.resolve_default_model().unwrap();
