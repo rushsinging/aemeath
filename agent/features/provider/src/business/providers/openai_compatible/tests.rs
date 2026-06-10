@@ -225,6 +225,26 @@ fn minimax_provider_uses_max_completion_tokens_field() {
 }
 
 #[test]
+fn minimax_provider_keeps_v1_base_url_suffix() {
+    let config =
+        OpenAIProviderConfig::from_driver(crate::api::ProviderDriverKind::Minimax, "minimax");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://api.minimaxi.com/v1".to_string()),
+        Some("MiniMax-M3".to_string()),
+        32000,
+        true,
+        None,
+    );
+
+    assert_eq!(
+        provider.chat_url(),
+        "https://api.minimaxi.com/v1/chat/completions"
+    );
+}
+
+#[test]
 fn openai_provider_config_from_driver_sets_fields() {
     use crate::api::ProviderDriverKind;
     let openai = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "source-openai");
