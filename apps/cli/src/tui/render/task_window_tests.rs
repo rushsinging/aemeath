@@ -44,9 +44,8 @@ fn test_single_completed() {
 
 #[test]
 fn test_status_group_ordering() {
-    // completed 按 updated_at 升序，窗口内只显示上一条 completed：task 7 (ts=700)
-    // in_progress 按 updated_at 升序：task 4 (ts=400)
-    // pending 按 display_number 升序：task 2 (display=2) → task 5 (display=5)
+    // total <= max_lines 时不折叠：completed 按 updated_at 升序完整显示；
+    // in_progress 按 updated_at 升序；pending 按 display_number 升序。
     let tasks = vec![
         make_task_with_ts("1", "done x", TaskState::Completed, 100),
         make_task_with_ts("2", "pending a", TaskState::Pending, 200),
@@ -57,13 +56,15 @@ fn test_status_group_ordering() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 6); // summary + 1 completed + 1 in_progress + 2 pending + fold hint
+    assert_eq!(result.len(), 7); // summary + all 6 active tasks
     assert!(result[0].contains("3/6"));
-    assert!(result[1].contains("✓ #6 done z"));
-    assert!(result[2].contains("■ #4 doing a"));
-    assert!(result[3].contains("□ #2 pending a"));
-    assert!(result[4].contains("□ #5 pending b"));
-    assert!(result[5].contains("+2 more"));
+    assert!(result[1].contains("✓ #1 done x"));
+    assert!(result[2].contains("✓ #3 done y"));
+    assert!(result[3].contains("✓ #6 done z"));
+    assert!(result[4].contains("■ #4 doing a"));
+    assert!(result[5].contains("□ #2 pending a"));
+    assert!(result[6].contains("□ #5 pending b"));
+    assert!(!result.iter().any(|line| line.contains("more")));
 }
 
 #[test]
@@ -80,17 +81,30 @@ fn test_truncation_with_fold_hint() {
 }
 
 #[test]
-fn test_all_completed() {
-    // completed 按 updated_at 升序，窗口内只显示上一条 completed
+fn test_all_completed_over_max_lines_keeps_recent_completed_only() {
     let tasks: Vec<TaskSummary> = (1..=10)
         .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 3); // summary + 1 completed + fold
+    assert_eq!(result.len(), 3); // summary + recent completed + fold
     assert!(result[0].contains("10/10"));
     assert!(result[1].contains("✓ #10"));
     assert!(result.last().unwrap().contains("+9 more"));
+}
+
+#[test]
+fn test_all_completed_within_max_lines_shows_all_without_fold() {
+    let tasks: Vec<TaskSummary> = (1..=7)
+        .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
+        .collect();
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert_eq!(result.len(), 8); // summary + all 7 completed tasks
+    assert!(result[0].contains("7/7"));
+    assert!(result[1].contains("✓ #1"));
+    assert!(result[7].contains("✓ #7"));
+    assert!(!result.iter().any(|line| line.contains("more")));
 }
 
 #[test]
@@ -136,6 +150,33 @@ fn test_owner_display() {
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
     assert!(result[1].contains("@agent-1"));
+}
+
+#[test]
+fn test_over_max_lines_keeps_recent_completed_and_fills_in_progress_before_pending() {
+    let mut tasks = vec![make_task_with_ts(
+        "1",
+        "recent completed",
+        TaskState::Completed,
+        100,
+    )];
+    tasks.extend((2..=8).map(|i| {
+        make_task_with_ts(
+            &i.to_string(),
+            &format!("doing {}", i),
+            TaskState::InProgress,
+            i * 100,
+        )
+    }));
+    tasks.push(make_task_with_ts("9", "next", TaskState::Pending, 900));
+    let map = make_display_map(&tasks);
+    let result = build_task_window(&tasks, &map, 7);
+    assert_eq!(result.len(), 9); // summary + 7 task lines + fold
+    assert!(result[1].contains("✓ #1 recent completed"));
+    assert!(result[2].contains("■ #2 doing 2"));
+    assert!(result[7].contains("■ #7 doing 7"));
+    assert!(!result.iter().any(|line| line.contains("next")));
+    assert!(result.last().unwrap().contains("+2 more"));
 }
 
 #[test]

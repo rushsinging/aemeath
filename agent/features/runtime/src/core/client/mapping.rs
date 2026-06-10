@@ -150,7 +150,11 @@ pub(crate) fn task_status_lines(
     in_progress.sort_by_key(|t| t.updated_at);
     pending.sort_by_key(|t| display_map.get(&t.id).copied().unwrap_or(usize::MAX));
 
-    let visible = select_task_window(completed, in_progress, pending, max_lines);
+    let visible = if total <= max_lines {
+        ordered_tasks(completed, in_progress, pending)
+    } else {
+        select_task_window(completed, in_progress, pending, max_lines)
+    };
     let shown_count = visible.len();
     let hidden_count = total.saturating_sub(shown_count);
     for task in visible {
@@ -160,6 +164,18 @@ pub(crate) fn task_status_lines(
         lines.push(format!("… +{} more", hidden_count));
     }
     lines
+}
+
+fn ordered_tasks<'a>(
+    completed: Vec<&'a storage::api::Task>,
+    in_progress: Vec<&'a storage::api::Task>,
+    pending: Vec<&'a storage::api::Task>,
+) -> Vec<&'a storage::api::Task> {
+    completed
+        .into_iter()
+        .chain(in_progress)
+        .chain(pending)
+        .collect()
 }
 
 fn select_task_window<'a>(
@@ -173,18 +189,12 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    let reserved_for_pending = usize::from(!pending.is_empty());
-    let in_progress_capacity = max_lines.saturating_sub(reserved_for_pending);
-    let shown_in_progress = in_progress.len().min(in_progress_capacity);
-    let can_show_completed = !completed.is_empty() && shown_in_progress < in_progress_capacity;
-
-    if can_show_completed {
-        if let Some(task) = completed.last() {
-            visible.push(*task);
-        }
+    if let Some(task) = completed.last() {
+        visible.push(*task);
     }
 
-    visible.extend(in_progress.into_iter().take(shown_in_progress));
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(in_progress.into_iter().take(remaining));
 
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(pending.into_iter().take(remaining));

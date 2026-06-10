@@ -3,7 +3,7 @@ use super::helpers_tests::{make_display_map, make_task_with_ts};
 use sdk::{TaskState, TaskSummary};
 
 #[test]
-fn test_completed_group_sorted_by_updated_at_asc_and_window_keeps_previous_completed() {
+fn test_completed_group_sorted_by_updated_at_asc_and_within_max_shows_all_completed() {
     let tasks = vec![
         make_task_with_ts("1", "step one", TaskState::Completed, 100),
         make_task_with_ts("2", "step two", TaskState::Completed, 300),
@@ -13,9 +13,12 @@ fn test_completed_group_sorted_by_updated_at_asc_and_window_keeps_previous_compl
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert!(result[1].contains("✓ #3 step three")); // ts=500
-    assert!(result[2].contains("■ #4"));
-    assert!(result[3].contains("□ #5"));
+    assert!(result[1].contains("✓ #1 step one")); // ts=100
+    assert!(result[2].contains("✓ #2 step two")); // ts=300
+    assert!(result[3].contains("✓ #3 step three")); // ts=500
+    assert!(result[4].contains("■ #4"));
+    assert!(result[5].contains("□ #5"));
+    assert!(!result.iter().any(|line| line.contains("more")));
 }
 
 #[test]
@@ -42,8 +45,8 @@ fn test_window_feature_24_keeps_in_progress_and_pending_visible() {
 }
 
 #[test]
-fn test_execution_order_reflected_in_display() {
-    // Simulates 1→2→7→3→4 execution order; task 3 is the previous completed task.
+fn test_execution_order_reflected_in_display_without_fold_within_max_lines() {
+    // total <= max_lines 时按组完整显示；completed 组内仍按 updated_at 升序。
     let tasks = vec![
         make_task_with_ts("1", "task 1", TaskState::Completed, 100),
         make_task_with_ts("2", "task 2", TaskState::Completed, 200),
@@ -55,7 +58,11 @@ fn test_execution_order_reflected_in_display() {
     // display map: sorted ids 1,2,3,4,5,7 → 1→#1, 2→#2, 3→#3, 4→#4, 5→#5, 7→#6
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert!(result[1].contains("✓ #3 task 3"));
-    assert!(result[2].contains("■ #4 task 4"));
-    assert!(result[3].contains("□ #5 task 5"));
+    assert!(result[1].contains("✓ #1 task 1"));
+    assert!(result[2].contains("✓ #2 task 2"));
+    assert!(result[3].contains("✓ #6 task 7"));
+    assert!(result[4].contains("✓ #3 task 3"));
+    assert!(result[5].contains("■ #4 task 4"));
+    assert!(result[6].contains("□ #5 task 5"));
+    assert!(!result.iter().any(|line| line.contains("more")));
 }
