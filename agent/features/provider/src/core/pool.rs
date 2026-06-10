@@ -136,6 +136,7 @@ impl LlmClientPool {
                 ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
                 ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
                 ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+                ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
                 ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
                 ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
             };

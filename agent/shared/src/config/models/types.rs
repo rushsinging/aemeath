@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 const VOLCENGINE_BASE_URL: &str = "https://ark.cn-beijing.volces.com/api/coding/v3";
+const MINIMAX_BASE_URL: &str = "https://api.minimaxi.com/v1";
 
 /// Multi-source model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -118,6 +119,15 @@ pub fn volcengine_coding_plan_config() -> ModelsConfig {
             models: default_volcengine_models(),
         },
     );
+    providers.insert(
+        "Minimax".to_string(),
+        ProviderModelsConfig {
+            base_url: MINIMAX_BASE_URL.to_string(),
+            api_key: String::new(),
+            driver: "minimax".to_string(),
+            models: default_minimax_models(),
+        },
+    );
     ModelsConfig {
         mode: "merge".to_string(),
         default: "Volcengine/doubao-seed-2-0-code-preview-260215".to_string(),
@@ -143,6 +153,19 @@ fn volcengine_model(
         reasoning: Some(true),
         reasoning_effort: None,
     }
+}
+
+fn default_minimax_models() -> Vec<ModelEntryConfig> {
+    vec![ModelEntryConfig {
+        id: "MiniMax-M3".to_string(),
+        name: "MiniMax-M3".to_string(),
+        input: vec!["text".to_string()],
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        thinking_max_tokens: 0,
+        reasoning: Some(true),
+        reasoning_effort: None,
+    }]
 }
 
 fn default_volcengine_models() -> Vec<ModelEntryConfig> {

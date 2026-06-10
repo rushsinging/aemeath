@@ -30,6 +30,7 @@ pub enum ProviderDriverKind {
     Zhipu,
     LiteLLM,
     Volcengine,
+    Minimax,
     Ollama,
 }
 
@@ -42,6 +43,7 @@ impl ProviderDriverKind {
             "zhipu" => Some(ProviderDriverKind::Zhipu),
             "litellm" => Some(ProviderDriverKind::LiteLLM),
             "volcengine" => Some(ProviderDriverKind::Volcengine),
+            "minimax" => Some(ProviderDriverKind::Minimax),
             "ollama" => Some(ProviderDriverKind::Ollama),
             _ => None,
         }
@@ -54,6 +56,7 @@ impl ProviderDriverKind {
             ProviderDriverKind::Zhipu => "zhipu",
             ProviderDriverKind::LiteLLM => "litellm",
             ProviderDriverKind::Volcengine => "volcengine",
+            ProviderDriverKind::Minimax => "minimax",
             ProviderDriverKind::Ollama => "ollama",
         }
     }
@@ -96,13 +99,20 @@ mod tests {
     }
 
     #[test]
+    fn test_from_str_minimax() {
+        assert_eq!(
+            ProviderDriverKind::parse("minimax"),
+            Some(ProviderDriverKind::Minimax)
+        );
+    }
+
+    #[test]
     fn test_from_str_ollama() {
         assert_eq!(
             ProviderDriverKind::parse("ollama"),
             Some(ProviderDriverKind::Ollama)
         );
     }
-
     #[test]
     fn test_as_str_ollama_roundtrip() {
         assert_eq!(ProviderDriverKind::Ollama.as_str(), "ollama");
@@ -136,6 +146,11 @@ mod tests {
     #[test]
     fn test_as_str_litellm() {
         assert_eq!(ProviderDriverKind::LiteLLM.as_str(), "litellm");
+    }
+
+    #[test]
+    fn test_as_str_minimax() {
+        assert_eq!(ProviderDriverKind::Minimax.as_str(), "minimax");
     }
 
     #[test]

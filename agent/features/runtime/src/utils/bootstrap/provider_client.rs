@@ -68,6 +68,7 @@ fn provider_driver_api_key_env_name(driver: ProviderDriverKind) -> Option<&'stat
         ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
         ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
         ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
+        ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
         ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
         ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
     }
@@ -222,6 +223,19 @@ mod tests {
         let result = resolve_api_key(None, &resolved, Some(&read_env));
 
         assert_eq!(result, Some("llm-key".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_uses_minimax_provider_env_before_llm_env() {
+        let resolved = resolved_model(ProviderDriverKind::Minimax, "config-key", "", "minimax");
+        let read_env = env_reader(&[
+            ("MINIMAX_API_KEY", "minimax-key"),
+            ("LLM_API_KEY", "llm-key"),
+        ]);
+
+        let result = resolve_api_key(None, &resolved, Some(&read_env));
+
+        assert_eq!(result, Some("minimax-key".to_string()));
     }
 
     #[test]
@@ -382,6 +396,14 @@ mod tests {
         assert_eq!(
             provider_driver_api_key_env_name(ProviderDriverKind::Ollama),
             Some("OLLAMA_API_KEY")
+        );
+    }
+
+    #[test]
+    fn test_provider_driver_api_key_env_name_minimax() {
+        assert_eq!(
+            provider_driver_api_key_env_name(ProviderDriverKind::Minimax),
+            Some("MINIMAX_API_KEY")
         );
     }
 

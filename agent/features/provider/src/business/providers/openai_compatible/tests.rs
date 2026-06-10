@@ -1,4 +1,6 @@
-use super::driver::{ChatApiDriver, LiteLlmDriver, OpenAiDriver, VolcengineDriver, ZhipuDriver};
+use super::driver::{
+    ChatApiDriver, LiteLlmDriver, MinimaxDriver, OpenAiDriver, VolcengineDriver, ZhipuDriver,
+};
 use super::*;
 use crate::core::client::OpenAIProviderConfig;
 use crate::core::provider::LlmProvider;
@@ -157,6 +159,72 @@ fn volcengine_object_reasoning_sends_reasoning_only() {
 }
 
 #[test]
+fn minimax_bool_true_sends_adaptive_thinking_and_reasoning_split() {
+    let config = ReasoningConfig::Bool(true);
+    let mut body = base_body();
+
+    MinimaxDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"adaptive"})));
+    assert_eq!(body.get("reasoning_split"), Some(&json!(true)));
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn minimax_bool_false_sends_disabled_thinking_and_keeps_reasoning_split() {
+    let config = ReasoningConfig::Bool(false);
+    let mut body = base_body();
+
+    MinimaxDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"disabled"})));
+    assert_eq!(body.get("reasoning_split"), Some(&json!(true)));
+}
+
+#[test]
+fn minimax_object_type_wins_over_reasoning_enabled() {
+    let config = ReasoningConfig::Object(json!({"type":"disabled"}));
+    let mut body = base_body();
+
+    MinimaxDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"disabled"})));
+    assert_eq!(body.get("reasoning_split"), Some(&json!(true)));
+}
+
+#[test]
+fn minimax_thinking_budget_uses_adaptive_thinking_without_budget_field() {
+    let config = ReasoningConfig::ThinkingBudget(4096);
+    let mut body = base_body();
+
+    MinimaxDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type":"adaptive"})));
+    assert_eq!(body.get("reasoning_split"), Some(&json!(true)));
+    assert!(body.get("thinking_max_tokens").is_none());
+}
+
+#[test]
+fn minimax_provider_uses_max_completion_tokens_field() {
+    let config =
+        OpenAIProviderConfig::from_driver(crate::api::ProviderDriverKind::Minimax, "minimax");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        None,
+        Some("MiniMax-M3".to_string()),
+        32000,
+        true,
+        None,
+    );
+
+    provider.set_max_tokens(8192);
+    let body = provider.base_request_body(Vec::new(), false);
+    assert_eq!(body.get("max_completion_tokens"), Some(&json!(8192)));
+    assert!(body.get("max_tokens").is_none());
+}
+
+#[test]
 fn openai_provider_config_from_driver_sets_fields() {
     use crate::api::ProviderDriverKind;
     let openai = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "source-openai");
@@ -174,6 +242,11 @@ fn openai_provider_config_from_driver_sets_fields() {
     assert_eq!(volcengine.source_key, "source-volcengine");
     assert_eq!(volcengine.driver, ProviderDriverKind::Volcengine);
     assert_eq!(volcengine.chat_api_suffix, "/chat/completions");
+
+    let minimax = OpenAIProviderConfig::from_driver(ProviderDriverKind::Minimax, "source-minimax");
+    assert_eq!(minimax.source_key, "source-minimax");
+    assert_eq!(minimax.driver, ProviderDriverKind::Minimax);
+    assert_eq!(minimax.chat_api_suffix, "/chat/completions");
 }
 
 #[test]
