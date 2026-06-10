@@ -19,7 +19,7 @@
 | 80 | Agent context 所有权重构（project 拥有 WorkspaceState） | 高 | ✅ 已完成 | 未确认 | workspace 可变状态收敛为 project 单一 WorkspaceState，feature 经能力 trait 访问，子 agent 隔离，git 抽 outbound port |
 | 81 | TUI assistant 文本与 spinner phase 视觉调整 | 低 | 待确认 | 未确认 | spinner phase 移除 emoji；assistant 文本前增加白色圆点 gutter |
 | 82 | Provider/Config 设计债收口 | 中 | 未开始 | 未确认 | 统一 API key 解析与 pool 配置路径、unknown driver 显式报错、默认值收口、spec 同步 |
-| 83 | Tool result 统一结构化 JSON | 高 | 设计中 | 未确认 | 所有 tool 返回统一 JSON payload，LLM 保留完整结构，TUI 按工具选择字段展示 |
+| 83 | Tool result 统一结构化 JSON | 高 | 实现中 | 未确认 | 所有 tool 返回统一 JSON payload，LLM 保留完整结构，TUI 按工具选择字段展示 |
 
 ### #8 Memory 系统
 
@@ -487,7 +487,13 @@ enum MemoryCategory {
 
 ### #83 Tool result 统一结构化 JSON
 
-**状态**：设计中
+**状态**：实现中
+
+**当前进展**：
+- `ToolResult` 已增加 `content: serde_json::Value`，`success/error` 默认包装为 `{ "text": ... }`，并保留 `output` 作为 TUI / legacy fallback。
+- runtime / sdk / storage oversized 持久化路径已携带 JSON content，`Message::tool_results_rich` 无图片时直接写入结构化 content，有图片时附带 text 与 json block。
+- TUI `UiEvent`、conversation model 与 view assembler 已接入结构化 content；`EnterWorktree` / `ExitWorktree` 优先展示 `message` 与 `当前分支：{branch}`，解析失败回退文本。
+- `EnterWorktree` / `ExitWorktree` 已返回 `status/message/branch/path_base/working_root/guidance` JSON schema；其他现有工具通过默认构造器统一包装为 `{ "text": ... }`。
 
 **症状 / 目标**：当前工具执行结果在 `ToolResult.output`、runtime stream event、TUI conversation model 中主要以纯文本 `String` 流转；虽然共享消息层的 `ContentBlock::ToolResult.content` 已支持 `serde_json::Value`，但工具层没有统一结构化 payload，导致 LLM 只能收到非结构化文本，TUI 也只能按行截断或做工具名特判。目标是所有 tool result 统一返回 JSON payload：LLM 获得完整结构，TUI 可按工具选择字段展示。
 

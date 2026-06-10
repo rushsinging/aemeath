@@ -41,17 +41,24 @@ fn get_current_branch(dir: &Path) -> String {
         .unwrap_or_else(|| "(unknown)".to_string())
 }
 
-fn format_workspace_context_result(
+fn workspace_context_payload(
     headline: &str,
     branch: &str,
     path_base: &Path,
     working_root: &Path,
-) -> String {
-    format!(
-        "{headline}\n当前分支：{branch}\n当前 path_base：{}\n当前 working_root：{}\n\n后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。\n如果必须使用绝对路径，必须位于当前 working_root 下。\n不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。",
-        path_base.display(),
-        working_root.display()
-    )
+) -> Value {
+    serde_json::json!({
+        "status": "success",
+        "message": headline,
+        "branch": branch,
+        "path_base": path_base.display().to_string(),
+        "working_root": working_root.display().to_string(),
+        "guidance": [
+            "后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。",
+            "如果必须使用绝对路径，必须位于当前 working_root 下。",
+            "不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。"
+        ]
+    })
 }
 
 #[async_trait]
@@ -109,8 +116,9 @@ impl Tool for EnterWorktreeTool {
                 let path_base = ctx.workspace_read().current_path_base();
                 let working_root = ctx.workspace_read().current_root();
                 let branch = get_current_branch(&working_root);
-                ToolResult::success(format_workspace_context_result(
-                    &format!("已进入 worktree：{}", display_target),
+                let headline = format!("已进入 worktree：{}", display_target);
+                ToolResult::success_json(workspace_context_payload(
+                    &headline,
                     &branch,
                     &path_base,
                     &working_root,
@@ -168,8 +176,9 @@ impl Tool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
-                    ToolResult::success(format_workspace_context_result(
-                        &format!("已切换到：{}", path),
+                    let headline = format!("已切换到：{}", path);
+                    ToolResult::success_json(workspace_context_payload(
+                        &headline,
                         &branch,
                         &path_base,
                         &working_root,
@@ -184,8 +193,9 @@ impl Tool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
-                    ToolResult::success(format_workspace_context_result(
-                        &format!("已退出 worktree，恢复到：{}", prev.path_base.display()),
+                    let headline = format!("已退出 worktree，恢复到：{}", prev.path_base.display());
+                    ToolResult::success_json(workspace_context_payload(
+                        &headline,
                         &branch,
                         &path_base,
                         &working_root,
@@ -266,17 +276,24 @@ mod tests {
     }
 
     #[test]
-    fn test_format_workspace_context_result_includes_path_base_and_working_root() {
-        let text = format_workspace_context_result(
+    fn test_workspace_context_payload_includes_path_base_and_working_root() {
+        let payload = workspace_context_payload(
             "已进入 worktree：/repo/.worktrees/feature",
             "feature",
             Path::new("/repo/.worktrees/feature/subdir"),
             Path::new("/repo/.worktrees/feature"),
         );
 
-        assert!(text.contains("当前 path_base：/repo/.worktrees/feature/subdir"));
-        assert!(text.contains("当前 working_root：/repo/.worktrees/feature"));
-        assert!(text.contains("后续 Read/Edit/Write/Glob/Grep/Bash"));
-        assert!(text.contains("不要继续使用进入 worktree 前"));
+        assert_eq!(
+            payload["message"],
+            "已进入 worktree：/repo/.worktrees/feature"
+        );
+        assert_eq!(payload["branch"], "feature");
+        assert_eq!(payload["path_base"], "/repo/.worktrees/feature/subdir");
+        assert_eq!(payload["working_root"], "/repo/.worktrees/feature");
+        assert!(payload["guidance"][0]
+            .as_str()
+            .unwrap()
+            .contains("后续 Read/Edit/Write/Glob/Grep/Bash"));
     }
 }

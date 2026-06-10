@@ -127,9 +127,10 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    for (_, _, output, _, _) in &mut results {
+                    for (_, _, output, content, _, _) in &mut results {
                         if output.len() > crate::business::compact::MAX_TOOL_RESULT_CHARS {
                             *output = truncate_tool_result(output);
+                            *content = serde_json::json!({ "text": output });
                         }
                     }
                     append_tool_results(&mut self.messages, results, &self.session_id);

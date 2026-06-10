@@ -37,6 +37,7 @@ impl ConversationModel {
         &mut self,
         id: ToolCallId,
         output: String,
+        content: serde_json::Value,
         is_error: bool,
         image_count: usize,
     ) {
@@ -46,6 +47,7 @@ impl ConversationModel {
         let block = ConversationBlock::ToolResult {
             id: id.clone(),
             output,
+            content,
             is_error,
             image_count,
         };

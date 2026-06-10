@@ -159,6 +159,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             provider_id,
             tool_name,
             output,
+            content,
             is_error,
             images,
         } => ChatEvent::ToolResult {
@@ -167,6 +168,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             provider_id,
             tool_name,
             output,
+            content,
             is_error,
             images: images
                 .into_iter()

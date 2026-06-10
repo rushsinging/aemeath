@@ -18,6 +18,7 @@ impl ConversationModel {
             id: _,
             tool_name: _,
             output,
+            content,
             is_error,
         } = self.blocks.remove(position)
         else {
@@ -30,6 +31,7 @@ impl ConversationModel {
             self.insert_tool_result_after_tool_call(
                 ToolCallId::new(id.to_string()),
                 output,
+                content,
                 is_error,
                 0,
             );
@@ -42,6 +44,7 @@ impl ConversationModel {
         _provider_id: String,
         tool_name: String,
         output: String,
+        content: serde_json::Value,
         is_error: bool,
         image_count: usize,
     ) -> Vec<ConversationChange> {
@@ -49,6 +52,7 @@ impl ConversationModel {
             self.insert_tool_result_after_tool_call(
                 ToolCallId::new(id.clone()),
                 output,
+                content,
                 is_error,
                 image_count,
             );
@@ -62,6 +66,7 @@ impl ConversationModel {
             id: id.clone(),
             tool_name,
             output,
+            content,
             is_error,
         });
         vec![

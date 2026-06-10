@@ -22,7 +22,7 @@ impl<'a> SubAgentRun<'a> {
         results: &[crate::business::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
-        for (id, _provider_id, output, is_error, _) in results.iter() {
+        for (id, _provider_id, output, _content, is_error, _) in results.iter() {
             let label = if *is_error { "ERR" } else { "OK" };
             if let Some((name, input_short)) = call_info.get(id.as_str()) {
                 (self.progress)(Some(turn_number), &format!("  → {}({})", name, input_short));
@@ -50,7 +50,7 @@ impl<'a> SubAgentRun<'a> {
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
         if let Some(ref jl) = self.runner.json_logger {
-            for (id, _provider_id, output, is_error, _) in results.iter() {
+            for (id, _provider_id, output, _content, is_error, _) in results.iter() {
                 let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
                 let _ = jl.lock().unwrap().log_tool_result(
                     turn_number,
@@ -119,23 +119,14 @@ pub(super) fn append_tool_results(
 ) {
     let mut provider_results: Vec<_> = results
         .drain(..)
-        .map(|(_runtime_id, provider_id, output, is_error, images)| {
-            (provider_id, output, is_error, images)
-        })
+        .map(
+            |(_runtime_id, provider_id, output, content, is_error, images)| {
+                (provider_id, output, content, is_error, images)
+            },
+        )
         .collect();
     storage::api::persist_oversized_results(session_id, &mut provider_results);
-    let has_images = provider_results
-        .iter()
-        .any(|(_, _, _, imgs)| !imgs.is_empty());
-    if has_images {
-        messages.push(Message::tool_results_rich(provider_results));
-    } else {
-        let simple = provider_results
-            .into_iter()
-            .map(|(id, output, is_error, _)| (id, output, is_error))
-            .collect();
-        messages.push(Message::tool_results(simple));
-    }
+    messages.push(Message::tool_results_rich(provider_results));
 }
 
 #[cfg(test)]
@@ -151,6 +142,7 @@ mod tests {
             "runtime-id".to_string(),
             "provider-id".to_string(),
             "ok".to_string(),
+            serde_json::json!({ "text": "ok" }),
             false,
             Vec::new(),
         )];
@@ -172,6 +164,7 @@ mod tests {
             "tool-oversized".to_string(),
             "provider-oversized".to_string(),
             oversized,
+            serde_json::json!({ "text": "oversized" }),
             false,
             Vec::new(),
         )];
@@ -181,7 +174,14 @@ mod tests {
         let [ContentBlock::ToolResult { content, .. }] = messages[0].content.as_slice() else {
             panic!("expected one tool result");
         };
-        let text = content.as_str().expect("tool result should be string");
+        let content = match content {
+            serde_json::Value::Object(map) => map,
+            other => panic!("tool result should be json object, got {other:?}"),
+        };
+        let text = content
+            .get("text")
+            .and_then(|value| value.as_str())
+            .expect("persisted reference should be in text field");
         assert!(text.contains("<persisted-output>"));
         assert!(text.len() < MAX_TOOL_RESULT_CHARS);
         assert!(text.contains(&session_id));

@@ -38,6 +38,7 @@ pub enum ConversationBlock {
     ToolResult {
         id: ToolCallId,
         output: String,
+        content: serde_json::Value,
         is_error: bool,
         image_count: usize,
     },
@@ -68,6 +69,7 @@ pub enum ConversationBlock {
         /// 避免把完整原始 output 当正文刷出（#87 残留）。
         tool_name: String,
         output: String,
+        content: serde_json::Value,
         is_error: bool,
     },
     /// AskUserQuestion 交互块（问题 + 选项列表）。渲染与选项导航高亮的单一真相。

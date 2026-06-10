@@ -7,6 +7,7 @@ pub struct ImageData {
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub output: String,
+    pub content: serde_json::Value,
     pub is_error: bool,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
@@ -14,17 +15,37 @@ pub struct ToolResult {
 
 impl ToolResult {
     pub fn success(output: impl Into<String>) -> Self {
+        Self::text(output, false)
+    }
+
+    pub fn error(output: impl Into<String>) -> Self {
+        Self::text(output, true)
+    }
+
+    pub fn success_json(content: serde_json::Value) -> Self {
+        Self::json(content, false)
+    }
+
+    pub fn error_json(content: serde_json::Value) -> Self {
+        Self::json(content, true)
+    }
+
+    pub fn text(output: impl Into<String>, is_error: bool) -> Self {
+        let output = output.into();
         Self {
-            output: output.into(),
-            is_error: false,
+            content: serde_json::json!({ "text": output }),
+            output,
+            is_error,
             images: Vec::new(),
         }
     }
 
-    pub fn error(output: impl Into<String>) -> Self {
+    pub fn json(content: serde_json::Value, is_error: bool) -> Self {
+        let output = display_text_from_content(&content);
         Self {
-            output: output.into(),
-            is_error: true,
+            output,
+            content,
+            is_error,
             images: Vec::new(),
         }
     }
@@ -32,6 +53,57 @@ impl ToolResult {
     pub fn with_image(mut self, base64: String, media_type: String) -> Self {
         self.images.push(ImageData { base64, media_type });
         self
+    }
+}
+
+fn display_text_from_content(content: &serde_json::Value) -> String {
+    if let Some(display) = content.get("display").and_then(|value| value.as_str()) {
+        return display.to_string();
+    }
+    if let Some(message) = content.get("message").and_then(|value| value.as_str()) {
+        return message.to_string();
+    }
+    if let Some(text) = content.get("text").and_then(|value| value.as_str()) {
+        return text.to_string();
+    }
+    content.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_result_success_wraps_text_payload() {
+        let result = ToolResult::success("ok");
+
+        assert_eq!(result.output, "ok");
+        assert!(!result.is_error);
+        assert_eq!(result.content, serde_json::json!({ "text": "ok" }));
+    }
+
+    #[test]
+    fn test_tool_result_json_prefers_display_text() {
+        let result = ToolResult::success_json(serde_json::json!({
+            "display": "shown in tui",
+            "message": "message for llm",
+            "data": { "value": 1 }
+        }));
+
+        assert_eq!(result.output, "shown in tui");
+        assert_eq!(result.content["data"]["value"], 1);
+    }
+
+    #[test]
+    fn test_tool_result_json_falls_back_to_message_text_or_serialized_json() {
+        let message = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
+        let text = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
+        let other = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
+
+        assert_eq!(message.output, "msg");
+        assert_eq!(text.output, "txt");
+        assert_eq!(other.output, r#"{"items":[1,2]}"#);
+        assert!(other.is_error);
     }
 }
 

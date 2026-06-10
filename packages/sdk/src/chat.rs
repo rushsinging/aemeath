@@ -283,6 +283,7 @@ pub enum ChatEvent {
         provider_id: String,
         tool_name: String,
         output: String,
+        content: serde_json::Value,
         is_error: bool,
         images: Vec<ToolResultImage>,
     },

@@ -95,6 +95,7 @@ where
             call.id.clone(),
             call.provider_id.clone(),
             "Blocked by PreToolUse hook".to_string(),
+            serde_json::json!({ "text": "Blocked by PreToolUse hook" }),
             true,
             Vec::new(),
         );
@@ -135,13 +136,14 @@ where
         call.id.clone(),
         call.provider_id.clone(),
         result.output,
+        result.content,
         result.is_error,
         result.images,
     )];
     ag_ctx.progress_tx = None;
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
-    for (id, provider_id, output, is_error, images) in &results {
+    for (id, provider_id, output, content, is_error, images) in &results {
         run_post_tool_hooks(&sink, &hook_ui, &hook_runner, &call, output, *is_error).await;
         send_tool_result(
             &sink,
@@ -151,6 +153,7 @@ where
                 id.clone(),
                 provider_id.clone(),
                 output.clone(),
+                content.clone(),
                 *is_error,
                 images.clone(),
             ),
