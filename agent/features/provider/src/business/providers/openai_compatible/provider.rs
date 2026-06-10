@@ -34,13 +34,17 @@ impl OpenAICompatibleProvider {
         reasoning_config: Option<ReasoningConfig>,
     ) -> Self {
         let driver = driver_for_provider_driver(config.driver);
+        let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
+        let base_url = if matches!(config.driver, crate::api::ProviderDriverKind::Minimax) {
+            raw_base_url.trim_end_matches('/').to_string()
+        } else {
+            raw_base_url
+                .trim_end_matches('/')
+                .trim_end_matches("/v1")
+                .to_string()
+        };
         Self {
-            base_url: {
-                let url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
-                url.trim_end_matches('/')
-                    .trim_end_matches("/v1")
-                    .to_string()
-            },
+            base_url,
             model: model.unwrap_or_else(|| "gpt-4o".to_string()),
             config,
             api_key,
