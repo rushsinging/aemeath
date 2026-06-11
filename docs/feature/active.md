@@ -406,21 +406,39 @@ enum MemoryCategory {
 
 **设计决策**：
 
-#### A. 日志分层（诊断日志 vs 审计数据分离）
+#### A. 统一日志入口：`UnifiedLogger`（路径 C）
 
-两类日志保持独立机制，但外围体验统一：
+**所有日志走一个 `log::Log` 入口 + 按 `record.target()` 前缀路由**。`JsonLogger` 与 `RoutingLogger` 合并为 `UnifiedLogger`，消除双管线：
 
-| 日志文件 | 机制 | 类型 | 内容 |
-|---------|------|------|------|
-| `aemeath.log` | `RoutingLogger`（兜底） | 诊断日志 | Runtime/Provider/Tools/Shared 等业务诊断 |
-| `tui.log` | `RoutingLogger`（`target` 以 `cli::` 开头） | 诊断日志 | TUI 渲染、事件、状态变更 |
-| `hook.log` | `RoutingLogger`（`target` 以 `hook::` 开头） | 诊断日志 | Hook 匹配、执行、结果 |
-| `input.log` | `JsonLogger::log_input()` | 结构化审计 | LLM 输入 messages / system / schemas |
-| `output.log` | `JsonLogger::log_output()` | 结构化审计 | LLM 输出 content / usage / timing |
-| `tool.log` | `JsonLogger::log_tool_call/result()` | 结构化审计 | 工具调用参数与结果 |
-| `panic.log` | `panic_hook.rs` | 崩溃日志 | Panic + backtrace |
+| target 前缀 | 路由目标 | 写入格式 | 类别 |
+|-------------|----------|----------|------|
+| `cli::*` | `tui.log` | 格式化 JSON 行 | 诊断 |
+| `hook::*` | `hook.log` | 格式化 JSON 行 | 诊断 |
+| `audit::input` | `input.log` | 原始 `serde_json::Value` | 结构化审计 |
+| `audit::output` | `output.log` | 原始 `serde_json::Value` | 结构化审计 |
+| `audit::tool` | `tool.log` | 原始 `serde_json::Value` | 结构化审计 |
+| 其他 | `aemeath.log` | 格式化 JSON 行 | 诊断 |
+| panic | `panic.log` | 纯文本 + backtrace | 崩溃日志 |
 
-**不纳入 `RoutingLogger` 的理由**：`input/output/tool.log` 是结构化审计数据（`serde_json::Value`），写入时机精确、字段严格、由 `role_logs_enabled` 独立开关控制；若走 `log::info!` 宏，只能传递字符串 `msg`，既无法承载复杂结构，也混淆了"日志级别"与"数据类型"两个维度。
+**`UnifiedLogger` 暴露两层 API**：
+
+1. **`impl log::Log for UnifiedLogger`**（诊断入口）：接受 `&Record`，按 `record.target()` 前缀路由到对应文件 sink。调用方仍是 `log::info!(target: "cli::render", "msg")` 等宏，零侵入。
+2. **结构化 sink 方法**（审计入口）：
+   ```rust
+   UnifiedLogger::log_input(json: serde_json::Value)
+   UnifiedLogger::log_output(json: serde_json::Value)
+   UnifiedLogger::log_tool(json: serde_json::Value)
+   ```
+   审计数据不经过 `log::*` 宏，直接以 `serde_json::Value` 形态写入对应审计文件，保留结构。
+
+**`enabled()` 行为**：
+- 诊断日志：`UnifiedLogger::enabled(record)` 委托 `env_logger::Logger::enabled()`，按 `RUST_LOG` + `config.level` 过滤
+- 审计日志：`log_input/output/tool()` 内部先查 `role_logs_enabled && env_logger::enabled(...)`，确保审计开关与日志级别双控制
+
+**为什么这是真正"统一"**：
+- 调用方只面对一个 logger（`log::Log` trait）
+- 审计与诊断共享 `enabled()` 过滤逻辑，但写入路径分 sink 保持各自数据形态
+- 避免了路径 B（`log::info!(target: "audit::input", "{:#?}", json)`）的"序列化→字符串→反序列化"退化
 
 #### B. 统一 JSON Lines 格式
 
@@ -452,32 +470,44 @@ enum MemoryCategory {
 
 #### E. 职责边界规范
 
-`aemeath.log` / `tui.log` / `hook.log` 禁止打印 messages / content blocks / tool results 等 LLM 交互数据；此类数据只能通过 `JsonLogger` API 进入 `input/output/tool.log`。
+`aemeath.log` / `tui.log` / `hook.log` 禁止打印 messages / content blocks / tool results 等 LLM 交互数据；此类数据**必须**走 `UnifiedLogger::log_input/output/tool()` 审计 API，目标 target 为 `audit::input/output/tool`。
 
 **技术实现**：
-- 复用 `env_logger::Logger` 做过滤判断（保留 `RUST_LOG` + `config.level` 解析能力），但替换输出层为自定义 `RoutingLogger`（实现 `log::Log`）。
-- `RoutingLogger::enabled()` 委托 `env_logger::Logger::enabled()`，`log()` 按 `record.target()` 前缀路由到不同文件。
+- 唯一 logger：`UnifiedLogger`（实现 `log::Log`），内部按 `record.target()` 前缀路由到 5 个文件 sink（aemeath/tui/hook/input/output/tool）。
+- `UnifiedLogger::enabled()` 委托 `env_logger::Logger::enabled()`，保留 `RUST_LOG` + `config.level` 解析能力。
+- 审计 sink 通过静态方法（`UnifiedLogger::log_input(json)` 等）暴露，绕过宏直接写入，保留 `serde_json::Value` 原始结构。
+- `panic.log` 维持 `panic_hook.rs` 现状，不纳入 `UnifiedLogger` 路由（panic 时 logger 自身可能不可用）。
 
-**分歧记录**：
-- 曾考虑让 `input/output/tool.log` 也走 `RoutingLogger`，经分析后放弃：二者数据形态、控制维度、写入语义不同，强行统一会增加复杂度并丧失结构化优势。
+**分歧记录（路径选择）**：
+- 路径 A（双管线：RoutingLogger + JsonLogger 平行）：被否，调用点分裂、过滤逻辑重复。
+- 路径 B（RoutingLogger 吞 JsonLogger，用 `log::info!(target: "audit::input", "{:#?}", json)`）：被否，`serde_json::Value` 退化为字符串、丧失结构化优势。
+- **路径 C（JsonLogger 实现 `log::Log`，按 target 路由 + 审计 sink 静态方法）** = 选定：真正单入口、共享 `enabled()` 过滤、审计数据保留原始结构。
 
 **改动文件**：
-- `packages/global/logging/src/multi_logger.rs` — 新增 `RoutingLogger`
-- `packages/global/logging/src/lib.rs` — 导出
-- `agent/features/runtime/src/utils/bootstrap/logging_setup.rs` — 替换初始化逻辑，新增全局上下文变量
-- `agent/features/runtime/src/business/chat/looping/loop_runner.rs` — `set_current_chat_id()`
-- `agent/features/runtime/src/business/agent/runner/setup.rs` — `set_current_model()`
+- `packages/global/logging/src/lib.rs` — 重新组织导出
+- `packages/global/logging/src/multi_logger.rs` — **删除**（合并入 unified_logger）
+- `packages/global/logging/src/json.rs` — **改造**为 unified_logger（实现 `log::Log` + 审计静态方法）
+- `packages/global/logging/src/unified_logger.rs` — **新增**（或整合入 json.rs，由实现选择决定）
+- `packages/global/logging/src/format.rs` — **新增**（诊断日志的 JSON 行格式化）
+- `packages/global/logging/src/context.rs` — **新增**（SESSION_ID / CURRENT_CHAT_ID / CURRENT_TURN / CURRENT_MODEL 全局上下文）
+- `agent/features/runtime/src/utils/bootstrap/logging_setup.rs` — 替换 `init_logging` 为 `UnifiedLogger::init(config)`
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs` — `set_current_chat_id()` 调用
+- `agent/features/runtime/src/business/agent/runner/setup.rs` — `set_current_model()` 调用
 - `agent/features/hook/src/business/hook/runner.rs` — 5 处 `info` → `debug`
-- `specs/rust-coding.md` — 更新日志规范（JSON 格式、职责边界）
+- `agent/features/runtime/src/utils/audit/**` — 调用点从 `JsonLogger::log_input(...)` 改为 `UnifiedLogger::log_input(...)`（如保留审计 API 命名）
+- `specs/rust-coding.md` — 更新日志规范（统一入口、target 路由表、JSON 格式、职责边界）
 - `docs/feature/active.md` — 本条目
 
 **验证**：
 - `cargo check --workspace`
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- 启动 TUI，确认 `~/.agents/logs/` 下同时生成 `aemeath.log` + `tui.log`（JSON 格式）
+- 启动 TUI，确认 `~/.agents/logs/` 下同时生成 `aemeath.log` + `tui.log`（JSON Lines 格式）
 - 触发 hook，确认 `hook.log` 生成且常规日志为 debug 级别
-- 确认 `input.log` / `output.log` / `tool.log` 正常写入且内容不与诊断日志重复
+- 触发一次 LLM 调用 + 一次 tool call，确认 `input.log` / `output.log` / `tool.log` 写入**原始** `serde_json::Value`（非 `format!` 字符串）
+- 确认 `RUST_LOG=hook::runner=debug` 能让 `hook.log` 输出流水日志
+- 确认 `role_logs_enabled=false` 时审计文件不生成内容
+- 单元测试：`UnifiedLogger::enabled()` 转发 `env_logger` 过滤；`UnifiedLogger::log_input()` 在 `role_logs_enabled=false` 时短路返回
 
 ### #80 Agent context 所有权重构（project 拥有 WorkspaceState）
 
