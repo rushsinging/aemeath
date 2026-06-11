@@ -1378,6 +1378,8 @@ name = "logging"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "env_logger",
+ "log",
  "serde_json",
 ]
 
@@ -2163,6 +2165,7 @@ name = "share"
 version = "0.1.0"
 dependencies = [
  "log",
+ "logging",
  "serde",
  "serde_json",
  "serde_yml",

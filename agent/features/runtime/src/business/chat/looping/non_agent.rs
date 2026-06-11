@@ -2,7 +2,6 @@ use crate::business::agent::{Agent, ToolCall};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
-use logging::JsonLogger;
 use share::config::hooks::HookEvent;
 use std::sync::Arc;
 
@@ -17,9 +16,6 @@ pub(super) async fn execute_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
     non_agent_calls: &[ToolCall],
 ) -> Vec<UiToolResult>
 where
@@ -41,9 +37,6 @@ where
             sink,
             hook_ui,
             hook_runner,
-            json_logger,
-            turn_count,
-            client_model,
             other_calls[0],
         )
         .await;
@@ -55,9 +48,6 @@ where
         sink,
         hook_ui,
         hook_runner,
-        json_logger,
-        turn_count,
-        client_model,
         &other_calls,
     )
     .await
@@ -70,9 +60,6 @@ async fn execute_multiple_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
     other_calls: &[&ToolCall],
 ) -> Vec<UiToolResult>
 where
@@ -91,7 +78,6 @@ where
                 let sink = sink.clone();
                 let hook_ui = hook_ui.clone();
                 let hook_runner = hook_runner.clone();
-                let json_logger = json_logger.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
                 async move {
@@ -102,9 +88,6 @@ where
                         &sink,
                         &hook_ui,
                         &hook_runner,
-                        &json_logger,
-                        turn_count,
-                        client_model,
                         call,
                     )
                     .await;
@@ -127,9 +110,6 @@ where
             sink,
             hook_ui,
             hook_runner,
-            json_logger,
-            turn_count,
-            client_model,
             call,
         )
         .await;
@@ -174,9 +154,6 @@ async fn execute_one_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
     call: &ToolCall,
 ) -> Vec<UiToolResult>
 where
@@ -239,9 +216,6 @@ where
     let mut out = Vec::new();
     for (id, provider_id, output, content, is_error, images) in exec_results {
         log_tool_result(
-            json_logger,
-            turn_count,
-            client_model,
             &id,
             &owned_call.name,
             is_error,

@@ -1,13 +1,12 @@
 use crate::business::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
 use async_trait::async_trait;
 use hook::api::HookRunner;
-use logging::JsonLogger;
 use prompt::api::skill::Skill;
 use provider::api::LlmClient;
 use provider::api::SystemBlock;
 use share::config::MemoryConfig;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use storage::api::TaskStore;
 use storage::api::{Task, TaskSnapshot};
 use tools::api::{AgentRunner, ToolRegistry};
@@ -24,7 +23,6 @@ pub struct ChatRuntimeContext {
     pub skills_map: HashMap<String, Skill>,
     pub hook_runner: HookRunner,
     pub memory_config: MemoryConfig,
-    pub json_logger: Option<Arc<Mutex<JsonLogger>>>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub allow_all: bool,
     pub context_size: usize,

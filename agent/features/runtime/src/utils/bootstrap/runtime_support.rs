@@ -1,11 +1,13 @@
 use crate::business::agent::runner as agent_runner;
+#[cfg(test)]
 use crate::utils::bootstrap::config_paths;
 use hook::api::HookRunner;
-use logging::JsonLogger;
 use provider::api::LlmClient;
 use share::config::Config;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
+use std::sync::Arc;
 
 pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
     let cwd_str = cwd.display().to_string();
@@ -27,42 +29,11 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
     session_id
 }
 
-pub fn build_json_logger(
-    session_id: &str,
-    config_file: Option<&Config>,
-) -> Option<Arc<Mutex<JsonLogger>>> {
-    if !config_file
-        .map(|config| config.logging.role_logs_enabled)
-        .unwrap_or(true)
-    {
-        return None;
-    }
-
-    let logs_dir = resolve_role_logs_dir(config_file);
-    let logging_cfg = config_file
-        .map(|config| &config.logging)
-        .cloned()
-        .unwrap_or_default();
-    match JsonLogger::new(
-        session_id,
-        &logs_dir,
-        logging_cfg.max_bytes,
-        logging_cfg.max_backups,
-    ) {
-        Ok(logger) => Some(Arc::new(Mutex::new(logger))),
-        Err(error) => {
-            log::warn!("无法创建分化日志: {}", error);
-            None
-        }
-    }
-}
-
 pub fn build_agent_runner(
     config_file: Option<&Config>,
     client: Arc<LlmClient>,
     hook_runner: HookRunner,
     reasoning: bool,
-    json_logger: Option<Arc<Mutex<JsonLogger>>>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(
         config_file
@@ -83,7 +54,6 @@ pub fn build_agent_runner(
         hook_runner,
         reasoning,
         models_config,
-        json_logger,
     })
 }
 
@@ -112,6 +82,7 @@ fn has_multi_provider_or_agent_roles(
             .unwrap_or(true)
 }
 
+#[cfg(test)]
 fn resolve_role_logs_dir(config_file: Option<&Config>) -> PathBuf {
     config_file
         .and_then(|config| config.logging.logs_dir.as_ref())
@@ -119,6 +90,7 @@ fn resolve_role_logs_dir(config_file: Option<&Config>) -> PathBuf {
         .unwrap_or_else(|| config_paths::global_logs_dir().join("logs"))
 }
 
+#[cfg(test)]
 fn expand_tilde_path(path: &str) -> PathBuf {
     if path.starts_with('~') {
         let home = dirs::home_dir().unwrap_or_default();
@@ -213,15 +185,6 @@ mod tests {
         let result = resolve_role_logs_dir(None);
 
         assert_eq!(result, config_paths::global_logs_dir().join("logs"));
-    }
-
-    #[test]
-    fn test_build_json_logger_returns_none_when_role_logs_disabled() {
-        let config = config_with_logging(false, None);
-
-        let result = build_json_logger("session-id", Some(&config));
-
-        assert!(result.is_none());
     }
 
     fn models_config_with_provider_count(count: usize) -> ModelsConfig {

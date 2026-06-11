@@ -1,4 +1,5 @@
 use crate::business::compact::safe_slice;
+use logging::{ToolKind, UnifiedLogger};
 use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
@@ -49,17 +50,11 @@ impl<'a> SubAgentRun<'a> {
         results: &[crate::business::agent::ToolResultTuple],
         call_info: &std::collections::HashMap<String, (String, String)>,
     ) {
-        if let Some(ref jl) = self.runner.json_logger {
-            for (id, _provider_id, output, _content, is_error, _) in results.iter() {
-                let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
-                let _ = jl.lock().unwrap().log_tool_result(
-                    turn_number,
-                    &self.role_name_for_log,
-                    &self.model_name_for_log,
-                    data,
-                );
-            }
+        for (id, _provider_id, output, _content, is_error, _) in results.iter() {
+            let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
+            UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Result, data);
         }
+        logging::context::set_current_turn(turn_number);
     }
 
     pub(super) fn compact_if_needed(&mut self, api_input: u64, turn_number: usize) {

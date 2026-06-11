@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hook::api::HookRunner;
-use logging::JsonLogger;
 use provider::api::LlmClient;
 use provider::api::SystemBlock;
 use storage::api::TaskStore;
@@ -35,7 +34,6 @@ pub struct TuiLaunchContext {
     pub memory_config: sdk::MemoryConfigView,
     pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
     pub hook_runner: HookRunner,
-    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
     /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
 }

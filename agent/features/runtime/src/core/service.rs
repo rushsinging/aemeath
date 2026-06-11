@@ -151,7 +151,6 @@ mod tests {
             skills_map: HashMap::new(),
             hook_runner: HookRunner::empty("/tmp/aemeath".to_string()),
             memory_config: MemoryConfig::default(),
-            json_logger: None,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             allow_all: false,
             context_size: 200_000,

@@ -107,6 +107,8 @@ impl AgentRunner for CliAgentRunner {
         let model_name = resolved_spec.as_deref().unwrap_or("default").to_string();
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
+        // 将 sub-agent 的 model 同步到日志 context（影响 hook/audit 等共享 sink 的 model 字段）
+        logging::context::set_current_model(model_name.clone());
         let progress = move |turn: Option<usize>, msg: &str| {
             let turn_str = turn
                 .map(|t| t.to_string())
@@ -193,7 +195,6 @@ impl AgentRunner for CliAgentRunner {
         );
 
         SubAgentRun {
-            runner: self,
             prompt,
             system,
             ctx,

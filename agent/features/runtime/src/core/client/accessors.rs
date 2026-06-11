@@ -122,7 +122,6 @@ impl AgentClientImpl {
                 .map(|(name, skill)| (name, super::mapping::skill_to_sdk(skill)))
                 .collect(),
             hook_runner: ctx.hook_runner,
-            json_logger: ctx.json_logger,
             session_reminders: Arc::new(
                 std::sync::Mutex::new(share::tool::SessionReminders::new()),
             ),

@@ -1,4 +1,3 @@
-use ::logging::JsonLogger;
 use hook::api::HookRunner;
 use provider::api::LlmClient;
 use provider::api::LlmClientPool;
@@ -29,8 +28,6 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup.
     pub models_config: Arc<ModelsConfig>,
-    /// 分化日志写入器（input.log / output.log / tool.log）
-    pub json_logger: Option<Arc<std::sync::Mutex<JsonLogger>>>,
 }
 
 /// A no-op stream handler for sub-agents (output goes to result, not terminal)
