@@ -412,13 +412,15 @@ enum MemoryCategory {
 
 | target 前缀 | 路由目标 | 写入格式 | 类别 |
 |-------------|----------|----------|------|
-| `cli::*` | `tui.log` | 格式化 JSON 行 | 诊断 |
-| `hook::*` | `hook.log` | 格式化 JSON 行 | 诊断 |
-| `audit::input` | `input.log` | 原始 `serde_json::Value` | 结构化审计 |
-| `audit::output` | `output.log` | 原始 `serde_json::Value` | 结构化审计 |
-| `audit::tool` | `tool.log` | 原始 `serde_json::Value` | 结构化审计 |
-| 其他 | `aemeath.log` | 格式化 JSON 行 | 诊断 |
+| `cli::*` | `tui.log` | 诊断 JSON Lines（固定 8 字段） | 诊断 |
+| `hook::*` | `hook.log` | 诊断 JSON Lines（固定 8 字段） | 诊断 |
+| `audit::input` | `input.log` | 审计 JSON Lines（单行 `serde_json::Value`） | 结构化审计 |
+| `audit::output` | `output.log` | 审计 JSON Lines（单行 `serde_json::Value`） | 结构化审计 |
+| `audit::tool` | `tool.log` | 审计 JSON Lines（单行 `serde_json::Value`） | 结构化审计 |
+| 其他 | `aemeath.log` | 诊断 JSON Lines（固定 8 字段） | 诊断 |
 | panic | `panic.log` | 纯文本 + backtrace | 崩溃日志 |
+
+> **统一为 JSON Lines**：诊断与审计均保证"**一行一个 JSON**"。诊断是固定 schema（`ts/session/chat/turn/model/level/target/msg`），审计是 `serde_json::Value::to_string()`（**compact，不带缩进**）单行序列化。`grep` / `jq` 可同时消费 `*.log`。
 
 **`UnifiedLogger` 暴露两层 API**：
 
@@ -440,14 +442,27 @@ enum MemoryCategory {
 - 审计与诊断共享 `enabled()` 过滤逻辑，但写入路径分 sink 保持各自数据形态
 - 避免了路径 B（`log::info!(target: "audit::input", "{:#?}", json)`）的"序列化→字符串→反序列化"退化
 
-#### B. 统一 JSON Lines 格式
+#### B. 统一 JSON Lines 格式（诊断 + 审计）
 
-诊断日志统一为 JSON Lines：
+所有日志文件均为 **JSON Lines**：每行一个完整 JSON 对象，行间无依赖。
+
+**诊断日志**（`aemeath.log` / `tui.log` / `hook.log`）固定 schema（8 字段）：
 ```json
 {"ts":"2026-06-11T14:30:00+08:00","session":"abc123","chat":"session-abc123-001","turn":3,"model":"deepseek/deepseek-chat","level":"INFO","target":"runtime::business::chat","msg":"chat started"}
 ```
 
 字段：`ts` / `session` / `chat` / `turn` / `model` / `level` / `target` / `msg`
+
+**审计日志**（`input.log` / `output.log` / `tool.log`）形态为**单行 `serde_json::Value`**：
+```json
+{"ts":"2026-06-11T14:30:00+08:00","session":"abc123","chat":"session-abc123-001","turn":3,"model":"...","messages":[{"role":"user","content":"..."}],"tools":[...]}
+```
+
+- 序列化：`serde_json::to_string(&value)`（**compact，不带缩进**），保证单行
+- 字段：调用方提供的 `serde_json::Value` 顶层加 `ts/session/chat/turn/model` 上下文后整体序列化
+- 嵌套结构可任意深度，consumer 用 `jq '.messages[0].content'` 即可下钻
+
+**消费者一致性**：`grep -E '^\{' *.log | jq` 同时处理诊断与审计；`jq -c` 强制 compact 输出便于管道传递。
 
 #### C. 全局日志上下文注入
 
@@ -475,7 +490,10 @@ enum MemoryCategory {
 **技术实现**：
 - 唯一 logger：`UnifiedLogger`（实现 `log::Log`），内部按 `record.target()` 前缀路由到 5 个文件 sink（aemeath/tui/hook/input/output/tool）。
 - `UnifiedLogger::enabled()` 委托 `env_logger::Logger::enabled()`，保留 `RUST_LOG` + `config.level` 解析能力。
-- 审计 sink 通过静态方法（`UnifiedLogger::log_input(json)` 等）暴露，绕过宏直接写入，保留 `serde_json::Value` 原始结构。
+- 诊断 sink：每条 `Record` → `serde_json::to_string(&diag_record{ts, level, target, msg, ...})`（compact）写文件 → 一行。
+- 审计 sink：通过静态方法（`UnifiedLogger::log_input(json)` 等）暴露，绕过宏直接写入：
+  1. 包装 `{ts, session, chat, turn, model, ...payload}` 为 `serde_json::Value`
+  2. `serde_json::to_string(&value)`（**compact**）→ 一行
 - `panic.log` 维持 `panic_hook.rs` 现状，不纳入 `UnifiedLogger` 路由（panic 时 logger 自身可能不可用）。
 
 **分歧记录（路径选择）**：
@@ -504,10 +522,13 @@ enum MemoryCategory {
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - 启动 TUI，确认 `~/.agents/logs/` 下同时生成 `aemeath.log` + `tui.log`（JSON Lines 格式）
 - 触发 hook，确认 `hook.log` 生成且常规日志为 debug 级别
-- 触发一次 LLM 调用 + 一次 tool call，确认 `input.log` / `output.log` / `tool.log` 写入**原始** `serde_json::Value`（非 `format!` 字符串）
+- 触发一次 LLM 调用 + 一次 tool call：
+  - `input.log` / `output.log` / `tool.log` 写入**单行** JSON（每行 = 1 个完整 JSON 对象，无 pretty-print 缩进）
+  - 用 `wc -l input.log` 行数 = LLM 调用次数；用 `jq '.' input.log` 无 parse error
+  - 用 `jq '.messages | length' input.log` 可下钻到嵌套数据
 - 确认 `RUST_LOG=hook::runner=debug` 能让 `hook.log` 输出流水日志
 - 确认 `role_logs_enabled=false` 时审计文件不生成内容
-- 单元测试：`UnifiedLogger::enabled()` 转发 `env_logger` 过滤；`UnifiedLogger::log_input()` 在 `role_logs_enabled=false` 时短路返回
+- 单元测试：`UnifiedLogger::enabled()` 转发 `env_logger` 过滤；`UnifiedLogger::log_input()` 在 `role_logs_enabled=false` 时短路返回；审计 sink 输出不含换行符（保证 JSON Lines）
 
 ### #80 Agent context 所有权重构（project 拥有 WorkspaceState）
 
