@@ -783,13 +783,22 @@ mod tests {
         HookRunner::new(HooksConfig { events }, ".".to_string())
     }
 
-    fn blocking_then_success_hook_runner() -> HookRunner {
+    fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+        // 用 nanos 时间戳生成唯一 flag 路径，避免与并行 cargo test 共享
+        // target/stop-hook-once.flag 时的 race condition。
+        let flag_path_str = flag_path.to_string_lossy().to_string();
         let mut events = HashMap::new();
         events.insert(
             HookEvent::Stop,
             vec![HookEntry {
                 matcher: String::new(),
-                command: "python3 -c 'import pathlib, sys; p=pathlib.Path(\"target/stop-hook-once.flag\"); sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), p.write_text(\"blocked\"), print(\"fix before stopping\"), 2)[3])'".to_string(),
+                command: format!(
+                    "python3 -c 'import pathlib, sys; \
+                     p=pathlib.Path(\"{flag_path}\"); \
+                     sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
+                     p.write_text(\"blocked\"), print(\"fix before stopping\"), 2)[3])'",
+                    flag_path = flag_path_str,
+                ),
                 timeout: 5,
             }],
         );
@@ -798,7 +807,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
-        let _ = std::fs::remove_file("target/stop-hook-once.flag");
+        // 每次测试生成独立 flag 路径，避免 cargo test 并行 race。
+        let flag_path = std::env::temp_dir().join(format!(
+            "aemeath_stop_hook_once_{}.flag",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&flag_path);
         let sink = RecordingSink::default();
 
         process_chat_loop(ChatLoopContext {
@@ -829,11 +846,11 @@ mod tests {
             max_tool_concurrency: 1,
             max_agent_concurrency: 1,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-            hook_runner: blocking_then_success_hook_runner(),
+            hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
         })
             .await;
-        let _ = std::fs::remove_file("target/stop-hook-once.flag");
+        let _ = std::fs::remove_file(&flag_path);
 
         let events = sink.events();
         let feedback_sync = events
