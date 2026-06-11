@@ -104,3 +104,4 @@
 | 118 | Hook env 中项目目录仍指向主工作区而非当前 worktree | [archived/118-hook-project-dir-env.md](archived/118-hook-project-dir-env.md) |
 | 119 | TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失 | [archived/119-tool-call-streaming-summary.md](archived/119-tool-call-streaming-summary.md) |
 | 120 | TUI tool call block 跨 turn 串写 | [archived/120-tool-call-block-cross-turn.md](archived/120-tool-call-block-cross-turn.md) |
+| 121 | Spinner verb 与 pharse_text 计时显示相同 | [archived/121-spinner-verb-phase-text-timer-same.md](archived/121-spinner-verb-phase-text-timer-same.md) |

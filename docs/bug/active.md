@@ -5,9 +5,8 @@
 | # | 标题 | 优先级 | 状态 | 确认结果 | 发现日期 | 根因类别 |
 |---|------|--------|------|----------|----------|----------|
 | 112 | TUI tool call spinner 有状态但输出区不显示 tool card | 中 | 待确认 | 待用户确认 | 2026-06 | runtime tool 事件携带 chat/turn context，TUI 按上下文绑定 conversation |
-| 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
-| 123 | TUI input queue 不识别换行符 | 中 | 活动中 | 待用户确认 | 2026-06 | input queue 对排队消息中的换行符识别/展示异常，需定位处理路径 |
+| 123 | TUI 长文本换行缺失：input area / input queue / user message 均不自动折行 | 中 | 活动中 | 待用户确认 | 2026-06 | input area 输入超宽不折行、input queue 排队消息丢失换行语义、user message 展示不自动换行 |
 | 124 | `/think` 命令输出不应渲染 Markdown | 中 | 待确认 | 待用户确认 | 2026-06 | ThinkingMessage 渲染器仍复用 inline Markdown 解析 |
 
 ### #112 TUI tool call spinner 有状态但输出区不显示 tool card
@@ -39,30 +38,6 @@
 - `apps/cli/src/tui/model/conversation/**`
 - `apps/cli/src/tui/render/display/render.rs`
 
-### #121 Spinner verb 与 pharse_text 计时显示相同
-
-**状态**：待确认
-
-**症状**：TUI 中 spinner verb 显示的耗时与 `pharse_text` 中显示/记录的计时相同。用户期望二者表达不同阶段或不同来源的计时，但当前界面上两个计时值一致，容易误导为重复显示或计时逻辑复用错误。
-
-**根因**：首轮修复已将 `LiveStatusAssembler` 改为使用 `SpinnerAnim::phase_elapsed_secs()`，但 `SpinnerAnim::sync_phase()` 的 `same_phase_kind()` 仍只按阶段类型判断：`CallingTool("Read")` → `CallingTool("Edit")` 被视为同一阶段，导致 phase 文案切换但 `phase_frame` 不重置，阶段计时继续累计。
-
-**修复**：在 `SpinnerAnim` 中保留独立 `phase_frame` 与已同步 `phase`；本轮将 phase 等价判定收窄为显示语义级规则：`CallingTool(name)` 只有工具名相同才不重置，`CallingTools { remaining }` 计数变化仍不视为新阶段，普通固定阶段同 variant 不重置，Hook 完整 phase 相同才不重置。
-
-**验证**：
-- `cargo test -p cli test_spinner_anim_sync_phase_resets_for_calling_tool_name_change -- --nocapture`
-- `cargo test -p cli test_spinner_anim_sync_phase_does_not_reset_for_calling_tools_remaining_change -- --nocapture`
-- `cargo test -p cli test_spinner_anim_sync_phase_does_not_reset_for_same_calling_tool_name -- --nocapture`
-- `cargo test -p cli spinner_anim -- --nocapture`
-- `cargo test -p cli live_status -- --nocapture`
-- `cargo fmt --check`
-- `cargo clippy -p cli --all-targets -- -D warnings`
-- `git diff --check`
-
-**涉及路径**：
-- `apps/cli/src/tui/**`
-- 可能涉及 runtime stream/status 事件路径
-
 ### #122 Tool gutter marker 闪烁过快且 summary 曾等 result 才出现
 
 **状态**：待确认
@@ -86,15 +61,19 @@
 - `apps/cli/src/tui/render/output/blocks/tool_call.rs`
 - `apps/cli/src/tui/app/update.rs`
 
-### #123 TUI input queue 不识别换行符
+### #123 TUI 长文本换行缺失：input area / input queue / user message 均不自动折行
 
 **状态**：活动中
 
-**症状**：TUI 对话处理中继续输入多行内容进入 input queue 后，queue 对消息中的换行符识别/展示异常；多行内容可能被当成单行、丢失换行语义，或后续发送时不能按原多行内容处理。
+**症状**：
 
-**根因**：待定位。疑似 input queue 入队、展示或 drain 路径对 queued message 使用单行文本假设，未统一保留并按 `\n` 拆分/传递。
+1. **Input area**：输入较长文本时，内容超出可视宽度后不会自动折行显示，而是继续向右延伸/截断，用户看不到已输入的后半部分。
+2. **Input queue**：对话处理中继续输入多行内容进入 input queue 后，queue 对消息中的换行符识别/展示异常；多行内容被当成单行、丢失换行语义。
+3. **User message**：TUI 输出区显示的 user message（已发送消息）在内容超出宽度时同样不会自动换行展示。
 
-**修复/实现**：待修复。需要定位 input queue 入队、渲染和消费路径，补充覆盖换行符的回归测试，再统一保留多行消息语义。
+**根因**：待定位。input area / input queue / user message 三条路径均未按可视宽度做软换行（word wrap），疑似共用渲染或文本行拆分逻辑缺失长行折行机制。
+
+**修复/实现**：待修复。需要统一修复 TUI 中 input area 渲染 / input queue 展示 / user message 展示的折行逻辑，补充覆盖长行换行的回归测试。
 
 **验证**：待补充。
 
