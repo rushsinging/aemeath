@@ -143,6 +143,36 @@ mod tests {
     }
 
     #[test]
+    fn test_logging_config_to_level_filter_parses_valid_level() {
+        let cfg = LoggingConfig {
+            level: "debug".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(cfg.to_level_filter(), log::LevelFilter::Debug);
+    }
+
+    #[test]
+    fn test_logging_config_to_level_filter_accepts_warning_alias() {
+        let cfg = LoggingConfig {
+            level: "warning".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(cfg.to_level_filter(), log::LevelFilter::Warn);
+    }
+
+    #[test]
+    fn test_logging_config_to_level_filter_falls_back_to_warn() {
+        let cfg = LoggingConfig {
+            level: "invalid".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(cfg.to_level_filter(), log::LevelFilter::Warn);
+    }
+
+    #[test]
     fn test_sub_agent_log_default() {
         let cfg = SubAgentLogConfig::default();
         assert!(cfg.enabled);
