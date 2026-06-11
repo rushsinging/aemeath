@@ -208,11 +208,18 @@ impl App {
             let suggestions_height = self
                 .input_area
                 .suggestions_height(&self.model.input.completion);
+            let input_render_model = InputRenderModel::from_document(
+                &self.model.input.document,
+                Some("Type a message... (Enter to send, Alt+Enter for new line)".to_string()),
+                self.chat.pending_image_count(),
+                true,
+            );
+            let input_height = InputArea::desired_height(size.width, &input_render_model);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(10),
-                    Constraint::Length(5),
+                    Constraint::Length(input_height),
                     Constraint::Length(suggestions_height),
                     Constraint::Length(2),
                 ])
@@ -244,12 +251,6 @@ impl App {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let suggestions_view =
                     SuggestionViewState::from_completion(&self.model.input.completion);
-                let input_render_model = InputRenderModel::from_document(
-                    &self.model.input.document,
-                    Some("Type a message... (Enter to send, Alt+Enter for new line)".to_string()),
-                    self.chat.pending_image_count(),
-                    true,
-                );
                 self.input_area.draw(
                     chunks[1],
                     chunks[2],

@@ -5,6 +5,7 @@ use sdk::CharIdx;
 use crate::tui::render::display::safe_text::clamp_split_index;
 use crate::tui::render::theme;
 
+use crate::tui::render::output::primitives::wrap::wrap_spans_with_prefix;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
 use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
@@ -22,19 +23,25 @@ impl OutputArea {
         // 排队输入预览行（固定在 spinner 上方）
         if !live_status.queued_lines.is_empty() {
             let base_idx = self.document.total_lines();
+            let style = Style::default().fg(theme::TEXT_DIM);
             for (i, text) in live_status.queued_lines.iter().enumerate() {
-                let char_count = text.chars().count();
-                self.screen_line_map
-                    .push((base_idx + i, CharIdx::ZERO, CharIdx::new(char_count)));
-                let style = Style::default().fg(theme::TEXT_DIM);
-                let line = Line::from(apply_selection_overlay_with_fg(
-                    &crate::tui::render::output::rendered::RenderedLine::new(vec![
-                        ratatui::text::Span::styled(text.clone(), style),
-                    ]),
-                    selection_range_for_virtual_line(view, base_idx + i, char_count),
-                    theme::SELECTION_FG,
-                ));
-                lines.push(line);
+                let wrapped = wrap_spans_with_prefix(
+                    vec![ratatui::text::Span::styled(text.clone(), style)],
+                    self.term_width,
+                    Some(ratatui::text::Span::styled("  ".to_string(), style)),
+                );
+                for (wrap_idx, rendered) in wrapped.into_iter().enumerate() {
+                    let logic_idx = base_idx + i;
+                    let char_count = rendered.plain.chars().count();
+                    self.screen_line_map
+                        .push((logic_idx, CharIdx::ZERO, CharIdx::new(char_count)));
+                    let line = Line::from(apply_selection_overlay_with_fg(
+                        &rendered,
+                        selection_range_for_virtual_line(view, logic_idx + wrap_idx, char_count),
+                        theme::SELECTION_FG,
+                    ));
+                    lines.push(line);
+                }
             }
         }
         if let Some(sl) = spinner_line {
@@ -138,6 +145,14 @@ mod tests {
         }
     }
 
+    fn live_status_with_queue(queued_lines: Vec<&str>) -> LiveStatusViewModel {
+        LiveStatusViewModel {
+            spinner: None,
+            queued_lines: queued_lines.into_iter().map(str::to_string).collect(),
+            task_lines: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_render_maps_task_status_lines_for_selection() {
         let mut output = OutputArea::new();
@@ -186,5 +201,33 @@ mod tests {
 
         let unselected = buf.cell((area.x + 9, area.y + 1)).unwrap();
         assert_ne!(unselected.style().bg, Some(theme::SELECTION_BG));
+    }
+
+    #[test]
+    fn test_render_preserves_queued_input_hard_newlines() {
+        let mut output = OutputArea::new();
+        let live_status = live_status_with_queue(vec!["> alpha", "  beta"]);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf, &Default::default(), &live_status);
+
+        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), ">");
+        assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "a");
+        assert_eq!(buf.cell((2, 1)).unwrap().symbol(), "b");
+    }
+
+    #[test]
+    fn test_render_wraps_long_queued_input_lines() {
+        let mut output = OutputArea::new();
+        let live_status = live_status_with_queue(vec!["> abcdef"]);
+        let area = Rect::new(0, 0, 6, 3);
+        let mut buf = Buffer::empty(area);
+
+        output.render(area, &mut buf, &Default::default(), &live_status);
+
+        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), ">");
+        assert_eq!(buf.cell((3, 0)).unwrap().symbol(), "b");
+        assert_eq!(buf.cell((2, 1)).unwrap().symbol(), "c");
     }
 }

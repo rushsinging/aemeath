@@ -1,22 +1,19 @@
+use crate::tui::render::output::primitives::wrap::wrap_spans_to_rendered_lines;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
-pub fn render_user_message(
-    block_id: &str,
-    view: &TextBlockView,
-    _ctx: &RenderCtx,
-) -> RenderedBlock {
+pub fn render_user_message(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) -> RenderedBlock {
     let style = Style::default().fg(theme::USER).bg(theme::USER_BG);
     // 前导 `> ` marker 与续行缩进现由 gutter 注入（UserMessage → ">"），组件只渲染原文。
     let mut lines = Vec::new();
     for line in view.text.lines() {
-        lines.push(RenderedLine::new(vec![Span::styled(
-            line.to_string(),
-            style,
-        )]));
+        lines.extend(wrap_spans_to_rendered_lines(
+            vec![Span::styled(line.to_string(), style)],
+            ctx.width as usize,
+        ));
     }
     if lines.is_empty() {
         lines.push(RenderedLine::new(vec![Span::styled(String::new(), style)]));
@@ -60,5 +57,28 @@ mod tests {
         assert_eq!(block.lines[1].plain, "b");
         assert_eq!(block.lines[0].spans[0].style.bg, Some(theme::USER_BG));
         assert_eq!(block.lines[1].spans[0].style.bg, Some(theme::USER_BG));
+    }
+
+    #[test]
+    fn test_user_message_wraps_long_line_to_render_width() {
+        let view = TextBlockView {
+            key: "u".into(),
+            text: "abcdef".into(),
+            style: SemanticStyle::Normal,
+        };
+        let block = render_user_message("u", &view, &RenderCtx { width: 4 });
+
+        assert_eq!(
+            block
+                .lines
+                .iter()
+                .map(|line| line.plain.as_str())
+                .collect::<Vec<_>>(),
+            vec!["abcd", "ef"]
+        );
+        assert!(block.lines.iter().all(|line| line
+            .spans
+            .iter()
+            .all(|span| span.style.bg == Some(theme::USER_BG))));
     }
 }

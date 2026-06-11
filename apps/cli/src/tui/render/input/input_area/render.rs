@@ -1,5 +1,7 @@
 use super::InputArea;
-use crate::tui::render::display::safe_text::str_display_width;
+use crate::tui::render::input::input_area::wrap::{
+    display_position_for_anchor, wrap_input_lines_for_width, WrappedInputLine,
+};
 use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::render::theme;
 use crate::tui::view_state::InputSelectionViewState;
@@ -24,10 +26,11 @@ impl InputArea {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let mut textarea = configured_textarea(model);
+        let display_lines = wrap_input_lines_for_width(model.lines(), inner_area.width as usize);
+        let mut textarea = configured_textarea(model, &display_lines);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
-        render_selection(inner_area, buf, model, selection);
+        render_selection(inner_area, buf, &display_lines, selection);
     }
 }
 
@@ -51,7 +54,7 @@ fn input_block(model: &InputRenderModel) -> Block<'static> {
 fn render_selection(
     inner_area: Rect,
     buf: &mut Buffer,
-    model: &InputRenderModel,
+    display_lines: &[WrappedInputLine],
     selection: &InputSelectionViewState,
 ) {
     let Some(((start_row, start_col), (end_row, end_col))) = selection.normalized_selection()
@@ -59,35 +62,51 @@ fn render_selection(
         return;
     };
 
-    let lines = model.lines();
     let selection_style = Style::default()
         .bg(theme::SELECTION_BG)
         .fg(theme::SELECTION_FG);
-    for (row, line_text) in lines.iter().enumerate() {
-        if row < start_row || row > end_row {
+    for (display_row, line) in display_lines.iter().enumerate() {
+        if line.original_row < start_row || line.original_row > end_row {
             continue;
         }
-        let line_len = line_text.chars().count();
-        let col_from = if row == start_row { start_col } else { 0 };
-        let col_to = if row == end_row {
-            end_col.min(line_len)
+        let line_len = line.text.chars().count();
+        let line_col_start = line.original_col_start;
+        let line_col_end = line_col_start + line_len;
+        let select_from = if line.original_row == start_row {
+            start_col.max(line_col_start)
         } else {
-            line_len
+            line_col_start
         };
+        let select_to = if line.original_row == end_row {
+            end_col.min(line_col_end)
+        } else {
+            line_col_end
+        };
+        if select_from >= select_to {
+            continue;
+        }
         highlight_selection_row(
             inner_area,
             buf,
-            row,
-            line_text,
-            col_from,
-            col_to,
+            display_row,
+            &line.text,
+            select_from - line_col_start,
+            select_to - line_col_start,
             selection_style,
         );
     }
 }
 
-fn configured_textarea(model: &InputRenderModel) -> TextArea<'static> {
-    let mut textarea = TextArea::from(model.lines());
+fn configured_textarea(
+    model: &InputRenderModel,
+    display_lines: &[WrappedInputLine],
+) -> TextArea<'static> {
+    let mut textarea = TextArea::from(
+        display_lines
+            .iter()
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>(),
+    );
     if let Some(placeholder) = &model.placeholder {
         textarea.set_placeholder_text(placeholder.clone());
     } else {
@@ -97,10 +116,12 @@ fn configured_textarea(model: &InputRenderModel) -> TextArea<'static> {
     textarea.set_cursor_style(Style::default().bg(theme::ACCENT).fg(theme::SURFACE));
     textarea.move_cursor(tui_textarea::CursorMove::Top);
     textarea.move_cursor(tui_textarea::CursorMove::Head);
-    for _ in 0..model.cursor_row {
+    let (cursor_row, cursor_col) =
+        display_position_for_anchor(display_lines, model.cursor_row, model.cursor_col);
+    for _ in 0..cursor_row {
         textarea.move_cursor(tui_textarea::CursorMove::Down);
     }
-    for _ in 0..model.cursor_col {
+    for _ in 0..cursor_col {
         textarea.move_cursor(tui_textarea::CursorMove::Forward);
     }
     textarea
@@ -138,8 +159,9 @@ fn highlight_selection_row(
 }
 
 fn char_col_to_screen_col(line_text: &str, char_col: usize) -> usize {
-    let prefix: String = line_text.chars().take(char_col).collect();
-    str_display_width(&prefix)
+    crate::tui::render::display::safe_text::str_display_width(
+        &line_text.chars().take(char_col).collect::<String>(),
+    )
 }
 
 #[cfg(test)]
@@ -210,5 +232,34 @@ mod tests {
         assert_eq!(buf.cell((8, 0)).unwrap().symbol(), "[");
         assert_eq!(buf.cell((9, 0)).unwrap().symbol(), "2");
         assert_eq!(buf.cell((0, 0)).unwrap().style().fg, Some(theme::BORDER));
+    }
+
+    #[test]
+    fn test_render_selection_highlights_wrapped_continuation_line() {
+        let mut input = InputArea::new();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 4,
+        };
+        let mut buf = Buffer::empty(area);
+        let model = render_model_with_state("abcdef", 0, true);
+        let mut selection = InputSelectionViewState::default();
+        selection.begin_selection((0, 4));
+        selection.update_selection((0, 6));
+
+        input.render(area, &mut buf, &model, &selection);
+        let inner = input.get_inner_area(&area);
+
+        assert_eq!(buf.cell((inner.x, inner.y + 1)).unwrap().symbol(), "e");
+        assert_eq!(
+            buf.cell((inner.x, inner.y + 1)).unwrap().style().bg,
+            Some(theme::SELECTION_BG)
+        );
+        assert_eq!(
+            buf.cell((inner.x + 1, inner.y + 1)).unwrap().style().bg,
+            Some(theme::SELECTION_BG)
+        );
     }
 }
