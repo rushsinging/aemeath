@@ -15,7 +15,7 @@
 | 69 | TUI Hook 消息类型化与 system-reminder 展示脱壳 | 中 | 活动中 | 未确认 | Hook 消息类型化（HookNotice），system-reminder TUI 展示脱壳 |
 | 77 | diff removed 行不语法高亮，只显示纯红色 | 低 | 待确认 | 未确认 | removed 行改为纯 `DIFF_REMOVE_FG` 红色，不调用语法高亮 |
 | 78 | CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式 | 中 | 活动中 | 未确认 | `-q` 跳过 TUI 直接 REPL，`-v` 日志输出到 stderr |
-| 79 | 日志模块整理与 hook 可观测性增强 | 中 | 待确认 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
+| 79 | 日志模块整理与 hook 可观测性增强 | 中 | ✅ 已完成 | 待用户确认 | 移除废弃 `module_levels`，统一全局过滤；补充 hook 初始化/匹配/分发日志 |
 | 80 | Agent context 所有权重构（project 拥有 WorkspaceState） | 高 | ✅ 已完成 | 未确认 | workspace 可变状态收敛为 project 单一 WorkspaceState，feature 经能力 trait 访问，子 agent 隔离，git 抽 outbound port |
 | 81 | TUI assistant 文本与 spinner phase 视觉调整 | 低 | 待确认 | 未确认 | spinner phase 移除 emoji；assistant 文本前增加白色圆点 gutter |
 | 82 | Provider/Config 设计债收口 | 中 | 未开始 | 未确认 | 统一 API key 解析与 pool 配置路径、unknown driver 显式报错、默认值收口、spec 同步 |

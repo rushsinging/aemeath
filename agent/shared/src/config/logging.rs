@@ -99,8 +99,17 @@ impl LoggingConfig {
     }
 
     /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
+    /// 内联实现以避免 share 反向依赖 logging crate（DDD 边界）。
     pub fn to_level_filter(&self) -> log::LevelFilter {
-        logging::level_filter_from_str(&self.level)
+        match self.level.to_ascii_lowercase().as_str() {
+            "off" => log::LevelFilter::Off,
+            "error" => log::LevelFilter::Error,
+            "warn" | "warning" => log::LevelFilter::Warn,
+            "info" => log::LevelFilter::Info,
+            "debug" => log::LevelFilter::Debug,
+            "trace" => log::LevelFilter::Trace,
+            _ => log::LevelFilter::Warn,
+        }
     }
 }
 
