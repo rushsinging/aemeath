@@ -230,8 +230,10 @@ mod tests {
 
     #[test]
     fn test_should_run_turn_reflection_false_when_memory_disabled() {
-        let mut config = share::config::MemoryConfig::default();
-        config.enabled = false;
+        let config = share::config::MemoryConfig {
+            enabled: false,
+            ..Default::default()
+        };
 
         assert!(!should_run_turn_reflection(
             &config,
@@ -304,8 +306,10 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         let base_dir = temp_dir("reflection-memory");
         let client = build_client(r#"{"suggested_memories":[]}"#);
-        let mut config = share::config::MemoryConfig::default();
-        config.enabled = false;
+        let config = share::config::MemoryConfig {
+            enabled: false,
+            ..Default::default()
+        };
 
         let result = run_complete_reflection_with_base_dir(
             ReflectionRunMode::Interval { turn_count: 10 },
