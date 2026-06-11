@@ -38,6 +38,7 @@ impl ConversationModel {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn observe_tool_result(
         &mut self,
         id: String,

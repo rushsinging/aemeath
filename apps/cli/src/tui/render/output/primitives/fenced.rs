@@ -14,8 +14,8 @@
 
 use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
 use crate::tui::render::output::primitives::{
-    markdown::markdown, rendered_line_from_spanparts, table::table,
-    unified_diff::render_unified_diff,
+    markdown::markdown, table::table, unified_diff::render_unified_diff,
+    wrap::wrap_spans_to_rendered_lines,
 };
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::{syntax, theme};
@@ -84,12 +84,18 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
                 .as_deref()
                 .and_then(syntax::language_by_fence_info);
             if let Some(parts) = syntax::highlight_line(line, syntax_ref.as_ref()) {
-                lines.push(rendered_line_from_spanparts(&parts));
+                lines.extend(wrap_spans_to_rendered_lines(
+                    crate::tui::render::output::primitives::spanparts_to_spans(&parts),
+                    width as usize,
+                ));
             } else {
-                lines.push(RenderedLine::new(vec![Span::styled(
-                    line.to_string(),
-                    Style::default().fg(theme::CODE),
-                )]));
+                lines.extend(wrap_spans_to_rendered_lines(
+                    vec![Span::styled(
+                        line.to_string(),
+                        Style::default().fg(theme::CODE),
+                    )],
+                    width as usize,
+                ));
             }
             idx += 1;
             continue;

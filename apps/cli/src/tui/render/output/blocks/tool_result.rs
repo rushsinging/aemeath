@@ -5,6 +5,7 @@
 
 use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
+use crate::tui::render::output::primitives::wrap::wrap_spans_to_rendered_lines;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::{
     result_max_lines, result_render_kind, ResultRender,
@@ -27,11 +28,12 @@ pub fn render_tool_result(
     let mut lines = match result_render_kind(&view.tool_title) {
         // Edit：解析 `---DIFF---` 渲染加减色 diff；解析失败回退纯文本预览。
         ResultRender::Diff => {
-            render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width)
-                .unwrap_or_else(|| format_result_lines(&view.tool_title, &view.result_text))
+            render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width).unwrap_or_else(
+                || format_result_lines(&view.tool_title, &view.result_text, ctx.width),
+            )
         }
         // Plain：纯文本原样预览（Read/Bash 等）。
-        ResultRender::Plain => format_result_lines(&view.tool_title, &view.result_text),
+        ResultRender::Plain => format_result_lines(&view.tool_title, &view.result_text, ctx.width),
     };
     // result 子块底部附加状态行：成功/失败/执行中 + 工具名（失败附首行原因），用状态色。
     lines.push(status_line(view));
@@ -75,7 +77,7 @@ fn status_line(view: &ToolResultBlockView) -> RenderedLine {
 /// 用暗色（`theme::TEXT_DIM`）——文件/命令输出预览不跟随 tool 状态色（状态绿/红只在 header
 /// 的 ✓/✗ marker）；**不做 markdown 重渲染**——避免文件内容里的 markdown（表格/标题/fence）
 /// 被渲染变形，保留原文（含 Read 行号/缩进，#91）。
-fn format_result_lines(tool_name: &str, result: &str) -> Vec<RenderedLine> {
+fn format_result_lines(tool_name: &str, result: &str, width: u16) -> Vec<RenderedLine> {
     if result.trim().is_empty() {
         return Vec::new();
     }
@@ -86,11 +88,13 @@ fn format_result_lines(tool_name: &str, result: &str) -> Vec<RenderedLine> {
     }
     let base = Style::default().fg(theme::TEXT_DIM);
     let mut iter = result.lines();
-    let mut out: Vec<RenderedLine> = iter
-        .by_ref()
-        .take(max_lines)
-        .map(|line| RenderedLine::new(vec![Span::styled(line.to_string(), base)]))
-        .collect();
+    let mut out: Vec<RenderedLine> = Vec::new();
+    for line in iter.by_ref().take(max_lines) {
+        out.extend(wrap_spans_to_rendered_lines(
+            vec![Span::styled(line.to_string(), base)],
+            width as usize,
+        ));
+    }
     let omitted = iter.by_ref().take(OMITTED_LINE_COUNT_LIMIT + 1).count();
     if omitted > 0 {
         let omitted_label = if omitted > OMITTED_LINE_COUNT_LIMIT {
@@ -135,6 +139,19 @@ mod tests {
             .lines
             .iter()
             .any(|line| line.plain.contains("done: 3 matches")));
+    }
+
+    #[test]
+    fn test_render_tool_result_plain_wraps_long_lines_to_render_width() {
+        let view = result("Bash", "abcdef");
+        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 4 });
+
+        assert_eq!(block.lines[0].plain, "abcd");
+        assert_eq!(block.lines[1].plain, "ef");
+        assert!(block.lines[..2].iter().all(|line| line
+            .spans
+            .iter()
+            .all(|span| span.style.fg == Some(theme::TEXT_DIM))));
     }
 
     #[test]

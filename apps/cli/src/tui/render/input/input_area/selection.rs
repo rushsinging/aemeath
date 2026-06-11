@@ -1,5 +1,8 @@
 use super::InputArea;
 use crate::tui::render::display::safe_text::{col_to_char_idx, safe_char_slice};
+use crate::tui::render::input::input_area::wrap::{
+    anchor_for_display_position, wrap_input_lines_for_width,
+};
 use ratatui::layout::Rect;
 
 pub fn text_anchor_for_screen_col(text: &str, row: usize, screen_col: usize) -> (usize, usize) {
@@ -52,9 +55,11 @@ impl InputArea {
         col: u16,
         inner_area: &Rect,
     ) -> (usize, usize) {
-        let text_row = row.saturating_sub(inner_area.y) as usize;
+        let display_row = row.saturating_sub(inner_area.y) as usize;
         let screen_col = col.saturating_sub(inner_area.x) as usize;
-        text_anchor_for_screen_col(text, text_row, screen_col)
+        let width = inner_area.width as usize;
+        let display_lines = wrap_input_lines_for_width(text.split('\n').collect(), width);
+        anchor_for_display_position(&display_lines, display_row, screen_col)
     }
 
     /// 获取选中的文本。
@@ -136,6 +141,20 @@ mod tests {
         assert_eq!(input.screen_to_input_anchor(text, 5, 12, &inner), (0, 1));
         assert_eq!(input.screen_to_input_anchor(text, 5, 99, &inner), (0, 3));
         assert_eq!(input.screen_to_input_anchor(text, 8, 12, &inner), (3, 0));
+    }
+
+    #[test]
+    fn test_screen_to_input_anchor_maps_wrapped_display_row_to_original_anchor() {
+        let input = InputArea::new();
+        let text = "abcdef";
+        let inner = Rect {
+            x: 10,
+            y: 5,
+            width: 4,
+            height: 3,
+        };
+
+        assert_eq!(input.screen_to_input_anchor(text, 6, 11, &inner), (0, 5));
     }
 
     #[test]

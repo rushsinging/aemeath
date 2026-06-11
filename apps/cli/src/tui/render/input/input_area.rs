@@ -10,6 +10,7 @@ mod render;
 mod resize;
 mod selection;
 pub mod suggestions;
+mod wrap;
 
 /// The input area with a multi-line text editor and autocomplete
 pub struct InputArea;

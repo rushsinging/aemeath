@@ -34,7 +34,7 @@ impl LiveStatusAssembler {
         };
         let queued_lines = queued_texts
             .iter()
-            .map(|text| format!("> {text}"))
+            .flat_map(|text| queued_preview_lines(text))
             .collect();
         LiveStatusViewModel {
             spinner,
@@ -42,6 +42,18 @@ impl LiveStatusAssembler {
             task_lines: runtime.task_status.lines.clone(),
         }
     }
+}
+
+fn queued_preview_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (idx, line) in text.split('\n').enumerate() {
+        let prefix = if idx == 0 { "> " } else { "  " };
+        lines.push(format!("{prefix}{line}"));
+    }
+    if lines.is_empty() {
+        lines.push("> ".to_string());
+    }
+    lines
 }
 
 /// 将 phase 语义转换为显示文案。文案与既有 `ui_event.rs` 字面量对齐。
@@ -204,6 +216,17 @@ mod tests {
             &["hello".to_string(), "world".to_string()],
         );
         assert_eq!(vm.queued_lines, vec!["> hello", "> world"]);
+    }
+
+    #[test]
+    fn test_assemble_queued_lines_preserves_hard_newlines() {
+        let runtime = runtime_with_spinner(true, None);
+        let vm = LiveStatusAssembler::assemble(
+            &runtime,
+            &SpinnerAnim::default(),
+            &["alpha\nbeta".to_string()],
+        );
+        assert_eq!(vm.queued_lines, vec!["> alpha", "  beta"]);
     }
 
     #[test]
