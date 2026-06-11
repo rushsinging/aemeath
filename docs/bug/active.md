@@ -8,7 +8,7 @@
 | 121 | Spinner verb 与 pharse_text 计时显示相同 | 中 | 待确认 | 待用户确认 | 2026-06 | 阶段计时已独立；本轮修正 CallingTool 名称变化不重置 phase_frame 的漏修 |
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
 | 123 | TUI input queue 不识别换行符 | 中 | 活动中 | 待用户确认 | 2026-06 | input queue 对排队消息中的换行符识别/展示异常，需定位处理路径 |
-| 124 | `/think` 命令输出不应渲染 Markdown | 中 | 待确认 | 待用户确认 | 2026-06 | TUI 输出区对 `/think` 返回的纯文本思考内容错误应用 Markdown 解析 |
+| 124 | `/think` 命令输出不应渲染 Markdown | 中 | 待确认 | 待用户确认 | 2026-06 | ThinkingMessage 渲染器仍复用 inline Markdown 解析 |
 
 ### #112 TUI tool call spinner 有状态但输出区不显示 tool card
 
@@ -108,24 +108,19 @@
 
 **症状**：用户执行 `/think` 命令后，模型返回的思考内容在 TUI 输出区被当作 Markdown 渲染，导致思考文本中的 `*`、`_`、`` ` ``、`#` 等字符被错误解析为 Markdown 语法（如斜体、代码、标题），破坏纯文本思考过程的可读性。
 
-**根因**：TUI 输出区对所有 assistant 文本统一应用 Markdown 解析，未对 `/think` 命令的思考输出做特殊处理。`/think` 的输出本质是内部推理文本，不应按 Markdown 展示。
+**根因**：TUI 已将模型 thinking 流拆成独立 `ConversationBlock::Thinking` / `OutputBlockKind::ThinkingMessage`，但 `render_thinking()` 仍复用 `md::inline_markdown_lines()` 解析内容，导致 thinking 文本在专用 block 中仍被 Markdown 标记剥离并套用样式。
 
-**修复方向**：
-1. 识别 `/think` 命令对应的输出块（可通过命令标记、role 标注或特定 block kind 区分）。
-2. 对 `/think` 输出跳过 Markdown 渲染，使用纯文本渲染。
-3. 保留换行和缩进等原始格式，避免 sanitize 过度处理。
+**修复**：`ThinkingMessage` 渲染改为本地纯文本按宽度换行：每行直接生成 THINKING 色 span，`plain` 与可见文本保持一致，不再经过 inline Markdown；保留空白过滤、宽度换行和 gutter 注入职责不变，普通 assistant Markdown 渲染不受影响。
 
 **验证**：
-- `cargo test -p cli think`
+- `cargo test -p cli test_thinking_renders_markdown_markers_as_plain_text -- --nocapture`
+- `cargo test -p cli thinking -- --nocapture`
 - `cargo test -p cli markdown`
 - `cargo fmt --check`
 - `cargo check -p cli`
 
 **涉及路径**：
-- `apps/cli/src/tui/render/output/**`
-- `apps/cli/src/tui/view_assembler/output.rs`
-- `apps/cli/src/tui/model/conversation/**`
-- `apps/cli/src/tui/app/slash/think.rs`（如存在）
+- `apps/cli/src/tui/render/output/blocks/thinking.rs`
 
 ---
 
