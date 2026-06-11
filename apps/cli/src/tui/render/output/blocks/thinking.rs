@@ -1,8 +1,9 @@
-use crate::tui::render::output::markdown as md;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
+use ratatui::text::Span;
+use unicode_width::UnicodeWidthChar;
 
 pub fn render_thinking(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) -> RenderedBlock {
     let style = Style::default().fg(theme::THINKING);
@@ -23,17 +24,34 @@ pub fn render_thinking(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) ->
 }
 
 fn render_wrapped_thinking_line(line: &str, style: Style, width: u16) -> Vec<RenderedLine> {
-    md::inline_markdown_lines(line, style, width as usize)
-        .into_iter()
-        .map(|line| {
-            let spans = line.spans;
-            let plain = spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>();
-            RenderedLine::with_plain(spans, plain)
-        })
-        .collect()
+    let max_width = width as usize;
+    if max_width == 0 {
+        return vec![plain_thinking_line(line, style)];
+    }
+
+    let mut rendered = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+
+    for ch in line.chars() {
+        let ch_width = ch.width().unwrap_or(1);
+        if !current.is_empty() && current_width + ch_width > max_width {
+            rendered.push(plain_thinking_line(&current, style));
+            current.clear();
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+    }
+
+    if !current.is_empty() || rendered.is_empty() {
+        rendered.push(plain_thinking_line(&current, style));
+    }
+    rendered
+}
+
+fn plain_thinking_line(text: &str, style: Style) -> RenderedLine {
+    RenderedLine::new(vec![Span::styled(text.to_string(), style)])
 }
 
 #[cfg(test)]
@@ -97,5 +115,22 @@ mod tests {
             .iter()
             .flat_map(|line| line.spans.iter())
             .all(|span| span.style.fg == Some(theme::THINKING)));
+    }
+
+    #[test]
+    fn test_thinking_renders_markdown_markers_as_plain_text() {
+        let text = "# plan: keep **stars**, _underscores_, `ticks`, and *asterisks*";
+        let view = TextBlockView {
+            key: "t".into(),
+            text: text.into(),
+            style: SemanticStyle::Muted,
+        };
+        let block = render_thinking("t", &view, &RenderCtx { width: 120 });
+
+        assert_eq!(block.lines.len(), 1);
+        assert_eq!(block.lines[0].plain, text);
+        assert_eq!(block.lines[0].spans.len(), 1);
+        assert_eq!(block.lines[0].spans[0].content.as_ref(), text);
+        assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::THINKING));
     }
 }
