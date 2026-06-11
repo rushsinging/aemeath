@@ -393,6 +393,92 @@ enum MemoryCategory {
 - `apps/cli/src/tui/render/output/primitives/unified_diff.rs`
 - `apps/cli/src/tui/render/output/diff.rs`
 
+### #79 日志模块整理与 hook 可观测性增强
+
+**状态**：设计中（待用户确认）
+
+**背景**：
+1. `module_levels` 已从 `LoggingConfig` 中移除，但 `docs/feature/archived/040-claude-compatible-agents-config.md` 记录了该决策；代码与配置层面已无残留。
+2. `aemeath.log` 当前通过 `env_logger::Builder` 接收全部 `log::*` 宏输出，所有模块的诊断日志混在一个文件中，TUI 渲染日志与 runtime 业务日志相互淹没，职责不清。
+3. Hook 可观测性不足：runner.rs 中常规流水日志为 `info` 级别，在默认 `warn` 级别下不可见。
+4. 日志格式为纯文本，不利于机器解析和后续分析。
+5. 日志上下文仅含 `session` + `turn`，缺少 `chat_id` 和 `model`。
+
+**设计决策**：
+
+#### A. 日志分层（诊断日志 vs 审计数据分离）
+
+两类日志保持独立机制，但外围体验统一：
+
+| 日志文件 | 机制 | 类型 | 内容 |
+|---------|------|------|------|
+| `aemeath.log` | `RoutingLogger`（兜底） | 诊断日志 | Runtime/Provider/Tools/Shared 等业务诊断 |
+| `tui.log` | `RoutingLogger`（`target` 以 `cli::` 开头） | 诊断日志 | TUI 渲染、事件、状态变更 |
+| `hook.log` | `RoutingLogger`（`target` 以 `hook::` 开头） | 诊断日志 | Hook 匹配、执行、结果 |
+| `input.log` | `JsonLogger::log_input()` | 结构化审计 | LLM 输入 messages / system / schemas |
+| `output.log` | `JsonLogger::log_output()` | 结构化审计 | LLM 输出 content / usage / timing |
+| `tool.log` | `JsonLogger::log_tool_call/result()` | 结构化审计 | 工具调用参数与结果 |
+| `panic.log` | `panic_hook.rs` | 崩溃日志 | Panic + backtrace |
+
+**不纳入 `RoutingLogger` 的理由**：`input/output/tool.log` 是结构化审计数据（`serde_json::Value`），写入时机精确、字段严格、由 `role_logs_enabled` 独立开关控制；若走 `log::info!` 宏，只能传递字符串 `msg`，既无法承载复杂结构，也混淆了"日志级别"与"数据类型"两个维度。
+
+#### B. 统一 JSON Lines 格式
+
+诊断日志统一为 JSON Lines：
+```json
+{"ts":"2026-06-11T14:30:00+08:00","session":"abc123","chat":"session-abc123-001","turn":3,"model":"deepseek/deepseek-chat","level":"INFO","target":"runtime::business::chat","msg":"chat started"}
+```
+
+字段：`ts` / `session` / `chat` / `turn` / `model` / `level` / `target` / `msg`
+
+#### C. 全局日志上下文注入
+
+| 变量 | 类型 | setter 位置 | 说明 |
+|------|------|------------|------|
+| `SESSION_ID` | `OnceLock<String>` | 会话启动 | 已有 |
+| `CURRENT_CHAT_ID` | `RwLock<String>` | `loop_runner.rs` 每 chat 开始 | **新增**（chat 生命周期内变化） |
+| `CURRENT_TURN` | `AtomicUsize` | 每 turn 开始 | 已有 |
+| `CURRENT_MODEL` | `RwLock<String>` | `setup.rs` model 解析后 | **新增**（模型可能切换） |
+
+#### D. Hook 日志降级
+
+`hook/runner.rs` 中 5 处常规流水 `log::info!` → `log::debug!`：
+- `hook match`
+- `hook start`
+- `hook env stdout/stderr`
+- `hook end`
+
+错误路径（spawn failed / wait failed / timeout / non-zero exit）保持 `warn`。
+
+#### E. 职责边界规范
+
+`aemeath.log` / `tui.log` / `hook.log` 禁止打印 messages / content blocks / tool results 等 LLM 交互数据；此类数据只能通过 `JsonLogger` API 进入 `input/output/tool.log`。
+
+**技术实现**：
+- 复用 `env_logger::Logger` 做过滤判断（保留 `RUST_LOG` + `config.level` 解析能力），但替换输出层为自定义 `RoutingLogger`（实现 `log::Log`）。
+- `RoutingLogger::enabled()` 委托 `env_logger::Logger::enabled()`，`log()` 按 `record.target()` 前缀路由到不同文件。
+
+**分歧记录**：
+- 曾考虑让 `input/output/tool.log` 也走 `RoutingLogger`，经分析后放弃：二者数据形态、控制维度、写入语义不同，强行统一会增加复杂度并丧失结构化优势。
+
+**改动文件**：
+- `packages/global/logging/src/multi_logger.rs` — 新增 `RoutingLogger`
+- `packages/global/logging/src/lib.rs` — 导出
+- `agent/features/runtime/src/utils/bootstrap/logging_setup.rs` — 替换初始化逻辑，新增全局上下文变量
+- `agent/features/runtime/src/business/chat/looping/loop_runner.rs` — `set_current_chat_id()`
+- `agent/features/runtime/src/business/agent/runner/setup.rs` — `set_current_model()`
+- `agent/features/hook/src/business/hook/runner.rs` — 5 处 `info` → `debug`
+- `specs/rust-coding.md` — 更新日志规范（JSON 格式、职责边界）
+- `docs/feature/active.md` — 本条目
+
+**验证**：
+- `cargo check --workspace`
+- `cargo test --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- 启动 TUI，确认 `~/.agents/logs/` 下同时生成 `aemeath.log` + `tui.log`（JSON 格式）
+- 触发 hook，确认 `hook.log` 生成且常规日志为 debug 级别
+- 确认 `input.log` / `output.log` / `tool.log` 正常写入且内容不与诊断日志重复
+
 ### #80 Agent context 所有权重构（project 拥有 WorkspaceState）
 
 **状态**：✅ 已完成（合并 commit `26dee4c5`），待确认
