@@ -10,9 +10,9 @@ use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
 use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::utils::bootstrap::{
-    self, apply_config_permission_mode, build_agent_runner, build_hook_runner, build_json_logger,
-    init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
-    resolve_context_size, resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
+    self, apply_config_permission_mode, build_agent_runner, build_hook_runner, init_logging,
+    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_context_size,
+    resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use prompt::api::skill::{load_all_skills, Skill};
@@ -132,16 +132,12 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let session_id = start_session(args.resume.clone());
     set_session_id(session_id.clone());
 
-    // 13. JSON logger
-    let json_logger = build_json_logger(&session_id, config_file.as_ref());
-
-    // 14. Agent runner
+    // 13. Agent runner
     let agent_runner = build_agent_runner(
         config_file.as_ref(),
         client.clone(),
         hook_runner.clone(),
         runtime_settings.reasoning,
-        json_logger.clone(),
     );
 
     // 15. Prompt bundle
@@ -210,7 +206,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         skills_map,
         hook_runner,
         memory_config,
-        json_logger,
         agent_semaphore,
         allow_all: args.allow_all,
         context_size,

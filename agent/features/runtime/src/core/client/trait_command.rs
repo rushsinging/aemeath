@@ -538,7 +538,6 @@ mod tests {
             skills_map: std::collections::HashMap::new(),
             hook_runner: hook::api::HookRunner::empty(cwd.display().to_string()),
             memory_config,
-            json_logger: None,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             allow_all: false,
             context_size: 200_000,
@@ -640,10 +639,9 @@ mod tests {
     async fn test_run_reflection_impl_returns_chinese_config_errors() {
         let cases = [
             (
-                {
-                    let mut config = share::config::MemoryConfig::default();
-                    config.enabled = false;
-                    config
+                share::config::MemoryConfig {
+                    enabled: false,
+                    ..Default::default()
                 },
                 "memory.enabled=false",
             ),
@@ -806,8 +804,10 @@ mod tests {
 
     #[test]
     fn test_apply_reflection_impl_disabled_error() {
-        let mut config = share::config::MemoryConfig::default();
-        config.enabled = false;
+        let config = share::config::MemoryConfig {
+            enabled: false,
+            ..Default::default()
+        };
         let cwd = std::env::temp_dir();
         let base_dir = temp_memory_base_dir();
         let output = reflection_view(

@@ -76,7 +76,8 @@ impl HookRunner {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        log::info!(
+        log::debug!(
+            target: "hook::runner",
             "hook match: event={:?} tool_name={:?} matched={} configured_events={} project_dir={}",
             event,
             tool_name,
@@ -99,7 +100,8 @@ impl HookRunner {
         let timeout = Duration::from_secs(hook.timeout);
         let project_dir = self.project_dir();
         let command = self.expand_command_placeholders(&hook.command);
-        log::info!(
+        log::debug!(
+            target: "hook::runner",
             "hook start: event={:?} matcher={} command={} project_dir={}",
             input.event,
             hook.matcher,
@@ -157,7 +159,8 @@ impl HookRunner {
                 let code = output.status.code().unwrap_or(-1);
 
                 for line in hook_env_lines(&stdout) {
-                    log::info!(
+                    log::debug!(
+                        target: "hook::runner",
                         "hook env: event={:?} command={} stream=stdout line={}",
                         input.event,
                         command,
@@ -165,7 +168,8 @@ impl HookRunner {
                     );
                 }
                 for line in hook_env_lines(&stderr) {
-                    log::info!(
+                    log::debug!(
+                        target: "hook::runner",
                         "hook env: event={:?} command={} stream=stderr line={}",
                         input.event,
                         command,
@@ -184,7 +188,8 @@ impl HookRunner {
                         stderr.trim()
                     );
                 }
-                log::info!(
+                log::debug!(
+                    target: "hook::runner",
                     "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={}",
                     input.event,
                     command,

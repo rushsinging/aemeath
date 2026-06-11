@@ -4,9 +4,10 @@ use super::logging::{
 };
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
-use super::{CliAgentRunner, SilentHandler};
+use super::{SilentHandler};
 use crate::business::agent::Agent;
 use crate::business::compact::{safe_slice, truncate_tool_result};
+use logging::{ToolKind, UnifiedLogger};
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
@@ -16,7 +17,6 @@ use tools::api::ToolExecutionContext;
 
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
-    pub runner: &'a CliAgentRunner,
     pub prompt: &'a str,
     pub system: String,
     pub ctx: &'a ToolExecutionContext,
@@ -192,19 +192,13 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_input(&self, turn_number: usize) {
-        if let Some(ref jl) = self.runner.json_logger {
-            let data = build_json_logger_input_data(
-                &self.messages,
-                self.system_blocks.len(),
-                &self.sub_schemas,
-            );
-            let _ = jl.lock().unwrap().log_input(
-                turn_number,
-                &self.role_name_for_log,
-                &self.model_name_for_log,
-                data,
-            );
-        }
+        let data = build_json_logger_input_data(
+            &self.messages,
+            self.system_blocks.len(),
+            &self.sub_schemas,
+        );
+        UnifiedLogger::log_input(&self.role_name_for_log, data);
+        logging::context::set_current_turn(turn_number);
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
@@ -218,19 +212,13 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_output(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
-        if let Some(ref jl) = self.runner.json_logger {
-            let data = build_json_logger_output_data(
-                resp,
-                self.start_time.elapsed().as_secs_f64(),
-                self.client.provider_name(),
-            );
-            let _ = jl.lock().unwrap().log_output(
-                turn_number,
-                &self.role_name_for_log,
-                &self.model_name_for_log,
-                data,
-            );
-        }
+        let data = build_json_logger_output_data(
+            resp,
+            self.start_time.elapsed().as_secs_f64(),
+            self.client.provider_name(),
+        );
+        UnifiedLogger::log_output(&self.role_name_for_log, data);
+        logging::context::set_current_turn(turn_number);
     }
 
     fn send_text_progress(&self, turn: usize, resp: &provider::api::StreamResponse) {
@@ -252,17 +240,11 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::business::agent::ToolCall]) {
-        if let Some(ref jl) = self.runner.json_logger {
-            for tool_call in tool_calls {
-                let data = build_json_logger_tool_call_data(tool_call);
-                let _ = jl.lock().unwrap().log_tool_call(
-                    turn_number,
-                    &self.role_name_for_log,
-                    &self.model_name_for_log,
-                    data,
-                );
-            }
+        for tool_call in tool_calls {
+            let data = build_json_logger_tool_call_data(tool_call);
+            UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Call, data);
         }
+        logging::context::set_current_turn(turn_number);
     }
 
     fn build_call_info(

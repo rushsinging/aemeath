@@ -97,6 +97,11 @@ impl LoggingConfig {
     pub fn to_filter_string(&self) -> String {
         self.level.clone()
     }
+
+    /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
+    pub fn to_level_filter(&self) -> log::LevelFilter {
+        logging::level_filter_from_str(&self.level)
+    }
 }
 
 #[cfg(test)]

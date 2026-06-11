@@ -19,7 +19,7 @@ pub use model_runtime::{
 pub use permissions::apply_config_permission_mode;
 pub use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 pub use runtime_support::{
-    build_agent_runner, build_hook_runner, build_json_logger, start_session,
+    build_agent_runner, build_hook_runner, start_session,
 };
 use share::config::models::ResolvedModel;
 use share::config::Config;

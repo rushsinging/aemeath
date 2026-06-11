@@ -1,64 +1,76 @@
 use crate::utils::bootstrap::config_paths as paths;
-use logging::{self, LogFile};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use logging::{self, UnifiedLogger};
+use share::config::LoggingConfig;
 
-/// 全局 session ID，供日志格式化器使用
-static SESSION_ID: OnceLock<String> = OnceLock::new();
-static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
-
-/// 设置全局 session ID（只能调用一次）
+/// 设置全局 session ID（只能调用一次）。委托 `logging::set_session_id`。
 pub fn set_session_id(id: String) {
-    let _ = SESSION_ID.set(id);
+    logging::set_session_id(id);
 }
 
+/// 设置当前 turn。委托 `logging::set_current_turn`。
 pub fn set_current_turn(turn: usize) {
-    CURRENT_TURN.store(turn, Ordering::Relaxed);
+    logging::set_current_turn(turn);
 }
 
-fn current_turn_for_log() -> Option<usize> {
-    match CURRENT_TURN.load(Ordering::Relaxed) {
-        0 => None,
-        turn => Some(turn),
-    }
-}
-
-pub fn init_logging(logging_config: &share::config::LoggingConfig) {
-    // 初始化结构化日志 — 路由到 ~/.agents/logs/aemeath.log，避免库的 log::warn! / log::error! 破坏 TUI 渲染。
-    // 设置 AEMEATH_LOG_STDERR=1 可在使用 --no-tui / CLI 模式调试时恢复 stderr 行为。
-    // 日志级别由 config.json 的 logging 段控制；可通过 RUST_LOG 环境变量覆盖。
+/// 初始化日志子系统（feature #79 路径 C）。
+///
+/// - 默认：用 `UnifiedLogger::init` 写到 `~/.agents/logs/{aemeath,tui,hook,input,output,tool}.log`。
+/// - `AEMEATH_LOG_STDERR=1` 或 `AEMEATH_LOG_STDERR=true`：回退到 `env_logger` 写 stderr
+///   （CLI 模式调试用，会破坏 TUI 渲染）。
+///
+/// 日志级别由 `config.json` 的 `logging` 段控制；`RUST_LOG` 环境变量始终优先。
+pub fn init_logging(logging_config: &LoggingConfig) {
     let default_filter = logging_config.to_filter_string();
     let use_stderr = use_stderr_log_target();
-    let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(&default_filter),
-    );
-    if !use_stderr {
-        if let Ok(file) = logging::open_append(&paths::global_logs_dir(), LogFile::Aemeath) {
-            builder.target(env_logger::Target::Pipe(Box::new(file)));
-        }
-    }
-    builder.format(|buf, record| {
-        use std::io::Write;
-        let session = SESSION_ID.get().map(|s| s.as_str()).unwrap_or("????????");
-        writeln!(
-            buf,
-            "{}",
-            logging::format_text_line_with_turn(
+    let logs_dir = paths::global_logs_dir();
+
+    if use_stderr {
+        // 调试模式：写 stderr（破坏 TUI 渲染，适合 --no-tui 调试）
+        let mut builder = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or(&default_filter),
+        );
+        builder.format(|buf, record| {
+            use std::io::Write;
+            let session = logging::session_id().unwrap_or("????????");
+            let turn = logging::current_turn();
+            let module = record.module_path().unwrap_or(record.target());
+            let line = logging::format_text_line_with_turn(
                 session,
-                current_turn_for_log(),
+                turn,
                 record.level().as_str(),
-                record.module_path().unwrap_or(record.target()),
+                module,
                 &record.args().to_string(),
+            );
+            writeln!(buf, "{}", line)
+        });
+        builder.init();
+        log::info!(
+            "logging initialized: filter={} target=stderr logs_dir={}",
+            std::env::var("RUST_LOG").unwrap_or(default_filter),
+            logs_dir.display()
+        );
+    } else {
+        // 默认：UnifiedLogger 统一入口，6 个文件按 record.target() 路由
+        if let Err(err) = UnifiedLogger::init(
+            &logs_dir,
+            logging::LOG_MAX_BYTES,
+            logging::LOG_MAX_BACKUPS,
+            logging_config.role_logs_enabled,
+            logging_config.to_level_filter(),
+        ) {
+            eprintln!("failed to init unified logger: {err}; falling back to stderr");
+            env_logger::Builder::from_env(
+                env_logger::Env::default().default_filter_or(&default_filter),
             )
-        )
-    });
-    builder.init();
-    log::info!(
-        "logging initialized: filter={} target={} logs_dir={}",
-        std::env::var("RUST_LOG").unwrap_or(default_filter),
-        if use_stderr { "stderr" } else { "aemeath.log" },
-        paths::global_logs_dir().display()
-    );
+            .init();
+            return;
+        }
+        log::info!(
+            "logging initialized: filter={} target=unified logs_dir={}",
+            std::env::var("RUST_LOG").unwrap_or(default_filter),
+            logs_dir.display()
+        );
+    }
 }
 
 fn use_stderr_log_target() -> bool {

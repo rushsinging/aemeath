@@ -6,7 +6,7 @@ use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::split_approved_calls;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
-use logging::JsonLogger;
+use logging::{ToolKind, UnifiedLogger};
 use share::config::hooks::HookEvent;
 use share::tool::ImageData;
 use std::sync::Arc;
@@ -31,9 +31,6 @@ pub(crate) async fn execute_tool_round<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
     max_agent_concurrency: usize,
     interrupted: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Vec<UiToolResult>
@@ -77,9 +74,6 @@ where
         sink,
         hook_ui,
         hook_runner,
-        json_logger,
-        turn_count,
-        client_model,
         &non_agent_calls,
     )
     .await;
@@ -275,26 +269,18 @@ pub(crate) fn tool_results_for_api(
 }
 
 pub(crate) fn log_tool_result(
-    json_logger: &Option<Arc<std::sync::Mutex<JsonLogger>>>,
-    turn_count: usize,
-    client_model: &str,
     id: &str,
     tool_name: &str,
     is_error: bool,
     output: &str,
 ) {
-    if let Some(jl) = json_logger {
-        let tr_data = serde_json::json!({
-            "tool_use_id": id,
-            "tool_name": tool_name,
-            "is_error": is_error,
-            "output": output,
-        });
-        let _ = jl
-            .lock()
-            .unwrap()
-            .log_tool_result(turn_count, "default", client_model, tr_data);
-    }
+    let tr_data = serde_json::json!({
+        "tool_use_id": id,
+        "tool_name": tool_name,
+        "is_error": is_error,
+        "output": output,
+    });
+    UnifiedLogger::log_tool("default", ToolKind::Result, tr_data);
 }
 
 #[cfg(test)]

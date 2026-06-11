@@ -55,7 +55,6 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
-    pub json_logger: Option<Arc<std::sync::Mutex<logging::JsonLogger>>>,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -91,7 +90,6 @@ where
         agent_semaphore,
         hook_runner,
         memory_config,
-        json_logger,
     } = ctx;
     let hook_ui = HookUi::new(sink.clone());
 
@@ -134,6 +132,8 @@ where
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let chat_id = format!("session-{session_id}");
+    // 将 chat_id 同步到日志 context，影响 tool/audit/hook 等共享 sink 的 chat 字段
+    logging::context::set_current_chat_id(chat_id.clone());
     loop {
         turn_count += 1;
         let turn_context = RuntimeTurnContext::new(chat_id.clone(), format!("turn-{turn_count}"));
@@ -264,9 +264,6 @@ where
             turn_context.clone(),
         );
         log_llm_input(
-            &json_logger,
-            turn_count,
-            client.model_name(),
             &messages_for_api,
             messages.len(),
             &system_blocks,
@@ -334,10 +331,7 @@ where
                         tool_identity.runtime_id_for_provider(provider_id)
                     });
                 log_llm_output_and_tool_calls(
-                    &json_logger,
-                    turn_count,
                     client.provider_name(),
-                    client.model_name(),
                     &resp,
                     &tool_calls,
                     api_elapsed,
@@ -440,9 +434,6 @@ where
                         &sink,
                         &hook_ui,
                         &hook_runner,
-                        &json_logger,
-                        turn_count,
-                        client.model_name(),
                         max_agent_concurrency,
                         &interrupted,
                     )
@@ -840,9 +831,8 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: blocking_then_success_hook_runner(),
             memory_config: share::config::MemoryConfig::default(),
-            json_logger: None,
         })
-        .await;
+            .await;
         let _ = std::fs::remove_file("target/stop-hook-once.flag");
 
         let events = sink.events();
@@ -942,9 +932,8 @@ mod tests {
                 path_base.path().display().to_string(),
             ),
             memory_config: share::config::MemoryConfig::default(),
-            json_logger: None,
         })
-        .await;
+            .await;
 
         assert!(sink
             .events()
@@ -999,9 +988,8 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: test_hook_runner(),
             memory_config: share::config::MemoryConfig::default(),
-            json_logger: None,
         })
-        .await;
+            .await;
 
         let events = sink.events();
         let queued_sync = events
