@@ -1,5 +1,7 @@
 # #47 TUI SDK DTO 边界彻底迁移设计
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 ## 背景
 
 #47 的目标是让 CLI/TUI 等入口保持薄，业务能力通过 `packages/sdk::AgentClient` 契约访问 runtime。前两轮已经完成：

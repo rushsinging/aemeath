@@ -1,5 +1,7 @@
 # Feature #50：CLI TUI 目录整理
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 ## 1. 设计目标
 
 清理 `apps/cli/src` 目录中的结构问题，按功能聚合为语义清晰的文件夹，消除冗余和废弃代码。

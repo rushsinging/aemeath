@@ -1,5 +1,7 @@
 # Feature #42：权限管控系统设计
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/146
+
 ## 背景
 
 原始 #42 关注点是：Allow All 模式下，用户明确要求访问 workspace 外路径时，Glob/Grep 仍被 workspace 边界拦截。进一步讨论后，范围升级为完整权限管控系统设计：既要支持外部路径授权，也要把工具审批、路径边界、风险评估和权限模式统一到一套模型里。

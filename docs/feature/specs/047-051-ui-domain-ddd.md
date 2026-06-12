@@ -1,5 +1,7 @@
 # Feature #51：UI Domain DDD 设计 —— 将 apps/cli 提升为核心域
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 ## 1. 设计目标
 
 修正 #47 DDD 设计中对 "Interface" 的定位：app/cli 不是薄入口（Inbound Adapter），而是一个独立的 **UI Domain（核心域）**。本设计为 UI Domain 建立 Bounded Context 划分、统一语言和 Context Map。

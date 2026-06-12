@@ -1,5 +1,7 @@
 # Feature #9 反思系统（重新设计）
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/115
+
 **日期**：2026-05-01
 **状态**：设计中
 **依赖**：Feature #8 Memory 系统（反思的输出目标）
