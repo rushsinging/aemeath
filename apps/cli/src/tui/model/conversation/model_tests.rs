@@ -450,6 +450,32 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
 }
 
 #[test]
+fn test_conversation_starts_new_thinking_block_after_block_complete() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "inspect state".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveThinkingText {
+        text: "first thought".to_string(),
+    });
+    model.apply(ConversationIntent::CompleteBlock);
+    model.apply(ConversationIntent::ObserveThinkingText {
+        text: "second thought".to_string(),
+    });
+
+    let thinking_blocks: Vec<_> = model
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            super::block::ConversationBlock::Thinking { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(thinking_blocks, vec!["first thought", "second thought"]);
+}
+
+#[test]
 fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {
@@ -510,7 +536,7 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
     model.apply(ConversationIntent::ObserveAssistantText {
         text: "已经完成的文字".to_string(),
     });
-    model.apply(ConversationIntent::CompleteTextBlock);
+    model.apply(ConversationIntent::CompleteBlock);
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
         provider_id: None,
@@ -759,7 +785,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     model.apply(ConversationIntent::ObserveAssistantText {
         text: "让我来审查".to_string(),
     });
-    model.apply(ConversationIntent::CompleteTextBlock);
+    model.apply(ConversationIntent::CompleteBlock);
     // ToolCallStart 用纯 tool 序号 index=0
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
@@ -812,7 +838,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
 
 #[test]
 fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
-    // #95 场景 B：assistant text 还在 streaming（未 CompleteTextBlock）时，
+    // #95 场景 B：assistant text 还在 streaming（未 CompleteBlock）时，
     // tool call 就到了。ToolCallStart index=0, ToolCall index=1（错位）。
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {
@@ -821,7 +847,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     model.apply(ConversationIntent::ObserveAssistantText {
         text: "让我".to_string(),
     });
-    // 不调 CompleteTextBlock — text 还在 streaming
+    // 不调 CompleteBlock — text 还在 streaming
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "tool-1".to_string(),
         provider_id: None,

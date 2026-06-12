@@ -345,7 +345,7 @@ mod tests {
                 context: test_turn_context(),
                 text: "thinking".to_string(),
             },
-            UiEvent::TextBlockComplete {
+            UiEvent::BlockComplete {
                 context: test_turn_context(),
                 text: "thinking".to_string(),
             },

@@ -65,7 +65,7 @@ pub enum RuntimeStreamEvent {
         context: RuntimeTurnContext,
         text: String,
     },
-    TextBlockComplete {
+    BlockComplete {
         context: RuntimeTurnContext,
         text: String,
     },

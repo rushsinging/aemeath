@@ -18,7 +18,7 @@ pub enum ConversationIntent {
     ObserveThinkingText {
         text: String,
     },
-    CompleteTextBlock,
+    CompleteBlock,
     ObserveToolCallStart {
         id: String,
         provider_id: Option<String>,

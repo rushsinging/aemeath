@@ -36,7 +36,7 @@ impl App {
                 }
                 self.spinner_phase(SpinnerPhase::Thinking);
             }
-            UiEvent::TextBlockComplete { context, text } => {
+            UiEvent::BlockComplete { context, text } => {
                 let _ = (context, text);
             }
             UiEvent::ToolCallStart { name, index, .. } => {

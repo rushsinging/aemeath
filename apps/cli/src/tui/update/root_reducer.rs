@@ -212,7 +212,7 @@ fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[Conversat
             | ConversationChange::QueuedSubmissionAdded { .. }
             | ConversationChange::QueuedSubmissionsCleared { .. }
             | ConversationChange::AgentProgressRecorded { .. }
-            | ConversationChange::TextBlockCompleted { .. }
+            | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
             | ConversationChange::AskUserDismissed

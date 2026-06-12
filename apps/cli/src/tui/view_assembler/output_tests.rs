@@ -380,7 +380,7 @@ fn add_tool_after_thinking(
     conversation.apply(ConversationIntent::ObserveThinkingText {
         text: "thinking".to_string(),
     });
-    conversation.apply(ConversationIntent::CompleteTextBlock);
+    conversation.apply(ConversationIntent::CompleteBlock);
     add_completed_tool(
         conversation,
         "tool-1",

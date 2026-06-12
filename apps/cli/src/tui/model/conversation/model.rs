@@ -84,7 +84,7 @@ impl ConversationModel {
             ConversationIntent::CompleteChat => self.complete_chat(),
             ConversationIntent::ObserveAssistantText { text } => self.append_assistant_text(text),
             ConversationIntent::ObserveThinkingText { text } => self.append_thinking_text(text),
-            ConversationIntent::CompleteTextBlock => self.complete_text_block(),
+            ConversationIntent::CompleteBlock => self.complete_block(),
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
             ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
             ConversationIntent::AppendError { text } => self.append_error(text),
@@ -413,13 +413,13 @@ impl ConversationModel {
         ]
     }
 
-    fn complete_text_block(&mut self) -> Vec<ConversationChange> {
+    fn complete_block(&mut self) -> Vec<ConversationChange> {
         let block_id = self
             .active_text_block_id
             .take()
             .or_else(|| self.active_thinking_block_id.take());
         vec![
-            ConversationChange::TextBlockCompleted { block_id },
+            ConversationChange::BlockCompleted { block_id },
             ConversationChange::StyleBoundaryResetRequired,
             ConversationChange::OutputDirty,
         ]

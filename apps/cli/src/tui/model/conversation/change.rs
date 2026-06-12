@@ -7,7 +7,7 @@ pub enum ConversationChange {
     UserMessageAppended { block_id: String },
     AssistantTextAppended { block_id: String },
     ThinkingTextAppended { block_id: String },
-    TextBlockCompleted { block_id: Option<String> },
+    BlockCompleted { block_id: Option<String> },
     ToolCallObserved { name: String, index: usize },
     ToolCallBound { id: String, name: String },
     ToolCallCompleted { id: String, status: ToolCallStatus },

@@ -639,7 +639,7 @@ mod tests {
                 RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
                 RuntimeStreamEvent::Cancelled => "Cancelled".to_string(),
                 RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
-                RuntimeStreamEvent::TextBlockComplete { .. } => "TextBlockComplete".to_string(),
+                RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
                 RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
                 RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
                 RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),

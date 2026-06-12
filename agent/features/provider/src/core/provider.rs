@@ -12,7 +12,7 @@ pub trait StreamHandler: Send {
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize);
     fn on_error(&mut self, error: &str);
     fn on_raw_line(&mut self, _line: &str) {}
-    fn on_text_block_complete(&mut self, _full_text: &str) {}
+    fn on_block_complete(&mut self, _full_text: &str) {}
     /// Called for reasoning/thinking content (e.g. GLM-5.1, DeepSeek-R1).
     /// Default: ignored. Override to display thinking in a special style.
     fn on_thinking(&mut self, _text: &str) {}
@@ -47,7 +47,7 @@ impl StreamHandler for CallbackHandler {
     }
     fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
     fn on_error(&mut self, _error: &str) {}
-    fn on_text_block_complete(&mut self, _full_text: &str) {}
+    fn on_block_complete(&mut self, _full_text: &str) {}
 }
 
 /// LLM Provider trait - all providers must implement this

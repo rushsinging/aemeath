@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::bootstrap::config_paths::TEST_ENV_LOCK;
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -250,6 +251,7 @@ async fn test_load_agents_md_falls_back_to_project_agents_md() {
 
 #[tokio::test]
 async fn test_load_agents_md_reads_project_claude_md_without_migration() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let base = std::env::temp_dir().join(format!(
         "aemeath_agents_md_no_auto_migration_{}",
         std::time::SystemTime::now()

@@ -4,6 +4,12 @@ use crate::business::chat::looping::events::{
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use provider::api::StreamHandler;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StreamingBlockKind {
+    Text,
+    Thinking,
+}
+
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
 pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub sink: S,
@@ -12,6 +18,7 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
     pub context: RuntimeTurnContext,
+    active_streaming_block: Option<StreamingBlockKind>,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
@@ -35,16 +42,37 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
             last_tps_update: std::time::Instant::now(),
             tool_identity,
             context,
+            active_streaming_block: None,
         }
     }
 
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> String {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
     }
+
+    fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {
+        if self
+            .active_streaming_block
+            .is_some_and(|active| active != kind)
+        {
+            self.complete_active_streaming_block();
+        }
+        self.active_streaming_block = Some(kind);
+    }
+
+    fn complete_active_streaming_block(&mut self) {
+        if self.active_streaming_block.take().is_some() {
+            self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
+                context: self.context.clone(),
+                text: String::new(),
+            });
+        }
+    }
 }
 
 impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_text(&mut self, text: &str) {
+        self.begin_streaming_block(StreamingBlockKind::Text);
         self.sink.try_send_event(RuntimeStreamEvent::Text {
             context: self.context.clone(),
             text: text.to_string(),
@@ -69,6 +97,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
+        self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
             context: self.context.clone(),
@@ -79,6 +108,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         });
     }
     fn on_error(&mut self, error: &str) {
+        self.complete_active_streaming_block();
         self.sink
             .try_send_event(RuntimeStreamEvent::SystemMessage(format!(
                 "[warn] {}",
@@ -86,15 +116,16 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
             )));
     }
 
-    fn on_text_block_complete(&mut self, text: &str) {
-        self.sink
-            .try_send_event(RuntimeStreamEvent::TextBlockComplete {
-                context: self.context.clone(),
-                text: text.to_string(),
-            });
+    fn on_block_complete(&mut self, text: &str) {
+        self.active_streaming_block = None;
+        self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
+            context: self.context.clone(),
+            text: text.to_string(),
+        });
     }
 
     fn on_thinking(&mut self, text: &str) {
+        self.begin_streaming_block(StreamingBlockKind::Thinking);
         self.sink.try_send_event(RuntimeStreamEvent::Thinking {
             context: self.context.clone(),
             text: text.to_string(),
@@ -108,6 +139,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         provider_id: Option<&str>,
         partial_args: &str,
     ) {
+        self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
             .try_send_event(RuntimeStreamEvent::ToolCallUpdate {

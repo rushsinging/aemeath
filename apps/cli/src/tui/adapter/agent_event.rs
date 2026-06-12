@@ -61,14 +61,12 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
             mapping
         }
-        UiEvent::TextBlockComplete { context, .. } => {
+        UiEvent::BlockComplete { context, .. } => {
             let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
             });
-            mapping
-                .conversation
-                .push(ConversationIntent::CompleteTextBlock);
+            mapping.conversation.push(ConversationIntent::CompleteBlock);
             mapping
         }
         UiEvent::ToolCallStart {
