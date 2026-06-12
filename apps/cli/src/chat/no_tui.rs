@@ -83,7 +83,7 @@ async fn run_single_turn(
 fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
     match event {
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
-        sdk::ChatEvent::BlockComplete { .. } => {}
+        sdk::ChatEvent::TextBlockComplete { .. } => {}
         sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::MessagesSync(_)
         | sdk::ChatEvent::Usage { .. }

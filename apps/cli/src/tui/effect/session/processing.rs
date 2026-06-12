@@ -69,7 +69,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             context: context.into(),
             text,
         },
-        sdk::ChatEvent::BlockComplete { context, text } => UiEvent::BlockComplete {
+        sdk::ChatEvent::TextBlockComplete { context, text } => UiEvent::BlockComplete {
             context: context.into(),
             text,
         },
