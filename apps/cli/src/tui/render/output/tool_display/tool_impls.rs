@@ -1,7 +1,7 @@
 use crate::tui::render::output_area::{display, INDENT};
 
 use super::common::{file_path, str_arg, truncate_ellipsis, u64_arg};
-use super::{ResultRender, ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
+use super::{ResultRender, ToolDisplay, ToolDisplayEntry, ToolDisplayMode, TOOL_RESULT_MAX_LINES};
 
 struct BashDisplay;
 impl ToolDisplay for BashDisplay {
@@ -40,8 +40,6 @@ impl ToolDisplay for ReadDisplay {
         format!("● Read({path})")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        // 路径已在 header `Read({path})` 展示，detail 不再重复（避免冗余第二行，#88）；
-        // 仅当带 offset/limit 时输出该范围信息。
         let Some(offset) = u64_arg(input, "offset") else {
             return vec![];
         };
@@ -51,6 +49,9 @@ impl ToolDisplay for ReadDisplay {
             detail.push_str(&format!(", limit: {l}"));
         }
         vec![detail]
+    }
+    fn display_mode(&self) -> ToolDisplayMode {
+        ToolDisplayMode::SingleLine
     }
 }
 inventory::submit!(ToolDisplayEntry {

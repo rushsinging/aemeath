@@ -10,6 +10,15 @@ use common::{format_todowrite_value, truncate_json};
 /// TUI 中 tool call 结果最多显示的行数。
 pub(crate) const TOOL_RESULT_MAX_LINES: usize = 5;
 
+/// 工具调用区域的展示模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolDisplayMode {
+    /// 默认展开模式：展示 header 和 details。
+    Expanded,
+    /// 单行模式：只展示 header，隐藏 details。
+    SingleLine,
+}
+
 /// 工具 result 的渲染类型。由工具**显式声明**（`ToolDisplay::result_render`），渲染层据此
 /// 分发，不按 `---DIFF---` 字符或硬编码工具名猜测。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +42,11 @@ pub trait ToolDisplay: Send + Sync {
 
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
+
+    /// Tool call display mode. Defaults to expanded display for backward compatibility.
+    fn display_mode(&self) -> ToolDisplayMode {
+        ToolDisplayMode::Expanded
+    }
 
     /// Max lines of result output to show (default 5).
     fn result_max_lines(&self) -> usize {
@@ -114,10 +128,12 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     }
 
     if let Some(display) = lookup_display(name) {
-        return (
-            display.format_header(&parsed),
-            display.format_details(&parsed),
-        );
+        let header = display.format_header(&parsed);
+        let details = match display.display_mode() {
+            ToolDisplayMode::Expanded => display.format_details(&parsed),
+            ToolDisplayMode::SingleLine => vec![],
+        };
+        return (header, details);
     }
 
     // Fallback for unknown tools
@@ -159,17 +175,42 @@ mod tests {
             header.contains("修复 bug 84"),
             "header 应包含 subject: {header}"
         );
-        assert!(!details.is_empty(), "details 应包含 summary");
+        assert!(
+            details.is_empty(),
+            "SingleLine 模式不应显示 details: {details:?}"
+        );
     }
 
     #[test]
-    fn test_format_tool_call_task_create() {
+    fn test_format_tool_call_task_create_keeps_expanded_details_by_default() {
         let (header, details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
         );
         assert!(header.contains("分析"), "header: {header}");
-        assert!(!details.is_empty());
+        assert_eq!(details, vec!["查看结构".to_string()]);
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_single_line_hides_status_detail() {
+        let (header, details) =
+            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#);
+        assert_eq!(header, "● TaskUpdate(42)");
+        assert!(
+            details.is_empty(),
+            "SingleLine 模式不应显示 details: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_single_line_hides_offset_limit_detail() {
+        let (header, details) =
+            format_tool_call("Read", r#"{"file_path":"/a/b.md","offset":10,"limit":5}"#);
+        assert_eq!(header, "● Read(/a/b.md)");
+        assert!(
+            details.is_empty(),
+            "SingleLine 模式不应显示 details: {details:?}"
+        );
     }
 
     #[test]
@@ -209,18 +250,13 @@ mod tests {
     }
 
     #[test]
-    fn test_format_tool_call_read_offset_limit_shown_without_path() {
+    fn test_format_tool_call_read_with_offset_uses_single_line_mode() {
         // 正常路径：有 offset/limit 时仍展示该信息，但不重复路径。
         let (_header, details) =
             format_tool_call("Read", r#"{"file_path":"/a/b.md","offset":10,"limit":5}"#);
-        let joined = details.join(" ");
         assert!(
-            joined.contains("10") && joined.contains('5'),
-            "应展示 offset/limit，实际: {details:?}"
-        );
-        assert!(
-            !joined.contains("/a/b.md"),
-            "offset/limit detail 不应重复路径，实际: {details:?}"
+            details.is_empty(),
+            "SingleLine 模式不应显示 offset/limit details，实际: {details:?}"
         );
     }
 
