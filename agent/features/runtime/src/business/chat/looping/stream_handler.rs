@@ -1,5 +1,5 @@
 use crate::business::chat::looping::events::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use provider::api::StreamHandler;
@@ -110,13 +110,15 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     ) {
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
-            .try_send_event(RuntimeStreamEvent::ToolArgumentsDelta {
+            .try_send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: self.context.clone(),
                 id,
                 provider_id: provider_id.map(str::to_string),
-                index,
                 name: name.to_string(),
-                partial_args: partial_args.to_string(),
+                index,
+                arguments: Some(partial_args.to_string()),
+                summary: None,
+                status: RuntimeToolCallStatus::PendingArgs,
             });
     }
 }

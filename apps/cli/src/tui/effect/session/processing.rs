@@ -86,37 +86,24 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             name,
             index,
         },
-        sdk::ChatEvent::ToolArgumentsDelta {
-            context,
-            id,
-            provider_id,
-            index,
-            name,
-            partial_args,
-            ..
-        } => UiEvent::ToolArgumentsDelta {
-            context: context.into(),
-            id,
-            provider_id,
-            index,
-            name,
-            partial_args,
-        },
-        sdk::ChatEvent::ToolCall {
+        sdk::ChatEvent::ToolCallUpdate {
             context,
             id,
             provider_id,
             name,
             index,
+            arguments,
             summary,
-            ..
-        } => UiEvent::ToolCall {
+            status,
+        } => UiEvent::ToolCallUpdate {
             context: context.into(),
             id,
             provider_id,
             name,
             index,
+            arguments,
             summary,
+            status,
         },
         sdk::ChatEvent::ToolResult {
             context,

@@ -48,6 +48,13 @@ pub struct RuntimeHookEvent {
     pub result: Option<RuntimeHookExecutionResult>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeToolCallStatus {
+    PendingArgs,
+    Ready,
+    Running,
+}
+
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
     Text {
@@ -69,21 +76,15 @@ pub enum RuntimeStreamEvent {
         name: String,
         index: usize,
     },
-    ToolArgumentsDelta {
+    ToolCallUpdate {
         context: RuntimeTurnContext,
         id: String,
         provider_id: Option<String>,
+        name: String,
         index: usize,
-        name: String,
-        partial_args: String,
-    },
-    ToolCall {
-        context: RuntimeTurnContext,
-        id: String,
-        provider_id: String,
-        name: String,
-        index: Option<usize>,
-        summary: String,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: RuntimeToolCallStatus,
     },
     ToolResult {
         context: RuntimeTurnContext,

@@ -16,9 +16,9 @@
 
 **症状**：运行时已进入 tool call 阶段，spinner phase 会显示类似 `call Bash` 的工具调用状态，但 TUI 输出区没有出现对应的 tool call card，用户只能从状态栏感知到工具正在调用。
 
-**根因**：spinner 走旧状态路径消费 `ToolCallStart` 并更新 `SpinnerPhase::CallingTool(name)`；tool card 渲染则依赖 `ConversationModel.active_chat_id`。当 streaming tool event 到达时本地没有可用 active chat/turn，`ConversationModel` 在处理 `ToolCallStart` / `ToolArgumentsDelta` 等事件时直接返回，导致没有创建 tool block。根因是 TUI 用本地 active chat 作为 streaming runtime 事件归属来源，而不是使用 runtime 会话自身的 chat/turn 上下文。
+**根因**：spinner 走旧状态路径消费 `ToolCallStart` 并更新 `SpinnerPhase::CallingTool(name)`；tool card 渲染则依赖 `ConversationModel.active_chat_id`。当 streaming tool event 到达时本地没有可用 active chat/turn，`ConversationModel` 在处理 `ToolCallStart` / `ToolCallUpdate` 等事件时直接返回，导致没有创建 tool block。根因是 TUI 用本地 active chat 作为 streaming runtime 事件归属来源，而不是使用 runtime 会话自身的 chat/turn 上下文。
 
-**修复**：runtime stream 事件新增 `RuntimeTurnContext { chat_id, turn_id }`，并经 SDK `ChatEvent`、TUI `UiEvent` 全链路透传。TUI adapter 在处理 text/thinking/tool event 前先发送 `BindRuntimeTurn`，让 `ConversationModel` 以 runtime context 建立或切换目标 chat/turn，再创建/更新 tool block。历史消息加载继续显式绑定 history turn，保持 resume 渲染路径可用。
+**修复**：runtime stream 事件新增 `RuntimeTurnContext { chat_id, turn_id }`，并经 SDK `ChatEvent`、TUI `UiEvent` 全链路透传。TUI adapter 在处理 text/thinking/tool event 前先发送 `BindRuntimeTurn`，让 `ConversationModel` 以 runtime context 建立或切换目标 chat/turn，再创建/更新 tool block。tool call 生命周期收敛为 `ToolCallStart` / `ToolCallUpdate` / `ToolResult`，`ToolCallUpdate` 统一承载参数、summary 与 `PendingArgs`/`Ready`/`Running` 状态，避免旧 `ToolArgumentsDelta` 与最终 `ToolCall` 语义分裂。历史消息加载继续显式绑定 history turn，保持 resume 渲染路径可用。
 
 **验证**：
 - `cargo test -p cli tui::model::conversation::model_extra_tests::test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat`
@@ -45,22 +45,30 @@
 
 **症状**：TUI 中 running/pending tool call 的 gutter marker 首轮修复后可闪烁，但直接按 spinner 90ms 帧奇偶切换，视觉上闪得太快；此前 Read/Edit/Bash/Grep/Skill/TaskCreate 等 tool call 的括号 summary 经常和 result 一起出现，用户看不到 ToolArgumentsDelta 到达后的提前更新。
 
-**根因**：首轮修复让 gutter marker 消费 `spinner_frame`，但直接使用每帧奇偶切换，导致每 90ms 翻转、完整周期 180ms；tool call header 只使用最终 `summary` 格式化，忽略 conversation model 已在 `ToolArgumentsDelta` 中维护的 `args_preview`，导致 summary 为空时只能显示裸工具名，直到最终 ToolCall 或 result 绑定后才刷新为带括号标题。
+**根因**：首轮修复让 gutter marker 消费 `spinner_frame`，但直接使用每帧奇偶切换，导致每 90ms 翻转、完整周期 180ms；旧事件系统把流式参数增量 `ToolArgumentsDelta` 与最终确认 `ToolCall` 拆成两类事件，TUI 状态层又基本压扁为 running，导致 header/summary 的 ready 阶段表达不稳定，部分 provider 或快速工具路径上看起来像等 result 才出现。
 
-**修复**：gutter 层新增闪烁分频，running/pending 工具按 `spinner_frame / 4` 在 `●`/`○` 间切换，即约 360ms 翻转、720ms 完整周期；成功/失败等终态保持静态。tool call header 改为优先使用 `summary`，无 summary 时使用可用的 `args_preview` 格式化，保证 ToolArgumentsDelta 后不等 result 即可显示括号/detail。
+**修复**：gutter 层新增闪烁分频，running/pending 工具按 `spinner_frame / 4` 在 `●`/`○` 间切换，即约 360ms 翻转、720ms 完整周期；成功/失败等终态保持静态。tool call header 改为优先使用 `summary`，无 summary 时使用可用的 `args_preview` 格式化。runtime/SDK/TUI 事件收敛为 `ToolCallStart`、`ToolCallUpdate`、`ToolResult` 三段：start 一发现工具实体就创建 card，update 立刻更新 arguments/summary/status，result 只表达终态，保证 update 阶段不等 result 即可显示括号/detail。
 
 **验证**：
 - `cargo test -p cli test_animated_marker_glyph_blinks_running_tool_between_filled_and_open_circle -- --nocapture`
 - `cargo test -p cli test_tool_call_renders_args_detail_from_args_preview_before_summary -- --nocapture`
 - `cargo test -p cli test_output_assembler_tool_arguments_delta_updates_header_before_result -- --nocapture`
-- `cargo test -p cli gutter -- --nocapture`
-- `cargo test -p cli tool_call -- --nocapture`
+- `cargo test -p runtime stream_handler -- --nocapture`
+- `cargo test -p cli test_conversation -- --nocapture`
+- `cargo test -p cli test_map_agent_event -- --nocapture`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
 
 **涉及路径**：
 - `apps/cli/src/tui/render/output/gutter.rs`
 - `apps/cli/src/tui/render/output/document_renderer.rs`
 - `apps/cli/src/tui/render/output/blocks/tool_call.rs`
 - `apps/cli/src/tui/app/update.rs`
+- `agent/features/runtime/src/business/chat/looping/**`
+- `agent/features/runtime/src/core/client/event.rs`
+- `packages/sdk/src/chat.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/**`
 
 ### #123 TUI 长文本换行缺失：input area / input queue / user message 均不自动折行
 

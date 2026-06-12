@@ -93,8 +93,10 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::HookEvent(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::TasksChanged => {}
-        sdk::ChatEvent::ToolCall { name, summary, .. } => {
-            eprintln!("[tool] {name} {summary}");
+        sdk::ChatEvent::ToolCallUpdate { name, summary, .. } => {
+            if let Some(summary) = summary {
+                eprintln!("[tool:update] {name} {summary}");
+            }
         }
         sdk::ChatEvent::ToolResult {
             tool_name,
@@ -121,7 +123,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::ToolCallStart { name, .. } => {
             eprintln!("[tool:start] {name}");
         }
-        sdk::ChatEvent::ToolArgumentsDelta { .. } => {}
         sdk::ChatEvent::AskUser {
             question,
             options,

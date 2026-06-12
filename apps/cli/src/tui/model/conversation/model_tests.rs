@@ -19,12 +19,14 @@ fn test_conversation_observes_tool_lifecycle() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read file".to_string(),
+        summary: Some("Read file".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),
@@ -75,19 +77,23 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         name: "Skill".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
-        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+        arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "call-using".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("call-using".to_string()),
         id: "tool-1".to_string(),
         name: "Skill".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::CompleteChat);
 
@@ -100,19 +106,23 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         name: "Skill".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-3".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
-        partial_args: r#"{"skill":"superpowers:brainstorming"}"#.to_string(),
+        arguments: Some(r#"{"skill":"superpowers:brainstorming"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "call-brainstorm".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("call-brainstorm".to_string()),
         id: "tool-3".to_string(),
         name: "Skill".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let summaries: Vec<_> = model
@@ -143,19 +153,23 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         name: "Skill".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-1".to_string(),
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
-        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+        arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "call-skill".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("call-skill".to_string()),
         id: "tool-1".to_string(),
         name: "Skill".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::CompleteChat);
 
@@ -171,12 +185,14 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         is_error: false,
         image_count: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "call-read".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("call-read".to_string()),
         id: "tool-2".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: r#"{"file_path":"agent/shared/src/config.rs"}"#.to_string(),
+        summary: Some(r#"{"file_path":"agent/shared/src/config.rs"}"#.to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let skill_result = model.chats[0].turns[0].tool_calls[0].result.as_deref();
@@ -209,19 +225,23 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         name: "Skill".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "call-provider-skill".to_string(),
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
-        partial_args: r#"{"skill":"superpowers:brainstorming"}"#.to_string(),
+        arguments: Some(r#"{"skill":"superpowers:brainstorming"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "call-provider-skill".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("call-provider-skill".to_string()),
         id: "tool-99".to_string(),
         name: "Skill".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let tool_blocks: Vec<_> = model
@@ -252,19 +272,23 @@ fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
         name: "Skill".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "call-skill".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
-        partial_args: r#"{"skill":"superpowers:using-superpowers"}"#.to_string(),
+        arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-skill".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-skill".to_string()),
         id: "call-skill".to_string(),
         name: "Skill".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     assert_eq!(
@@ -290,19 +314,23 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         name: "TaskListCreate".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "call-list".to_string(),
         provider_id: None,
         name: "TaskListCreate".to_string(),
         index: 0,
-        partial_args: r#"{"subject":"修复显示","summary":"排查 tool call"}"#.to_string(),
+        arguments: Some(r#"{"subject":"修复显示","summary":"排查 tool call"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-list".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-list".to_string()),
         id: "call-list".to_string(),
         name: "TaskListCreate".to_string(),
         index: 0,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
         id: "call-task".to_string(),
@@ -310,19 +338,23 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         name: "TaskCreate".to_string(),
         index: 1,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "call-task".to_string(),
         provider_id: None,
         name: "TaskCreate".to_string(),
         index: 1,
-        partial_args: r#"{"subject":"写测试","description":"复现 TaskCreate 显示"}"#.to_string(),
+        arguments: Some(r#"{"subject":"写测试","description":"复现 TaskCreate 显示"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-task".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-task".to_string()),
         id: "call-task".to_string(),
         name: "TaskCreate".to_string(),
         index: 1,
-        summary: String::new(),
+        summary: Some(String::new()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let tool_blocks: Vec<_> = model
@@ -366,12 +398,14 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         is_error: false,
         image_count: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read file".to_string(),
+        summary: Some("Read file".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     assert!(!model.blocks.iter().any(|block| matches!(
@@ -430,12 +464,14 @@ fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read docs".to_string(),
+        summary: Some("Read docs".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let tool_pos = model
@@ -481,12 +517,14 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read docs".to_string(),
+        summary: Some("Read docs".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let text_pos = model
@@ -532,12 +570,14 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read docs".to_string(),
+        summary: Some("Read docs".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let tool_pos = model
@@ -576,12 +616,14 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read docs".to_string(),
+        summary: Some("Read docs".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),
@@ -679,19 +721,23 @@ fn test_conversation_keeps_tool_args_preview() {
         name: "Read".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
-        partial_args: r#"{"file_path":"src/main.rs"}"#.to_string(),
+        arguments: Some(r#"{"file_path":"src/main.rs"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "Read file".to_string(),
+        summary: Some("Read file".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     assert!(model.blocks.iter().any(|block| matches!(
@@ -722,12 +768,14 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         index: 0,
     });
     // ToolCall 用 content_block index=1（因为 text 占了 block 0）
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "call_agent_1".to_string(),
         name: "Agent".to_string(),
         index: 1,
-        summary: "Review code".to_string(),
+        summary: Some("Review code".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     // Agent progress（不影响绑定）
     model.apply(ConversationIntent::RecordAgentProgress {
@@ -780,12 +828,14 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         name: "Agent".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "call_abc".to_string(),
         name: "Agent".to_string(),
         index: 1,
-        summary: "Review".to_string(),
+        summary: Some("Review".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),
@@ -815,12 +865,14 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         submission: "review code".to_string(),
     });
     // 不发送 ToolCallStart
-    model.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "call_agent_no_start".to_string(),
         name: "Agent".to_string(),
         index: 0,
-        summary: "Review code".to_string(),
+        summary: Some("Review code".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),

@@ -49,21 +49,15 @@ pub enum AppEvent {
         name: String,
         index: usize,
     },
-    ToolArgumentsDelta {
+    ToolCallUpdate {
         context: UiTurnContext,
         id: String,
         provider_id: Option<String>,
+        name: String,
         index: usize,
-        name: String,
-        partial_args: String,
-    },
-    ToolCall {
-        context: UiTurnContext,
-        id: String,
-        provider_id: String,
-        name: String,
-        index: Option<usize>,
-        summary: String,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: sdk::ToolCallStatusView,
     },
     ToolResult {
         context: UiTurnContext,

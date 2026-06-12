@@ -1,6 +1,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::rendered::RenderCtx;
 use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
 
@@ -161,12 +162,14 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         is_error: false,
         image_count: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Edit".to_string(),
         index: 0,
-        summary: r#"{"file_path":"docs/bug/active.md"}"#.to_string(),
+        summary: Some(r#"{"file_path":"docs/bug/active.md"}"#.to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
@@ -278,12 +281,14 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolArguments {
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
-        partial_args: r#"{"file_path":"src/lib.rs"}"#.to_string(),
+        arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
@@ -328,12 +333,14 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "search".to_string(),
+        summary: Some("search".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
@@ -398,12 +405,14 @@ fn add_completed_tool(
         name: name.to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCall {
-        provider_id: format!("provider-{id}"),
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some(format!("provider-{id}")),
         id: id.to_string(),
         name: name.to_string(),
         index: 0,
-        summary: summary.to_string(),
+        summary: Some(summary.to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
         provider_id: format!("provider-{id}"),

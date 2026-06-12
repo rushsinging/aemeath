@@ -5,6 +5,7 @@ use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
+use super::tool_call::ToolCallStatus;
 
 #[test]
 fn test_append_user_message_pushes_block_without_new_chat() {
@@ -104,12 +105,14 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         name: "Bash".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolArguments {
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
-        partial_args: r#"{"command":"pwd"}"#.to_string(),
+        arguments: Some(r#"{"command":"pwd"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
     });
 
     assert_eq!(

@@ -4,7 +4,9 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::split_approved_calls;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use crate::business::chat::looping::{
+    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+};
 use hook::api::{HookData, ToolHookData};
 use logging::{ToolKind, UnifiedLogger};
 use share::config::hooks::HookEvent;
@@ -43,17 +45,18 @@ where
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
         let _ = sink
-            .send_event(RuntimeStreamEvent::ToolCall {
+            .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
                 id: call.id.clone(),
-                provider_id: call.provider_id.clone(),
+                provider_id: Some(call.provider_id.clone()),
                 name: call.name.clone(),
-                index: Some(call.index),
-                summary: call.input.to_string(),
+                index: call.index,
+                arguments: Some(call.input.to_string()),
+                summary: Some(call.input.to_string()),
+                status: RuntimeToolCallStatus::Ready,
             })
             .await;
     }
-
     let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) =
         approved.into_iter().partition(|c| c.name == "Agent");
     let non_agent_calls: Vec<ToolCall> = non_agent_approved
@@ -68,15 +71,8 @@ where
         .collect();
 
     let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_calls).await;
-    let non_agent_results = execute_non_agent(
-        context,
-        agent,
-        sink,
-        hook_ui,
-        hook_runner,
-        &non_agent_calls,
-    )
-    .await;
+    let non_agent_results =
+        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_calls).await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
@@ -124,13 +120,15 @@ where
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
         let _ = sink
-            .send_event(RuntimeStreamEvent::ToolCall {
+            .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
                 id: call.id.clone(),
-                provider_id: call.provider_id.clone(),
+                provider_id: Some(call.provider_id.clone()),
                 name: call.name.clone(),
-                index: Some(call.index),
-                summary: call.input.to_string(),
+                index: call.index,
+                arguments: Some(call.input.to_string()),
+                summary: Some(call.input.to_string()),
+                status: RuntimeToolCallStatus::Ready,
             })
             .await;
         let result = (
@@ -268,12 +266,7 @@ pub(crate) fn tool_results_for_api(
     share::message::Message::tool_results_rich(provider_results)
 }
 
-pub(crate) fn log_tool_result(
-    id: &str,
-    tool_name: &str,
-    is_error: bool,
-    output: &str,
-) {
+pub(crate) fn log_tool_result(id: &str, tool_name: &str, is_error: bool, output: &str) {
     let tr_data = serde_json::json!({
         "tool_use_id": id,
         "tool_name": tool_name,

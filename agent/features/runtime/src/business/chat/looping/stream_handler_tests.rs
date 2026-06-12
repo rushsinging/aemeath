@@ -1,6 +1,8 @@
 use super::stream_handler::RuntimeStreamHandler;
 use super::tool_identity::ToolIdentityRegistry;
-use super::{ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext};
+use super::{
+    ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+};
 use provider::api::StreamHandler;
 use std::sync::{Arc, Mutex};
 
@@ -68,7 +70,13 @@ fn test_stream_handler_forwards_provider_id_on_start_and_delta() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        RuntimeStreamEvent::ToolArgumentsDelta { provider_id, .. }
-            if provider_id.as_deref() == Some("call-provider-skill")
+        RuntimeStreamEvent::ToolCallUpdate {
+            provider_id,
+            status,
+            arguments,
+            ..
+        } if provider_id.as_deref() == Some("call-provider-skill")
+            && *status == RuntimeToolCallStatus::PendingArgs
+            && arguments.as_deref() == Some(r#"{"skill""#)
     )));
 }

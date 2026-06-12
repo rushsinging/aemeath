@@ -48,16 +48,9 @@ impl App {
                     self.spinner_phase(SpinnerPhase::CallingTool(name));
                 }
             }
-            UiEvent::ToolArgumentsDelta { .. } => {}
-            UiEvent::ToolCall {
-                id,
-                name,
-                index: _,
-                summary: _,
-                ..
-            } => {
+            UiEvent::ToolCallUpdate { name, id, .. } => {
                 log::debug!(
-                    "[SPINNER] ToolCall({name}): tool_call_active={}",
+                    "[SPINNER] ToolCallUpdate({name}): tool_call_active={}",
                     self.chat.tool_call_active
                 );
                 self.chat.register_tool_call(id.clone());
