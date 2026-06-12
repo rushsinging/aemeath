@@ -183,7 +183,7 @@ impl UnifiedLogger {
 
     fn write_audit(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
         if let Ok(mut guard) = sink.lock() {
-            self.maybe_rotate(sink, path, &mut guard);
+            self.maybe_rotate(path, &mut guard);
             if let Some(writer) = guard.as_mut() {
                 let _ = writeln!(writer, "{}", line);
                 let _ = writer.flush();
@@ -193,7 +193,7 @@ impl UnifiedLogger {
 
     fn write_diag(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
         if let Ok(mut guard) = sink.lock() {
-            self.maybe_rotate(sink, path, &mut guard);
+            self.maybe_rotate(path, &mut guard);
             if let Some(writer) = guard.as_mut() {
                 let _ = writeln!(writer, "{}", line);
                 let _ = writer.flush();
@@ -201,12 +201,12 @@ impl UnifiedLogger {
         }
     }
 
-    fn maybe_rotate(
-        &self,
-        sink: &Mutex<Option<BufWriter<File>>>,
-        path: &Path,
-        guard: &mut Option<BufWriter<File>>,
-    ) {
+    /// 在持有 sink 锁（`guard`）的前提下按需轮转。
+    ///
+    /// **NEVER** 在此重新 `sink.lock()`：调用方 `write_diag` / `write_audit` 已持有该锁，
+    /// `std::sync::Mutex` 不可重入，重入会让写日志的线程自死锁。新 writer 直接经
+    /// `guard` 安装。
+    fn maybe_rotate(&self, path: &Path, guard: &mut Option<BufWriter<File>>) {
         let need_rotate = fs::metadata(path)
             .map(|m| m.len() >= self.max_bytes)
             .unwrap_or(false);
@@ -218,9 +218,7 @@ impl UnifiedLogger {
         }
         let _ = rotate_if_needed(path, self.max_bytes, self.max_backups);
         if let Ok(new) = open_buf(path) {
-            if let Ok(mut g) = sink.lock() {
-                *g = Some(new);
-            }
+            *guard = Some(new);
         }
     }
 }
@@ -306,5 +304,83 @@ mod tests {
         UnifiedLogger::log_input("default", json!({}));
         UnifiedLogger::log_output("default", json!({}));
         UnifiedLogger::log_tool("default", ToolKind::Call, json!({}));
+    }
+
+    /// 构造一个仅用于测试 `maybe_rotate` 的最小 logger（其余 sink 留空）。
+    fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> UnifiedLogger {
+        UnifiedLogger {
+            aemeath: Mutex::new(None),
+            tui: Mutex::new(None),
+            hook: Mutex::new(None),
+            input: Mutex::new(None),
+            output: Mutex::new(None),
+            tool: Mutex::new(None),
+            paths: SinkPaths::from_logs_dir(dir),
+            max_bytes,
+            max_backups,
+            role_logs_enabled: false,
+            filter: build_filter(LevelFilter::Off),
+        }
+    }
+
+    // 正常路径：达到阈值时轮转，并经 guard 重装新 writer（不重入 sink 锁、不死锁）。
+    #[test]
+    fn maybe_rotate_rotates_and_reinstalls_writer_when_over_threshold() {
+        let dir = std::env::temp_dir().join("aem_rot_over_threshold");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("aemeath.log");
+        File::create(&path).unwrap().write_all(&[b'x'; 2048]).unwrap();
+
+        let logger = rotate_test_logger(&dir, 1024, 3);
+        let sink: Mutex<Option<BufWriter<File>>> = Mutex::new(Some(open_buf(&path).unwrap()));
+        {
+            // 持锁状态下调用 —— 旧实现会在此对同一把锁重入而自死锁。
+            let mut guard = sink.lock().unwrap();
+            logger.maybe_rotate(&path, &mut guard);
+            assert!(guard.is_some(), "轮转后应经 guard 安装新 writer");
+            writeln!(guard.as_mut().unwrap(), "fresh").unwrap();
+            guard.as_mut().unwrap().flush().unwrap();
+        }
+        assert!(dir.join("aemeath.log.1").exists(), "旧内容应轮转到 .1");
+        let new_len = fs::metadata(&path).unwrap().len();
+        assert!(new_len < 1024, "新文件应只含 fresh 行，实际 {new_len} 字节");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // 边界：未达阈值时不轮转、不动 writer。
+    #[test]
+    fn maybe_rotate_is_noop_when_under_threshold() {
+        let dir = std::env::temp_dir().join("aem_rot_under_threshold");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("aemeath.log");
+        File::create(&path).unwrap().write_all(&[b'x'; 100]).unwrap();
+
+        let logger = rotate_test_logger(&dir, 1024, 3);
+        let sink: Mutex<Option<BufWriter<File>>> = Mutex::new(Some(open_buf(&path).unwrap()));
+        {
+            let mut guard = sink.lock().unwrap();
+            logger.maybe_rotate(&path, &mut guard);
+            assert!(guard.is_some(), "未达阈值不应清空 writer");
+        }
+        assert!(!dir.join("aemeath.log.1").exists(), "未达阈值不应轮转");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // 错误路径：目标文件不存在时 metadata 失败，直接 no-op，不创建文件/writer。
+    #[test]
+    fn maybe_rotate_is_noop_when_file_missing() {
+        let dir = std::env::temp_dir().join("aem_rot_missing");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("does_not_exist.log");
+
+        let logger = rotate_test_logger(&dir, 1024, 3);
+        let mut guard: Option<BufWriter<File>> = None;
+        logger.maybe_rotate(&path, &mut guard);
+        assert!(guard.is_none(), "缺文件应直接 no-op");
+        assert!(!path.exists(), "no-op 不应创建文件");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
