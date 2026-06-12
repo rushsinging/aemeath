@@ -8,6 +8,7 @@
 | 122 | Tool gutter marker 闪烁过快且 summary 曾等 result 才出现 | 高 | 待确认 | 待用户确认 | 2026-06 | running marker 已消费动画帧但按每帧奇偶切换过快；header 只看 summary 的问题已修复为回退 args_preview |
 | 123 | TUI 长文本换行缺失：input area / input queue / user message 均不自动折行 | 中 | 活动中 | 待用户确认 | 2026-06 | input area 输入超宽不折行、input queue 排队消息丢失换行语义、user message 展示不自动换行 |
 | 124 | `/think` 命令输出不应渲染 Markdown | 中 | 待确认 | 待用户确认 | 2026-06 | ThinkingMessage 渲染器仍复用 inline Markdown 解析 |
+| 125 | Stop hook 异常被渲染为「无主 tool」信息 | 中 | 待确认 | 待用户确认 | 2026-06 | Stop hook 失败/异常事件在 TUI 中被错误归类为 tool call block 或 orphan tool result |
 
 ### #112 TUI tool call spinner 有状态但输出区不显示 tool card
 
@@ -100,6 +101,30 @@
 
 **涉及路径**：
 - `apps/cli/src/tui/render/output/blocks/thinking.rs`
+
+### #125 Stop hook 异常被渲染为「无主 tool」信息
+
+**状态**：待确认
+
+**症状**：当 Stop hook 执行异常（如 hook 命令返回非零退出码、超时、spawn 失败等）时，TUI 输出区错误地渲染出一条类似「无主 tool」的信息（orphan tool result / detached tool call），而不是清晰展示 hook 失败原因。用户难以区分这是普通 tool call 失败还是 Stop hook 本身的异常。
+
+**根因**：待定位。疑似 Stop hook 失败事件在 SDK/runtime → TUI 的事件转换中，被错误地映射为 tool result 或 orphan tool 块；或者 TUI  conversation model 中没有专门的 HookNotice 失败分支，只能 fallback 到 tool call 展示。
+
+**修复/实现**：待修复。需要检查 Stop hook 异常事件的全链路：
+1. `agent/features/hook/src/business/hook/runner.rs` 中失败事件的构造。
+2. runtime 如何将 hook 失败反馈转换为 SDK `ChatEvent`。
+3. TUI adapter 如何接收并映射为 conversation block。
+4. 确保 Stop hook 异常使用 `HookNotice` 或专用 block 展示，不落入 tool call 渲染路径。
+
+**验证**：待补充。
+
+**涉及路径**：
+- `agent/features/hook/src/business/hook/runner.rs`
+- `agent/features/runtime/src/business/chat/looping/finalize.rs`
+- `packages/sdk/src/chat.rs`
+- `apps/cli/src/tui/adapter/agent_event.rs`
+- `apps/cli/src/tui/model/conversation/*`
+- `apps/cli/src/tui/render/output/blocks/diagnostic.rs` 或 hook notice renderer
 
 ---
 
