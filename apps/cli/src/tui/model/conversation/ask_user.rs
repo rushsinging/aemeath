@@ -360,6 +360,8 @@ mod tests {
             submission: "需要选择".to_string(),
         });
         model.apply(ConversationIntent::ObserveAssistantText {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "请选择：".to_string(),
         });
         show(&mut model, &["A", "B"], 2, false);
@@ -368,6 +370,8 @@ mod tests {
         });
 
         model.apply(ConversationIntent::ObserveAssistantText {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "继续生成".to_string(),
         });
 

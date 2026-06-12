@@ -18,10 +18,14 @@ pub struct ConversationModel {
     next_chat_sequence: usize,
     next_block_sequence: usize,
     active_text_block_id: Option<String>,
+    active_text_context: Option<(ChatId, ChatTurnId)>,
     active_thinking_block_id: Option<String>,
+    active_thinking_context: Option<(ChatId, ChatTurnId)>,
 }
 
 struct ToolCallUpdateObservation {
+    chat_id: ChatId,
+    turn_id: ChatTurnId,
     id: String,
     provider_id: Option<String>,
     name: String,
@@ -42,12 +46,16 @@ impl ConversationModel {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
             ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
             ConversationIntent::ObserveToolCallStart {
+                chat_id,
+                turn_id,
                 id,
                 provider_id,
                 name,
                 index,
-            } => self.observe_tool_call_start(id, provider_id, name, index),
+            } => self.observe_tool_call_start(chat_id, turn_id, id, provider_id, name, index),
             ConversationIntent::ObserveToolCallUpdate {
+                chat_id,
+                turn_id,
                 id,
                 provider_id,
                 name,
@@ -56,6 +64,8 @@ impl ConversationModel {
                 summary,
                 status,
             } => self.observe_tool_call_update(ToolCallUpdateObservation {
+                chat_id,
+                turn_id,
                 id,
                 provider_id,
                 name,
@@ -65,6 +75,8 @@ impl ConversationModel {
                 status,
             }),
             ConversationIntent::ObserveToolResult {
+                chat_id,
+                turn_id,
                 id,
                 provider_id,
                 tool_name,
@@ -73,6 +85,8 @@ impl ConversationModel {
                 is_error,
                 image_count,
             } => self.observe_tool_result(
+                chat_id,
+                turn_id,
                 id,
                 provider_id,
                 tool_name,
@@ -82,9 +96,19 @@ impl ConversationModel {
                 image_count,
             ),
             ConversationIntent::CompleteChat => self.complete_chat(),
-            ConversationIntent::ObserveAssistantText { text } => self.append_assistant_text(text),
-            ConversationIntent::ObserveThinkingText { text } => self.append_thinking_text(text),
-            ConversationIntent::CompleteBlock => self.complete_block(),
+            ConversationIntent::ObserveAssistantText {
+                chat_id,
+                turn_id,
+                text,
+            } => self.append_assistant_text(chat_id, turn_id, text),
+            ConversationIntent::ObserveThinkingText {
+                chat_id,
+                turn_id,
+                text,
+            } => self.append_thinking_text(chat_id, turn_id, text),
+            ConversationIntent::CompleteBlock { chat_id, turn_id } => {
+                self.complete_block(chat_id, turn_id)
+            }
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
             ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
             ConversationIntent::AppendError { text } => self.append_error(text),
@@ -194,35 +218,16 @@ impl ConversationModel {
             .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
     }
 
-    fn current_runtime_turn(&mut self) -> Option<(ChatId, ChatTurnId)> {
-        let chat_id = self.active_chat_id.clone()?;
-        let turn_id = self
-            .chats
-            .iter()
-            .find(|chat| chat.id == chat_id)?
-            .active_turn()?
-            .id
-            .clone();
-        Some((chat_id, turn_id))
-    }
-
     fn observe_tool_call_start(
         &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         id: String,
         _provider_id: Option<String>,
         name: String,
         index: usize,
     ) -> Vec<ConversationChange> {
-        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "model drop tool_call_start without active turn id={} name={} index={}",
-                id,
-                name,
-                index,
-            );
-            return Vec::new();
-        };
+        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         log::debug!(
             target: "cli::tui::tool_flow",
             "model observe tool_call_start chat_id={} turn_id={} id={} name={} index={} blocks_before={}",
@@ -235,9 +240,11 @@ impl ConversationModel {
         );
         let tool_call_id = ToolCallId::new(id.clone());
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-            turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
+            turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
         }
         self.insert_tool_call_block_before_active_text(
+            chat_id,
+            turn_id,
             tool_call_id,
             name.clone(),
             String::new(),
@@ -253,6 +260,8 @@ impl ConversationModel {
         update: ToolCallUpdateObservation,
     ) -> Vec<ConversationChange> {
         let ToolCallUpdateObservation {
+            chat_id,
+            turn_id,
             id,
             provider_id,
             name,
@@ -261,18 +270,7 @@ impl ConversationModel {
             summary,
             status,
         } = update;
-        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "model drop tool_call_update without active turn id={} provider_id={:?} name={} index={} status={:?}",
-                id,
-                provider_id,
-                name,
-                index,
-                status,
-            );
-            return Vec::new();
-        };
+        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         let candidate_ids = [Some(id.as_str()), provider_id.as_deref()];
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
@@ -315,15 +313,18 @@ impl ConversationModel {
                 }
             }
         }
-        self.promote_orphan_tool_result(&bound_id);
+        self.promote_orphan_tool_result(&chat_id, &turn_id, &bound_id);
         let existing_tool_position = self.blocks.iter().position(|block| {
             matches!(
                 block,
-                ConversationBlock::ToolCall { id: block_id, .. } if block_id.as_ref() == bound_id
+                ConversationBlock::ToolCall { id: block_id, chat_id: block_chat_id, turn_id: block_turn_id, .. }
+                    if block_chat_id == &chat_id && block_turn_id == &turn_id && block_id.as_ref() == bound_id
             )
         });
         if existing_tool_position.is_none() {
             self.insert_tool_call_block_before_active_text(
+                chat_id.clone(),
+                turn_id.clone(),
                 ToolCallId::new(bound_id.clone()),
                 name.clone(),
                 final_summary.clone(),
@@ -333,12 +334,17 @@ impl ConversationModel {
             for block in &mut self.blocks {
                 if let ConversationBlock::ToolCall {
                     id: block_id,
+                    chat_id: block_chat_id,
+                    turn_id: block_turn_id,
                     summary: block_summary,
                     args_preview: block_args,
                     ..
                 } = block
                 {
-                    if block_id.as_ref() == bound_id {
+                    if block_chat_id == &chat_id
+                        && block_turn_id == &turn_id
+                        && block_id.as_ref() == bound_id
+                    {
                         if !final_summary.is_empty() {
                             *block_summary = final_summary.clone();
                         }
@@ -350,7 +356,7 @@ impl ConversationModel {
                 }
             }
         }
-        self.move_tool_results_after_tool_call(&bound_id);
+        self.move_tool_results_after_tool_call(&chat_id, &turn_id, &bound_id);
         log::debug!(
             target: "cli::tui::tool_flow",
             "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} summary_len={} has_block={} blocks_after={}",
@@ -384,40 +390,58 @@ impl ConversationModel {
         Vec::new()
     }
 
-    fn append_assistant_text(&mut self, text: String) -> Vec<ConversationChange> {
+    fn append_assistant_text(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+        text: String,
+    ) -> Vec<ConversationChange> {
         if text.is_empty() {
             return Vec::new();
         }
-        if let Some((chat_id, turn_id)) = self.current_runtime_turn() {
-            if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-                turn.assistant_stream.push_str(&text);
-            }
+        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            turn.assistant_stream.push_str(&text);
         }
         self.active_thinking_block_id = None;
-        let block_id = self.append_or_extend_text_block(text, false);
+        self.active_thinking_context = None;
+        let block_id = self.append_or_extend_text_block(chat_id, turn_id, text, false);
         vec![
             ConversationChange::AssistantTextAppended { block_id },
             ConversationChange::OutputDirty,
         ]
     }
 
-    fn append_thinking_text(&mut self, text: String) -> Vec<ConversationChange> {
+    fn append_thinking_text(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+        text: String,
+    ) -> Vec<ConversationChange> {
         if text.is_empty() {
             return Vec::new();
         }
+        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         self.active_text_block_id = None;
-        let block_id = self.append_or_extend_text_block(text, true);
+        self.active_text_context = None;
+        let block_id = self.append_or_extend_text_block(chat_id, turn_id, text, true);
         vec![
             ConversationChange::ThinkingTextAppended { block_id },
             ConversationChange::OutputDirty,
         ]
     }
 
-    fn complete_block(&mut self) -> Vec<ConversationChange> {
-        let block_id = self
-            .active_text_block_id
-            .take()
-            .or_else(|| self.active_thinking_block_id.take());
+    fn complete_block(&mut self, chat_id: ChatId, turn_id: ChatTurnId) -> Vec<ConversationChange> {
+        let context = (chat_id, turn_id);
+        let block_id = if self.active_text_context.as_ref() == Some(&context) {
+            self.active_text_context = None;
+            self.active_text_block_id.take()
+        } else if self.active_thinking_context.as_ref() == Some(&context) {
+            self.active_thinking_context = None;
+            self.active_thinking_block_id.take()
+        } else {
+            None
+        };
         vec![
             ConversationChange::BlockCompleted { block_id },
             ConversationChange::StyleBoundaryResetRequired,
@@ -472,11 +496,22 @@ impl ConversationModel {
             .push(AgentProgressEntry::new(tool_id.clone(), message.clone()));
         vec![ConversationChange::OutputDirty]
     }
-    fn append_or_extend_text_block(&mut self, text: String, thinking: bool) -> String {
+    fn append_or_extend_text_block(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+        text: String,
+        thinking: bool,
+    ) -> String {
+        let context = (chat_id.clone(), turn_id.clone());
         let active_id = if thinking {
-            self.active_thinking_block_id.clone()
+            (self.active_thinking_context.as_ref() == Some(&context))
+                .then(|| self.active_thinking_block_id.clone())
+                .flatten()
         } else {
-            self.active_text_block_id.clone()
+            (self.active_text_context.as_ref() == Some(&context))
+                .then(|| self.active_text_block_id.clone())
+                .flatten()
         };
 
         if let Some(block_id) = active_id {
@@ -494,14 +529,20 @@ impl ConversationModel {
         let block_id = self.next_block_id(prefix);
         if thinking {
             self.active_thinking_block_id = Some(block_id.clone());
+            self.active_thinking_context = Some(context);
             self.blocks.push(ConversationBlock::Thinking {
                 id: block_id.clone(),
+                chat_id: Some(chat_id),
+                turn_id: Some(turn_id),
                 text,
             });
         } else {
             self.active_text_block_id = Some(block_id.clone());
+            self.active_text_context = Some(context);
             self.blocks.push(ConversationBlock::AssistantText {
                 id: block_id.clone(),
+                chat_id: Some(chat_id),
+                turn_id: Some(turn_id),
                 text,
             });
         }
@@ -510,7 +551,9 @@ impl ConversationModel {
 
     pub(super) fn clear_active_text_blocks(&mut self) {
         self.active_text_block_id = None;
+        self.active_text_context = None;
         self.active_thinking_block_id = None;
+        self.active_thinking_context = None;
     }
 
     pub(super) fn next_block_id(&mut self, prefix: &str) -> String {

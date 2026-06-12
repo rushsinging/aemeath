@@ -30,7 +30,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::AssistantText { id, text } => {
+                ConversationBlock::AssistantText { id, text, .. } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::AssistantMessage(TextBlockView {
@@ -40,7 +40,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::Thinking { id, text } => {
+                ConversationBlock::Thinking { id, text, .. } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::ThinkingMessage(TextBlockView {
@@ -78,6 +78,7 @@ impl OutputViewAssembler {
                     content,
                     is_error,
                     image_count,
+                    ..
                 } => {
                     if tool_result_is_embedded(conversation, id) {
                         continue;

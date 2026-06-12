@@ -54,24 +54,40 @@ impl crate::tui::app::App {
                 HistoryAssistantBlock::Text(text) => {
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveAssistantText { text });
+                        .apply(ConversationIntent::ObserveAssistantText {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
+                            text,
+                        });
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteBlock);
+                        .apply(ConversationIntent::CompleteBlock {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
+                        });
                 }
                 HistoryAssistantBlock::Thinking(text) => {
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveThinkingText { text });
+                        .apply(ConversationIntent::ObserveThinkingText {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
+                            text,
+                        });
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteBlock);
+                        .apply(ConversationIntent::CompleteBlock {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
+                        });
                 }
                 HistoryAssistantBlock::ToolUse { id, name, input } => {
                     let input_json = input.to_string();
                     self.model
                         .conversation
                         .apply(ConversationIntent::ObserveToolCallStart {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
                             id: id.clone(),
                             provider_id: None,
                             name: name.clone(),
@@ -80,6 +96,8 @@ impl crate::tui::app::App {
                     self.model
                         .conversation
                         .apply(ConversationIntent::ObserveToolCallUpdate {
+                            chat_id: chat_id.clone(),
+                            turn_id: turn_id.clone(),
                             id: id.clone(),
                             provider_id: Some(id.clone()),
                             name: name.clone(),
@@ -92,6 +110,8 @@ impl crate::tui::app::App {
                         self.model
                             .conversation
                             .apply(ConversationIntent::ObserveToolResult {
+                                chat_id: chat_id.clone(),
+                                turn_id: turn_id.clone(),
                                 id: id.clone(),
                                 provider_id: id.clone(),
                                 tool_name: name,

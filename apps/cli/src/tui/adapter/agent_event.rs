@@ -42,7 +42,11 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             });
             mapping
                 .conversation
-                .push(ConversationIntent::ObserveAssistantText { text: text.clone() });
+                .push(ConversationIntent::ObserveAssistantText {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    text: text.clone(),
+                });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
@@ -55,7 +59,11 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             });
             mapping
                 .conversation
-                .push(ConversationIntent::ObserveThinkingText { text: text.clone() });
+                .push(ConversationIntent::ObserveThinkingText {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    text: text.clone(),
+                });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
@@ -66,7 +74,12 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
             });
-            mapping.conversation.push(ConversationIntent::CompleteBlock);
+            mapping
+                .conversation
+                .push(ConversationIntent::CompleteBlock {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                });
             mapping
         }
         UiEvent::ToolCallStart {
@@ -93,6 +106,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
                 .conversation
                 .push(ConversationIntent::ObserveToolCallStart {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
                     id: id.clone(),
                     provider_id: provider_id.clone(),
                     name: name.clone(),
@@ -132,6 +147,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
                 .conversation
                 .push(ConversationIntent::ObserveToolCallUpdate {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
                     id: id.clone(),
                     provider_id: provider_id.clone(),
                     name: name.clone(),
@@ -181,6 +198,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
                 .conversation
                 .push(ConversationIntent::ObserveToolResult {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
                     id: id.clone(),
                     provider_id: provider_id.clone(),
                     tool_name: tool_name.clone(),
@@ -439,7 +458,7 @@ mod tests {
         });
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
+            Some(ConversationIntent::ObserveAssistantText { text, .. }) if text == "hello"
         ));
     }
 
@@ -452,7 +471,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText { text }) if text == "hello"
+            Some(ConversationIntent::ObserveAssistantText { text, .. }) if text == "hello"
         ));
         assert_eq!(
             mapping.runtime,
@@ -469,7 +488,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveThinkingText { text }) if text == "reason"
+            Some(ConversationIntent::ObserveThinkingText { text, .. }) if text == "reason"
         ));
         assert_eq!(
             mapping.runtime,

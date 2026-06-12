@@ -1,11 +1,16 @@
 use super::block::ConversationBlock;
 use super::change::ConversationChange;
-use super::ids::ToolCallId;
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 
 impl ConversationModel {
-    pub(super) fn promote_orphan_tool_result(&mut self, id: &str) {
+    pub(super) fn promote_orphan_tool_result(
+        &mut self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        id: &str,
+    ) {
         let Some(position) = self.blocks.iter().position(|block| {
             matches!(
                 block,
@@ -25,10 +30,12 @@ impl ConversationModel {
             return;
         };
         if self
-            .complete_tool_in_context(id, output.clone(), is_error)
+            .complete_tool_in_context(chat_id, turn_id, id, output.clone(), is_error)
             .is_some()
         {
             self.insert_tool_result_after_tool_call(
+                chat_id.clone(),
+                turn_id.clone(),
                 ToolCallId::new(id.to_string()),
                 output,
                 content,
@@ -41,6 +48,8 @@ impl ConversationModel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn observe_tool_result(
         &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         id: String,
         _provider_id: String,
         tool_name: String,
@@ -49,8 +58,13 @@ impl ConversationModel {
         is_error: bool,
         image_count: usize,
     ) -> Vec<ConversationChange> {
-        if let Some(status) = self.complete_tool_in_context(&id, output.clone(), is_error) {
+        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        if let Some(status) =
+            self.complete_tool_in_context(&chat_id, &turn_id, &id, output.clone(), is_error)
+        {
             self.insert_tool_result_after_tool_call(
+                chat_id.clone(),
+                turn_id.clone(),
                 ToolCallId::new(id.clone()),
                 output,
                 content,
@@ -96,21 +110,16 @@ impl ConversationModel {
     }
     pub(super) fn complete_tool_in_context(
         &mut self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
         id: &str,
         output: String,
         is_error: bool,
     ) -> Option<ToolCallStatus> {
-        for chat in &mut self.chats {
-            if let Some(turn) = chat.turns.iter_mut().find(|turn| {
-                turn.tool_calls.iter().any(|call| {
-                    call.id
-                        .as_ref()
-                        .is_some_and(|call_id| call_id.as_ref() == id)
-                })
-            }) {
-                return turn.complete_tool(id, output, is_error);
-            }
-        }
-        None
+        self.chats
+            .iter_mut()
+            .find(|chat| &chat.id == chat_id)
+            .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
+            .and_then(|turn| turn.complete_tool(id, output, is_error))
     }
 }

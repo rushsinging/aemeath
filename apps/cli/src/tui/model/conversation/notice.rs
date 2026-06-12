@@ -107,12 +107,16 @@ mod tests {
             submission: "hi".to_string(),
         });
         model.apply(ConversationIntent::ObserveAssistantText {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "streaming".to_string(),
         });
         model.apply(ConversationIntent::AppendSystemMessage {
             text: "notice".to_string(),
         });
         model.apply(ConversationIntent::ObserveAssistantText {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "after".to_string(),
         });
         let assistant_blocks = model
