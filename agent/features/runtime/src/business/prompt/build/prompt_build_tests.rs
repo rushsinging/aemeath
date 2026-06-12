@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::bootstrap::config_paths::TestEnvGuard;
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -262,17 +263,10 @@ async fn test_load_agents_md_reads_project_claude_md_without_migration() {
     let agents_dir = base.join("agents-home");
     std::fs::create_dir_all(&agents_dir).unwrap();
 
-    let previous = std::env::var_os("AEMEATH_AGENTS_DIR");
-    std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir);
+    let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
 
     let hook_runner = HookRunner::new(Default::default(), base.to_string_lossy().to_string());
     let content = load_agents_md(&base, &hook_runner).await;
-
-    if let Some(previous) = previous {
-        std::env::set_var("AEMEATH_AGENTS_DIR", previous);
-    } else {
-        std::env::remove_var("AEMEATH_AGENTS_DIR");
-    }
 
     assert!(content.contains("old project instructions"));
     assert!(!base.join("AGENTS.md").exists());

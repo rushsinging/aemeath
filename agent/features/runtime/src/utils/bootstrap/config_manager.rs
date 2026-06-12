@@ -1025,34 +1025,7 @@ mod tests {
         assert!(!merged.logging.role_logs_enabled);
     }
 
-    struct EnvGuard {
-        key: &'static str,
-        old: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: String) -> Self {
-            let old = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, old }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            if let Some(old) = &self.old {
-                unsafe {
-                    std::env::set_var(self.key, old);
-                }
-            } else {
-                unsafe {
-                    std::env::remove_var(self.key);
-                }
-            }
-        }
-    }
+    use crate::utils::bootstrap::config_paths::TestEnvGuard;
 
     #[tokio::test]
     async fn test_load_project_hooks_do_not_reset_global_logging_level() {
@@ -1075,7 +1048,7 @@ mod tests {
         .await
         .unwrap();
 
-        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().as_ref());
         let manager = ConfigManager::new(Some(&project));
 
         let loaded = manager.load().await.expect("config should load");
@@ -1092,7 +1065,7 @@ mod tests {
         tokio::fs::create_dir_all(&home).await.unwrap();
         tokio::fs::create_dir_all(&project).await.unwrap();
 
-        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().as_ref());
         let manager = ConfigManager::new(Some(&project));
 
         let loaded = manager.load().await.expect("config should load");
@@ -1134,7 +1107,7 @@ mod tests {
         .await
         .unwrap();
 
-        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().as_ref());
         let manager = ConfigManager::new(Some(&project));
 
         let loaded = manager.load().await.expect("config should load");
