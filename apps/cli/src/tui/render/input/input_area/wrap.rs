@@ -1,4 +1,4 @@
-use crate::tui::render::display::safe_text::{col_to_char_idx, str_display_width};
+use crate::tui::render::display::safe_text::col_to_char_idx;
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,8 +67,7 @@ pub(crate) fn display_position_for_anchor(
         return (best_idx, 0);
     };
     let offset = original_col.saturating_sub(line.original_col_start);
-    let screen_col = str_display_width(&line.text.chars().take(offset).collect::<String>());
-    (best_idx, screen_col)
+    (best_idx, offset)
 }
 
 pub(crate) fn anchor_for_display_position(
@@ -115,6 +114,13 @@ mod tests {
         let lines = wrap_input_lines_for_width(vec!["abcdef"], 4);
 
         assert_eq!(display_position_for_anchor(&lines, 0, 5), (1, 1));
+    }
+
+    #[test]
+    fn display_position_for_anchor_uses_textarea_char_column_for_cjk() {
+        let lines = wrap_input_lines_for_width(vec!["你好ab"], 10);
+
+        assert_eq!(display_position_for_anchor(&lines, 0, 1), (0, 1));
     }
 
     #[test]
