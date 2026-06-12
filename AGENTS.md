@@ -96,7 +96,7 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，给出修复/实现方案。复杂改动 **SHOULD** 调用 `superpowers:writing-plans` 制定详细计划。
 3. **等待用户同意**：将方案呈现给用户，**MUST** 获得明确同意后才开始修改代码。用户可能要求调整方案。
 4. **执行与验证**：在 worktree 中实施，通过编译、测试、clippy 验证后合并回 `main`。
-5. **关闭 Issue**：合并完成后用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
+5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。合并完成后，由用户确认是否关闭；用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
 
 创建新 issue 时 **MUST** 应用 `kind:bug` 或 `kind:feature` label（按问题类型二选一），有明确优先级时再加 `priority:high|medium|low`。`migrated-from:docs` 仅用于历史迁移条目。
 
