@@ -11,7 +11,26 @@ use sdk::ChangeSet;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
+
+pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
+    match msg {
+        TuiMsg::Key(_) => "Key",
+        TuiMsg::Mouse(_) => "Mouse",
+        TuiMsg::Paste(_) => "Paste",
+        TuiMsg::Resize { .. } => "Resize",
+        TuiMsg::SpinnerTick => "SpinnerTick",
+        TuiMsg::Ui(_) => "Ui",
+        TuiMsg::TerminalKey(_) => "TerminalKey",
+        TuiMsg::TerminalMouse(_) => "TerminalMouse",
+        TuiMsg::TerminalResize { .. } => "TerminalResize",
+        TuiMsg::AgentEvent(_) => "AgentEvent",
+        TuiMsg::EffectCompleted(_) => "EffectCompleted",
+        TuiMsg::TimerTick { .. } => "TimerTick",
+        TuiMsg::RenderTick => "RenderTick",
+    }
+}
 
 impl App {
     async fn handle_change_set(&mut self, change: ChangeSet) {
@@ -35,6 +54,7 @@ impl App {
         let mut change_rx = self.agent_client.as_ref().map(|client| client.changes());
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_loop_iteration = Instant::now();
 
         // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
         self.update_task_status(self.chat.is_processing).await;
@@ -43,6 +63,22 @@ impl App {
         self.refresh_output_document_from_model();
 
         loop {
+            let loop_now = Instant::now();
+            let loop_gap_ms = loop_now.duration_since(last_loop_iteration).as_millis();
+            last_loop_iteration = loop_now;
+            crate::tui::log_trace!(
+                "tui.loop.frame_begin gap_ms={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} spinner_active={} spinner_phase={:?} spinner_frame={} output_lines={}",
+                loop_gap_ms,
+                self.view_state.dirty.output,
+                self.view_state.dirty.status,
+                self.view_state.dirty.input,
+                self.view_state.dirty.dialog,
+                self.model.runtime.spinner.active,
+                self.model.runtime.spinner.phase,
+                self.view_state.animation.spinner_frame,
+                self.output_area.document().total_lines()
+            );
+
             // Ctrl+C 超时复原 status line
             self.check_ctrlc_timeout();
 
@@ -90,12 +126,36 @@ impl App {
             };
 
             let Some(msg) = msg else {
+                crate::tui::log_trace!("tui.loop.event msg=None");
                 self.input.just_pasted = false;
                 continue;
             };
 
+            crate::tui::log_trace!(
+                "tui.loop.event msg={} spinner_active={} spinner_phase={:?} spinner_frame={}",
+                tui_msg_name(&msg),
+                self.model.runtime.spinner.active,
+                self.model.runtime.spinner.phase,
+                self.view_state.animation.spinner_frame
+            );
+
             // --- TEA update: state transition ---
+            let update_start = Instant::now();
             let result = self.update(msg, &ui_tx, &spawn_refs);
+            crate::tui::log_trace!(
+                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} spinner_active={} spinner_phase={:?} spinner_frame={}",
+                update_start.elapsed().as_millis(),
+                result.effects.len(),
+                result.spawn_effect.is_some(),
+                result.pending_slash.is_some(),
+                self.view_state.dirty.output,
+                self.view_state.dirty.status,
+                self.view_state.dirty.input,
+                self.view_state.dirty.dialog,
+                self.model.runtime.spinner.active,
+                self.model.runtime.spinner.phase,
+                self.view_state.animation.spinner_frame
+            );
 
             // --- Handle pending slash commands (async) ---
             if let Some(input) = result.pending_slash {
