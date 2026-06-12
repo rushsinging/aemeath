@@ -2,9 +2,7 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::ConversationIntent;
-use crate::tui::model::input::change::{
-    submitted_display_text_from_changes, submitted_text_from_changes,
-};
+use crate::tui::model::input::change::submitted_text_from_changes;
 use tokio::sync::mpsc;
 
 impl App {
@@ -19,8 +17,6 @@ impl App {
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
         let input = submitted_text_from_changes(&changes).unwrap_or_default();
-        let display_input =
-            submitted_display_text_from_changes(&changes).unwrap_or_else(|| input.clone());
         if input.is_empty() {
             return UpdateResult::none();
         }
@@ -36,7 +32,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::StartChat {
-                submission: display_input.clone(),
+                submission: input.clone(),
             });
         self.mark_output_dirty();
 
@@ -108,5 +104,35 @@ mod tests {
         assert_eq!(result.pending_slash.as_deref(), Some("/help"));
         assert!(result.effects.is_empty());
         assert!(result.spawn_effect.is_none());
+    }
+
+    #[test]
+    fn test_update_enter_renders_copied_text_user_message_as_original() {
+        let mut app = test_app();
+        app.model
+            .input
+            .apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+        let (ui_tx, _ui_rx) = mpsc::channel(1);
+        let spawn_refs = SpawnContextRefs { agent_client: None };
+
+        let result = app.update_enter(&ui_tx, &spawn_refs);
+
+        assert!(result.spawn_effect.is_none());
+        let has_original_user_message = app.model.conversation.blocks.iter().any(|block| {
+            matches!(
+                block,
+                crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. }
+                    if text == "a\nb\nc"
+            )
+        });
+        assert!(
+            has_original_user_message,
+            "首轮 user message 应渲染复制原文，而不是 [Copied Text n] 占位符"
+        );
+        assert!(app
+            .chat
+            .messages
+            .iter()
+            .any(|message| { message.role == "user" && message.text_content() == "a\nb\nc" }));
     }
 }
