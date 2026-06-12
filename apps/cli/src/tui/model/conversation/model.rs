@@ -214,8 +214,25 @@ impl ConversationModel {
         index: usize,
     ) -> Vec<ConversationChange> {
         let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "model drop tool_call_start without active turn id={} name={} index={}",
+                id,
+                name,
+                index,
+            );
             return Vec::new();
         };
+        log::debug!(
+            target: "cli::tui::tool_flow",
+            "model observe tool_call_start chat_id={} turn_id={} id={} name={} index={} blocks_before={}",
+            chat_id.as_ref(),
+            turn_id.as_ref(),
+            id,
+            name,
+            index,
+            self.blocks.len(),
+        );
         let tool_call_id = ToolCallId::new(id.clone());
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
@@ -245,6 +262,15 @@ impl ConversationModel {
             status,
         } = update;
         let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "model drop tool_call_update without active turn id={} provider_id={:?} name={} index={} status={:?}",
+                id,
+                provider_id,
+                name,
+                index,
+                status,
+            );
             return Vec::new();
         };
         let candidate_ids = [Some(id.as_str()), provider_id.as_deref()];
@@ -276,7 +302,7 @@ impl ConversationModel {
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 let tool_call_id = ToolCallId::new(id.clone());
-                turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
+                turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
                 let _ = turn.update_tool(&id, arguments.clone(), summary.clone(), status);
                 bound_id = id.clone();
                 if let Some(call) = turn
@@ -325,6 +351,23 @@ impl ConversationModel {
             }
         }
         self.move_tool_results_after_tool_call(&bound_id);
+        log::debug!(
+            target: "cli::tui::tool_flow",
+            "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} summary_len={} has_block={} blocks_after={}",
+            chat_id.as_ref(),
+            turn_id.as_ref(),
+            id,
+            provider_id,
+            bound_id,
+            name,
+            index,
+            status,
+            bound,
+            args_preview.len(),
+            final_summary.len(),
+            existing_tool_position.is_some(),
+            self.blocks.len(),
+        );
         vec![
             ConversationChange::ToolCallBound { id: bound_id, name },
             ConversationChange::OutputDirty,

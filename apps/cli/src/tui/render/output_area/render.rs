@@ -76,6 +76,7 @@ impl OutputArea {
         user_line_backgrounds.resize(display_lines.len(), false);
         let user_line_backgrounds = trim_line_flags(user_line_backgrounds, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
+        let display_line_count = display_lines.len();
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(display_lines);
@@ -84,6 +85,22 @@ impl OutputArea {
         paint_user_message_line_background(content_area, buf, &user_line_backgrounds);
 
         let total_rendered = self.screen_line_map.len();
+        log::debug!(
+            target: "cli::tui::tool_flow",
+            "output_area render area={}x{} doc_lines={} visible_lines={} range={}..{} display_lines={} spinner={} task_lines={} queued_lines={} auto_scroll={} scroll_offset={}",
+            area.width,
+            area.height,
+            total_lines,
+            visible_lines,
+            start,
+            end,
+            display_line_count,
+            spinner_line.is_some(),
+            live_status.task_lines.len(),
+            live_status.queued_lines.len(),
+            view.auto_scroll,
+            view.scroll_offset,
+        );
         if total_rendered > 0 {
             log::debug!(
                 "render: screen_map after trim: first=[{:?}], last=[{:?}], total={}",
@@ -92,7 +109,6 @@ impl OutputArea {
                 total_rendered,
             );
         }
-
         render_scrollbar(
             area,
             buf,

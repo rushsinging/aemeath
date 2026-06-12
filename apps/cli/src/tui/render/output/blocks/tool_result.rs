@@ -36,8 +36,18 @@ pub fn render_tool_result(
         ResultRender::Plain => format_result_lines(&view.tool_title, &view.result_text, ctx.width),
     };
     // result 子块底部附加状态行：成功/失败/执行中 + 工具名（失败附首行原因），用状态色。
+    let content_line_count = lines.len();
+    log::debug!(
+        target: "cli::tui::tool_flow",
+        "render tool_result block_id={} tool_title={} result_len={} content_lines={} width={} style={:?}",
+        block_id,
+        view.tool_title,
+        view.result_text.len(),
+        content_line_count,
+        ctx.width,
+        view.style,
+    );
     lines.push(status_line(view));
-
     RenderedBlock {
         block_id: block_id.to_string(),
         lines,

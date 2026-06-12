@@ -51,6 +51,16 @@ impl OutputDocumentRenderer {
             groups.push(group);
         }
         let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
+        let total_lines: usize = blocks.iter().map(|block| block.lines.len()).sum();
+        log::debug!(
+            target: "cli::tui::tool_flow",
+            "render document roots={} rendered_blocks={} total_lines={} width={} animation_frame={}",
+            view_model.roots.len(),
+            blocks.len(),
+            total_lines,
+            width,
+            animation_frame,
+        );
         let live_ids = collect_rendered_block_ids(&blocks);
         self.cache.retain(&live_ids);
         RenderedDocument { blocks }
