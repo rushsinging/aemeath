@@ -150,6 +150,7 @@ fn display_command_name(command: &str) -> String {
         .find(|segment| !segment.trim().is_empty())
         .unwrap_or(command)
         .trim()
+        .trim_matches('"')
         .to_string()
 }
 
@@ -247,6 +248,28 @@ mod tests {
             crate::tui::model::runtime::spinner::SpinnerPhase::Hook {
                 event: "Stop".to_string(),
                 detail: "build_cli.sh".to_string(),
+                outcome: crate::tui::model::runtime::spinner::HookOutcome::Running,
+            }
+        );
+    }
+
+    #[test]
+    fn spinner_detail_strips_wrapping_quote_after_basename() {
+        let event = sdk::HookEventView {
+            hook_name: "Stop".to_string(),
+            status: sdk::HookEventStatus::Running,
+            matcher: None,
+            command: Some("\"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.sh\"".to_string()),
+            result: None,
+        };
+
+        let phase = hook_spinner_phase(&event);
+
+        assert_eq!(
+            phase,
+            crate::tui::model::runtime::spinner::SpinnerPhase::Hook {
+                event: "Stop".to_string(),
+                detail: "stop-verify.sh".to_string(),
                 outcome: crate::tui::model::runtime::spinner::HookOutcome::Running,
             }
         );
