@@ -23,7 +23,8 @@ business_allow = {
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging"},
     "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},
-    "share": set(),
+    # packages/global/* are shared infrastructure and may be consumed by share.
+    "share": {"logging"},
     "project": {"share"},
     "policy": {"share"},
     "prompt": {"share"},
