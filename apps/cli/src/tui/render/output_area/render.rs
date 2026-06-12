@@ -141,7 +141,7 @@ fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> Rect {
     Rect {
         x: area.x,
         y: area.y,
-        width: area.width.saturating_sub(1),
+        width: area.width.saturating_sub(5).max(1),
         height: area.height,
     }
 }
@@ -273,6 +273,19 @@ mod tests {
             "最右列预留给滚动条，不应渲染正文"
         );
         assert_eq!(buf[(0, 1)].symbol(), "l", "多行文档应继续渲染下一条逻辑行");
+    }
+
+    #[test]
+    fn test_content_area_width_matches_output_document_width_when_scrollbar_visible() {
+        let area_rect = Rect::new(0, 0, 80, 10);
+
+        let content_area = content_area_for_scrollbar(area_rect, true);
+
+        assert_eq!(
+            content_area.width,
+            area_rect.width.saturating_sub(5).max(1),
+            "输出文档预换行宽度必须等于 Paragraph 实际渲染宽度，避免二次折行"
+        );
     }
 
     #[test]
