@@ -64,6 +64,7 @@ allowed_dependencies = {
     "tokio-util",
     "uuid",
     "log",
+    "logging",
     "unicode-width",
 }
 
