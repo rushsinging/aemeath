@@ -6,6 +6,7 @@ use super::chat_turn::ChatTurn;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::queued_submission::QueuedSubmission;
+use super::tool_call::ToolCallStatus;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConversationModel {
@@ -18,6 +19,16 @@ pub struct ConversationModel {
     next_block_sequence: usize,
     active_text_block_id: Option<String>,
     active_thinking_block_id: Option<String>,
+}
+
+struct ToolCallUpdateObservation {
+    id: String,
+    provider_id: Option<String>,
+    name: String,
+    index: usize,
+    arguments: Option<String>,
+    summary: Option<String>,
+    status: ToolCallStatus,
 }
 
 impl ConversationModel {
@@ -36,13 +47,23 @@ impl ConversationModel {
                 name,
                 index,
             } => self.observe_tool_call_start(id, provider_id, name, index),
-            ConversationIntent::ObserveToolCall {
+            ConversationIntent::ObserveToolCallUpdate {
                 id,
                 provider_id,
                 name,
                 index,
+                arguments,
                 summary,
-            } => self.observe_tool_call(id, provider_id, name, index, summary),
+                status,
+            } => self.observe_tool_call_update(ToolCallUpdateObservation {
+                id,
+                provider_id,
+                name,
+                index,
+                arguments,
+                summary,
+                status,
+            }),
             ConversationIntent::ObserveToolResult {
                 id,
                 provider_id,
@@ -64,13 +85,6 @@ impl ConversationModel {
             ConversationIntent::ObserveAssistantText { text } => self.append_assistant_text(text),
             ConversationIntent::ObserveThinkingText { text } => self.append_thinking_text(text),
             ConversationIntent::CompleteTextBlock => self.complete_text_block(),
-            ConversationIntent::ObserveToolArguments {
-                id,
-                provider_id,
-                name,
-                index,
-                partial_args,
-            } => self.observe_tool_arguments(id, provider_id, name, index, partial_args),
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
             ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
             ConversationIntent::AppendError { text } => self.append_error(text),
@@ -217,25 +231,32 @@ impl ConversationModel {
             ConversationChange::OutputDirty,
         ]
     }
-    fn observe_tool_call(
+    fn observe_tool_call_update(
         &mut self,
-        id: String,
-        provider_id: String,
-        name: String,
-        index: usize,
-        summary: String,
+        update: ToolCallUpdateObservation,
     ) -> Vec<ConversationChange> {
+        let ToolCallUpdateObservation {
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            summary,
+            status,
+        } = update;
         let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
             return Vec::new();
         };
-        let candidate_ids = [id.as_str(), provider_id.as_str()];
-        let mut args_preview = String::new();
-        let mut final_summary = summary.clone();
+        let candidate_ids = [Some(id.as_str()), provider_id.as_deref()];
         let mut bound_id = id.clone();
+        let mut args_preview = arguments.clone().unwrap_or_default();
+        let mut final_summary = summary.clone().unwrap_or_default();
         let mut bound = false;
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-            for candidate_id in candidate_ids {
-                if let Some(preview) = turn.bind_tool(candidate_id, summary.clone()) {
+            for candidate_id in candidate_ids.into_iter().flatten() {
+                if let Some(preview) =
+                    turn.update_tool(candidate_id, arguments.clone(), summary.clone(), status)
+                {
                     args_preview = preview;
                     bound_id = candidate_id.to_string();
                     if final_summary.is_empty() {
@@ -256,17 +277,15 @@ impl ConversationModel {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 let tool_call_id = ToolCallId::new(id.clone());
                 turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
-                let _ = turn.bind_tool(&id, summary.clone());
+                let _ = turn.update_tool(&id, arguments.clone(), summary.clone(), status);
                 bound_id = id.clone();
-                if final_summary.is_empty() {
-                    if let Some(call) = turn
-                        .tool_calls
-                        .iter()
-                        .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
-                    {
-                        args_preview = call.args_preview.clone();
-                        final_summary = call.summary.clone().unwrap_or_default();
-                    }
+                if let Some(call) = turn
+                    .tool_calls
+                    .iter()
+                    .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                {
+                    args_preview = call.args_preview.clone();
+                    final_summary = call.summary.clone().unwrap_or_default();
                 }
             }
         }
@@ -282,7 +301,7 @@ impl ConversationModel {
                 ToolCallId::new(bound_id.clone()),
                 name.clone(),
                 final_summary.clone(),
-                args_preview,
+                args_preview.clone(),
             );
         } else {
             for block in &mut self.blocks {
@@ -363,62 +382,6 @@ impl ConversationModel {
         ]
     }
 
-    fn observe_tool_arguments(
-        &mut self,
-        id: String,
-        _provider_id: Option<String>,
-        name: String,
-        index: usize,
-        partial_args: String,
-    ) -> Vec<ConversationChange> {
-        let Some((chat_id, turn_id)) = self.current_runtime_turn() else {
-            return Vec::new();
-        };
-        let tool_call_id = ToolCallId::new(id.clone());
-        let mut found_call = false;
-        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-            if let Some(call) = turn
-                .tool_calls
-                .iter_mut()
-                .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
-            {
-                call.update_args(partial_args.clone());
-                found_call = true;
-            }
-        }
-        if !found_call {
-            if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-                turn.observe_tool_start(tool_call_id.clone(), chat_id, name.clone(), index);
-                if let Some(call) = turn
-                    .tool_calls
-                    .iter_mut()
-                    .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
-                {
-                    call.update_args(partial_args.clone());
-                }
-            }
-            self.insert_tool_call_block_before_active_text(
-                tool_call_id.clone(),
-                name.clone(),
-                String::new(),
-                partial_args.clone(),
-            );
-        }
-        for block in &mut self.blocks {
-            if let ConversationBlock::ToolCall {
-                id: block_id,
-                args_preview,
-                ..
-            } = block
-            {
-                if block_id.as_ref() == id {
-                    *args_preview = partial_args;
-                    break;
-                }
-            }
-        }
-        vec![ConversationChange::OutputDirty]
-    }
     fn queue_submission(&mut self, text: String) -> Vec<ConversationChange> {
         let id = self.next_block_id("queued");
         self.queued_submissions

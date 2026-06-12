@@ -2,6 +2,7 @@ use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
@@ -22,6 +23,14 @@ pub struct AgentEventMapping {
     pub runtime: Vec<RuntimeIntent>,
     pub session: Vec<SessionIntent>,
     pub effects: Vec<Effect>,
+}
+
+fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
+    match status {
+        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
+        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
+        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
+    }
 }
 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
@@ -83,13 +92,15 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 });
             mapping
         }
-        UiEvent::ToolArgumentsDelta {
+        UiEvent::ToolCallUpdate {
             context,
             id,
             provider_id,
-            index,
             name,
-            partial_args,
+            index,
+            arguments,
+            summary,
+            status,
         } => {
             let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
                 chat_id: context.chat_id.clone(),
@@ -97,35 +108,18 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             });
             mapping
                 .conversation
-                .push(ConversationIntent::ObserveToolArguments {
+                .push(ConversationIntent::ObserveToolCallUpdate {
                     id: id.clone(),
                     provider_id: provider_id.clone(),
                     name: name.clone(),
                     index: *index,
-                    partial_args: sanitize_tool_arguments_delta(name, partial_args),
-                });
-            mapping
-        }
-        UiEvent::ToolCall {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-            summary,
-        } => {
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-            });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveToolCall {
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: index.unwrap_or(0),
-                    summary: sanitize_tool_summary(name, summary),
+                    arguments: arguments
+                        .as_ref()
+                        .map(|value| sanitize_tool_arguments_delta(name, value)),
+                    summary: summary
+                        .as_ref()
+                        .map(|value| sanitize_tool_summary(name, value)),
+                    status: tool_call_status_from_sdk(*status),
                 });
             mapping
         }
@@ -458,49 +452,55 @@ mod tests {
     }
 
     #[test]
-    fn test_map_agent_event_tool_arguments_delta_truncates_large_stream() {
-        let event = UiEvent::ToolArgumentsDelta {
+    fn test_map_agent_event_tool_update_truncates_large_stream() {
+        let event = UiEvent::ToolCallUpdate {
             context: ctx(),
             id: "tool-1".to_string(),
             provider_id: Some("provider-1".to_string()),
-            index: 0,
             name: "Edit".to_string(),
-            partial_args: "x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2),
+            index: 0,
+            arguments: Some("x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2)),
+            summary: None,
+            status: sdk::ToolCallStatusView::PendingArgs,
         };
 
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
-            Some(ConversationIntent::ObserveToolArguments { partial_args, .. }) => {
-                assert!(partial_args.len() < TOOL_STREAM_PREVIEW_LIMIT + 128);
-                assert!(partial_args.contains("omitted from TUI preview for Edit"));
+            Some(ConversationIntent::ObserveToolCallUpdate { arguments, .. }) => {
+                let arguments = arguments.as_deref().unwrap_or_default();
+                assert!(arguments.len() < TOOL_STREAM_PREVIEW_LIMIT + 128);
+                assert!(arguments.contains("omitted from TUI preview for Edit"));
             }
             other => panic!("unexpected mapping: {other:?}"),
         }
     }
-
     #[test]
     fn test_map_agent_event_tool_call_summarizes_edit_fields() {
         let large_old = "旧".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
         let large_new = "新".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT);
-        let event = UiEvent::ToolCall {
+        let event = UiEvent::ToolCallUpdate {
             context: ctx(),
             id: "tool-1".to_string(),
-            provider_id: "provider-1".to_string(),
+            provider_id: Some("provider-1".to_string()),
             name: "Edit".to_string(),
-            index: Some(0),
-            summary: serde_json::json!({
-                "file_path": "src/lib.rs",
-                "old_string": large_old,
-                "new_string": large_new,
-            })
-            .to_string(),
+            index: 0,
+            arguments: None,
+            summary: Some(
+                serde_json::json!({
+                    "file_path": "src/lib.rs",
+                    "old_string": large_old,
+                    "new_string": large_new,
+                })
+                .to_string(),
+            ),
+            status: sdk::ToolCallStatusView::Ready,
         };
-
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
-            Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
+            Some(ConversationIntent::ObserveToolCallUpdate { summary, .. }) => {
+                let summary = summary.as_deref().unwrap_or_default();
                 assert!(summary.contains("src/lib.rs"));
                 assert!(summary.contains("Edit.old_string"));
                 assert!(summary.contains("Edit.new_string"));
@@ -517,21 +517,24 @@ mod tests {
     #[test]
     fn test_map_agent_event_tool_call_summarizes_agent_prompt_and_bash_command() {
         for (tool_name, field) in [("Agent", "prompt"), ("Bash", "command")] {
-            let event = UiEvent::ToolCall {
+            let event = UiEvent::ToolCallUpdate {
                 context: ctx(),
                 id: "tool-1".to_string(),
-                provider_id: "provider-1".to_string(),
+                provider_id: Some("provider-1".to_string()),
                 name: tool_name.to_string(),
-                index: Some(0),
-                summary:
+                index: 0,
+                arguments: None,
+                summary: Some(
                     serde_json::json!({ field: "x".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT * 2) })
                         .to_string(),
+                ),
+                status: sdk::ToolCallStatusView::Ready,
             };
-
             let mapping = map_agent_event(&event);
 
             match first_observation(&mapping) {
-                Some(ConversationIntent::ObserveToolCall { summary, .. }) => {
+                Some(ConversationIntent::ObserveToolCallUpdate { summary, .. }) => {
+                    let summary = summary.as_deref().unwrap_or_default();
                     assert!(summary.contains(&format!("{tool_name}.{field}")));
                     assert!(
                         summary.len() < 700,

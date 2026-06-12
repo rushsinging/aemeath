@@ -3,6 +3,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{OutputBlockKind, SemanticStyle};
 
 #[test]
@@ -64,12 +65,14 @@ fn test_non_embedded_tool_result_uses_summary() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCall {
-        provider_id: "provider-1".to_string(),
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
         index: 0,
-        summary: "read file".to_string(),
+        summary: Some("read file".to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
         provider_id: "provider-1".to_string(),

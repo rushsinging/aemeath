@@ -1,5 +1,6 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
 const HISTORY_RESTORE_ERROR: &str = "无法恢复一条历史消息：消息格式不符合当前会话 schema，已跳过。";
 
@@ -78,12 +79,14 @@ impl crate::tui::app::App {
                         });
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveToolCall {
+                        .apply(ConversationIntent::ObserveToolCallUpdate {
                             id: id.clone(),
-                            provider_id: id.clone(),
+                            provider_id: Some(id.clone()),
                             name: name.clone(),
                             index,
-                            summary: input_json,
+                            arguments: Some(input_json.clone()),
+                            summary: Some(input_json),
+                            status: ToolCallStatus::Ready,
                         });
                     if let Some(result) = tool_results.get(id.as_str()) {
                         self.model

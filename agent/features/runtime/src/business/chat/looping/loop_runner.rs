@@ -641,8 +641,7 @@ mod tests {
                 RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
                 RuntimeStreamEvent::TextBlockComplete { .. } => "TextBlockComplete".to_string(),
                 RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
-                RuntimeStreamEvent::ToolArgumentsDelta { .. } => "ToolArgumentsDelta".to_string(),
-                RuntimeStreamEvent::ToolCall { .. } => "ToolCall".to_string(),
+                RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
                 RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
                 RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
                 RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
@@ -849,7 +848,7 @@ mod tests {
             hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
         })
-            .await;
+        .await;
         let _ = std::fs::remove_file(&flag_path);
 
         let events = sink.events();
@@ -950,7 +949,7 @@ mod tests {
             ),
             memory_config: share::config::MemoryConfig::default(),
         })
-            .await;
+        .await;
 
         assert!(sink
             .events()
@@ -1006,7 +1005,7 @@ mod tests {
             hook_runner: test_hook_runner(),
             memory_config: share::config::MemoryConfig::default(),
         })
-            .await;
+        .await;
 
         let events = sink.events();
         let queued_sync = events

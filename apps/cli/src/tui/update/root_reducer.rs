@@ -317,12 +317,14 @@ mod tests {
         reduce_agent_event(
             &mut model,
             AgentEventMapping {
-                conversation: vec![ConversationIntent::ObserveToolCall {
+                conversation: vec![ConversationIntent::ObserveToolCallUpdate {
                     id: "tool-1".to_string(),
-                    provider_id: "provider-1".to_string(),
+                    provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),
                     index: 0,
-                    summary: "Read file".to_string(),
+                    arguments: None,
+                    summary: Some("Read file".to_string()),
+                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
                 }],
                 ..Default::default()
             },

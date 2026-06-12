@@ -33,6 +33,34 @@ impl ChatTurn {
         self.status = ChatTurnStatus::ToolExecuting;
     }
 
+    pub fn update_tool(
+        &mut self,
+        id: &str,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: ToolCallStatus,
+    ) -> Option<String> {
+        let call = self
+            .tool_calls
+            .iter_mut()
+            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id))?;
+        call.update(arguments, summary, status);
+        self.status = match status {
+            ToolCallStatus::PendingArgs | ToolCallStatus::Ready => {
+                if self.status == ChatTurnStatus::Completed {
+                    self.status
+                } else {
+                    ChatTurnStatus::ToolCalling
+                }
+            }
+            ToolCallStatus::Running => ChatTurnStatus::ToolExecuting,
+            ToolCallStatus::Success
+            | ToolCallStatus::Error
+            | ToolCallStatus::Cancelled
+            | ToolCallStatus::Orphaned => self.status,
+        };
+        Some(call.args_preview.clone())
+    }
     pub fn bind_tool(&mut self, id: &str, summary: String) -> Option<String> {
         let call = self
             .tool_calls

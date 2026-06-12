@@ -20,7 +20,7 @@ impl ToolCall {
             stream_key,
             args_preview: String::new(),
             summary: None,
-            status: ToolCallStatus::Running,
+            status: ToolCallStatus::PendingArgs,
             result: None,
             activities: Vec::new(),
         }
@@ -29,6 +29,36 @@ impl ToolCall {
         self.args_preview = partial_args.into();
     }
 
+    pub fn update(
+        &mut self,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: ToolCallStatus,
+    ) -> Vec<ToolCallChange> {
+        if let Some(arguments) = arguments {
+            self.args_preview = arguments;
+        }
+        if let Some(summary) = summary {
+            if summary.is_empty() {
+                if self.summary.as_deref().unwrap_or_default().is_empty()
+                    && !self.args_preview.is_empty()
+                {
+                    self.summary = Some(self.args_preview.clone());
+                }
+            } else {
+                self.summary = Some(summary);
+            }
+        }
+        let previous = self.status;
+        if self.status != ToolCallStatus::Success && self.status != ToolCallStatus::Error {
+            self.status = status;
+        }
+        let mut changes = vec![ToolCallChange::Bound];
+        if previous != status && status == ToolCallStatus::Running {
+            changes.push(ToolCallChange::Running);
+        }
+        changes
+    }
     pub fn bind(&mut self, summary: String) -> Vec<ToolCallChange> {
         if summary.is_empty() {
             if self.summary.as_deref().unwrap_or_default().is_empty()
@@ -96,7 +126,10 @@ mod tests {
         let changes = call.bind("Read file".to_string());
         assert_eq!(call.id.as_ref().map(AsRef::as_ref), Some("tool-1"));
         assert_eq!(call.status, ToolCallStatus::Running);
-        assert_eq!(changes, vec![ToolCallChange::Bound]);
+        assert_eq!(
+            changes,
+            vec![ToolCallChange::Bound, ToolCallChange::Running]
+        );
     }
 
     #[test]

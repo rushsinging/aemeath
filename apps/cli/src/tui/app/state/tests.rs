@@ -355,14 +355,16 @@ mod tests {
                 name: "Grep".to_string(),
                 index: 1,
             },
-            UiEvent::ToolCall {
+            UiEvent::ToolCallUpdate {
                 context: test_turn_context(),
-                id: "grep-1".to_string(),                provider_id: "provider-grep-1".to_string(),
+                id: "grep-1".to_string(),
+                provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
-                index: Some(1),
-                summary: r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string(),
-            },
-            UiEvent::ToolResult {
+                index: 1,
+                arguments: None,
+                summary: Some(r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string()),
+                status: sdk::ToolCallStatusView::Ready,
+            },            UiEvent::ToolResult {
                 context: test_turn_context(),
                 id: "grep-1".to_string(),
                 provider_id: "provider-grep-1".to_string(),

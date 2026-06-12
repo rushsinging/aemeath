@@ -232,6 +232,14 @@ impl ChatEventContext {
     }
 }
 
+/// 工具调用的中间状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallStatusView {
+    PendingArgs,
+    Ready,
+    Running,
+}
+
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
@@ -258,23 +266,16 @@ pub enum ChatEvent {
         name: String,
         index: usize,
     },
-    /// 工具参数增量。
-    ToolArgumentsDelta {
+    /// 工具调用属性/状态更新。
+    ToolCallUpdate {
         context: ChatEventContext,
         id: String,
         provider_id: Option<String>,
+        name: String,
         index: usize,
-        name: String,
-        partial_args: String,
-    },
-    /// 工具调用确认。
-    ToolCall {
-        context: ChatEventContext,
-        id: String,
-        provider_id: String,
-        name: String,
-        index: Option<usize>,
-        summary: String,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: ToolCallStatusView,
     },
     /// 工具执行结果。
     ToolResult {

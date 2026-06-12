@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use crate::business::chat::looping::RuntimeTurnContext;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChangeSet, ChatEvent,
-    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, ToolResultImage,
+    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, ToolCallStatusView,
+    ToolResultImage,
 };
 
 #[derive(Clone)]
@@ -88,6 +89,18 @@ fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
     }
 }
 
+fn tool_call_status_to_sdk(
+    status: crate::business::chat::RuntimeToolCallStatus,
+) -> ToolCallStatusView {
+    match status {
+        crate::business::chat::RuntimeToolCallStatus::PendingArgs => {
+            ToolCallStatusView::PendingArgs
+        }
+        crate::business::chat::RuntimeToolCallStatus::Ready => ToolCallStatusView::Ready,
+        crate::business::chat::RuntimeToolCallStatus::Running => ToolCallStatusView::Running,
+    }
+}
+
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
     current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
@@ -123,35 +136,24 @@ pub(crate) fn runtime_event_to_sdk_event(
             name,
             index,
         },
-        crate::business::chat::RuntimeStreamEvent::ToolArgumentsDelta {
-            context,
-            id,
-            provider_id,
-            index,
-            name,
-            partial_args,
-        } => ChatEvent::ToolArgumentsDelta {
-            context: turn_context_to_sdk(context),
-            id,
-            provider_id,
-            index,
-            name,
-            partial_args,
-        },
-        crate::business::chat::RuntimeStreamEvent::ToolCall {
+        crate::business::chat::RuntimeStreamEvent::ToolCallUpdate {
             context,
             id,
             provider_id,
             name,
             index,
+            arguments,
             summary,
-        } => ChatEvent::ToolCall {
+            status,
+        } => ChatEvent::ToolCallUpdate {
             context: turn_context_to_sdk(context),
             id,
             provider_id,
             name,
             index,
+            arguments,
             summary,
+            status: tool_call_status_to_sdk(status),
         },
         crate::business::chat::RuntimeStreamEvent::ToolResult {
             context,

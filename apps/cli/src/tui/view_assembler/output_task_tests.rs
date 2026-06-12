@@ -1,6 +1,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
 
 #[test]
@@ -110,12 +111,14 @@ fn add_task_tool(
         name: name.to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCall {
-        provider_id: format!("provider-{id}"),
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        provider_id: Some(format!("provider-{id}")),
         id: id.to_string(),
         name: name.to_string(),
         index: 0,
-        summary: summary.to_string(),
+        summary: Some(summary.to_string()),
+        arguments: None,
+        status: ToolCallStatus::Ready,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
         provider_id: format!("provider-{id}"),

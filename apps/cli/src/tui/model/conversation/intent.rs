@@ -25,19 +25,14 @@ pub enum ConversationIntent {
         name: String,
         index: usize,
     },
-    ObserveToolArguments {
+    ObserveToolCallUpdate {
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        partial_args: String,
-    },
-    ObserveToolCall {
-        id: String,
-        provider_id: String,
-        name: String,
-        index: usize,
-        summary: String,
+        arguments: Option<String>,
+        summary: Option<String>,
+        status: super::tool_call::ToolCallStatus,
     },
     ObserveToolResult {
         id: String,
