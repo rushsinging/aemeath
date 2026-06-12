@@ -230,13 +230,6 @@ impl OutputViewAssembler {
                 }
             }
         }
-        log::debug!(
-            target: "cli::tui::tool_flow",
-            "assemble output_view roots={} conversation_blocks={} version={}",
-            roots.len(),
-            conversation.blocks.len(),
-            version,
-        );
         OutputViewModel {
             roots,
             version,

@@ -180,14 +180,6 @@ impl App {
         };
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
-        log::debug!(
-            target: "cli::tui::tool_flow",
-            "app update_agent_event effects={} view_dirty_output={} view_dirty_status={} view_dirty_dialog={}",
-            result.effects.len(),
-            self.view_state.dirty.output,
-            self.view_state.dirty.status,
-            self.view_state.dirty.dialog,
-        );
         result.effects.extend(model_result.effects);
         result
     }
@@ -208,24 +200,10 @@ impl App {
             self.output_area.term_width,
             self.view_state.animation.spinner_frame,
         );
-        log::debug!(
-            target: "cli::tui::tool_flow",
-            "refresh output document width={} fallback_width={} roots={} doc_blocks={} doc_lines={} spinner_frame={}",
-            width,
-            self.output_area.term_width,
-            view_model.roots.len(),
-            document.blocks.len(),
-            document.total_lines(),
-            self.view_state.animation.spinner_frame,
-        );
         self.output_area.replace_document(document);
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "flush dirty output: refreshing document"
-            );
             self.refresh_output_document_from_model();
             self.view_state.dirty.clear_output();
         }

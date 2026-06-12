@@ -27,10 +27,12 @@ impl InputState {
         self.input_queue.drain(..).collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn queue_len(&self) -> usize {
         self.input_queue.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn queue_preview(&self) -> String {
         self.input_queue
             .iter()
