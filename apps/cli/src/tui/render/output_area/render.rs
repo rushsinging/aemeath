@@ -8,6 +8,7 @@ use ratatui::{
 use sdk::CharIdx;
 
 use super::OutputArea;
+use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
@@ -49,6 +50,32 @@ impl OutputArea {
         clear_area(area, buf);
 
         let document_lines = self.document.iter_lines().collect::<Vec<_>>();
+        let first_visible_doc_line_plain = document_lines
+            .get(start)
+            .map(|line| diagnostic_plain(&line.plain))
+            .unwrap_or_default();
+        let last_visible_doc_line_plain = end
+            .checked_sub(1)
+            .and_then(|idx| document_lines.get(idx))
+            .map(|line| diagnostic_plain(&line.plain))
+            .unwrap_or_default();
+        let last_doc_line_plain = document_lines
+            .last()
+            .map(|line| diagnostic_plain(&line.plain))
+            .unwrap_or_default();
+        let visible_overwide_lines = document_lines
+            .get(start..end)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|line| str_display_width(&line.plain) > content_area.width as usize)
+            .count();
+        let max_visible_line_width = document_lines
+            .get(start..end)
+            .unwrap_or(&[])
+            .iter()
+            .map(|line| str_display_width(&line.plain))
+            .max()
+            .unwrap_or(0);
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
@@ -72,10 +99,37 @@ impl OutputArea {
 
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
+        let before_status_lines = display_lines.len();
         self.append_status_lines(&mut display_lines, &spinner_line, live_status, view);
+        let after_status_lines = display_lines.len();
         line_fill_styles.resize(display_lines.len(), None);
         let line_fill_styles = trim_line_fill_styles(line_fill_styles, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
+        crate::tui::log_trace!(
+            "tui.output.render area={}x{} content={}x{} total_lines={} visible_lines={} auto_scroll={} scroll_offset={} range={}..{} needs_scrollbar={} spinner={} queued_lines={} task_lines={} before_status_lines={} after_status_lines={} after_trim_lines={} visible_overwide_lines={} max_visible_line_width={} first_visible={:?} last_visible={:?} last_doc={:?}",
+            area.width,
+            area.height,
+            content_area.width,
+            content_area.height,
+            total_lines,
+            visible_lines,
+            view.auto_scroll,
+            view.scroll_offset,
+            start,
+            end,
+            needs_scrollbar,
+            spinner_line.is_some(),
+            live_status.queued_lines.len(),
+            live_status.task_lines.len(),
+            before_status_lines,
+            after_status_lines,
+            display_lines.len(),
+            visible_overwide_lines,
+            max_visible_line_width,
+            first_visible_doc_line_plain,
+            last_visible_doc_line_plain,
+            last_doc_line_plain
+        );
 
         paint_line_fill_styles(content_area, buf, &line_fill_styles);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -125,6 +179,19 @@ pub(crate) fn sel_range_for_bounds(
         plain_len
     };
     (start < end).then_some(SelRange { start, end })
+}
+
+fn diagnostic_plain(value: &str) -> String {
+    const MAX_CHARS: usize = 96;
+    let mut out = value
+        .chars()
+        .take(MAX_CHARS)
+        .collect::<String>()
+        .replace('\n', "\\n");
+    if value.chars().count() > MAX_CHARS {
+        out.push('…');
+    }
+    out
 }
 
 fn normalize_rendered_table_plain(plain: &str) -> String {

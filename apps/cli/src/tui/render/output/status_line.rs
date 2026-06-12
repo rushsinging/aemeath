@@ -78,16 +78,35 @@ impl OutputArea {
         lines: Vec<Line<'static>>,
         height: usize,
     ) -> Vec<Line<'static>> {
-        if lines.len() > height {
-            let offset = lines.len() - height;
+        let input_len = lines.len();
+        let input_map_len = self.screen_line_map.len();
+        if input_len > height {
+            let offset = input_len - height;
             let mapped_drop = clamp_split_index(offset, self.screen_line_map.len());
             self.screen_line_map = self.screen_line_map.split_off(mapped_drop);
             let visible_map_len = self.screen_line_map.len().min(height);
             self.screen_line_map.truncate(visible_map_len);
+            crate::tui::log_trace!(
+                "tui.output.trim height={} input_lines={} output_lines={} input_map_len={} mapped_drop={} output_map_len={} trimmed=true",
+                height,
+                input_len,
+                height,
+                input_map_len,
+                mapped_drop,
+                self.screen_line_map.len()
+            );
             lines.into_iter().skip(offset).collect()
         } else {
-            let visible_map_len = self.screen_line_map.len().min(lines.len());
+            let visible_map_len = self.screen_line_map.len().min(input_len);
             self.screen_line_map.truncate(visible_map_len);
+            crate::tui::log_trace!(
+                "tui.output.trim height={} input_lines={} output_lines={} input_map_len={} mapped_drop=0 output_map_len={} trimmed=false",
+                height,
+                input_len,
+                input_len,
+                input_map_len,
+                self.screen_line_map.len()
+            );
             lines
         }
     }
