@@ -173,13 +173,48 @@ pub async fn ensure_agents_dirs() -> Result<(), String> {
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
+pub(crate) struct TestEnvGuard {
+    key: &'static str,
+    old: Option<std::ffi::OsString>,
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl TestEnvGuard {
+    pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let guard = TEST_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let old = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self {
+            key,
+            old,
+            _guard: guard,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
 
     #[test]
     fn test_global_logs_dir_uses_agents_logs_directory() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
         let temp_agents_dir = std::env::temp_dir().join(format!(
             "aemeath_agents_logs_{}",
             std::time::SystemTime::now()
@@ -187,21 +222,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
-        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+        let _guard = TestEnvGuard::set(paths::AGENTS_DIR_ENV, &temp_agents_dir);
 
         assert_eq!(global_logs_dir(), temp_agents_dir.join("logs"));
-
-        if let Some(previous) = previous {
-            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
-        } else {
-            std::env::remove_var(paths::AGENTS_DIR_ENV);
-        }
     }
 
     #[test]
     fn test_global_data_paths_use_agents_directory() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
         let temp_agents_dir = std::env::temp_dir().join(format!(
             "aemeath_agents_data_{}",
             std::time::SystemTime::now()
@@ -209,8 +236,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let previous = std::env::var_os(paths::AGENTS_DIR_ENV);
-        std::env::set_var(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+        let _guard = TestEnvGuard::set(paths::AGENTS_DIR_ENV, &temp_agents_dir);
 
         assert_eq!(global_guidance_dir(), temp_agents_dir.join("guidance"));
         assert_eq!(global_memory_dir(), temp_agents_dir.join("memory"));
@@ -226,12 +252,6 @@ mod tests {
             global_settings_path(),
             temp_agents_dir.join("settings.json")
         );
-
-        if let Some(previous) = previous {
-            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
-        } else {
-            std::env::remove_var(paths::AGENTS_DIR_ENV);
-        }
     }
 
     #[test]
