@@ -53,6 +53,11 @@ impl WorkspaceRead for WorkspaceService {
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.lock().resolve(rel)
     }
+    fn in_worktree(&self) -> bool {
+        // 先克隆 working_root 释放状态锁，避免持锁期间 spawn git 子进程。
+        let root = self.lock().working_root.clone();
+        self.git.in_worktree(&root)
+    }
 }
 
 impl WorkspaceControl for WorkspaceService {
