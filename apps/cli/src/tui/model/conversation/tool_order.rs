@@ -23,14 +23,7 @@ impl ConversationModel {
             summary,
             args_preview,
         };
-        let Some(position) = self
-            .active_text_block_id()
-            .and_then(|text_id| self.blocks.iter().position(|b| b.id() == text_id))
-        else {
-            self.blocks.push(block);
-            return;
-        };
-        self.blocks.insert(position, block);
+        self.blocks.push(block);
     }
 
     pub(super) fn insert_tool_result_after_tool_call(
