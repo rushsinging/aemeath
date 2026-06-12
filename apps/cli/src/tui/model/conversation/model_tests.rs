@@ -14,12 +14,16 @@ fn test_conversation_observes_tool_lifecycle() {
         .any(|change| matches!(change, ConversationChange::ChatStarted { .. })));
 
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -29,6 +33,8 @@ fn test_conversation_observes_tool_lifecycle() {
         status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
@@ -51,6 +57,8 @@ fn test_conversation_reports_orphan_tool_result() {
         submission: "read file".to_string(),
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "missing".to_string(),
         tool_name: "Read".to_string(),
@@ -72,12 +80,16 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         submission: "load first skill".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
@@ -87,6 +99,8 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("call-using".to_string()),
         id: "tool-1".to_string(),
         name: "Skill".to_string(),
@@ -101,12 +115,16 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         submission: "load second skill".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-3".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-3".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
@@ -116,6 +134,8 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("call-brainstorm".to_string()),
         id: "tool-3".to_string(),
         name: "Skill".to_string(),
@@ -142,18 +162,87 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
 }
 
 #[test]
+fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_active_turn_drifted() {
+    let mut model = ConversationModel::default();
+    let live_chat = super::ids::ChatId::new("session-live");
+    let live_turn = super::ids::ChatTurnId::new("turn-2");
+    let stale_chat = super::ids::ChatId::new("session-stale");
+    let stale_turn = super::ids::ChatTurnId::new("turn-55");
+
+    model.ensure_runtime_turn(live_chat.clone(), live_turn.clone());
+    model.ensure_runtime_turn(stale_chat, stale_turn);
+
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: live_chat.clone(),
+        turn_id: live_turn.clone(),
+        id: "tool-1".to_string(),
+        provider_id: Some("call-read".to_string()),
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: live_chat.clone(),
+        turn_id: live_turn.clone(),
+        id: "tool-1".to_string(),
+        provider_id: Some("call-read".to_string()),
+        name: "Read".to_string(),
+        index: 0,
+        arguments: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
+    });
+    model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: live_chat.clone(),
+        turn_id: live_turn.clone(),
+        id: "tool-1".to_string(),
+        provider_id: "call-read".to_string(),
+        tool_name: "Read".to_string(),
+        output: "workspace manifest".to_string(),
+        content: serde_json::json!({ "text": "workspace manifest" }),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let live_turn_model = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == live_chat)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == live_turn))
+        .expect("live runtime turn should exist");
+    assert_eq!(live_turn_model.tool_calls.len(), 1);
+    assert_eq!(
+        live_turn_model.tool_calls[0].result.as_deref(),
+        Some("workspace manifest")
+    );
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolCall { id, name, args_preview, .. }
+            if id.as_ref() == "tool-1" && name == "Read" && args_preview.contains("Cargo.toml")
+    )));
+    assert!(model.blocks.iter().any(|block| matches!(
+        block,
+        super::block::ConversationBlock::ToolResult { id, output, .. }
+            if id.as_ref() == "tool-1" && output == "workspace manifest"
+    )));
+}
+
+#[test]
 fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provider_tool() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {
         submission: "load skill".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
@@ -163,6 +252,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("call-skill".to_string()),
         id: "tool-1".to_string(),
         name: "Skill".to_string(),
@@ -177,6 +268,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         submission: "read config".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-2".to_string(),
         provider_id: "call-read".to_string(),
         tool_name: "Read".to_string(),
@@ -186,6 +279,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         image_count: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("call-read".to_string()),
         id: "tool-2".to_string(),
         name: "Read".to_string(),
@@ -220,12 +315,16 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         submission: "load skill".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-provider-skill".to_string(),
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-provider-skill".to_string(),
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
@@ -235,6 +334,8 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("call-provider-skill".to_string()),
         id: "tool-99".to_string(),
         name: "Skill".to_string(),
@@ -267,12 +368,16 @@ fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
         submission: "load skill".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-skill".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-skill".to_string(),
         provider_id: None,
         name: "Skill".to_string(),
@@ -282,6 +387,8 @@ fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-skill".to_string()),
         id: "call-skill".to_string(),
         name: "Skill".to_string(),
@@ -309,12 +416,16 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         submission: "create tasks".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-list".to_string(),
         provider_id: None,
         name: "TaskListCreate".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-list".to_string(),
         provider_id: None,
         name: "TaskListCreate".to_string(),
@@ -324,6 +435,8 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-list".to_string()),
         id: "call-list".to_string(),
         name: "TaskListCreate".to_string(),
@@ -333,12 +446,16 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-task".to_string(),
         provider_id: None,
         name: "TaskCreate".to_string(),
         index: 1,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "call-task".to_string(),
         provider_id: None,
         name: "TaskCreate".to_string(),
@@ -348,6 +465,8 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-task".to_string()),
         id: "call-task".to_string(),
         name: "TaskCreate".to_string(),
@@ -384,12 +503,16 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         submission: "read file".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
@@ -399,6 +522,8 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         image_count: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -433,9 +558,13 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
         submission: "hello".to_string(),
     });
     model.apply(ConversationIntent::ObserveThinkingText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "plan".to_string(),
     });
     model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "answer".to_string(),
     });
 
@@ -456,10 +585,17 @@ fn test_conversation_starts_new_thinking_block_after_block_complete() {
         submission: "inspect state".to_string(),
     });
     model.apply(ConversationIntent::ObserveThinkingText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "first thought".to_string(),
     });
-    model.apply(ConversationIntent::CompleteBlock);
+    model.apply(ConversationIntent::CompleteBlock {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
+    });
     model.apply(ConversationIntent::ObserveThinkingText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "second thought".to_string(),
     });
 
@@ -482,15 +618,21 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
         submission: "check docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "结论先到".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -534,16 +676,25 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
         submission: "check docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "已经完成的文字".to_string(),
     });
-    model.apply(ConversationIntent::CompleteBlock);
+    model.apply(ConversationIntent::CompleteBlock {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
+    });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -582,6 +733,8 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         submission: "read docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
@@ -591,12 +744,16 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         image_count: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -637,12 +794,16 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         submission: "read docs".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -652,6 +813,8 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
@@ -742,12 +905,16 @@ fn test_conversation_keeps_tool_args_preview() {
         submission: "read file".to_string(),
     });
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
@@ -757,6 +924,8 @@ fn test_conversation_keeps_tool_args_preview() {
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -783,11 +952,18 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     });
     // LLM 先输出 assistant text（content_block 0）
     model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "让我来审查".to_string(),
     });
-    model.apply(ConversationIntent::CompleteBlock);
+    model.apply(ConversationIntent::CompleteBlock {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
+    });
     // ToolCallStart 用纯 tool 序号 index=0
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Agent".to_string(),
@@ -795,6 +971,8 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     });
     // ToolCall 用 content_block index=1（因为 text 占了 block 0）
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "call_agent_1".to_string(),
         name: "Agent".to_string(),
@@ -810,6 +988,8 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     });
     // Agent tool result
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "call_agent_1".to_string(),
         tool_name: "Agent".to_string(),
@@ -845,16 +1025,22 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         submission: "review".to_string(),
     });
     model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         text: "让我".to_string(),
     });
     // 不调 CompleteBlock — text 还在 streaming
     model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "call_abc".to_string(),
         name: "Agent".to_string(),
@@ -864,6 +1050,8 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "call_abc".to_string(),
         tool_name: "Agent".to_string(),
@@ -892,6 +1080,8 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     });
     // 不发送 ToolCallStart
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "call_agent_no_start".to_string(),
         name: "Agent".to_string(),
@@ -901,6 +1091,8 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         status: ToolCallStatus::Ready,
     });
     let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "call_agent_no_start".to_string(),
         tool_name: "Agent".to_string(),

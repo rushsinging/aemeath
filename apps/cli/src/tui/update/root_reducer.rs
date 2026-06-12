@@ -302,10 +302,17 @@ mod tests {
         model.conversation.apply(ConversationIntent::StartChat {
             submission: "read".to_string(),
         });
+        let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
+        let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-1");
+        model
+            .conversation
+            .ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         reduce_agent_event(
             &mut model,
             AgentEventMapping {
                 conversation: vec![ConversationIntent::ObserveToolCallStart {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
                     id: "tool-1".to_string(),
                     provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),
@@ -318,6 +325,8 @@ mod tests {
             &mut model,
             AgentEventMapping {
                 conversation: vec![ConversationIntent::ObserveToolCallUpdate {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
                     id: "tool-1".to_string(),
                     provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),

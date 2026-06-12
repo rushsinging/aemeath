@@ -108,6 +108,8 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
         false,
     );
     conversation.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "我看到 active bug 列表，下面是分析。".to_string(),
     });
 
@@ -147,12 +149,16 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         submission: "edit docs".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Edit".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Edit".to_string(),
@@ -163,6 +169,8 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         image_count: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Edit".to_string(),
@@ -276,12 +284,16 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         submission: "read file".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
@@ -328,12 +340,16 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -378,9 +394,14 @@ fn add_tool_after_thinking(
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveThinkingText {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "thinking".to_string(),
     });
-    conversation.apply(ConversationIntent::CompleteBlock);
+    conversation.apply(ConversationIntent::CompleteBlock {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+    });
     add_completed_tool(
         conversation,
         "tool-1",
@@ -400,12 +421,16 @@ fn add_completed_tool(
     is_error: bool,
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: id.to_string(),
         provider_id: None,
         name: name.to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
         id: id.to_string(),
         name: name.to_string(),
@@ -415,6 +440,8 @@ fn add_completed_tool(
         status: ToolCallStatus::Ready,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),
         id: id.to_string(),
         tool_name: name.to_string(),

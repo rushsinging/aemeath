@@ -100,12 +100,16 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         turn_id: ChatTurnId::new("runtime-turn-1"),
     });
     let changes = model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Bash".to_string(),

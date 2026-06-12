@@ -16,6 +16,8 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         submission: "x".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-orphan".to_string(),
         tool_name: "Read".to_string(),
@@ -60,12 +62,16 @@ fn test_non_embedded_tool_result_uses_summary() {
         submission: "search".to_string(),
     });
     conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: "tool-1".to_string(),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
     });
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: "tool-1".to_string(),
         name: "Read".to_string(),
@@ -75,6 +81,8 @@ fn test_non_embedded_tool_result_uses_summary() {
         status: ToolCallStatus::Ready,
     });
     conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-1".to_string(),
         tool_name: "Read".to_string(),
@@ -108,6 +116,8 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         .collect::<Vec<_>>()
         .join("\n");
     conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: "tool-orphan".to_string(),
         tool_name: "Bash".to_string(),
@@ -196,7 +206,7 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
     // 在 chats.turns.tool_calls 中找不到（find_tool_name_by_id=None），旧逻辑经
     // truncate 把完整带行号 output 当摘要逐行刷出（正文刷屏）。修复后只显示通用完成摘要。
     use crate::tui::model::conversation::block::ConversationBlock;
-    use crate::tui::model::conversation::ids::ToolCallId;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 
     let mut conversation = ConversationModel::default();
     // chats 为空 → 没有任何 tool_call 与该 ToolResult id 匹配（模拟 id 错位）。
@@ -206,6 +216,8 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
         .join("\n");
     conversation.blocks.push(ConversationBlock::ToolResult {
         id: ToolCallId::new("call_orphaned"),
+        chat_id: ChatId::new("chat-orphaned"),
+        turn_id: ChatTurnId::new("turn-orphaned"),
         output: output.clone(),
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,

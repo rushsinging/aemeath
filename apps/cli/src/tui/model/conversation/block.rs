@@ -1,4 +1,4 @@
-use super::ids::ToolCallId;
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum HookNoticeKind {
@@ -23,20 +23,28 @@ pub enum ConversationBlock {
     },
     AssistantText {
         id: String,
+        chat_id: Option<ChatId>,
+        turn_id: Option<ChatTurnId>,
         text: String,
     },
     Thinking {
         id: String,
+        chat_id: Option<ChatId>,
+        turn_id: Option<ChatTurnId>,
         text: String,
     },
     ToolCall {
         id: ToolCallId,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         name: String,
         summary: String,
         args_preview: String,
     },
     ToolResult {
         id: ToolCallId,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         output: String,
         content: serde_json::Value,
         is_error: bool,
@@ -128,6 +136,8 @@ mod tests {
     fn test_conversation_block_returns_text_id() {
         let block = ConversationBlock::AssistantText {
             id: "assistant-1".to_string(),
+            chat_id: None,
+            turn_id: None,
             text: "hello".to_string(),
         };
         assert_eq!(block.id(), "assistant-1");
@@ -137,6 +147,8 @@ mod tests {
     fn test_conversation_block_returns_tool_id() {
         let block = ConversationBlock::ToolCall {
             id: ToolCallId::new("tool-1"),
+            chat_id: ChatId::new("chat-1"),
+            turn_id: ChatTurnId::new("turn-1"),
             name: "Read".to_string(),
             summary: "read file".to_string(),
             args_preview: String::new(),

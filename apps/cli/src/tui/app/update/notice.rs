@@ -385,6 +385,8 @@ mod tests {
         app.model
             .conversation
             .apply(ConversationIntent::ObserveAssistantText {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
                 text: "后续回复".to_string(),
             });
         app.refresh_output_document_from_model();
@@ -429,6 +431,8 @@ mod tests {
         app.model
             .conversation
             .apply(ConversationIntent::ObserveAssistantText {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
                 text: "你好".to_string(),
             });
         app.refresh_output_document_from_model();
@@ -439,6 +443,8 @@ mod tests {
         app.model
             .conversation
             .apply(ConversationIntent::ObserveAssistantText {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
                 text: "世界".to_string(),
             });
         app.refresh_output_document_from_model();

@@ -1,4 +1,5 @@
 use super::block::HookNoticeContent;
+use super::ids::{ChatId, ChatTurnId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationIntent {
@@ -13,19 +14,30 @@ pub enum ConversationIntent {
         text: String,
     },
     ObserveAssistantText {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         text: String,
     },
     ObserveThinkingText {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         text: String,
     },
-    CompleteBlock,
+    CompleteBlock {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+    },
     ObserveToolCallStart {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ObserveToolCallUpdate {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         id: String,
         provider_id: Option<String>,
         name: String,
@@ -35,6 +47,8 @@ pub enum ConversationIntent {
         status: super::tool_call::ToolCallStatus,
     },
     ObserveToolResult {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         id: String,
         provider_id: String,
         tool_name: String,
