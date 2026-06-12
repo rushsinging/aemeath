@@ -450,7 +450,7 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
 }
 
 #[test]
-fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
+fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::StartChat {
         submission: "check docs".to_string(),
@@ -474,16 +474,6 @@ fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
         status: ToolCallStatus::Ready,
     });
 
-    let tool_pos = model
-        .blocks
-        .iter()
-        .position(|block| {
-            matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
-            )
-        })
-        .expect("tool block");
     let text_pos = model
         .blocks
         .iter()
@@ -494,10 +484,20 @@ fn test_conversation_places_late_tool_call_before_pending_assistant_text() {
             )
         })
         .expect("assistant text block");
+    let tool_pos = model
+        .blocks
+        .iter()
+        .position(|block| {
+            matches!(
+                block,
+                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
+            )
+        })
+        .expect("tool block");
 
     assert!(
-        tool_pos < text_pos,
-        "后到达的 tool call 应显示在待完成文本块之前"
+        text_pos < tool_pos,
+        "live 场景中后到达的 tool call 应显示在已出现文本之后"
     );
 }
 
