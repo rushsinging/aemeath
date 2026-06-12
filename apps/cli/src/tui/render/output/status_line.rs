@@ -80,7 +80,7 @@ impl OutputArea {
     ) -> Vec<Line<'static>> {
         if lines.len() > height {
             let offset = lines.len() - height;
-            log::debug!(
+            crate::tui::log_debug!(
                 "trim: lines.len={}, area.height={}, offset={}, screen_map.len={}",
                 lines.len(),
                 height,

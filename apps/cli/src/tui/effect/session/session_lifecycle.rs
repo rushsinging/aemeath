@@ -110,10 +110,10 @@ impl App {
                 .sync_current_messages(self.chat.messages.clone())
                 .await
             {
-                log::warn!("failed to sync session messages: {e}");
+                crate::tui::log_warn!("failed to sync session messages: {e}");
             }
             if let Err(e) = agent_client.save_current_session().await {
-                log::warn!("failed to auto-save session: {e}");
+                crate::tui::log_warn!("failed to auto-save session: {e}");
             }
         }
 

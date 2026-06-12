@@ -107,7 +107,7 @@ impl crate::tui::app::App {
     }
 
     fn report_history_restore_error(&mut self, error: HistoryDisplayParseError) {
-        log::warn!("skip invalid history message during resume: {error}");
+        crate::tui::log_warn!("skip invalid history message during resume: {error}");
         self.model
             .conversation
             .apply(ConversationIntent::AppendError {
