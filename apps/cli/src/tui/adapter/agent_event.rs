@@ -78,6 +78,16 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             name,
             index,
         } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                name,
+                index,
+            );
             let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
@@ -103,6 +113,20 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             summary,
             status,
         } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                name,
+                index,
+                status,
+                arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
+                arguments.is_some(),
+                summary.as_ref().map(|value| value.len()).unwrap_or(0),
+            );
             let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
@@ -139,6 +163,19 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             is_error,
             images,
         } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                tool_name,
+                output.len(),
+                json_value_kind(content),
+                is_error,
+                images.len(),
+            );
             let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
@@ -220,6 +257,17 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             conversation(ConversationIntent::CompleteChat)
         }
         _ => AgentEventMapping::default(),
+    }
+}
+
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 

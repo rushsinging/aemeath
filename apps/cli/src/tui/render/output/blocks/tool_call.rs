@@ -19,8 +19,19 @@ pub fn render_tool_call(
     let (header_text, detail_lines) = header_input
         .map(|summary| format_tool_call(&view.title, summary))
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
-    let icon_color = semantic_color(view.style);
-    // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本（颜色不变）。
+    log::debug!(
+        target: "cli::tui::tool_flow",
+        "render tool_call block_id={} title={} status={:?} args_len={} summary_len={} result_len={} detail_lines={} activity_present={}",
+        block_id,
+        view.title,
+        view.semantic_status,
+        view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
+        view.summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        detail_lines.len(),
+        view.activity_summary.is_some(),
+    );
+    let icon_color = semantic_color(view.style); // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本（颜色不变）。
     let title_text = header_text
         .strip_prefix('●')
         .unwrap_or(&header_text)

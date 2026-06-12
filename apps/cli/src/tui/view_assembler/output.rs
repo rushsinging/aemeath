@@ -230,6 +230,13 @@ impl OutputViewAssembler {
                 }
             }
         }
+        log::debug!(
+            target: "cli::tui::tool_flow",
+            "assemble output_view roots={} conversation_blocks={} version={}",
+            roots.len(),
+            conversation.blocks.len(),
+            version,
+        );
         OutputViewModel {
             roots,
             version,
@@ -317,6 +324,30 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                     continue;
                 }
                 let (icon, semantic_status, style) = map_tool_status(call.status);
+                let result_summary = call
+                    .result
+                    .as_deref()
+                    .filter(|result| !result.is_empty())
+                    .map(|result| {
+                        find_tool_result_content(conversation, tool_id)
+                            .map(|content| {
+                                display_text_for_tool_result(Some(&call.name), result, content)
+                            })
+                            .unwrap_or_else(|| result.to_string())
+                    });
+                log::debug!(
+                    target: "cli::tui::tool_flow",
+                    "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
+                    chat.id.as_ref(),
+                    turn.id.as_ref(),
+                    tool_id,
+                    call.name,
+                    call.status,
+                    call.args_preview.len(),
+                    call.summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                    result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                    call.activities.len(),
+                );
                 return Some(ToolCallBlockView {
                     key: format!("{}/{}/{}", chat.id.as_ref(), turn.id.as_ref(), tool_id),
                     chat_id: Some(chat.id.as_ref().to_string()),
@@ -333,17 +364,7 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                     // result 子块展示实际工具 output（供渲染层 format_result_lines 按
                     // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
                     // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
-                    result_summary: call
-                        .result
-                        .as_deref()
-                        .filter(|result| !result.is_empty())
-                        .map(|result| {
-                            find_tool_result_content(conversation, tool_id)
-                                .map(|content| {
-                                    display_text_for_tool_result(Some(&call.name), result, content)
-                                })
-                                .unwrap_or_else(|| result.to_string())
-                        }),
+                    result_summary,
                     collapsible: true,
                     collapsed: false,
                 });

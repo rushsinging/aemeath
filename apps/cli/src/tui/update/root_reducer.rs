@@ -46,6 +46,15 @@ pub fn update(model: &mut TuiModel, view_state: &mut AppViewState, msg: TuiMsg) 
         },
     };
     crate::tui::update::dirty::merge_dirty(&mut view_state.dirty, result.dirty.clone());
+    log::debug!(
+        target: "cli::tui::tool_flow",
+        "root update result dirty output={} status={} input={} dialog={} effects={}",
+        result.dirty.output,
+        result.dirty.status,
+        result.dirty.input,
+        result.dirty.dialog,
+        result.effects.len(),
+    );
     result
 }
 
