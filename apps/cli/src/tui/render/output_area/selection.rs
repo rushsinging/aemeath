@@ -143,7 +143,7 @@ impl super::OutputArea {
 
         for logic_idx in start_logic..=end_logic {
             if logic_idx >= total {
-                log::debug!(
+                crate::tui::log_debug!(
                     "get_selected_text: logic_idx {} >= total {}, breaking",
                     logic_idx,
                     total
@@ -172,7 +172,7 @@ impl super::OutputArea {
             };
             let selected_chars = safe_char_slice(&chars, from, to);
             if selected_chars.is_empty() {
-                log::debug!(
+                crate::tui::log_debug!(
                     "get_selected_text: empty clamped range logic={}, from={}, to={}, chars_len={}",
                     logic_idx,
                     from,
@@ -181,7 +181,7 @@ impl super::OutputArea {
                 );
                 continue;
             }
-            log::debug!(
+            crate::tui::log_debug!(
                 "get_selected_text: logic={}, from={}, to={}, chars_len={}, content={:?}",
                 logic_idx,
                 from,

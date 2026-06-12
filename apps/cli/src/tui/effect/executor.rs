@@ -68,7 +68,7 @@ impl App {
             return;
         };
         if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
-            log::warn!("sync failed: {e}");
+            crate::tui::log_warn!("sync failed: {e}");
         }
         match ac.save_current_session().await {
             Ok(()) => {
@@ -81,7 +81,7 @@ impl App {
                 }
             }
             Err(e) => {
-                log::warn!("save failed: {e}");
+                crate::tui::log_warn!("save failed: {e}");
                 if notify {
                     let _ = ui_tx
                         .send(UiEvent::SlashCommandFailed {
@@ -120,7 +120,7 @@ impl App {
         if let Some(ref ac) = self.agent_client {
             match ac.read_clipboard_image().await {
                 Ok(img) => self.accept_pending_clipboard_image(img),
-                Err(e) => log::warn!("clipboard read failed: {e}"),
+                Err(e) => crate::tui::log_warn!("clipboard read failed: {e}"),
             }
         }
     }
@@ -129,7 +129,7 @@ impl App {
         if let Some(ref ac) = self.agent_client {
             match ac.process_image_file(path).await {
                 Ok(img) => self.accept_pending_clipboard_image(img),
-                Err(e) => log::warn!("image process failed: {e}"),
+                Err(e) => crate::tui::log_warn!("image process failed: {e}"),
             }
         }
     }
@@ -152,7 +152,7 @@ impl App {
                     )));
             }
             Err(err) => {
-                log::warn!("复制选中内容失败: {err}");
+                crate::tui::log_warn!("复制选中内容失败: {err}");
                 self.model
                     .runtime
                     .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(err)));
@@ -221,7 +221,9 @@ impl App {
                         let _ = ui_tx.send(UiEvent::ReminderRecap(line)).await;
                     }
                 }
-                Err(e) => log::warn!("fetch reminder recap failed: {e}"),
+                Err(e) => {
+                    crate::tui::log_warn!("fetch reminder recap failed: {e}")
+                }
             }
         }
     }

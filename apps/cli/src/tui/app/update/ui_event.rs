@@ -20,14 +20,16 @@ impl App {
         match ev {
             UiEvent::Text { .. } => {
                 if self.chat.tool_call_active {
-                    log::debug!("[SPINNER] Text: tool_call_active was true, resetting to false");
+                    crate::tui::log_debug!(
+                        "[SPINNER] Text: tool_call_active was true, resetting to false"
+                    );
                     self.chat.clear_tool_activity();
                 }
                 self.spinner_phase(SpinnerPhase::Generating);
             }
             UiEvent::Thinking { .. } => {
                 if self.chat.tool_call_active {
-                    log::debug!(
+                    crate::tui::log_debug!(
                         "[SPINNER] Thinking: tool_call_active was true, resetting to false"
                     );
                     self.chat.clear_tool_activity();
@@ -38,7 +40,7 @@ impl App {
                 let _ = (context, text);
             }
             UiEvent::ToolCallStart { name, index, .. } => {
-                log::debug!(
+                crate::tui::log_debug!(
                     "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
                     self.chat.tool_call_active
                 );
@@ -49,7 +51,7 @@ impl App {
                 }
             }
             UiEvent::ToolCallUpdate { name, id, .. } => {
-                log::debug!(
+                crate::tui::log_debug!(
                     "[SPINNER] ToolCallUpdate({name}): tool_call_active={}",
                     self.chat.tool_call_active
                 );
@@ -66,7 +68,7 @@ impl App {
             } => {
                 let had_active_id = self.chat.has_active_tool_call(&id);
                 let remaining = self.chat.finish_tool_call(&id);
-                log::debug!(
+                crate::tui::log_debug!(
                     "[BUG#24] ToolResult({tool_name}): removed_id={had_active_id}, remaining_active_tools={remaining}"
                 );
                 if remaining == 0 {
@@ -96,7 +98,7 @@ impl App {
                 }
             }
             UiEvent::Error(msg) => {
-                log::debug!(
+                crate::tui::log_debug!(
                     "[SPINNER] Error: tool_call_active {} -> false",
                     self.chat.tool_call_active
                 );
@@ -295,11 +297,11 @@ impl App {
                 effects.push(Effect::FetchTaskStatus);
             }
             UiEvent::Done => {
-                log::debug!(
+                crate::tui::log_debug!(
                     "[SPINNER] Done: tool_call_active {} -> false",
                     self.chat.tool_call_active
                 );
-                log::info!(
+                crate::tui::log_info!(
                     "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),
@@ -312,11 +314,11 @@ impl App {
                 effects.extend(self.handle_done(ui_tx, None));
             }
             UiEvent::DoneWithDuration(elapsed) => {
-                log::debug!(
+                crate::tui::log_debug!(
                     "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
                     self.chat.tool_call_active
                 );
-                log::info!(
+                crate::tui::log_info!(
                     "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
                     self.session.session_id,
                     self.input.queue_len(),

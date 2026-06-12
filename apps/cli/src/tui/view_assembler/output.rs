@@ -259,7 +259,7 @@ fn leaf(block_id: String, kind: OutputBlockKind) -> BlockNode {
 /// 按嵌套规则表 + 深度上限校验后将 child 挂到 parent 下；不合法则记日志并丢弃（debug 断言失败）。
 fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
     if !allowed_child(&parent.kind, &child.kind) || depth >= MAX_BLOCK_DEPTH {
-        log::warn!(
+        crate::tui::log_warn!(
             "drop illegal child block: parent={} child={} depth={depth}",
             parent.block_id,
             child.block_id
@@ -336,8 +336,7 @@ fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<Too
                             .unwrap_or_else(|| result.to_string())
                     });
                 log::debug!(
-                    target: "cli::tui::tool_flow",
-                    "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
+                    target: "cli::tui::tool_flow",                    "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
                     chat.id.as_ref(),
                     turn.id.as_ref(),
                     tool_id,

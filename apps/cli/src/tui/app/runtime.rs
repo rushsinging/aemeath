@@ -25,10 +25,10 @@ impl App {
         self.input.ask_user_state = None;
         if let Some(agent_client) = &self.agent_client {
             if let Err(e) = agent_client.sync_current_messages(Vec::new()).await {
-                log::warn!("failed to reset SDK session messages: {e}");
+                crate::tui::log_warn!("failed to reset SDK session messages: {e}");
             }
             if let Err(e) = agent_client.clear_tasks().await {
-                log::warn!("failed to clear SDK task store: {e}");
+                crate::tui::log_warn!("failed to clear SDK task store: {e}");
             }
         }
         self.model
@@ -58,7 +58,7 @@ impl App {
             Some(agent_client) => match agent_client.task_status().await {
                 Ok(view) => view.lines,
                 Err(e) => {
-                    log::warn!("failed to fetch SDK task status: {e}");
+                    crate::tui::log_warn!("failed to fetch SDK task status: {e}");
                     return;
                 }
             },

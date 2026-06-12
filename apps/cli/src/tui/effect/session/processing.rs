@@ -240,7 +240,7 @@ pub fn spawn_processing(ctx: SpawnContext) {
                         })
                         .collect();
                     if let Err(e) = ctx.agent_client.sync_current_messages(messages).await {
-                        log::warn!("failed to sync drained queue messages: {e}");
+                        crate::tui::log_warn!("failed to sync drained queue messages: {e}");
                     }
                 }
             }

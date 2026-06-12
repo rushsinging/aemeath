@@ -102,7 +102,7 @@ impl OutputArea {
             view.scroll_offset,
         );
         if total_rendered > 0 {
-            log::debug!(
+            crate::tui::log_debug!(
                 "render: screen_map after trim: first=[{:?}], last=[{:?}], total={}",
                 self.screen_line_map.first(),
                 self.screen_line_map.last(),
