@@ -45,8 +45,8 @@ impl<'a> StreamHandler for TrackingHandler<'a> {
     fn on_raw_line(&mut self, line: &str) {
         self.inner.on_raw_line(line);
     }
-    fn on_text_block_complete(&mut self, full_text: &str) {
-        self.inner.on_text_block_complete(full_text);
+    fn on_block_complete(&mut self, full_text: &str) {
+        self.inner.on_block_complete(full_text);
     }
     fn on_thinking(&mut self, text: &str) {
         self.emitted = true;
@@ -136,7 +136,7 @@ pub(crate) async fn send_message_non_stream(
                 "text" => {
                     if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
                         handler.on_text(text);
-                        handler.on_text_block_complete(text);
+                        handler.on_block_complete(text);
                         content_blocks.push(ContentBlock::Text {
                             text: text.to_string(),
                         });

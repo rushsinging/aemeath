@@ -117,8 +117,8 @@ pub(crate) fn runtime_event_to_sdk_event(
                 text,
             }
         }
-        crate::business::chat::RuntimeStreamEvent::TextBlockComplete { context, text } => {
-            ChatEvent::TextBlockComplete {
+        crate::business::chat::RuntimeStreamEvent::BlockComplete { context, text } => {
+            ChatEvent::BlockComplete {
                 context: turn_context_to_sdk(context),
                 text,
             }

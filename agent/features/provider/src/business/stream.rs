@@ -159,7 +159,7 @@ pub async fn parse_stream(
                         thinking: std::mem::take(&mut current_thinking),
                     });
                 } else if !current_text.is_empty() {
-                    handler.on_text_block_complete(&current_text);
+                    handler.on_block_complete(&current_text);
                     content_blocks.push(ContentBlock::Text {
                         text: std::mem::take(&mut current_text),
                     });

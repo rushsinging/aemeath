@@ -148,7 +148,7 @@ pub(crate) async fn parse_ollama_stream(
 
     // Build final content blocks
     if !current_text.is_empty() {
-        handler.on_text_block_complete(&current_text);
+        handler.on_block_complete(&current_text);
         content_blocks.push(ContentBlock::Text { text: current_text });
     }
 

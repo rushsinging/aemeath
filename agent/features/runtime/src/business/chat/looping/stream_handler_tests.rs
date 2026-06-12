@@ -1,8 +1,6 @@
 use super::stream_handler::RuntimeStreamHandler;
 use super::tool_identity::ToolIdentityRegistry;
-use super::{
-    ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
-};
+use super::{ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext};
 use provider::api::StreamHandler;
 use std::sync::{Arc, Mutex};
 
@@ -55,30 +53,49 @@ fn test_stream_handler_keeps_runtime_tool_ids_unique_across_handlers() {
 }
 
 #[test]
-fn test_stream_handler_forwards_provider_id_on_start_and_delta() {
+fn test_stream_handler_emits_block_complete_between_thinking_and_tool_call() {
     let sink = RecordingSink::default();
     let mut handler = RuntimeStreamHandler::new(sink.clone());
 
-    handler.on_tool_use_start("Skill", Some("call-provider-skill"), 0);
-    handler.on_tool_arguments_delta(0, "Skill", Some("call-provider-skill"), r#"{"skill""#);
+    handler.on_thinking("first thought");
+    handler.on_tool_use_start("Read", Some("provider-tool"), 0);
+    handler.on_thinking("second thought");
 
     let events = sink.events.lock().unwrap();
-    assert!(events.iter().any(|event| matches!(
-        event,
-        RuntimeStreamEvent::ToolCallStart { provider_id, .. }
-            if provider_id.as_deref() == Some("call-provider-skill")
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        RuntimeStreamEvent::ToolCallUpdate {
-            provider_id,
-            status,
-            arguments_delta,
-            arguments,
-            ..
-        } if provider_id.as_deref() == Some("call-provider-skill")
-            && *status == RuntimeToolCallStatus::PendingArgs
-            && arguments_delta.as_deref() == Some(r#"{"skill""#)
-            && arguments.is_none()
-    )));
+    let event_kinds: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            RuntimeStreamEvent::Thinking { .. } => "thinking",
+            RuntimeStreamEvent::ToolCallStart { .. } => "tool_start",
+            RuntimeStreamEvent::BlockComplete { .. } => "complete",
+            _ => "other",
+        })
+        .collect();
+
+    assert_eq!(
+        event_kinds,
+        vec!["thinking", "complete", "tool_start", "thinking"]
+    );
+}
+
+#[test]
+fn test_stream_handler_emits_block_complete_when_text_kind_changes() {
+    let sink = RecordingSink::default();
+    let mut handler = RuntimeStreamHandler::new(sink.clone());
+
+    handler.on_thinking("thought");
+    handler.on_text("answer");
+
+    let events = sink.events.lock().unwrap();
+    let event_kinds: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            RuntimeStreamEvent::Thinking { .. } => "thinking",
+            RuntimeStreamEvent::Text { .. } => "text",
+            RuntimeStreamEvent::BlockComplete { .. } => "complete",
+            _ => "other",
+        })
+        .collect();
+
+    assert_eq!(event_kinds, vec!["thinking", "complete", "text"]);
 }

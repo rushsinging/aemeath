@@ -57,7 +57,7 @@ impl crate::tui::app::App {
                         .apply(ConversationIntent::ObserveAssistantText { text });
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteTextBlock);
+                        .apply(ConversationIntent::CompleteBlock);
                 }
                 HistoryAssistantBlock::Thinking(text) => {
                     self.model
@@ -65,7 +65,7 @@ impl crate::tui::app::App {
                         .apply(ConversationIntent::ObserveThinkingText { text });
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteTextBlock);
+                        .apply(ConversationIntent::CompleteBlock);
                 }
                 HistoryAssistantBlock::ToolUse { id, name, input } => {
                     let input_json = input.to_string();

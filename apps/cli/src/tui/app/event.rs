@@ -38,7 +38,7 @@ pub enum AppEvent {
         context: UiTurnContext,
         text: String,
     },
-    TextBlockComplete {
+    BlockComplete {
         context: UiTurnContext,
         text: String,
     },

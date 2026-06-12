@@ -253,8 +253,8 @@ pub enum ChatEvent {
         context: ChatEventContext,
         text: String,
     },
-    /// 文本块完成。
-    TextBlockComplete {
+    /// 块完成。
+    BlockComplete {
         context: ChatEventContext,
         text: String,
     },

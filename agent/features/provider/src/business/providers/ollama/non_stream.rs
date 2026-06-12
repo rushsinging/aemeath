@@ -110,7 +110,7 @@ impl OllamaProviderNonStream for OllamaProvider {
             if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
                 if !content.is_empty() {
                     handler.on_text(content);
-                    handler.on_text_block_complete(content);
+                    handler.on_block_complete(content);
                     content_blocks.push(ContentBlock::Text {
                         text: content.to_string(),
                     });
