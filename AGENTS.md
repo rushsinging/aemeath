@@ -35,6 +35,7 @@
 | `specs/tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `config-compat` 补默认值） |
 | `specs/prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
+| `specs/project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、COLA 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `runtime.md`） |
 | `specs/config-compat.md` | `agent/shared/src/config/**` —— 配置分层、provider 默认值 / env / base_url、Claude Code 兼容、运行时路径 | 新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级 |
 | `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
@@ -108,3 +109,4 @@ aemeath/                    # workspace root
 - MCP 工具的动态加载方式（当前通过 `mcp_loader.rs` + `serde_json::Value` 配置）。
 - Skill 系统的热重载策略。
 - 多模型 pool 的自动故障转移策略。
+- Server Foundation MVP 的落地路径（目前仅设计文档，尚无 `server` crate）。**server 代码落地时 MUST 同步在触发表补 `agent/features/server/**` 行并新增对应分片**，否则破坏渐进式披露的路径覆盖。
