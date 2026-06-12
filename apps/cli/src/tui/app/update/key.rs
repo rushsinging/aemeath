@@ -272,4 +272,34 @@ mod tests {
             CtrlCAction::WarnExit
         );
     }
+
+    #[test]
+    fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() {
+        let mut app = App::new(
+            "test-session".to_string(),
+            std::path::PathBuf::from("/tmp"),
+            "test-model".to_string(),
+        );
+        app.chat.start_processing();
+        app.model
+            .input
+            .apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+        let (ui_tx, _ui_rx) = mpsc::channel(1);
+        let spawn_refs = SpawnContextRefs { agent_client: None };
+        let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+        let result = app.update_key(key, &ui_tx, &spawn_refs);
+
+        assert_eq!(app.input.queue_preview(), "a\nb\nc");
+        assert_eq!(
+            app.live_status_view_model().queued_lines,
+            vec!["> [Copied Text 1]"]
+        );
+        assert!(matches!(
+            result.effects.as_slice(),
+            [Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::UserMessage { text, .. }
+            }] if text == "a\nb\nc"
+        ));
+    }
 }
