@@ -53,8 +53,8 @@ pub fn init_logging(logging_config: &LoggingConfig) {
         // 默认：UnifiedLogger 统一入口，6 个文件按 record.target() 路由
         if let Err(err) = UnifiedLogger::init(
             &logs_dir,
-            logging::LOG_MAX_BYTES,
-            logging::LOG_MAX_BACKUPS,
+            logging_config.max_bytes,
+            logging_config.max_backups,
             logging_config.role_logs_enabled,
             logging_config.to_level_filter(),
         ) {

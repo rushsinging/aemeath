@@ -69,7 +69,7 @@ fn default_level() -> String {
     "warn".to_string()
 }
 pub(crate) fn default_max_bytes() -> u64 {
-    10 * 1024 * 1024 // 10 MB
+    logging::LOG_MAX_BYTES
 }
 pub(crate) fn default_max_backups() -> usize {
     5
@@ -82,7 +82,7 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "warn".to_string(),
-            max_bytes: 10 * 1024 * 1024,
+            max_bytes: default_max_bytes(),
             max_backups: 5,
             retention_days: 30,
             sub_agent_log: SubAgentLogConfig::default(),

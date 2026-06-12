@@ -45,6 +45,6 @@ pub fn level_filter_from_str(level: &str) -> log::LevelFilter {
     }
 }
 
-pub const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+pub const LOG_MAX_BYTES: u64 = 100 * 1024 * 1024;
 pub const LOG_MAX_BACKUPS: usize = 5;
 pub const LOG_RETENTION_DAYS: u64 = 30;
