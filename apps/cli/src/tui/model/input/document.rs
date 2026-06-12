@@ -1,7 +1,11 @@
+use super::copied_text::CopiedTextSpan;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputDocument {
     pub buffer: String,
     pub cursor: usize,
+    pub copied_text_spans: Vec<CopiedTextSpan>,
+    next_copied_text_index: usize,
 }
 
 impl InputDocument {
@@ -13,12 +17,22 @@ impl InputDocument {
         let cursor = self.cursor.min(self.buffer.len());
         let cursor = clamp_to_char_boundary(&self.buffer, cursor);
         self.buffer.insert_str(cursor, text);
+        self.shift_spans_for_insert(cursor, text.len());
         self.cursor = cursor + text.len();
+    }
+
+    pub fn insert_pasted_text(&mut self, text: &str) {
+        if should_collapse_paste(text) {
+            self.insert_copied_text(text);
+        } else {
+            self.insert_text(text);
+        }
     }
 
     pub fn replace_text(&mut self, text: String) {
         self.buffer = text;
         self.cursor = self.buffer.len();
+        self.copied_text_spans.clear();
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
@@ -75,13 +89,21 @@ impl InputDocument {
         if self.cursor == 0 {
             return;
         }
+        if let Some((start, end)) = self.copied_text_span_for_backward_delete() {
+            self.delete_range(start, end);
+            return;
+        }
         let old_cursor = self.cursor;
         self.move_left();
-        self.buffer.drain(self.cursor..old_cursor);
+        self.delete_range(self.cursor, old_cursor);
     }
 
     pub fn delete_word_before_cursor(&mut self) {
         if self.cursor == 0 {
+            return;
+        }
+        if let Some((start, end)) = self.copied_text_span_for_backward_delete() {
+            self.delete_range(start, end);
             return;
         }
         let end = clamp_to_char_boundary(&self.buffer, self.cursor);
@@ -95,8 +117,7 @@ impl InputDocument {
             }
             start = idx;
         }
-        self.buffer.drain(start..end);
-        self.cursor = start;
+        self.delete_range(start, end);
     }
 
     pub fn delete_forward(&mut self) {
@@ -106,13 +127,38 @@ impl InputDocument {
         let start = self.cursor;
         self.move_right();
         let end = self.cursor;
-        self.buffer.drain(start..end);
-        self.cursor = start;
+        self.delete_range(start, end);
     }
 
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.cursor = 0;
+        self.copied_text_spans.clear();
+    }
+
+    pub fn display_text(&self) -> String {
+        self.buffer.clone()
+    }
+
+    pub fn expand_copied_text(&self) -> String {
+        if self.copied_text_spans.is_empty() {
+            return self.buffer.clone();
+        }
+        let mut expanded = String::new();
+        let mut cursor = 0;
+        let mut spans = self.copied_text_spans.clone();
+        spans.sort_by_key(|span| span.start);
+        for span in spans {
+            if span.start > cursor {
+                expanded.push_str(&self.buffer[cursor..span.start]);
+            }
+            expanded.push_str(&span.original);
+            cursor = span.end;
+        }
+        if cursor < self.buffer.len() {
+            expanded.push_str(&self.buffer[cursor..]);
+        }
+        expanded
     }
 
     /// 光标所在行号（从 0 开始）
@@ -216,6 +262,58 @@ impl InputDocument {
                 .unwrap_or(next_line.len());
         self.cursor = new_cursor;
     }
+
+    fn insert_copied_text(&mut self, original: &str) {
+        self.next_copied_text_index += 1;
+        let placeholder = format!("[Copied Text {}]", self.next_copied_text_index);
+        let cursor = clamp_to_char_boundary(&self.buffer, self.cursor.min(self.buffer.len()));
+        self.buffer.insert_str(cursor, &placeholder);
+        self.shift_spans_for_insert(cursor, placeholder.len());
+        let end = cursor + placeholder.len();
+        self.copied_text_spans
+            .push(CopiedTextSpan::new(placeholder, original, cursor, end));
+        self.cursor = end;
+    }
+
+    fn copied_text_span_for_backward_delete(&self) -> Option<(usize, usize)> {
+        self.copied_text_spans
+            .iter()
+            .find(|span| self.cursor > span.start && self.cursor <= span.end)
+            .map(|span| (span.start, span.end))
+    }
+
+    fn delete_range(&mut self, start: usize, end: usize) {
+        let start = clamp_to_char_boundary(&self.buffer, start.min(self.buffer.len()));
+        let end = clamp_to_char_boundary(&self.buffer, end.min(self.buffer.len()));
+        if start >= end {
+            self.cursor = start;
+            return;
+        }
+        self.buffer.drain(start..end);
+        let deleted_len = end - start;
+        self.copied_text_spans
+            .retain(|span| !(span.start >= start && span.end <= end));
+        for span in &mut self.copied_text_spans {
+            if span.start >= end {
+                span.start -= deleted_len;
+                span.end -= deleted_len;
+            }
+        }
+        self.cursor = start;
+    }
+
+    fn shift_spans_for_insert(&mut self, start: usize, len: usize) {
+        for span in &mut self.copied_text_spans {
+            if span.start >= start {
+                span.start += len;
+                span.end += len;
+            }
+        }
+    }
+}
+
+fn should_collapse_paste(text: &str) -> bool {
+    text.matches('\n').count() >= 2
 }
 
 fn clamp_to_char_boundary(text: &str, cursor: usize) -> usize {

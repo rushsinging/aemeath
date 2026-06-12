@@ -21,6 +21,7 @@ impl InputModel {
         match intent {
             InputIntent::InsertChar(ch) => self.insert_text(ch.to_string()),
             InputIntent::InsertText(text) => self.insert_text(text),
+            InputIntent::InsertPastedText(text) => self.insert_pasted_text(text),
             InputIntent::ReplaceText(text) => self.replace_text(text),
             InputIntent::MoveCursor(cursor) => {
                 self.document.move_cursor(cursor);
@@ -140,6 +141,13 @@ impl InputModel {
         self.completion.clear();
         self.history.selected_index = None;
         self.document.insert_text(&text);
+        self.text_changed()
+    }
+
+    fn insert_pasted_text(&mut self, text: String) -> Vec<InputChange> {
+        self.completion.clear();
+        self.history.selected_index = None;
+        self.document.insert_pasted_text(&text);
         self.text_changed()
     }
 
@@ -279,10 +287,11 @@ impl InputModel {
 
     fn submit(&mut self) -> Vec<InputChange> {
         let submission = InputSubmission {
-            text: self.document.buffer.clone(),
+            text: self.document.expand_copied_text(),
+            display_text: self.document.display_text(),
             attachments: self.attachments.clone(),
         };
-        self.history.entries.push(submission.text.clone());
+        self.history.entries.push(submission.display_text.clone());
         self.history.selected_index = None;
         self.history.saved_input.clear();
         self.attachments.clear();
@@ -388,6 +397,81 @@ mod tests {
         assert_eq!(model.history.entries, vec!["new".to_string()]);
         assert_eq!(model.history.selected_index, None);
         assert_eq!(model.history.saved_input, "");
+    }
+
+    #[test]
+    fn test_input_model_collapses_long_pasted_text_and_submits_original() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+
+        assert_eq!(model.document.buffer, "[Copied Text 1]");
+
+        let changes = model.apply(InputIntent::Submit);
+        let submission = changes
+            .iter()
+            .find_map(|change| match change {
+                InputChange::Submitted { submission } => Some(submission),
+                _ => None,
+            })
+            .expect("应产生提交变更");
+        assert_eq!(submission.text, "a\nb\nc");
+        assert_eq!(submission.display_text, "[Copied Text 1]");
+    }
+
+    #[test]
+    fn test_input_model_does_not_collapse_two_line_paste() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb".to_string()));
+
+        assert_eq!(model.document.buffer, "a\nb");
+    }
+
+    #[test]
+    fn test_input_model_backspace_deletes_copied_text_as_atomic_block() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+
+        model.apply(InputIntent::DeleteBackward);
+
+        assert_eq!(model.document.buffer, "");
+        assert_eq!(model.document.cursor, 0);
+        assert_eq!(model.document.expand_copied_text(), "");
+    }
+
+    #[test]
+    fn test_input_model_backspace_inside_copied_text_deletes_atomic_block() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+        model.apply(InputIntent::MoveCursor(5));
+
+        model.apply(InputIntent::DeleteBackward);
+
+        assert_eq!(model.document.buffer, "");
+        assert_eq!(model.document.cursor, 0);
+        assert_eq!(model.document.expand_copied_text(), "");
+    }
+
+    #[test]
+    fn test_input_model_ctrl_backspace_deletes_copied_text_as_atomic_block() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+
+        model.apply(InputIntent::DeleteWordBeforeCursor);
+
+        assert_eq!(model.document.buffer, "");
+        assert_eq!(model.document.cursor, 0);
+        assert_eq!(model.document.expand_copied_text(), "");
+    }
+
+    #[test]
+    fn test_input_model_copied_text_counter_increments_per_long_paste() {
+        let mut model = InputModel::default();
+        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+        model.apply(InputIntent::InsertText(" ".to_string()));
+        model.apply(InputIntent::InsertPastedText("d\ne\nf".to_string()));
+
+        assert_eq!(model.document.buffer, "[Copied Text 1] [Copied Text 2]");
+        assert_eq!(model.document.expand_copied_text(), "a\nb\nc d\ne\nf");
     }
 
     #[test]

@@ -39,6 +39,7 @@ mod tests {
         let route = route_submission(
             InputSubmission {
                 text: "hello".to_string(),
+                display_text: "hello".to_string(),
                 attachments: Vec::new(),
             },
             ConversationAvailability::Idle,
@@ -52,6 +53,7 @@ mod tests {
         let route = route_submission(
             InputSubmission {
                 text: "hello".to_string(),
+                display_text: "hello".to_string(),
                 attachments: Vec::new(),
             },
             ConversationAvailability::Running,
@@ -65,6 +67,7 @@ mod tests {
         let route = route_submission(
             InputSubmission {
                 text: "yes".to_string(),
+                display_text: "yes".to_string(),
                 attachments: Vec::new(),
             },
             ConversationAvailability::Idle,

@@ -62,9 +62,9 @@ impl crate::tui::app::App {
                 }
             });
         } else {
-            self.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertText(
-                text,
-            ));
+            self.handle_input_intent(
+                crate::tui::model::input::intent::InputIntent::InsertPastedText(text),
+            );
             self.update_suggestions();
         }
     }

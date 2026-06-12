@@ -306,6 +306,21 @@ mod tests {
     }
 
     #[test]
+    fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
+        let mut app = make_app();
+        app.enqueue_submission_echo("[Copied Text 1]");
+
+        let has_queued = app.model.conversation.blocks.iter().any(|block| {
+            matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "[Copied Text 1]")
+        });
+        assert!(has_queued, "排队区应显示折叠占位符");
+        assert_eq!(
+            app.live_status_view_model().queued_lines,
+            vec!["> [Copied Text 1]"]
+        );
+    }
+
+    #[test]
     fn test_clear_queued_submission_echo_removes_queued_blocks_no_double_display() {
         // 边界 + 关键：drain 时先清排队块，再以正式 UserMessage 回显——
         // 验证清除后不再有 QueuedUserMessage（避免与已发送回显双显示）。

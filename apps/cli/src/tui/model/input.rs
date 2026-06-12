@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod change;
 pub mod completion;
 pub mod completion_item;
+pub mod copied_text;
 pub mod document;
 pub mod history;
 pub mod intent;

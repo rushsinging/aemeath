@@ -5,6 +5,7 @@ use super::mode::InputMode;
 pub enum InputIntent {
     InsertChar(char),
     InsertText(String),
+    InsertPastedText(String),
     ReplaceText(String),
     MoveCursor(usize),
     MoveCursorLeft,
