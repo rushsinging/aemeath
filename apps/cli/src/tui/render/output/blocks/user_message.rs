@@ -10,13 +10,17 @@ pub fn render_user_message(block_id: &str, view: &TextBlockView, ctx: &RenderCtx
     // 前导 `> ` marker 与续行缩进现由 gutter 注入（UserMessage → ">"），组件只渲染原文。
     let mut lines = Vec::new();
     for line in view.text.lines() {
+        if line.is_empty() {
+            lines.push(RenderedLine::empty());
+            continue;
+        }
         lines.extend(wrap_spans_to_rendered_lines(
             vec![Span::styled(line.to_string(), style)],
             ctx.width as usize,
         ));
     }
     if lines.is_empty() {
-        lines.push(RenderedLine::new(vec![Span::styled(String::new(), style)]));
+        lines.push(RenderedLine::empty());
     }
     RenderedBlock {
         block_id: block_id.to_string(),
@@ -57,6 +61,21 @@ mod tests {
         assert_eq!(block.lines[1].plain, "b");
         assert_eq!(block.lines[0].spans[0].style.bg, Some(theme::USER_BG));
         assert_eq!(block.lines[1].spans[0].style.bg, Some(theme::USER_BG));
+    }
+
+    #[test]
+    fn test_user_message_blank_line_has_no_filler_span() {
+        let view = TextBlockView {
+            key: "u".into(),
+            text: "a\n\nb".into(),
+            style: SemanticStyle::Normal,
+        };
+        let block = render_user_message("u", &view, &RenderCtx { width: 80 });
+
+        assert_eq!(block.lines[0].plain, "a");
+        assert_eq!(block.lines[1].plain, "");
+        assert!(block.lines[1].spans.is_empty());
+        assert_eq!(block.lines[2].plain, "b");
     }
 
     #[test]

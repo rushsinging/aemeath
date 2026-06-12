@@ -3,6 +3,7 @@
 //! 不变式：每个 `RenderedLine` 的 `plain` 等于其 `spans` 可见文本拼接
 //! （见 primitives / blocks 各组件单测断言）。
 
+use ratatui::style::Style;
 use ratatui::text::Span;
 
 /// 渲染管线的渲染上下文。
@@ -25,6 +26,8 @@ pub struct RenderedLine {
     pub plain: String,
     /// 前导 gutter 的显示列数（亦即 spans 首部 gutter 字符数）。无 gutter 时为 0。
     pub gutter_cols: usize,
+    /// 整条可见行的填充样式。由最终 buffer render 负责填满行宽，不进入 plain。
+    pub fill_style: Option<Style>,
 }
 
 impl RenderedLine {
@@ -38,6 +41,23 @@ impl RenderedLine {
             spans,
             plain,
             gutter_cols: 0,
+            fill_style: None,
+        }
+    }
+
+    /// 构造一条空渲染行。
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// 从纯文本构造渲染行。
+    pub fn from_plain(text: impl Into<String>) -> Self {
+        let plain = text.into();
+        Self {
+            spans: vec![Span::raw(plain.clone())],
+            plain,
+            gutter_cols: 0,
+            fill_style: None,
         }
     }
 
@@ -47,7 +67,19 @@ impl RenderedLine {
             spans,
             plain,
             gutter_cols: 0,
+            fill_style: None,
         }
+    }
+
+    /// 设置整行填充样式。
+    pub fn with_fill_style(mut self, style: Style) -> Self {
+        self.fill_style = Some(style);
+        self
+    }
+
+    /// 原地设置整行填充样式。
+    pub fn set_fill_style(&mut self, style: Style) {
+        self.fill_style = Some(style);
     }
 }
 
@@ -56,6 +88,16 @@ impl RenderedLine {
 pub struct RenderedBlock {
     pub block_id: String,
     pub lines: Vec<RenderedLine>,
+}
+
+impl RenderedBlock {
+    /// 为 block 内所有行设置统一填充样式。
+    pub fn with_line_fill_style(mut self, style: Style) -> Self {
+        for line in &mut self.lines {
+            line.set_fill_style(style);
+        }
+        self
+    }
 }
 
 /// 整个输出文档的渲染产物（按 block 顺序）。
@@ -96,6 +138,25 @@ mod tests {
         let line = RenderedLine::with_plain(vec![Span::raw("**x**")], "x".to_string());
 
         assert_eq!(line.plain, "x");
+    }
+
+    #[test]
+    fn test_rendered_line_with_fill_style_preserves_plain_text() {
+        let fill = Style::default().bg(Color::Blue);
+        let line = RenderedLine::from_plain("hello").with_fill_style(fill);
+
+        assert_eq!(line.plain, "hello");
+        assert_eq!(line.fill_style, Some(fill));
+    }
+
+    #[test]
+    fn test_rendered_line_empty_with_fill_style_has_no_filler_text() {
+        let fill = Style::default().bg(Color::Blue);
+        let line = RenderedLine::empty().with_fill_style(fill);
+
+        assert_eq!(line.plain, "");
+        assert!(line.spans.is_empty());
+        assert_eq!(line.fill_style, Some(fill));
     }
 
     #[test]

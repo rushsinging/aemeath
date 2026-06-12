@@ -105,6 +105,7 @@ pub fn apply_gutter_with_frame(
             spans.extend(line.spans);
             let mut gutted = RenderedLine::with_plain(spans, line.plain);
             gutted.gutter_cols = gutter_cols;
+            gutted.fill_style = line.fill_style;
             gutted
         })
         .collect()

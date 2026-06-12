@@ -5,6 +5,7 @@ use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, Rend
 use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
+use ratatui::style::Style;
 
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
@@ -78,13 +79,18 @@ impl OutputDocumentRenderer {
             version: node.block_version,
             width,
         };
-        let rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
+        let mut rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
             self.render_count.set(self.render_count.get() + 1);
             node.kind.component().render_self(&node.block_id, ctx)
         });
-        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
-        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
+        if matches!(
+            node.kind,
+            crate::tui::view_model::output::OutputBlockKind::UserMessage(_)
+        ) {
+            rendered = rendered.with_line_fill_style(Style::default().bg(theme::USER_BG));
+        }
+        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
         let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
             &node.kind,
             depth,
@@ -129,13 +135,7 @@ fn wrap_user_message_card_lines(lines: &mut Vec<RenderedLine>) {
 }
 
 fn user_message_card_spacer_line(gutter_cols: usize) -> RenderedLine {
-    let mut line = RenderedLine::new(vec![ratatui::text::Span::styled(
-        " ".repeat(gutter_cols),
-        ratatui::style::Style::default()
-            .fg(theme::USER)
-            .bg(theme::USER_BG),
-    )]);
-    line.plain.clear();
+    let mut line = RenderedLine::empty().with_fill_style(Style::default().bg(theme::USER_BG));
     line.gutter_cols = gutter_cols;
     line
 }
@@ -329,10 +329,60 @@ mod tests {
         assert_eq!(lines[1].plain, "", "用户消息上方应有背景空行");
         assert_eq!(lines[2].plain, "hello");
         assert_eq!(lines[3].plain, "", "用户消息下方应有背景空行");
-        assert_eq!(lines[1].spans[0].style.bg, Some(theme::USER_BG));
+        assert_eq!(lines[0].fill_style.and_then(|style| style.bg), None);
+        assert_eq!(
+            lines[1].fill_style.and_then(|style| style.bg),
+            Some(theme::USER_BG)
+        );
+        assert_eq!(
+            lines[2].fill_style.and_then(|style| style.bg),
+            Some(theme::USER_BG)
+        );
+        assert_eq!(
+            lines[3].fill_style.and_then(|style| style.bg),
+            Some(theme::USER_BG)
+        );
+        assert!(lines[1].spans.is_empty());
         assert_eq!(lines[2].spans[1].style.bg, Some(theme::USER_BG));
-        assert_eq!(lines[3].spans[0].style.bg, Some(theme::USER_BG));
+        assert!(lines[3].spans.is_empty());
         assert_eq!(lines[2].spans[1].style.fg, Some(theme::USER));
+    }
+
+    #[test]
+    fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
+        let kind = OutputBlockKind::UserMessage(TextBlockView {
+            key: "u".into(),
+            text: "a\n\nb".into(),
+            style: SemanticStyle::Normal,
+        });
+        let user = BlockNode {
+            block_id: "u".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: Vec::new(),
+        };
+        let vm = vm_with_roots(vec![user]);
+        let mut renderer = OutputDocumentRenderer::default();
+        let doc = renderer.render_tree(&vm, 80);
+        let lines = &doc.blocks[0].lines;
+
+        assert_eq!(lines.len(), 6);
+        assert_eq!(lines[0].plain, "", "root 分隔空行不属于用户消息卡片");
+        assert_eq!(lines[1].plain, "", "用户消息上方 spacer");
+        assert_eq!(lines[2].plain, "a");
+        assert_eq!(lines[3].plain, "", "用户消息内部空行");
+        assert_eq!(lines[4].plain, "b");
+        assert_eq!(lines[5].plain, "", "用户消息下方 spacer");
+        assert!(lines[1..].iter().all(|line| line
+            .fill_style
+            .is_some_and(|style| style.bg == Some(theme::USER_BG))));
+        assert!(lines.iter().all(|line| !line.plain.ends_with(' ')));
+        assert!(lines[1].spans.is_empty());
+        assert!(
+            lines[3].spans.len() <= 1,
+            "内部空行只允许 gutter chrome，不允许文本 filler"
+        );
+        assert!(lines[5].spans.is_empty());
     }
 
     fn rb(id: &str, lines: usize) -> RenderedBlock {
