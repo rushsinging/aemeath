@@ -73,10 +73,12 @@ fn test_stream_handler_forwards_provider_id_on_start_and_delta() {
         RuntimeStreamEvent::ToolCallUpdate {
             provider_id,
             status,
+            arguments_delta,
             arguments,
             ..
         } if provider_id.as_deref() == Some("call-provider-skill")
             && *status == RuntimeToolCallStatus::PendingArgs
-            && arguments.as_deref() == Some(r#"{"skill""#)
+            && arguments_delta.as_deref() == Some(r#"{"skill""#)
+            && arguments.is_none()
     )));
 }

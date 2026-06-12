@@ -51,7 +51,8 @@ where
                 provider_id: Some(call.provider_id.clone()),
                 name: call.name.clone(),
                 index: call.index,
-                arguments: Some(call.input.to_string()),
+                arguments_delta: None,
+                arguments: Some(call.input.clone()),
                 summary: Some(call.input.to_string()),
                 status: RuntimeToolCallStatus::Ready,
             })
@@ -126,7 +127,8 @@ where
                 provider_id: Some(call.provider_id.clone()),
                 name: call.name.clone(),
                 index: call.index,
-                arguments: Some(call.input.to_string()),
+                arguments_delta: None,
+                arguments: Some(call.input.clone()),
                 summary: Some(call.input.to_string()),
                 status: RuntimeToolCallStatus::Ready,
             })
