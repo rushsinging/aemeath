@@ -20,18 +20,12 @@ impl App {
         match ev {
             UiEvent::Text { .. } => {
                 if self.chat.tool_call_active {
-                    crate::tui::log_debug!(
-                        "[SPINNER] Text: tool_call_active was true, resetting to false"
-                    );
                     self.chat.clear_tool_activity();
                 }
                 self.spinner_phase(SpinnerPhase::Generating);
             }
             UiEvent::Thinking { .. } => {
                 if self.chat.tool_call_active {
-                    crate::tui::log_debug!(
-                        "[SPINNER] Thinking: tool_call_active was true, resetting to false"
-                    );
                     self.chat.clear_tool_activity();
                 }
                 self.spinner_phase(SpinnerPhase::Thinking);
@@ -39,38 +33,26 @@ impl App {
             UiEvent::TextBlockComplete { context, text } => {
                 let _ = (context, text);
             }
-            UiEvent::ToolCallStart { name, index, .. } => {
-                crate::tui::log_debug!(
-                    "[SPINNER] ToolCallStart({name}[{index}]): tool_call_active {} -> true",
-                    self.chat.tool_call_active
-                );
-                self.chat.start_tool_activity();
-                // AskUserQuestion 等待用户回复期间不应显示 spinner
+            UiEvent::ToolCallStart { name, index: _, .. } => {
+                self.chat.start_tool_activity(); // AskUserQuestion 等待用户回复期间不应显示 spinner
                 if name != "AskUserQuestion" {
                     self.spinner_phase(SpinnerPhase::CallingTool(name));
                 }
             }
             UiEvent::ToolCallUpdate { name, id, .. } => {
-                crate::tui::log_debug!(
-                    "[SPINNER] ToolCallUpdate({name}): tool_call_active={}",
-                    self.chat.tool_call_active
-                );
                 self.chat.register_tool_call(id.clone());
                 self.spinner_phase(SpinnerPhase::CallingTool(name));
             }
             UiEvent::ToolResult {
                 id,
-                tool_name,
+                tool_name: _,
                 output: _,
                 is_error: _,
                 images: _,
                 ..
             } => {
-                let had_active_id = self.chat.has_active_tool_call(&id);
+                let _had_active_id = self.chat.has_active_tool_call(&id);
                 let remaining = self.chat.finish_tool_call(&id);
-                crate::tui::log_debug!(
-                    "[BUG#24] ToolResult({tool_name}): removed_id={had_active_id}, remaining_active_tools={remaining}"
-                );
                 if remaining == 0 {
                     // All tool results received — agent loop will continue with next API call.
                     // Restart spinner to show "waiting for next response" state.
@@ -98,12 +80,7 @@ impl App {
                 }
             }
             UiEvent::Error(msg) => {
-                crate::tui::log_debug!(
-                    "[SPINNER] Error: tool_call_active {} -> false",
-                    self.chat.tool_call_active
-                );
-                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
-                // 此处不再重复写 output_area（消除双表示）。
+                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，                // 此处不再重复写 output_area（消除双表示）。
                 self.spinner_stop();
                 self.chat.stop_processing();
                 return UpdateResult::one(Effect::RunHook {
@@ -297,37 +274,9 @@ impl App {
                 effects.push(Effect::FetchTaskStatus);
             }
             UiEvent::Done => {
-                crate::tui::log_debug!(
-                    "[SPINNER] Done: tool_call_active {} -> false",
-                    self.chat.tool_call_active
-                );
-                crate::tui::log_info!(
-                    "[bug49_input_queue_at_done] session_id={} event=Done input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
-                    self.session.session_id,
-                    self.input.queue_len(),
-                    self.model.conversation.queued_submissions.len(),
-                    self.chat.is_processing,
-                    self.chat.tool_call_active,
-                    self.chat.active_tool_call_ids.len(),
-                    self.model.input.document.is_empty(),                    self.input.queue_preview()
-                );
                 effects.extend(self.handle_done(ui_tx, None));
             }
             UiEvent::DoneWithDuration(elapsed) => {
-                crate::tui::log_debug!(
-                    "[SPINNER] DoneWithDuration: tool_call_active {} -> false",
-                    self.chat.tool_call_active
-                );
-                crate::tui::log_info!(
-                    "[bug49_input_queue_at_done] session_id={} event=DoneWithDuration input_queue_len={} queued_submissions_len={} is_processing={} tool_call_active={} active_tool_call_ids={} input_area_empty={} input_queue_front_preview={:?}",
-                    self.session.session_id,
-                    self.input.queue_len(),
-                    self.model.conversation.queued_submissions.len(),
-                    self.chat.is_processing,
-                    self.chat.tool_call_active,
-                    self.chat.active_tool_call_ids.len(),
-                    self.model.input.document.is_empty(),                    self.input.queue_preview()
-                );
                 effects.extend(self.handle_done(ui_tx, Some(elapsed)));
             }
         }

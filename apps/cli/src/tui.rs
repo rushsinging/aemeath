@@ -8,6 +8,9 @@ pub mod view_assembler;
 pub mod view_model;
 pub mod view_state;
 
+#[cfg(test)]
+mod log_scope_tests;
+
 pub(crate) const LOG_TARGET: &str = "cli::tui";
 
 #[macro_export]
@@ -45,7 +48,7 @@ macro_rules! tui_log_trace {
     };
 }
 
-pub(crate) use {tui_log_debug as log_debug, tui_log_info as log_info, tui_log_warn as log_warn};
+pub(crate) use {tui_log_info as log_info, tui_log_warn as log_warn};
 
 #[cfg(test)]
 mod tests {

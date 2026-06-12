@@ -76,7 +76,6 @@ impl OutputArea {
         line_fill_styles.resize(display_lines.len(), None);
         let line_fill_styles = trim_line_fill_styles(line_fill_styles, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
-        let display_line_count = display_lines.len();
 
         paint_line_fill_styles(content_area, buf, &line_fill_styles);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -84,31 +83,6 @@ impl OutputArea {
             paragraph.render(content_area, buf);
         }));
 
-        let total_rendered = self.screen_line_map.len();
-        log::debug!(
-            target: "cli::tui::tool_flow",
-            "output_area render area={}x{} doc_lines={} visible_lines={} range={}..{} display_lines={} spinner={} task_lines={} queued_lines={} auto_scroll={} scroll_offset={}",
-            area.width,
-            area.height,
-            total_lines,
-            visible_lines,
-            start,
-            end,
-            display_line_count,
-            spinner_line.is_some(),
-            live_status.task_lines.len(),
-            live_status.queued_lines.len(),
-            view.auto_scroll,
-            view.scroll_offset,
-        );
-        if total_rendered > 0 {
-            crate::tui::log_debug!(
-                "render: screen_map after trim: first=[{:?}], last=[{:?}], total={}",
-                self.screen_line_map.first(),
-                self.screen_line_map.last(),
-                total_rendered,
-            );
-        }
         render_scrollbar(
             area,
             buf,

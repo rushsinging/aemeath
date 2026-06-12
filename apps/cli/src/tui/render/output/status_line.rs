@@ -80,13 +80,6 @@ impl OutputArea {
     ) -> Vec<Line<'static>> {
         if lines.len() > height {
             let offset = lines.len() - height;
-            crate::tui::log_debug!(
-                "trim: lines.len={}, area.height={}, offset={}, screen_map.len={}",
-                lines.len(),
-                height,
-                offset,
-                self.screen_line_map.len()
-            );
             let mapped_drop = clamp_split_index(offset, self.screen_line_map.len());
             self.screen_line_map = self.screen_line_map.split_off(mapped_drop);
             let visible_map_len = self.screen_line_map.len().min(height);

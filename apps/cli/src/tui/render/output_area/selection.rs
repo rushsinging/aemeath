@@ -1,6 +1,6 @@
 use sdk::{char_to_byte, CharIdx, StrSlice};
 
-use crate::tui::render::display::safe_text::{safe_char_slice, safe_str_slice_by_char};
+use crate::tui::render::display::safe_text::safe_char_slice;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::OutputViewState;
 
@@ -143,11 +143,6 @@ impl super::OutputArea {
 
         for logic_idx in start_logic..=end_logic {
             if logic_idx >= total {
-                crate::tui::log_debug!(
-                    "get_selected_text: logic_idx {} >= total {}, breaking",
-                    logic_idx,
-                    total
-                );
                 break;
             }
 
@@ -172,23 +167,8 @@ impl super::OutputArea {
             };
             let selected_chars = safe_char_slice(&chars, from, to);
             if selected_chars.is_empty() {
-                crate::tui::log_debug!(
-                    "get_selected_text: empty clamped range logic={}, from={}, to={}, chars_len={}",
-                    logic_idx,
-                    from,
-                    to,
-                    chars.len()
-                );
                 continue;
             }
-            crate::tui::log_debug!(
-                "get_selected_text: logic={}, from={}, to={}, chars_len={}, content={:?}",
-                logic_idx,
-                from,
-                to,
-                chars.len(),
-                safe_str_slice_by_char(&content, 0, 60)
-            );
             result.extend(selected_chars.iter());
         }
 
