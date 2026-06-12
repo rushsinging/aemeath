@@ -1,5 +1,6 @@
 use ratatui::{
     layout::Rect,
+    style::Style,
     text::Line,
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
@@ -8,7 +9,6 @@ use sdk::CharIdx;
 
 use super::OutputArea;
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
-use crate::tui::render::theme;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
 
@@ -52,7 +52,7 @@ impl OutputArea {
         let mut screen_map = Vec::new();
         let mut rendered_content = std::collections::HashMap::new();
         let mut display_lines = Vec::new();
-        let mut user_line_backgrounds = Vec::new();
+        let mut line_fill_styles = Vec::new();
 
         for idx in start..end {
             let Some(line) = document_lines.get(idx) else {
@@ -66,23 +66,23 @@ impl OutputArea {
             screen_map.push((idx, CharIdx::ZERO, char_end));
             rendered_content.insert(idx, plain);
             let spans = apply_selection_overlay(line, sel_range_for_line(view, line, idx));
-            user_line_backgrounds.push(is_user_message_line(line));
+            line_fill_styles.push(line.fill_style);
             display_lines.push(Line::from(spans));
         }
 
         self.screen_line_map = screen_map;
         self.rendered_line_content = rendered_content;
         self.append_status_lines(&mut display_lines, &spinner_line, live_status, view);
-        user_line_backgrounds.resize(display_lines.len(), false);
-        let user_line_backgrounds = trim_line_flags(user_line_backgrounds, area.height as usize);
+        line_fill_styles.resize(display_lines.len(), None);
+        let line_fill_styles = trim_line_fill_styles(line_fill_styles, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
         let display_line_count = display_lines.len();
 
+        paint_line_fill_styles(content_area, buf, &line_fill_styles);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(display_lines);
             paragraph.render(content_area, buf);
         }));
-        paint_user_message_line_background(content_area, buf, &user_line_backgrounds);
 
         let total_rendered = self.screen_line_map.len();
         log::debug!(
@@ -196,43 +196,37 @@ fn clear_area(area: Rect, buf: &mut ratatui::buffer::Buffer) {
     }
 }
 
-fn paint_user_message_line_background(
+fn paint_line_fill_styles(
     area: Rect,
     buf: &mut ratatui::buffer::Buffer,
-    user_line_backgrounds: &[bool],
+    fill_styles: &[Option<Style>],
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    for (row, should_paint) in user_line_backgrounds.iter().enumerate() {
+    for (row, fill_style) in fill_styles.iter().enumerate() {
         if row >= area.height as usize {
             break;
         }
-        if !should_paint {
+        let Some(style) = fill_style else {
             continue;
-        }
+        };
         let y = area.y + row as u16;
         for x in area.left()..area.right() {
             if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_bg(theme::USER_BG);
+                cell.set_style(*style);
             }
         }
     }
 }
 
-fn trim_line_flags(flags: Vec<bool>, height: usize) -> Vec<bool> {
-    let len = flags.len();
+fn trim_line_fill_styles(styles: Vec<Option<Style>>, height: usize) -> Vec<Option<Style>> {
+    let len = styles.len();
     if len > height {
-        flags.into_iter().skip(len - height).collect()
+        styles.into_iter().skip(len - height).collect()
     } else {
-        flags
+        styles
     }
-}
-
-fn is_user_message_line(line: &crate::tui::render::output::rendered::RenderedLine) -> bool {
-    line.spans
-        .iter()
-        .any(|span| span.style.bg == Some(theme::USER_BG))
 }
 
 fn render_scrollbar(
@@ -330,6 +324,60 @@ mod tests {
     }
 
     #[test]
+    fn test_output_area_paints_fill_style_for_short_and_empty_lines() {
+        let fill = ratatui::style::Style::default().bg(ratatui::style::Color::Blue);
+        let mut area = OutputArea::new();
+        area.replace_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "filled".into(),
+                lines: vec![
+                    RenderedLine::from_plain("hi").with_fill_style(fill),
+                    RenderedLine::empty().with_fill_style(fill),
+                ],
+            }],
+        });
+        let area_rect = Rect::new(0, 0, 8, 3);
+        let view = OutputViewState {
+            last_visible_height: 3,
+            ..Default::default()
+        };
+        let mut buf = Buffer::empty(area_rect);
+
+        area.render(area_rect, &mut buf, &view, &no_live_status());
+
+        for x in 0..8 {
+            assert_eq!(buf[(x, 0)].bg, ratatui::style::Color::Blue);
+            assert_eq!(buf[(x, 1)].bg, ratatui::style::Color::Blue);
+        }
+        assert_ne!(buf[(0, 2)].bg, ratatui::style::Color::Blue);
+    }
+
+    #[test]
+    fn test_output_area_selection_overrides_fill_style_on_text_cells() {
+        let fill = ratatui::style::Style::default().bg(ratatui::style::Color::Blue);
+        let mut area = OutputArea::new();
+        area.replace_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "filled".into(),
+                lines: vec![RenderedLine::from_plain("hello").with_fill_style(fill)],
+            }],
+        });
+        let area_rect = Rect::new(0, 0, 8, 2);
+        let view = OutputViewState {
+            last_visible_height: 2,
+            ..output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(2)))
+        };
+        let mut buf = Buffer::empty(area_rect);
+
+        area.render(area_rect, &mut buf, &view, &no_live_status());
+
+        assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
+        assert_eq!(buf[(1, 0)].bg, theme::SELECTION_BG);
+        assert_eq!(buf[(2, 0)].bg, ratatui::style::Color::Blue);
+        assert_eq!(buf[(7, 0)].bg, ratatui::style::Color::Blue);
+    }
+
+    #[test]
     fn test_render_document_with_gutter_offsets_selection_and_skips_gutter() {
         // 带 gutter（"✓ "，宽 2）的行，plain="hello"。
         let mut line =
@@ -373,7 +421,8 @@ mod tests {
                 ),
             ],
             "hello".into(),
-        );
+        )
+        .with_fill_style(ratatui::style::Style::default().bg(theme::USER_BG));
         line.gutter_cols = 2;
         let mut area = OutputArea::new();
         area.replace_document(RenderedDocument {
