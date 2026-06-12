@@ -9,6 +9,7 @@
 - **[#47 DDD 架构设计](docs/feature/specs/047-ddd-redesign.md)** — 以 DDD 领域模型 + COLA 分层规范为架构基线，定义 Agent Runtime 核心域、统一语言（Session/Chat/Agent Looping/Turn/Task）及 Bounded Context 边界。
 - **[TUI Model/View 架构设计](docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md)** — TUI 按 Model/View 分离架构重设计：`Model` 保存业务真相（Conversation/Input/Runtime/Diagnostic 四个 Context），`ViewAssembler` 组装 `ViewModel`，`Render` 纯渲染不反推状态。TUI 作为 CLI Adapter 不定义 Domain Model。
 - **[TUI SDK DTO 边界设计](docs/feature/specs/047-tui-sdk-dto-boundary-design.md)** — TUI 与 runtime 的类型边界彻底消解：`sdk::ChatEvent` 使用强类型 DTO，TUI 内部只使用 SDK DTO 或私有 view model。
+- **[Server Foundation MVP 设计](docs/superpowers/specs/2026-06-01-server-foundation-mvp-design.md)** — 多租户 Agent server 基础设施：控制面（WsProxy 反向代理 + SessionManager + WorkerLauncher）+ worker（自托管 WS、`AgentClient`-over-WS 协议）+ CLI 双模式（`--server` 远程 / 原生直连），端到端统一一套 `AgentClient`-over-WS 协议；约定领域服务（协作域 BC）与控制面分离。
 
 核心结论：
 
