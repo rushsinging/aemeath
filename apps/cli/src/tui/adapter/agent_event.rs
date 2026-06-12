@@ -98,6 +98,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             provider_id,
             name,
             index,
+            arguments_delta,
             arguments,
             summary,
             status,
@@ -113,12 +114,17 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                     provider_id: provider_id.clone(),
                     name: name.clone(),
                     index: *index,
-                    arguments: arguments
+                    arguments: arguments_delta
                         .as_ref()
                         .map(|value| sanitize_tool_arguments_delta(name, value)),
                     summary: summary
                         .as_ref()
-                        .map(|value| sanitize_tool_summary(name, value)),
+                        .map(|value| sanitize_tool_summary(name, value))
+                        .or_else(|| {
+                            arguments.as_ref().map(|value| {
+                                sanitize_tool_arguments(name, value.clone()).to_string()
+                            })
+                        }),
                     status: tool_call_status_from_sdk(*status),
                 });
             mapping
@@ -219,6 +225,10 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
 
 fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
     truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name))
+}
+
+fn sanitize_tool_arguments(tool_name: &str, arguments: Value) -> Value {
+    sanitize_tool_value(tool_name, arguments)
 }
 
 fn sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
@@ -441,6 +451,32 @@ mod tests {
     }
 
     #[test]
+    fn test_map_agent_event_tool_call_uses_json_arguments_when_summary_missing() {
+        let event = UiEvent::ToolCallUpdate {
+            context: ctx(),
+            id: "tool-1".to_string(),
+            provider_id: Some("provider-1".to_string()),
+            name: "Read".to_string(),
+            index: 0,
+            arguments_delta: None,
+            arguments: Some(serde_json::json!({ "file_path": "src/lib.rs" })),
+            summary: None,
+            status: sdk::ToolCallStatusView::Ready,
+        };
+        let mapping = map_agent_event(&event);
+
+        match first_observation(&mapping) {
+            Some(ConversationIntent::ObserveToolCallUpdate {
+                arguments, summary, ..
+            }) => {
+                assert!(arguments.is_none());
+                assert_eq!(summary.as_deref(), Some(r#"{"file_path":"src/lib.rs"}"#));
+            }
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_map_agent_event_error_records_diagnostic_and_hook() {
         let mapping = map_agent_event(&UiEvent::Error("坏了".to_string()));
         assert_eq!(mapping.conversation.len(), 1);
@@ -459,7 +495,8 @@ mod tests {
             provider_id: Some("provider-1".to_string()),
             name: "Edit".to_string(),
             index: 0,
-            arguments: Some("x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2)),
+            arguments_delta: Some("x".repeat(TOOL_STREAM_PREVIEW_LIMIT * 2)),
+            arguments: None,
             summary: None,
             status: sdk::ToolCallStatusView::PendingArgs,
         };
@@ -485,6 +522,7 @@ mod tests {
             provider_id: Some("provider-1".to_string()),
             name: "Edit".to_string(),
             index: 0,
+            arguments_delta: None,
             arguments: None,
             summary: Some(
                 serde_json::json!({
@@ -523,6 +561,7 @@ mod tests {
                 provider_id: Some("provider-1".to_string()),
                 name: tool_name.to_string(),
                 index: 0,
+                arguments_delta: None,
                 arguments: None,
                 summary: Some(
                     serde_json::json!({ field: "x".repeat(TOOL_LARGE_FIELD_PREVIEW_LIMIT * 2) })

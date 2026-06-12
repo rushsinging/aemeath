@@ -116,7 +116,8 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
                 provider_id: provider_id.map(str::to_string),
                 name: name.to_string(),
                 index,
-                arguments: Some(partial_args.to_string()),
+                arguments_delta: Some(partial_args.to_string()),
+                arguments: None,
                 summary: None,
                 status: RuntimeToolCallStatus::PendingArgs,
             });

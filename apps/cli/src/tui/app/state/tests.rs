@@ -361,6 +361,7 @@ mod tests {
                 provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
+                arguments_delta: None,
                 arguments: None,
                 summary: Some(r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string()),
                 status: sdk::ToolCallStatusView::Ready,
