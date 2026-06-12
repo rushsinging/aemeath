@@ -27,6 +27,7 @@ mod tests {
         let effects = effects_for_input_change(&InputChange::Submitted {
             submission: InputSubmission {
                 text: "hello".to_string(),
+                display_text: "hello".to_string(),
                 attachments: Vec::new(),
             },
         });

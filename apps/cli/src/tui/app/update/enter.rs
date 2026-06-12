@@ -2,7 +2,9 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::ConversationIntent;
-use crate::tui::model::input::change::submitted_text_from_changes;
+use crate::tui::model::input::change::{
+    submitted_display_text_from_changes, submitted_text_from_changes,
+};
 use tokio::sync::mpsc;
 
 impl App {
@@ -17,6 +19,8 @@ impl App {
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
         let input = submitted_text_from_changes(&changes).unwrap_or_default();
+        let display_input =
+            submitted_display_text_from_changes(&changes).unwrap_or_else(|| input.clone());
         if input.is_empty() {
             return UpdateResult::none();
         }
@@ -32,7 +36,7 @@ impl App {
         self.model
             .conversation
             .apply(ConversationIntent::StartChat {
-                submission: input.clone(),
+                submission: display_input.clone(),
             });
         self.mark_output_dirty();
 

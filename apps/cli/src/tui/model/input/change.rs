@@ -45,6 +45,19 @@ pub fn submitted_text_from_changes(changes: &[InputChange]) -> Option<String> {
     })
 }
 
+pub fn submitted_display_text_from_changes(changes: &[InputChange]) -> Option<String> {
+    changes.iter().find_map(|change| match change {
+        InputChange::Submitted { submission } => Some(submission.display_text.clone()),
+        InputChange::TextChanged { .. }
+        | InputChange::CursorMoved { .. }
+        | InputChange::CompletionChanged { .. }
+        | InputChange::HistorySelected { .. }
+        | InputChange::AttachmentChanged { .. }
+        | InputChange::ModeChanged { .. }
+        | InputChange::Cleared => None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +67,7 @@ mod tests {
         let changes = vec![InputChange::Submitted {
             submission: InputSubmission {
                 text: "run".to_string(),
+                display_text: "run".to_string(),
                 attachments: Vec::new(),
             },
         }];
@@ -85,12 +99,14 @@ mod tests {
             InputChange::Submitted {
                 submission: InputSubmission {
                     text: "first".to_string(),
+                    display_text: "first".to_string(),
                     attachments: Vec::new(),
                 },
             },
             InputChange::Submitted {
                 submission: InputSubmission {
                     text: "second".to_string(),
+                    display_text: "second".to_string(),
                     attachments: Vec::new(),
                 },
             },
