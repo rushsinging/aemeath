@@ -223,26 +223,10 @@ pub fn spawn_processing(ctx: SpawnContext) {
                 return;
             }
         };
-        let queue = TuiQueueDrainPort::new(ctx.queue_request_tx);
         while let Some(event) = stream.recv().await {
             let ui_event = sdk_event_to_ui_event(event);
-            let is_done = matches!(ui_event, UiEvent::Done | UiEvent::DoneWithDuration(_));
             if ctx.tx.send(ui_event).await.is_err() {
                 return;
-            }
-            if is_done {
-                if let Some(queued) = queue.drain_queued_input().await {
-                    let messages = queued
-                        .into_iter()
-                        .map(|text| sdk::ChatMessage {
-                            role: "user".to_string(),
-                            content: serde_json::json!([{ "type": "text", "text": text }]),
-                        })
-                        .collect();
-                    if let Err(e) = ctx.agent_client.sync_current_messages(messages).await {
-                        crate::tui::log_warn!("failed to sync drained queue messages: {e}");
-                    }
-                }
             }
         }
     });
@@ -251,6 +235,9 @@ pub fn spawn_processing(ctx: SpawnContext) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::watch;
 
     fn test_sdk_event_context() -> sdk::ChatEventContext {
         sdk::ChatEventContext::new("chat-test", "turn-test")
@@ -361,5 +348,217 @@ mod tests {
 
         let result = port.drain_queued_input().await;
         assert!(result.is_none(), "通道断开应返回 None");
+    }
+
+    #[tokio::test]
+    async fn test_spawn_processing_done_does_not_drain_queue_again() {
+        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel(16);
+        let (queue_tx, mut queue_rx) = tokio::sync::mpsc::channel(16);
+        let client = Arc::new(DoneOnlyAgentClient::default());
+
+        spawn_processing(SpawnContext {
+            tx: ui_tx,
+            queue_request_tx: queue_tx,
+            input_event_buffer: Arc::new(std::sync::Mutex::new(Vec::new())),
+            agent_client: client.clone(),
+            messages: Vec::new(),
+        });
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), ui_rx.recv())
+            .await
+            .expect("Done event should be forwarded")
+            .expect("ui channel should receive Done");
+        assert!(matches!(event, UiEvent::Done));
+
+        let drain_request =
+            tokio::time::timeout(std::time::Duration::from_millis(50), queue_rx.recv()).await;
+        assert!(
+            !matches!(drain_request, Ok(Some(UiEvent::DrainQueuedInput { .. }))),
+            "Done 后不应再次 drain TUI input queue"
+        );
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[derive(Default)]
+    struct DoneOnlyAgentClient {
+        sync_calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl sdk::AgentClient for DoneOnlyAgentClient {
+        fn session_snapshot(&self) -> sdk::SessionSnapshot {
+            sdk::SessionSnapshot {
+                id: "test-session".to_string(),
+                message_count: 0,
+                total_tokens: 0,
+                messages: vec![],
+                created_at: None,
+                trimmed: 0,
+                repaired: 0,
+                workspace: None,
+                tasks: None,
+            }
+        }
+
+        fn cost(&self) -> sdk::CostInfo {
+            sdk::CostInfo::default()
+        }
+
+        fn task_list(&self) -> Vec<sdk::TaskSummary> {
+            Vec::new()
+        }
+
+        async fn task_status(&self) -> Result<sdk::TaskStatusView, sdk::SdkError> {
+            Ok(sdk::TaskStatusView::default())
+        }
+
+        fn project(&self) -> sdk::ProjectContext {
+            sdk::ProjectContext::default()
+        }
+
+        fn changes(&self) -> watch::Receiver<sdk::ChangeSet> {
+            let (_tx, rx) = watch::channel(sdk::ChangeSet::empty());
+            rx
+        }
+
+        async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            tx.send(sdk::ChatEvent::Done).unwrap();
+            drop(tx);
+            Ok(sdk::ChatStream::new(rx))
+        }
+
+        async fn sync_current_messages(
+            &self,
+            _messages: Vec<sdk::ChatMessage>,
+        ) -> Result<(), sdk::SdkError> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn save_current_session(&self) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        fn cancel(&self) {}
+
+        async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
+            Ok(self.session_snapshot())
+        }
+
+        async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
+            Ok(Vec::new())
+        }
+
+        async fn delete_session(&self, _id: &str) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
+            Ok(Vec::new())
+        }
+
+        async fn compact(&self) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        async fn read_clipboard_image(&self) -> Result<sdk::ClipboardImageView, sdk::SdkError> {
+            Err(sdk::SdkError::Internal("not implemented".to_string()))
+        }
+
+        async fn process_image_file(
+            &self,
+            _path: String,
+        ) -> Result<sdk::ClipboardImageView, sdk::SdkError> {
+            Err(sdk::SdkError::Internal("not implemented".to_string()))
+        }
+
+        async fn run_reflection(
+            &self,
+            _messages: Vec<sdk::ChatMessage>,
+        ) -> Result<sdk::ReflectionOutputView, sdk::SdkError> {
+            Err(sdk::SdkError::Internal("not implemented".to_string()))
+        }
+
+        async fn apply_reflection(
+            &self,
+            _output: sdk::ReflectionOutputView,
+        ) -> Result<String, sdk::SdkError> {
+            Ok("applied".to_string())
+        }
+
+        async fn execute_command(
+            &self,
+            _name: &str,
+            _args: &str,
+            _ctx: sdk::CommandContext,
+        ) -> Result<sdk::CommandResult, sdk::SdkError> {
+            Ok(sdk::CommandResult::Success("ok".to_string()))
+        }
+
+        async fn estimate_context(
+            &self,
+            _messages: &[sdk::ChatMessage],
+            _system_prompt: &str,
+        ) -> Result<sdk::ContextEstimate, sdk::SdkError> {
+            Ok(sdk::ContextEstimate {
+                estimated_tokens: 0,
+                system_tokens: 0,
+                context_size: 0,
+                usage_percentage: 0.0,
+            })
+        }
+
+        async fn switch_model(
+            &self,
+            _params: sdk::ModelSwitchParams,
+        ) -> Result<sdk::ModelSwitchResult, sdk::SdkError> {
+            Ok(sdk::ModelSwitchResult {
+                display_name: "test/model".to_string(),
+                context_window: 0,
+                reasoning_active: None,
+            })
+        }
+
+        async fn set_thinking(&self, _desired: Option<bool>) -> Result<bool, sdk::SdkError> {
+            Ok(true)
+        }
+
+        async fn compact_messages(
+            &self,
+            messages: Vec<sdk::ChatMessage>,
+            _system_prompt: &str,
+            _context_size: usize,
+        ) -> Result<(Vec<sdk::ChatMessage>, bool), sdk::SdkError> {
+            Ok((messages, false))
+        }
+
+        async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, sdk::SdkError> {
+            Ok(Vec::new())
+        }
+
+        async fn add_reminder(&self, _content: &str) -> Result<String, sdk::SdkError> {
+            Ok("test-id".to_string())
+        }
+
+        async fn complete_reminder(&self, _id: &str) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        async fn get_thinking(&self) -> Result<bool, sdk::SdkError> {
+            Ok(false)
+        }
+
+        async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
+
+        async fn clear_tasks(&self) -> Result<(), sdk::SdkError> {
+            Ok(())
+        }
     }
 }
