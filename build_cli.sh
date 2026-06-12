@@ -11,16 +11,17 @@ echo "[hook-env] PWD=$PWD"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"
 
-# Keep build artifacts isolated per checkout by default. A shared target dir can
-# leave stale crate metadata across worktrees and make release hooks flaky.
-TARGET_DIR="${CARGO_TARGET_DIR:-target/aemeath-cli}"
-export CARGO_TARGET_DIR="$TARGET_DIR"
+# Use the target dir from .cargo/config.toml (build.target-dir), still honoring
+# CARGO_TARGET_DIR when the caller sets one. Resolve it from cargo itself so the
+# install path can never drift from the actual build output.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
+    | python3 -c 'import sys, json; print(json.load(sys.stdin)["target_directory"])')"
 
 # Limit parallel rustc jobs to avoid hook-time SIGTERM on memory pressure.
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
-echo ">>> cargo build --release --package cli --target-dir $TARGET_DIR --jobs $CARGO_BUILD_JOBS"
-cargo build --release --package cli --target-dir "$TARGET_DIR" --jobs "$CARGO_BUILD_JOBS"
+echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
+cargo build --release --package cli --jobs "$CARGO_BUILD_JOBS"
 
 mkdir -p "$INSTALL_DIR"
 cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
