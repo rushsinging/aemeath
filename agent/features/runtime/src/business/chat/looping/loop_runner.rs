@@ -165,36 +165,23 @@ where
                 .await;
             sink.send_event(RuntimeStreamEvent::Cancelled).await;
             loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
-            if finalize_main_loop(
-                &AgentRunOutcome {
-                    status: AgentRunStatus::Cancelled,
-                    turns: turn_count,
-                    duration: turn_start.elapsed(),
-                    role: None,
-                    model: client.model_name().to_string(),
-                },
+            let outcome = AgentRunOutcome {
+                status: AgentRunStatus::Cancelled,
+                turns: turn_count,
+                duration: turn_start.elapsed(),
+                role: None,
+                model: client.model_name().to_string(),
+            };
+            let _ = finalize_main_loop(
+                &outcome,
                 &sink,
                 &hook_ui,
                 &hook_runner,
                 &session_id,
                 &task_store,
             )
-            .await
-            .is_some()
-            {
-                loop_fsm.transition(ChatLoopTransition::StopBlocked);
-                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                loop_fsm.assert_state(
-                    ChatLoopState::Running,
-                    "cancel stop hook blocked resumes loop",
-                );
-                continue;
-            }
-            loop_fsm.transition(ChatLoopTransition::StopSucceeded);
-            loop_fsm.assert_state(
-                ChatLoopState::Done,
-                "cancel finalizes after stop hooks pass",
-            );
+            .await;
+            loop_fsm.assert_state(ChatLoopState::Done, "cancel finalizes loop");
             break;
         }
 
@@ -470,6 +457,38 @@ where
                 }
             }
             Err(e) => {
+                if is_user_cancelled_provider_error(&e)
+                    // If user cancellation races with provider error reporting, classify
+                    // generic abort/network errors as cancellation rather than API errors.
+                    || cancel.is_cancelled()
+                    || interrupted.load(Ordering::Relaxed)
+                {
+                    interrupted.store(false, Ordering::Relaxed);
+                    messages.truncate(messages_at_start);
+                    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                        .await;
+                    sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                    loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
+                    let outcome = AgentRunOutcome {
+                        status: AgentRunStatus::Cancelled,
+                        turns: turn_count,
+                        duration: turn_start.elapsed(),
+                        role: None,
+                        model: client.model_name().to_string(),
+                    };
+                    let _ = finalize_main_loop(
+                        &outcome,
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        &session_id,
+                        &task_store,
+                    )
+                    .await;
+                    loop_fsm.assert_state(ChatLoopState::Done, "api cancel finalizes loop");
+                    break;
+                }
+
                 let error_msg = e.to_string();
                 sink.send_event(RuntimeStreamEvent::Error(error_msg.clone()))
                     .await;
@@ -537,6 +556,10 @@ fn chat_loop_transition_for_gate_exit(decision: GateDecision) -> ChatLoopTransit
     }
 }
 
+fn is_user_cancelled_provider_error(error: &provider::api::LlmError) -> bool {
+    error.is_cancelled()
+}
+
 async fn drain_and_apply_gate<Q, I, S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
@@ -566,6 +589,12 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Mutex;
     use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn provider_cancelled_error_maps_to_cancelled_outcome() {
+        let error = provider::api::LlmError::Cancelled;
+        assert!(is_user_cancelled_provider_error(&error));
+    }
 
     #[derive(Clone)]
     struct SequenceQueueDrainPort {

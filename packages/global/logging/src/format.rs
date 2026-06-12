@@ -25,11 +25,7 @@ pub fn format_diag_json_line(record: &Record) -> String {
 ///
 /// 拆分目的是让测试不必构造 `log::Record`（`Record::builder().args(format_args!(...))`
 /// 会产生借用临时值的错误）。
-pub fn format_diag_json_line_from_parts(
-    level: &str,
-    target: &str,
-    msg: &str,
-) -> String {
+pub fn format_diag_json_line_from_parts(level: &str, target: &str, msg: &str) -> String {
     let line = json!({
         "ts": timestamp_rfc3339(),
         "session": context::session_id().unwrap_or("-"),
@@ -50,11 +46,7 @@ pub fn format_diag_json_line_from_parts(
 /// `role` 取自调用方（`"default"` 或具体 sub-agent 角色）。
 ///
 /// 调用方提供的 `payload` 字段会与上下文字段**平铺**到同一对象。
-pub fn format_audit_json_line(
-    audit_type: &str,
-    role: &str,
-    payload: Value,
-) -> String {
+pub fn format_audit_json_line(audit_type: &str, role: &str, payload: Value) -> String {
     let mut line = match payload {
         Value::Object(map) => map,
         other => {

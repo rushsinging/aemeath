@@ -4,7 +4,7 @@ use super::logging::{
 };
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
-use super::{SilentHandler};
+use super::SilentHandler;
 use crate::business::agent::Agent;
 use crate::business::compact::{safe_slice, truncate_tool_result};
 use logging::{ToolKind, UnifiedLogger};
@@ -137,6 +137,11 @@ impl<'a> SubAgentRun<'a> {
                     self.compact_if_needed(api_input, turn_number);
                 }
                 Err(e) => {
+                    if e.is_cancelled() || self.ctx.cancel.is_cancelled() {
+                        (self.progress)(Some(turn_number), "Agent cancelled by user");
+                        let result = "Cancelled by user".to_string();
+                        finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
+                    }
                     (self.progress)(Some(turn_number), &format!("Agent error: {e}"));
                     let error_string = e.to_string();
                     let result = format!("Sub-agent error: {error_string}");

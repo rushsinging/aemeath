@@ -176,7 +176,8 @@ impl App {
                     self.spinner_phase(SpinnerPhase::Thinking);
                     self.chat.start_processing();
                     if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
-                        processing::spawn_processing(spawn_ctx);
+                        let handle = processing::spawn_processing(spawn_ctx);
+                        self.chat.set_processing_handle(handle);
                     } else {
                         self.append_error_notice("SDK agent client is unavailable");
                     }

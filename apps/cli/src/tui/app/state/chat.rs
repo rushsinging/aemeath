@@ -13,7 +13,9 @@ pub(crate) struct ChatState {
     pub pending_reflection: Option<sdk::ReflectionOutputView>,
     pub applying_reflection: Option<sdk::ReflectionOutputView>,
     pub input_event_buffer: Option<std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>>,
+    pub processing_handle: Option<crate::tui::effect::session::processing::ProcessingHandle>,
     pub is_processing: bool,
+    pub is_cancelling: bool,
 }
 
 impl ChatState {
@@ -89,19 +91,51 @@ impl ChatState {
     pub(crate) fn reset_runtime_state(&mut self) {
         self.clear_tool_activity();
         self.is_processing = false;
+        self.is_cancelling = false;
         self.pending_reflection = None;
         self.applying_reflection = None;
         self.clear_input_event_buffer();
+        self.clear_processing_handle();
         self.turn_count = 0;
     }
 
     pub(crate) fn start_processing(&mut self) {
         self.is_processing = true;
+        self.is_cancelling = false;
     }
 
     pub(crate) fn stop_processing(&mut self) {
         self.clear_tool_activity();
         self.is_processing = false;
+        self.is_cancelling = false;
+    }
+
+    pub(crate) fn start_cancelling(&mut self) {
+        self.is_cancelling = true;
+    }
+
+    pub(crate) fn set_processing_handle(
+        &mut self,
+        handle: crate::tui::effect::session::processing::ProcessingHandle,
+    ) {
+        if let Some(old_handle) = self.processing_handle.take() {
+            old_handle.abort();
+        }
+        self.processing_handle = Some(handle);
+    }
+
+    pub(crate) fn abort_processing_handle(&mut self) {
+        if let Some(handle) = self.processing_handle.take() {
+            handle.abort();
+        }
+        self.clear_tool_activity();
+        self.is_processing = false;
+        self.is_cancelling = false;
+    }
+
+    pub(crate) fn clear_processing_handle(&mut self) {
+        self.processing_handle = None;
+        self.is_cancelling = false;
     }
 }
 
@@ -118,7 +152,9 @@ impl Default for ChatState {
             pending_reflection: None,
             applying_reflection: None,
             input_event_buffer: None,
+            processing_handle: None,
             is_processing: false,
+            is_cancelling: false,
         }
     }
 }

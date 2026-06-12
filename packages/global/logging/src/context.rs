@@ -120,9 +120,6 @@ mod tests {
     fn model_non_empty_some() {
         let _guard = TEST_LOCK.lock().unwrap();
         set_current_model("deepseek/deepseek-chat".to_string());
-        assert_eq!(
-            current_model().as_deref(),
-            Some("deepseek/deepseek-chat")
-        );
+        assert_eq!(current_model().as_deref(), Some("deepseek/deepseek-chat"));
     }
 }

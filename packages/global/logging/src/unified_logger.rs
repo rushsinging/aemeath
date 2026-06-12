@@ -330,7 +330,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("aemeath.log");
-        File::create(&path).unwrap().write_all(&[b'x'; 2048]).unwrap();
+        File::create(&path)
+            .unwrap()
+            .write_all(&[b'x'; 2048])
+            .unwrap();
 
         let logger = rotate_test_logger(&dir, 1024, 3);
         let sink: Mutex<Option<BufWriter<File>>> = Mutex::new(Some(open_buf(&path).unwrap()));
@@ -355,7 +358,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("aemeath.log");
-        File::create(&path).unwrap().write_all(&[b'x'; 100]).unwrap();
+        File::create(&path)
+            .unwrap()
+            .write_all(&[b'x'; 100])
+            .unwrap();
 
         let logger = rotate_test_logger(&dir, 1024, 3);
         let sink: Mutex<Option<BufWriter<File>>> = Mutex::new(Some(open_buf(&path).unwrap()));

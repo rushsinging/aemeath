@@ -9,14 +9,18 @@ use tokio::sync::mpsc;
 impl App {
     pub(crate) fn execute_spawn_effect(&mut self, effect: SpawnAgentChatEffect) {
         if let Some(spawn_ctx) = effect.context {
-            processing::spawn_processing(spawn_ctx);
+            let handle = processing::spawn_processing(spawn_ctx);
+            self.chat.set_processing_handle(handle);
         }
     }
 
     pub(crate) async fn execute_effect(&mut self, effect: Effect, ui_tx: &mpsc::Sender<UiEvent>) {
         match effect {
             Effect::None | Effect::RequestRender => {}
-            Effect::QuitApplication => self.layout.request_exit(),
+            Effect::QuitApplication => {
+                self.chat.abort_processing_handle();
+                self.layout.request_exit();
+            }
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::CancelAgentChat => self.cancel_agent_chat(),
@@ -36,9 +40,15 @@ impl App {
     }
 
     fn cancel_agent_chat(&mut self) {
+        self.chat.start_cancelling();
         if let Some(ref ac) = self.agent_client {
             ac.cancel();
         }
+        self.model
+            .runtime
+            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+                "Cancelling current response… Press Ctrl+C again to exit",
+            )));
     }
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {

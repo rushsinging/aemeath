@@ -4,9 +4,14 @@ use super::logging::{
 };
 use super::progress::{build_tool_calls_progress_event, format_grouped_tool_summaries};
 use super::*;
+use async_trait::async_trait;
+use provider::api::{LlmError, LlmProvider, StreamResponse, SystemBlock};
 use share::config::AgentRoleConfig;
 use share::message::Message;
 use share::tool::AgentProgressKind;
+use std::collections::HashSet;
+use std::sync::Arc;
+use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
 #[test]
 fn test_role_max_tokens_override() {
@@ -147,6 +152,64 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     assert_eq!(data["output"], "完整输出");
 }
 
+#[tokio::test]
+async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
+    let runner = test_runner(LlmError::Cancelled);
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            max_turns: Some(1),
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    assert_eq!(result, "Cancelled by user");
+}
+
+#[tokio::test]
+async fn test_run_agent_context_cancelled_after_provider_error_returns_user_cancelled() {
+    let runner = test_runner(LlmError::Network("interrupted".to_string()));
+    let ctx = test_ctx();
+    ctx.cancel.cancel();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            max_turns: Some(1),
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    assert_eq!(result, "Cancelled by user");
+}
+
+#[tokio::test]
+async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
+    let runner = test_runner(LlmError::Network("boom".to_string()));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            max_turns: Some(1),
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    assert_eq!(result, "Sub-agent error: network error: boom");
+}
+
 fn test_tool_call(
     id: &str,
     name: &str,
@@ -158,5 +221,84 @@ fn test_tool_call(
         name: name.to_string(),
         index: 0,
         input,
+    }
+}
+
+fn test_runner(error: LlmError) -> CliAgentRunner {
+    CliAgentRunner {
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            ErrorProvider { error },
+        ))),
+        pool: None,
+        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        hook_runner: hook::api::HookRunner::empty(".".to_string()),
+        reasoning: false,
+        models_config: Arc::new(share::config::ModelsConfig::default()),
+    }
+}
+
+fn test_ctx() -> ToolExecutionContext {
+    let cwd = std::env::current_dir().unwrap();
+    ToolExecutionContext {
+        cwd: cwd.clone(),
+        workspace: project::api::WorkspaceService::new(cwd),
+        cancel: tokio_util::sync::CancellationToken::new(),
+        read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        agent_runner: None,
+        session_reminders: None,
+        memory_config: share::config::MemoryConfig::default(),
+        plan_mode: None,
+        allow_all: true,
+        max_tool_concurrency: 10,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        progress_tx: None,
+        parent_session_id: None,
+    }
+}
+
+struct ErrorProvider {
+    error: LlmError,
+}
+
+#[async_trait]
+impl LlmProvider for ErrorProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _handler: &mut dyn provider::api::StreamHandler,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<StreamResponse, LlmError> {
+        Err(match &self.error {
+            LlmError::Network(message) => LlmError::Network(message.clone()),
+            LlmError::Api {
+                error_type,
+                message,
+            } => LlmError::Api {
+                error_type: error_type.clone(),
+                message: message.clone(),
+            },
+            LlmError::RateLimited => LlmError::RateLimited,
+            LlmError::ContextTooLong => LlmError::ContextTooLong,
+            LlmError::Cancelled => LlmError::Cancelled,
+            LlmError::Stream(message) => LlmError::Stream(message.clone()),
+            LlmError::Config(message) => LlmError::Config(message.clone()),
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning(&self, _enabled: bool) {}
+
+    fn is_reasoning(&self) -> bool {
+        false
     }
 }

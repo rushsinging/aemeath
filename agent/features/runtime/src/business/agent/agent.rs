@@ -32,34 +32,49 @@ fn tool_call_timeout_message(name: &str, timeout: u64, elapsed: std::time::Durat
     )
 }
 
+fn tool_call_cancelled_message(name: &str) -> String {
+    format!("tool.call execution cancelled: tool={name}")
+}
+
 async fn call_tool_with_timeout(
     tool: std::sync::Arc<dyn Tool>,
     name: &str,
     input: serde_json::Value,
     ctx: &ToolExecutionContext,
 ) -> Result<ToolResult, String> {
+    if ctx.cancel.is_cancelled() {
+        return Err(tool_call_cancelled_message(name));
+    }
+
     let timeout = tool.timeout_secs();
     let started = std::time::Instant::now();
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(timeout),
-        tool.call(input, ctx),
-    )
-    .await
-    {
-        Ok(result) => {
-            log::debug!(
-                "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
-                name,
-                timeout,
-                started.elapsed().as_millis()
-            );
-            Ok(result)
-        }
-        Err(_) => {
-            let elapsed = started.elapsed();
-            let message = tool_call_timeout_message(name, timeout, elapsed);
-            log::warn!("{message}");
+    tokio::select! {
+        _ = ctx.cancel.cancelled() => {
+            let message = tool_call_cancelled_message(name);
+            log::info!("{message}");
             Err(message)
+        }
+        result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout),
+            tool.call(input, ctx),
+        ) => {
+            match result {
+                Ok(result) => {
+                    log::debug!(
+                        "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
+                        name,
+                        timeout,
+                        started.elapsed().as_millis()
+                    );
+                    Ok(result)
+                }
+                Err(_) => {
+                    let elapsed = started.elapsed();
+                    let message = tool_call_timeout_message(name, timeout, elapsed);
+                    log::warn!("{message}");
+                    Err(message)
+                }
+            }
         }
     }
 }

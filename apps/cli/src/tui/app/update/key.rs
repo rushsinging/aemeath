@@ -13,7 +13,7 @@ use crate::tui::model::runtime::status_notice::StatusNotice;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
 
-/// Ctrl+C 在非 processing、非 completion 状态下的动作。
+/// Ctrl+C 动作。
 /// 提取为纯函数以便单元测试。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum CtrlCAction {
@@ -23,14 +23,27 @@ pub(super) enum CtrlCAction {
     WarnExit,
     /// 退出 TUI
     Quit,
+    /// 请求取消当前处理
+    RequestCancel,
+    /// 取消中再次按下时强制退出
+    ForceQuit,
 }
 
 /// Ctrl+C 两段式退出超时（秒）
 pub(crate) const CTRL_C_TIMEOUT_SECS: f64 = 3.0;
 
-/// 根据 input 是否为空和上次 Ctrl+C 时间戳决定动作。
-fn ctrlc_action(input_empty: bool, last_ctrlc: Option<std::time::Instant>) -> CtrlCAction {
-    if !input_empty {
+/// 根据 input 是否为空、上次 Ctrl+C 时间戳和处理生命周期状态决定动作。
+fn ctrlc_action(
+    input_empty: bool,
+    last_ctrlc: Option<std::time::Instant>,
+    is_processing: bool,
+    is_cancelling: bool,
+) -> CtrlCAction {
+    if is_processing && is_cancelling {
+        CtrlCAction::ForceQuit
+    } else if is_processing {
+        CtrlCAction::RequestCancel
+    } else if !input_empty {
         CtrlCAction::ClearInput
     } else {
         let now = std::time::Instant::now();
@@ -84,37 +97,42 @@ impl App {
 
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                if self.chat.is_processing {
-                    if let Some(agent_client) = &spawn_refs.agent_client {
-                        agent_client.cancel();
+                match ctrlc_action(
+                    self.model.input.document.is_empty(),
+                    self.layout.last_ctrlc,
+                    self.chat.is_processing,
+                    self.chat.is_cancelling,
+                ) {
+                    CtrlCAction::RequestCancel => {
+                        self.chat.start_cancelling();
+                        self.layout.mark_ctrlc_now();
+                        return UpdateResult::one(Effect::CancelAgentChat);
                     }
-                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                        StatusNotice::warning("Interrupted"),
-                    ));
-                } else if completion_visible {
-                    self.handle_input_intent(InputIntent::SetCompletions {
-                        query: String::new(),
-                        items: Vec::new(),
-                    });
-                } else {
-                    match ctrlc_action(self.model.input.document.is_empty(), self.layout.last_ctrlc)
-                    {
-                        CtrlCAction::ClearInput => {
-                            self.handle_input_intent(InputIntent::Clear);
-                            self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                                StatusNotice::warning("Input cleared (Ctrl+C again to exit)"),
-                            ));
-                            self.layout.mark_ctrlc_now();
-                        }
-                        CtrlCAction::WarnExit => {
+                    CtrlCAction::ForceQuit => {
+                        return UpdateResult::one(Effect::QuitApplication);
+                    }
+                    CtrlCAction::ClearInput => {
+                        self.handle_input_intent(InputIntent::Clear);
+                        self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                            StatusNotice::warning("Input cleared (Ctrl+C again to exit)"),
+                        ));
+                        self.layout.mark_ctrlc_now();
+                    }
+                    CtrlCAction::WarnExit => {
+                        if completion_visible {
+                            self.handle_input_intent(InputIntent::SetCompletions {
+                                query: String::new(),
+                                items: Vec::new(),
+                            });
+                        } else {
                             self.layout.mark_ctrlc_now();
                             self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
                                 StatusNotice::warning("Press Ctrl+C again to exit"),
                             ));
                         }
-                        CtrlCAction::Quit => {
-                            return UpdateResult::one(Effect::QuitApplication);
-                        }
+                    }
+                    CtrlCAction::Quit => {
+                        return UpdateResult::one(Effect::QuitApplication);
                     }
                 }
             }
@@ -237,39 +255,75 @@ mod tests {
 
     #[test]
     fn test_ctrlc_action_input_nonempty_clears() {
-        assert_eq!(ctrlc_action(false, None), CtrlCAction::ClearInput);
         assert_eq!(
-            ctrlc_action(false, Some(std::time::Instant::now())),
+            ctrlc_action(false, None, false, false),
+            CtrlCAction::ClearInput
+        );
+        assert_eq!(
+            ctrlc_action(false, Some(std::time::Instant::now()), false, false),
             CtrlCAction::ClearInput
         );
     }
 
     #[test]
     fn test_ctrlc_action_empty_first_press_warns() {
-        assert_eq!(ctrlc_action(true, None), CtrlCAction::WarnExit);
+        assert_eq!(
+            ctrlc_action(true, None, false, false),
+            CtrlCAction::WarnExit
+        );
     }
 
     #[test]
     fn test_ctrlc_action_empty_quick_second_press_quits() {
         let recent = std::time::Instant::now();
-        assert_eq!(ctrlc_action(true, Some(recent)), CtrlCAction::Quit);
+        assert_eq!(
+            ctrlc_action(true, Some(recent), false, false),
+            CtrlCAction::Quit
+        );
     }
 
     #[test]
     fn test_ctrlc_action_empty_expired_second_press_warns() {
         let expired = std::time::Instant::now() - std::time::Duration::from_secs(4);
-        assert_eq!(ctrlc_action(true, Some(expired)), CtrlCAction::WarnExit);
+        assert_eq!(
+            ctrlc_action(true, Some(expired), false, false),
+            CtrlCAction::WarnExit
+        );
     }
 
     #[test]
     fn test_ctrlc_action_boundary_timeout() {
         let just_inside = std::time::Instant::now() - std::time::Duration::from_millis(2900);
-        assert_eq!(ctrlc_action(true, Some(just_inside)), CtrlCAction::Quit);
+        assert_eq!(
+            ctrlc_action(true, Some(just_inside), false, false),
+            CtrlCAction::Quit
+        );
 
         let just_outside = std::time::Instant::now() - std::time::Duration::from_millis(3100);
         assert_eq!(
-            ctrlc_action(true, Some(just_outside)),
+            ctrlc_action(true, Some(just_outside), false, false),
             CtrlCAction::WarnExit
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_processing_first_press_requests_cancel() {
+        assert_eq!(
+            ctrlc_action(true, None, true, false),
+            CtrlCAction::RequestCancel
+        );
+        assert_eq!(
+            ctrlc_action(false, None, true, false),
+            CtrlCAction::RequestCancel
+        );
+    }
+
+    #[test]
+    fn test_ctrlc_action_cancelling_second_press_force_quits() {
+        assert_eq!(ctrlc_action(true, None, true, true), CtrlCAction::ForceQuit);
+        assert_eq!(
+            ctrlc_action(false, None, true, true),
+            CtrlCAction::ForceQuit
         );
     }
 

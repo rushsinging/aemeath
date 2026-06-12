@@ -60,6 +60,14 @@ fn test_ctx() -> ToolExecutionContext {
     }
 }
 
+#[test]
+fn tool_cancelled_message_names_tool() {
+    assert_eq!(
+        super::tool_call_cancelled_message("Bash"),
+        "tool.call execution cancelled: tool=Bash"
+    );
+}
+
 #[tokio::test]
 async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));

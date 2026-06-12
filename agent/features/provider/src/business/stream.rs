@@ -50,7 +50,7 @@ pub async fn parse_stream(
         let line = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(remaining) => {
                 handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));

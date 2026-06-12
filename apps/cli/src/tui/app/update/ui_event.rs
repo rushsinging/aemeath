@@ -83,6 +83,7 @@ impl App {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，                // 此处不再重复写 output_area（消除双表示）。
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
                     name: "error".to_string(),
@@ -93,6 +94,7 @@ impl App {
                 self.append_system_notice("已取消");
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
             }
             UiEvent::MessagesSync(msgs) => {
                 // 比较新旧 messages，提取新增的 user messages 用于回显
@@ -173,6 +175,7 @@ impl App {
                 }
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
                 self.model
                     .runtime
                     .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
@@ -275,9 +278,11 @@ impl App {
             }
             UiEvent::Done => {
                 effects.extend(self.handle_done(ui_tx, None));
+                self.chat.clear_processing_handle();
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 effects.extend(self.handle_done(ui_tx, Some(elapsed)));
+                self.chat.clear_processing_handle();
             }
         }
 
