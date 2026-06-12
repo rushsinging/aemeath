@@ -9,7 +9,7 @@ use share::config::{
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
     memory::{MemoryConfig, ReflectionConfig},
-    models::{volcengine_coding_plan_config, ModelsConfig, ProviderModelsConfig},
+    models::{ModelsConfig, ProviderModelsConfig},
     paths as share_paths,
     permissions::{PermissionConfig, PermissionModeConfig},
     skills::SkillsConfig,
@@ -274,10 +274,7 @@ impl ConfigManager {
 
     /// Load configuration from all sources.
     pub async fn load(&self) -> Result<Config, String> {
-        let mut config = Config {
-            models: volcengine_coding_plan_config(),
-            ..Default::default()
-        };
+        let mut config = Config::default();
 
         // Load global config.
         if self.global_path.exists() {
@@ -1085,5 +1082,71 @@ mod tests {
 
         assert_eq!(loaded.logging.level, "debug");
         assert_eq!(loaded.hooks.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_load_does_not_inject_builtin_model_providers() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let home = root.path().join("home_agents");
+        let project = root.path().join("project");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&project).await.unwrap();
+
+        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let manager = ConfigManager::new(Some(&project));
+
+        let loaded = manager.load().await.expect("config should load");
+
+        assert!(loaded.models.providers.is_empty());
+        assert!(loaded.models.default.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_project_hooks_do_not_reset_global_models() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let home = root.path().join("home_agents");
+        let project = root.path().join("project");
+        let project_agents = project.join(".agents");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&project_agents).await.unwrap();
+        tokio::fs::write(
+            home.join("aemeath.json"),
+            r#"{
+              "models": {
+                "default": "MiniMax/MiniMax-M3",
+                "providers": {
+                  "MiniMax": {
+                    "baseUrl": "https://api.minimaxi.com/v1",
+                    "apiKey": "minimax-key",
+                    "driver": "minimax",
+                    "models": [{ "id": "MiniMax-M3", "name": "MiniMax-M3" }]
+                  }
+                }
+              }
+            }"#,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            project_agents.join("aemeath.json"),
+            r#"{ "hooks": { "Stop": [{ "command": "echo ok" }] } }"#,
+        )
+        .await
+        .unwrap();
+
+        let _guard = EnvGuard::set("AEMEATH_AGENTS_DIR", home.to_string_lossy().to_string());
+        let manager = ConfigManager::new(Some(&project));
+
+        let loaded = manager.load().await.expect("config should load");
+        let provider = loaded
+            .models
+            .providers
+            .get("MiniMax")
+            .expect("global provider should remain configured");
+
+        assert_eq!(loaded.models.providers.len(), 1);
+        assert_eq!(loaded.models.default, "MiniMax/MiniMax-M3");
+        assert_eq!(provider.api_key, "minimax-key");
+        assert!(loaded.models.providers.get("Minimax").is_none());
     }
 }

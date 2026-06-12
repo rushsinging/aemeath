@@ -22,12 +22,11 @@ impl ModelsConfig {
 
         let available_sources = self.available_source_keys();
         let (source_key, source_config) =
-            self.provider_entry_ci(source_query).ok_or_else(|| {
-                ModelResolveError::UnknownSource {
+            self.provider_entry(source_query)
+                .ok_or_else(|| ModelResolveError::UnknownSource {
                     source: source_query.to_string(),
                     available_sources: available_sources.clone(),
-                }
-            })?;
+                })?;
 
         let model = find_model_in_provider(source_config, model_query)
             .cloned()
@@ -112,7 +111,7 @@ impl ModelsConfig {
         query: &str,
     ) -> Option<(String, ProviderModelsConfig, ModelEntryConfig)> {
         let (source_query, model_query) = query.split_once('/')?;
-        let (source_key, source_config) = self.provider_entry_ci(source_query)?;
+        let (source_key, source_config) = self.provider_entry(source_query)?;
         let source_key = source_key.clone();
         let source_config = source_config.clone();
         find_model_in_provider(&source_config, model_query)
@@ -120,15 +119,14 @@ impl ModelsConfig {
             .map(|model| (source_key, source_config, model))
     }
 
-    /// Look up a source entry case-insensitively.
-    pub fn provider_ci(&self, name: &str) -> Option<&ProviderModelsConfig> {
-        self.provider_entry_ci(name).map(|(_, v)| v)
+    /// Look up a source entry by exact provider key.
+    pub fn provider(&self, name: &str) -> Option<&ProviderModelsConfig> {
+        self.provider_entry(name).map(|(_, v)| v)
     }
 
-    /// 内部方法：大小写不敏感查找 provider 条目
-    fn provider_entry_ci(&self, name: &str) -> Option<(&String, &ProviderModelsConfig)> {
-        let lc = name.to_lowercase();
-        self.providers.iter().find(|(k, _)| k.to_lowercase() == lc)
+    /// 内部方法：大小写敏感查找 provider 条目。
+    fn provider_entry(&self, name: &str) -> Option<(&String, &ProviderModelsConfig)> {
+        self.providers.get_key_value(name)
     }
 
     /// 统一的模型选择入口：CLI `--model` 参数优先，否则使用配置默认值。

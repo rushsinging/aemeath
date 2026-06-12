@@ -45,13 +45,20 @@ fn resolver_config() -> ModelsConfig {
 #[test]
 fn test_resolve_model_selection_zhipu() {
     let config = resolver_config();
-    let resolved = config.resolve_model_selection("zhipu/glm-5.1").unwrap();
+    let resolved = config.resolve_model_selection("Zhipu/glm-5.1").unwrap();
     assert_eq!(resolved.source_key, "Zhipu");
     assert_eq!(resolved.model.id, "glm-5.1");
     assert_eq!(resolved.driver, "zhipu");
     assert_eq!(resolved.source_config.driver, "zhipu");
 }
 
+#[test]
+fn test_resolve_model_selection_rejects_source_case_mismatch() {
+    let config = resolver_config();
+    let err = config.resolve_model_selection("zhipu/glm-5.1").unwrap_err();
+
+    assert!(err.to_string().contains("未找到模型来源 'zhipu'"));
+}
 #[test]
 fn test_resolve_model_selection_litellm_model_id_with_slash() {
     let config = resolver_config();
@@ -136,14 +143,13 @@ fn test_display_label() {
 }
 
 #[test]
-fn test_provider_ci() {
+fn test_provider_lookup_is_case_sensitive() {
     let config = resolver_config();
-    assert!(config.provider_ci("zhipu").is_some());
-    assert!(config.provider_ci("ZHIPU").is_some());
-    assert!(config.provider_ci("Zhipu").is_some());
-    assert!(config.provider_ci("unknown").is_none());
+    assert!(config.provider("Zhipu").is_some());
+    assert!(config.provider("zhipu").is_none());
+    assert!(config.provider("ZHIPU").is_none());
+    assert!(config.provider("unknown").is_none());
 }
-
 #[test]
 fn test_select_for_run_prefers_cli_model() {
     let config = resolver_config();

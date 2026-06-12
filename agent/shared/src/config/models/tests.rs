@@ -1,6 +1,5 @@
 use super::*;
 use crate::config::models::resolve::normalize_model_key;
-use crate::config::Config;
 use std::collections::HashMap;
 
 fn test_config() -> ModelsConfig {
@@ -32,83 +31,6 @@ fn test_config() -> ModelsConfig {
 }
 
 #[test]
-fn test_default_models_config_includes_volcengine_coding_plan() {
-    let config = volcengine_coding_plan_config();
-    let provider = config.providers.get("Volcengine").unwrap();
-
-    assert_eq!(
-        config.default,
-        "Volcengine/doubao-seed-2-0-code-preview-260215"
-    );
-    assert_eq!(provider.driver, "volcengine");
-    assert_eq!(
-        provider.base_url,
-        "https://ark.cn-beijing.volces.com/api/coding/v3"
-    );
-    assert!(provider.api_key.is_empty());
-    assert!(provider
-        .models
-        .iter()
-        .any(|m| m.id == "doubao-seed-2-0-code-preview-260215"));
-}
-
-#[test]
-fn test_default_models_config_keeps_latest_vendor_models() {
-    let config = volcengine_coding_plan_config();
-    let provider = config.providers.get("Volcengine").unwrap();
-    let ids: Vec<&str> = provider.models.iter().map(|m| m.id.as_str()).collect();
-
-    assert!(ids.contains(&"glm-4-7-251222"));
-    assert!(ids.contains(&"deepseek-v3-2-251201"));
-    assert!(ids.contains(&"kimi-k2-thinking-251104"));
-    assert!(ids.contains(&"doubao-seed-2-0-pro-260215"));
-    assert!(ids.contains(&"doubao-seed-2-0-lite-260428"));
-    assert!(ids.contains(&"doubao-seed-2-0-mini-260428"));
-    assert!(!ids.iter().any(|id| id.contains("minimax")));
-}
-
-#[test]
-fn test_default_models_config_includes_minimax_m3() {
-    let config = volcengine_coding_plan_config();
-    let provider = config.providers.get("Minimax").unwrap();
-
-    assert_eq!(provider.driver, "minimax");
-    assert_eq!(provider.base_url, "https://api.minimaxi.com/v1");
-    assert!(provider.api_key.is_empty());
-    let model = provider
-        .models
-        .iter()
-        .find(|m| m.id == "MiniMax-M3")
-        .unwrap();
-    assert_eq!(model.name, "MiniMax-M3");
-    assert_eq!(model.reasoning, Some(true));
-}
-
-#[test]
-fn test_default_models_config_resolves_minimax_m3() {
-    let config = volcengine_coding_plan_config();
-    let resolved = config
-        .resolve_model_selection("Minimax/MiniMax-M3")
-        .unwrap();
-
-    assert_eq!(resolved.source_key, "Minimax");
-    assert_eq!(resolved.driver, "minimax");
-    assert_eq!(resolved.model.id, "MiniMax-M3");
-}
-
-#[test]
-fn test_default_models_config_resolves_volcengine_default() {
-    let config = volcengine_coding_plan_config();
-    let resolved = config.resolve_default_model().unwrap();
-
-    assert_eq!(resolved.source_key, "Volcengine");
-    assert_eq!(resolved.driver, "volcengine");
-    assert_eq!(resolved.model.id, "doubao-seed-2-0-code-preview-260215");
-    assert_eq!(resolved.model.reasoning, Some(true));
-    assert_eq!(resolved.model.thinking_max_tokens, 131_072);
-}
-
-#[test]
 fn test_empty_models_config_keeps_empty_default_semantics() {
     let config = ModelsConfig::default();
 
@@ -117,35 +39,9 @@ fn test_empty_models_config_keeps_empty_default_semantics() {
 }
 
 #[test]
-fn test_merge_config_keeps_volcengine_builtin_without_overriding_user_default() {
-    let builtin = Config {
-        models: volcengine_coding_plan_config(),
-        ..Default::default()
-    };
-    let mut user = Config::default();
-    user.models.default = "Custom/custom-model".to_string();
-
-    let mut merged = Config {
-        models: builtin.models,
-        ..Default::default()
-    };
-    merged.models.providers.extend(user.models.providers);
-    if !user.models.default.is_empty() {
-        merged.models.default = user.models.default;
-    }
-    if !user.models.mode.is_empty() {
-        merged.models.mode = user.models.mode;
-    }
-    merged.models.guidance.extend(user.models.guidance);
-
-    assert_eq!(merged.models.default, "Custom/custom-model");
-    assert!(merged.models.providers.contains_key("Volcengine"));
-}
-
-#[test]
-fn test_find_model_exact_source_case_insensitive() {
+fn test_find_model_exact_source_case_sensitive() {
     let config = test_config();
-    let result = config.find_model("litellm/gpt-5.5");
+    let result = config.find_model("LiteLLM/gpt-5.5");
     assert!(result.is_some());
     let (source, _, model) = result.unwrap();
     assert_eq!(source, "LiteLLM");
@@ -154,9 +50,16 @@ fn test_find_model_exact_source_case_insensitive() {
 }
 
 #[test]
-fn test_find_model_display_name_case_insensitive_source() {
+fn test_find_model_rejects_source_case_mismatch() {
     let config = test_config();
-    let result = config.find_model("litellm/GPT-5.5");
+    let result = config.find_model("litellm/gpt-5.5");
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_find_model_display_name_with_exact_source_case() {
+    let config = test_config();
+    let result = config.find_model("LiteLLM/GPT-5.5");
     assert!(result.is_some());
     let (_, _, model) = result.unwrap();
     assert_eq!(model.name, "GPT-5.5");
