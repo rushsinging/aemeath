@@ -1,0 +1,2124 @@
+[
+  {
+    "kind": "bug",
+    "id": 3,
+    "title": "优化 tool call TUI 显示",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/003-tool-call-tui-display.md",
+    "draft_file": "bug_003.md"
+  },
+  {
+    "kind": "bug",
+    "id": 17,
+    "title": "对话进行中无法粘贴",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/017-paste-while-processing.md",
+    "draft_file": "bug_017.md"
+  },
+  {
+    "kind": "bug",
+    "id": 20,
+    "title": "aemeath run --provider litellm 无反应直接退出",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/020-litellm-provider-exit.md",
+    "draft_file": "bug_020.md"
+  },
+  {
+    "kind": "bug",
+    "id": 21,
+    "title": "对话中粘贴内容直接进 input queue（应进 input area）",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/021-paste-enters-input-queue.md",
+    "draft_file": "bug_021.md"
+  },
+  {
+    "kind": "bug",
+    "id": 22,
+    "title": "Resume 时部分 tool call 信息显示不全",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/022-resume-tool-call-display.md",
+    "draft_file": "bug_022.md"
+  },
+  {
+    "kind": "bug",
+    "id": 23,
+    "title": "Input queue 内容在 TUI 显示时未适配换行符",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/023-input-queue-newlines.md",
+    "draft_file": "bug_023.md"
+  },
+  {
+    "kind": "bug",
+    "id": 24,
+    "title": "Tool call 执行时 spinner 偶尔消失",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/024-spinner-disappears-during-tool-call.md",
+    "draft_file": "bug_024.md"
+  },
+  {
+    "kind": "bug",
+    "id": 25,
+    "title": "/clear 命令未清空 status line 数据",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/025-clear-status-line.md",
+    "draft_file": "bug_025.md"
+  },
+  {
+    "kind": "bug",
+    "id": 26,
+    "title": "几乎每次对话都触发 superpowers skill 调用",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/026-superpowers-skill-trigger.md",
+    "draft_file": "bug_026.md"
+  },
+  {
+    "kind": "bug",
+    "id": 27,
+    "title": "Sub-agent 已执行 tool call 但 task list 状态不更新",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/027-sub-agent-task-status.md",
+    "draft_file": "bug_027.md"
+  },
+  {
+    "kind": "bug",
+    "id": 28,
+    "title": "Output Area 选中/渲染时 panic：slice/split_off 越界",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/028-output-area-selection-render-panic.md",
+    "draft_file": "bug_028.md"
+  },
+  {
+    "kind": "bug",
+    "id": 29,
+    "title": "主 agent tool call 执行后 task list 状态不更新",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/029-main-agent-task-status.md",
+    "draft_file": "bug_029.md"
+  },
+  {
+    "kind": "bug",
+    "id": 30,
+    "title": "对话过程中 input queue 不被消费，消息卡在队列里",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/030-input-queue-not-consumed.md",
+    "draft_file": "bug_030.md"
+  },
+  {
+    "kind": "bug",
+    "id": 31,
+    "title": "WebSearch 工具返回空结果（DuckDuckGo HTML 结构变更）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/031-web-search-empty-results.md",
+    "draft_file": "bug_031.md"
+  },
+  {
+    "kind": "bug",
+    "id": 32,
+    "title": "Task list 窗口化显示异常",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/032-task-window-shrink.md",
+    "draft_file": "bug_032.md"
+  },
+  {
+    "kind": "bug",
+    "id": 33,
+    "title": "Spinner 下方 task list 无法选中、复制和高亮",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/033-task-list-selection.md",
+    "draft_file": "bug_033.md"
+  },
+  {
+    "kind": "bug",
+    "id": 34,
+    "title": "Task reminder 干扰新用户请求",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/034-task-reminder-interference.md",
+    "draft_file": "bug_034.md"
+  },
+  {
+    "kind": "bug",
+    "id": 35,
+    "title": "Write tool 在 worktree 中写入错误分支",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/035-write-tool-worktree-path.md",
+    "draft_file": "bug_035.md"
+  },
+  {
+    "kind": "bug",
+    "id": 36,
+    "title": "TaskListCreate 后新任务编号未从 1 开始",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/036-task-list-numbering.md",
+    "draft_file": "bug_036.md"
+  },
+  {
+    "kind": "bug",
+    "id": 37,
+    "title": "Task list 全部完成后切换对话仍显示旧 task",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/037-task-list-stale-after-complete.md",
+    "draft_file": "bug_037.md"
+  },
+  {
+    "kind": "bug",
+    "id": 38,
+    "title": "Assistant 空消息导致 API 400 invalid_request_error",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/038-assistant-empty-message-400.md",
+    "draft_file": "bug_038.md"
+  },
+  {
+    "kind": "bug",
+    "id": 39,
+    "title": "超大工具结果触发 API 400 string_above_max_length",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/039-tool-result-too-large.md",
+    "draft_file": "bug_039.md"
+  },
+  {
+    "kind": "bug",
+    "id": 40,
+    "title": "DeepSeek 流式输出约 120 秒后 decode timeout",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/040-deepseek-streaming-timeout.md",
+    "draft_file": "bug_040.md"
+  },
+  {
+    "kind": "bug",
+    "id": 41,
+    "title": "执行 /reflect 时 TUI 短暂卡死后才出现 LLM 输出",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/041-reflect-tui-freeze.md",
+    "draft_file": "bug_041.md"
+  },
+  {
+    "kind": "bug",
+    "id": 42,
+    "title": "TUI 中 Bash 工具输出中文显示为乱码（M- 转义序列）",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/042-bash-chinese-garbled.md",
+    "draft_file": "bug_042.md"
+  },
+  {
+    "kind": "bug",
+    "id": 43,
+    "title": "TaskUpdate 使用全局 id 但 TUI task list 显示局部编号，agent 引用编号不一致",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/043-task-update-global-vs-local-id.md",
+    "draft_file": "bug_043.md"
+  },
+  {
+    "kind": "bug",
+    "id": 44,
+    "title": "Bash 工具设置 600s timeout 仍被 120s 截断",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/044-bash-timeout-truncated.md",
+    "draft_file": "bug_044.md"
+  },
+  {
+    "kind": "bug",
+    "id": 45,
+    "title": "/ 命令自动补全时上下键不能翻页选择候选",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/045-suggestion-list-scroll.md",
+    "draft_file": "bug_045.md"
+  },
+  {
+    "kind": "bug",
+    "id": 46,
+    "title": "Output area Markdown 表格行选中复制内容错位",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/046-markdown-table-selection-offset.md",
+    "draft_file": "bug_046.md"
+  },
+  {
+    "kind": "bug",
+    "id": 47,
+    "title": "LLM 声称派发多个 reviewer 但 Agent 实际串行执行",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/047-serial-agent-execution.md",
+    "draft_file": "bug_047.md"
+  },
+  {
+    "kind": "bug",
+    "id": 48,
+    "title": "Output area 选中复制文本内容错位（含 CJK）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/048-selection-offset-cjk.md",
+    "draft_file": "bug_048.md"
+  },
+  {
+    "kind": "bug",
+    "id": 49,
+    "title": "last turn 时用户提交的内容不会发给 LLM，留在 input queue 区域",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/049-input-queue-last-turn.md",
+    "draft_file": "bug_049.md"
+  },
+  {
+    "kind": "bug",
+    "id": 50,
+    "title": "input area 为空时按上键进入历史翻看模式",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/050-history-up-empty-input.md",
+    "draft_file": "bug_050.md"
+  },
+  {
+    "kind": "bug",
+    "id": 51,
+    "title": "Output area 复制时复制出 Markdown 源码而非渲染后纯文本",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/051-output-area-markdown-copy.md",
+    "draft_file": "bug_051.md"
+  },
+  {
+    "kind": "bug",
+    "id": 52,
+    "title": "Tool call spinner 一直闪烁且 tool 结果未更新",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/052-tool-call-spinner-result-not-updated.md",
+    "draft_file": "bug_052.md"
+  },
+  {
+    "kind": "bug",
+    "id": 53,
+    "title": "AskUserQuestion 选项未逐行显示，多个选项挤在一行",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/053-ask-user-question-options-lines.md",
+    "draft_file": "bug_053.md"
+  },
+  {
+    "kind": "bug",
+    "id": 54,
+    "title": "LLM 过度使用 TaskListCreate，简单任务也创建 task list",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/054-task-list-overuse.md",
+    "draft_file": "bug_054.md"
+  },
+  {
+    "kind": "bug",
+    "id": 55,
+    "title": "行内代码（`...`）自动换行处渲染异常",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/055-inline-code-wrap.md",
+    "draft_file": "bug_055.md"
+  },
+  {
+    "kind": "bug",
+    "id": 56,
+    "title": "Stop hook 返回 exit 2 后 LLM 仍结束",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/056-stop-hook-exit2-ignored.md",
+    "draft_file": "bug_056.md"
+  },
+  {
+    "kind": "bug",
+    "id": 57,
+    "title": "Spinner 有时闪烁过快",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/057-spinner-flicker.md",
+    "draft_file": "bug_057.md"
+  },
+  {
+    "kind": "bug",
+    "id": 58,
+    "title": "TUI 中 Markdown 多行代码块/表格滚出视口后渲染异常",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/058-codeblock-table-scroll-state.md",
+    "draft_file": "bug_058.md"
+  },
+  {
+    "kind": "bug",
+    "id": 59,
+    "title": "Input area 翻历史记录时丢失换行且文本超出渲染框",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/059-input-history-multiline.md",
+    "draft_file": "bug_059.md"
+  },
+  {
+    "kind": "bug",
+    "id": 60,
+    "title": "TUI 中 Markdown code 块复制时下划线被吞掉",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/060-markdown-code-underscore-copy.md",
+    "draft_file": "bug_060.md"
+  },
+  {
+    "kind": "bug",
+    "id": 61,
+    "title": "Diff 渲染行号顶到最左破坏缩进，且选中后高亮丧失",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/061-diff-indent-selection-highlight.md",
+    "draft_file": "bug_061.md"
+  },
+  {
+    "kind": "bug",
+    "id": 62,
+    "title": "Grep 工具执行中标题文字不可见但复制可见",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/062-grep-title-invisible.md",
+    "draft_file": "bug_062.md"
+  },
+  {
+    "kind": "bug",
+    "id": 63,
+    "title": "AskUserQuestion options 模式上下选择未同步到 TUI 显示",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/063-ask-user-options-selection-sync.md",
+    "draft_file": "bug_063.md"
+  },
+  {
+    "kind": "bug",
+    "id": 64,
+    "title": "Agent 未绑定 taskId 仍启动导致 TaskList 无 doing 状态",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/064-agent-missing-taskid.md",
+    "draft_file": "bug_064.md"
+  },
+  {
+    "kind": "bug",
+    "id": 65,
+    "title": "工具结果 fenced code block 后续内容继续显示为 code 颜色",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/065-tool-result-fence-leak.md",
+    "draft_file": "bug_065.md"
+  },
+  {
+    "kind": "bug",
+    "id": 66,
+    "title": "ExitWorktree 带 path 参数报错\"已在 worktree 中\"",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/066-exit-worktree-path.md",
+    "draft_file": "bug_066.md"
+  },
+  {
+    "kind": "bug",
+    "id": 67,
+    "title": "`--resume` 失效：进入 TUI 后未加载历史会话",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/067-resume-history-not-loaded.md",
+    "draft_file": "bug_067.md"
+  },
+  {
+    "kind": "bug",
+    "id": 68,
+    "title": "TUI 丢失 context window 用量显示",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/068-context-window-display-missing.md",
+    "draft_file": "bug_068.md"
+  },
+  {
+    "kind": "bug",
+    "id": 69,
+    "title": "worktree 中 LLM 仍尝试搜索主分支路径",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/069-worktree-main-path-search.md",
+    "draft_file": "bug_069.md"
+  },
+  {
+    "kind": "bug",
+    "id": 70,
+    "title": "TaskListCreate 第一次调用会超时",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/070-tasklistcreate-first-timeout.md",
+    "draft_file": "bug_070.md"
+  },
+  {
+    "kind": "bug",
+    "id": 71,
+    "title": "TUI 渲染缓存越界 panic（len 10000 / index 10000）+ unsafe string guard 覆盖不全",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/071-render-cache-out-of-bounds.md",
+    "draft_file": "bug_071.md"
+  },
+  {
+    "kind": "bug",
+    "id": 72,
+    "title": "agent 双层循环中一轮结束后不自动读取 input queue",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/072-agent-loop-input-queue-drain.md",
+    "draft_file": "bug_072.md"
+  },
+  {
+    "kind": "bug",
+    "id": 73,
+    "title": "EnterWorktree 不能创建 worktree 导致 LLM 回退到主工作区 checkout",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/073-enter-worktree-create.md",
+    "draft_file": "bug_073.md"
+  },
+  {
+    "kind": "bug",
+    "id": 74,
+    "title": "TUI 执行 /reflect 后续文本颜色全部变暗（System 色泄漏）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/074-reflect-system-color-leak.md",
+    "draft_file": "bug_074.md"
+  },
+  {
+    "kind": "bug",
+    "id": 75,
+    "title": "中文输入法下 input area 输入顺序错乱（查看 → 看查）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/075-ime-cjk-input-order.md",
+    "draft_file": "bug_075.md"
+  },
+  {
+    "kind": "bug",
+    "id": 76,
+    "title": "reasoning 模型 think 后 Grep 结果渲染成扁平原始行且滚动条失效",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/076-reasoning-grep-flat-render.md",
+    "draft_file": "bug_076.md"
+  },
+  {
+    "kind": "bug",
+    "id": 77,
+    "title": "@/ / 补全后按空格回退删除字符",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/077-completion-model-stale-overwrite.md",
+    "draft_file": "bug_077.md"
+  },
+  {
+    "kind": "bug",
+    "id": 78,
+    "title": "input area 粘贴后按空格清空粘贴内容",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/078-paste-cleared-by-space.md",
+    "draft_file": "bug_078.md"
+  },
+  {
+    "kind": "bug",
+    "id": 80,
+    "title": "滚动条不跟随最新内容（全量替换时 scroll_offset 累加）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/080-scroll-not-follow-latest.md",
+    "draft_file": "bug_080.md"
+  },
+  {
+    "kind": "bug",
+    "id": 81,
+    "title": "TUI 输出区中文按单字竖排显示",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/081-cjk-vertical-render.md",
+    "draft_file": "bug_081.md"
+  },
+  {
+    "kind": "bug",
+    "id": 82,
+    "title": "TUI 渲染 tool call 时丢失 theme 颜色",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/082-tool-call-theme-color-lost.md",
+    "draft_file": "bug_082.md"
+  },
+  {
+    "kind": "bug",
+    "id": 83,
+    "title": "TUI 渲染 tool call 同时输出 summary 和完整内容，重复刷屏",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/083-tool-result-duplicate-flood.md",
+    "draft_file": "bug_083.md"
+  },
+  {
+    "kind": "bug",
+    "id": 84,
+    "title": "TUI 未渲染 TaskListCreate 工具调用",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/084-tasklistcreate-not-rendered.md",
+    "draft_file": "bug_084.md"
+  },
+  {
+    "kind": "bug",
+    "id": 85,
+    "title": "Ollama provider 声明但工厂未接线（整模块死代码）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/085-ollama-factory-wiring.md",
+    "draft_file": "bug_085.md"
+  },
+  {
+    "kind": "bug",
+    "id": 86,
+    "title": "TUI tool call 顺序颠倒",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/086-tool-call-order-reversed.md",
+    "draft_file": "bug_086.md"
+  },
+  {
+    "kind": "bug",
+    "id": 87,
+    "title": "TUI tool call 显示完整 tool result 内容且不受 max output 限制，result 渲染格式错误",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/087-tool-result-overflow.md",
+    "draft_file": "bug_087.md"
+  },
+  {
+    "kind": "bug",
+    "id": 88,
+    "title": "TUI Read tool call 头部下重复显示一行 `Read /path`",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/088-read-path-duplicate.md",
+    "draft_file": "bug_088.md"
+  },
+  {
+    "kind": "bug",
+    "id": 89,
+    "title": "TUI markdown 表格只渲染表头，分隔行与数据行原样泄漏",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/089-markdown-table-header-only.md",
+    "draft_file": "bug_089.md"
+  },
+  {
+    "kind": "bug",
+    "id": 90,
+    "title": "TUI Edit 工具结果不渲染为 diff（只显示 ✓ Edit completed 摘要）",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/090-edit-result-not-diff.md",
+    "draft_file": "bug_090.md"
+  },
+  {
+    "kind": "bug",
+    "id": 91,
+    "title": "TUI thinking block 渲染时被缩进，破坏 markdown 表头与代码块",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/091-thinking-indent-breaks-markdown.md",
+    "draft_file": "bug_091.md"
+  },
+  {
+    "kind": "bug",
+    "id": 92,
+    "title": "--resume CLI 路径未为 Resume 模式加载 InputModel 输入历史",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/092-resume-cli-input-history.md",
+    "draft_file": "bug_092.md"
+  },
+  {
+    "kind": "bug",
+    "id": 93,
+    "title": "TUI 工具结果块内重复显示工具名和图标",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/093-tool-result-header-duplicate.md",
+    "draft_file": "bug_093.md"
+  },
+  {
+    "kind": "bug",
+    "id": 94,
+    "title": "Bash 工具运行时阻塞 LLM 流式渲染",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/094-bash-blocks-streaming.md",
+    "draft_file": "bug_094.md"
+  },
+  {
+    "kind": "bug",
+    "id": 95,
+    "title": "Agent tool result 被归为 orphan",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/095-agent-tool-result-orphan.md",
+    "draft_file": "bug_095.md"
+  },
+  {
+    "kind": "bug",
+    "id": 96,
+    "title": "EnterWorktree 上下文栈与 git 实际状态不一致，导致误报\"已在 worktree 中\"",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/096-worktree-stack-stale.md",
+    "draft_file": "bug_096.md"
+  },
+  {
+    "kind": "bug",
+    "id": 97,
+    "title": "/clear 未清空 task store 和 task list window",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/097-clear-tasks-window.md",
+    "draft_file": "bug_097.md"
+  },
+  {
+    "kind": "bug",
+    "id": 98,
+    "title": "resume 时没有加载 worktree 配置",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/098-resume-workspace-restore.md",
+    "draft_file": "bug_098.md"
+  },
+  {
+    "kind": "bug",
+    "id": 99,
+    "title": "input area 里上下键始终翻看历史，无法上下移动光标",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/099-input-up-down-cursor.md",
+    "draft_file": "bug_099.md"
+  },
+  {
+    "kind": "bug",
+    "id": 101,
+    "title": "HookUi 只发一次 HookStart，多 hook 场景下 spinner 只显示第一个 hook 命令",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/101-hook-start-per-hook.md",
+    "draft_file": "bug_101.md"
+  },
+  {
+    "kind": "bug",
+    "id": 102,
+    "title": "长工具调用内容导致 TUI 画面完全不刷新、按键无响应",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/102-tool-content-tui-block.md",
+    "draft_file": "bug_102.md"
+  },
+  {
+    "kind": "bug",
+    "id": 103,
+    "title": "EnterWorktree/ExitWorktree 在 TUI 中显示原始 JSON 参数内容",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/103-worktree-tool-display.md",
+    "draft_file": "bug_103.md"
+  },
+  {
+    "kind": "bug",
+    "id": 104,
+    "title": "input queue drain 后没有在 TUI 中显示",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/104-input-queue-drain-display.md",
+    "draft_file": "bug_104.md"
+  },
+  {
+    "kind": "bug",
+    "id": 105,
+    "title": "TUI 中 ```text fenced block 被当作代码块显示而非 Markdown 渲染",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/105-text-fence-markdown.md",
+    "draft_file": "bug_105.md"
+  },
+  {
+    "kind": "bug",
+    "id": 106,
+    "title": "TUI 输出区渲染未预留滚动条列宽，右侧文字与滚动条重叠且长行不自动换行",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/106-scrollbar-overlap.md",
+    "draft_file": "bug_106.md"
+  },
+  {
+    "kind": "bug",
+    "id": 107,
+    "title": "TUI Rust fenced code 使用 `rust` 语言名时没有 syntect 高亮",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/107-rust-fence-highlight.md",
+    "draft_file": "bug_107.md"
+  },
+  {
+    "kind": "bug",
+    "id": 108,
+    "title": "TUI diff 代码块没有统一走 syntect 高亮",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/108-diff-syntect-highlight.md",
+    "draft_file": "bug_108.md"
+  },
+  {
+    "kind": "bug",
+    "id": 109,
+    "title": "TUI syntect 高亮主题使用 base16-ocean.dark，与 Catppuccin Macchiato UI 主题不一致",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/109-syntect-theme-macchiato.md",
+    "draft_file": "bug_109.md"
+  },
+  {
+    "kind": "bug",
+    "id": 110,
+    "title": "Stop hook 项目上下文只输出到 stdout，成功时不进入 aemeath.log",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/110-hook-env-log.md",
+    "draft_file": "bug_110.md"
+  },
+  {
+    "kind": "bug",
+    "id": 111,
+    "title": "LLM 输出长行被截断，TUI 只显示到屏幕宽度即断行消失",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/111-thinking-long-line-truncated.md",
+    "draft_file": "bug_111.md"
+  },
+  {
+    "kind": "bug",
+    "id": 112,
+    "title": "TUI tool call spinner 有状态但输出区不显示 tool card",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/active.md#112",
+    "draft_file": "bug_112.md"
+  },
+  {
+    "kind": "bug",
+    "id": 113,
+    "title": "AskUserQuestion 回答后 LLM 新输出渲染到 AskUser 块上方；AskUser 块本身固定在初始位置",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/113-askuser-output-order.md",
+    "draft_file": "bug_113.md"
+  },
+  {
+    "kind": "bug",
+    "id": 114,
+    "title": "Stop hook blocked 缺少显式 chat loop 停止状态表达",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/114-stop-hook-blocked-chat-loop-state.md",
+    "draft_file": "bug_114.md"
+  },
+  {
+    "kind": "bug",
+    "id": 115,
+    "title": "check-unit-tests 测试过滤参数误用导致误报失败",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/115-check-unit-tests-filter.md",
+    "draft_file": "bug_115.md"
+  },
+  {
+    "kind": "bug",
+    "id": 116,
+    "title": "TaskListCreate 工具返回未带 task list ID",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/116-tasklistcreate-no-id.md",
+    "draft_file": "bug_116.md"
+  },
+  {
+    "kind": "bug",
+    "id": 117,
+    "title": "创建 task list 和 task 时，TUI task list window 没有更新",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/117-tui-task-list-refresh.md",
+    "draft_file": "bug_117.md"
+  },
+  {
+    "kind": "bug",
+    "id": 118,
+    "title": "Hook env 中项目目录仍指向主工作区而非当前 worktree",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/118-hook-project-dir-env.md",
+    "draft_file": "bug_118.md"
+  },
+  {
+    "kind": "bug",
+    "id": 119,
+    "title": "TUI tool call 空 summary 覆盖流式参数导致 Skill(?) 与 TaskCreate 缺失",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/119-tool-call-streaming-summary.md",
+    "draft_file": "bug_119.md"
+  },
+  {
+    "kind": "bug",
+    "id": 120,
+    "title": "TUI tool call block 跨 turn 串写",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/120-tool-call-block-cross-turn.md",
+    "draft_file": "bug_120.md"
+  },
+  {
+    "kind": "bug",
+    "id": 121,
+    "title": "Spinner verb 与 pharse_text 计时显示相同",
+    "labels": [
+      "kind:bug",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/archived/121-spinner-verb-phase-text-timer-same.md",
+    "draft_file": "bug_121.md"
+  },
+  {
+    "kind": "bug",
+    "id": 122,
+    "title": "Tool gutter marker 闪烁过快且 summary 曾等 result 才出现",
+    "labels": [
+      "kind:bug",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/active.md#122",
+    "draft_file": "bug_122.md"
+  },
+  {
+    "kind": "bug",
+    "id": 123,
+    "title": "TUI 长文本换行缺失：input area / input queue / user message 均不自动折行",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/active.md#123",
+    "draft_file": "bug_123.md"
+  },
+  {
+    "kind": "bug",
+    "id": 124,
+    "title": "`/think` 命令输出不应渲染 Markdown",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/active.md#124",
+    "draft_file": "bug_124.md"
+  },
+  {
+    "kind": "bug",
+    "id": 125,
+    "title": "Stop hook 异常被渲染为「无主 tool」信息",
+    "labels": [
+      "kind:bug",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/bug/active.md#125",
+    "draft_file": "bug_125.md"
+  },
+  {
+    "kind": "feature",
+    "id": 1,
+    "title": "Hook 功能（参考 Claude Code 设计）",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/001-hook-system.md",
+    "draft_file": "feature_001.md"
+  },
+  {
+    "kind": "feature",
+    "id": 2,
+    "title": "SubAgent 可配置",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/002-subagent-configurable.md",
+    "draft_file": "feature_002.md"
+  },
+  {
+    "kind": "feature",
+    "id": 3,
+    "title": "CLI 子命令",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/003-cli-subcommands.md",
+    "draft_file": "feature_003.md"
+  },
+  {
+    "kind": "feature",
+    "id": 4,
+    "title": "AskUserQuestion TUI 美化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/004-ask-user-question-tui.md",
+    "draft_file": "feature_004.md"
+  },
+  {
+    "kind": "feature",
+    "id": 5,
+    "title": "Agent 调用显示优化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/005-agent-display.md",
+    "draft_file": "feature_005.md"
+  },
+  {
+    "kind": "feature",
+    "id": 6,
+    "title": "Task 调用显示优化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/006-task-display.md",
+    "draft_file": "feature_006.md"
+  },
+  {
+    "kind": "feature",
+    "id": 7,
+    "title": "Input Queue 优化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/007-input-queue.md",
+    "draft_file": "feature_007.md"
+  },
+  {
+    "kind": "feature",
+    "id": 8,
+    "title": "Memory 系统",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#8",
+    "draft_file": "feature_008.md"
+  },
+  {
+    "kind": "feature",
+    "id": 9,
+    "title": "反思系统",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#9",
+    "draft_file": "feature_009.md"
+  },
+  {
+    "kind": "feature",
+    "id": 10,
+    "title": "日志文件规范化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/010-log-file-spec.md",
+    "draft_file": "feature_010.md"
+  },
+  {
+    "kind": "feature",
+    "id": 11,
+    "title": "Esc 打断对话",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/011-esc-interrupt.md",
+    "draft_file": "feature_011.md"
+  },
+  {
+    "kind": "feature",
+    "id": 11,
+    "title": "OpenAI reasoning_effort 配置支持",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/011-openai-reasoning-effort.md",
+    "draft_file": "feature_011__1.md"
+  },
+  {
+    "kind": "feature",
+    "id": 12,
+    "title": "Input Queue 双层循环优化",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/012-input-queue-double-loop.md",
+    "draft_file": "feature_012.md"
+  },
+  {
+    "kind": "feature",
+    "id": 13,
+    "title": "Task list 显示在 spinner 下方",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/013-task-list-below-spinner.md",
+    "draft_file": "feature_013.md"
+  },
+  {
+    "kind": "feature",
+    "id": 14,
+    "title": "Session ID 自增无冲突方案",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/014-session-id-uuidv7.md",
+    "draft_file": "feature_014.md"
+  },
+  {
+    "kind": "feature",
+    "id": 15,
+    "title": "通过 max_tokens 配置 LLM 输出 + thinking 双上限",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/015-max-tokens-thinking-budget.md",
+    "draft_file": "feature_015.md"
+  },
+  {
+    "kind": "feature",
+    "id": 16,
+    "title": "Spinner 行合并状态显示 + Hook 调用信息",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/016-spinner-merged-status-hook-info.md",
+    "draft_file": "feature_016.md"
+  },
+  {
+    "kind": "feature",
+    "id": 17,
+    "title": "Skill 延迟加载 + 命名空间前缀",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/017-skill-lazy-load-namespace.md",
+    "draft_file": "feature_017.md"
+  },
+  {
+    "kind": "feature",
+    "id": 18,
+    "title": "Task list 跨轮次 batch 机制",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/018-task-list-batch.md",
+    "draft_file": "feature_018.md"
+  },
+  {
+    "kind": "feature",
+    "id": 19,
+    "title": "config model 支持 zhipu api 类型",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/019-zhipu-api-type.md",
+    "draft_file": "feature_019.md"
+  },
+  {
+    "kind": "feature",
+    "id": 20,
+    "title": "config model 支持 litellm api 类型",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/020-litellm-api-type.md",
+    "draft_file": "feature_020.md"
+  },
+  {
+    "kind": "feature",
+    "id": 21,
+    "title": "TUI 优化 Agent 调用输出展示",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/021-tui-agent-output-display.md",
+    "draft_file": "feature_021.md"
+  },
+  {
+    "kind": "feature",
+    "id": 23,
+    "title": "TUI 字符串/切片安全索引收口",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/023-safe-text-index.md",
+    "draft_file": "feature_023.md"
+  },
+  {
+    "kind": "feature",
+    "id": 23,
+    "title": "TUI 字符串/切片安全索引收口",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/023-tui-safe-text-indexing.md",
+    "draft_file": "feature_023__1.md"
+  },
+  {
+    "kind": "feature",
+    "id": 24,
+    "title": "Spinner 下方 task list 限量显示（最多 7 条）",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/024-task-list-windowed-display.md",
+    "draft_file": "feature_024.md"
+  },
+  {
+    "kind": "feature",
+    "id": 25,
+    "title": "Task list 跨轮次生命周期策略",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/025-task-lifecycle-policy.md",
+    "draft_file": "feature_025.md"
+  },
+  {
+    "kind": "feature",
+    "id": 27,
+    "title": "日志分化：input.log / output.log / tool.log",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/027-log-split.md",
+    "draft_file": "feature_027.md"
+  },
+  {
+    "kind": "feature",
+    "id": 28,
+    "title": "MCP 系统完善",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#28",
+    "draft_file": "feature_028.md"
+  },
+  {
+    "kind": "feature",
+    "id": 29,
+    "title": "Task reminder 被动注入",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/029-task-reminder-passive-injection.md",
+    "draft_file": "feature_029.md"
+  },
+  {
+    "kind": "feature",
+    "id": 30,
+    "title": "Agent loop 收尾工作",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/030-agent-loop-finalize.md",
+    "draft_file": "feature_030.md"
+  },
+  {
+    "kind": "feature",
+    "id": 31,
+    "title": "TUI 架构守卫脚本（TEA 纯度 + 400 行限制）",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/031-tui-architecture-guards.md",
+    "draft_file": "feature_031.md"
+  },
+  {
+    "kind": "feature",
+    "id": 32,
+    "title": "TUI 选中和复制逻辑统一",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/032-tui-selection-copy-unify.md",
+    "draft_file": "feature_032.md"
+  },
+  {
+    "kind": "feature",
+    "id": 33,
+    "title": "优化 TaskListCreate / TaskListComplete 工具调用显示",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/033-task-list-display-optimization.md",
+    "draft_file": "feature_033.md"
+  },
+  {
+    "kind": "feature",
+    "id": 34,
+    "title": "Anthropic Claude 原生 Provider",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#34",
+    "draft_file": "feature_034.md"
+  },
+  {
+    "kind": "feature",
+    "id": 35,
+    "title": "Diff 渲染 add 行语法高亮 + 行号显示",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/035-diff-add-highlight-line-numbers.md",
+    "draft_file": "feature_035.md"
+  },
+  {
+    "kind": "feature",
+    "id": 37,
+    "title": "火山引擎（Volcengine）Coding Plan Provider",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/037-volcengine-coding-plan-provider.md",
+    "draft_file": "feature_037.md"
+  },
+  {
+    "kind": "feature",
+    "id": 39,
+    "title": "Ctrl+C 两段式退出",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/039-ctrlc-two-stage-exit.md",
+    "draft_file": "feature_039.md"
+  },
+  {
+    "kind": "feature",
+    "id": 39,
+    "title": "TUI 配色方案重新设计",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/039-tui-theme-redesign.md",
+    "draft_file": "feature_039__1.md"
+  },
+  {
+    "kind": "feature",
+    "id": 40,
+    "title": "配置文件改造：对齐 Claude 优先兼容的 `~/.agents` / `CLAUDE.md` / skills 读取",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/040-claude-compatible-agents-config.md",
+    "draft_file": "feature_040.md"
+  },
+  {
+    "kind": "feature",
+    "id": 42,
+    "title": "权限管控系统",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#42",
+    "draft_file": "feature_042.md"
+  },
+  {
+    "kind": "feature",
+    "id": 43,
+    "title": "在 git worktree 中工作时 cwd 应设置为 worktree 目录",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/043-worktree-cwd-context.md",
+    "draft_file": "feature_043.md"
+  },
+  {
+    "kind": "feature",
+    "id": 44,
+    "title": "Commit Style Context 与 AI 协作者 trailer",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/044-commit-style-context.md",
+    "draft_file": "feature_044.md"
+  },
+  {
+    "kind": "feature",
+    "id": 45,
+    "title": "为 LLM 提供 EnterWorktree / ExitWorktree 工具",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/045-enter-exit-worktree-tools.md",
+    "draft_file": "feature_045.md"
+  },
+  {
+    "kind": "feature",
+    "id": 46,
+    "title": "TUI status line 增加第二行并显示 cwd/current worktree",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/046-tui-status-line-worktree-context.md",
+    "draft_file": "feature_046.md"
+  },
+  {
+    "kind": "feature",
+    "id": 47,
+    "title": "以 DDD 思路重新设计 Aemeath 架构",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/047-ddd-redesign.md",
+    "draft_file": "feature_047.md"
+  },
+  {
+    "kind": "feature",
+    "id": 48,
+    "title": "TUI 窗口 resize 时重新计算渲染层并刷新显示层",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/048-tui-resize-render-refresh.md",
+    "draft_file": "feature_048.md"
+  },
+  {
+    "kind": "feature",
+    "id": 49,
+    "title": "AskUserQuestion 增强——title+description 选项、智能 All/None、Type something 输入框",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#49",
+    "draft_file": "feature_049.md"
+  },
+  {
+    "kind": "feature",
+    "id": 50,
+    "title": "CLI 目录整理 — 收拢碎片、统一模块层级",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/050-cli-directory-cleanup.md",
+    "draft_file": "feature_050.md"
+  },
+  {
+    "kind": "feature",
+    "id": 51,
+    "title": "UI Domain DDD 设计 — 将 apps/cli 提升为核心域",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/051-ui-domain-ddd-design.md",
+    "draft_file": "feature_051.md"
+  },
+  {
+    "kind": "feature",
+    "id": 52,
+    "title": "Tool 描述英文化：所有 tool 给 LLM 的 description 统一为英文",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#52",
+    "draft_file": "feature_052.md"
+  },
+  {
+    "kind": "feature",
+    "id": 53,
+    "title": "TUI Model/View 架构迁移",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/053-tui-model-view-migration.md",
+    "draft_file": "feature_053.md"
+  },
+  {
+    "kind": "feature",
+    "id": 54,
+    "title": "主动压缩触发：大上下文下防止 LiteLLM 代理拒绝",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/054-proactive-compaction-trigger.md",
+    "draft_file": "feature_054.md"
+  },
+  {
+    "kind": "feature",
+    "id": 55,
+    "title": "TUI 架构收口 — render / adapter / app 三层落地 + 清理 legacy core",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/055-tui-render-adapter-app-layers.md",
+    "draft_file": "feature_055.md"
+  },
+  {
+    "kind": "feature",
+    "id": 56,
+    "title": "输入单一真相约束 — 禁止直接改 input_area 并加架构 guard",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/056-input-single-source-guard.md",
+    "draft_file": "feature_056.md"
+  },
+  {
+    "kind": "feature",
+    "id": 57,
+    "title": "TUI 目录物理收口 — 并入剩余 widget/service 目录、删 core shim",
+    "labels": [
+      "kind:feature",
+      "priority:low",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/057-tui-toplevel-physical-cleanup.md",
+    "draft_file": "feature_057.md"
+  },
+  {
+    "kind": "feature",
+    "id": 58,
+    "title": "TUI 输出区渲染管线统一重构",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/058-tui-output-render-pipeline.md",
+    "draft_file": "feature_058.md"
+  },
+  {
+    "kind": "feature",
+    "id": 59,
+    "title": "TUI Model/View 单源迁移收口（伞型 roadmap）",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/059-tui-single-source-roadmap.md",
+    "draft_file": "feature_059.md"
+  },
+  {
+    "kind": "feature",
+    "id": 60,
+    "title": "Auto-compact LLM 语义化压缩",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/060-auto-compact-llm-summary.md",
+    "draft_file": "feature_060.md"
+  },
+  {
+    "kind": "feature",
+    "id": 61,
+    "title": "架构债务收口（047 DDD 软约束落实）",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/061-ddd-architecture-debt-closure.md",
+    "draft_file": "feature_061.md"
+  },
+  {
+    "kind": "feature",
+    "id": 63,
+    "title": "TUI Block 抽象 trait 化 + 真正渲染树（嵌套规则）+ gutter",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/063-tui-block-trait-nesting.md",
+    "draft_file": "feature_063.md"
+  },
+  {
+    "kind": "feature",
+    "id": 64,
+    "title": "TUI tool call result 子块展示 output 内容预览",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/064-tool-result-preview.md",
+    "draft_file": "feature_064.md"
+  },
+  {
+    "kind": "feature",
+    "id": 65,
+    "title": "Resume 模式输入历史 — 上下键翻阅过往输入",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/065-resume-input-history.md",
+    "draft_file": "feature_065.md"
+  },
+  {
+    "kind": "feature",
+    "id": 66,
+    "title": "去除 mod.rs 旧写法 + 架构 guard",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/066-no-mod-rs-guard.md",
+    "draft_file": "feature_066.md"
+  },
+  {
+    "kind": "feature",
+    "id": 67,
+    "title": "Task/project window 改为 ChangeSet 驱动刷新",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/067-changeset-task-project-refresh.md",
+    "draft_file": "feature_067.md"
+  },
+  {
+    "kind": "feature",
+    "id": 68,
+    "title": "项目指令搜索增强：全局 fallback ~/.claude/CLAUDE.md + 向上/向下 5 级目录探索",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#68",
+    "draft_file": "feature_068.md"
+  },
+  {
+    "kind": "feature",
+    "id": 69,
+    "title": "TUI Hook 消息类型化与 system-reminder 展示脱壳",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#69",
+    "draft_file": "feature_069.md"
+  },
+  {
+    "kind": "feature",
+    "id": 70,
+    "title": "统一 input_queue 到事件驱动",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/070-unify-input-queue-event-driven.md",
+    "draft_file": "feature_070.md"
+  },
+  {
+    "kind": "feature",
+    "id": 71,
+    "title": "Stop hook 日志输出项目目录上下文",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/071-stop-hook-project-dir-context.md",
+    "draft_file": "feature_071.md"
+  },
+  {
+    "kind": "feature",
+    "id": 72,
+    "title": "Edit diff 显示真实文件行号",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/072-edit-diff-real-line-numbers.md",
+    "draft_file": "feature_072.md"
+  },
+  {
+    "kind": "feature",
+    "id": 73,
+    "title": "AGENTS.md 渐进式披露重构",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/073-agents-md-progressive-disclosure.md",
+    "draft_file": "feature_073.md"
+  },
+  {
+    "kind": "feature",
+    "id": 74,
+    "title": "Guidance — 任务执行期间用户提问时同步更新 task list",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/074-task-list-scope-change-guidance.md",
+    "draft_file": "feature_074.md"
+  },
+  {
+    "kind": "feature",
+    "id": 75,
+    "title": "EnterWorktree/ExitWorktree result 不截断",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/075-enter-exit-worktree-result-no-truncate.md",
+    "draft_file": "feature_075.md"
+  },
+  {
+    "kind": "feature",
+    "id": 76,
+    "title": "TUI spinner 时长显示改进",
+    "labels": [
+      "kind:feature",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/archived/076-spinner-duration-display.md",
+    "draft_file": "feature_076.md"
+  },
+  {
+    "kind": "feature",
+    "id": 77,
+    "title": "diff removed 行不语法高亮，只显示纯红色",
+    "labels": [
+      "kind:feature",
+      "priority:low",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#77",
+    "draft_file": "feature_077.md"
+  },
+  {
+    "kind": "feature",
+    "id": 78,
+    "title": "CLI 增加 `-q` 无 TUI 模式和 `-v` 日志输出到 stderr 模式",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#78",
+    "draft_file": "feature_078.md"
+  },
+  {
+    "kind": "feature",
+    "id": 79,
+    "title": "日志模块整理与 hook 可观测性增强",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#79",
+    "draft_file": "feature_079.md"
+  },
+  {
+    "kind": "feature",
+    "id": 80,
+    "title": "Agent context 所有权重构（project 拥有 WorkspaceState）",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#80",
+    "draft_file": "feature_080.md"
+  },
+  {
+    "kind": "feature",
+    "id": 81,
+    "title": "TUI assistant 文本与 spinner phase 视觉调整",
+    "labels": [
+      "kind:feature",
+      "priority:low",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#81",
+    "draft_file": "feature_081.md"
+  },
+  {
+    "kind": "feature",
+    "id": 82,
+    "title": "Provider/Config 设计债收口",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#82",
+    "draft_file": "feature_082.md"
+  },
+  {
+    "kind": "feature",
+    "id": 83,
+    "title": "Tool result 统一结构化 JSON",
+    "labels": [
+      "kind:feature",
+      "priority:high",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#83",
+    "draft_file": "feature_083.md"
+  },
+  {
+    "kind": "feature",
+    "id": 84,
+    "title": "Stop hook 命令显示短路径",
+    "labels": [
+      "kind:feature",
+      "priority:low",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#84",
+    "draft_file": "feature_084.md"
+  },
+  {
+    "kind": "feature",
+    "id": 85,
+    "title": "Read/TaskList tool call 单行摘要展示",
+    "labels": [
+      "kind:feature",
+      "priority:medium",
+      "migrated-from:docs"
+    ],
+    "source": "docs/feature/active.md#85",
+    "draft_file": "feature_085.md"
+  }
+]

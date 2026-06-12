@@ -1,5 +1,7 @@
 # #48 TUI 窗口 resize 渲染刷新设计
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/152
+
 ## 状态
 
 - 状态：设计已确认，待实现

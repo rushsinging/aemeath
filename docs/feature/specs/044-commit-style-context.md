@@ -1,5 +1,7 @@
 # Feature #44：Commit Style Context 与 AI 协作者 trailer
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/148
+
 ## 背景
 
 不同项目的 commit message 风格不同。用户希望 Aemeath 在需要创建 git commit 时，先参考当前项目历史中带 `Co-Authored-By` 的提交风格，再生成符合项目习惯的 commit message。

@@ -1,0 +1,24 @@
+<!-- Migrated from: docs/feature/archived/066-no-mod-rs-guard.md -->
+# Feature #66：去除 mod.rs 旧写法 + 架构 guard
+
+| 字段 | 值 |
+|------|-----|
+| 优先级 | 中 |
+| 归档日期 | 2026-06-02 |
+| 状态 | 已确认完成 |
+| 实现 | 31ad26c, cf07d47, ce34cec |
+
+## 目标
+
+将 Rust 模块组织从 `mod.rs` 旧写法迁移为父目录同名文件，并用架构 guard 防止新增 `mod.rs` 回归。
+
+## 完成内容
+
+1. 将项目中约 78 个 `mod.rs` 重命名为父目录同名模块文件。
+2. 新增/迁移 `no_mod_rs` 架构 guard，检测新增 `mod.rs` 并拒绝。
+3. 将相关检查纳入架构 guard 体系。
+
+## 验证
+
+- 架构 guard 通过。
+- 用户确认完成。

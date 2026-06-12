@@ -1,5 +1,7 @@
 # Feature #47 DDD/COLA 重构 Review
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 > 生成工具：GLM (Zhipu/glm-5.1) | 日期：2026-05-24
 
 ## 审查范围

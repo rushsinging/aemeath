@@ -1,5 +1,7 @@
 # Feature 47 Review — DDD 架构重设计 Spec & Phase 1-4 实施计划审查
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 > Reviewer: Aemeath (DeepSeek/deepseek-v4-pro)  
 > Review Date: 2026-05-24  
 > 审查范围:

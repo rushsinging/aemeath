@@ -1,5 +1,7 @@
 # Feature #47：以 DDD 思路重新设计 Aemeath 架构
 
+> 对应 Issue: https://github.com/rushsinging/aemeath/issues/151
+
 > **文档性质**：本 spec 是 **#47（DDD 基线）/ #61（架构债务收口）/ #62（audit/policy 落地）** 的共同**目标态架构基线**。
 >
 > **阅读约定**：本文**只描述目标态约束**，是判断"是否合规"的依据，不记录实现进展、迁移现状或历史债务——后者随代码演进、属易变信息，统一由 `docs/feature/active.md`、git history 和架构守卫脚本承载，不进入本文。**参考蓝本**：feature-boundary 分层参考 `wanaka-platform`（`services/core-api` 的 features/shared/composition + `context/` published-language 模式），见 §6.4。

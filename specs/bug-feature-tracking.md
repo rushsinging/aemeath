@@ -1,57 +1,64 @@
 # Bug / Feature 追踪联动
 
-**Scope**：无路径触发。任何 bug 修复或 feature 实现的流程约束；改 `docs/bug/**` 或 `docs/feature/**` 时适用。
+**Scope**：无路径触发。任何 bug 修复或 feature 实现的流程约束；操作 GitHub Issues 时适用。
 **主触发**：无（按场景）。
-**次触发**：开始任何 bug 修复 / feature 实现；新增、更新或归档 `docs/bug/**`、`docs/feature/**` 条目。
+**次触发**：开始任何 bug 修复 / feature 实现；新增、更新或关闭 GitHub Issue；改 `docs/feature/specs/**` 设计稿。
+
+## 仓库与工具
+
+- **仓库**：`rushsinging/aemeath`。
+- **CLI**：`gh`（`gh auth status` 通过）。所有 issue 操作（创建 / 查看 / 编辑 / 关闭 / 评论）**MUST** 用 `gh issue ... --repo rushsinging/aemeath`。
+- **Label 体系**（创建 issue 时 **MUST** 应用）：
+  - `kind:bug` —— bug 修复类。
+  - `kind:feature` —— feature 实现类。
+  - `priority:high` / `priority:medium` / `priority:low` —— 优先级（已知时加，未知可省）。
+  - `migrated-from:docs` —— 仅历史迁移条目，**NEVER** 用于新建 issue。
+- **标题**：直接写问题描述（一句中文），**NEVER** 加 `[Bug #N]` / `[Feature #N]` 前缀——`kind:*` label 已区分类型。
 
 ## 开工前
 
-- **MUST** 开始工作前查看 `docs/bug/active.md` 和 `docs/feature/active.md`，确认当前修改是否与已知条目相关。
+- **MUST** 先用 `gh issue list --repo rushsinging/aemeath --state open --label kind:bug,kind:feature --limit 50` 查看当前活跃条目，确认当前修改是否与已知条目相关或重复。
+- 若发现重复 issue，**MUST** 评论到现有 issue 上而不是新建。
 
-## 编号与查找
+## 编号
 
-- **编号独立**：bug 与 feature **NEVER** 共享编号序列，各自独立递增。bug 编号取 `docs/bug/active.md`、`docs/bug/archive.md` 与 `docs/bug/archived/` 的最大值 +1；feature 编号取 `docs/feature/active.md`、`docs/feature/archive.md` 与 `docs/feature/archived/` 的最大值 +1。新增条目前 **MUST** 在对应类别内核对最大编号，不得跨类别取号。
-- **查找固定文档**：查询 bug / feature 时，**MUST** 优先查找固定追踪文档：活跃 bug 查 `docs/bug/active.md`，活跃 feature 查 `docs/feature/active.md`；归档条目先查 `docs/bug/archive.md` 或 `docs/feature/archive.md`，再读取索引指向的 `archived/<编号>-<slug>.md`。按编号查找活跃条目时 **MUST** 在对应 `active.md` 中搜索编号标题（如 `#70`）并阅读命中行附近的详细章节；按编号查找归档条目时 **MUST** 在对应 `archive.md` 中搜索编号行并读取链接文件，NEVER 只根据顶部表格摘要下结论。
+- **NEVER** 手写 `Bug #N` / `Feature #N` 编号或前缀。GitHub 自动分配 issue 编号。issue body **NEVER** 含 `#<N>` 形式引用其他 issue（避免迁移历史中编号与 GitHub 编号混淆）；引用其他 issue 用 `gh issue view <N>` 在评论或 PR 描述中给链接。
+- 历史迁移条目的原 docs 编号（`#1` ~ `#106` bug、`#1` ~ `#85` feature）作为标题前缀或正文子标题保留，便于阅读时识别对应原条目。body 顶部有 `<!-- Migrated from: <source> -->` 标记，可反查 `docs/bug/archived/<id>-<slug>.md` 或 `docs/active.md#<id>`。
 
-## 修复流程
+## Issue Body 规范
+
+- 标题：单句问题描述（80 字内）。
+- Body 建议结构（**SHOULD** 完整覆盖；轻量 issue 可裁剪）：
+  1. `## 现象` / `## 目标` —— bug 描述复现条件或 feature 要达成的效果。
+  2. `## 根因` / `## 设计` —— bug 根因或 feature 关键设计决策。
+  3. `## 修复 / 实现` —— 方案要点。
+  4. `## 验证` —— 复现命令、测试方法、截图/录屏。
+  5. `## 涉及路径` —— 文件 / 模块路径。
+- 表格里摘要只回答"是什么"，**NEVER** 在 issue body 中复刻 80 字摘要+多行根因的 `active.md` 风格——GitHub Issue 鼓励长 body 完整描述。
+
+## 工作流
 
 - **Bug 修复 / feature 实现 MUST 使用 git worktree**（详见根 `AGENTS.md` 工作流约束）。
-- **MUST** 修复 bug 时先添加重现该 bug 的测试用例，再提交修复代码。
-- **Bug 状态流程**：`活动中` → `修复中` → `待确认` → 用户确认后归档。
+- **MUST** 修复 bug 时先添加重现该 bug 的测试用例，再提交修复代码（TDD）。
+- **状态流转**（用 `gh issue edit` 更新 body 或 comment 表达）：
+  - bug：`活动中` → `修复中` → `待确认` → 用户确认后关闭。
+  - feature：`计划中` → `实现中` → `待 review` → 合并后关闭。
+- **新建 issue 时 MUST**：
+  1. 标题、body 完整。
+  2. 至少打一个 `kind:*` label。
+  3. 关联路径或 spec 在 body 末尾 `## 涉及路径` 段给出。
 - **修改涉及已知 bug 时 MUST**：
-  1. 在 `docs/bug/active.md` 的对应行更新状态。
-  2. 在 commit message 中引用 bug 编号（如 `refs #1`）。
-  3. 修复后将 commit hash 更新到归档文件的"修复"字段。
-- **新增 bug 发现时 MUST**：在 `docs/bug/active.md` 表格中添加行（状态"活动中"），并在详情区域记录症状、根因、修复方向。
-- **实现 feature 时 MUST**：在 `docs/feature/active.md` 登记，完成后归档。
-- **MUST** 解决 bug 或完成 feature 后，同步更新 `docs/bug/active.md` 或 `docs/feature/active.md`，记录问题、解决思路和当前解决状态。
+  1. 在 PR 描述中引用 issue（如 `Closes #N`）。
+  2. 合并后 `gh issue close N --repo rushsinging/aemeath --comment "已合并：<commit-sha>"`。
+- **设计稿联动**：feature 类 issue **SHOULD** 配套 `docs/feature/specs/<file>.md` 设计稿。每份 spec 顶部已写 `> 对应 Issue: <url>`；修改 spec 时 **MUST** 同步更新该指针（issue 关 / 转 PR / 重开都要更新）。
 
-## 归档门禁
+## 关闭 / 重开
 
-- bug 修复或 feature 完成后，**MUST** 等待用户确认，确认后将完整详细描述**移动**到 `archived/<编号>-<slug>.md`：
-    1. 从 `active.md` 表格中删除对应行，并按编号顺序加入 `archive.md` 归档索引。
-    2. 把 active.md 中 `### #<编号>` / `## #<编号>` 详情段整体迁移到归档文件，**NEVER** 只在 active.md 标题后追加"（已修复）"等标记。
-    3. 归档文件 **MUST** 包含编号、标题、状态、修复 commits、症状、根因、修复方案、验证、涉及路径。
-  - 在 `main` 上更新文档后 **MUST** 立即提交，不与其他改动混入同一 commit。
-- `active.md` **MUST** 只保留活跃或待确认条目；已归档条目 **MUST** 从 `active.md` 表格和详情段落移除，并在 `archive.md` 中保留索引行。
+- 关闭前 **MUST** 确认：① 测试通过；② 已合并到 main；③ 用户确认。
+- 关闭 comment **MUST** 含 commit SHA 或 PR 链接，便于审计。
+- **NEVER** 用 `gh issue close --delete-branch`（仓库禁用 issue 关联删除分支）。
 
-## active.md 文档规范
+## 不属于本分片
 
-### 表格行
-
-- 表格中每个条目 **MUST** 只占一行，摘要 **MUST** 控制在 80 字以内（单句概括）。
-- 摘要只回答"是什么"，不展开根因、修复方案、验证命令、涉及路径等细节。
-- **NEVER** 在表格行中内联完整根因描述或多行修复步骤。
-
-### 详情区块
-
-- `### #<编号> <标题>` 详情区块是详细描述的**唯一位置**。
-- 详情区块 **MUST** 包含：状态、症状、根因、修复/实现、验证、涉及路径。
-- 同一条目的详情 **NEVER** 出现两次（如两个 `### #41` 段落）。发现重复时 **MUST** 合并为一个。
-- 专案（如"专案 A"）使用汇总表 + 子条目简要行即可，子条目的独立详情段只保留未完成/进行中的。
-
-### 归档条目处理
-
-- 已归档条目 **MUST** 出现在对应 `archive.md` 索引中，索引 **MUST** 按 ID 升序排列并链接到 `archived/<编号>-<slug>.md`。
-- 已归档条目在 active.md 中 **NEVER** 保留表格行或详情段落。
-- 迁移详情到归档文件时 **MUST** 完整搬运，**NEVER** 丢弃信息。
+- 改 `docs/feature/specs/**` 之外的 `docs/**`：按内容落到对应分片（`runtime.md` / `tools.md` 等）。
+- 改 `specs/**` 自身：按改动内容分片（与本分片无关）。
