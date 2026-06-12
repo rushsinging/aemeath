@@ -26,18 +26,22 @@ fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
-fn stderr_log_env_value(verbose: bool) -> Option<&'static str> {
-    if verbose {
-        Some("1")
-    } else {
-        None
-    }
+fn should_clear_stderr_log_env(quiet: bool) -> bool {
+    quiet
+}
+
+fn should_emit_cli_frontend_started_log() -> bool {
+    true
+}
+
+fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
+    quiet
 }
 
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
-    if let Some(value) = stderr_log_env_value(args.verbose) {
-        std::env::set_var("AEMEATH_LOG_STDERR", value);
+    if should_clear_stderr_log_env(args.quiet) {
+        std::env::remove_var("AEMEATH_LOG_STDERR");
     }
     let args = apply_permission_env_override(args);
     let quiet = args.quiet;
@@ -49,8 +53,14 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
     let session_id = bootstrap.session_id.clone();
+    if should_emit_cli_frontend_started_log() {
+        crate::tui::log_info!("chat frontend started: quiet={quiet} session={session_id}");
+    }
 
     if quiet {
+        if should_emit_quiet_cli_diagnostic_log(quiet) {
+            crate::tui::log_info!("quiet chat started: session={session_id}");
+        }
         crate::chat::no_tui::run_no_tui_chat(bootstrap.client, session_id)
             .await
             .unwrap_or_else(|e| {
@@ -125,12 +135,27 @@ mod tests {
     }
 
     #[test]
-    fn test_stderr_log_env_value_enables_for_verbose() {
-        assert_eq!(stderr_log_env_value(true), Some("1"));
+    fn test_should_clear_stderr_log_env_for_quiet_mode() {
+        assert!(should_clear_stderr_log_env(true));
     }
 
     #[test]
-    fn test_stderr_log_env_value_leaves_default_for_non_verbose() {
-        assert_eq!(stderr_log_env_value(false), None);
+    fn test_should_clear_stderr_log_env_keeps_user_choice_for_tui_mode() {
+        assert!(!should_clear_stderr_log_env(false));
+    }
+
+    #[test]
+    fn test_should_emit_cli_frontend_started_log() {
+        assert!(should_emit_cli_frontend_started_log());
+    }
+
+    #[test]
+    fn test_should_emit_quiet_cli_diagnostic_log_for_quiet_mode() {
+        assert!(should_emit_quiet_cli_diagnostic_log(true));
+    }
+
+    #[test]
+    fn test_should_emit_quiet_cli_diagnostic_log_skips_tui_mode() {
+        assert!(!should_emit_quiet_cli_diagnostic_log(false));
     }
 }
