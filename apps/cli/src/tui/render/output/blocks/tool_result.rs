@@ -99,11 +99,21 @@ fn format_result_lines(tool_name: &str, result: &str, width: u16) -> Vec<Rendere
     let base = Style::default().fg(theme::TEXT_DIM);
     let mut iter = result.lines();
     let mut out: Vec<RenderedLine> = Vec::new();
-    for line in iter.by_ref().take(max_lines) {
-        out.extend(wrap_spans_to_rendered_lines(
-            vec![Span::styled(line.to_string(), base)],
-            width as usize,
-        ));
+    // 逐原始行处理，每行 wrap 后累计渲染行数，达到 max_lines 即停止
+    while out.len() < max_lines {
+        match iter.next() {
+            None => break,
+            Some(line) => {
+                out.extend(wrap_spans_to_rendered_lines(
+                    vec![Span::styled(line.to_string(), base)],
+                    width as usize,
+                ));
+            }
+        }
+    }
+    // 截断 wrap 展开后超出 max_lines 的渲染行（处理单行长输出场景）
+    if out.len() > max_lines {
+        out.truncate(max_lines);
     }
     let omitted = iter.by_ref().take(OMITTED_LINE_COUNT_LIMIT + 1).count();
     if omitted > 0 {
