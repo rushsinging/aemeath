@@ -139,12 +139,26 @@ impl App {
             TuiMsg::SpinnerTick => {
                 // 动画帧真相归 view_state；spinner 是否可见由 Model 决定，
                 // 镜像写回统一在每帧渲染前的 refresh_live_status_from_model。
+                let before_frame = self.view_state.animation.spinner_frame;
+                let before_version = self.view_state.animation.version;
                 self.view_state.animation.spinner_frame =
                     self.view_state.animation.spinner_frame.wrapping_add(1);
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
                 self.mark_output_dirty();
+                crate::tui::log_trace!(
+                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
+                    before_frame,
+                    self.view_state.animation.spinner_frame,
+                    before_version,
+                    self.view_state.animation.version,
+                    self.view_state.spinner.frame,
+                    self.model.runtime.spinner.active,
+                    self.model.runtime.spinner.phase,
+                    self.view_state.spinner.verb,
+                    self.view_state.dirty.output
+                );
                 UpdateResult::none()
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
@@ -251,6 +265,7 @@ impl App {
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
         let active = self.model.runtime.spinner.active;
+        let before_anim = self.view_state.spinner.clone();
         if active {
             if self.view_state.spinner.verb.is_empty() {
                 self.view_state.spinner.pick_verb();
@@ -261,6 +276,19 @@ impl App {
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
+        crate::tui::log_trace!(
+            "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
+            active,
+            self.model.runtime.spinner.phase,
+            before_anim.frame,
+            self.view_state.spinner.frame,
+            before_anim.phase_frame,
+            self.view_state.spinner.phase_frame,
+            before_anim.phase,
+            self.view_state.spinner.phase,
+            before_anim.verb,
+            self.view_state.spinner.verb
+        );
     }
     /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。

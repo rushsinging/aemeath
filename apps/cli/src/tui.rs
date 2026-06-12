@@ -48,7 +48,7 @@ macro_rules! tui_log_trace {
     };
 }
 
-pub(crate) use {tui_log_info as log_info, tui_log_warn as log_warn};
+pub(crate) use {tui_log_info as log_info, tui_log_trace as log_trace, tui_log_warn as log_warn};
 
 #[cfg(test)]
 mod tests {

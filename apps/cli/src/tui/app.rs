@@ -23,6 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub use event::{StatusContextUpdate, UiEvent};
 
@@ -196,6 +197,7 @@ impl App {
 
     /// Draw the TUI frame.
     fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+        let draw_start = Instant::now();
         let mut output_rect = Rect::default();
         let mut input_rect = Rect::default();
         let mut status_rect = Rect::default();
@@ -268,6 +270,25 @@ impl App {
         })?;
         self.layout
             .update_areas(output_rect, input_rect, status_rect);
+        crate::tui::log_trace!(
+            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} spinner_active={} spinner_phase={:?} spinner_frame={} output_lines={}",
+            draw_start.elapsed().as_millis(),
+            self.layout
+                .last_terminal_size
+                .map(|size| size.width)
+                .unwrap_or_default(),
+            self.layout
+                .last_terminal_size
+                .map(|size| size.height)
+                .unwrap_or_default(),
+            output_rect,
+            input_rect,
+            status_rect,
+            self.model.runtime.spinner.active,
+            self.model.runtime.spinner.phase,
+            self.view_state.animation.spinner_frame,
+            self.output_area.document().total_lines()
+        );
         Ok(())
     }
 }
