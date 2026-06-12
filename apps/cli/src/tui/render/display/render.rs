@@ -104,9 +104,6 @@ impl crate::tui::app::App {
                 }
             }
         }
-        self.model
-            .conversation
-            .apply(ConversationIntent::CompleteTextBlock);
     }
 
     fn report_history_restore_error(&mut self, error: HistoryDisplayParseError) {
@@ -502,35 +499,6 @@ mod tests {
             .expect("tool call should be restored");
         assert_eq!(tool_call.status, ToolCallStatus::Success);
         assert_eq!(tool_call.result.as_deref(), Some("done"));
-    }
-
-    #[test]
-    fn test_render_history_message_separates_resumed_text_from_live_output() {
-        let mut app = app();
-        app.render_history_message(&user_text("hello"), None);
-        let msg = message(
-            "assistant",
-            serde_json::json!([{ "type": "text", "text": "历史输出" }]),
-        );
-
-        app.render_history_message(&msg, None);
-        app.model.conversation.apply(
-            crate::tui::model::conversation::intent::ConversationIntent::ObserveAssistantText {
-                text: "实时输出".to_string(),
-            },
-        );
-
-        let assistant_texts = app
-            .model
-            .conversation
-            .blocks
-            .iter()
-            .filter_map(|block| match block {
-                ConversationBlock::AssistantText { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(assistant_texts, vec!["历史输出", "实时输出"]);
     }
 
     #[test]
