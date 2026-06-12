@@ -1,5 +1,5 @@
 use super::common::{bool_arg, str_arg, truncate_ellipsis};
-use super::{ToolDisplay, ToolDisplayEntry, TOOL_RESULT_MAX_LINES};
+use super::{ToolDisplay, ToolDisplayEntry, ToolDisplayMode, TOOL_RESULT_MAX_LINES};
 
 struct TaskCreateDisplay;
 impl ToolDisplay for TaskCreateDisplay {
@@ -41,6 +41,9 @@ impl ToolDisplay for TaskUpdateDisplay {
             return vec![];
         }
         vec![format!("-> {status}")]
+    }
+    fn display_mode(&self) -> ToolDisplayMode {
+        ToolDisplayMode::SingleLine
     }
     fn result_max_lines(&self) -> usize {
         TOOL_RESULT_MAX_LINES
@@ -87,6 +90,9 @@ impl ToolDisplay for TaskListCreateDisplay {
         } else {
             vec![truncate_ellipsis(summary, 80)]
         }
+    }
+    fn display_mode(&self) -> ToolDisplayMode {
+        ToolDisplayMode::SingleLine
     }
     fn result_max_lines(&self) -> usize {
         0
