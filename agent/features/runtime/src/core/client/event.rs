@@ -129,13 +129,25 @@ pub(crate) fn runtime_event_to_sdk_event(
             provider_id,
             name,
             index,
-        } => ChatEvent::ToolCallStart {
-            context: turn_context_to_sdk(context),
-            id,
-            provider_id,
-            name,
-            index,
-        },
+        } => {
+            log::trace!(
+                target: "cli::tui::tool_flow",
+                "runtime->sdk tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                name,
+                index
+            );
+            ChatEvent::ToolCallStart {
+                context: turn_context_to_sdk(context),
+                id,
+                provider_id,
+                name,
+                index,
+            }
+        }
         crate::business::chat::RuntimeStreamEvent::ToolCallUpdate {
             context,
             id,
@@ -146,17 +158,33 @@ pub(crate) fn runtime_event_to_sdk_event(
             arguments,
             summary,
             status,
-        } => ChatEvent::ToolCallUpdate {
-            context: turn_context_to_sdk(context),
-            id,
-            provider_id,
-            name,
-            index,
-            arguments_delta,
-            arguments,
-            summary,
-            status: tool_call_status_to_sdk(status),
-        },
+        } => {
+            log::trace!(
+                target: "cli::tui::tool_flow",
+                "runtime->sdk tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                name,
+                index,
+                status,
+                arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
+                arguments.is_some(),
+                summary.as_ref().map(|value| value.len()).unwrap_or(0)
+            );
+            ChatEvent::ToolCallUpdate {
+                context: turn_context_to_sdk(context),
+                id,
+                provider_id,
+                name,
+                index,
+                arguments_delta,
+                arguments,
+                summary,
+                status: tool_call_status_to_sdk(status),
+            }
+        }
         crate::business::chat::RuntimeStreamEvent::ToolResult {
             context,
             id,
@@ -166,22 +194,44 @@ pub(crate) fn runtime_event_to_sdk_event(
             content,
             is_error,
             images,
-        } => ChatEvent::ToolResult {
-            context: turn_context_to_sdk(context),
-            id,
-            provider_id,
-            tool_name,
-            output,
-            content,
-            is_error,
-            images: images
-                .into_iter()
-                .map(|image| ToolResultImage {
-                    base64: image.base64,
-                    media_type: image.media_type,
-                })
-                .collect(),
-        },
+        } => {
+            log::trace!(
+                target: "cli::tui::tool_flow",
+                "runtime->sdk tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                tool_name,
+                output.len(),
+                match &content {
+                    serde_json::Value::Null => "null",
+                    serde_json::Value::Bool(_) => "bool",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::String(_) => "string",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Object(_) => "object",
+                },
+                is_error,
+                images.len()
+            );
+            ChatEvent::ToolResult {
+                context: turn_context_to_sdk(context),
+                id,
+                provider_id,
+                tool_name,
+                output,
+                content,
+                is_error,
+                images: images
+                    .into_iter()
+                    .map(|image| ToolResultImage {
+                        base64: image.base64,
+                        media_type: image.media_type,
+                    })
+                    .collect(),
+            }
+        }
         crate::business::chat::RuntimeStreamEvent::SystemMessage(msg) => {
             ChatEvent::SystemMessage(msg)
         }
