@@ -4,7 +4,7 @@
 //!   completed → 按 updated_at 升序；折叠窗口内固定显示最近完成的一条
 //!   in_progress → 按 updated_at 升序（最早开始的在前）
 //!   pending → 按 display_number 升序（稳定序）
-//! 窗口化：不超过 max_lines 时完整显示；超出时最近 completed + 尽量 in_progress + pending。
+//! 窗口化：不超过 max_lines 总行数时完整显示；超出时最近 completed + 尽量 in_progress + pending。
 
 #[cfg(test)]
 use sdk::{TaskState, TaskSummary};
@@ -15,12 +15,12 @@ use std::collections::HashMap;
 ///
 /// 规则：
 /// 1. 摘要行 `━━ Tasks: completed/total ━━` 反映全量
-/// 2. `total <= max_lines` 时完整显示所有未删除任务，不折叠
-/// 3. `total > max_lines` 时使用窗口策略：最近 completed + 尽量 in_progress + pending
+/// 2. `summary + task 行数 <= max_lines` 时完整显示所有未删除任务，不折叠
+/// 3. 超出 `max_lines` 时使用窗口策略：最近 completed + 尽量 in_progress + pending
 ///    - completed 组内按 updated_at 升序，折叠窗口内取最近完成的一条
 ///    - in_progress 组内按 updated_at 升序（最早开始的在前）
 ///    - pending 组内按 display_number 升序
-/// 4. 最多显示 `max_lines` 条 task 行
+/// 4. 最多显示 `max_lines` 条总行数（含 summary 和 fold hint）
 /// 5. 超出部分折叠提示 `… +N more`
 /// 6. 空输入返回空 Vec
 #[cfg(test)]
@@ -65,10 +65,12 @@ pub fn build_task_window(
     // pending: 按 display_number 稳定序
     sort_by_display_number(&mut pending, display_map);
 
-    let visible = if total <= max_lines {
+    let task_slots_without_fold = max_lines.saturating_sub(1);
+    let visible = if total <= task_slots_without_fold {
         ordered_tasks(completed, in_progress, pending)
     } else {
-        select_task_window(completed, in_progress, pending, max_lines)
+        let task_slots_with_fold = max_lines.saturating_sub(2);
+        select_task_window(completed, in_progress, pending, task_slots_with_fold)
     };
     let shown_count = visible.len();
     let hidden_count = total.saturating_sub(shown_count);

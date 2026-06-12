@@ -74,10 +74,12 @@ fn test_truncation_with_fold_hint() {
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    // summary + 7 tasks + fold hint
-    assert_eq!(result.len(), 9);
+    // summary + 5 tasks + fold hint
+    assert_eq!(result.len(), 7);
     assert!(result[0].contains("0/20"));
-    assert!(result.last().unwrap().contains("+13 more"));
+    assert!(result[1].contains("□ #1 task 1"));
+    assert!(result[5].contains("□ #5 task 5"));
+    assert!(result.last().unwrap().contains("+15 more"));
 }
 
 #[test]
@@ -94,17 +96,16 @@ fn test_all_completed_over_max_lines_keeps_recent_completed_only() {
 }
 
 #[test]
-fn test_all_completed_within_max_lines_shows_all_without_fold() {
+fn test_all_completed_at_window_limit_keeps_recent_completed_only() {
     let tasks: Vec<TaskSummary> = (1..=7)
         .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 8); // summary + all 7 completed tasks
+    assert_eq!(result.len(), 3); // summary + recent completed + fold hint
     assert!(result[0].contains("7/7"));
-    assert!(result[1].contains("✓ #1"));
-    assert!(result[7].contains("✓ #7"));
-    assert!(!result.iter().any(|line| line.contains("more")));
+    assert!(result[1].contains("✓ #7"));
+    assert!(result.last().unwrap().contains("+6 more"));
 }
 
 #[test]
@@ -171,12 +172,12 @@ fn test_over_max_lines_keeps_recent_completed_and_fills_in_progress_before_pendi
     tasks.push(make_task_with_ts("9", "next", TaskState::Pending, 900));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 9); // summary + 7 task lines + fold
+    assert_eq!(result.len(), 7); // summary + 5 task lines + fold
     assert!(result[1].contains("✓ #1 recent completed"));
     assert!(result[2].contains("■ #2 doing 2"));
-    assert!(result[7].contains("■ #7 doing 7"));
+    assert!(result[5].contains("■ #5 doing 5"));
     assert!(!result.iter().any(|line| line.contains("next")));
-    assert!(result.last().unwrap().contains("+2 more"));
+    assert!(result.last().unwrap().contains("+4 more"));
 }
 
 #[test]
@@ -188,11 +189,11 @@ fn test_window_prefers_feature_24_shape() {
     tasks.push(make_task("7", "pending", TaskState::Pending));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 4);
-    assert_eq!(result.len(), 5); // summary + previous completed + in_progress + pending + fold hint
+    assert_eq!(result.len(), 4); // summary + previous completed + in_progress + fold hint
     assert!(result[1].contains("✓ #5 done 5"));
     assert!(result[2].contains("■ #6 doing"));
-    assert!(result[3].contains("□ #7 pending"));
-    assert!(result[4].contains("+4 more"));
+    assert!(!result.iter().any(|line| line.contains("pending")));
+    assert!(result[3].contains("+5 more"));
 }
 
 #[test]
@@ -206,10 +207,9 @@ fn test_recent_completed_before_older() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 3);
+    assert_eq!(result.len(), 3);
     assert!(result[1].contains("✓ #3 newest completed"));
-    assert!(result[2].contains("■ #4 current"));
-    assert!(result[3].contains("□ #5 next"));
-    assert!(result[4].contains("+2 more"));
+    assert!(result[2].contains("+4 more"));
 }
 
 #[test]
