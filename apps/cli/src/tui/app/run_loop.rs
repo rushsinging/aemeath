@@ -34,6 +34,14 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
 
 impl App {
     async fn handle_change_set(&mut self, change: ChangeSet) {
+        crate::tui::log_trace!(
+            "tui.change_set received bits={:?} contains_tasks={} contains_project={} contains_session={} contains_cost={}",
+            change,
+            change.contains(ChangeSet::TASKS),
+            change.contains(ChangeSet::PROJECT),
+            change.contains(ChangeSet::SESSION),
+            change.contains(ChangeSet::COST)
+        );
         if change.contains(ChangeSet::TASKS) {
             self.update_task_status(self.chat.is_processing).await;
         }

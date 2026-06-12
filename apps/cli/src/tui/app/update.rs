@@ -23,6 +23,41 @@ use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
+fn ui_event_name(event: &UiEvent) -> &'static str {
+    match event {
+        UiEvent::Text { .. } => "Text",
+        UiEvent::Thinking { .. } => "Thinking",
+        UiEvent::BlockComplete { .. } => "BlockComplete",
+        UiEvent::ToolCallStart { .. } => "ToolCallStart",
+        UiEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
+        UiEvent::ToolResult { .. } => "ToolResult",
+        UiEvent::Usage { .. } => "Usage",
+        UiEvent::Error(_) => "Error",
+        UiEvent::Cancelled => "Cancelled",
+        UiEvent::MessagesSync(_) => "MessagesSync",
+        UiEvent::Done => "Done",
+        UiEvent::DoneWithDuration(_) => "DoneWithDuration",
+        UiEvent::LiveTps(_) => "LiveTps",
+        UiEvent::ClipboardImage(_) => "ClipboardImage",
+        UiEvent::SystemMessage(_) => "SystemMessage",
+        UiEvent::ReminderRecap(_) => "ReminderRecap",
+        UiEvent::MemoryList(_) => "MemoryList",
+        UiEvent::SessionSaved { .. } => "SessionSaved",
+        UiEvent::SlashCommandFailed { .. } => "SlashCommandFailed",
+        UiEvent::ReflectionStarted => "ReflectionStarted",
+        UiEvent::ReflectionUsage => "ReflectionUsage",
+        UiEvent::ReflectionDone { .. } => "ReflectionDone",
+        UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
+        UiEvent::AskUser { .. } => "AskUser",
+        UiEvent::HookEvent(_) => "HookEvent",
+        UiEvent::AgentProgress { .. } => "AgentProgress",
+        UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
+        UiEvent::TaskStatusChanged => "TaskStatusChanged",
+        UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
+        UiEvent::DrainQueuedInput { .. } => "DrainQueuedInput",
+    }
+}
+
 pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusViewModel) -> usize {
     let spinner_line_count = usize::from(live_status.spinner.is_some());
     let task_line_count = if live_status.spinner.is_some() {
@@ -187,11 +222,31 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         let mapping = map_agent_event(&ev);
+        crate::tui::log_trace!(
+            "tui.agent_event mapped event={} conversation_intents={} runtime_intents={} diagnostic_intents={} session_intents={} effects={}",
+            ui_event_name(&ev),
+            mapping.conversation.len(),
+            mapping.runtime.len(),
+            mapping.diagnostic.len(),
+            mapping.session.len(),
+            mapping.effects.len()
+        );
         let model_result = if mapping == Default::default() {
             TuiUpdateResult::default()
         } else {
             reduce_agent_event(&mut self.model, mapping)
         };
+        crate::tui::log_trace!(
+            "tui.agent_event reduced event={} dirty_output={} dirty_status={} dirty_dialog={} dirty_input={} effects={} conversation_blocks={} chats={}",
+            ui_event_name(&ev),
+            model_result.dirty.output,
+            model_result.dirty.status,
+            model_result.dirty.dialog,
+            model_result.dirty.input,
+            model_result.effects.len(),
+            self.model.conversation.blocks.len(),
+            self.model.conversation.chats.len()
+        );
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
         result.effects.extend(model_result.effects);
@@ -203,16 +258,31 @@ impl App {
     }
 
     pub(crate) fn refresh_output_document_from_model(&mut self) {
+        let before_lines = self.output_area.document().total_lines();
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
         );
+        let root_count = view_model.roots.len();
         let width = self.output_document_width();
         let document = self.output_document_renderer.render_model_document(
             &view_model,
             width,
             self.output_area.term_width,
             self.view_state.animation.spinner_frame,
+        );
+        let after_lines = document.total_lines();
+        crate::tui::log_trace!(
+            "tui.output.refresh_document version={} width={} term_width={} spinner_frame={} roots={} conversation_blocks={} chats={} before_lines={} after_lines={}",
+            self.view_state.output.version,
+            width,
+            self.output_area.term_width,
+            self.view_state.animation.spinner_frame,
+            root_count,
+            self.model.conversation.blocks.len(),
+            self.model.conversation.chats.len(),
+            before_lines,
+            after_lines
         );
         self.output_area.replace_document(document);
     }
