@@ -12,6 +12,8 @@ pub struct HookRunner {
     pub(crate) config: HooksConfig,
     /// 项目根目录
     pub(crate) project_dir: Arc<Mutex<String>>,
+    /// 当前工作根是否在 git worktree 中（注入 `AEMEATH_IN_WORKTREE`）。
+    pub(crate) in_worktree: Arc<Mutex<bool>>,
 }
 
 impl HookRunner {
@@ -20,6 +22,7 @@ impl HookRunner {
         Self {
             config,
             project_dir: Arc::new(Mutex::new(project_dir)),
+            in_worktree: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -28,6 +31,7 @@ impl HookRunner {
         Self {
             config: HooksConfig::default(),
             project_dir: Arc::new(Mutex::new(project_dir)),
+            in_worktree: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -36,6 +40,7 @@ impl HookRunner {
         Self {
             config: config.hooks.clone(),
             project_dir: Arc::new(Mutex::new(project_dir)),
+            in_worktree: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -52,11 +57,24 @@ impl HookRunner {
             .unwrap_or_else(|e| e.into_inner().clone())
     }
 
-    /// 更新 hook 项目目录，用于 worktree/cwd 切换后同步内置环境变量。
-    pub fn set_project_dir(&self, project_dir: String) {
+    /// 当前工作根是否在 git worktree 中（注入 `AEMEATH_IN_WORKTREE`）。
+    pub fn in_worktree(&self) -> bool {
+        self.in_worktree
+            .lock()
+            .map(|v| *v)
+            .unwrap_or_else(|e| *e.into_inner())
+    }
+
+    /// 同步 hook 项目目录与 worktree 标志，用于 worktree/cwd 切换后更新内置环境变量。
+    /// 两者原子更新，避免 `project_dir` 与 `in_worktree` 不一致。
+    pub fn set_project_context(&self, project_dir: String, in_worktree: bool) {
         match self.project_dir.lock() {
             Ok(mut current) => *current = project_dir,
             Err(poisoned) => *poisoned.into_inner() = project_dir,
+        }
+        match self.in_worktree.lock() {
+            Ok(mut current) => *current = in_worktree,
+            Err(poisoned) => *poisoned.into_inner() = in_worktree,
         }
     }
 
@@ -122,6 +140,10 @@ impl HookRunner {
             )
             .env("AEMEATH_PROJECT_DIR", &project_dir)
             .env("CLAUDE_PROJECT_DIR", &project_dir)
+            .env(
+                "AEMEATH_IN_WORKTREE",
+                if self.in_worktree() { "1" } else { "0" },
+            )
             .envs(input.data.to_env_vars())
             .spawn()
         {

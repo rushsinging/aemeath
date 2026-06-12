@@ -200,7 +200,8 @@ where
     }
     let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
     let working_root = agent.ctx.workspace_read().current_root();
-    hook_runner.set_project_dir(working_root.display().to_string());
+    let in_worktree = agent.ctx.workspace_read().in_worktree();
+    hook_runner.set_project_context(working_root.display().to_string(), in_worktree);
     let workspace = project::api::WorkspacePersist::snapshot(agent.ctx.workspace.as_ref());
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {

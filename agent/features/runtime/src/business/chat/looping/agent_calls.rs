@@ -123,7 +123,8 @@ where
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
     let working_root = ag_ctx.workspace_read().current_root();
-    hook_runner.set_project_dir(working_root.display().to_string());
+    let in_worktree = ag_ctx.workspace_read().in_worktree();
+    hook_runner.set_project_context(working_root.display().to_string(), in_worktree);
     let workspace = project::api::WorkspacePersist::snapshot(ag_ctx.workspace.as_ref());
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {

@@ -6,7 +6,16 @@ cd "$(dirname "$0")"
 
 echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
+echo "[hook-env] AEMEATH_IN_WORKTREE=${AEMEATH_IN_WORKTREE:-<unset>}"
 echo "[hook-env] PWD=$PWD"
+
+# 仅在主仓库（main 工作区）构建并安装：aemeath 在 git worktree 中执行 hook 时
+# 注入 AEMEATH_IN_WORKTREE=1，此时跳过 build/install，避免把未合并分支的二进制
+# 装成全局工具污染日常使用的 ~/.local/bin/aemeath。
+if [[ "${AEMEATH_IN_WORKTREE:-0}" == "1" ]]; then
+    echo ">>> 在 git worktree 中，跳过 build/install（仅在 main 主工作区构建）"
+    exit 0
+fi
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"

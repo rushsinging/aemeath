@@ -273,7 +273,7 @@ mod hook_tests {
             timeout: 5,
         };
         let runner = HookRunner::empty(initial_dir.display().to_string());
-        runner.set_project_dir(worktree_dir.display().to_string());
+        runner.set_project_context(worktree_dir.display().to_string(), false);
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),

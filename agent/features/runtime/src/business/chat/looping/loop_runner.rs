@@ -96,7 +96,8 @@ where
     // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
     // 这里直接读取当前 root 作为 hook/日志的工作目录基准（忽略 seed cwd）。
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
-    hook_runner.set_project_dir(cwd.display().to_string());
+    let in_worktree = project::api::WorkspaceRead::in_worktree(workspace.as_ref());
+    hook_runner.set_project_context(cwd.display().to_string(), in_worktree);
     log::info!(
         "chat loop hook runner ready: project_dir={} configured_events={}",
         hook_runner.project_dir(),
