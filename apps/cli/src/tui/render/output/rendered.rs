@@ -90,6 +90,16 @@ pub struct RenderedBlock {
     pub lines: Vec<RenderedLine>,
 }
 
+impl RenderedBlock {
+    /// 为 block 内所有行设置统一填充样式。
+    pub fn with_line_fill_style(mut self, style: Style) -> Self {
+        for line in &mut self.lines {
+            line.set_fill_style(style);
+        }
+        self
+    }
+}
+
 /// 整个输出文档的渲染产物（按 block 顺序）。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedDocument {
