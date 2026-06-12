@@ -22,6 +22,7 @@
 | 83 | Tool result 统一结构化 JSON | 高 | 实现中 | 未确认 | 所有 tool 返回统一 JSON payload，LLM 保留完整结构，TUI 按工具选择字段展示 |
 | 84 | Stop hook 命令显示短路径 | 低 | ✅ 已完成 | 未确认 | TUI 显示 hook stop 命令时只展示脚本名，避免完整项目路径过长 |
 | 85 | Read/TaskList tool call 单行摘要展示 | 中 | 待确认 | 未确认 | Read 显示读取范围与总行数；TaskListCreate/TaskUpdate 单行摘要；失败原因仅在 result 中展开 |
+| 86 | 粘贴长文本自动折叠为 `[Copied Text n]` | 中 | 待确认 | 未确认 | input area / input queue 中超过两行的粘贴文本折叠显示为 `[Copied Text n]`，TUI 原样渲染 |
 
 ### #8 Memory 系统
 
@@ -738,3 +739,50 @@ enum MemoryCategory {
 - `apps/cli/src/tui/model/conversation/tool_call.rs`
 - `agent/features/tools/src/file_read.rs`
 - `agent/features/tools/src/task_list.rs`
+
+### #86 粘贴长文本自动折叠为 `[Copied Text n]`
+
+**状态**：待确认
+
+**目标**：当用户向 TUI input area 粘贴超过两行的文本时，不直接展开显示完整内容，而是折叠为 `[Copied Text n]`（n 为本次会话中第几次发生长文本粘贴）。同样，当该输入进入 input queue 时，也以折叠形式展示；TUI 输出区对这类折叠标记原样渲染，保持界面整洁。
+
+**设计方向**：
+
+1. **粘贴检测与折叠**：
+   - 在 input area 粘贴路径检测插入文本是否包含超过两个 `\n`（即超过两行）。
+   - 若超过两行，将实际文本暂存到会话级或输入模型级缓冲区，并在 input area 中显示 `[Copied Text n]` 占位符。
+   - `n` 为本次会话中累计的长文本粘贴次数，从 1 开始递增。
+
+2. **Input queue 一致性**：
+   - 当用户提交含折叠占位符的输入时，实际发送给 LLM 的内容仍是原始完整文本。
+   - input queue 中显示时同样以 `[Copied Text n]` 占位，避免队列区域被长文本撑开。
+
+3. **TUI 输出区原样渲染**：
+   - 对用户消息中的 `[Copied Text n]` 占位符不做 Markdown 解析，按纯文本原样渲染。
+   - 选中和复制行为保持可用；复制时应复制占位符文本（与显示一致）。
+
+4. **边界场景**：
+   - 单行或两行粘贴不触发折叠，按现有行为直接显示。
+   - 编辑态下删除占位符视为删除对应粘贴内容。
+   - 多次粘贴各自独立计数和占位。
+
+**验收标准**：
+1. 超过两行的粘贴文本在 input area 显示为 `[Copied Text n]`。
+2. 提交后进入 input queue 同样显示折叠占位符。
+3. TUI 输出区对用户消息中的占位符原样渲染、不解析 Markdown。
+4. 实际发送给 LLM 的内容为原始完整文本，不影响对话语义。
+5. 不破坏现有单行/双行粘贴、输入历史、撤销/重做行为。
+
+**验证**：
+- `cargo test -p cli input_area -- --nocapture`
+- `cargo test -p cli input_queue -- --nocapture`
+- `cargo test -p cli paste -- --nocapture`
+- `cargo fmt --check`
+- `cargo clippy -p cli --all-targets -- -D warnings`
+
+**涉及路径**：
+- `apps/cli/src/tui/input_area.rs`
+- `apps/cli/src/tui/input_queue.rs`（如存在）
+- `apps/cli/src/tui/model/input.rs`（如存在）
+- `apps/cli/src/tui/app/update.rs`（粘贴处理）
+- `apps/cli/src/tui/render/output/blocks/user_message.rs` 或通用文本渲染路径
