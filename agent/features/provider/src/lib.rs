@@ -22,8 +22,27 @@ pub enum LlmError {
     RateLimited,
     #[error("context too long")]
     ContextTooLong,
+    #[error("request cancelled by user")]
+    Cancelled,
     #[error("stream error: {0}")]
     Stream(String),
     #[error("config error: {0}")]
     Config(String),
+}
+
+impl LlmError {
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, LlmError::Cancelled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlmError;
+
+    #[test]
+    fn llm_cancelled_error_is_classified_as_cancelled() {
+        let error = LlmError::Cancelled;
+        assert!(error.is_cancelled());
+    }
 }

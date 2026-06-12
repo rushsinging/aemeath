@@ -140,7 +140,7 @@ impl LlmProvider for OpenAICompatibleProvider {
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
-                return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                return Err(crate::LlmError::Cancelled);
             }
 
             if attempt > 0 {
@@ -149,7 +149,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
-                        return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                        return Err(crate::LlmError::Cancelled);
                     }
                     _ = tokio::time::sleep(delay) => {}
                 }
@@ -165,7 +165,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             let response = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
-                    return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                    return Err(crate::LlmError::Cancelled);
                 }
                 result = send_fut => {
                     match result {

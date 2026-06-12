@@ -106,6 +106,7 @@ impl App {
                 // 此处不再重复写 output_area（消除双表示）。
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
                     name: "error".to_string(),
@@ -116,6 +117,7 @@ impl App {
                 self.append_system_notice("已取消");
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
             }
             UiEvent::MessagesSync(msgs) => {
                 // 比较新旧 messages，提取新增的 user messages 用于回显
@@ -196,6 +198,7 @@ impl App {
                 }
                 self.spinner_stop();
                 self.chat.stop_processing();
+                self.chat.clear_processing_handle();
                 self.model
                     .runtime
                     .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
@@ -309,9 +312,11 @@ impl App {
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
-                    self.model.input.document.is_empty(),                    self.input.queue_preview()
+                    self.model.input.document.is_empty(),
+                    self.input.queue_preview()
                 );
                 effects.extend(self.handle_done(ui_tx, None));
+                self.chat.clear_processing_handle();
             }
             UiEvent::DoneWithDuration(elapsed) => {
                 crate::tui::log_debug!(
@@ -326,9 +331,11 @@ impl App {
                     self.chat.is_processing,
                     self.chat.tool_call_active,
                     self.chat.active_tool_call_ids.len(),
-                    self.model.input.document.is_empty(),                    self.input.queue_preview()
+                    self.model.input.document.is_empty(),
+                    self.input.queue_preview()
                 );
                 effects.extend(self.handle_done(ui_tx, Some(elapsed)));
+                self.chat.clear_processing_handle();
             }
         }
 

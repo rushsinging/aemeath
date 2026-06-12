@@ -131,7 +131,7 @@ impl LlmProvider for AnthropicProvider {
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
-                return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                return Err(crate::LlmError::Cancelled);
             }
 
             if attempt > 0 {
@@ -140,7 +140,7 @@ impl LlmProvider for AnthropicProvider {
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {
-                        return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                        return Err(crate::LlmError::Cancelled);
                     }
                     _ = tokio::time::sleep(delay) => {}
                 }
@@ -156,7 +156,7 @@ impl LlmProvider for AnthropicProvider {
             let response = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
-                    return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                    return Err(crate::LlmError::Cancelled);
                 }
                 result = send_fut => {
                     match result {

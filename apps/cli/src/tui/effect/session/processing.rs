@@ -201,8 +201,23 @@ pub(crate) struct SpawnContext {
     pub messages: Vec<sdk::ChatMessage>,
 }
 
-pub fn spawn_processing(ctx: SpawnContext) {
-    tokio::spawn(async move {
+#[derive(Debug)]
+pub(crate) struct ProcessingHandle {
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl ProcessingHandle {
+    pub(crate) fn abort(&self) {
+        self.join.abort();
+    }
+
+    pub(crate) fn is_finished(&self) -> bool {
+        self.join.is_finished()
+    }
+}
+
+pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
+    let join = tokio::spawn(async move {
         let mut stream = match ctx
             .agent_client
             .chat(sdk::ChatRequest {
@@ -246,6 +261,7 @@ pub fn spawn_processing(ctx: SpawnContext) {
             }
         }
     });
+    ProcessingHandle { join }
 }
 
 #[cfg(test)]

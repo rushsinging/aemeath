@@ -31,26 +31,14 @@ where
     }
 
     if other_calls.len() == 1 {
-        return execute_one_non_agent(
-            context,
-            agent,
-            sink,
-            hook_ui,
-            hook_runner,
-            other_calls[0],
-        )
-        .await;
+        if agent.ctx.cancel.is_cancelled() {
+            return vec![cancelled_result(other_calls[0])];
+        }
+        return execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, other_calls[0])
+            .await;
     }
 
-    execute_multiple_non_agent(
-        context,
-        agent,
-        sink,
-        hook_ui,
-        hook_runner,
-        &other_calls,
-    )
-    .await
+    execute_multiple_non_agent(context, agent, sink, hook_ui, hook_runner, &other_calls).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -81,16 +69,13 @@ where
                 let sem = semaphore.clone();
                 let context = context.clone();
                 async move {
+                    if agent.ctx.cancel.is_cancelled() {
+                        return (pos, Vec::new());
+                    }
                     let _permit = sem.acquire().await.expect("semaphore closed");
-                    let result = execute_one_non_agent(
-                        &context,
-                        agent,
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        call,
-                    )
-                    .await;
+                    let result =
+                        execute_one_non_agent(&context, agent, &sink, &hook_ui, &hook_runner, call)
+                            .await;
                     (pos, result)
                 }
             })
@@ -98,23 +83,23 @@ where
         for (pos, result_vec) in futures::future::join_all(futures).await {
             if let Some(r) = result_vec.into_iter().next() {
                 results[pos] = Some(r);
+            } else {
+                results[pos] = Some(cancelled_result(other_calls[pos]));
             }
         }
     }
 
     for &pos in &sequential_positions {
         let call = other_calls[pos];
-        let result_vec = execute_one_non_agent(
-            context,
-            agent,
-            sink,
-            hook_ui,
-            hook_runner,
-            call,
-        )
-        .await;
+        let result_vec = if agent.ctx.cancel.is_cancelled() {
+            Vec::new()
+        } else {
+            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call).await
+        };
         if let Some(r) = result_vec.into_iter().next() {
             results[pos] = Some(r);
+        } else {
+            results[pos] = Some(cancelled_result(call));
         }
     }
 
@@ -145,6 +130,17 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
         }
     }
     (concurrent_positions, sequential_positions)
+}
+
+fn cancelled_result(call: &ToolCall) -> UiToolResult {
+    (
+        call.id.clone(),
+        call.provider_id.clone(),
+        "Cancelled by user".to_string(),
+        serde_json::json!({ "text": "Cancelled by user" }),
+        true,
+        Vec::new(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -215,12 +211,7 @@ where
         .await;
     let mut out = Vec::new();
     for (id, provider_id, output, content, is_error, images) in exec_results {
-        log_tool_result(
-            &id,
-            &owned_call.name,
-            is_error,
-            &output,
-        );
+        log_tool_result(&id, &owned_call.name, is_error, &output);
         run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
         let result = (id, provider_id, output, content, is_error, images);

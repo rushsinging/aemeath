@@ -131,8 +131,7 @@ impl UnifiedLogger {
             role_logs_enabled,
         };
         let leaked: &'static UnifiedLogger = Box::leak(Box::new(logger));
-        log::set_logger(leaked)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        log::set_logger(leaked).map_err(|e| io::Error::other(e.to_string()))?;
         log::set_max_level(max_level);
         // LOGGER 重复 set 会失败，但 init 只能调用一次，与 log::set_logger 一致
         let _ = LOGGER.set(leaked);
@@ -146,7 +145,9 @@ impl UnifiedLogger {
 
     /// 记录 LLM 输入到 `input.log`。
     pub fn log_input(role: &str, payload: Value) {
-        let Some(logger) = Self::current() else { return };
+        let Some(logger) = Self::current() else {
+            return;
+        };
         if !logger.role_logs_enabled {
             return;
         }
@@ -156,7 +157,9 @@ impl UnifiedLogger {
 
     /// 记录 LLM 输出到 `output.log`。
     pub fn log_output(role: &str, payload: Value) {
-        let Some(logger) = Self::current() else { return };
+        let Some(logger) = Self::current() else {
+            return;
+        };
         if !logger.role_logs_enabled {
             return;
         }
@@ -166,7 +169,9 @@ impl UnifiedLogger {
 
     /// 记录 tool call / result 到 `tool.log`。
     pub fn log_tool(role: &str, kind: ToolKind, payload: Value) {
-        let Some(logger) = Self::current() else { return };
+        let Some(logger) = Self::current() else {
+            return;
+        };
         if !logger.role_logs_enabled {
             return;
         }
@@ -174,12 +179,7 @@ impl UnifiedLogger {
         logger.write_audit(&logger.tool, &logger.paths.tool, &line);
     }
 
-    fn write_audit(
-        &self,
-        sink: &Mutex<Option<BufWriter<File>>>,
-        path: &Path,
-        line: &str,
-    ) {
+    fn write_audit(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
         if let Ok(mut guard) = sink.lock() {
             self.maybe_rotate(sink, path, &mut guard);
             if let Some(writer) = guard.as_mut() {
@@ -264,10 +264,7 @@ impl Log for UnifiedLogger {
 
 fn open_buf(path: &Path) -> io::Result<BufWriter<File>> {
     Ok(BufWriter::new(
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?,
+        OpenOptions::new().create(true).append(true).open(path)?,
     ))
 }
 

@@ -38,7 +38,7 @@ pub(crate) async fn parse_ollama_stream(
         let line = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                return Err(crate::LlmError::Stream("interrupted by user".to_string()));
+                return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
                 handler.on_error(&format!("Ollama stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
