@@ -10,7 +10,6 @@ use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
-use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
@@ -212,13 +211,13 @@ impl App {
             let suggestions_height = self
                 .input_area
                 .suggestions_height(&self.model.input.completion);
-            let input_render_model = InputRenderModel::from_document(
+            let input_vm = crate::tui::view_model::InputAreaViewModel::from_document(
                 &self.model.input.document,
                 Some("Type a message... (Enter to send, Alt+Enter for new line)".to_string()),
                 self.chat.pending_image_count(),
                 true,
             );
-            let input_height = InputArea::desired_height(size.width, &input_render_model);
+            let input_height = InputArea::desired_height(size.width, &input_vm);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -259,7 +258,7 @@ impl App {
                     chunks[1],
                     chunks[2],
                     buf,
-                    &input_render_model,
+                    &input_vm,
                     &self.view_state.input_sel,
                     &suggestions_view,
                 );

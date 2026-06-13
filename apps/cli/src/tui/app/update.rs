@@ -307,6 +307,12 @@ impl App {
         )
     }
 
+    pub(crate) fn dialog_view_model(&self) -> Option<crate::tui::view_model::DialogViewModel> {
+        crate::tui::view_assembler::dialog::DialogViewAssembler::assemble_from_diagnostic(
+            &self.model.diagnostic,
+        )
+    }
+
     /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
     /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
