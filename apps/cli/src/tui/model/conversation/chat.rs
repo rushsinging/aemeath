@@ -15,7 +15,7 @@ impl Chat {
             id,
             user_submission,
             status: ChatStatus::Running,
-            turns: vec![ChatTurn::new(ChatTurnId::new("turn-1"), 0)],
+            turns: vec![ChatTurn::new(ChatTurnId::new_v7(), 0)],
         }
     }
 

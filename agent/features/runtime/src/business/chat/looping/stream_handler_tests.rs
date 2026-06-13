@@ -25,15 +25,17 @@ impl ChatEventSink for RecordingSink {
 fn test_stream_handler_keeps_runtime_tool_ids_unique_across_handlers() {
     let sink = RecordingSink::default();
     let registry = ToolIdentityRegistry::new();
+    let chat_id = sdk::ids::ChatId::new_v7();
+    let turn_id = sdk::ids::ChatTurnId::new_v7();
     let mut first = RuntimeStreamHandler::with_tool_identity(
         sink.clone(),
         registry.clone(),
-        RuntimeTurnContext::new("chat", "turn-1"),
+        RuntimeTurnContext::new(chat_id.clone(), turn_id.clone()),
     );
     let mut second = RuntimeStreamHandler::with_tool_identity(
         sink.clone(),
         registry,
-        RuntimeTurnContext::new("chat", "turn-1"),
+        RuntimeTurnContext::new(chat_id, turn_id),
     );
 
     first.on_tool_use_start("Read", Some("provider-a"), 0);

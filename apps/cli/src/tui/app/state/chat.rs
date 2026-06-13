@@ -8,7 +8,7 @@ pub(crate) struct ChatState {
     pub system_prompt_text: String,
     pub context_size: usize,
     pub tool_call_active: bool,
-    pub active_tool_call_ids: std::collections::HashSet<String>,
+    pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
     pub turn_count: usize,
     pub pending_reflection: Option<sdk::ReflectionOutputView>,
     pub applying_reflection: Option<sdk::ReflectionOutputView>,
@@ -28,16 +28,16 @@ impl ChatState {
         self.tool_call_active = true;
     }
 
-    pub(crate) fn register_tool_call(&mut self, id: String) {
+    pub(crate) fn register_tool_call(&mut self, id: sdk::ids::ToolCallId) {
         self.tool_call_active = true;
         self.active_tool_call_ids.insert(id);
     }
 
-    pub(crate) fn has_active_tool_call(&self, id: &str) -> bool {
+    pub(crate) fn has_active_tool_call(&self, id: &sdk::ids::ToolCallId) -> bool {
         self.active_tool_call_ids.contains(id)
     }
 
-    pub(crate) fn finish_tool_call(&mut self, id: &str) -> usize {
+    pub(crate) fn finish_tool_call(&mut self, id: &sdk::ids::ToolCallId) -> usize {
         self.active_tool_call_ids.remove(id);
         let remaining = self.active_tool_call_ids.len();
         self.tool_call_active = remaining > 0;

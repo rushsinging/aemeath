@@ -23,6 +23,12 @@ impl ChatId {
         Self(Uuid::now_v7())
     }
 
+    /// Create a ChatId from a legacy string or generate new UUIDv7.
+    /// Alias for `from_legacy_or_new` — use `new_v7()` for fresh IDs.
+    pub fn new(s: &str) -> Self {
+        Self::from_legacy_or_new(s)
+    }
+
     /// Parse a UUIDv7 string as a ChatId.
     pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
         let uuid = Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
@@ -71,6 +77,12 @@ impl ChatTurnId {
         Self(Uuid::now_v7())
     }
 
+    /// Create a ChatTurnId from a legacy string or generate new UUIDv7.
+    /// Alias for `from_legacy_or_new` — use `new_v7()` for fresh IDs.
+    pub fn new(s: &str) -> Self {
+        Self::from_legacy_or_new(s)
+    }
+
     pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
         let uuid = Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
         if uuid.get_version_num() != 7 {
@@ -111,6 +123,12 @@ pub struct ToolCallId(Uuid);
 impl ToolCallId {
     pub fn new_v7() -> Self {
         Self(Uuid::now_v7())
+    }
+
+    /// Create a ToolCallId from a legacy string or generate new UUIDv7.
+    /// Alias for `from_legacy_or_new` — use `new_v7()` for fresh IDs.
+    pub fn new(s: String) -> Self {
+        Self::from_legacy_or_new(&s)
     }
 
     pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {

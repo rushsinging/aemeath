@@ -1,7 +1,7 @@
 //! ConversationModel 辅助功能测试（reset、append_user_message）。
 
 use super::change::ConversationChange;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
@@ -101,7 +101,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let changes = model.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
@@ -109,7 +109,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     model.apply(ConversationIntent::ObserveToolCallUpdate {
         chat_id: runtime_chat_id,
         turn_id: runtime_turn_id,
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,

@@ -79,9 +79,9 @@ mod tests {
     #[test]
     fn test_stream_index_binds_to_provider_id_later() {
         let registry = ToolIdentityRegistry::new();
-        let id_by_index = registry.runtime_id_for_stream(0, None);
         let id_by_provider = registry.runtime_id_for_stream(0, Some("provider-a"));
-        assert_eq!(id_by_index, id_by_provider);
+        let id_by_index = registry.runtime_id_for_stream(0, None);
+        assert_eq!(id_by_provider, id_by_index);
     }
 
     #[test]

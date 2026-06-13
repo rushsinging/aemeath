@@ -284,15 +284,15 @@ impl ConversationModel {
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             for candidate_id in candidate_ids.into_iter().flatten() {
                 if let Some(preview) =
-                    turn.update_tool(candidate_id, arguments.clone(), summary.clone(), status)
+                    turn.update_tool(&candidate_id, arguments.clone(), summary.clone(), status)
                 {
                     args_preview = preview;
-                    bound_id = ToolCallId::from_legacy_or_new(candidate_id);
+                    bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
                     if final_summary.is_empty() {
                         if let Some(call) = turn
                             .tool_calls
                             .iter()
-                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id))
+                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id.as_str()))
                         {
                             final_summary = call.summary.clone().unwrap_or_default();
                         }

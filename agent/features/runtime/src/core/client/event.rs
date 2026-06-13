@@ -283,7 +283,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             default,
             reply_tx,
         } => ChatEvent::AskUser {
-            id,
+            id: id.to_string(),
             question,
             options,
             allow_free_input,
@@ -351,7 +351,7 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
             calls: calls
                 .into_iter()
                 .map(|call| AgentToolCallProgressView {
-                    id: call.id,
+                    id: sdk::ids::ToolCallId::from_legacy_or_new(&call.id),
                     name: call.name,
                     input: call.input,
                     summary: call.summary,

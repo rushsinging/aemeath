@@ -41,14 +41,16 @@ fn test_role_max_tokens_override() {
 
 #[test]
 fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
+    let id1 = sdk::ids::ToolCallId::new_v7();
+    let id2 = sdk::ids::ToolCallId::new_v7();
     let calls = vec![
-        test_tool_call(
-            "1",
+        test_tool_call_with_id(
+            id1.clone(),
             "Read",
             serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         ),
-        test_tool_call(
-            "2",
+        test_tool_call_with_id(
+            id2.clone(),
             "Grep",
             serde_json::json!({"pattern": "AgentProgress", "path": "/repo/src"}),
         ),
@@ -60,7 +62,7 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
     match event.kind {
         AgentProgressKind::ToolCalls { calls } => {
             assert_eq!(calls.len(), 2);
-            assert_eq!(calls[0].id, "1");
+            assert_eq!(calls[0].id, id1.to_string());
             assert_eq!(calls[0].name, "Read");
             assert_eq!(
                 calls[0].input,
@@ -123,30 +125,32 @@ fn test_build_json_logger_input_data_includes_latest_message_and_schema_names() 
 
 #[test]
 fn test_build_json_logger_tool_call_data_contains_full_input() {
-    let call = test_tool_call(
-        "tool-1",
+    let call_id = sdk::ids::ToolCallId::new_v7();
+    let call = test_tool_call_with_id(
+        call_id.clone(),
         "Bash",
         serde_json::json!({"command": "cargo check"}),
     );
 
     let data = build_json_logger_tool_call_data(&call);
 
-    assert_eq!(data["tool_use_id"], "tool-1");
+    assert_eq!(data["tool_use_id"], call_id.to_string());
     assert_eq!(data["tool_name"], "Bash");
     assert_eq!(data["input"]["command"], "cargo check");
 }
 
 #[test]
 fn test_build_json_logger_tool_result_data_contains_full_output() {
+    let tool_id = sdk::ids::ToolCallId::new_v7();
     let mut call_info = std::collections::HashMap::new();
     call_info.insert(
-        "tool-1".to_string(),
+        tool_id.clone(),
         ("Read".to_string(), "file.rs".to_string()),
     );
 
-    let data = build_json_logger_tool_result_data("tool-1", "完整输出", false, &call_info);
+    let data = build_json_logger_tool_result_data(&tool_id.to_string(), "完整输出", false, &call_info);
 
-    assert_eq!(data["tool_use_id"], "tool-1");
+    assert_eq!(data["tool_use_id"], tool_id.to_string());
     assert_eq!(data["tool_name"], "Read");
     assert_eq!(data["is_error"], false);
     assert_eq!(data["output"], "完整输出");
@@ -215,9 +219,21 @@ fn test_tool_call(
     name: &str,
     input: serde_json::Value,
 ) -> crate::business::agent::ToolCall {
+    test_tool_call_with_id(
+        sdk::ids::ToolCallId::parse_uuid7(id).unwrap_or_else(|_| sdk::ids::ToolCallId::new_v7()),
+        name,
+        input,
+    )
+}
+
+fn test_tool_call_with_id(
+    id: sdk::ids::ToolCallId,
+    name: &str,
+    input: serde_json::Value,
+) -> crate::business::agent::ToolCall {
     crate::business::agent::ToolCall {
         provider_id: "provider-test".to_string(),
-        id: id.to_string(),
+        id,
         name: name.to_string(),
         index: 0,
         input,

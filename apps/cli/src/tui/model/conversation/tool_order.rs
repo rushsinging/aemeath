@@ -80,7 +80,7 @@ impl ConversationModel {
         self.timeline.move_tool_result_after_tool_call(
             chat_id,
             turn_id,
-            &ToolCallId::new(id.to_string()),
+            &ToolCallId::from_legacy_or_new(id),
         );
         let mut results = Vec::new();
         let mut index = 0;

@@ -344,7 +344,7 @@ mod tests {
                 conversation: vec![ConversationIntent::ObserveToolCallStart {
                     chat_id: chat_id.clone(),
                     turn_id: turn_id.clone(),
-                    id: "tool-1".to_string(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string()),
                     provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),
                     index: 0,
@@ -358,7 +358,7 @@ mod tests {
                 conversation: vec![ConversationIntent::ObserveToolCallUpdate {
                     chat_id: chat_id.clone(),
                     turn_id: turn_id.clone(),
-                    id: "tool-1".to_string(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string()),
                     provider_id: Some("provider-1".to_string()),
                     name: "Read".to_string(),
                     index: 0,
@@ -390,7 +390,7 @@ mod tests {
                 conversation: vec![ConversationIntent::ObserveToolCallUpdate {
                     chat_id: chat_id.clone(),
                     turn_id: turn_id.clone(),
-                    id: "tool-atomic".to_string(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic".to_string()),
                     provider_id: Some("provider-atomic".to_string()),
                     name: "Read".to_string(),
                     index: 0,

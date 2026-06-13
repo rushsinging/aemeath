@@ -1,4 +1,5 @@
 use super::OutputViewAssembler;
+use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -108,7 +109,7 @@ fn add_task_tool(
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         provider_id: None,
         name: name.to_string(),
         index: 0,
@@ -117,7 +118,7 @@ fn add_task_tool(
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         name: name.to_string(),
         index: 0,
         summary: Some(summary.to_string()),
@@ -128,7 +129,7 @@ fn add_task_tool(
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         tool_name: name.to_string(),
         output: output.to_string(),
         content: serde_json::json!({ "text": output }),

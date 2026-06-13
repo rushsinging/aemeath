@@ -46,7 +46,7 @@ impl ConversationModel {
             self.insert_tool_result_after_tool_call(
                 chat_id.clone(),
                 turn_id.clone(),
-                ToolCallId::new(id.to_string()),
+                ToolCallId::from_legacy_or_new(id),
                 output,
                 content,
                 is_error,
@@ -60,7 +60,7 @@ impl ConversationModel {
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        id: String,
+        id: ToolCallId,
         _provider_id: String,
         tool_name: String,
         output: String,
@@ -72,13 +72,13 @@ impl ConversationModel {
         if let Some(status) = self.complete_tool_in_context(
             &chat_id,
             &turn_id,
-            &id,
+            &id.to_string(),
             ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
         ) {
             self.insert_tool_result_after_tool_call(
                 chat_id.clone(),
                 turn_id.clone(),
-                ToolCallId::new(id.clone()),
+                id.clone(),
                 output,
                 content,
                 is_error,
@@ -87,7 +87,7 @@ impl ConversationModel {
             log::debug!(
                 target: "cli::tui::tool_flow",
                 "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} blocks_after={}",
-                id,
+                id.to_string(),
                 tool_name,
                 status,
                 is_error,
@@ -95,20 +95,20 @@ impl ConversationModel {
                 self.blocks.len(),
             );
             return vec![
-                ConversationChange::ToolCallCompleted { id, status },
+                ConversationChange::ToolCallCompleted { id: id.to_string(), status },
                 ConversationChange::StyleBoundaryResetRequired,
                 ConversationChange::OutputDirty,
             ];
         }
         self.timeline.push(OutputTimelineItem::OrphanToolResult {
-            id: id.clone(),
+            id: id.to_string(),
             tool_name: tool_name.clone(),
             output: output.clone(),
             content: content.clone(),
             is_error,
         });
         self.blocks.push(ConversationBlock::OrphanToolResult {
-            id: id.clone(),
+            id: id.to_string(),
             tool_name,
             output,
             content,
@@ -117,13 +117,13 @@ impl ConversationModel {
         log::debug!(
             target: "cli::tui::tool_flow",
             "model observe tool_result orphan id={} is_error={} image_count={} blocks_after={}",
-            id,
+            id.to_string(),
             is_error,
             image_count,
             self.blocks.len(),
         );
         vec![
-            ConversationChange::OrphanToolResultObserved { id },
+            ConversationChange::OrphanToolResultObserved { id: id.to_string() },
             ConversationChange::StyleBoundaryResetRequired,
             ConversationChange::OutputDirty,
         ]

@@ -65,11 +65,12 @@ pub(crate) fn build_json_logger_tool_result_data(
     id: &str,
     output: &str,
     is_error: bool,
-    call_info: &std::collections::HashMap<String, (String, String)>,
+    call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
 ) -> serde_json::Value {
     let tool_name = call_info
-        .get(id)
-        .map(|(name, _)| name.as_str())
+        .iter()
+        .find(|(k, _)| k.to_string() == id)
+        .map(|(_, (name, _))| name.as_str())
         .unwrap_or("?");
     json!({
         "tool_use_id": id,

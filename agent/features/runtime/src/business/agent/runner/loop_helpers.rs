@@ -21,11 +21,11 @@ impl<'a> SubAgentRun<'a> {
         &self,
         turn_number: usize,
         results: &[crate::business::agent::ToolResultTuple],
-        call_info: &std::collections::HashMap<String, (String, String)>,
+        call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
             let label = if *is_error { "ERR" } else { "OK" };
-            if let Some((name, input_short)) = call_info.get(id.as_str()) {
+            if let Some((name, input_short)) = call_info.get(id) {
                 (self.progress)(Some(turn_number), &format!("  → {}({})", name, input_short));
             }
             let out_short = if output.len() > 300 {
@@ -34,7 +34,7 @@ impl<'a> SubAgentRun<'a> {
                 output.clone()
             };
             let tool_name = call_info
-                .get(id.as_str())
+                .get(id)
                 .map(|(name, _)| name.as_str())
                 .unwrap_or("?");
             (self.progress)(
@@ -48,10 +48,10 @@ impl<'a> SubAgentRun<'a> {
         &self,
         turn_number: usize,
         results: &[crate::business::agent::ToolResultTuple],
-        call_info: &std::collections::HashMap<String, (String, String)>,
+        call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
-            let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
+            let data = build_json_logger_tool_result_data(&id.to_string(), output, *is_error, call_info);
             UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Result, data);
         }
         logging::context::set_current_turn(turn_number);
@@ -134,7 +134,7 @@ mod tests {
     fn test_append_tool_results_uses_provider_id_not_runtime_id() {
         let mut messages = Vec::new();
         let results = vec![(
-            "runtime-id".to_string(),
+            sdk::ids::ToolCallId::from_legacy_or_new("runtime-id"),
             "provider-id".to_string(),
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
@@ -156,7 +156,7 @@ mod tests {
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
         let mut messages = Vec::new();
         let results = vec![(
-            "tool-oversized".to_string(),
+            sdk::ids::ToolCallId::from_legacy_or_new("tool-oversized"),
             "provider-oversized".to_string(),
             oversized,
             serde_json::json!({ "text": "oversized" }),

@@ -11,7 +11,7 @@ pub(crate) fn build_tool_calls_progress_event(
             calls: tool_calls
                 .iter()
                 .map(|call| AgentToolCallProgress {
-                    id: call.id.clone(),
+                    id: call.id.to_string(),
                     name: call.name.clone(),
                     input: call.input.clone(),
                     summary: summarize_tool_input(&call.name, &call.input),

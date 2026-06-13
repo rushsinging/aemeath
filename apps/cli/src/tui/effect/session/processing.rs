@@ -168,7 +168,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             default,
             reply_tx,
         } => UiEvent::AskUser {
-            id,
+            id: sdk::ids::ToolCallId::from_legacy_or_new(&id),
             question,
             options,
             allow_free_input,
@@ -432,7 +432,7 @@ mod tests {
     use tokio::sync::watch;
 
     fn test_sdk_event_context() -> sdk::ChatEventContext {
-        sdk::ChatEventContext::new("chat-test", "turn-test")
+        sdk::ChatEventContext::new(sdk::ids::ChatId::new("chat-test"), sdk::ids::ChatTurnId::new("turn-test"))
     }
 
     #[test]
@@ -450,9 +450,10 @@ mod tests {
 
     #[test]
     fn test_sdk_event_to_ui_event_preserves_agent_progress_context() {
+        let expected_tool_id = sdk::ids::ToolCallId::new("tool-1".to_string());
         let event = sdk_event_to_ui_event(sdk::ChatEvent::AgentProgress {
-            context: sdk::ChatEventContext::new("chat-progress", "turn-progress"),
-            tool_id: "tool-1".to_string(),
+            context: sdk::ChatEventContext::new(sdk::ids::ChatId::new("chat-progress"), sdk::ids::ChatTurnId::new("turn-progress")),
+            tool_id: expected_tool_id.clone(),
             event: sdk::AgentProgressEventView {
                 sequence: 1,
                 kind: sdk::AgentProgressKindView::Message {
@@ -467,7 +468,7 @@ mod tests {
             } => {
                 assert_eq!(context.chat_id.as_ref(), "chat-progress");
                 assert_eq!(context.turn_id.as_ref(), "turn-progress");
-                assert_eq!(tool_id, "tool-1");
+                assert_eq!(tool_id, expected_tool_id);
             }
             other => panic!("unexpected event: {other:?}"),
         }

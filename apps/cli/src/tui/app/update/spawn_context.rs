@@ -34,8 +34,8 @@ impl App {
                 })
             })
             .unwrap_or_else(|| UiTurnContext {
-                chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-unknown"),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-unknown"),
+                chat_id: crate::tui::model::conversation::ids::ChatId::new_v7(),
+                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new_v7(),
             })
     }
 }

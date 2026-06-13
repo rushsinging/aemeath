@@ -125,16 +125,16 @@ mod tests {
     #[test]
     fn test_push_tool_call_ref_is_idempotent_for_same_context() {
         let mut model = OutputTimelineModel::default();
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
         assert_eq!(model.items().len(), 1);
     }
 
     #[test]
     fn test_push_tool_call_ref_allows_same_id_different_turn() {
         let mut model = OutputTimelineModel::default();
-        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-a"), ToolCallId::new("tool-1"));
-        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-b"), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-a"), ToolCallId::new("tool-1".to_string()));
+        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-b"), ToolCallId::new("tool-1".to_string()));
         assert_eq!(model.items().len(), 2);
     }
 
@@ -142,10 +142,10 @@ mod tests {
     fn test_move_tool_result_after_tool_call_reorders_matching_context_only() {
         let mut model = OutputTimelineModel::default();
         model.push(OutputTimelineItem::ToolResult {
-            reference: TimelineToolCallRef::new(chat(), turn(), ToolCallId::new("tool-1")),
+            reference: TimelineToolCallRef::new(chat(), turn(), ToolCallId::new("tool-1".to_string())),
         });
         model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
-        model.move_tool_result_after_tool_call(&chat(), &turn(), &ToolCallId::new("tool-1"));
+        model.move_tool_result_after_tool_call(&chat(), &turn(), &ToolCallId::new("tool-1".to_string()));
         assert!(matches!(
             model.items()[0],
             OutputTimelineItem::ToolCall { .. }

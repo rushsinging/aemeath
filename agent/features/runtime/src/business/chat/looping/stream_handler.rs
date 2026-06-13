@@ -26,7 +26,7 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
         Self::with_tool_identity(
             sink,
             ToolIdentityRegistry::new(),
-            RuntimeTurnContext::new("runtime-chat-1", "turn-1"),
+            RuntimeTurnContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatTurnId::new_v7()),
         )
     }
 
@@ -46,7 +46,7 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
         }
     }
 
-    pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> String {
+    pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
     }
 
