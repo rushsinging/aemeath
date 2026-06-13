@@ -71,10 +71,6 @@ impl StatusBar {
     }
 
     /// Set permission mode text for the status context.
-    ///
-    /// This is reserved for #42 PermissionEngine integration; until then the
-    /// default status line shows AskMe.
-    #[allow(dead_code)]
     pub fn set_permission_mode(&mut self, mode: impl Into<String>) {
         self.context.permission_mode = mode.into();
     }

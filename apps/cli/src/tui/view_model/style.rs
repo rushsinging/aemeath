@@ -6,7 +6,6 @@ pub enum SemanticStyle {
     Success,
     Error,
     Warning,
-    /// 预留：强调样式（后续渲染管线 S 任务接线）。
-    #[allow(dead_code)]
+    /// 强调样式。
     Accent,
 }

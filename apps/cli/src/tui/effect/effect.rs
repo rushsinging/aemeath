@@ -1,11 +1,9 @@
-#[allow(dead_code)]
 pub struct SpawnAgentChatEffect {
     pub chat_id: String,
     pub prompt: String,
     pub context: Option<crate::tui::effect::session::processing::SpawnContext>,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
     None,
@@ -65,7 +63,6 @@ impl Effect {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EffectResult {
     Noop,

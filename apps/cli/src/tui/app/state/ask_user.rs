@@ -16,6 +16,5 @@ pub(crate) struct AskUserState {
     pub llm_option_count: usize,
     pub multi_select: bool,
     /// Whether free-text input is allowed
-    #[allow(dead_code)]
     pub allow_free_input: bool,
 }
