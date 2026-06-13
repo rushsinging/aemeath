@@ -285,6 +285,21 @@ impl LlmProvider for ErrorProvider {
             LlmError::Cancelled => LlmError::Cancelled,
             LlmError::Stream(message) => LlmError::Stream(message.clone()),
             LlmError::Config(message) => LlmError::Config(message.clone()),
+            LlmError::StreamTruncated {
+                tool_call_id,
+                tool_call_name,
+                accumulated_bytes,
+                delta_count,
+                head_preview,
+                tail_preview,
+            } => LlmError::StreamTruncated {
+                tool_call_id: tool_call_id.clone(),
+                tool_call_name: tool_call_name.clone(),
+                accumulated_bytes: *accumulated_bytes,
+                delta_count: *delta_count,
+                head_preview: head_preview.clone(),
+                tail_preview: tail_preview.clone(),
+            },
         })
     }
 

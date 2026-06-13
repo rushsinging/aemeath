@@ -14,6 +14,69 @@ pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration:
 /// 停滞检测阈值：超过 30 秒无数据则记录警告
 pub(crate) const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// 尝试通过补全 closing quote 和必要的右括号，从上游截断的 JSON 字符串中恢复出可解析的 JSON。
+///
+/// 适用场景：上游 SSE 流在某个 tool_call `arguments` 字符串字面量中间被截断（典型 EOF 错误）。
+/// 该情况是 OpenAI 兼容 provider 最常见的流式截断形态，因为模型经常在 string 边界被切。
+///
+/// 启发式策略：
+/// 1. 用状态机扫描原始字符串，跟踪"是否在 string 内"（正确处理 `\\` 和 `\"` 转义）。
+/// 2. 仅当流结束**且**仍处于 string 中时尝试补全；其他截断形态（如缺逗号/冒号）不做猜测。
+/// 3. 补 `"` 关闭 string，然后按未闭合的结构符顺序补 `}` / `]`。
+/// 4. 重新调用 `serde_json::from_str`；成功则返回 `Some(value)`，失败返回 `None`（让 caller 走原错误路径）。
+///
+/// 注意：**绝不**对截断在结构边界（`,` `:` `{` `[` 之后）的情况做"猜测式补全"，
+/// 因为那会引入 silent corruption（例如把 `{"a":1` 补成 `{"a":1}`，模型侧的语义可能完全不同）。
+pub(crate) fn try_complete_truncated_json(raw: &str) -> Option<serde_json::Value> {
+    let mut in_string = false;
+    let mut escape = false;
+    for &b in raw.as_bytes() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_string => escape = true,
+            b'"' => in_string = !in_string,
+            _ => {}
+        }
+    }
+
+    // 只处理"在 string 内被截断"这一种形态。其他形态让 caller 抛错。
+    if !in_string {
+        return None;
+    }
+
+    // 补一个 closing quote，然后遍历整段字符串统计未闭合的结构符。
+    let mut candidate = String::with_capacity(raw.len() + 16);
+    candidate.push_str(raw);
+    candidate.push('"');
+
+    let mut stack: Vec<u8> = Vec::new();
+    let mut in_str2 = false;
+    let mut esc2 = false;
+    for &b in candidate.as_bytes() {
+        if esc2 {
+            esc2 = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_str2 => esc2 = true,
+            b'"' => in_str2 = !in_str2,
+            b'{' if !in_str2 => stack.push(b'}'),
+            b'[' if !in_str2 => stack.push(b']'),
+            _ => {}
+        }
+    }
+
+    // 按栈的逆序补右括号（即最深层的先闭合）。
+    while let Some(c) = stack.pop() {
+        candidate.push(c as char);
+    }
+
+    serde_json::from_str(&candidate).ok()
+}
+
 /// 解析 OpenAI 风格的 SSE 流
 pub(crate) async fn parse_openai_stream(
     response: reqwest::Response,
@@ -238,13 +301,13 @@ pub(crate) async fn parse_openai_stream(
     let mut sorted_tool_calls: Vec<_> = current_tool_calls.into_iter().collect();
     sorted_tool_calls.sort_by_key(|(i, _)| *i);
 
-    let mut truncated_tool: Option<(String, String, usize, u32)> = None;
+    let mut truncated_tool: Option<(String, String, String, String, usize, u32)> = None;
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if name.is_empty() {
             log::warn!(
-                "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
-                id, arguments.len(), delta_count
-            );
+                      "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
+                      id, arguments.len(), delta_count
+                  );
             continue;
         }
         // Note: on_tool_use_start was already called during streaming
@@ -252,52 +315,64 @@ pub(crate) async fn parse_openai_stream(
         // call it again here.
         let input: serde_json::Value = if arguments.is_empty() {
             log::warn!(
-                    "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
-                    name, id, delta_count
-                );
+                          "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
+                          name, id, delta_count
+                      );
             serde_json::Value::Object(serde_json::Map::new())
         } else {
             match serde_json::from_str(&arguments) {
                 Ok(v) => v,
                 Err(e) => {
                     let is_eof = matches!(e.classify(), serde_json::error::Category::Eof);
-                    log::warn!(
-                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — likely upstream truncated the SSE stream mid-tool_call.",
-                            name, id, delta_count, arguments.len(), e
-                        );
-                    log::warn!(
-                        "[openai-compat stream] truncated args head: {}",
-                        arguments.chars().take(300).collect::<String>()
-                    );
-                    log::warn!(
-                        "[openai-compat stream] truncated args tail: {}",
-                        arguments
-                            .chars()
-                            .rev()
-                            .take(200)
-                            .collect::<String>()
-                            .chars()
-                            .rev()
-                            .collect::<String>()
-                    );
-                    if is_eof && truncated_tool.is_none() {
-                        truncated_tool =
-                            Some((id.clone(), name.clone(), arguments.len(), delta_count));
+
+                    // 先尝试启发式补全：仅当 JSON 在字符串字面量中间被截断时有效。
+                    if let Some(recovered) = try_complete_truncated_json(&arguments) {
+                        log::warn!(
+                                  "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
+                                  name, id, delta_count, arguments.len(), e
+                              );
+                        recovered
+                    } else {
+                        let head: String = arguments.chars().take(300).collect();
+                        let tail_rev: String =
+                            arguments.chars().rev().take(200).collect::<String>();
+                        let tail: String = tail_rev.chars().rev().collect();
+                        log::warn!(
+                                  "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
+                                  name, id, delta_count, arguments.len(), e
+                              );
+                        log::warn!("[openai-compat stream] truncated args head: {}", head);
+                        log::warn!("[openai-compat stream] truncated args tail: {}", tail);
+                        if is_eof && truncated_tool.is_none() {
+                            truncated_tool = Some((
+                                id.clone(),
+                                name.clone(),
+                                head,
+                                tail,
+                                arguments.len(),
+                                delta_count,
+                            ));
+                        }
+                        serde_json::Value::Object(serde_json::Map::new())
                     }
-                    serde_json::Value::Object(serde_json::Map::new())
                 }
             }
         };
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 
-    // 如果 args 因 EOF 截断（典型上游断流症状），向上抛错让 client 层重试，
-    // 而不是给模型送 {} 让它陷入"missing required parameter"重试死循环。
-    if let Some((tid, tname, raw_len, delta_count)) = truncated_tool {
-        return Err(crate::LlmError::Stream(format!(
-            "upstream truncated tool_call '{}' (id={}) mid-arguments: {} bytes accumulated across {} delta chunks but JSON ended inside an open string. The provider closed the SSE stream early.",
-            tname, tid, raw_len, delta_count
-        )));
+    // 如果 args 因 EOF 截断（典型上游断流症状）且启发式补全也失败，向上抛结构化错误
+    // 让 caller 决定下一步（重试 stream / fallback non-streaming）。
+    // **不再**给模型送 `{}`，因为那会陷入"missing required parameter"死循环。
+    if let Some((tid, tname, head, tail, raw_len, delta_count)) = truncated_tool {
+        return Err(crate::LlmError::StreamTruncated {
+            tool_call_id: tid,
+            tool_call_name: tname,
+            accumulated_bytes: raw_len,
+            delta_count,
+            head_preview: head,
+            tail_preview: tail,
+        });
     }
 
     Ok(StreamResponse {
@@ -309,4 +384,70 @@ pub(crate) async fn parse_openai_stream(
         usage,
         stop_reason,
     })
+}
+
+#[cfg(test)]
+mod json_recovery_tests {
+    use super::try_complete_truncated_json;
+    use serde_json::json;
+
+    #[test]
+    fn recovers_when_string_value_is_truncated_mid_quote() {
+        // 模型写到 `"file_path":"/Users/...` 后流被切断
+        let raw = r#"{"file_path":"/Users/x"#;
+        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
+        assert_eq!(recovered, json!({"file_path": "/Users/x"}));
+    }
+
+    #[test]
+    fn recovers_when_string_value_contains_escape_sequences() {
+        // 字符串中含有 `\"` 和 `\\` 转义，不应让状态机误判
+        let raw = r#"{"content":"line1\nline2 \"with quote\""#;
+        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
+        assert_eq!(recovered["content"], "line1\nline2 \"with quote\"");
+    }
+
+    #[test]
+    fn recovers_nested_objects() {
+        // 嵌套对象，截断在最里层 string
+        let raw = r#"{"outer":{"inner":{"key":"val"#;
+        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
+        assert_eq!(recovered, json!({"outer": {"inner": {"key": "val"}}}));
+    }
+
+    #[test]
+    fn recovers_arrays_inside_object() {
+        // 数组作为 value，且 array 内的 string 也被截断
+        let raw = r#"{"items":["a","b","c"#;
+        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
+        assert_eq!(recovered, json!({"items": ["a", "b", "c"]}));
+    }
+
+    #[test]
+    fn does_not_recover_when_truncated_outside_a_string() {
+        // 截断在结构符之后（缺逗号），不做猜测 — 避免 silent corruption
+        let raw = r#"{"a":1"#;
+        assert!(try_complete_truncated_json(raw).is_none());
+    }
+
+    #[test]
+    fn does_not_recover_well_formed_json() {
+        // 正常 JSON：状态机结束在 string 之外（in_string=false），不触发补全
+        let raw = r#"{"a":1,"b":"ok"}"#;
+        assert!(try_complete_truncated_json(raw).is_none());
+    }
+
+    #[test]
+    fn does_not_recover_when_closing_quote_would_be_invalid() {
+        // 流刚好在合法 string 末尾被切，再补一个 `"` 会破坏语法；
+        // 我们的状态机此时 in_string=false（最后一个 `"` 已关），所以不补。
+        // 这是 expected 行为 — 这种情况下 JSON 实际上是 well-formed 的（仅缺 closing brace）。
+        let raw = r#"{"a":"b""#;
+        assert!(try_complete_truncated_json(raw).is_none());
+    }
+
+    #[test]
+    fn does_not_recover_completely_empty_input() {
+        assert!(try_complete_truncated_json("").is_none());
+    }
 }
