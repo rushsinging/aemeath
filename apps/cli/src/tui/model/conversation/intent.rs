@@ -1,5 +1,5 @@
 use super::block::HookNoticeContent;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationIntent {
@@ -30,7 +30,7 @@ pub enum ConversationIntent {
     ObserveToolCallStart {
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -38,7 +38,7 @@ pub enum ConversationIntent {
     ObserveToolCallUpdate {
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -49,7 +49,7 @@ pub enum ConversationIntent {
     ObserveToolResult {
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        id: String,
+        id: ToolCallId,
         provider_id: String,
         tool_name: String,
         output: String,
@@ -73,7 +73,7 @@ pub enum ConversationIntent {
     RecordAgentProgress {
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        tool_id: String,
+        tool_id: ToolCallId,
         message: String,
     },
     /// 显示 AskUserQuestion 交互块（问题 + 选项），替换已有的 AskUser 块（若有）。
