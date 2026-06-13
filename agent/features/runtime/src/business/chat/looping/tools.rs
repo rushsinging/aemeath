@@ -9,13 +9,14 @@ use crate::business::chat::looping::{
 };
 use hook::api::{HookData, ToolHookData};
 use logging::{ToolKind, UnifiedLogger};
+use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use share::tool::ImageData;
 use std::sync::Arc;
 use tools::api::ToolRegistry;
 
 pub(crate) type UiToolResult = (
-    String,
+    ToolCallId,
     String,
     String,
     serde_json::Value,
@@ -268,9 +269,9 @@ pub(crate) fn tool_results_for_api(
     share::message::Message::tool_results_rich(provider_results)
 }
 
-pub(crate) fn log_tool_result(id: &str, tool_name: &str, is_error: bool, output: &str) {
+pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, output: &str) {
     let tr_data = serde_json::json!({
-        "tool_use_id": id,
+        "tool_use_id": id.to_string(),
         "tool_name": tool_name,
         "is_error": is_error,
         "output": output,
@@ -282,12 +283,13 @@ pub(crate) fn log_tool_result(id: &str, tool_name: &str, is_error: bool, output:
 mod tests {
     use super::tool_results_for_api;
     use crate::business::compact::MAX_TOOL_RESULT_CHARS;
+    use sdk::ids::ToolCallId;
     use share::message::ContentBlock;
 
     #[test]
     fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
         let results = vec![(
-            "runtime-id".to_string(),
+            ToolCallId::new_v7(),
             "provider-id".to_string(),
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
@@ -307,7 +309,7 @@ mod tests {
         let session_id = format!("test-tui-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
         let results = vec![(
-            "tool-1".to_string(),
+            ToolCallId::new_v7(),
             "provider-oversized".to_string(),
             oversized,
             serde_json::json!({ "text": "oversized" }),
