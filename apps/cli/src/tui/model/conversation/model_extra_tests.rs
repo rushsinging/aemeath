@@ -129,11 +129,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         .chats
         .iter()
         .find(|chat| chat.id == expected_chat_id)
-        .and_then(|chat| {
-            chat.turns
-                .iter()
-                .find(|turn| turn.id == expected_turn_id)
-        })
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == expected_turn_id))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()

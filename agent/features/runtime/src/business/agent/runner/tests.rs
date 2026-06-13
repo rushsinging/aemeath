@@ -143,12 +143,10 @@ fn test_build_json_logger_tool_call_data_contains_full_input() {
 fn test_build_json_logger_tool_result_data_contains_full_output() {
     let tool_id = sdk::ids::ToolCallId::new_v7();
     let mut call_info = std::collections::HashMap::new();
-    call_info.insert(
-        tool_id.clone(),
-        ("Read".to_string(), "file.rs".to_string()),
-    );
+    call_info.insert(tool_id.clone(), ("Read".to_string(), "file.rs".to_string()));
 
-    let data = build_json_logger_tool_result_data(&tool_id.to_string(), "完整输出", false, &call_info);
+    let data =
+        build_json_logger_tool_result_data(&tool_id.to_string(), "完整输出", false, &call_info);
 
     assert_eq!(data["tool_use_id"], tool_id.to_string());
     assert_eq!(data["tool_name"], "Read");

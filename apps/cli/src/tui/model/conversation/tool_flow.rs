@@ -72,7 +72,7 @@ impl ConversationModel {
         if let Some(status) = self.complete_tool_in_context(
             &chat_id,
             &turn_id,
-            &id.to_string(),
+            id.as_ref(),
             ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
         ) {
             self.insert_tool_result_after_tool_call(
@@ -87,7 +87,7 @@ impl ConversationModel {
             log::debug!(
                 target: "cli::tui::tool_flow",
                 "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} blocks_after={}",
-                id.to_string(),
+                id,
                 tool_name,
                 status,
                 is_error,
@@ -95,7 +95,10 @@ impl ConversationModel {
                 self.blocks.len(),
             );
             return vec![
-                ConversationChange::ToolCallCompleted { id: id.to_string(), status },
+                ConversationChange::ToolCallCompleted {
+                    id: id.to_string(),
+                    status,
+                },
                 ConversationChange::StyleBoundaryResetRequired,
                 ConversationChange::OutputDirty,
             ];
@@ -117,7 +120,7 @@ impl ConversationModel {
         log::debug!(
             target: "cli::tui::tool_flow",
             "model observe tool_result orphan id={} is_error={} image_count={} blocks_after={}",
-            id.to_string(),
+            id,
             is_error,
             image_count,
             self.blocks.len(),

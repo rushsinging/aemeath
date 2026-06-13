@@ -12,7 +12,12 @@ pub struct ToolStreamKey {
 }
 
 impl ToolStreamKey {
-    pub fn new(chat_id: ChatId, turn_id: ChatTurnId, name: impl Into<String>, index: usize) -> Self {
+    pub fn new(
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+        name: impl Into<String>,
+        index: usize,
+    ) -> Self {
         Self {
             chat_id,
             turn_id,

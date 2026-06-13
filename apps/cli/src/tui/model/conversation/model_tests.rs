@@ -16,7 +16,9 @@ fn tool_call<'a>(
         .find(|chat| &chat.id == chat_id)
         .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
         .and_then(|turn| {
-            turn.tool_calls.iter().find(|call| call.id.as_ref() == Some(id))
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(id))
         })
 }
 
@@ -90,7 +92,9 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
         .find(|chat| chat.id == live_chat)
         .and_then(|chat| chat.turns.iter().find(|turn| turn.id == live_turn))
         .and_then(|turn| {
-            turn.tool_calls.iter().find(|call| call.id.as_ref() == Some(&agent_tool_id))
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(&agent_tool_id))
         })
         .expect("live agent tool call should exist");
 
@@ -284,7 +288,8 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     let turn_id = super::ids::ChatTurnId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
     let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    let summaries: Vec<_> = turn.tool_calls
+    let summaries: Vec<_> = turn
+        .tool_calls
         .iter()
         .filter(|call| call.name == "Skill")
         .filter_map(|call| call.summary.as_deref())
@@ -354,10 +359,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
     assert_eq!(live_call.name, "Read");
     assert!(live_call.args_preview.contains("Cargo.toml"));
     assert!(timeline_tool_call_ref_exists(
-        &model,
-        &live_chat,
-        &live_turn,
-        &tool_id
+        &model, &live_chat, &live_turn, &tool_id
     ));
     assert!(model.blocks.iter().any(|block| matches!(
         block,
@@ -445,11 +447,19 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     );
     let chat_id = super::ids::ChatId::new("chat-1");
     let turn_id = super::ids::ChatTurnId::new("turn-1");
-    let read_call =
-        tool_call(&model, &chat_id, &turn_id, &super::ids::ToolCallId::new("tool-2".to_string())).expect("Read tool call should exist");
+    let read_call = tool_call(
+        &model,
+        &chat_id,
+        &turn_id,
+        &super::ids::ToolCallId::new("tool-2".to_string()),
+    )
+    .expect("Read tool call should exist");
     assert_eq!(read_call.name, "Read");
     assert!(timeline_tool_call_ref_exists(
-        &model, &chat_id, &turn_id, &super::ids::ToolCallId::new("tool-2".to_string())
+        &model,
+        &chat_id,
+        &turn_id,
+        &super::ids::ToolCallId::new("tool-2".to_string())
     ));
     assert!(read_call
         .result
@@ -499,7 +509,8 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
     let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
     let provider_skill_id = super::ids::ToolCallId::new("call-provider-skill".to_string());
-    let tool_calls: Vec<_> = turn.tool_calls
+    let tool_calls: Vec<_> = turn
+        .tool_calls
         .iter()
         .map(|call| {
             (
@@ -635,7 +646,8 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
     let turn_id = super::ids::ChatTurnId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
     let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    let tool_calls: Vec<_> = turn.tool_calls
+    let tool_calls: Vec<_> = turn
+        .tool_calls
         .iter()
         .map(|call| {
             (
@@ -704,15 +716,32 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         super::block::ConversationBlock::ToolResult { id, .. } if *id == tool_1_id
     )));
     assert_eq!(
-        model.chats.iter().find(|c| c.id == super::ids::ChatId::new("chat-1")).unwrap()
-            .turns.iter().find(|t| t.id == super::ids::ChatTurnId::new("turn-1")).unwrap()
-            .tool_calls[0].result.as_deref(),
+        model
+            .chats
+            .iter()
+            .find(|c| c.id == super::ids::ChatId::new("chat-1"))
+            .unwrap()
+            .turns
+            .iter()
+            .find(|t| t.id == super::ids::ChatTurnId::new("turn-1"))
+            .unwrap()
+            .tool_calls[0]
+            .result
+            .as_deref(),
         Some("line1\nline2")
     );
     assert_eq!(
-        model.chats.iter().find(|c| c.id == super::ids::ChatId::new("chat-1")).unwrap()
-            .turns.iter().find(|t| t.id == super::ids::ChatTurnId::new("turn-1")).unwrap()
-            .tool_calls[0].status,
+        model
+            .chats
+            .iter()
+            .find(|c| c.id == super::ids::ChatId::new("chat-1"))
+            .unwrap()
+            .turns
+            .iter()
+            .find(|t| t.id == super::ids::ChatTurnId::new("turn-1"))
+            .unwrap()
+            .tool_calls[0]
+            .status,
         ToolCallStatus::Success
     );
 }
@@ -1107,8 +1136,13 @@ fn test_conversation_keeps_tool_args_preview() {
 
     let chat_id = super::ids::ChatId::new("chat-1");
     let turn_id = super::ids::ChatTurnId::new("turn-1");
-    let read_call =
-        tool_call(&model, &chat_id, &turn_id, &super::ids::ToolCallId::new("tool-1".to_string())).expect("Read tool call should exist");
+    let read_call = tool_call(
+        &model,
+        &chat_id,
+        &turn_id,
+        &super::ids::ToolCallId::new("tool-1".to_string()),
+    )
+    .expect("Read tool call should exist");
     assert!(read_call.args_preview.contains("src/main.rs"));
 }
 

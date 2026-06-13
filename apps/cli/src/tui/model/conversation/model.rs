@@ -243,9 +243,9 @@ impl ConversationModel {
         log::debug!(
             target: "cli::tui::tool_flow",
             "model observe tool_call_start chat_id={} turn_id={} id={} name={} index={} blocks_before={}",
-            chat_id.to_string(),
-            turn_id.to_string(),
-            id.to_string(),
+            chat_id,
+            turn_id,
+            id,
             name,
             index,
             self.blocks.len(),
@@ -296,11 +296,9 @@ impl ConversationModel {
                     args_preview = preview;
                     bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
                     if final_summary.is_empty() {
-                        if let Some(call) = turn
-                            .tool_calls
-                            .iter()
-                            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id.as_str()))
-                        {
+                        if let Some(call) = turn.tool_calls.iter().find(|call| {
+                            call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id.as_str())
+                        }) {
                             final_summary = call.summary.clone().unwrap_or_default();
                         }
                     }
@@ -312,13 +310,12 @@ impl ConversationModel {
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
-                let _ = turn.update_tool(&id.to_string(), arguments.clone(), summary.clone(), status);
+                let _ =
+                    turn.update_tool(id.as_ref(), arguments.clone(), summary.clone(), status);
                 bound_id = id.clone();
-                if let Some(call) = turn
-                    .tool_calls
-                    .iter()
-                    .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.to_string().as_str()))
-                {
+                if let Some(call) = turn.tool_calls.iter().find(|call| {
+                    call.id.as_ref().map(AsRef::as_ref) == Some(id.as_ref())
+                }) {
                     args_preview = call.args_preview.clone();
                     final_summary = call.summary.clone().unwrap_or_default();
                 }
@@ -343,11 +340,11 @@ impl ConversationModel {
         log::debug!(
             target: "cli::tui::tool_flow",
             "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} summary_len={} has_block={} blocks_after={}",
-            chat_id.to_string(),
-            turn_id.to_string(),
-            id.to_string(),
+            chat_id,
+            turn_id,
+            id,
             provider_id,
-            bound_id.to_string(),
+            bound_id,
             name,
             index,
             status,
@@ -358,7 +355,10 @@ impl ConversationModel {
             self.blocks.len(),
         );
         vec![
-            ConversationChange::ToolCallBound { id: bound_id.to_string(), name },
+            ConversationChange::ToolCallBound {
+                id: bound_id.to_string(),
+                name,
+            },
             ConversationChange::OutputDirty,
         ]
     }
@@ -478,16 +478,17 @@ impl ConversationModel {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
         // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-            if let Some(call) = turn
-                .tool_calls
-                .iter_mut()
-                .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id.to_string()))
-            {
+            if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
+                c.id.as_ref()
+                    .is_some_and(|id| id.as_ref() == tool_id.to_string())
+            }) {
                 call.activities.push(message.clone());
             }
         }
-        self.agent_progress
-            .push(AgentProgressEntry::new(tool_id.to_string(), message.clone()));
+        self.agent_progress.push(AgentProgressEntry::new(
+            tool_id.to_string(),
+            message.clone(),
+        ));
         vec![ConversationChange::OutputDirty]
     }
     fn append_or_extend_text_block(

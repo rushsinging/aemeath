@@ -30,7 +30,9 @@ impl ToolIdentityRegistry {
             }
             let id = ToolCallId::new_v7();
             state.by_stream_index.insert(index, id.clone());
-            state.by_provider_id.insert(provider_id.to_string(), id.clone());
+            state
+                .by_provider_id
+                .insert(provider_id.to_string(), id.clone());
             return id;
         }
 
@@ -51,7 +53,9 @@ impl ToolIdentityRegistry {
         }
 
         let id = ToolCallId::new_v7();
-        state.by_provider_id.insert(provider_id.to_string(), id.clone());
+        state
+            .by_provider_id
+            .insert(provider_id.to_string(), id.clone());
         id
     }
 }

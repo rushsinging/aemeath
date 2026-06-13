@@ -510,7 +510,8 @@ mod tests {
 
         app.render_history_message(&assistant, Some(&tool_result));
 
-        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
+        let expected_tool_id =
+            crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
         let tool_call = app
             .model
             .conversation

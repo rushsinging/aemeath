@@ -370,7 +370,8 @@ mod tests {
             },
         );
 
-        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
+        let expected_tool_id =
+            crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
         assert!(model.conversation.blocks.iter().any(|block| matches!(
             block,
             crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
@@ -391,7 +392,9 @@ mod tests {
                 conversation: vec![ConversationIntent::ObserveToolCallUpdate {
                     chat_id: chat_id.clone(),
                     turn_id: turn_id.clone(),
-                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic".to_string()),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new(
+                        "tool-atomic".to_string(),
+                    ),
                     provider_id: Some("provider-atomic".to_string()),
                     name: "Read".to_string(),
                     index: 0,
@@ -419,7 +422,8 @@ mod tests {
                 .count(),
             1
         );
-        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic".to_string());
+        let expected_tool_id =
+            crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic".to_string());
         assert!(model
             .conversation
             .timeline

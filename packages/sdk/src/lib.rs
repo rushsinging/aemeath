@@ -32,6 +32,7 @@ pub use commands::{
     ModelSwitchParams, ModelSwitchResult,
 };
 pub use error::SdkError;
+pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{
@@ -43,7 +44,6 @@ pub use tui::{
     ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView,
     SkillView, TaskStatusView, TuiLaunchContext,
 };
-pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
     StrSlice, TaskState, TaskSummary,

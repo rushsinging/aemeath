@@ -69,7 +69,7 @@ pub(crate) fn build_json_logger_tool_result_data(
 ) -> serde_json::Value {
     let tool_name = call_info
         .iter()
-        .find(|(k, _)| k.to_string() == id)
+        .find(|(k, _)| k.as_ref() == id)
         .map(|(_, (name, _))| name.as_str())
         .unwrap_or("?");
     json!({
