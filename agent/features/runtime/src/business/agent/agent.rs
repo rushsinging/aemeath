@@ -4,7 +4,7 @@ use tools::api::{Tool, ToolExecutionContext, ToolRegistry};
 
 /// (runtime_id, provider_id, output_text, json_content, is_error, images)
 pub type ToolResultTuple = (
-    String,
+    sdk::ids::ToolCallId,
     String,
     String,
     serde_json::Value,
@@ -18,7 +18,7 @@ pub struct Agent<'a> {
 }
 
 pub struct ToolCall {
-    pub id: String,
+    pub id: sdk::ids::ToolCallId,
     pub provider_id: String,
     pub name: String,
     pub index: usize,
@@ -85,7 +85,7 @@ impl<'a> Agent<'a> {
         mut runtime_id_for_provider: F,
     ) -> Vec<ToolCall>
     where
-        F: FnMut(&str) -> String,
+        F: FnMut(&str) -> sdk::ids::ToolCallId,
     {
         message
             .content
@@ -105,7 +105,9 @@ impl<'a> Agent<'a> {
     }
 
     pub fn extract_tool_calls(message: &Message) -> Vec<ToolCall> {
-        Self::extract_tool_calls_with_ids(message, |provider_id| provider_id.to_string())
+        Self::extract_tool_calls_with_ids(message, |provider_id| {
+            sdk::ids::ToolCallId::from_legacy_or_new(provider_id)
+        })
     }
 
     pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolResultTuple> {
