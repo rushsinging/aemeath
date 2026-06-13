@@ -34,6 +34,7 @@ impl ConversationModel {
         self.blocks.push(block);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn insert_tool_result_after_tool_call(
         &mut self,
         chat_id: ChatId,

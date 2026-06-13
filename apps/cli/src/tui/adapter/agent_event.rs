@@ -36,52 +36,31 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     match event {
         UiEvent::Text { context, text } => {
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+            let mut mapping = conversation(ConversationIntent::ObserveAssistantText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
+                text: text.clone(),
             });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveAssistantText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
             mapping
         }
         UiEvent::Thinking { context, text } => {
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+            let mut mapping = conversation(ConversationIntent::ObserveThinkingText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
+                text: text.clone(),
             });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveThinkingText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                });
             mapping
                 .runtime
                 .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
             mapping
         }
-        UiEvent::BlockComplete { context, .. } => {
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-            });
-            mapping
-                .conversation
-                .push(ConversationIntent::CompleteBlock {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                });
-            mapping
-        }
+        UiEvent::BlockComplete { context, .. } => conversation(ConversationIntent::CompleteBlock {
+            chat_id: context.chat_id.clone(),
+            turn_id: context.turn_id.clone(),
+        }),
         UiEvent::ToolCallStart {
             context,
             id,
@@ -99,21 +78,14 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 name,
                 index,
             );
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+            conversation(ConversationIntent::ObserveToolCallStart {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
-            });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveToolCallStart {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                });
-            mapping
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+            })
         }
         UiEvent::ToolCallUpdate {
             context,
@@ -140,33 +112,26 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 arguments.is_some(),
                 summary.as_ref().map(|value| value.len()).unwrap_or(0),
             );
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+            conversation(ConversationIntent::ObserveToolCallUpdate {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
-            });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveToolCallUpdate {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                    arguments: arguments_delta
-                        .as_ref()
-                        .map(|value| sanitize_tool_arguments_delta(name, value)),
-                    summary: summary
-                        .as_ref()
-                        .map(|value| sanitize_tool_summary(name, value))
-                        .or_else(|| {
-                            arguments.as_ref().map(|value| {
-                                sanitize_tool_arguments(name, value.clone()).to_string()
-                            })
-                        }),
-                    status: tool_call_status_from_sdk(*status),
-                });
-            mapping
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+                arguments: arguments_delta
+                    .as_ref()
+                    .map(|value| sanitize_tool_arguments_delta(name, value)),
+                summary: summary
+                    .as_ref()
+                    .map(|value| sanitize_tool_summary(name, value))
+                    .or_else(|| {
+                        arguments
+                            .as_ref()
+                            .map(|value| sanitize_tool_arguments(name, value.clone()).to_string())
+                    }),
+                status: tool_call_status_from_sdk(*status),
+            })
         }
         UiEvent::ToolResult {
             context,
@@ -191,24 +156,17 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 is_error,
                 images.len(),
             );
-            let mut mapping = conversation(ConversationIntent::BindRuntimeTurn {
+            conversation(ConversationIntent::ObserveToolResult {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
-            });
-            mapping
-                .conversation
-                .push(ConversationIntent::ObserveToolResult {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    tool_name: tool_name.clone(),
-                    output: sanitize_tool_output(tool_name, output),
-                    content: sanitize_tool_result_content(tool_name, content.clone()),
-                    is_error: *is_error,
-                    image_count: images.len(),
-                });
-            mapping
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                tool_name: tool_name.clone(),
+                output: sanitize_tool_output(tool_name, output),
+                content: sanitize_tool_result_content(tool_name, content.clone()),
+                is_error: *is_error,
+                image_count: images.len(),
+            })
         }
         UiEvent::Usage {
             input,
@@ -254,12 +212,16 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             id: id.clone(),
             question: question.clone(),
         }),
-        UiEvent::AgentProgress { tool_id, event } => {
-            conversation(ConversationIntent::RecordAgentProgress {
-                tool_id: tool_id.clone(),
-                message: format!("{event}"),
-            })
-        }
+        UiEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => conversation(ConversationIntent::RecordAgentProgress {
+            chat_id: context.chat_id.clone(),
+            turn_id: context.turn_id.clone(),
+            tool_id: tool_id.clone(),
+            message: format!("{event}"),
+        }),
         UiEvent::HookEvent(event) => {
             let mut mapping = runtime(RuntimeIntent::SetSpinnerPhase(hook_spinner_phase(event)));
             if let Some(notice) = hook_event_notice(event) {
@@ -444,10 +406,68 @@ mod tests {
     }
 
     fn first_observation(mapping: &AgentEventMapping) -> Option<&ConversationIntent> {
-        mapping
-            .conversation
-            .iter()
-            .find(|intent| !matches!(intent, ConversationIntent::BindRuntimeTurn { .. }))
+        mapping.conversation.first()
+    }
+
+    fn assert_no_runtime_bind_prelude(mapping: &AgentEventMapping) {
+        assert_eq!(
+            mapping.conversation.len(),
+            1,
+            "runtime observations must carry context inline and emit exactly one conversation intent"
+        );
+    }
+
+    #[test]
+    fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
+        let context = ctx();
+
+        let events = vec![
+            UiEvent::Text {
+                context: context.clone(),
+                text: "hello".to_string(),
+            },
+            UiEvent::Thinking {
+                context: context.clone(),
+                text: "thinking".to_string(),
+            },
+            UiEvent::BlockComplete {
+                context: context.clone(),
+                text: String::new(),
+            },
+            UiEvent::ToolCallStart {
+                context: context.clone(),
+                id: "tool-1".to_string(),
+                provider_id: Some("provider-1".to_string()),
+                name: "Read".to_string(),
+                index: 0,
+            },
+            UiEvent::ToolCallUpdate {
+                context: context.clone(),
+                id: "tool-1".to_string(),
+                provider_id: Some("provider-1".to_string()),
+                name: "Read".to_string(),
+                index: 0,
+                arguments_delta: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
+                arguments: None,
+                summary: None,
+                status: sdk::ToolCallStatusView::Ready,
+            },
+            UiEvent::ToolResult {
+                context,
+                id: "tool-1".to_string(),
+                provider_id: "provider-1".to_string(),
+                tool_name: "Read".to_string(),
+                output: "ok".to_string(),
+                content: serde_json::json!({ "text": "ok" }),
+                is_error: false,
+                images: Vec::new(),
+            },
+        ];
+
+        for event in events {
+            let mapping = map_agent_event(&event);
+            assert_no_runtime_bind_prelude(&mapping);
+        }
     }
 
     #[test]

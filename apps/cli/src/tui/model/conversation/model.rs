@@ -114,9 +114,12 @@ impl ConversationModel {
             ConversationIntent::AppendError { text } => self.append_error(text),
             ConversationIntent::QueueSubmission { text } => self.queue_submission(text),
             ConversationIntent::ClearQueuedSubmissions => self.clear_queued_submissions(),
-            ConversationIntent::RecordAgentProgress { tool_id, message } => {
-                self.record_agent_progress(tool_id, message)
-            }
+            ConversationIntent::RecordAgentProgress {
+                chat_id,
+                turn_id,
+                tool_id,
+                message,
+            } => self.record_agent_progress(chat_id, turn_id, tool_id, message),
             ConversationIntent::ShowAskUser {
                 question,
                 options,
@@ -143,10 +146,6 @@ impl ConversationModel {
             ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
             ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
             ConversationIntent::AnswerAskUser { answer } => self.answer_ask_user(answer),
-            ConversationIntent::BindRuntimeTurn { chat_id, turn_id } => {
-                self.ensure_runtime_turn(chat_id, turn_id);
-                Vec::new()
-            }
         }
     }
 
@@ -191,7 +190,6 @@ impl ConversationModel {
         chat_id: ChatId,
         turn_id: ChatTurnId,
     ) -> (ChatId, ChatTurnId) {
-        self.active_chat_id = Some(chat_id.clone());
         if let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) {
             chat.status = ChatStatus::Running;
             if !chat.turns.iter().any(|turn| turn.id == turn_id) {
@@ -476,20 +474,20 @@ impl ConversationModel {
 
     fn record_agent_progress(
         &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
         tool_id: String,
         message: String,
     ) -> Vec<ConversationChange> {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
         // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
-        if let Some(chat) = self.active_chat_mut() {
-            if let Some(turn) = chat.active_turn_mut() {
-                if let Some(call) = turn
-                    .tool_calls
-                    .iter_mut()
-                    .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id))
-                {
-                    call.activities.push(message.clone());
-                }
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            if let Some(call) = turn
+                .tool_calls
+                .iter_mut()
+                .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id))
+            {
+                call.activities.push(message.clone());
             }
         }
         self.agent_progress

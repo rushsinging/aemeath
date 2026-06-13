@@ -16,39 +16,44 @@ pub(crate) const LOG_TARGET: &str = "cli::tui";
 #[macro_export]
 macro_rules! tui_log_debug {
     ($($arg:tt)*) => {
-        log::debug!(target: crate::tui::LOG_TARGET, $($arg)*)
+        log::debug!(target: $crate::tui::LOG_TARGET, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! tui_log_info {
     ($($arg:tt)*) => {
-        log::info!(target: crate::tui::LOG_TARGET, $($arg)*)
+        log::info!(target: $crate::tui::LOG_TARGET, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! tui_log_warn {
     ($($arg:tt)*) => {
-        log::warn!(target: crate::tui::LOG_TARGET, $($arg)*)
+        log::warn!(target: $crate::tui::LOG_TARGET, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! tui_log_error {
     ($($arg:tt)*) => {
-        log::error!(target: crate::tui::LOG_TARGET, $($arg)*)
+        log::error!(target: $crate::tui::LOG_TARGET, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! tui_log_trace {
     ($($arg:tt)*) => {
-        log::trace!(target: crate::tui::LOG_TARGET, $($arg)*)
+        log::trace!(target: $crate::tui::LOG_TARGET, $($arg)*)
     };
 }
 
 pub(crate) use {tui_log_info as log_info, tui_log_trace as log_trace, tui_log_warn as log_warn};
+
+pub use self::app::App;
+pub use self::render::input::input_area::InputArea;
+pub use self::render::output_area::OutputArea;
+pub use self::render::status::StatusBar;
 
 #[cfg(test)]
 mod tests {
@@ -57,8 +62,3 @@ mod tests {
         assert_eq!(super::LOG_TARGET, "cli::tui");
     }
 }
-
-pub use self::app::App;
-pub use self::render::input::input_area::InputArea;
-pub use self::render::output_area::OutputArea;
-pub use self::render::status::StatusBar;

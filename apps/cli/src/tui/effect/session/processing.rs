@@ -168,9 +168,15 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             default,
             reply_tx,
         },
-        sdk::ChatEvent::AgentProgress { tool_id, event } => {
-            UiEvent::AgentProgress { tool_id, event }
-        }
+        sdk::ChatEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => UiEvent::AgentProgress {
+            context: context.into(),
+            tool_id,
+            event,
+        },
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
             working_root,
@@ -424,6 +430,31 @@ mod tests {
 
         match event {
             UiEvent::Text { text, .. } => assert_eq!(text, "hello"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sdk_event_to_ui_event_preserves_agent_progress_context() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::AgentProgress {
+            context: sdk::ChatEventContext::new("chat-progress", "turn-progress"),
+            tool_id: "tool-1".to_string(),
+            event: sdk::AgentProgressEventView {
+                sequence: 1,
+                kind: sdk::AgentProgressKindView::Message {
+                    text: "working".to_string(),
+                },
+            },
+        });
+
+        match event {
+            UiEvent::AgentProgress {
+                context, tool_id, ..
+            } => {
+                assert_eq!(context.chat_id.as_ref(), "chat-progress");
+                assert_eq!(context.turn_id.as_ref(), "turn-progress");
+                assert_eq!(tool_id, "tool-1");
+            }
             other => panic!("unexpected event: {other:?}"),
         }
     }

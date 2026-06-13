@@ -328,6 +328,7 @@ pub enum ChatEvent {
     },
     /// Agent progress 事件投影。
     AgentProgress {
+        context: ChatEventContext,
         tool_id: String,
         event: AgentProgressEventView,
     },

@@ -107,10 +107,12 @@ where
     ag_ctx.progress_tx = Some(prog_tx);
     let call_id = call.id.clone();
     let ui_sink = sink.clone();
+    let progress_context = context.clone();
     let forward_handle = tokio::spawn(async move {
         while let Some(event) = prog_rx.recv().await {
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {
+                    context: progress_context.clone(),
                     tool_id: call_id.clone(),
                     event,
                 })

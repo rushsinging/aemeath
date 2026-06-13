@@ -97,10 +97,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
 
     let runtime_chat_id = ChatId::new("runtime-chat-1");
     let runtime_turn_id = ChatTurnId::new("runtime-turn-1");
-    model.apply(ConversationIntent::BindRuntimeTurn {
-        chat_id: runtime_chat_id.clone(),
-        turn_id: runtime_turn_id.clone(),
-    });
+    model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
     let changes = model.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
@@ -121,10 +118,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         status: ToolCallStatus::Ready,
     });
 
-    assert_eq!(
-        model.active_chat_id.as_ref().map(AsRef::as_ref),
-        Some("runtime-chat-1")
-    );
+    assert!(model.active_chat_id.is_none());
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::ToolCallObserved { name, .. } if name == "Bash")));

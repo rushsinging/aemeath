@@ -4,6 +4,69 @@ use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 
 #[test]
+fn test_ensure_runtime_turn_does_not_change_active_chat() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "user focused chat".to_string(),
+    });
+    let active_before = model.active_chat_id.clone();
+
+    model.ensure_runtime_turn(
+        super::ids::ChatId::new("runtime-chat"),
+        super::ids::ChatTurnId::new("runtime-turn"),
+    );
+
+    assert_eq!(model.active_chat_id, active_before);
+    assert!(model
+        .chats
+        .iter()
+        .any(|chat| chat.id == super::ids::ChatId::new("runtime-chat")));
+}
+
+#[test]
+fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_drifted() {
+    let mut model = ConversationModel::default();
+    let live_chat = super::ids::ChatId::new("session-live");
+    let live_turn = super::ids::ChatTurnId::new("turn-live");
+    let stale_chat = super::ids::ChatId::new("session-stale");
+    let stale_turn = super::ids::ChatTurnId::new("turn-stale");
+
+    model.ensure_runtime_turn(live_chat.clone(), live_turn.clone());
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: live_chat.clone(),
+        turn_id: live_turn.clone(),
+        id: "agent-tool".to_string(),
+        provider_id: Some("provider-agent".to_string()),
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    model.ensure_runtime_turn(stale_chat.clone(), stale_turn.clone());
+
+    model.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: live_chat.clone(),
+        turn_id: live_turn.clone(),
+        tool_id: "agent-tool".to_string(),
+        message: "reading files".to_string(),
+    });
+
+    let live_call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == live_chat)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == live_turn))
+        .and_then(|turn| {
+            turn.tool_calls.iter().find(|call| {
+                call.id
+                    .as_ref()
+                    .is_some_and(|id| id.as_ref() == "agent-tool")
+            })
+        })
+        .expect("live agent tool call should exist");
+
+    assert_eq!(live_call.activities, vec!["reading files".to_string()]);
+}
+
+#[test]
 fn test_conversation_observes_tool_lifecycle() {
     let mut model = ConversationModel::default();
     let changes = model.apply(ConversationIntent::StartChat {
@@ -983,6 +1046,8 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     });
     // Agent progress（不影响绑定）
     model.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
         tool_id: "call_agent_1".to_string(),
         message: "reading files...".to_string(),
     });

@@ -287,12 +287,15 @@ pub(crate) fn runtime_event_to_sdk_event(
             default,
             reply_tx,
         },
-        crate::business::chat::RuntimeStreamEvent::AgentProgress { tool_id, event } => {
-            ChatEvent::AgentProgress {
-                tool_id,
-                event: agent_progress_event_to_sdk(event),
-            }
-        }
+        crate::business::chat::RuntimeStreamEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => ChatEvent::AgentProgress {
+            context: ChatEventContext::new(context.chat_id, context.turn_id),
+            tool_id,
+            event: agent_progress_event_to_sdk(event),
+        },
         crate::business::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
             working_root,

@@ -122,6 +122,7 @@ pub enum RuntimeStreamEvent {
         reply_tx: tokio::sync::oneshot::Sender<String>,
     },
     AgentProgress {
+        context: RuntimeTurnContext,
         tool_id: String,
         event: AgentProgressEvent,
     },
