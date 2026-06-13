@@ -46,7 +46,11 @@ use serde::{Deserialize, Serialize};
 /// The `api` and `model` fields are **legacy** and only kept for backward
 /// compatibility with older config files. New configurations should use the
 /// `models` field with the `"<source>/<model>"` selection format.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_language() -> String {
+    "en".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// **Legacy** — prefer `models` field. Still used by `/model`, `/config` commands.
     #[serde(default)]
@@ -95,6 +99,32 @@ pub struct Config {
     /// Logging configuration
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Language preference for guidance files. Supported values: "en", "zh".
+    /// Default: "en". Guidance files are loaded from `{language}/` subdirectory first,
+    /// then fallback to root directory files.
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api: ApiConfig::default(),
+            model: ModelConfig::default(),
+            models: ModelsConfig::default(),
+            tools: ToolsConfig::default(),
+            agents: AgentsConfig::default(),
+            ui: UiConfig::default(),
+            permissions: PermissionConfig::default(),
+            skills: SkillsConfig::default(),
+            storage: StorageConfig::default(),
+            hooks: HooksConfig::default(),
+            memory: MemoryConfig::default(),
+            logging: LoggingConfig::default(),
+            language: default_language(),
+        }
+    }
 }
 
 #[cfg(test)]

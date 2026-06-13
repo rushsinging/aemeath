@@ -59,18 +59,23 @@ When fixing bugs or implementing features, if the same issue can be addressed wi
 // After init, users edit the md files directly.
 // ---------------------------------------------------------------------------
 
-/// Default file names and their initial content.
-/// Content lives here solely so `init_guidance_dir()` can scaffold the files.
-pub const DEFAULT_FILES: &[(&str, &str)] = &[
+/// Default guidance files for English language.
+pub const DEFAULT_FILES_EN: &[(&str, &str)] = &[
     (
         "_default.md",
         r#"# Default Guidance
-- 使用中文思考和回复。
-- 除非用户明确要求，不要主动生成测试用例、说明文档（README 等）。
+- Think and respond in English unless the user explicitly uses another language.
+- Do not proactively generate test cases or documentation (README, etc.) unless explicitly requested.
 - Tool call JSON parameters must be strictly valid JSON. Double-check before sending.
 - When editing code, always show the exact old_string and new_string — never approximate.
 - When using AskUserQuestion with options, the system automatically appends "Type something..." as a built-in option for free-text input. Do NOT include similar options in your options array.
 - When using AskUserQuestion with options, prefer object format { "title": "...", "description": "..." } over plain strings. Use description to provide additional context or explanation for each choice.
+"#,
+    ),
+    (
+        "deepseek.md",
+        r#"# DeepSeek Model Guidance
+- Your reasoning/thinking content is displayed separately (thinking mode). Keep it extremely concise: 100 characters or less, 2 sentences max. Do NOT repeat the request, do NOT re-explain code, do NOT include any code snippets in your thinking.
 "#,
     ),
     (
@@ -83,14 +88,6 @@ pub const DEFAULT_FILES: &[(&str, &str)] = &[
 "#,
     ),
     (
-        "deepseek.md",
-        r#"# DeepSeek Model Guidance
-- 你的推理过程（reasoning_content）必须使用中文。在思考阶段使用中文进行推理和分析。
-- 回复内容也使用中文，除非用户明确使用其他语言。
-- **强制要求**：reasoning_content 严格限制在 100 字以内。只输出最终结论，禁止中间推导步骤，禁止代码分析，禁止在推理中引用或复制任何代码。超过 2 句话立即停止。这是硬性约束。
-"#,
-    ),
-    (
         "minimax.md",
         r#"# MiniMax Model Guidance
 - Your thinking/reasoning content is displayed separately. In the main response, output conclusions and actions directly.
@@ -100,9 +97,62 @@ pub const DEFAULT_FILES: &[(&str, &str)] = &[
     (
         "_reasoning.md",
         r#"# Language Preference
-- You MUST think/reason in Chinese (中文). Your internal reasoning process must be in Chinese.
-- Your final response should also be in Chinese unless the user explicitly writes in another language.
+- You MUST think/reason in English. Your internal reasoning process must be in English.
+- Your final response should also be in English unless the user explicitly writes in another language.
 - Keep reasoning concise: output only the final conclusion, no intermediate steps, no code snippets.
 "#,
     ),
+];
+
+/// Default guidance files for Chinese language.
+pub const DEFAULT_FILES_ZH: &[(&str, &str)] = &[
+    (
+        "_default.md",
+        r#"# 默认 Guidance
+- 使用中文思考和回复。
+- 除非用户明确要求，不要主动生成测试用例、说明文档（README 等）。
+- Tool call JSON 参数必须是严格有效的 JSON。发送前请仔细检查。
+- 编辑代码时，必须显示精确的 old_string 和 new_string — 不要近似。
+- 使用 AskUserQuestion 带选项时，系统会自动添加 "Type something..." 作为自由文本输入选项。不要在 options 数组中包含类似选项。
+- 使用 AskUserQuestion 带选项时，优先使用对象格式 { "title": "...", "description": "..." } 而非纯字符串。使用 description 为每个选项提供额外上下文或解释。
+"#,
+    ),
+    (
+        "deepseek.md",
+        r#"# DeepSeek 模型 Guidance
+- 你的推理过程（reasoning_content）必须使用中文。在思考阶段使用中文进行推理和分析。
+- 回复内容也使用中文，除非用户明确使用其他语言。
+- **强制要求**：reasoning_content 严格限制在 100 字以内。只输出最终结论，禁止中间推导步骤，禁止代码分析，禁止在推理中引用或复制任何代码。超过 2 句话立即停止。这是硬性约束。
+"#,
+    ),
+    (
+        "glm.md",
+        r#"# GLM 模型 Guidance
+- 不要意译或重复工具输出 — 直接引用。
+- Tool call JSON 参数必须是严格有效的 JSON。发送前请仔细检查。
+- 编辑代码时，必须显示精确的 old_string 和 new_string — 不要近似。
+- 你的推理/思考内容会单独显示（thinking mode）。保持极简：100 字以内，最多 2 句话。不要重复请求，不要重新解释代码，不要在思考中包含任何代码片段。
+"#,
+    ),
+    (
+        "minimax.md",
+        r#"# MiniMax 模型 Guidance
+- 你的思考/推理内容会单独显示。在主回复中直接输出结论和行动。
+- 不要在回复正文中重复推理过程。
+"#,
+    ),
+    (
+        "_reasoning.md",
+        r#"# 语言偏好
+- 你必须使用中文思考/推理。你的内部推理过程必须是中文。
+- 你的最终回复也应使用中文，除非用户明确使用其他语言。
+- 保持推理简洁：只输出最终结论，无中间步骤，无代码片段。
+"#,
+    ),
+];
+
+/// All supported languages and their default files.
+pub const SUPPORTED_LANGUAGES: &[(&str, &[(&str, &str)])] = &[
+    ("en", DEFAULT_FILES_EN),
+    ("zh", DEFAULT_FILES_ZH),
 ];

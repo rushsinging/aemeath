@@ -9,7 +9,7 @@ fn test_prompt_guidance_resolves_config_fallback() {
         "~/definitely-missing-guidance.md".to_string(),
     );
 
-    let resolved = resolve_guidance("other-model", &guidance, false);
+    let resolved = resolve_guidance("other-model", &guidance, false, "en");
 
     assert!(!resolved.contains("definitely-missing-guidance"));
 }

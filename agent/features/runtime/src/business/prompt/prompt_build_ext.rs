@@ -18,11 +18,15 @@ pub async fn build_static_prompt(
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
+    let language = config_file
+        .map(|c| c.language.as_str())
+        .unwrap_or("en");
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner(hook_runner);
     let model_guidance = prompt::api::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
+        language,
         Some(&instructions_hook),
     )
     .await;
