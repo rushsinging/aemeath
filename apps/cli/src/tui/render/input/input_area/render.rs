@@ -2,8 +2,8 @@ use super::InputArea;
 use crate::tui::render::input::input_area::wrap::{
     display_position_for_anchor, wrap_input_lines_for_width, WrappedInputLine,
 };
-use crate::tui::render::input::input_render_model::InputRenderModel;
 use crate::tui::render::theme;
+use crate::tui::view_model::InputAreaViewModel;
 use crate::tui::view_state::InputSelectionViewState;
 use ratatui::{
     buffer::Buffer,
@@ -14,33 +14,33 @@ use ratatui::{
 use tui_textarea::TextArea;
 
 impl InputArea {
-    /// Render the input area from a model-derived projection.
+    /// Render the input area from a ViewModel.
     pub fn render(
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        model: &InputRenderModel,
+        vm: &InputAreaViewModel,
         selection: &InputSelectionViewState,
     ) {
-        let block = input_block(model);
+        let block = input_block(vm);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let display_lines = wrap_input_lines_for_width(model.lines(), inner_area.width as usize);
-        let mut textarea = configured_textarea(model, &display_lines);
+        let display_lines = wrap_input_lines_for_width(vm.lines(), inner_area.width as usize);
+        let mut textarea = configured_textarea(vm, &display_lines);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
         render_selection(inner_area, buf, &display_lines, selection);
     }
 }
 
-fn input_block(model: &InputRenderModel) -> Block<'static> {
-    let title = if model.pending_images > 0 {
-        format!(" Input [{} image(s) pending] ", model.pending_images)
+fn input_block(vm: &InputAreaViewModel) -> Block<'static> {
+    let title = if vm.pending_images > 0 {
+        format!(" Input [{} image(s) pending] ", vm.pending_images)
     } else {
         " Input ".to_string()
     };
-    let border_style = if model.focused {
+    let border_style = if vm.focused {
         Style::default().fg(theme::ACCENT)
     } else {
         Style::default().fg(theme::BORDER)
@@ -98,7 +98,7 @@ fn render_selection(
 }
 
 fn configured_textarea(
-    model: &InputRenderModel,
+    vm: &InputAreaViewModel,
     display_lines: &[WrappedInputLine],
 ) -> TextArea<'static> {
     let mut textarea = TextArea::from(
@@ -107,7 +107,7 @@ fn configured_textarea(
             .map(|line| line.text.clone())
             .collect::<Vec<_>>(),
     );
-    if let Some(placeholder) = &model.placeholder {
+    if let Some(placeholder) = &vm.placeholder {
         textarea.set_placeholder_text(placeholder.clone());
     } else {
         textarea.set_placeholder_text("Type a message... (Enter to send, Alt+Enter for new line)");
@@ -117,7 +117,7 @@ fn configured_textarea(
     textarea.move_cursor(tui_textarea::CursorMove::Top);
     textarea.move_cursor(tui_textarea::CursorMove::Head);
     let (cursor_row, cursor_col) =
-        display_position_for_anchor(display_lines, model.cursor_row, model.cursor_col);
+        display_position_for_anchor(display_lines, vm.cursor_row, vm.cursor_col);
     for _ in 0..cursor_row {
         textarea.move_cursor(tui_textarea::CursorMove::Down);
     }
@@ -172,20 +172,20 @@ mod tests {
     use crate::tui::render::input::input_area::selection::text_anchor_for_screen_col;
     use ratatui::buffer::Buffer;
 
-    fn render_model_with_state(
+    fn render_vm_with_state(
         text: &str,
         pending_images: usize,
         focused: bool,
-    ) -> InputRenderModel {
+    ) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputRenderModel::from_document(&document, None, pending_images, focused)
+        InputAreaViewModel::from_document(&document, None, pending_images, focused)
     }
 
     #[test]
     fn test_render_selection_highlights_cjk_to_screen_width_end() {
         let mut input = InputArea::new();
-        let model = render_model_with_state("@docs/ bug 33，拖动选中后还是没有高亮", 0, true);
+        let vm = render_vm_with_state("@docs/ bug 33，拖动选中后还是没有高亮", 0, true);
         let area = Rect {
             x: 0,
             y: 0,
@@ -193,17 +193,17 @@ mod tests {
             height: 3,
         };
         let mut buf = Buffer::empty(area);
-        input.render(area, &mut buf, &model, &InputSelectionViewState::default());
+        input.render(area, &mut buf, &vm, &InputSelectionViewState::default());
         let inner = input.get_inner_area(&area);
 
-        let start = text_anchor_for_screen_col(&model.text, 0, 0);
-        let end = text_anchor_for_screen_col(&model.text, 0, 36);
+        let start = text_anchor_for_screen_col(&vm.text, 0, 0);
+        let end = text_anchor_for_screen_col(&vm.text, 0, 36);
         let mut selection = InputSelectionViewState::default();
         selection.begin_selection(start);
         selection.update_selection(end);
-        input.render(area, &mut buf, &model, &selection);
-        let selected_end = col_to_char_idx(&model.text, 36);
-        let screen_col = char_col_to_screen_col(&model.text, selected_end) - 1;
+        input.render(area, &mut buf, &vm, &selection);
+        let selected_end = col_to_char_idx(&vm.text, 36);
+        let screen_col = char_col_to_screen_col(&vm.text, selected_end) - 1;
 
         assert_eq!(
             buf.cell((inner.x + screen_col as u16, inner.y))
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_projects_pending_images_and_focus_from_model() {
+    fn test_render_projects_pending_images_and_focus_from_vm() {
         let mut input = InputArea::new();
         let area = Rect {
             x: 0,
@@ -224,9 +224,9 @@ mod tests {
             height: 3,
         };
         let mut buf = Buffer::empty(area);
-        let model = render_model_with_state("hello", 2, false);
+        let vm = render_vm_with_state("hello", 2, false);
 
-        input.render(area, &mut buf, &model, &InputSelectionViewState::default());
+        input.render(area, &mut buf, &vm, &InputSelectionViewState::default());
 
         assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "I");
         assert_eq!(buf.cell((8, 0)).unwrap().symbol(), "[");
@@ -244,12 +244,12 @@ mod tests {
             height: 4,
         };
         let mut buf = Buffer::empty(area);
-        let model = render_model_with_state("abcdef", 0, true);
+        let vm = render_vm_with_state("abcdef", 0, true);
         let mut selection = InputSelectionViewState::default();
         selection.begin_selection((0, 4));
         selection.update_selection((0, 6));
 
-        input.render(area, &mut buf, &model, &selection);
+        input.render(area, &mut buf, &vm, &selection);
         let inner = input.get_inner_area(&area);
 
         assert_eq!(buf.cell((inner.x, inner.y + 1)).unwrap().symbol(), "e");

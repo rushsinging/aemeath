@@ -3,6 +3,7 @@
 //! Provides a modal selection dialog for the TUI.
 
 use crate::tui::render::theme;
+use crate::tui::view_model::DialogViewModel;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -117,4 +118,81 @@ impl Dialog {
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
         paragraph.render(inner, buf);
     }
+}
+
+/// Render a DialogViewModel as a modal dialog
+pub fn render_dialog_vm(vm: &DialogViewModel, area: Rect, buf: &mut Buffer) {
+    // Calculate dimensions
+    let max_action_len = vm.actions.iter().map(|a| a.label.len()).max().unwrap_or(20);
+    let content_width = (max_action_len as u16 + 8)
+        .max(vm.title.len() as u16 + 6)
+        .min(area.width.saturating_sub(4));
+    let height = (vm.actions.len() as u16 + 3) // +3 for border + hint line
+        .min(area.height.saturating_sub(2));
+
+    // Center
+    let x = (area.width.saturating_sub(content_width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let dialog_area = Rect::new(x, y, content_width, height);
+
+    // Clear background
+    Clear.render(dialog_area, buf);
+
+    // Border style based on severity
+    let border_style = match vm.severity {
+        crate::tui::view_model::status::StatusSeverity::Error => {
+            Style::default().fg(theme::ERROR)
+        }
+        crate::tui::view_model::status::StatusSeverity::Warning => {
+            Style::default().fg(theme::WARNING)
+        }
+        _ => Style::default().fg(theme::ACCENT),
+    };
+
+    // Border
+    let block = Block::default()
+        .title(Span::styled(
+            format!(" {} ", vm.title),
+            border_style.add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let inner = block.inner(dialog_area);
+    block.render(dialog_area, buf);
+
+    // Body
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::styled(
+        vm.body.clone(),
+        Style::default().fg(theme::TEXT),
+    ));
+    lines.push(Line::raw(""));
+
+    // Actions
+    for (_i, action) in vm.actions.iter().enumerate() {
+        let is_default = vm.default_action.as_ref() == Some(&action.id);
+        if is_default {
+            lines.push(Line::styled(
+                format!(" > {}", action.label),
+                Style::default()
+                    .fg(theme::WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            lines.push(Line::styled(
+                format!("   {}", action.label),
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
+        }
+    }
+
+    // Hint line
+    lines.push(Line::styled(
+        " Enter=select  Esc=cancel",
+        Style::default().fg(theme::TEXT_DIM),
+    ));
+
+    let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
+    paragraph.render(inner, buf);
 }
