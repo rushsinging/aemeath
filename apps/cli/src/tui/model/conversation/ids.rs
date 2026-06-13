@@ -1,48 +1,8 @@
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ChatId(String);
+//! Re-export SDK ID types for TUI conversation model.
 
-impl ChatId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
+pub use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 
-impl AsRef<str> for ChatId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ChatTurnId(String);
-
-impl ChatTurnId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl AsRef<str> for ChatTurnId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ToolCallId(String);
-
-impl ToolCallId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl AsRef<str> for ToolCallId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
+/// Tool stream key for identifying tool call streams.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ToolStreamKey {
     pub chat_id: ChatId,
@@ -52,12 +12,7 @@ pub struct ToolStreamKey {
 }
 
 impl ToolStreamKey {
-    pub fn new(
-        chat_id: ChatId,
-        turn_id: ChatTurnId,
-        name: impl Into<String>,
-        index: usize,
-    ) -> Self {
+    pub fn new(chat_id: ChatId, turn_id: ChatTurnId, name: impl Into<String>, index: usize) -> Self {
         Self {
             chat_id,
             turn_id,
