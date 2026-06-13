@@ -27,7 +27,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             ToolSemanticStatus::Error => "✗",
             ToolSemanticStatus::Cancelled => "–",
             ToolSemanticStatus::Orphaned => "?",
-            ToolSemanticStatus::Pending | ToolSemanticStatus::Running => {
+            ToolSemanticStatus::Running => {
                 let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
                 if blink_frame.is_multiple_of(2) {
                     "●"
@@ -50,7 +50,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
             ToolSemanticStatus::Success => theme::SUCCESS,
             ToolSemanticStatus::Error => theme::ERROR,
-            ToolSemanticStatus::Running | ToolSemanticStatus::Pending => theme::TOOL_RUNNING,
+            ToolSemanticStatus::Running => theme::TOOL_RUNNING,
             ToolSemanticStatus::Cancelled => theme::TEXT_MUTED,
             ToolSemanticStatus::Orphaned => theme::WARNING,
         },
@@ -171,11 +171,11 @@ mod tests {
     }
 
     #[test]
-    fn test_animated_marker_glyph_blinks_pending_tool_with_same_divisor() {
-        let pending = tool(ToolSemanticStatus::Pending);
-        assert_eq!(animated_marker_glyph(&pending, 0), "●");
-        assert_eq!(animated_marker_glyph(&pending, 4), "○");
-        assert_eq!(animated_marker_glyph(&pending, 8), "●");
+    fn test_animated_marker_glyph_blinks_running_tool_with_same_divisor() {
+        let running = tool(ToolSemanticStatus::Running);
+        assert_eq!(animated_marker_glyph(&running, 0), "●");
+        assert_eq!(animated_marker_glyph(&running, 4), "○");
+        assert_eq!(animated_marker_glyph(&running, 8), "●");
     }
 
     #[test]

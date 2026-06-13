@@ -205,7 +205,6 @@ impl App {
                 id,
                 question,
                 options,
-                allow_free_input,
                 multi_select,
                 default,
                 reply_tx,
@@ -247,7 +246,6 @@ impl App {
                         options: all_options,
                         llm_option_count,
                         multi_select,
-                        allow_free_input,
                     });
                 }
                 self.spinner_stop();

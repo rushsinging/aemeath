@@ -12,9 +12,6 @@ pub struct DialogViewModel {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DialogKind {
-    Permission,
-    HookBlocked,
-    Error,
     Confirmation,
 }
 

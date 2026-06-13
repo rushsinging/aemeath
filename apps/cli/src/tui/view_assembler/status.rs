@@ -71,34 +71,6 @@ impl StatusViewAssembler {
             },
         }
     }
-    pub fn assemble_basic(model_id: Option<&str>, cwd: Option<&str>) -> StatusLineViewModel {
-        let mut vm = StatusLineViewModel::default();
-        if let Some(model_id) = model_id {
-            vm.left.push(StatusSegment {
-                key: "model".to_string(),
-                text: model_id.to_string(),
-                style: SemanticStyle::Accent,
-                priority: 10,
-            });
-        }
-        if let Some(cwd) = cwd {
-            vm.right.push(StatusSegment {
-                key: "cwd".to_string(),
-                text: cwd.to_string(),
-                style: SemanticStyle::Muted,
-                priority: 20,
-            });
-        }
-        vm
-    }
-
-    pub fn assemble_from_models(
-        runtime: &RuntimeModel,
-        diagnostic: &DiagnosticModel,
-    ) -> StatusLineViewModel {
-        Self::assemble_from_runtime_session(runtime, None, diagnostic)
-    }
-
     pub fn assemble_from_runtime_session(
         runtime: &RuntimeModel,
         session: Option<&SessionModel>,
@@ -322,7 +294,7 @@ mod tests {
             message: "orphan event".to_string(),
         });
 
-        let vm = StatusViewAssembler::assemble_from_models(&runtime, &diagnostic);
+        let vm = StatusViewAssembler::assemble_from_runtime_session(&runtime, None, &diagnostic);
         assert!(vm.left.iter().any(|segment| segment.text == "gpt-5.5"));
         assert!(vm.right.iter().any(|segment| segment.text == "/repo"));
         assert!(vm

@@ -38,8 +38,6 @@ pub enum OutputBlockKind {
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
     AskUser(AskUserBlockView),
-    /// 分隔块。
-    Separator,
 }
 
 /// AskUserQuestion 交互块视图：问题 + 选项列表 + 当前导航高亮状态。
@@ -122,8 +120,6 @@ pub struct ToolResultBlockView {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
-    /// 工具尚未开始执行。
-    Pending,
     Running,
     Success,
     Error,
@@ -136,7 +132,11 @@ mod node_tests {
     use super::*;
 
     fn leaf(id: &str) -> BlockNode {
-        let kind = OutputBlockKind::Separator;
+        let kind = OutputBlockKind::SystemNotice(TextBlockView {
+            key: id.into(),
+            text: String::new(),
+            style: SemanticStyle::Normal,
+        });
         BlockNode {
             block_id: id.into(),
             block_version: 0,

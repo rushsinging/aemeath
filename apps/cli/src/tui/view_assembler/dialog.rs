@@ -4,10 +4,6 @@ use crate::tui::view_model::{DialogActionViewModel, DialogKind, DialogViewModel,
 pub struct DialogViewAssembler;
 
 impl DialogViewAssembler {
-    pub fn none() -> Option<DialogViewModel> {
-        None
-    }
-
     pub fn assemble_from_diagnostic(diagnostic: &DiagnosticModel) -> Option<DialogViewModel> {
         let prompt = diagnostic.active_prompt.as_ref()?;
         Some(DialogViewModel {

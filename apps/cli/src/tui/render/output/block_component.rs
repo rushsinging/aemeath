@@ -51,7 +51,6 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::HookNotice(notice) => {
                 blocks::diagnostic::render_hook_notice(block_id, notice, ctx)
             }
-            OutputBlockKind::Separator => blocks::separator::render_separator(block_id),
             OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
                 blocks::diagnostic::render_diagnostic(block_id, text, ctx)
             }

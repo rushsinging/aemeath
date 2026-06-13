@@ -118,7 +118,6 @@ pub enum AppEvent {
         id: String,
         question: String,
         options: Vec<sdk::OptionItem>,
-        allow_free_input: bool,
         multi_select: bool,
         default: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<String>,

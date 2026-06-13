@@ -15,6 +15,4 @@ pub(crate) struct AskUserState {
     /// Number of LLM-provided options (built-in options start at this index).
     pub llm_option_count: usize,
     pub multi_select: bool,
-    /// Whether free-text input is allowed
-    pub allow_free_input: bool,
 }

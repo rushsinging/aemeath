@@ -105,7 +105,7 @@ mod tests {
             &child
         ));
         assert!(!allowed_child(&text(OutputBlockKind::UserMessage), &child));
-        assert!(!allowed_child(&OutputBlockKind::Separator, &child));
+        assert!(!allowed_child(&text(OutputBlockKind::SystemNotice), &child));
     }
 
     #[test]
