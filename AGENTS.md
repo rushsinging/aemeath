@@ -95,8 +95,8 @@ aemeath/                    # workspace root
 bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按以下步骤执行，**NEVER** 跳过：
 
 1. **阅读 Issue**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body（body 顶部有 `<!-- Migrated from: <source> -->` 标记，可追溯到原 `docs/bug/archived/<id>-<slug>.md` 或 `docs/active.md#<id>`）。设计稿类 issue **SHOULD** 配套阅读 `docs/feature/specs/<file>.md`，每份 spec 顶部已写入 `> 对应 Issue: <url>` 指针。
-2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，给出修复/实现方案。复杂改动 **SHOULD** 调用 `superpowers:writing-plans` 制定详细计划。
-3. **等待用户同意**：将方案呈现给用户，**MUST** 获得明确同意后才开始修改代码。用户可能要求调整方案。
+2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
+3. **等待用户明确同意**：在获得用户的明确书面同意（如“同意”、“开始改”）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。如果用户只给出笼统意图（如“修一下”）而未确认具体方案，**MUST** 先呈现方案并等待确认。
 4. **执行与验证**：在 worktree 中实施，通过编译、测试、clippy 验证后合并回 `main`。
 5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。合并完成后，由用户确认是否关闭；用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
 
