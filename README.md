@@ -4,28 +4,18 @@
 
 ## 关键设计
 
-本项目的架构设计核心文档：
-
-- **[#47 DDD 架构设计](docs/snapshot/specs/047-ddd-redesign.md)** — 以 DDD 领域模型 + COLA 分层规范为架构基线，定义 Agent Runtime 核心域、统一语言（Session/Chat/Agent Looping/Turn/Task）及 Bounded Context 边界。
-- **[TUI Model/View 架构设计](docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md)** — TUI 按 Model/View 分离架构重设计：`Model` 保存业务真相（Conversation/Input/Runtime/Diagnostic 四个 Context），`ViewAssembler` 组装 `ViewModel`，`Render` 纯渲染不反推状态。TUI 作为 CLI Adapter 不定义 Domain Model。
-- **[TUI SDK DTO 边界设计](docs/snapshot/specs/047-tui-sdk-dto-boundary-design.md)** — TUI 与 runtime 的类型边界彻底消解：`sdk::ChatEvent` 使用强类型 DTO，TUI 内部只使用 SDK DTO 或私有 view model。
-- **[Server Foundation MVP](docs/server-foundation-mvp.md)** — 多租户 Agent server：控制面（WsProxy 薄代理）+ worker（自托管 WS、runtime 不改）+ CLI 双模式；统一 `AgentClient`-over-WS 协议，控制面 NEVER 承载领域实体。
-- **[Runtime/TUI UUIDv7 ID 设计](docs/runtime-tui-uuidv7-id.md)** — 内部实体 ID（ChatId/ChatTurnId/ToolCallId）与 provider 协议 ID 分离：内部 MUST 为 UUIDv7 newtype，provider_id 单独保存，回填 LLM 时使用 provider_id。
-- **[Agent Context 所有权重构](docs/agent-context-ownership.md)** — workspace 状态从 5 套类型收敛到 `WorkspaceService`（project 拥有类型与规则，runtime 仅持有句柄），消除撕裂读、子 agent 共享 bug、六边形违规。
+**[设计总纲](docs/design-outline.md)** — 涵盖架构总纲（DDD + COLA）、Runtime、TUI、Server 四大模块的设计终态。
 
 核心结论：
 
 - 核心域是 **Agent Runtime**。
 - Agent 是由 `ConfigurationSnapshot` 解析出的配置化执行者实体。
 - Agent Runtime 使用 `Session` / `Chat` / `Agent Looping` / `Turn` / `Task` 作为统一语言。
-- `Task` 属于 Agent Runtime，由 `Agent Looping` 推进，持久化投影进入 `Session History`。
-- `PermissionDecision` 与 `HookDecision` 分离。
-- `Audit` 独立记录权限、hook、工具、模型调用和最终 outcome。
-- `Skill / Guidance` 独立于 `Configuration`，`Memory` 不依赖 `Skill / Guidance`。
-- HTTP / CLI / TUI / SDK 等入口保持薄，只作为 inbound adapter 接入统一 application service。
-- COLA 作为工程分层参考，要求 Adapter / Application / Domain / Infrastructure / Client 职责分离。
-- TUI 遵循 Model/View 分离架构：Model（Conversation/Input/Runtime/Diagnostic）保存业务真相 → ViewAssembler 组装 ViewModel → Render 纯渲染 → Effect 集中执行副作用。
-- 架构边界由 8 个自动化守卫脚本强制执行（见 `.agents/hooks/check-architecture-guards.sh`）。
+- 内部实体 ID（ChatId/ChatTurnId/ToolCallId）使用 UUIDv7，与 provider 协议 ID 严格分离。
+- workspace 状态由 `WorkspaceService`（project feature）单一持有，runtime 仅持有实例生命周期。
+- TUI 遵循 Model/View 分离架构，通过 `AgentClient` trait（`packages/sdk`）与 Runtime 通信。
+- Server 采用控制面薄代理 + worker 自托管 WS + CLI 双模式，控制面 NEVER 承载领域实体。
+- 架构边界由自动化守卫脚本强制执行（见 `.agents/hooks/check-architecture-guards.sh`）。
 
 ## 项目结构
 
