@@ -48,6 +48,10 @@ After completing a task, verify the result:
 - Config changes → Load and test
 Never claim "done" without verification.
 </verification>
+
+<solution_depth>
+When fixing bugs or implementing features, if the same issue can be addressed with both a minimal patch and a thorough root-cause solution, you MUST present both options with their trade-offs, costs, and risks. For recurring, structural, or design-flaw issues, you SHOULD recommend and prioritize the thorough solution unless the user explicitly asks for the minimal patch only.
+</solution_depth>
 "#;
 
 // ---------------------------------------------------------------------------

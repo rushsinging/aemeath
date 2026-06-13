@@ -54,7 +54,8 @@ fn static_system_prompt_for(cwd_str: &str, is_git: bool) -> String {
  - In general, do not propose changes to code you haven't read. If a user asks about or wants you to modify a file, read it first.
  - Do not create files unless they're absolutely necessary for achieving your goal.
  - Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection.
- - Don't add features, refactor code, or make improvements beyond what was asked.
+ - Don't add features or make improvements beyond what was asked, unless they are necessary to fix the root cause or prevent recurrence.
+ - If a problem can be addressed with both a minimal patch and a thorough root-cause solution, present both options with their trade-offs, costs, and risks. For recurring or structural issues, prefer and recommend the thorough solution unless the user explicitly asks for the minimal patch only.
  - Use the Memory tool to search and manage long-term memory when relevant. Do not assume memory contents unless retrieved.
 
 # Using Agent tool — MANDATORY two-phase approach

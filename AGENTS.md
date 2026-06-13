@@ -102,6 +102,8 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 
 修复 bug 或实现 feature 时，**MUST** 做根因层面的修正（fact-check），而不是只做最小化补丁绕过症状。应评估相关代码路径、数据流和状态机，确保同类问题不再复发。
 
+如果同一问题既可临时止血也能彻底重构，**MUST** 同时给出最小化补丁和根因级彻底方案，并说明两者优劣、成本与风险。对于存在复发风险、明显设计缺陷或结构性不合理的情况，**SHOULD** 默认推荐并优先实施彻底方案，除非用户明确要求只做最小修改。
+
 创建新 issue 时 **MUST** 应用 `kind:bug` 或 `kind:feature` label（按问题类型二选一），有明确优先级时再加 `priority:high|medium|low`。`migrated-from:docs` 仅用于历史迁移条目。
 
 ### Git 工作流
