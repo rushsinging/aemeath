@@ -168,7 +168,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             default,
             reply_tx,
         } => UiEvent::AskUser {
-            id,
+            id: sdk::ids::ToolCallId::from_legacy_or_new(&id),
             question,
             options,
             multi_select,
@@ -431,7 +431,10 @@ mod tests {
     use tokio::sync::watch;
 
     fn test_sdk_event_context() -> sdk::ChatEventContext {
-        sdk::ChatEventContext::new("chat-test", "turn-test")
+        sdk::ChatEventContext::new(
+            sdk::ids::ChatId::new("chat-test"),
+            sdk::ids::ChatTurnId::new("turn-test"),
+        )
     }
 
     #[test]
@@ -449,9 +452,13 @@ mod tests {
 
     #[test]
     fn test_sdk_event_to_ui_event_preserves_agent_progress_context() {
+        let expected_tool_id = sdk::ids::ToolCallId::new("tool-1".to_string());
         let event = sdk_event_to_ui_event(sdk::ChatEvent::AgentProgress {
-            context: sdk::ChatEventContext::new("chat-progress", "turn-progress"),
-            tool_id: "tool-1".to_string(),
+            context: sdk::ChatEventContext::new(
+                sdk::ids::ChatId::new("chat-progress"),
+                sdk::ids::ChatTurnId::new("turn-progress"),
+            ),
+            tool_id: expected_tool_id.clone(),
             event: sdk::AgentProgressEventView {
                 sequence: 1,
                 kind: sdk::AgentProgressKindView::Message {
@@ -464,9 +471,15 @@ mod tests {
             UiEvent::AgentProgress {
                 context, tool_id, ..
             } => {
-                assert_eq!(context.chat_id.as_ref(), "chat-progress");
-                assert_eq!(context.turn_id.as_ref(), "turn-progress");
-                assert_eq!(tool_id, "tool-1");
+                assert_eq!(
+                    context.chat_id,
+                    crate::tui::model::conversation::ids::ChatId::new("chat-progress")
+                );
+                assert_eq!(
+                    context.turn_id,
+                    crate::tui::model::conversation::ids::ChatTurnId::new("turn-progress")
+                );
+                assert_eq!(tool_id, expected_tool_id);
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -589,10 +602,12 @@ mod tests {
             .await
             .expect("Done event should be forwarded")
             .expect("ui channel should receive Done");
+        let expected_chat = crate::tui::model::conversation::ids::ChatId::new("chat-test");
+        let expected_turn = crate::tui::model::conversation::ids::ChatTurnId::new("turn-test");
         assert!(matches!(
             event,
             UiEvent::Done { context }
-                if context.chat_id.as_ref() == "chat-test" && context.turn_id.as_ref() == "turn-test"
+                if context.chat_id == expected_chat && context.turn_id == expected_turn
         ));
 
         let drain_request =

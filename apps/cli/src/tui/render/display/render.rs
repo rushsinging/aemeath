@@ -1,4 +1,4 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
@@ -43,8 +43,8 @@ impl crate::tui::app::App {
             .conversation
             .active_chat_id
             .clone()
-            .unwrap_or_else(|| ChatId::new("history-chat"));
-        let turn_id = ChatTurnId::new("turn-1");
+            .unwrap_or_else(|| ChatId::from_legacy_or_new("history-chat"));
+        let turn_id = ChatTurnId::from_legacy_or_new("turn-1");
         self.model
             .conversation
             .ensure_runtime_turn(chat_id.clone(), turn_id.clone());
@@ -83,12 +83,13 @@ impl crate::tui::app::App {
                 }
                 HistoryAssistantBlock::ToolUse { id, name, input } => {
                     let input_json = input.to_string();
+                    let tool_call_id = ToolCallId::from_legacy_or_new(&id);
                     self.model
                         .conversation
                         .apply(ConversationIntent::ObserveToolCallStart {
                             chat_id: chat_id.clone(),
                             turn_id: turn_id.clone(),
-                            id: id.clone(),
+                            id: tool_call_id.clone(),
                             provider_id: None,
                             name: name.clone(),
                             index,
@@ -98,7 +99,7 @@ impl crate::tui::app::App {
                         .apply(ConversationIntent::ObserveToolCallUpdate {
                             chat_id: chat_id.clone(),
                             turn_id: turn_id.clone(),
-                            id: id.clone(),
+                            id: tool_call_id.clone(),
                             provider_id: Some(id.clone()),
                             name: name.clone(),
                             index,
@@ -112,7 +113,7 @@ impl crate::tui::app::App {
                             .apply(ConversationIntent::ObserveToolResult {
                                 chat_id: chat_id.clone(),
                                 turn_id: turn_id.clone(),
-                                id: id.clone(),
+                                id: tool_call_id.clone(),
                                 provider_id: id.clone(),
                                 tool_name: name,
                                 output: tool_result_content_to_string(result.content),
@@ -509,6 +510,8 @@ mod tests {
 
         app.render_history_message(&assistant, Some(&tool_result));
 
+        let expected_tool_id =
+            crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
         let tool_call = app
             .model
             .conversation
@@ -516,7 +519,7 @@ mod tests {
             .iter()
             .flat_map(|chat| &chat.turns)
             .flat_map(|turn| &turn.tool_calls)
-            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some("tool-1"))
+            .find(|call| call.id.as_ref() == Some(&expected_tool_id))
             .expect("tool call should be restored");
         assert_eq!(tool_call.status, ToolCallStatus::Success);
         assert_eq!(tool_call.result.as_deref(), Some("done"));

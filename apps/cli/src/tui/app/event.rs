@@ -10,8 +10,8 @@ pub struct UiTurnContext {
 impl From<sdk::ChatEventContext> for UiTurnContext {
     fn from(context: sdk::ChatEventContext) -> Self {
         Self {
-            chat_id: ChatId::new(context.chat_id),
-            turn_id: ChatTurnId::new(context.turn_id),
+            chat_id: context.chat_id,
+            turn_id: context.turn_id,
         }
     }
 }
@@ -44,14 +44,14 @@ pub enum AppEvent {
     },
     ToolCallStart {
         context: UiTurnContext,
-        id: String,
+        id: sdk::ids::ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolCallUpdate {
         context: UiTurnContext,
-        id: String,
+        id: sdk::ids::ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -62,7 +62,7 @@ pub enum AppEvent {
     },
     ToolResult {
         context: UiTurnContext,
-        id: String,
+        id: sdk::ids::ToolCallId,
         provider_id: String,
         tool_name: String,
         output: String,
@@ -115,7 +115,7 @@ pub enum AppEvent {
     },
     /// AskUserQuestion tool call: pause and wait for user input
     AskUser {
-        id: String,
+        id: sdk::ids::ToolCallId,
         question: String,
         options: Vec<sdk::OptionItem>,
         multi_select: bool,
@@ -125,7 +125,7 @@ pub enum AppEvent {
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
         context: UiTurnContext,
-        tool_id: String,
+        tool_id: sdk::ids::ToolCallId,
         event: sdk::AgentProgressEventView,
     },
     /// Unified lifecycle hook event.

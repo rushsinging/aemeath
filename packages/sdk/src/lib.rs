@@ -15,6 +15,8 @@ pub mod session;
 pub mod tui;
 pub mod types;
 
+pub mod ids;
+
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
@@ -30,6 +32,7 @@ pub use commands::{
     ModelSwitchParams, ModelSwitchResult,
 };
 pub use error::SdkError;
+pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{

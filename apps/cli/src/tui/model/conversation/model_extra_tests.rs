@@ -1,7 +1,7 @@
 //! ConversationModel 辅助功能测试（reset、append_user_message）。
 
 use super::change::ConversationChange;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
@@ -97,11 +97,14 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
 
     let runtime_chat_id = ChatId::new("runtime-chat-1");
     let runtime_turn_id = ChatTurnId::new("runtime-turn-1");
+    let expected_chat_id = runtime_chat_id.clone();
+    let expected_turn_id = runtime_turn_id.clone();
+    let expected_tool_id = ToolCallId::new("tool-1".to_string());
     model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
     let changes = model.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
@@ -109,7 +112,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     model.apply(ConversationIntent::ObserveToolCallUpdate {
         chat_id: runtime_chat_id,
         turn_id: runtime_turn_id,
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
@@ -125,16 +128,12 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let tool_call = model
         .chats
         .iter()
-        .find(|chat| chat.id.as_ref() == "runtime-chat-1")
-        .and_then(|chat| {
-            chat.turns
-                .iter()
-                .find(|turn| turn.id.as_ref() == "runtime-turn-1")
-        })
+        .find(|chat| chat.id == expected_chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == expected_turn_id))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()
-                .find(|call| call.id.as_ref().is_some_and(|id| id.as_ref() == "tool-1"))
+                .find(|call| call.id.as_ref() == Some(&expected_tool_id))
         })
         .expect("tool call should exist");
     assert_eq!(tool_call.name, "Bash");
@@ -142,8 +141,8 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     assert!(model.timeline.items().iter().any(|item| matches!(
         item,
         OutputTimelineItem::ToolCall { reference }
-            if reference.context.chat_id.as_ref() == "runtime-chat-1"
-                && reference.context.turn_id.as_ref() == "runtime-turn-1"
-                && reference.tool_call_id.as_ref() == "tool-1"
+            if reference.context.chat_id == expected_chat_id
+                && reference.context.turn_id == expected_turn_id
+                && reference.tool_call_id == expected_tool_id
     )));
 }

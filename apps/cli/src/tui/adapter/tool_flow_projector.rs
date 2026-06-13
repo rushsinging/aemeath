@@ -317,14 +317,14 @@ mod tests {
             },
             RuntimeObservation::ToolCallStart {
                 context: context.clone(),
-                id: "tool-1".to_string(),
+                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
             },
             RuntimeObservation::ToolCallUpdate {
                 context: context.clone(),
-                id: "tool-1".to_string(),
+                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
@@ -334,7 +334,7 @@ mod tests {
             },
             RuntimeObservation::AgentProgress {
                 context: context.clone(),
-                tool_id: "tool-1".to_string(),
+                tool_id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 message: "running".to_string(),
             },
             RuntimeObservation::Complete {
@@ -350,7 +350,7 @@ mod tests {
     fn test_projector_preserves_tool_result_context() {
         let mapping = ToolFlowProjector::project(&RuntimeObservation::ToolResult {
             context: ctx(),
-            id: "tool-1".to_string(),
+            id: sdk::ids::ToolCallId::new("tool-1".to_string()),
             provider_id: "provider-1".to_string(),
             tool_name: "Read".to_string(),
             output: "done".to_string(),
@@ -359,10 +359,12 @@ mod tests {
             image_count: 0,
         });
         assert_no_runtime_bind_prelude(&mapping);
+        let expected_id = sdk::ids::ToolCallId::new("tool-1".to_string());
+        let expected_context = ctx();
         assert!(matches!(
             first_observation(&mapping),
             Some(ConversationIntent::ObserveToolResult { chat_id, turn_id, id, .. })
-                if chat_id.as_ref() == "chat-test" && turn_id.as_ref() == "turn-test" && id == "tool-1"
+                if chat_id == &expected_context.chat_id && turn_id == &expected_context.turn_id && id == &expected_id
         ));
     }
 

@@ -94,14 +94,14 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let tool_calls = vec![
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "a".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("a"),
             name: "parallel_a".to_string(),
             index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "b".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("b"),
             name: "parallel_b".to_string(),
             index: 1,
             input: serde_json::json!({}),
@@ -157,14 +157,14 @@ async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     let tool_calls = vec![
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "a".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("a"),
             name: "seq_a".to_string(),
             index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "b".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("b"),
             name: "seq_b".to_string(),
             index: 1,
             input: serde_json::json!({}),
@@ -241,24 +241,27 @@ async fn test_execute_tools_preserves_original_order() {
     };
 
     // Pass calls in order: tool_c, tool_a, tool_b
+    let id_c = sdk::ids::ToolCallId::from_legacy_or_new("1");
+    let id_a = sdk::ids::ToolCallId::from_legacy_or_new("2");
+    let id_b = sdk::ids::ToolCallId::from_legacy_or_new("3");
     let tool_calls = vec![
         ToolCall {
             provider_id: "provider-1".to_string(),
-            id: "1".to_string(),
+            id: id_c.clone(),
             name: "tool_c".to_string(),
             index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-2".to_string(),
-            id: "2".to_string(),
+            id: id_a.clone(),
             name: "tool_a".to_string(),
             index: 1,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-3".to_string(),
-            id: "3".to_string(),
+            id: id_b.clone(),
             name: "tool_b".to_string(),
             index: 2,
             input: serde_json::json!({}),
@@ -269,11 +272,11 @@ async fn test_execute_tools_preserves_original_order() {
     assert_eq!(exec_results.len(), 3);
 
     // Results should be in the original call order: tool_c, tool_a, tool_b
-    assert_eq!(exec_results[0].0, "1"); // tool_c
+    assert_eq!(exec_results[0].0, id_c); // tool_c
     assert_eq!(exec_results[0].1, "provider-1");
-    assert_eq!(exec_results[1].0, "2"); // tool_a
+    assert_eq!(exec_results[1].0, id_a); // tool_a
     assert_eq!(exec_results[1].1, "provider-2");
-    assert_eq!(exec_results[2].0, "3"); // tool_b
+    assert_eq!(exec_results[2].0, id_b); // tool_b
     assert_eq!(exec_results[2].1, "provider-3");
 }
 
@@ -317,7 +320,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
     let results = agent
         .execute_tools(&[ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "timeout-1".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("timeout-1"),
             name: "short_timeout".to_string(),
             index: 0,
             input: serde_json::json!({}),
@@ -354,24 +357,27 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
         ctx,
     };
 
+    let id_p1 = sdk::ids::ToolCallId::from_legacy_or_new("p1");
+    let id_s1 = sdk::ids::ToolCallId::from_legacy_or_new("s1");
+    let id_p2 = sdk::ids::ToolCallId::from_legacy_or_new("p2");
     let tool_calls = vec![
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "p1".to_string(),
+            id: id_p1.clone(),
             name: "parallel".to_string(),
             index: 0,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "s1".to_string(),
+            id: id_s1.clone(),
             name: "sequential".to_string(),
             index: 1,
             input: serde_json::json!({}),
         },
         ToolCall {
             provider_id: "provider-test".to_string(),
-            id: "p2".to_string(),
+            id: id_p2.clone(),
             name: "parallel".to_string(),
             index: 2,
             input: serde_json::json!({}),
@@ -382,8 +388,8 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
     assert_eq!(results.len(), 3);
 
     // Verify order is preserved: p1, s1, p2
-    assert_eq!(results[0].0, "p1");
-    assert_eq!(results[1].0, "s1");
-    assert_eq!(results[2].0, "p2");
+    assert_eq!(results[0].0, id_p1);
+    assert_eq!(results[1].0, id_s1);
+    assert_eq!(results[2].0, id_p2);
     assert!(results.iter().all(|r| !r.4), "no errors expected");
 }

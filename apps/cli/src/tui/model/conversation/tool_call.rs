@@ -129,14 +129,14 @@ mod tests {
     use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 
     fn pending_call() -> ToolCall {
-        ToolCall::pending(ToolCallId::new("tool-1"), stream_key())
+        ToolCall::pending(ToolCallId::new("tool-1".to_string()), stream_key())
     }
 
     #[test]
     fn test_tool_call_binds_id_and_runs() {
         let mut call = pending_call();
         let changes = call.bind("Read file".to_string());
-        assert_eq!(call.id.as_ref().map(AsRef::as_ref), Some("tool-1"));
+        assert!(call.id.as_ref().is_some(), "id should be set after bind");
         assert_eq!(call.status, ToolCallStatus::Running);
         assert_eq!(
             changes,

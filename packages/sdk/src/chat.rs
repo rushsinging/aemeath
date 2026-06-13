@@ -118,7 +118,7 @@ pub struct ToolResultImage {
 /// Sub-agent 工具调用进度。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentToolCallProgressView {
-    pub id: String,
+    pub id: crate::ids::ToolCallId,
     pub name: String,
     pub input: serde_json::Value,
     pub summary: String,
@@ -219,16 +219,13 @@ pub struct HookEventView {
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatEventContext {
-    pub chat_id: String,
-    pub turn_id: String,
+    pub chat_id: crate::ids::ChatId,
+    pub turn_id: crate::ids::ChatTurnId,
 }
 
 impl ChatEventContext {
-    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
-        Self {
-            chat_id: chat_id.into(),
-            turn_id: turn_id.into(),
-        }
+    pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
+        Self { chat_id, turn_id }
     }
 }
 
@@ -261,7 +258,7 @@ pub enum ChatEvent {
     /// 工具调用开始。
     ToolCallStart {
         context: ChatEventContext,
-        id: String,
+        id: crate::ids::ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -269,7 +266,7 @@ pub enum ChatEvent {
     /// 工具调用属性/状态更新。
     ToolCallUpdate {
         context: ChatEventContext,
-        id: String,
+        id: crate::ids::ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -281,7 +278,7 @@ pub enum ChatEvent {
     /// 工具执行结果。
     ToolResult {
         context: ChatEventContext,
-        id: String,
+        id: crate::ids::ToolCallId,
         provider_id: String,
         tool_name: String,
         output: String,
@@ -332,7 +329,7 @@ pub enum ChatEvent {
     /// Agent progress 事件投影。
     AgentProgress {
         context: ChatEventContext,
-        tool_id: String,
+        tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
     },
     /// 工作目录变化。
@@ -381,8 +378,10 @@ mod tests {
     #[tokio::test]
     async fn test_chat_stream_recv_returns_sent_event() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let chat_id = crate::ids::ChatId::new_v7();
+        let turn_id = crate::ids::ChatTurnId::new_v7();
         tx.send(ChatEvent::Token {
-            context: ChatEventContext::new("chat-1", "turn-1"),
+            context: ChatEventContext::new(chat_id.clone(), turn_id.clone()),
             text: "hello".to_string(),
         })
         .unwrap();
@@ -393,8 +392,8 @@ mod tests {
 
         match event {
             Some(ChatEvent::Token { context, text }) => {
-                assert_eq!(context.chat_id, "chat-1");
-                assert_eq!(context.turn_id, "turn-1");
+                assert_eq!(context.chat_id, chat_id);
+                assert_eq!(context.turn_id, turn_id);
                 assert_eq!(text, "hello");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -433,7 +432,7 @@ mod tests {
             sequence: 2,
             kind: AgentProgressKindView::ToolCalls {
                 calls: vec![AgentToolCallProgressView {
-                    id: "tool-1".to_string(),
+                    id: crate::ids::ToolCallId::new_v7(),
                     name: "Read".to_string(),
                     input: serde_json::json!({"file_path":"a.rs"}),
                     summary: "a.rs".to_string(),
@@ -462,13 +461,13 @@ mod tests {
             kind: AgentProgressKindView::ToolCalls {
                 calls: vec![
                     AgentToolCallProgressView {
-                        id: "c1".to_string(),
+                        id: crate::ids::ToolCallId::new_v7(),
                         name: "Bash".to_string(),
                         input: serde_json::json!({"command": "ls"}),
                         summary: "ls -la /project".to_string(),
                     },
                     AgentToolCallProgressView {
-                        id: "c2".to_string(),
+                        id: crate::ids::ToolCallId::new_v7(),
                         name: "Read".to_string(),
                         input: serde_json::json!({"file_path": "TODO.md"}),
                         summary: "project/TODO.md".to_string(),

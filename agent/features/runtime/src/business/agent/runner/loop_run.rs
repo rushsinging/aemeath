@@ -255,7 +255,7 @@ impl<'a> SubAgentRun<'a> {
     fn build_call_info(
         &self,
         tool_calls: &[crate::business::agent::ToolCall],
-    ) -> std::collections::HashMap<String, (String, String)> {
+    ) -> std::collections::HashMap<sdk::ids::ToolCallId, (String, String)> {
         tool_calls
             .iter()
             .map(|call| {

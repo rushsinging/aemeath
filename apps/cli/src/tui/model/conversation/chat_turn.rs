@@ -108,10 +108,10 @@ mod tests {
     use super::*;
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 
-    fn bound_ids(turn: &ChatTurn) -> Vec<String> {
+    fn bound_ids(turn: &ChatTurn) -> Vec<ToolCallId> {
         turn.tool_calls
             .iter()
-            .filter_map(|call| call.id.as_ref().map(|id| id.as_ref().to_string()))
+            .filter_map(|call| call.id.clone())
             .collect()
     }
 
@@ -120,12 +120,14 @@ mod tests {
         // 正常路径：(name, index) 精确匹配未绑定占位。
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
-        turn.observe_tool_start(ToolCallId::new("call_r"), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(ToolCallId::new("call_b"), chat, "Bash".into(), 1);
+        let call_r = ToolCallId::new("call_r".to_string());
+        let call_b = ToolCallId::new("call_b".to_string());
+        turn.observe_tool_start(call_r.clone(), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(call_b.clone(), chat, "Bash".into(), 1);
 
-        assert!(turn.bind_tool("call_r", String::new()).is_some());
-        assert_eq!(turn.tool_calls[0].id.as_ref().unwrap().as_ref(), "call_r");
-        assert_eq!(turn.tool_calls[1].id.as_ref().unwrap().as_ref(), "call_b");
+        assert!(turn.bind_tool(&call_r.as_str(), String::new()).is_some());
+        assert_eq!(turn.tool_calls[0].id.as_ref(), Some(&call_r));
+        assert_eq!(turn.tool_calls[1].id.as_ref(), Some(&call_b));
     }
 
     #[test]
@@ -135,18 +137,20 @@ mod tests {
         // 而非返回 None 成 orphan。
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
-        turn.observe_tool_start(ToolCallId::new("call_a"), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(ToolCallId::new("call_b"), chat, "Read".into(), 1);
+        let call_a = ToolCallId::new("call_a".to_string());
+        let call_b = ToolCallId::new("call_b".to_string());
+        turn.observe_tool_start(call_a.clone(), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(call_b.clone(), chat, "Read".into(), 1);
 
-        assert!(turn.bind_tool("call_a", String::new()).is_some());
+        assert!(turn.bind_tool(&call_a.as_str(), String::new()).is_some());
         assert!(
-            turn.bind_tool("call_b", String::new()).is_some(),
+            turn.bind_tool(&call_b.as_str(), String::new()).is_some(),
             "internal id 应直接绑定，不再依赖 provider/content index"
         );
 
         let ids = bound_ids(&turn);
         assert_eq!(ids.len(), 2, "两个占位都应绑上，实际: {ids:?}");
-        assert!(ids.contains(&"call_a".to_string()) && ids.contains(&"call_b".to_string()));
+        assert!(ids.contains(&call_a) && ids.contains(&call_b));
     }
 
     #[test]
@@ -155,23 +159,27 @@ mod tests {
         // 轮2 bind(index=1) 的 find-first 会命中轮1 已绑占位——绝不能覆盖，否则丢 id 致泄漏。
         let mut turn = ChatTurn::new(ChatTurnId::new("t"), 0);
         let chat = ChatId::new("c");
+        let call_1a = ToolCallId::new("call_1a".to_string());
+        let call_1 = ToolCallId::new("call_1".to_string());
+        let call_2a = ToolCallId::new("call_2a".to_string());
+        let call_2 = ToolCallId::new("call_2".to_string());
         // 轮 1 占位 + 绑定。
-        turn.observe_tool_start(ToolCallId::new("call_1a"), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(ToolCallId::new("call_1"), chat.clone(), "Read".into(), 1);
-        turn.bind_tool("call_1", String::new());
+        turn.observe_tool_start(call_1a.clone(), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(call_1.clone(), chat.clone(), "Read".into(), 1);
+        turn.bind_tool(&call_1.as_str(), String::new());
         // 轮 2 占位（index 跨轮重复）。
-        turn.observe_tool_start(ToolCallId::new("call_2a"), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(ToolCallId::new("call_2"), chat, "Read".into(), 1);
+        turn.observe_tool_start(call_2a.clone(), chat.clone(), "Read".into(), 0);
+        turn.observe_tool_start(call_2.clone(), chat, "Read".into(), 1);
         // 轮 2 bind(index=1)：internal id 直连，不会覆盖轮1 已绑 call_1。
-        turn.bind_tool("call_2", String::new());
+        turn.bind_tool(&call_2.as_str(), String::new());
 
         let ids = bound_ids(&turn);
         assert!(
-            ids.contains(&"call_1".to_string()),
+            ids.contains(&call_1),
             "已绑定的 call_1 不应被覆盖丢失（#87 泄漏根因 B），实际: {ids:?}"
         );
         assert!(
-            ids.contains(&"call_2".to_string()),
+            ids.contains(&call_2),
             "call_2 应绑到另一个未绑定占位，实际: {ids:?}"
         );
     }

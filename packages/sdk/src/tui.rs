@@ -16,7 +16,7 @@ pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>>
 /// runtime 返回给 TUI 的 chat handle。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatHandle {
-    pub id: String,
+    pub id: crate::ids::ChatId,
 }
 
 /// TUI 从 runtime 接收 chat 流式事件的 sink。

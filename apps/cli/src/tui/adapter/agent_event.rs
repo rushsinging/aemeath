@@ -73,7 +73,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             message_count: messages.len(),
         }),
         UiEvent::AskUser { id, question, .. } => diagnostic(DiagnosticIntent::OpenPrompt {
-            id: id.clone(),
+            id: id.to_string(),
             question: question.clone(),
         }),
         UiEvent::AgentProgress {
@@ -275,14 +275,14 @@ mod tests {
             },
             UiEvent::ToolCallStart {
                 context: context.clone(),
-                id: "tool-1".to_string(),
+                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
             },
             UiEvent::ToolCallUpdate {
                 context: context.clone(),
-                id: "tool-1".to_string(),
+                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
@@ -293,7 +293,7 @@ mod tests {
             },
             UiEvent::ToolResult {
                 context,
-                id: "tool-1".to_string(),
+                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
                 provider_id: "provider-1".to_string(),
                 tool_name: "Read".to_string(),
                 output: "ok".to_string(),
@@ -378,7 +378,7 @@ mod tests {
     fn test_map_agent_event_tool_call_uses_json_arguments_when_summary_missing() {
         let event = UiEvent::ToolCallUpdate {
             context: ctx(),
-            id: "tool-1".to_string(),
+            id: sdk::ids::ToolCallId::new("tool-1".to_string()),
             provider_id: Some("provider-1".to_string()),
             name: "Read".to_string(),
             index: 0,

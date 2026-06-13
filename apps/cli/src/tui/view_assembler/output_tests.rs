@@ -1,4 +1,5 @@
 use super::OutputViewAssembler;
+use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -151,7 +152,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Edit".to_string(),
         index: 0,
@@ -160,7 +161,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         tool_name: "Edit".to_string(),
         output: "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew"
             .to_string(),
@@ -172,7 +173,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         name: "Edit".to_string(),
         index: 0,
         summary: Some(r#"{"file_path":"docs/bug/active.md"}"#.to_string()),
@@ -266,7 +267,11 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
         matches!(&result.kind, OutputBlockKind::ToolResult(_)),
         "子块应为 ToolResult 变体"
     );
-    assert_eq!(result.block_id, "tool-1-result");
+    let expected_tool_id = ToolCallId::new("tool-1".to_string());
+    assert_eq!(
+        result.block_id,
+        format!("{}-result", expected_tool_id.as_ref())
+    );
     assert!(result.children.is_empty(), "ToolResult 为叶子");
     // ToolResult 不应作为顶层 root 出现（必须是 tool_call 的子）。
     assert!(
@@ -286,7 +291,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
@@ -294,7 +299,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     conversation.apply(ConversationIntent::ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
@@ -342,7 +347,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
@@ -351,7 +356,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
-        id: "tool-1".to_string(),
+        id: ToolCallId::new("tool-1".to_string()),
         name: "Read".to_string(),
         index: 0,
         summary: Some("search".to_string()),
@@ -423,7 +428,7 @@ fn add_completed_tool(
     conversation.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         provider_id: None,
         name: name.to_string(),
         index: 0,
@@ -432,7 +437,7 @@ fn add_completed_tool(
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         name: name.to_string(),
         index: 0,
         summary: Some(summary.to_string()),
@@ -443,7 +448,7 @@ fn add_completed_tool(
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),
-        id: id.to_string(),
+        id: ToolCallId::new(id.to_string()),
         tool_name: name.to_string(),
         output: output.to_string(),
         content: serde_json::json!({ "text": output }),

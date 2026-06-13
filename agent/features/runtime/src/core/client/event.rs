@@ -83,10 +83,7 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
 }
 
 fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
-    ChatEventContext {
-        chat_id: context.chat_id,
-        turn_id: context.turn_id,
-    }
+    ChatEventContext::new(context.chat_id, context.turn_id)
 }
 
 fn tool_call_status_to_sdk(
@@ -286,7 +283,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             default,
             reply_tx,
         } => ChatEvent::AskUser {
-            id,
+            id: id.to_string(),
             question,
             options,
             allow_free_input,
@@ -354,7 +351,7 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
             calls: calls
                 .into_iter()
                 .map(|call| AgentToolCallProgressView {
-                    id: call.id,
+                    id: sdk::ids::ToolCallId::from_legacy_or_new(&call.id),
                     name: call.name,
                     input: call.input,
                     summary: call.summary,
