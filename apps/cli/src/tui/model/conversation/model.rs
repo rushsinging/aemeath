@@ -7,12 +7,16 @@ use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::queued_submission::QueuedSubmission;
 use super::tool_call::ToolCallStatus;
+use crate::tui::model::output_timeline::{
+    OutputTimelineItem, OutputTimelineModel, TimelineRuntimeContext,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConversationModel {
     pub chats: Vec<Chat>,
     pub active_chat_id: Option<ChatId>,
     pub blocks: Vec<ConversationBlock>,
+    pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
     pub agent_progress: Vec<AgentProgressEntry>,
     next_chat_sequence: usize,
@@ -160,6 +164,10 @@ impl ConversationModel {
         let user_block_id = self.next_block_id("user");
         let turn_id = "turn-1".to_string();
         self.blocks.push(ConversationBlock::UserMessage {
+            id: user_block_id.clone(),
+            text: submission.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::UserMessage {
             id: user_block_id,
             text: submission,
         });
@@ -178,6 +186,10 @@ impl ConversationModel {
     fn append_user_message(&mut self, text: String) -> Vec<ConversationChange> {
         let block_id = self.next_block_id("user");
         self.blocks.push(ConversationBlock::UserMessage {
+            id: block_id.clone(),
+            text: text.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::UserMessage {
             id: block_id.clone(),
             text,
         });
@@ -242,14 +254,7 @@ impl ConversationModel {
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
         }
-        self.insert_tool_call_block_before_active_text(
-            chat_id,
-            turn_id,
-            tool_call_id,
-            name.clone(),
-            String::new(),
-            String::new(),
-        );
+        self.insert_tool_call_block_before_active_text(chat_id, turn_id, tool_call_id);
         vec![
             ConversationChange::ToolCallObserved { name, index },
             ConversationChange::OutputDirty,
@@ -326,35 +331,7 @@ impl ConversationModel {
                 chat_id.clone(),
                 turn_id.clone(),
                 ToolCallId::new(bound_id.clone()),
-                name.clone(),
-                final_summary.clone(),
-                args_preview.clone(),
             );
-        } else {
-            for block in &mut self.blocks {
-                if let ConversationBlock::ToolCall {
-                    id: block_id,
-                    chat_id: block_chat_id,
-                    turn_id: block_turn_id,
-                    summary: block_summary,
-                    args_preview: block_args,
-                    ..
-                } = block
-                {
-                    if block_chat_id == &chat_id
-                        && block_turn_id == &turn_id
-                        && block_id.as_ref() == bound_id
-                    {
-                        if !final_summary.is_empty() {
-                            *block_summary = final_summary.clone();
-                        }
-                        if !args_preview.is_empty() {
-                            *block_args = args_preview.clone();
-                        }
-                        break;
-                    }
-                }
-            }
         }
         self.move_tool_results_after_tool_call(&chat_id, &turn_id, &bound_id);
         log::debug!(
@@ -460,6 +437,10 @@ impl ConversationModel {
             .push(QueuedSubmission::new(id.clone(), text.clone()));
         self.blocks.push(ConversationBlock::QueuedUserMessage {
             id: id.clone(),
+            text: text.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::QueuedUserMessage {
+            id: id.clone(),
             text,
         });
         vec![
@@ -473,6 +454,8 @@ impl ConversationModel {
         self.queued_submissions.clear();
         self.blocks
             .retain(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. }));
+        self.timeline
+            .retain(|item| !matches!(item, OutputTimelineItem::QueuedUserMessage { .. }));
         vec![
             ConversationChange::QueuedSubmissionsCleared { count },
             ConversationChange::OutputDirty,
@@ -526,6 +509,17 @@ impl ConversationModel {
             ) = self.blocks.iter_mut().find(|block| block.id() == block_id)
             {
                 existing.push_str(&text);
+                if let Some(
+                    OutputTimelineItem::AssistantText { text: existing, .. }
+                    | OutputTimelineItem::Thinking { text: existing, .. },
+                ) = self
+                    .timeline
+                    .items_mut()
+                    .iter_mut()
+                    .find(|item| item.id().as_ref() == block_id)
+                {
+                    existing.push_str(&text);
+                }
                 return block_id;
             }
         }
@@ -537,8 +531,13 @@ impl ConversationModel {
             self.active_thinking_context = Some(context);
             self.blocks.push(ConversationBlock::Thinking {
                 id: block_id.clone(),
-                chat_id: Some(chat_id),
-                turn_id: Some(turn_id),
+                chat_id: Some(chat_id.clone()),
+                turn_id: Some(turn_id.clone()),
+                text: text.clone(),
+            });
+            self.timeline.push(OutputTimelineItem::Thinking {
+                id: block_id.clone(),
+                context: Some(TimelineRuntimeContext::new(chat_id, turn_id)),
                 text,
             });
         } else {
@@ -546,8 +545,13 @@ impl ConversationModel {
             self.active_text_context = Some(context);
             self.blocks.push(ConversationBlock::AssistantText {
                 id: block_id.clone(),
-                chat_id: Some(chat_id),
-                turn_id: Some(turn_id),
+                chat_id: Some(chat_id.clone()),
+                turn_id: Some(turn_id.clone()),
+                text: text.clone(),
+            });
+            self.timeline.push(OutputTimelineItem::AssistantText {
+                id: block_id.clone(),
+                context: Some(TimelineRuntimeContext::new(chat_id, turn_id)),
                 text,
             });
         }

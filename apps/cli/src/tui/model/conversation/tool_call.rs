@@ -1,4 +1,5 @@
 use super::ids::{ToolCallId, ToolStreamKey};
+use super::tool_result_payload::ToolResultPayload;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCall {
@@ -9,6 +10,9 @@ pub struct ToolCall {
     pub summary: Option<String>,
     pub status: ToolCallStatus,
     pub result: Option<String>,
+    pub result_content: Option<serde_json::Value>,
+    pub is_error: bool,
+    pub image_count: usize,
     pub activities: Vec<String>,
 }
 
@@ -22,6 +26,9 @@ impl ToolCall {
             summary: None,
             status: ToolCallStatus::PendingArgs,
             result: None,
+            result_content: None,
+            is_error: false,
+            image_count: 0,
             activities: Vec::new(),
         }
     }
@@ -76,9 +83,12 @@ impl ToolCall {
             vec![ToolCallChange::Bound]
         }
     }
-    pub fn complete(&mut self, result: String, is_error: bool) {
-        self.result = Some(result);
-        self.status = if is_error {
+    pub fn complete(&mut self, result: ToolResultPayload) {
+        self.result = Some(result.output);
+        self.result_content = Some(result.content);
+        self.is_error = result.is_error;
+        self.image_count = result.image_count;
+        self.status = if result.is_error {
             ToolCallStatus::Error
         } else {
             ToolCallStatus::Success
@@ -116,6 +126,8 @@ mod tests {
         ToolStreamKey::new(ChatId::new("chat-1"), ChatTurnId::new("turn-1"), "Read", 0)
     }
 
+    use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
+
     fn pending_call() -> ToolCall {
         ToolCall::pending(ToolCallId::new("tool-1"), stream_key())
     }
@@ -136,17 +148,32 @@ mod tests {
     fn test_tool_call_completes_success() {
         let mut call = pending_call();
         call.bind("Read file".to_string());
-        call.complete("ok".to_string(), false);
+        call.complete(ToolResultPayload::new(
+            "ok".to_string(),
+            serde_json::json!({ "text": "ok" }),
+            false,
+            0,
+        ));
         assert_eq!(call.status, ToolCallStatus::Success);
         assert_eq!(call.result.as_deref(), Some("ok"));
+        assert_eq!(
+            call.result_content,
+            Some(serde_json::json!({ "text": "ok" }))
+        );
     }
 
     #[test]
     fn test_tool_call_completes_error() {
         let mut call = pending_call();
         call.bind("Read file".to_string());
-        call.complete("failed".to_string(), true);
+        call.complete(ToolResultPayload::new(
+            "failed".to_string(),
+            serde_json::json!({ "text": "failed" }),
+            true,
+            0,
+        ));
         assert_eq!(call.status, ToolCallStatus::Error);
         assert_eq!(call.result.as_deref(), Some("failed"));
+        assert!(call.is_error);
     }
 }

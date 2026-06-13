@@ -3,6 +3,8 @@ use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
+use super::tool_result_payload::ToolResultPayload;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 impl ConversationModel {
     pub(super) fn promote_orphan_tool_result(
@@ -30,9 +32,17 @@ impl ConversationModel {
             return;
         };
         if self
-            .complete_tool_in_context(chat_id, turn_id, id, output.clone(), is_error)
+            .complete_tool_in_context(
+                chat_id,
+                turn_id,
+                id,
+                ToolResultPayload::new(output.clone(), content.clone(), is_error, 0),
+            )
             .is_some()
         {
+            self.timeline.retain(|item| {
+                !matches!(item, OutputTimelineItem::OrphanToolResult { id: orphan_id, .. } if orphan_id == id)
+            });
             self.insert_tool_result_after_tool_call(
                 chat_id.clone(),
                 turn_id.clone(),
@@ -59,9 +69,12 @@ impl ConversationModel {
         image_count: usize,
     ) -> Vec<ConversationChange> {
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-        if let Some(status) =
-            self.complete_tool_in_context(&chat_id, &turn_id, &id, output.clone(), is_error)
-        {
+        if let Some(status) = self.complete_tool_in_context(
+            &chat_id,
+            &turn_id,
+            &id,
+            ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
+        ) {
             self.insert_tool_result_after_tool_call(
                 chat_id.clone(),
                 turn_id.clone(),
@@ -87,6 +100,13 @@ impl ConversationModel {
                 ConversationChange::OutputDirty,
             ];
         }
+        self.timeline.push(OutputTimelineItem::OrphanToolResult {
+            id: id.clone(),
+            tool_name: tool_name.clone(),
+            output: output.clone(),
+            content: content.clone(),
+            is_error,
+        });
         self.blocks.push(ConversationBlock::OrphanToolResult {
             id: id.clone(),
             tool_name,
@@ -113,13 +133,12 @@ impl ConversationModel {
         chat_id: &ChatId,
         turn_id: &ChatTurnId,
         id: &str,
-        output: String,
-        is_error: bool,
+        result: ToolResultPayload,
     ) -> Option<ToolCallStatus> {
         self.chats
             .iter_mut()
             .find(|chat| &chat.id == chat_id)
             .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
-            .and_then(|turn| turn.complete_tool(id, output, is_error))
+            .and_then(|turn| turn.complete_tool(id, result))
     }
 }

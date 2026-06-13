@@ -2,6 +2,7 @@ use super::block::{ConversationBlock, HookNoticeContent};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// 启动横幅文本，作为对话起始的 System block 注入单一真相源。
 pub const BANNER_LINES: [&str; 4] = [
@@ -24,9 +25,14 @@ impl ConversationModel {
     pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("system");
+        let text = strip_system_reminder_envelope_owned(text);
         self.blocks.push(ConversationBlock::System {
             id: block_id.clone(),
-            text: strip_system_reminder_envelope_owned(text),
+            text: text.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::System {
+            id: block_id.clone(),
+            text,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },
@@ -43,6 +49,10 @@ impl ConversationModel {
         let block_id = self.next_block_id("hook");
         self.blocks.push(ConversationBlock::HookNotice {
             id: block_id.clone(),
+            content: content.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::HookNotice {
+            id: block_id.clone(),
             content,
         });
         vec![
@@ -56,6 +66,10 @@ impl ConversationModel {
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("error");
         self.blocks.push(ConversationBlock::Error {
+            id: block_id.clone(),
+            text: text.clone(),
+        });
+        self.timeline.push(OutputTimelineItem::Error {
             id: block_id.clone(),
             text,
         });

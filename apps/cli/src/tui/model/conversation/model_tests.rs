@@ -2,6 +2,44 @@ use super::change::ConversationChange;
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
+use crate::tui::model::output_timeline::OutputTimelineItem;
+
+fn tool_call<'a>(
+    model: &'a ConversationModel,
+    chat_id: &str,
+    turn_id: &str,
+    id: &str,
+) -> Option<&'a super::tool_call::ToolCall> {
+    model
+        .chats
+        .iter()
+        .find(|chat| chat.id.as_ref() == chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id.as_ref() == turn_id))
+        .and_then(|turn| {
+            turn.tool_calls.iter().find(|call| {
+                call.id
+                    .as_ref()
+                    .is_some_and(|call_id| call_id.as_ref() == id)
+            })
+        })
+}
+
+fn timeline_tool_call_ref_exists(
+    model: &ConversationModel,
+    chat_id: &str,
+    turn_id: &str,
+    id: &str,
+) -> bool {
+    model.timeline.items().iter().any(|item| {
+        matches!(
+            item,
+            OutputTimelineItem::ToolCall { reference }
+                if reference.context.chat_id.as_ref() == chat_id
+                    && reference.context.turn_id.as_ref() == turn_id
+                    && reference.tool_call_id.as_ref() == id
+        )
+    })
+}
 
 #[test]
 fn test_ensure_runtime_turn_does_not_change_active_chat() {
@@ -248,15 +286,11 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         status: ToolCallStatus::Ready,
     });
 
-    let summaries: Vec<_> = model
-        .blocks
+    let summaries: Vec<_> = model.chats[0].turns[0]
+        .tool_calls
         .iter()
-        .filter_map(|block| match block {
-            super::block::ConversationBlock::ToolCall { name, summary, .. } if name == "Skill" => {
-                Some(summary.as_str())
-            }
-            _ => None,
-        })
+        .filter(|call| call.name == "Skill")
+        .filter_map(|call| call.summary.as_deref())
         .collect();
 
     assert_eq!(summaries.len(), 2);
@@ -317,11 +351,16 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         live_turn_model.tool_calls[0].result.as_deref(),
         Some("workspace manifest")
     );
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolCall { id, name, args_preview, .. }
-            if id.as_ref() == "tool-1" && name == "Read" && args_preview.contains("Cargo.toml")
-    )));
+    let live_call =
+        tool_call(&model, "session-live", "turn-2", "tool-1").expect("live tool call should exist");
+    assert_eq!(live_call.name, "Read");
+    assert!(live_call.args_preview.contains("Cargo.toml"));
+    assert!(timeline_tool_call_ref_exists(
+        &model,
+        "session-live",
+        "turn-2",
+        "tool-1"
+    ));
     assert!(model.blocks.iter().any(|block| matches!(
         block,
         super::block::ConversationBlock::ToolResult { id, output, .. }
@@ -402,16 +441,16 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         Some("//! Configuration file management"),
         "Read 结果不应写入上一轮 Skill"
     );
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolCall { id, name, .. }
-            if id.as_ref() == "tool-2" && name == "Read"
-    )));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolResult { id, output, .. }
-            if id.as_ref() == "tool-2" && output.contains("Configuration file management")
-    )));
+    let read_call =
+        tool_call(&model, "chat-1", "turn-1", "tool-2").expect("Read tool call should exist");
+    assert_eq!(read_call.name, "Read");
+    assert!(timeline_tool_call_ref_exists(
+        &model, "chat-1", "turn-1", "tool-2"
+    ));
+    assert!(read_call
+        .result
+        .as_deref()
+        .is_some_and(|output| output.contains("Configuration file management")));
 }
 
 #[test]
@@ -451,20 +490,20 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         status: ToolCallStatus::Ready,
     });
 
-    let tool_blocks: Vec<_> = model
-        .blocks
+    let tool_calls: Vec<_> = model.chats[0].turns[0]
+        .tool_calls
         .iter()
-        .filter_map(|block| match block {
-            super::block::ConversationBlock::ToolCall { id, summary, .. } => {
-                Some((id.as_ref(), summary.as_str()))
-            }
-            _ => None,
+        .map(|call| {
+            (
+                call.id.as_ref().unwrap().as_ref(),
+                call.summary.as_deref().unwrap_or(""),
+            )
         })
         .collect();
 
-    assert_eq!(tool_blocks.len(), 1);
-    assert_eq!(tool_blocks[0].0, "call-provider-skill");
-    assert!(tool_blocks[0].1.contains("superpowers:brainstorming"));
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0].0, "call-provider-skill");
+    assert!(tool_calls[0].1.contains("superpowers:brainstorming"));
 }
 
 #[test]
@@ -508,11 +547,9 @@ fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
         model.chats[0].turns[0].tool_calls[0].summary.as_deref(),
         Some(r#"{"skill":"superpowers:using-superpowers"}"#)
     );
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolCall { summary, .. }
-            if summary == r#"{"skill":"superpowers:using-superpowers"}"#
-    )));
+    assert!(model.chats[0].turns[0].tool_calls.iter().any(|call| {
+        call.summary.as_deref() == Some(r#"{"skill":"superpowers:using-superpowers"}"#)
+    }));
 }
 
 #[test]
@@ -582,22 +619,23 @@ fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() 
         status: ToolCallStatus::Ready,
     });
 
-    let tool_blocks: Vec<_> = model
-        .blocks
+    let tool_calls: Vec<_> = model.chats[0].turns[0]
+        .tool_calls
         .iter()
-        .filter_map(|block| match block {
-            super::block::ConversationBlock::ToolCall {
-                id, name, summary, ..
-            } => Some((id.as_ref(), name.as_str(), summary.as_str())),
-            _ => None,
+        .map(|call| {
+            (
+                call.id.as_ref().unwrap().as_ref(),
+                call.name.as_str(),
+                call.summary.as_deref().unwrap_or(""),
+            )
         })
         .collect();
 
-    assert_eq!(tool_blocks.len(), 2, "应保留两个独立 tool call block");
-    assert!(tool_blocks.iter().any(|(id, name, summary)| {
+    assert_eq!(tool_calls.len(), 2, "应保留两个独立 tool call block");
+    assert!(tool_calls.iter().any(|(id, name, summary)| {
         *id == "call-list" && *name == "TaskListCreate" && summary.contains("修复显示")
     }));
-    assert!(tool_blocks.iter().any(|(id, name, summary)| {
+    assert!(tool_calls.iter().any(|(id, name, summary)| {
         *id == "call-task" && *name == "TaskCreate" && summary.contains("写测试")
     }));
 }
@@ -869,28 +907,27 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         status: ToolCallStatus::Ready,
     });
 
-    let tool_pos = model
-        .blocks
+    let positions: Vec<_> = model
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
-            matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if id.as_ref() == "tool-1"
-            )
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            OutputTimelineItem::ToolCall { reference }
+            | OutputTimelineItem::ToolResult { reference }
+                if reference.tool_call_id.as_ref() == "tool-1" =>
+            {
+                Some(index)
+            }
+            _ => None,
         })
-        .expect("tool block");
-    let result_pos = model
-        .blocks
-        .iter()
-        .position(|block| {
-            matches!(
-                block,
-                super::block::ConversationBlock::ToolResult { id, .. } if id.as_ref() == "tool-1"
-            )
-        })
-        .expect("tool result block");
+        .collect();
 
-    assert!(tool_pos < result_pos, "工具结果不应显示在工具标题之前");
+    assert_eq!(positions.len(), 2);
+    assert!(
+        positions[0] < positions[1],
+        "工具结果不应显示在工具标题之前"
+    );
 }
 
 #[test]
@@ -931,13 +968,14 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     });
 
     let positions: Vec<_> = model
-        .blocks
+        .timeline
+        .items()
         .iter()
         .enumerate()
-        .filter_map(|(index, block)| match block {
-            super::block::ConversationBlock::ToolCall { id, .. }
-            | super::block::ConversationBlock::ToolResult { id, .. }
-                if id.as_ref() == "tool-1" =>
+        .filter_map(|(index, item)| match item {
+            OutputTimelineItem::ToolCall { reference }
+            | OutputTimelineItem::ToolResult { reference }
+                if reference.tool_call_id.as_ref() == "tool-1" =>
             {
                 Some(index)
             }
@@ -1041,11 +1079,48 @@ fn test_conversation_keeps_tool_args_preview() {
         status: ToolCallStatus::Ready,
     });
 
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolCall { args_preview, .. }
-            if args_preview.contains("src/main.rs")
-    )));
+    let read_call =
+        tool_call(&model, "chat-1", "turn-1", "tool-1").expect("Read tool call should exist");
+    assert!(read_call.args_preview.contains("src/main.rs"));
+}
+
+#[test]
+fn test_tool_call_timeline_item_stores_reference_not_copied_payload() {
+    let mut model = ConversationModel::default();
+    model.apply(ConversationIntent::StartChat {
+        submission: "read file".to_string(),
+    });
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: super::ids::ChatId::new("chat-1"),
+        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: "tool-1".to_string(),
+        name: "Read".to_string(),
+        index: 0,
+        arguments: Some(r#"{"file_path":"src/main.rs"}"#.to_string()),
+        summary: None,
+        status: ToolCallStatus::Ready,
+    });
+
+    let timeline_item = model
+        .timeline
+        .items()
+        .iter()
+        .find(|item| matches!(item, OutputTimelineItem::ToolCall { .. }))
+        .expect("timeline should contain tool call ref");
+
+    match timeline_item {
+        OutputTimelineItem::ToolCall { reference } => {
+            assert_eq!(reference.context.chat_id.as_ref(), "chat-1");
+            assert_eq!(reference.context.turn_id.as_ref(), "turn-1");
+            assert_eq!(reference.tool_call_id.as_ref(), "tool-1");
+        }
+        _ => unreachable!(),
+    }
+    let call = tool_call(&model, "chat-1", "turn-1", "tool-1")
+        .expect("tool payload should live in chat turn model");
+    assert_eq!(call.name, "Read");
+    assert!(call.args_preview.contains("src/main.rs"));
 }
 
 #[test]

@@ -1,7 +1,8 @@
-use crate::tui::model::conversation::block::ConversationBlock;
-use crate::tui::model::conversation::ids::ToolCallId;
+use crate::tui::model::conversation::block::HookNoticeKind;
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
-use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
+use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::{
     allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
     OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
@@ -16,9 +17,13 @@ impl OutputViewAssembler {
         version: u64,
     ) -> OutputViewModel {
         let mut roots: Vec<BlockNode> = Vec::new();
-        for conversation_block in &conversation.blocks {
-            match conversation_block {
-                ConversationBlock::UserMessage { id, text } => {
+        if conversation.timeline.items().is_empty() {
+            assemble_legacy_conversation_blocks(conversation, &mut roots);
+        }
+
+        for item in conversation.timeline.items() {
+            match item {
+                OutputTimelineItem::UserMessage { id, text } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::UserMessage(TextBlockView {
@@ -28,7 +33,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::AssistantText { id, text, .. } => {
+                OutputTimelineItem::AssistantText { id, text, .. } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::AssistantMessage(TextBlockView {
@@ -38,7 +43,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::Thinking { id, text, .. } => {
+                OutputTimelineItem::Thinking { id, text, .. } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::ThinkingMessage(TextBlockView {
@@ -48,13 +53,18 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::ToolCall { id, .. } => {
-                    if let Some(tool) = find_tool_view(conversation, id.as_ref()) {
+                OutputTimelineItem::ToolCall { reference } => {
+                    if let Some(tool) = find_tool_view(
+                        conversation,
+                        &reference.context.chat_id,
+                        &reference.context.turn_id,
+                        &reference.tool_call_id,
+                    ) {
                         let mut parent =
                             leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
                         // 工具结果升为子块：取 result_summary 同源文本，附加为 depth-1 子节点。
                         if let Some(result_text) = tool.result_summary.clone() {
-                            let result_id = format!("{}-result", id.as_ref());
+                            let result_id = format!("{}-result", reference.tool_call_id.as_ref());
                             let child = leaf(
                                 result_id.clone(),
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
@@ -70,36 +80,50 @@ impl OutputViewAssembler {
                         roots.push(parent);
                     }
                 }
-                ConversationBlock::ToolResult {
-                    id,
-                    output,
-                    content,
-                    is_error,
-                    image_count,
-                    ..
-                } => {
-                    if tool_result_is_embedded(conversation, id) {
+                OutputTimelineItem::ToolResult { reference } => {
+                    if tool_result_is_embedded(
+                        conversation,
+                        &reference.context.chat_id,
+                        &reference.context.turn_id,
+                        &reference.tool_call_id,
+                    ) {
                         continue;
                     }
-                    let tool_name = find_tool_name_by_id(conversation, id);
-                    let display_output =
-                        display_text_for_tool_result(tool_name.as_deref(), output, content);
+                    let tool_name = find_tool_name_by_id(
+                        conversation,
+                        &reference.context.chat_id,
+                        &reference.context.turn_id,
+                        &reference.tool_call_id,
+                    );
+                    let Some(result) = find_tool_result_payload(
+                        conversation,
+                        &reference.context.chat_id,
+                        &reference.context.turn_id,
+                        &reference.tool_call_id,
+                    ) else {
+                        continue;
+                    };
+                    let display_output = display_text_for_tool_result(
+                        tool_name.as_deref(),
+                        result.output,
+                        result.content,
+                    );
                     let text = summarize_non_embedded_result(
                         tool_name.as_deref(),
                         &display_output,
-                        *is_error,
+                        result.is_error,
                     );
-                    let text = if *image_count > 0 {
-                        format!("{text}\n[图片: {image_count}]")
+                    let text = if result.image_count > 0 {
+                        format!("{text}\n[图片: {}]", result.image_count)
                     } else {
                         text
                     };
                     roots.push(leaf(
-                        format!("{}-result", id.as_ref()),
+                        format!("{}-result", reference.tool_call_id.as_ref()),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
-                            key: format!("{}-result", id.as_ref()),
+                            key: format!("{}-result", reference.tool_call_id.as_ref()),
                             text,
-                            style: if *is_error {
+                            style: if result.is_error {
                                 SemanticStyle::Error
                             } else {
                                 SemanticStyle::Success
@@ -107,7 +131,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::System { id, text } => {
+                OutputTimelineItem::System { id, text } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::SystemNotice(TextBlockView {
@@ -117,15 +141,15 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::HookNotice { id, content } => {
+                OutputTimelineItem::HookNotice { id, content } => {
                     let (kind, style) = match content.kind {
-                        crate::tui::model::conversation::block::HookNoticeKind::Blocked => {
+                        HookNoticeKind::Blocked => {
                             (HookNoticeSemanticKind::Blocked, SemanticStyle::Warning)
                         }
-                        crate::tui::model::conversation::block::HookNoticeKind::Failed => {
+                        HookNoticeKind::Failed => {
                             (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
                         }
-                        crate::tui::model::conversation::block::HookNoticeKind::Info => {
+                        HookNoticeKind::Info => {
                             (HookNoticeSemanticKind::Info, SemanticStyle::Muted)
                         }
                     };
@@ -141,7 +165,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::Error { id, text } => {
+                OutputTimelineItem::Error { id, text } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -151,14 +175,10 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::QueuedUserMessage { .. } => {
+                OutputTimelineItem::QueuedUserMessage { .. } => {
                     // 排队输入不再作为 document block 渲染，改为在 spinner 上方固定显示。
                 }
-                ConversationBlock::AgentProgress {
-                    id,
-                    tool_id: _,
-                    message,
-                } => {
+                OutputTimelineItem::AgentProgress { id, message, .. } => {
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -168,7 +188,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::AskUser {
+                OutputTimelineItem::AskUser {
                     id,
                     question,
                     options,
@@ -198,7 +218,7 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                ConversationBlock::OrphanToolResult {
+                OutputTimelineItem::OrphanToolResult {
                     id,
                     tool_name,
                     output,
@@ -262,32 +282,25 @@ fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
     parent.children.push(child);
 }
 
-fn tool_result_is_embedded(conversation: &ConversationModel, tool_id: &ToolCallId) -> bool {
-    conversation.chats.iter().any(|chat| {
-        chat.turns.iter().any(|turn| {
-            turn.tool_calls.iter().any(|call| {
-                call.id.as_ref() == Some(tool_id)
-                    && call
-                        .result
-                        .as_ref()
-                        .is_some_and(|result| !result.is_empty())
-            })
-        })
-    })
+fn tool_result_is_embedded(
+    conversation: &ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> bool {
+    find_tool_call(conversation, chat_id, turn_id, tool_id)
+        .and_then(|call| call.result.as_ref())
+        .is_some_and(|result| !result.is_empty())
 }
 
-/// 查找 tool call id 对应的工具名称（遍历 conversation 中的所有 tool_calls）。
-fn find_tool_name_by_id(conversation: &ConversationModel, tool_id: &ToolCallId) -> Option<String> {
-    for chat in &conversation.chats {
-        for turn in &chat.turns {
-            for call in &turn.tool_calls {
-                if call.id.as_ref() == Some(tool_id) {
-                    return Some(call.name.clone());
-                }
-            }
-        }
-    }
-    None
+/// 查找指定 runtime context 下 tool call id 对应的工具名称。
+fn find_tool_name_by_id(
+    conversation: &ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<String> {
+    find_tool_call(conversation, chat_id, turn_id, tool_id).map(|call| call.name.clone())
 }
 
 /// 对非嵌入/孤儿 ToolResult 生成摘要文本：优先用工具的 `format_result_summary`，
@@ -304,74 +317,156 @@ fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error
     default_tool_result_summary(name, is_error).join("\n")
 }
 
-fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<ToolCallBlockView> {
-    for chat in &conversation.chats {
-        for turn in &chat.turns {
-            for call in &turn.tool_calls {
-                if call.id.as_ref().map(|id| id.as_ref()) != Some(tool_id) {
-                    continue;
-                }
-                let (icon, semantic_status, style) = map_tool_status(call.status);
-                let result_summary = call
-                    .result
-                    .as_deref()
-                    .filter(|result| !result.is_empty())
-                    .map(|result| {
-                        find_tool_result_content(conversation, tool_id)
-                            .map(|content| {
-                                display_text_for_tool_result(Some(&call.name), result, content)
-                            })
-                            .unwrap_or_else(|| result.to_string())
-                    });
-                log::debug!(
-                    target: "cli::tui::tool_flow",                    "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
-                    chat.id.as_ref(),
-                    turn.id.as_ref(),
-                    tool_id,
-                    call.name,
-                    call.status,
-                    call.args_preview.len(),
-                    call.summary.as_ref().map(|value| value.len()).unwrap_or(0),
-                    result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
-                    call.activities.len(),
-                );
-                return Some(ToolCallBlockView {
-                    key: format!("{}/{}/{}", chat.id.as_ref(), turn.id.as_ref(), tool_id),
-                    chat_id: Some(chat.id.as_ref().to_string()),
-                    turn_id: Some(turn.id.as_ref().to_string()),
-                    tool_call_id: Some(tool_id.to_string()),
-                    title: call.name.clone(),
-                    icon: icon.to_string(),
-                    semantic_status,
-                    style,
-                    args_preview: (!call.args_preview.is_empty())
-                        .then(|| call.args_preview.clone()),
-                    summary: call.summary.clone(),
-                    activity_summary: call.activities.last().cloned(),
-                    // result 子块展示实际工具 output（供渲染层 format_result_lines 按
-                    // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
-                    // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
-                    result_summary,
-                    collapsible: true,
-                    collapsed: false,
-                });
-            }
-        }
-    }
-    None
+fn find_tool_view(
+    conversation: &ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<ToolCallBlockView> {
+    let call = find_tool_call(conversation, chat_id, turn_id, tool_id)?;
+    let (icon, semantic_status, style) = map_tool_status(call.status);
+    let result_summary = call
+        .result
+        .as_deref()
+        .filter(|result| !result.is_empty())
+        .map(|result| {
+            find_tool_result_payload(conversation, chat_id, turn_id, tool_id)
+                .map(|payload| {
+                    display_text_for_tool_result(Some(&call.name), result, payload.content)
+                })
+                .unwrap_or_else(|| result.to_string())
+        });
+    log::debug!(
+        target: "cli::tui::tool_flow",        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
+        chat_id.as_ref(),
+        turn_id.as_ref(),
+        tool_id.as_ref(),
+        call.name,
+        call.status,
+        call.args_preview.len(),
+        call.summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        call.activities.len(),
+    );
+    Some(ToolCallBlockView {
+        key: format!(
+            "{}/{}/{}",
+            chat_id.as_ref(),
+            turn_id.as_ref(),
+            tool_id.as_ref()
+        ),
+        chat_id: Some(chat_id.as_ref().to_string()),
+        turn_id: Some(turn_id.as_ref().to_string()),
+        tool_call_id: Some(tool_id.as_ref().to_string()),
+        title: call.name.clone(),
+        icon: icon.to_string(),
+        semantic_status,
+        style,
+        args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
+        summary: call.summary.clone(),
+        activity_summary: call.activities.last().cloned(),
+        // result 子块展示实际工具 output（供渲染层 format_result_lines 按
+        // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
+        // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
+        result_summary,
+        collapsible: true,
+        collapsed: false,
+    })
 }
 
-fn find_tool_result_content<'a>(
+struct ToolResultPayload<'a> {
+    output: &'a str,
+    content: &'a serde_json::Value,
+    is_error: bool,
+    image_count: usize,
+}
+
+fn find_tool_call<'a>(
     conversation: &'a ConversationModel,
-    tool_id: &str,
-) -> Option<&'a serde_json::Value> {
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<&'a ToolCall> {
+    conversation
+        .chats
+        .iter()
+        .find(|chat| &chat.id == chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(tool_id))
+        })
+}
+
+fn find_tool_result_payload<'a>(
+    conversation: &'a ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<ToolResultPayload<'a>> {
     conversation.blocks.iter().find_map(|block| match block {
-        ConversationBlock::ToolResult { id, content, .. } if id.as_ref() == tool_id => {
-            Some(content)
+        crate::tui::model::conversation::block::ConversationBlock::ToolResult {
+            id,
+            chat_id: result_chat_id,
+            turn_id: result_turn_id,
+            output,
+            content,
+            is_error,
+            image_count,
+        } if id == tool_id && result_chat_id == chat_id && result_turn_id == turn_id => {
+            Some(ToolResultPayload {
+                output,
+                content,
+                is_error: *is_error,
+                image_count: *image_count,
+            })
         }
-        ConversationBlock::OrphanToolResult { id, content, .. } if id == tool_id => Some(content),
         _ => None,
     })
+}
+
+fn assemble_legacy_conversation_blocks(
+    conversation: &ConversationModel,
+    roots: &mut Vec<BlockNode>,
+) {
+    for block in &conversation.blocks {
+        let crate::tui::model::conversation::block::ConversationBlock::ToolResult {
+            id,
+            chat_id,
+            turn_id,
+            output,
+            content,
+            is_error,
+            image_count,
+        } = block
+        else {
+            continue;
+        };
+        if tool_result_is_embedded(conversation, chat_id, turn_id, id) {
+            continue;
+        }
+        let tool_name = find_tool_name_by_id(conversation, chat_id, turn_id, id);
+        let display_output = display_text_for_tool_result(tool_name.as_deref(), output, content);
+        let text = summarize_non_embedded_result(tool_name.as_deref(), &display_output, *is_error);
+        let text = if *image_count > 0 {
+            format!("{text}\n[图片: {image_count}]")
+        } else {
+            text
+        };
+        roots.push(leaf(
+            format!("{}-result", id.as_ref()),
+            OutputBlockKind::DiagnosticNotice(TextBlockView {
+                key: format!("{}-result", id.as_ref()),
+                text,
+                style: if *is_error {
+                    SemanticStyle::Error
+                } else {
+                    SemanticStyle::Success
+                },
+            }),
+        ));
+    }
 }
 
 fn display_text_for_tool_result(

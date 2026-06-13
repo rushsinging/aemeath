@@ -10,9 +10,6 @@ impl ConversationModel {
         chat_id: ChatId,
         turn_id: ChatTurnId,
         id: ToolCallId,
-        name: String,
-        summary: String,
-        args_preview: String,
     ) {
         if self.blocks.iter().any(|block| {
             matches!(
@@ -24,13 +21,11 @@ impl ConversationModel {
             return;
         }
         let block = ConversationBlock::ToolCall {
-            id,
-            chat_id,
-            turn_id,
-            name,
-            summary,
-            args_preview,
+            id: id.clone(),
+            chat_id: chat_id.clone(),
+            turn_id: turn_id.clone(),
         };
+        self.timeline.push_tool_call_ref(chat_id, turn_id, id);
         self.blocks.push(block);
     }
 
@@ -52,6 +47,8 @@ impl ConversationModel {
                     if result_chat_id == &chat_id && result_turn_id == &turn_id && result_id == &id
             )
         });
+        self.timeline
+            .push_tool_result_ref(chat_id.clone(), turn_id.clone(), id.clone());
         let block = ConversationBlock::ToolResult {
             id: id.clone(),
             chat_id: chat_id.clone(),
@@ -80,6 +77,11 @@ impl ConversationModel {
         turn_id: &ChatTurnId,
         id: &str,
     ) {
+        self.timeline.move_tool_result_after_tool_call(
+            chat_id,
+            turn_id,
+            &ToolCallId::new(id.to_string()),
+        );
         let mut results = Vec::new();
         let mut index = 0;
         while index < self.blocks.len() {

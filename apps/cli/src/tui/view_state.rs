@@ -64,6 +64,13 @@ impl ViewModelDirty {
         self.dialog = true;
     }
 
+    pub fn merge(&mut self, source: &Self) {
+        self.output |= source.output;
+        self.status |= source.status;
+        self.input |= source.input;
+        self.dialog |= source.dialog;
+    }
+
     pub fn clear_output(&mut self) {
         self.output = false;
     }

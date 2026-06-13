@@ -3,6 +3,7 @@ use crate::tui::adapter::effect_result::{map_effect_result, EffectResultMapping}
 use crate::tui::adapter::input::{route_submission, ConversationAvailability, SubmissionRoute};
 use crate::tui::adapter::key_event::map_key_event;
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::change::{dirty_from_model_changes, ModelChange};
 use crate::tui::model::conversation::change::ConversationChange;
 use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::input::change::InputChange;
@@ -15,6 +16,29 @@ use crate::tui::view_state::{AppViewState, ViewModelDirty};
 pub struct TuiUpdateResult {
     pub dirty: ViewModelDirty,
     pub effects: Vec<Effect>,
+}
+
+impl TuiUpdateResult {
+    pub(crate) fn push_render_request_once(&mut self) {
+        if !self.effects.contains(&Effect::RequestRender) {
+            self.effects.push(Effect::RequestRender);
+        }
+    }
+
+    pub(crate) fn dedupe_render_requests(&mut self) {
+        let mut seen = false;
+        self.effects.retain(|effect| {
+            if !matches!(effect, Effect::RequestRender) {
+                return true;
+            }
+            if seen {
+                false
+            } else {
+                seen = true;
+                true
+            }
+        });
+    }
 }
 
 pub fn update(model: &mut TuiModel, view_state: &mut AppViewState, msg: TuiMsg) -> TuiUpdateResult {
@@ -140,8 +164,9 @@ pub(crate) fn reduce_agent_event(
         result.dirty.mark_status();
     }
     result.effects.extend(mapping.effects);
+    result.dedupe_render_requests();
     if result.dirty.output || result.dirty.status || result.dirty.dialog {
-        result.effects.push(Effect::RequestRender);
+        result.push_render_request_once();
     }
     result
 }
@@ -184,11 +209,20 @@ fn apply_input_changes(result: &mut TuiUpdateResult, changes: &[InputChange]) {
         return;
     }
     result.dirty.mark_input();
-    result.effects.push(Effect::RequestRender);
+    result.push_render_request_once();
 }
 
 fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[ConversationChange]) {
-    for change in changes {
+    let model_changes: Vec<ModelChange> = changes.iter().map(ModelChange::from).collect();
+    let dirty = dirty_from_model_changes(&model_changes);
+    result.dirty.merge(&dirty);
+    if dirty.output || dirty.status {
+        result.push_render_request_once();
+    }
+}
+
+impl From<&ConversationChange> for ModelChange {
+    fn from(change: &ConversationChange) -> Self {
         match change {
             ConversationChange::OutputDirty
             | ConversationChange::UserMessageAppended { .. }
@@ -207,15 +241,12 @@ fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[Conversat
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
             | ConversationChange::AskUserDismissed
-            | ConversationChange::StyleBoundaryResetRequired => result.dirty.mark_output(),
+            | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }
             | ConversationChange::ChatCompleting { .. }
-            | ConversationChange::ChatCompleted { .. } => result.dirty.mark_status(),
+            | ConversationChange::ChatCompleted { .. } => ModelChange::status_dirty(),
         }
-    }
-    if result.dirty.output || result.dirty.status {
-        result.effects.push(Effect::RequestRender);
     }
 }
 
@@ -344,6 +375,61 @@ mod tests {
             crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
                 if id.as_ref() == "tool-1"
         )));
+    }
+
+    #[test]
+    fn test_reduce_agent_event_applies_tool_patch_and_spinner_atomically_with_single_render_request(
+    ) {
+        let mut model = TuiModel::default();
+        let chat_id = crate::tui::model::conversation::ids::ChatId::new("chat-atomic");
+        let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-atomic");
+
+        let result = reduce_agent_event(
+            &mut model,
+            AgentEventMapping {
+                conversation: vec![ConversationIntent::ObserveToolCallUpdate {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
+                    id: "tool-atomic".to_string(),
+                    provider_id: Some("provider-atomic".to_string()),
+                    name: "Read".to_string(),
+                    index: 0,
+                    arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
+                    summary: Some("Read src/lib.rs".to_string()),
+                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+                }],
+                runtime: vec![
+                    crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(
+                        crate::tui::model::runtime::spinner::SpinnerPhase::Generating,
+                    ),
+                ],
+                effects: vec![Effect::RequestRender],
+                ..Default::default()
+            },
+        );
+
+        assert!(result.dirty.output);
+        assert!(result.dirty.status);
+        assert_eq!(
+            result
+                .effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::RequestRender))
+                .count(),
+            1
+        );
+        assert!(model
+            .conversation
+            .timeline
+            .items()
+            .iter()
+            .any(|item| matches!(
+                item,
+                crate::tui::model::output_timeline::OutputTimelineItem::ToolCall { reference }
+                    if reference.context.chat_id == chat_id
+                        && reference.context.turn_id == turn_id
+                        && reference.tool_call_id.as_ref() == "tool-atomic"
+            )));
     }
 
     #[test]

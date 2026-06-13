@@ -2,6 +2,7 @@
 mod tests {
     const FOCUSED_LOG_FILES: &[&str] = &[
         "apps/cli/src/tui/adapter/agent_event.rs",
+        "apps/cli/src/tui/adapter/tool_flow_projector.rs",
         "apps/cli/src/tui/app/update/spinner.rs",
         "apps/cli/src/tui/model/conversation/model.rs",
         "apps/cli/src/tui/model/conversation/tool_flow.rs",
