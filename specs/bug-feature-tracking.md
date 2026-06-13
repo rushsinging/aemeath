@@ -2,7 +2,7 @@
 
 **Scope**：无路径触发。任何 bug 修复或 feature 实现的流程约束；操作 GitHub Issues 时适用。
 **主触发**：无（按场景）。
-**次触发**：开始任何 bug 修复 / feature 实现；新增、更新或关闭 GitHub Issue；改 `docs/feature/specs/**` 设计稿。
+**次触发**：开始任何 bug 修复 / feature 实现；新增、更新或关闭 GitHub Issue；改 `docs/snapshot/specs/**` 设计稿。
 
 ## 仓库与工具
 
@@ -50,7 +50,7 @@
 - **修改涉及已知 bug 时 MUST**：
   1. 在 PR 描述中引用 issue（如 `Closes #N`）。
   2. 合并后 `gh issue close N --repo rushsinging/aemeath --comment "已合并：<commit-sha>"`。
-- **设计稿联动**：feature 类 issue **SHOULD** 配套 `docs/feature/specs/<file>.md` 设计稿。每份 spec 顶部已写 `> 对应 Issue: <url>`；修改 spec 时 **MUST** 同步更新该指针（issue 关 / 转 PR / 重开都要更新）。
+- **设计稿联动**：feature 类 issue **SHOULD** 配套 `docs/snapshot/specs/<file>.md` 设计稿。每份 spec 顶部已写 `> 对应 Issue: <url>`；修改 spec 时 **MUST** 同步更新该指针（issue 关 / 转 PR / 重开都要更新）。
 
 ## 关闭 / 重开
 
@@ -60,5 +60,5 @@
 
 ## 不属于本分片
 
-- 改 `docs/feature/specs/**` 之外的 `docs/**`：按内容落到对应分片（`runtime.md` / `tools.md` 等）。
+- 改 `docs/snapshot/specs/**` 之外的 `docs/**`：按内容落到对应分片（`runtime.md` / `tools.md` 等）。
 - 改 `specs/**` 自身：按改动内容分片（与本分片无关）。

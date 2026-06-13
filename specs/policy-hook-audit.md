@@ -7,7 +7,7 @@
 ## Policy（权限）
 
 - 权限 / 安全评估：`agent/features/policy/src/business/security.rs`。
-- 完整权限管控系统（PermissionEngine、AskMe / Auto / Plan / AllowAll 模式、audit/policy 域）仍在设计/实施中，设计依据见 `docs/feature/active.md` 的 #42 与 `docs/feature/specs/042-permission-control-system.md`、`047-ddd-redesign.md`。改动前先核对该 feature 当前状态，**NEVER** 把尚未落地的设计当作既成约束。
+- 完整权限管控系统（PermissionEngine、AskMe / Auto / Plan / AllowAll 模式、audit/policy 域）仍在设计/实施中，设计依据见 `docs/snapshot/active.md` 的 #42 与 `docs/snapshot/specs/042-permission-control-system.md`、`047-ddd-redesign.md`。改动前先核对该 feature 当前状态，**NEVER** 把尚未落地的设计当作既成约束。
 
 ## Hook
 
