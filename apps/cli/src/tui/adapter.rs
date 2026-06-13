@@ -15,3 +15,4 @@ pub mod output_widget;
 pub mod resize;
 #[cfg(test)]
 pub mod status_widget;
+pub mod tool_flow_projector;

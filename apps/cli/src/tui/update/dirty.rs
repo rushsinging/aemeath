@@ -1,10 +1,7 @@
 use crate::tui::view_state::ViewModelDirty;
 
 pub fn merge_dirty(target: &mut ViewModelDirty, source: ViewModelDirty) {
-    target.output |= source.output;
-    target.status |= source.status;
-    target.input |= source.input;
-    target.dialog |= source.dialog;
+    target.merge(&source);
 }
 
 #[cfg(test)]

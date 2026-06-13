@@ -37,9 +37,6 @@ pub enum ConversationBlock {
         id: ToolCallId,
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        name: String,
-        summary: String,
-        args_preview: String,
     },
     ToolResult {
         id: ToolCallId,
@@ -149,9 +146,6 @@ mod tests {
             id: ToolCallId::new("tool-1"),
             chat_id: ChatId::new("chat-1"),
             turn_id: ChatTurnId::new("turn-1"),
-            name: "Read".to_string(),
-            summary: "read file".to_string(),
-            args_preview: String::new(),
         };
         assert_eq!(block.id(), "tool-1");
     }

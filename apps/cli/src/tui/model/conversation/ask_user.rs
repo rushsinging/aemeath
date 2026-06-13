@@ -7,6 +7,8 @@
 use super::block::ConversationBlock;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
+use crate::tui::model::conversation::ask_user_timeline::sync_ask_user_timeline_item;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// AskUser 交互块的固定 id（同一时刻至多一个）。
 pub const ASK_USER_BLOCK_ID: &str = "ask-user";
@@ -57,6 +59,19 @@ impl ConversationModel {
         self.remove_ask_user_block();
         self.blocks.push(ConversationBlock::AskUser {
             id: ASK_USER_BLOCK_ID.to_string(),
+            question: question.clone(),
+            options: options.clone(),
+            llm_option_count,
+            multi_select,
+            cursor,
+            selected: vec![false; total],
+            chat_input_active: false,
+            chat_input_text: String::new(),
+            default: default.clone(),
+            answer: None,
+        });
+        self.timeline.push(OutputTimelineItem::AskUser {
+            id: ASK_USER_BLOCK_ID.to_string(),
             question,
             options,
             llm_option_count,
@@ -88,7 +103,7 @@ impl ConversationModel {
                 return Vec::new();
             }
             *current = cursor.min(options.len() - 1);
-            return Self::ask_user_updated();
+            return self.ask_user_updated();
         }
         Vec::new()
     }
@@ -106,7 +121,7 @@ impl ConversationModel {
             }
             if let Some(flag) = selected.get_mut(index) {
                 *flag = !*flag;
-                return Self::ask_user_updated();
+                return self.ask_user_updated();
             }
         }
         Vec::new()
@@ -124,7 +139,7 @@ impl ConversationModel {
             if !active {
                 chat_input_text.clear();
             }
-            return Self::ask_user_updated();
+            return self.ask_user_updated();
         }
         Vec::new()
     }
@@ -139,7 +154,7 @@ impl ConversationModel {
         {
             if *chat_input_active {
                 chat_input_text.push(ch);
-                return Self::ask_user_updated();
+                return self.ask_user_updated();
             }
         }
         Vec::new()
@@ -155,7 +170,7 @@ impl ConversationModel {
         {
             if *chat_input_active {
                 chat_input_text.pop();
-                return Self::ask_user_updated();
+                return self.ask_user_updated();
             }
         }
         Vec::new()
@@ -193,12 +208,13 @@ impl ConversationModel {
         self.clear_active_text_blocks();
         if let Some(ConversationBlock::AskUser { answer: ans, .. }) = self.ask_user_block_mut() {
             *ans = Some(answer);
-            return Self::ask_user_updated();
+            return self.ask_user_updated();
         }
         Vec::new()
     }
 
-    fn ask_user_updated() -> Vec<ConversationChange> {
+    fn ask_user_updated(&mut self) -> Vec<ConversationChange> {
+        sync_ask_user_timeline_item(&self.blocks, self.timeline.items_mut());
         vec![
             ConversationChange::AskUserUpdated {
                 id: ASK_USER_BLOCK_ID.to_string(),
@@ -218,6 +234,8 @@ impl ConversationModel {
         let before = self.blocks.len();
         self.blocks
             .retain(|block| !matches!(block, ConversationBlock::AskUser { .. }));
+        self.timeline
+            .retain(|item| !matches!(item, OutputTimelineItem::AskUser { .. }));
         before != self.blocks.len()
     }
 }

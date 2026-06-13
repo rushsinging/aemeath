@@ -1,11 +1,11 @@
 //! ConversationModel 辅助功能测试（reset、append_user_message）。
 
-use super::block::ConversationBlock;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
 fn test_append_user_message_pushes_block_without_new_chat() {
@@ -122,9 +122,28 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::ToolCallObserved { name, .. } if name == "Bash")));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        ConversationBlock::ToolCall { id, name, args_preview, .. }
-            if id.as_ref() == "tool-1" && name == "Bash" && args_preview.contains("pwd")
+    let tool_call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id.as_ref() == "runtime-chat-1")
+        .and_then(|chat| {
+            chat.turns
+                .iter()
+                .find(|turn| turn.id.as_ref() == "runtime-turn-1")
+        })
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref().is_some_and(|id| id.as_ref() == "tool-1"))
+        })
+        .expect("tool call should exist");
+    assert_eq!(tool_call.name, "Bash");
+    assert!(tool_call.args_preview.contains("pwd"));
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::ToolCall { reference }
+            if reference.context.chat_id.as_ref() == "runtime-chat-1"
+                && reference.context.turn_id.as_ref() == "runtime-turn-1"
+                && reference.tool_call_id.as_ref() == "tool-1"
     )));
 }
