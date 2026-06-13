@@ -17,6 +17,7 @@ use crate::business::chat::looping::{
     RuntimeStreamHandler, RuntimeTurnContext,
 };
 use provider::api::StopReason;
+use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -132,12 +133,13 @@ where
     let mut pending_input = PendingInputBuffer::default();
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
-    let chat_id = format!("session-{session_id}");
+    let chat_id = ChatId::new_v7();
     // 将 chat_id 同步到日志 context，影响 tool/audit/hook 等共享 sink 的 chat 字段
-    logging::context::set_current_chat_id(chat_id.clone());
+    logging::context::set_current_chat_id(chat_id.to_string());
     loop {
         turn_count += 1;
-        let turn_context = RuntimeTurnContext::new(chat_id.clone(), format!("turn-{turn_count}"));
+        let turn_id = ChatTurnId::new_v7();
+        let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id);
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
             .await; // Refresh tool schemas each turn so dynamically registered MCP tools
