@@ -1,5 +1,6 @@
 use super::driver::{
-    ChatApiDriver, LiteLlmDriver, MinimaxDriver, OpenAiDriver, VolcengineDriver, ZhipuDriver,
+    ChatApiDriver, LiteLlmDriver, MimoDriver, MinimaxDriver, OpenAiDriver, VolcengineDriver,
+    ZhipuDriver,
 };
 use super::*;
 use crate::core::client::OpenAIProviderConfig;
@@ -242,6 +243,38 @@ fn minimax_provider_keeps_v1_base_url_suffix() {
         provider.chat_url(),
         "https://api.minimaxi.com/v1/chat/completions"
     );
+}
+
+#[test]
+fn test_mimo_driver_uses_max_completion_tokens() {
+    assert_eq!(MimoDriver.max_tokens_field(), "max_completion_tokens");
+}
+
+#[test]
+fn test_mimo_driver_enables_thinking_by_default() {
+    let mut body = serde_json::json!({});
+
+    MimoDriver.apply_reasoning_fields(&mut body, None, false);
+
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "enabled" }));
+}
+
+#[test]
+fn test_mimo_driver_respects_bool_reasoning_override() {
+    let mut body = serde_json::json!({});
+
+    MimoDriver.apply_reasoning_fields(&mut body, Some(&ReasoningConfig::Bool(false)), true);
+
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+}
+
+#[test]
+fn test_mimo_config_uses_chat_completions_suffix() {
+    use crate::api::ProviderDriverKind;
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::Mimo, "mimo");
+
+    assert_eq!(config.chat_api_suffix, "/chat/completions");
+    assert_eq!(config.driver, ProviderDriverKind::Mimo);
 }
 
 #[test]

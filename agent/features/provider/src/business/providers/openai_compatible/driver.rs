@@ -42,6 +42,9 @@ pub struct VolcengineDriver;
 #[derive(Debug)]
 pub struct MinimaxDriver;
 
+#[derive(Debug)]
+pub struct MimoDriver;
+
 impl ChatApiDriver for OpenAiDriver {
     fn apply_reasoning_fields(
         &self,
@@ -162,6 +165,27 @@ impl ChatApiDriver for MinimaxDriver {
     }
 }
 
+impl ChatApiDriver for MimoDriver {
+    fn max_tokens_field(&self) -> &'static str {
+        "max_completion_tokens"
+    }
+
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        _reasoning_enabled: bool,
+    ) {
+        let enabled = match reasoning_config {
+            Some(ReasoningConfig::Bool(value)) => *value,
+            Some(ReasoningConfig::ThinkingBudget(_)) | Some(ReasoningConfig::Object(_)) => true,
+            None => true,
+        };
+        let thinking_type = if enabled { "enabled" } else { "disabled" };
+        request_body["thinking"] = serde_json::json!({ "type": thinking_type });
+    }
+}
+
 pub(crate) fn driver_for_provider_driver(
     driver: ProviderDriverKind,
 ) -> Box<dyn ChatApiDriver + Send + Sync> {
@@ -171,6 +195,7 @@ pub(crate) fn driver_for_provider_driver(
         ProviderDriverKind::LiteLLM => Box::new(LiteLlmDriver),
         ProviderDriverKind::Volcengine => Box::new(VolcengineDriver),
         ProviderDriverKind::Minimax => Box::new(MinimaxDriver),
+        ProviderDriverKind::Mimo => Box::new(MimoDriver),
         // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
         ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama => Box::new(OpenAiDriver),
     }
