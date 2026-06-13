@@ -7,6 +7,22 @@ use serde::{Deserialize, Serialize};
 pub struct ChatMessage {
     pub role: String,
     pub content: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ChatMessageMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessageMetadata {
+    #[serde(default)]
+    pub source: ChatMessageSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatMessageSource {
+    #[default]
+    User,
+    SystemGenerated,
 }
 
 impl ChatMessage {
@@ -14,6 +30,17 @@ impl ChatMessage {
         Self {
             role: "user".to_string(),
             content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            metadata: None,
+        }
+    }
+
+    pub fn system_generated_user_text(text: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            metadata: Some(ChatMessageMetadata {
+                source: ChatMessageSource::SystemGenerated,
+            }),
         }
     }
 
@@ -21,6 +48,7 @@ impl ChatMessage {
         Self {
             role: "assistant".to_string(),
             content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            metadata: None,
         }
     }
 
@@ -39,6 +67,7 @@ impl ChatMessage {
         Self {
             role: "user".to_string(),
             content: serde_json::Value::Array(blocks),
+            metadata: None,
         }
     }
 
@@ -52,6 +81,13 @@ impl ChatMessage {
                     .collect::<Vec<_>>()
                     .join("")
             })
+            .unwrap_or_default()
+    }
+
+    pub fn source(&self) -> ChatMessageSource {
+        self.metadata
+            .as_ref()
+            .map(|metadata| metadata.source)
             .unwrap_or_default()
     }
 }

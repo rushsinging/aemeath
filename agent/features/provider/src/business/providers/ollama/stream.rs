@@ -170,6 +170,7 @@ pub(crate) async fn parse_ollama_stream(
         assistant_message: Message {
             role: Role::Assistant,
             content: content_blocks,
+            metadata: None,
         },
         usage,
         stop_reason,

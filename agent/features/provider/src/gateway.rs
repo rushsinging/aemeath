@@ -105,6 +105,7 @@ mod tests {
                 assistant_message: messages.last().cloned().unwrap_or_else(|| Message {
                     role: share::message::Role::Assistant,
                     content: Vec::new(),
+                    metadata: None,
                 }),
                 usage: crate::business::types::Usage {
                     input_tokens: 0,

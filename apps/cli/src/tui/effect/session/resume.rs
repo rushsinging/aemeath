@@ -95,6 +95,7 @@ mod tests {
                 { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "abc" } },
                 { "type": "text", "text": "world" }
             ]),
+            metadata: None,
         }];
 
         let history = extract_user_input_history(&messages);

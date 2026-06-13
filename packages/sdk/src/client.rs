@@ -50,6 +50,7 @@ pub trait AgentClient: Send + Sync + 'static {
             messages: vec![super::ChatMessage {
                 role: "user".to_string(),
                 content,
+                metadata: None,
             }],
             queue_drain: None,
             input_events: None,

@@ -478,6 +478,7 @@ mod tests {
         let event = sdk_event_to_ui_event(sdk::ChatEvent::MessagesSync(vec![sdk::ChatMessage {
             role: "user".to_string(),
             content: serde_json::json!([{ "type": "text", "text": "hello" }]),
+            metadata: None,
         }]));
 
         match event {

@@ -416,6 +416,7 @@ mod tests {
         sdk::ChatMessage {
             role: role.to_string(),
             content,
+            metadata: None,
         }
     }
 

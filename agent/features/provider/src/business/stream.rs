@@ -191,6 +191,7 @@ pub async fn parse_stream(
         assistant_message: Message {
             role: Role::Assistant,
             content: content_blocks,
+            metadata: None,
         },
         usage,
         stop_reason,

@@ -14,6 +14,7 @@ fn assistant_with_tools(ids: &[&str]) -> Message {
                 input: serde_json::json!({}),
             })
             .collect(),
+        metadata: None,
     }
 }
 
@@ -139,6 +140,7 @@ fn test_text_content_multiple_blocks() {
                 text: "part2".to_string(),
             },
         ],
+        metadata: None,
     };
     assert_eq!(msg.text_content(), "part1part2");
 }
@@ -160,6 +162,7 @@ fn test_text_content_skips_non_text() {
                 text: "after".to_string(),
             },
         ],
+        metadata: None,
     };
     assert_eq!(msg.text_content(), "beforeafter");
 }

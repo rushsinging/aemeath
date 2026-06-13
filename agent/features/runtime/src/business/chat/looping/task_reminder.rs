@@ -123,10 +123,7 @@ impl TaskReminderState {
         );
         let reminder = format!("<system-reminder>\n{}\n</system-reminder>", text);
 
-        Some(Message {
-            role: Role::User,
-            content: vec![ContentBlock::Text { text: reminder }],
-        })
+        Some(Message::system_generated_user(reminder))
     }
 }
 
