@@ -1,6 +1,7 @@
 //! Guidance resolution logic: loading, prefix-matching, and assembly.
 
 use super::guidance_dir;
+use super::constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH};
 
 #[async_trait::async_trait(?Send)]
 pub trait InstructionsLoadedHook {
@@ -125,6 +126,7 @@ pub async fn resolve_model_guidance_async(
 
 /// Load a named file with language subdirectory support.
 /// Tries `{language}/{name}.md` first, falls back to `{name}.md`.
+/// If file is empty or not found, falls back to built-in default content.
 pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<String> {
     let dir = guidance_dir()?;
 
@@ -132,20 +134,24 @@ pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<St
     if !language.is_empty() {
         let lang_path = dir.join(language).join(format!("{}.md", name));
         if let Ok(content) = std::fs::read_to_string(&lang_path) {
-            log::debug!("Loaded guidance from {}", lang_path.display());
-            return Some(content);
+            if !content.trim().is_empty() {
+                log::debug!("Loaded guidance from {}", lang_path.display());
+                return Some(content);
+            }
         }
     }
 
     // Fallback to root directory
     let root_path = dir.join(format!("{}.md", name));
-    match std::fs::read_to_string(&root_path) {
-        Ok(content) => {
+    if let Ok(content) = std::fs::read_to_string(&root_path) {
+        if !content.trim().is_empty() {
             log::debug!("Loaded guidance from {}", root_path.display());
-            Some(content)
+            return Some(content);
         }
-        Err(_) => None,
     }
+
+    // Fallback to built-in default content
+    load_builtin_default(name, language)
 }
 
 /// Async version of load_named_file_with_lang.
@@ -163,28 +169,32 @@ async fn load_named_file_async_with_lang(
     if !language.is_empty() {
         let lang_path = dir.join(language).join(format!("{}.md", name));
         if let Ok(content) = std::fs::read_to_string(&lang_path) {
-            log::debug!("Loaded guidance from {}", lang_path.display());
+            if !content.trim().is_empty() {
+                log::debug!("Loaded guidance from {}", lang_path.display());
+                if let Some(hr) = hook_runner {
+                    let file_path_str = lang_path.to_string_lossy().to_string();
+                    hr.on_instructions_loaded(&file_path_str, "guidance").await;
+                }
+                return Some(content);
+            }
+        }
+    }
+
+    // Fallback to root directory
+    let root_path = dir.join(format!("{}.md", name));
+    if let Ok(content) = std::fs::read_to_string(&root_path) {
+        if !content.trim().is_empty() {
+            log::debug!("Loaded guidance from {}", root_path.display());
             if let Some(hr) = hook_runner {
-                let file_path_str = lang_path.to_string_lossy().to_string();
+                let file_path_str = root_path.to_string_lossy().to_string();
                 hr.on_instructions_loaded(&file_path_str, "guidance").await;
             }
             return Some(content);
         }
     }
 
-    // Fallback to root directory
-    let root_path = dir.join(format!("{}.md", name));
-    match std::fs::read_to_string(&root_path) {
-        Ok(content) => {
-            log::debug!("Loaded guidance from {}", root_path.display());
-            if let Some(hr) = hook_runner {
-                let file_path_str = root_path.to_string_lossy().to_string();
-                hr.on_instructions_loaded(&file_path_str, "guidance").await;
-            }
-            Some(content)
-        }
-        Err(_) => None,
-    }
+    // Fallback to built-in default content
+    load_builtin_default(name, language)
 }
 
 /// Load prefix-matched guidance file with language subdirectory support.
@@ -390,6 +400,24 @@ fn expand_tilde(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+/// Load built-in default content for a given file name and language.
+fn load_builtin_default(name: &str, language: &str) -> Option<String> {
+    let filename = format!("{}.md", name);
+    let files = match language {
+        "zh" => DEFAULT_FILES_ZH,
+        _ => DEFAULT_FILES_EN,
+    };
+
+    for &(file_name, content) in files {
+        if file_name == filename {
+            log::debug!("Using built-in default for {} ({})", filename, language);
+            return Some(content.trim().to_string());
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

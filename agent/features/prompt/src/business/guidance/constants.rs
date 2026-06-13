@@ -59,7 +59,17 @@ When fixing bugs or implementing features, if the same issue can be addressed wi
 // After init, users edit the md files directly.
 // ---------------------------------------------------------------------------
 
-/// Default guidance files for English language.
+/// Default file names for guidance directory initialization.
+/// Files are created empty; users fill in their own content.
+pub const DEFAULT_FILE_NAMES: &[&str] = &[
+    "_default.md",
+    "deepseek.md",
+    "glm.md",
+    "minimax.md",
+    "_reasoning.md",
+];
+
+/// Default guidance files for English language (embedded for fallback).
 pub const DEFAULT_FILES_EN: &[(&str, &str)] = &[
     (
         "_default.md",

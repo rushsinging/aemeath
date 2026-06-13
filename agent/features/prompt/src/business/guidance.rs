@@ -42,16 +42,16 @@ pub fn guidance_dir() -> Option<PathBuf> {
     Some(global_guidance_dir())
 }
 
-/// Initialise the guidance directory with default files.
+/// Initialise the guidance directory with empty placeholder files.
 ///
-/// Creates the directory structure:
-///   ~/.agents/guidance/
-///   ├── en/
-///   │   └── (English guidance files)
-///   └── zh/
-///       └── (Chinese guidance files)
+/// Creates empty files in `~/.agents/guidance/`:
+///   - `_default.md`
+///   - `deepseek.md`
+///   - `glm.md`
+///   - `minimax.md`
+///   - `_reasoning.md`
 ///
-/// Existing files are **never** overwritten.
+/// Users fill in their own content. Built-in defaults are used as fallback.
 pub fn init_guidance_dir() {
     let dir = match guidance_dir() {
         Some(d) => d,
@@ -65,28 +65,18 @@ pub fn init_guidance_dir() {
         }
     }
 
-    // Initialize language subdirectories
-    for (lang, files) in constants::SUPPORTED_LANGUAGES {
-        let lang_dir = dir.join(lang);
-        if !lang_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&lang_dir) {
-                log::warn!("Failed to create guidance lang dir {}: {}", lang_dir.display(), e);
-                continue;
-            }
+    // Create empty placeholder files
+    for &filename in constants::DEFAULT_FILE_NAMES {
+        let path = dir.join(filename);
+        if path.exists() {
+            continue; // never overwrite user-edited files
         }
-
-        for (filename, content) in *files {
-            let path = lang_dir.join(filename);
-            if path.exists() {
-                continue; // never overwrite user-edited files
-            }
-            if let Err(e) = std::fs::write(&path, content.trim()) {
-                log::warn!("Failed to write {}: {}", path.display(), e);
-            }
+        if let Err(e) = std::fs::File::create(&path) {
+            log::warn!("Failed to create {}: {}", path.display(), e);
         }
     }
 
-    log::info!("Initialised default guidance files in {}", dir.display());
+    log::info!("Initialised guidance files in {}", dir.display());
 }
 
 #[cfg(test)]
@@ -148,24 +138,19 @@ mod tests {
 
         init_guidance_dir();
 
-        // Check English subdirectory
-        assert!(guidance.join("en/_default.md").exists());
-        assert!(guidance.join("en/glm.md").exists());
-        assert!(guidance.join("en/deepseek.md").exists());
-        assert!(guidance.join("en/_reasoning.md").exists());
+        // Check that empty placeholder files are created
+        assert!(guidance.join("_default.md").exists());
+        assert!(guidance.join("deepseek.md").exists());
+        assert!(guidance.join("glm.md").exists());
+        assert!(guidance.join("minimax.md").exists());
+        assert!(guidance.join("_reasoning.md").exists());
 
-        // Check Chinese subdirectory
-        assert!(guidance.join("zh/_default.md").exists());
-        assert!(guidance.join("zh/glm.md").exists());
-        assert!(guidance.join("zh/deepseek.md").exists());
-        assert!(guidance.join("zh/_reasoning.md").exists());
+        // Verify files are empty
+        let content = std::fs::read_to_string(guidance.join("_default.md")).unwrap();
+        assert!(content.is_empty());
 
-        // Verify content
-        let content = std::fs::read_to_string(guidance.join("en/_reasoning.md")).unwrap();
-        assert!(content.contains("think/reason in English"));
-
-        let content = std::fs::read_to_string(guidance.join("zh/_reasoning.md")).unwrap();
-        assert!(content.contains("中文"));
+        let content = std::fs::read_to_string(guidance.join("_reasoning.md")).unwrap();
+        assert!(content.is_empty());
 
         let _ = std::fs::remove_dir_all(&temp_agents_dir);
     }
@@ -207,6 +192,21 @@ mod tests {
         // Now English should use its own
         let content = resolver::load_named_file_with_lang("_default", "en");
         assert_eq!(content, Some("en content".to_string()));
+
+        // Test fallback to built-in defaults when files are empty
+        std::fs::write(guidance.join("_default.md"), "").unwrap();
+        std::fs::write(zh_dir.join("_default.md"), "").unwrap();
+        std::fs::write(en_dir.join("_default.md"), "").unwrap();
+
+        // Should fallback to built-in default (English)
+        let content = resolver::load_named_file_with_lang("_default", "en");
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("English"));
+
+        // Should fallback to built-in default (Chinese)
+        let content = resolver::load_named_file_with_lang("_default", "zh");
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("中文"));
 
         let _ = std::fs::remove_dir_all(&temp_agents_dir);
     }
