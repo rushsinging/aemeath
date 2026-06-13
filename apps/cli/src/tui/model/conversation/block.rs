@@ -65,7 +65,7 @@ pub enum ConversationBlock {
     },
     AgentProgress {
         id: String,
-        tool_id: String,
+        tool_id: ToolCallId,
         message: String,
     },
     OrphanToolResult {
