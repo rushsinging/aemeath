@@ -1,4 +1,4 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -28,14 +28,14 @@ pub enum RuntimeObservation {
     },
     ToolCallStart {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolCallUpdate {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -45,7 +45,7 @@ pub enum RuntimeObservation {
     },
     ToolResult {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: String,
         tool_name: String,
         output: String,
@@ -55,7 +55,7 @@ pub enum RuntimeObservation {
     },
     AgentProgress {
         context: RuntimeTurnContext,
-        tool_id: String,
+        tool_id: ToolCallId,
         message: String,
     },
     Complete {
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn test_runtime_observation_exposes_explicit_context() {
-        let context = RuntimeTurnContext::new(ChatId::new("chat-a"), ChatTurnId::new("turn-a"));
+        let context = RuntimeTurnContext::new(ChatId::new_v7(), ChatTurnId::new_v7());
         let observation = RuntimeObservation::AssistantText {
             context: context.clone(),
             text: "hello".to_string(),
@@ -77,8 +77,8 @@ mod tests {
 
         match observation {
             RuntimeObservation::AssistantText { context, text } => {
-                assert_eq!(context.chat_id.as_ref(), "chat-a");
-                assert_eq!(context.turn_id.as_ref(), "turn-a");
+                assert_eq!(context.chat_id, context.chat_id);
+                assert_eq!(context.turn_id, context.turn_id);
                 assert_eq!(text, "hello");
             }
             other => panic!("unexpected observation: {other:?}"),
