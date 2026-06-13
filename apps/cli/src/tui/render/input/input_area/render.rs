@@ -19,28 +19,28 @@ impl InputArea {
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        vm: &InputAreaViewModel,
+        view_model: &InputAreaViewModel,
         selection: &InputSelectionViewState,
     ) {
-        let block = input_block(vm);
+        let block = input_block(view_model);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let display_lines = wrap_input_lines_for_width(vm.lines(), inner_area.width as usize);
-        let mut textarea = configured_textarea(vm, &display_lines);
+        let display_lines = wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
+        let mut textarea = configured_textarea(view_model, &display_lines);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
         render_selection(inner_area, buf, &display_lines, selection);
     }
 }
 
-fn input_block(vm: &InputAreaViewModel) -> Block<'static> {
-    let title = if vm.pending_images > 0 {
-        format!(" Input [{} image(s) pending] ", vm.pending_images)
+fn input_block(view_model: &InputAreaViewModel) -> Block<'static> {
+    let title = if view_model.pending_images > 0 {
+        format!(" Input [{} image(s) pending] ", view_model.pending_images)
     } else {
         " Input ".to_string()
     };
-    let border_style = if vm.focused {
+    let border_style = if view_model.focused {
         Style::default().fg(theme::ACCENT)
     } else {
         Style::default().fg(theme::BORDER)
@@ -170,6 +170,7 @@ mod tests {
     use crate::tui::model::input::document::InputDocument;
     use crate::tui::render::display::safe_text::col_to_char_idx;
     use crate::tui::render::input::input_area::selection::text_anchor_for_screen_col;
+    use crate::tui::view_assembler::input::InputViewAssembler;
     use ratatui::buffer::Buffer;
 
     fn render_vm_with_state(
@@ -179,7 +180,7 @@ mod tests {
     ) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputAreaViewModel::from_document(&document, None, pending_images, focused)
+        InputViewAssembler::from_document(&document, None, pending_images, focused)
     }
 
     #[test]

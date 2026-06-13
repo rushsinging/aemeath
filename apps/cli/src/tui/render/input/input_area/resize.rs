@@ -23,11 +23,12 @@ impl InputArea {
 pub mod tests {
     use super::*;
     use crate::tui::model::input::document::InputDocument;
+    use crate::tui::view_assembler::input::InputViewAssembler;
 
     fn vm(text: &str) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputAreaViewModel::from_document(&document, None, 0, true)
+        InputViewAssembler::from_document(&document, None, 0, true)
     }
 
     #[test]

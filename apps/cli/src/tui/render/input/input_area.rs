@@ -45,11 +45,11 @@ impl InputArea {
         area: Rect,
         suggestions_area: Rect,
         buf: &mut Buffer,
-        vm: &crate::tui::view_model::InputAreaViewModel,
+        view_model: &crate::tui::view_model::InputAreaViewModel,
         selection: &crate::tui::view_state::InputSelectionViewState,
         suggestions: &suggestions::SuggestionViewState,
     ) {
-        self.render(area, buf, vm, selection);
+        self.render(area, buf, view_model, selection);
         if suggestions_area.height > 0 {
             self.render_suggestions_in_area(suggestions_area, buf, suggestions);
         }

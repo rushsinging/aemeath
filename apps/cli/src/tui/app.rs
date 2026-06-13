@@ -211,11 +211,11 @@ impl App {
             let suggestions_height = self
                 .input_area
                 .suggestions_height(&self.model.input.completion);
-            let input_vm = crate::tui::view_model::InputAreaViewModel::from_document(
-                &self.model.input.document,
-                Some("Type a message... (Enter to send, Alt+Enter for new line)".to_string()),
+            let input_vm = crate::tui::view_assembler::input::InputViewAssembler::assemble_from_model(
+                &self.model.input,
+                0, // queued_count
                 self.chat.pending_image_count(),
-                true,
+                true, // focused
             );
             let input_height = InputArea::desired_height(size.width, &input_vm);
             let chunks = Layout::default()
@@ -265,7 +265,9 @@ impl App {
             }));
             self.status_bar
                 .draw(chunks[3], buf, &self.view_state.status_sel, &status_view);
-            if let Some(dialog) = self.layout.active_dialog() {
+            if let Some(dialog_vm) = self.dialog_view_model() {
+                crate::tui::render::dialog::render_dialog_vm(&dialog_vm, size, buf);
+            } else if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }
         })?;
