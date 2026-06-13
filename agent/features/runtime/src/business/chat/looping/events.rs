@@ -106,9 +106,16 @@ pub enum RuntimeStreamEvent {
         elapsed_secs: f64,
     },
     MessagesSync(Vec<Message>),
-    Done,
-    DoneWithDuration(std::time::Duration),
-    Cancelled,
+    Done {
+        context: RuntimeTurnContext,
+    },
+    DoneWithDuration {
+        context: RuntimeTurnContext,
+        duration: std::time::Duration,
+    },
+    Cancelled {
+        context: RuntimeTurnContext,
+    },
     LiveTps(f64),
     TurnChanged(usize),
     HookEvent(RuntimeHookEvent),

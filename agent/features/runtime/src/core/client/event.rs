@@ -258,11 +258,18 @@ pub(crate) fn runtime_event_to_sdk_event(
                     .collect(),
             )
         }
-        crate::business::chat::RuntimeStreamEvent::Done => ChatEvent::Done,
-        crate::business::chat::RuntimeStreamEvent::DoneWithDuration(duration) => {
-            ChatEvent::DoneWithDurationMs(duration.as_millis() as u64)
+        crate::business::chat::RuntimeStreamEvent::Done { context } => ChatEvent::Done {
+            context: ChatEventContext::new(context.chat_id, context.turn_id),
+        },
+        crate::business::chat::RuntimeStreamEvent::DoneWithDuration { context, duration } => {
+            ChatEvent::DoneWithDurationMs {
+                context: ChatEventContext::new(context.chat_id, context.turn_id),
+                duration_ms: duration.as_millis() as u64,
+            }
         }
-        crate::business::chat::RuntimeStreamEvent::Cancelled => ChatEvent::Cancelled,
+        crate::business::chat::RuntimeStreamEvent::Cancelled { context } => ChatEvent::Cancelled {
+            context: ChatEventContext::new(context.chat_id, context.turn_id),
+        },
         crate::business::chat::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
         crate::business::chat::RuntimeStreamEvent::TurnChanged(turn) => {
             ChatEvent::CurrentTurnChanged(turn)

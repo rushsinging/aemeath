@@ -303,11 +303,14 @@ pub enum ChatEvent {
     /// runtime 同步当前 messages。
     MessagesSync(Vec<ChatMessage>),
     /// Chat 完成。
-    Done,
+    Done { context: ChatEventContext },
     /// Chat 完成并附带耗时毫秒。
-    DoneWithDurationMs(u64),
+    DoneWithDurationMs {
+        context: ChatEventContext,
+        duration_ms: u64,
+    },
     /// Chat 被取消。
-    Cancelled,
+    Cancelled { context: ChatEventContext },
     /// 实时 TPS。
     LiveTps(f64),
     /// 当前 turn 变化。

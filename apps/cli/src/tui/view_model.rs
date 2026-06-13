@@ -5,6 +5,7 @@ pub mod dialog;
 #[allow(dead_code)]
 pub mod input;
 pub mod live_status;
+pub mod nesting;
 pub mod output;
 #[allow(dead_code)]
 pub mod status;
@@ -13,6 +14,7 @@ pub mod style;
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
 pub use live_status::{LiveStatusViewModel, SpinnerLineView};
+pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
     OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,

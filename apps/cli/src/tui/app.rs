@@ -25,7 +25,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub use event::{StatusContextUpdate, UiEvent};
+pub use event::{StatusContextUpdate, UiEvent, UiTurnContext};
 
 /// Main TUI application
 pub struct App {

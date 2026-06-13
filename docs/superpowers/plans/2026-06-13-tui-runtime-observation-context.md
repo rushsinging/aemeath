@@ -12,13 +12,28 @@
 
 ## Current fact-check summary
 
-- `ConversationIntent::ObserveAssistantText`, `ObserveThinkingText`, `CompleteBlock`, `ObserveToolCallStart`, `ObserveToolCallUpdate`, and `ObserveToolResult` already carry `chat_id` and `turn_id` in `apps/cli/src/tui/model/conversation/intent.rs`.
-- `map_agent_event()` still prepends `ConversationIntent::BindRuntimeTurn` before the explicit-context observe intents in `apps/cli/src/tui/adapter/agent_event.rs`; that is now redundant and violates spec §7.1.
-- `ConversationModel::ensure_runtime_turn()` still writes `self.active_chat_id = Some(chat_id.clone())`; this violates spec §4.3 because runtime observations implicitly switch UI active chat.
-- `ConversationIntent::RecordAgentProgress` has no context and `record_agent_progress()` writes activities through `active_chat_mut().active_turn_mut()`; this violates spec §9-bis step 3.
-- `ConversationIntent::CompleteChat` has no context and `complete_chat()` uses `active_chat_mut()`; this violates spec §9-bis step 3. Runtime/SDK lifecycle events currently lack context, matching spec §13 risk 2.
-- Runtime `AgentProgress` events are emitted from `agent/features/runtime/src/business/chat/looping/agent_calls.rs` while that function has the runtime `context` in scope; adding context there is low-risk.
-- Runtime `Done/DoneWithDuration/Cancelled` are emitted without context from several loop/finalize paths; lifecycle context requires a broader runtime change. This plan first makes TUI complete-chat legacy-safe, then adds context in a follow-up when runtime current-turn ownership is explicit.
+### 2026-06-13 update after first implementation commit
+
+Completed in `30a36ab8 fix(tui): remove runtime observation active rebinding`:
+
+- `ConversationIntent::ObserveAssistantText`, `ObserveThinkingText`, `CompleteBlock`, `ObserveToolCallStart`, `ObserveToolCallUpdate`, `ObserveToolResult`, and `RecordAgentProgress` now carry explicit `chat_id` + `turn_id`.
+- `ConversationIntent::BindRuntimeTurn` has been removed from the live code path.
+- `ConversationModel::ensure_runtime_turn()` no longer writes `active_chat_id`.
+- Runtime `AgentProgress` now carries context through runtime → SDK → TUI → `ConversationIntent` and writes activity records by explicit context.
+
+Rev.3 spec updates to reflect before continuing:
+
+- `tool_display` ownership stays in render. The `view_assembler -> render` dependency is removed by deleting the assembler-side `lookup_display` call for orphan / non-embedded result summaries, not by moving `tool_display` upward.
+- Timeline single-owner rule is hybrid: tool entries store references to `chats`-owned tool data; non-tool text / thinking / system / error / askuser entries may self-own payload because no second owner exists.
+
+Remaining gaps confirmed in current code:
+
+- Runtime lifecycle events `Done`, `DoneWithDuration`, and `Cancelled` still lack context in runtime / SDK / TUI and `ConversationIntent::CompleteChat` still has no explicit context.
+- No `RuntimeObservation` application-layer carrier / projector exists yet; `adapter/agent_event.rs` maps `UiEvent` directly to `ConversationIntent`.
+- `adapter/agent_event.rs` still imports `crate::tui::render::display::safe_text::safe_str_slice_by_char`.
+- `view_assembler/output.rs` still imports render nesting rules and `lookup_display`.
+- `ConversationModel.blocks` is still the output timeline and still has tool payload duplicates in `ConversationBlock::ToolCall { name, summary, args_preview }`.
+- Tool flow logic is partly extracted to `model/conversation/tool_flow.rs`, but it still mutates `ConversationModel` directly rather than producing atomic conversation + timeline patches.
 
 ## Files and responsibilities
 
@@ -736,6 +751,51 @@ For every runtime streaming event, assert mapping produces one observation with 
 
 Refactor adapter internals to build `RuntimeObservation` first, then convert to existing `ConversationIntent` so behavior remains unchanged.
 
+## Phase C2: Context-aware lifecycle events
+
+### Task 12.1: Thread lifecycle context from runtime to SDK
+
+**Files:**
+- Modify: `agent/features/runtime/src/business/chat/looping/events.rs`
+- Modify: `agent/features/runtime/src/business/chat/looping/finalize.rs`
+- Modify: `agent/features/runtime/src/business/chat/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/core/client/event.rs`
+- Modify: `packages/sdk/src/chat.rs`
+
+- [ ] **Step 1: RED compile/API test**
+
+Add or update tests so `RuntimeStreamEvent::Done`, `DoneWithDuration`, and `Cancelled` require `RuntimeTurnContext`, and SDK `ChatEvent::Done`, `DoneWithDurationMs`, and `Cancelled` require `ChatEventContext`.
+
+- [ ] **Step 2: GREEN runtime emit sites**
+
+Use the authoritative `RuntimeTurnContext` already passed through chat loop functions:
+
+```rust
+Done { context: context.clone() }
+DoneWithDuration { context: context.clone(), duration }
+Cancelled { context: context.clone() }
+```
+
+Do not synthesize context from UI active state or session-global mutable state.
+
+### Task 12.2: Thread lifecycle context through TUI and completion model
+
+**Files:**
+- Modify: `apps/cli/src/tui/app/event.rs`
+- Modify: `apps/cli/src/tui/effect/session/processing.rs`
+- Modify: `apps/cli/src/tui/adapter/agent_event.rs`
+- Modify: `apps/cli/src/tui/model/conversation/intent.rs`
+- Modify: `apps/cli/src/tui/model/conversation/model.rs`
+- Modify tests in `apps/cli/src/tui/model/conversation/model_tests.rs` and adapter/processing inline tests.
+
+- [ ] **Step 1: RED stale-active completion test**
+
+Assert a lifecycle complete event for `live_chat/live_turn` marks only that chat as completed/completing while `active_chat_id` points at `stale_chat`.
+
+- [ ] **Step 2: GREEN context-aware completion**
+
+Change `ConversationIntent::CompleteChat` to carry `chat_id` and `turn_id`, then implement completion by locating `chat_id` directly. It must never call `active_chat_mut()` or `active_turn_mut()`.
+
 ## Phase D: dependency direction cleanup
 
 ### Task 13: Move safe text utility out of render
@@ -754,20 +814,24 @@ Add or update a test/guard that fails if `apps/cli/src/tui/adapter/**` imports `
 
 Move `safe_str_slice_by_char` to `tui::text::safe_text`; update adapter import to `crate::tui::text::safe_text::safe_str_slice_by_char`.
 
-### Task 14: Move output nesting/tool display presentation dependencies out of render
+### Task 14: Remove view assembler's render dependency while keeping `tool_display` in render
 
 **Files:**
 - Modify: `apps/cli/src/tui/view_assembler/output.rs`
-- Create/modify: `apps/cli/src/tui/view_assembler/output_nesting.rs` or `apps/cli/src/tui/view_model/output_nesting.rs`
-- Modify: `apps/cli/src/tui/render/output/nesting.rs` only to depend downward or re-export temporarily.
+- Create/modify: `apps/cli/src/tui/view_assembler/output_nesting.rs` or `apps/cli/src/tui/view_model/output_nesting.rs` if nesting rules are still needed outside render.
+- Do **not** move `apps/cli/src/tui/render/tool_display.rs`; rev.3 explicitly keeps display logic render-owned.
 
 - [ ] **Step 1: RED import guard**
 
 Assert `apps/cli/src/tui/view_assembler/**` does not contain `crate::tui::render::` imports.
 
-- [ ] **Step 2: Move presentation-only rules**
+- [ ] **Step 2: Remove assembler-side display lookup**
 
-Move `allowed_child`, `MAX_BLOCK_DEPTH`, and display lookup semantics needed by assembler into presenter/view-model layer. Render keeps only drawing.
+For orphan / non-embedded tool results, stop calling render `lookup_display` from the assembler. Preserve raw/sanitized result text in the model/view model and let render-side `tool_display` decide final presentation when drawing.
+
+- [ ] **Step 3: Move only generic nesting constants if still needed**
+
+If assembler still needs `allowed_child` / `MAX_BLOCK_DEPTH`, move those generic rules to a non-render module. Render may import them downward; assembler must not import render.
 
 ## Phase E: OutputTimelineModel and ToolFlowProjector follow-up
 
@@ -779,13 +843,13 @@ Move `allowed_child`, `MAX_BLOCK_DEPTH`, and display lookup semantics needed by 
 - Modify: `apps/cli/src/tui/model/conversation/model.rs`
 - Modify: `apps/cli/src/tui/view_assembler/output.rs`
 
-- [ ] **Step 1: RED single-owner tests**
+- [ ] **Step 1: RED single-owner tests for tool entries**
 
-Assert tool call payload fields (`name`, `summary`, `args_preview`, `result`) are not stored in timeline items.
+Assert tool call timeline entries store stable references (`chat_id`, `turn_id`, `tool_call_id` / index) and do not duplicate mutable tool payload fields (`name`, `summary`, `args_preview`, `result`).
 
 - [ ] **Step 2: GREEN minimal split**
 
-Move ordering, active text/thinking block ids, and orphan result placement into timeline model. Keep `ConversationModel.chats` as tool data owner.
+Move ordering, active text/thinking block ids, and orphan result placement into timeline model. Keep `ConversationModel.chats` as the single owner for tool call / result data. Non-tool text, thinking, system, error, and ask-user entries may keep their payload in the timeline because they have no second owner.
 
 ### Task 16: Extract ToolFlowProjector with atomic patches
 

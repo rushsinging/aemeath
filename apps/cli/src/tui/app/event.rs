@@ -77,10 +77,17 @@ pub enum AppEvent {
         elapsed_secs: f64,
     },
     Error(String),
-    Cancelled,
+    Cancelled {
+        context: UiTurnContext,
+    },
     MessagesSync(Vec<sdk::ChatMessage>),
-    Done,
-    DoneWithDuration(std::time::Duration),
+    Done {
+        context: UiTurnContext,
+    },
+    DoneWithDuration {
+        context: UiTurnContext,
+        duration: std::time::Duration,
+    },
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),

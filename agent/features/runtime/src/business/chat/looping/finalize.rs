@@ -1,6 +1,6 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::chat::looping::hook_ui::{runtime_hook_event_finished, HookUi};
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::PathBuf;
@@ -21,6 +21,7 @@ pub(crate) async fn finalize_main_loop<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     session_id: &str,
+    context: &RuntimeTurnContext,
     _task_store: &TaskStore,
 ) -> Option<String>
 where
@@ -33,7 +34,11 @@ where
             run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id).await
         }
         AgentRunStatus::Cancelled => {
-            let _ = sink.send_event(RuntimeStreamEvent::Done).await;
+            let _ = sink
+                .send_event(RuntimeStreamEvent::Done {
+                    context: context.clone(),
+                })
+                .await;
             None
         }
         AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
@@ -47,7 +52,11 @@ where
                     }),
                 )
                 .await;
-            let _ = sink.send_event(RuntimeStreamEvent::Done).await;
+            let _ = sink
+                .send_event(RuntimeStreamEvent::Done {
+                    context: context.clone(),
+                })
+                .await;
             None
         }
     }
@@ -92,12 +101,16 @@ where
 pub(crate) async fn finish_completed_loop<S>(
     outcome: &AgentRunOutcome,
     sink: &S,
+    context: &RuntimeTurnContext,
     task_store: &TaskStore,
 ) where
     S: ChatEventSink,
 {
     let _ = sink
-        .send_event(RuntimeStreamEvent::DoneWithDuration(outcome.duration))
+        .send_event(RuntimeStreamEvent::DoneWithDuration {
+            context: context.clone(),
+            duration: outcome.duration,
+        })
         .await;
 
     if let Some(active) = task_store.active_list().await {

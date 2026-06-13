@@ -1,4 +1,4 @@
-use crate::tui::app::event::{StatusContextUpdate, UiEvent};
+use crate::tui::app::event::{StatusContextUpdate, UiEvent, UiTurnContext};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -141,11 +141,19 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             elapsed_secs,
         },
         sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
-        sdk::ChatEvent::Done => UiEvent::Done,
-        sdk::ChatEvent::DoneWithDurationMs(ms) => {
-            UiEvent::DoneWithDuration(std::time::Duration::from_millis(ms))
-        }
-        sdk::ChatEvent::Cancelled => UiEvent::Cancelled,
+        sdk::ChatEvent::Done { context } => UiEvent::Done {
+            context: context.into(),
+        },
+        sdk::ChatEvent::DoneWithDurationMs {
+            context,
+            duration_ms,
+        } => UiEvent::DoneWithDuration {
+            context: context.into(),
+            duration: std::time::Duration::from_millis(duration_ms),
+        },
+        sdk::ChatEvent::Cancelled { context } => UiEvent::Cancelled {
+            context: context.into(),
+        },
         sdk::ChatEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
         sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
             UiEvent::CurrentTurnChanged(turn)
@@ -204,6 +212,7 @@ pub(crate) struct SpawnContext {
     pub queue_request_tx: mpsc::Sender<UiEvent>,
     pub input_event_buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>,
     pub agent_client: Arc<dyn sdk::AgentClient>,
+    pub fallback_context: UiTurnContext,
     pub messages: Vec<sdk::ChatMessage>,
 }
 
@@ -394,7 +403,12 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             Ok(stream) => stream,
             Err(e) => {
                 let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
-                let _ = ctx.tx.send(UiEvent::Done).await;
+                let _ = ctx
+                    .tx
+                    .send(UiEvent::Done {
+                        context: ctx.fallback_context.clone(),
+                    })
+                    .await;
                 return;
             }
         };
@@ -564,6 +578,10 @@ mod tests {
             queue_request_tx: queue_tx,
             input_event_buffer: Arc::new(std::sync::Mutex::new(Vec::new())),
             agent_client: client.clone(),
+            fallback_context: UiTurnContext {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
+                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
+            },
             messages: Vec::new(),
         });
 
@@ -571,7 +589,11 @@ mod tests {
             .await
             .expect("Done event should be forwarded")
             .expect("ui channel should receive Done");
-        assert!(matches!(event, UiEvent::Done));
+        assert!(matches!(
+            event,
+            UiEvent::Done { context }
+                if context.chat_id.as_ref() == "chat-test" && context.turn_id.as_ref() == "turn-test"
+        ));
 
         let drain_request =
             tokio::time::timeout(std::time::Duration::from_millis(50), queue_rx.recv()).await;
@@ -626,7 +648,10 @@ mod tests {
 
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            tx.send(sdk::ChatEvent::Done).unwrap();
+            tx.send(sdk::ChatEvent::Done {
+                context: test_sdk_event_context(),
+            })
+            .unwrap();
             drop(tx);
             Ok(sdk::ChatStream::new(rx))
         }

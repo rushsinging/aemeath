@@ -89,7 +89,7 @@ impl App {
                     name: "error".to_string(),
                 });
             }
-            UiEvent::Cancelled => {
+            UiEvent::Cancelled { .. } => {
                 // 取消提示改为注入 ConversationModel 的 System notice，经 document 渲染。
                 self.append_system_notice("已取消");
                 self.spinner_stop();
@@ -276,12 +276,12 @@ impl App {
             UiEvent::TaskStatusChanged => {
                 effects.push(Effect::FetchTaskStatus);
             }
-            UiEvent::Done => {
+            UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();
             }
-            UiEvent::DoneWithDuration(elapsed) => {
-                effects.extend(self.handle_done(ui_tx, Some(elapsed)));
+            UiEvent::DoneWithDuration { duration, .. } => {
+                effects.extend(self.handle_done(ui_tx, Some(duration)));
                 self.chat.clear_processing_handle();
             }
         }

@@ -95,7 +95,9 @@ impl ConversationModel {
                 is_error,
                 image_count,
             ),
-            ConversationIntent::CompleteChat => self.complete_chat(),
+            ConversationIntent::CompleteChat { chat_id, turn_id } => {
+                self.complete_chat(chat_id, turn_id)
+            }
             ConversationIntent::ObserveAssistantText {
                 chat_id,
                 turn_id,
@@ -377,15 +379,20 @@ impl ConversationModel {
             ConversationChange::OutputDirty,
         ]
     }
-    fn complete_chat(&mut self) -> Vec<ConversationChange> {
+    fn complete_chat(&mut self, chat_id: ChatId, turn_id: ChatTurnId) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
+        self.active_text_context = None;
         self.active_thinking_block_id = None;
-        if let Some(chat) = self.active_chat_mut() {
-            chat.status = ChatStatus::Completing;
-            let chat_id = chat.id.as_ref().to_string();
-            return vec![ConversationChange::ChatCompleting { chat_id }];
+        self.active_thinking_context = None;
+        let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) else {
+            return Vec::new();
+        };
+        if !chat.turns.iter().any(|turn| turn.id == turn_id) {
+            return Vec::new();
         }
-        Vec::new()
+        chat.status = ChatStatus::Completing;
+        let chat_id = chat.id.as_ref().to_string();
+        vec![ConversationChange::ChatCompleting { chat_id }]
     }
 
     fn append_assistant_text(

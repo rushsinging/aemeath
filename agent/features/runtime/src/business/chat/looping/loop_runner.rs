@@ -164,7 +164,10 @@ where
             messages.truncate(messages_at_start);
             sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                 .await;
-            sink.send_event(RuntimeStreamEvent::Cancelled).await;
+            sink.send_event(RuntimeStreamEvent::Cancelled {
+                context: turn_context.clone(),
+            })
+            .await;
             loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
             let outcome = AgentRunOutcome {
                 status: AgentRunStatus::Cancelled,
@@ -179,6 +182,7 @@ where
                 &hook_ui,
                 &hook_runner,
                 &session_id,
+                &turn_context,
                 &task_store,
             )
             .await;
@@ -220,7 +224,10 @@ where
             GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
                 loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
                 loop_fsm.assert_state(ChatLoopState::Done, "before-llm gate exits loop");
-                sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                sink.send_event(RuntimeStreamEvent::Cancelled {
+                    context: turn_context.clone(),
+                })
+                .await;
                 break;
             }
         }
@@ -408,7 +415,7 @@ where
                         ChatLoopState::Done,
                         "completed loop finalizes after stop hooks pass",
                     );
-                    finish_completed_loop(&outcome, &sink, &task_store).await;
+                    finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
                     break;
                 }
                 {
@@ -448,7 +455,10 @@ where
                     ) {
                         loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
                         loop_fsm.assert_state(ChatLoopState::Done, "after-tool gate exits loop");
-                        sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                        sink.send_event(RuntimeStreamEvent::Cancelled {
+                            context: turn_context.clone(),
+                        })
+                        .await;
                         break;
                     }
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
@@ -468,7 +478,10 @@ where
                     messages.truncate(messages_at_start);
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
-                    sink.send_event(RuntimeStreamEvent::Cancelled).await;
+                    sink.send_event(RuntimeStreamEvent::Cancelled {
+                        context: turn_context.clone(),
+                    })
+                    .await;
                     loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
                     let outcome = AgentRunOutcome {
                         status: AgentRunStatus::Cancelled,
@@ -483,6 +496,7 @@ where
                         &hook_ui,
                         &hook_runner,
                         &session_id,
+                        &turn_context,
                         &task_store,
                     )
                     .await;
@@ -519,6 +533,7 @@ where
                     &hook_ui,
                     &hook_runner,
                     &session_id,
+                    &turn_context,
                     &task_store,
                 )
                 .await
@@ -657,17 +672,17 @@ mod tests {
                         .map(|message| message.text_content())
                         .unwrap_or_default()
                 ),
-                RuntimeStreamEvent::DoneWithDuration(_) => "DoneWithDuration".to_string(),
+                RuntimeStreamEvent::DoneWithDuration { .. } => "DoneWithDuration".to_string(),
                 RuntimeStreamEvent::HookEvent(event) => {
                     format!("HookEvent:{}:{:?}", event.hook_name, event.status)
                 }
                 RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
                 RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
                 RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
-                RuntimeStreamEvent::Done => "Done".to_string(),
+                RuntimeStreamEvent::Done { .. } => "Done".to_string(),
                 RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
                 RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
-                RuntimeStreamEvent::Cancelled => "Cancelled".to_string(),
+                RuntimeStreamEvent::Cancelled { .. } => "Cancelled".to_string(),
                 RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
                 RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
                 RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),

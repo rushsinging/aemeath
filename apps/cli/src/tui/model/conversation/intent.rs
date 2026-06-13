@@ -110,5 +110,8 @@ pub enum ConversationIntent {
     DeleteAskUserChatChar,
     /// 移除 AskUser 交互块（用户提交答案或取消后折叠）。
     DismissAskUser,
-    CompleteChat,
+    CompleteChat {
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+    },
 }

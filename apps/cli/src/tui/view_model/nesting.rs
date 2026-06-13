@@ -1,4 +1,4 @@
-//! block 嵌套合法性规则。见 spec §4。
+//! ViewModel block nesting legality rules.
 use crate::tui::view_model::output::OutputBlockKind;
 
 /// 最大嵌套深度：top(0) → tool_call(1) → result-content(2)。深度从 0 计，最深合法子层级为 2。
@@ -70,13 +70,11 @@ mod tests {
 
     #[test]
     fn test_allowed_child_tool_allows_tool_result() {
-        // ToolCall → ToolResult 合法（结果升为子块，#60）。
         assert!(allowed_child(&tool(), &tool_result()));
     }
 
     #[test]
     fn test_allowed_child_tool_result_is_leaf() {
-        // ToolResult 为叶子，不接受任何子（含 ToolResult 自身）。
         let child = text(OutputBlockKind::AssistantMessage);
         assert!(!allowed_child(&tool_result(), &child));
         assert!(!allowed_child(&tool_result(), &tool_result()));
@@ -95,15 +93,12 @@ mod tests {
     #[test]
     fn test_allowed_child_tool_rejects_tool_and_user_message() {
         let parent = tool();
-        // ToolCall 子（禁止再嵌套 tool_call）。
         assert!(!allowed_child(&parent, &tool()));
-        // UserMessage 不是合法的 result 富渲染子块。
         assert!(!allowed_child(&parent, &text(OutputBlockKind::UserMessage)));
     }
 
     #[test]
     fn test_allowed_child_non_tool_parent_is_leaf() {
-        // 非 ToolCall 父均为叶子，不接受任何子。
         let child = text(OutputBlockKind::AssistantMessage);
         assert!(!allowed_child(
             &text(OutputBlockKind::AssistantMessage),

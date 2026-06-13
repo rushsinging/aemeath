@@ -5,3 +5,4 @@ pub mod diagnostic;
 pub mod input;
 pub mod root;
 pub mod runtime;
+pub mod runtime_observation;

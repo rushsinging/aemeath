@@ -9,6 +9,7 @@ use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::model::runtime::workspace::WorktreeKind;
+use crate::tui::model::runtime_observation::{RuntimeObservation, RuntimeTurnContext};
 use crate::tui::render::display::safe_text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
 
@@ -34,140 +35,10 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 }
 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
+    if let Some(observation) = runtime_observation_from_ui_event(event) {
+        return map_runtime_observation(&observation);
+    }
     match event {
-        UiEvent::Text { context, text } => {
-            let mut mapping = conversation(ConversationIntent::ObserveAssistantText {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                text: text.clone(),
-            });
-            mapping
-                .runtime
-                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
-            mapping
-        }
-        UiEvent::Thinking { context, text } => {
-            let mut mapping = conversation(ConversationIntent::ObserveThinkingText {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                text: text.clone(),
-            });
-            mapping
-                .runtime
-                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
-            mapping
-        }
-        UiEvent::BlockComplete { context, .. } => conversation(ConversationIntent::CompleteBlock {
-            chat_id: context.chat_id.clone(),
-            turn_id: context.turn_id.clone(),
-        }),
-        UiEvent::ToolCallStart {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-        } => {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
-                context.chat_id.as_ref(),
-                context.turn_id.as_ref(),
-                id,
-                provider_id,
-                name,
-                index,
-            );
-            conversation(ConversationIntent::ObserveToolCallStart {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                id: id.clone(),
-                provider_id: provider_id.clone(),
-                name: name.clone(),
-                index: *index,
-            })
-        }
-        UiEvent::ToolCallUpdate {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-            arguments_delta,
-            arguments,
-            summary,
-            status,
-        } => {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
-                context.chat_id.as_ref(),
-                context.turn_id.as_ref(),
-                id,
-                provider_id,
-                name,
-                index,
-                status,
-                arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
-                arguments.is_some(),
-                summary.as_ref().map(|value| value.len()).unwrap_or(0),
-            );
-            conversation(ConversationIntent::ObserveToolCallUpdate {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                id: id.clone(),
-                provider_id: provider_id.clone(),
-                name: name.clone(),
-                index: *index,
-                arguments: arguments_delta
-                    .as_ref()
-                    .map(|value| sanitize_tool_arguments_delta(name, value)),
-                summary: summary
-                    .as_ref()
-                    .map(|value| sanitize_tool_summary(name, value))
-                    .or_else(|| {
-                        arguments
-                            .as_ref()
-                            .map(|value| sanitize_tool_arguments(name, value.clone()).to_string())
-                    }),
-                status: tool_call_status_from_sdk(*status),
-            })
-        }
-        UiEvent::ToolResult {
-            context,
-            id,
-            provider_id,
-            tool_name,
-            output,
-            content,
-            is_error,
-            images,
-        } => {
-            log::debug!(
-                target: "cli::tui::tool_flow",
-                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
-                context.chat_id.as_ref(),
-                context.turn_id.as_ref(),
-                id,
-                provider_id,
-                tool_name,
-                output.len(),
-                json_value_kind(content),
-                is_error,
-                images.len(),
-            );
-            conversation(ConversationIntent::ObserveToolResult {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                id: id.clone(),
-                provider_id: provider_id.clone(),
-                tool_name: tool_name.clone(),
-                output: sanitize_tool_output(tool_name, output),
-                content: sanitize_tool_result_content(tool_name, content.clone()),
-                is_error: *is_error,
-                image_count: images.len(),
-            })
-        }
         UiEvent::Usage {
             input,
             output,
@@ -232,10 +103,245 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             mapping
         }
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
-        UiEvent::Done | UiEvent::DoneWithDuration(_) | UiEvent::Cancelled => {
-            conversation(ConversationIntent::CompleteChat)
-        }
         _ => AgentEventMapping::default(),
+    }
+}
+
+fn runtime_context(context: &crate::tui::app::UiTurnContext) -> RuntimeTurnContext {
+    RuntimeTurnContext::new(context.chat_id.clone(), context.turn_id.clone())
+}
+
+fn runtime_observation_from_ui_event(event: &UiEvent) -> Option<RuntimeObservation> {
+    match event {
+        UiEvent::Text { context, text } => Some(RuntimeObservation::AssistantText {
+            context: runtime_context(context),
+            text: text.clone(),
+        }),
+        UiEvent::Thinking { context, text } => Some(RuntimeObservation::ThinkingText {
+            context: runtime_context(context),
+            text: text.clone(),
+        }),
+        UiEvent::BlockComplete { context, .. } => Some(RuntimeObservation::BlockComplete {
+            context: runtime_context(context),
+        }),
+        UiEvent::ToolCallStart {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        } => Some(RuntimeObservation::ToolCallStart {
+            context: runtime_context(context),
+            id: id.clone(),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+        }),
+        UiEvent::ToolCallUpdate {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments_delta,
+            arguments,
+            summary,
+            status,
+        } => Some(RuntimeObservation::ToolCallUpdate {
+            context: runtime_context(context),
+            id: id.clone(),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+            arguments: arguments_delta.clone(),
+            summary: summary
+                .clone()
+                .or_else(|| arguments.as_ref().map(ToString::to_string)),
+            status: tool_call_status_from_sdk(*status),
+        }),
+        UiEvent::ToolResult {
+            context,
+            id,
+            provider_id,
+            tool_name,
+            output,
+            content,
+            is_error,
+            images,
+        } => Some(RuntimeObservation::ToolResult {
+            context: runtime_context(context),
+            id: id.clone(),
+            provider_id: provider_id.clone(),
+            tool_name: tool_name.clone(),
+            output: output.clone(),
+            content: content.clone(),
+            is_error: *is_error,
+            image_count: images.len(),
+        }),
+        UiEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => Some(RuntimeObservation::AgentProgress {
+            context: runtime_context(context),
+            tool_id: tool_id.clone(),
+            message: format!("{event}"),
+        }),
+        UiEvent::Done { context }
+        | UiEvent::DoneWithDuration { context, .. }
+        | UiEvent::Cancelled { context } => Some(RuntimeObservation::Complete {
+            context: runtime_context(context),
+        }),
+        _ => None,
+    }
+}
+
+fn map_runtime_observation(observation: &RuntimeObservation) -> AgentEventMapping {
+    match observation {
+        RuntimeObservation::AssistantText { context, text } => {
+            let mut mapping = conversation(ConversationIntent::ObserveAssistantText {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                text: text.clone(),
+            });
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
+            mapping
+        }
+        RuntimeObservation::ThinkingText { context, text } => {
+            let mut mapping = conversation(ConversationIntent::ObserveThinkingText {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                text: text.clone(),
+            });
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
+            mapping
+        }
+        RuntimeObservation::BlockComplete { context } => {
+            conversation(ConversationIntent::CompleteBlock {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            })
+        }
+        RuntimeObservation::ToolCallStart {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                name,
+                index,
+            );
+            conversation(ConversationIntent::ObserveToolCallStart {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+            })
+        }
+        RuntimeObservation::ToolCallUpdate {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            summary,
+            status,
+        } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} summary_len={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                name,
+                index,
+                status,
+                arguments.as_ref().map(|value| value.len()).unwrap_or(0),
+                summary.as_ref().map(|value| value.len()).unwrap_or(0),
+            );
+            conversation(ConversationIntent::ObserveToolCallUpdate {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+                arguments: arguments
+                    .as_ref()
+                    .map(|value| sanitize_tool_arguments_delta(name, value)),
+                summary: summary
+                    .as_ref()
+                    .map(|value| sanitize_tool_summary(name, value)),
+                status: *status,
+            })
+        }
+        RuntimeObservation::ToolResult {
+            context,
+            id,
+            provider_id,
+            tool_name,
+            output,
+            content,
+            is_error,
+            image_count,
+        } => {
+            log::debug!(
+                target: "cli::tui::tool_flow",
+                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                context.chat_id.as_ref(),
+                context.turn_id.as_ref(),
+                id,
+                provider_id,
+                tool_name,
+                output.len(),
+                json_value_kind(content),
+                is_error,
+                image_count,
+            );
+            conversation(ConversationIntent::ObserveToolResult {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                tool_name: tool_name.clone(),
+                output: sanitize_tool_output(tool_name, output),
+                content: sanitize_tool_result_content(tool_name, content.clone()),
+                is_error: *is_error,
+                image_count: *image_count,
+            })
+        }
+        RuntimeObservation::AgentProgress {
+            context,
+            tool_id,
+            message,
+        } => conversation(ConversationIntent::RecordAgentProgress {
+            chat_id: context.chat_id.clone(),
+            turn_id: context.turn_id.clone(),
+            tool_id: tool_id.clone(),
+            message: message.clone(),
+        }),
+        RuntimeObservation::Complete { context } => {
+            conversation(ConversationIntent::CompleteChat {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            })
+        }
     }
 }
 
@@ -252,10 +358,6 @@ fn json_value_kind(value: &Value) -> &'static str {
 
 fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
     truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name))
-}
-
-fn sanitize_tool_arguments(tool_name: &str, arguments: Value) -> Value {
-    sanitize_tool_value(tool_name, arguments)
 }
 
 fn sanitize_tool_summary(tool_name: &str, summary: &str) -> String {

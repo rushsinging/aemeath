@@ -117,9 +117,9 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::Result(result) => {
             print_stdout(&result.text)?;
         }
-        sdk::ChatEvent::Done
-        | sdk::ChatEvent::DoneWithDurationMs(_)
-        | sdk::ChatEvent::Cancelled => {}
+        sdk::ChatEvent::Done { .. }
+        | sdk::ChatEvent::DoneWithDurationMs { .. }
+        | sdk::ChatEvent::Cancelled { .. } => {}
         sdk::ChatEvent::ToolCallStart { name, .. } => {
             eprintln!("[tool:start] {name}");
         }

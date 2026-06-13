@@ -2,12 +2,10 @@ use crate::tui::model::conversation::block::ConversationBlock;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::render::output::nesting::{allowed_child, MAX_BLOCK_DEPTH};
-use crate::tui::render::output::tool_display::lookup_display;
 use crate::tui::view_model::{
-    AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
-    OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView, ToolResultBlockView,
-    ToolSemanticStatus,
+    allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
+    OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
 
 pub struct OutputViewAssembler;
@@ -303,11 +301,7 @@ fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error
     }
     // 无工具名时用占位名走通用完成摘要（如 `✓ Tool completed`），仍不泄漏正文。
     let name = tool_name.unwrap_or("Tool");
-    let lines = lookup_display(name)
-        .map(|display| display.format_result_summary(output, is_error))
-        .filter(|lines| !lines.is_empty())
-        .unwrap_or_else(|| default_tool_result_summary(name, is_error));
-    lines.join("\n")
+    default_tool_result_summary(name, is_error).join("\n")
 }
 
 fn find_tool_view(conversation: &ConversationModel, tool_id: &str) -> Option<ToolCallBlockView> {
