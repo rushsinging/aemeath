@@ -83,29 +83,33 @@ fn test_truncation_with_fold_hint() {
 }
 
 #[test]
-fn test_all_completed_over_max_lines_keeps_recent_completed_only() {
+fn test_all_completed_over_max_lines_backfills_recent_completed() {
     let tasks: Vec<TaskSummary> = (1..=10)
         .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 3); // summary + recent completed + fold
+    // task_slots_with_fold = 5 → show 5 most recent completed (newest first)
+    assert_eq!(result.len(), 7); // summary + 5 completed + fold
     assert!(result[0].contains("10/10"));
-    assert!(result[1].contains("✓ #10"));
-    assert!(result.last().unwrap().contains("+9 more"));
+    assert!(result[1].contains("✓ #10 task 10"));
+    assert!(result[5].contains("✓ #6 task 6"));
+    assert!(result.last().unwrap().contains("+5 more"));
 }
 
 #[test]
-fn test_all_completed_at_window_limit_keeps_recent_completed_only() {
+fn test_all_completed_at_window_limit_backfills_recent_completed() {
     let tasks: Vec<TaskSummary> = (1..=7)
         .map(|i| make_task(&i.to_string(), &format!("task {}", i), TaskState::Completed))
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    assert_eq!(result.len(), 3); // summary + recent completed + fold hint
+    // task_slots_with_fold = 5 → show 5 most recent completed
+    assert_eq!(result.len(), 7); // summary + 5 completed + fold
     assert!(result[0].contains("7/7"));
-    assert!(result[1].contains("✓ #7"));
-    assert!(result.last().unwrap().contains("+6 more"));
+    assert!(result[1].contains("✓ #7 task 7"));
+    assert!(result[5].contains("✓ #3 task 3"));
+    assert!(result.last().unwrap().contains("+2 more"));
 }
 
 #[test]
@@ -154,7 +158,7 @@ fn test_owner_display() {
 }
 
 #[test]
-fn test_over_max_lines_keeps_recent_completed_and_fills_in_progress_before_pending() {
+fn test_over_max_lines_fills_in_progress_then_pending_then_completed_backfill() {
     let mut tasks = vec![make_task_with_ts(
         "1",
         "recent completed",
@@ -172,16 +176,16 @@ fn test_over_max_lines_keeps_recent_completed_and_fills_in_progress_before_pendi
     tasks.push(make_task_with_ts("9", "next", TaskState::Pending, 900));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
+    // task_slots_with_fold = 5 → 5 in_progress (earliest by updated_at)
     assert_eq!(result.len(), 7); // summary + 5 task lines + fold
-    assert!(result[1].contains("✓ #1 recent completed"));
-    assert!(result[2].contains("■ #2 doing 2"));
-    assert!(result[5].contains("■ #5 doing 5"));
+    assert!(result[1].contains("■ #2 doing 2"));
+    assert!(result[5].contains("■ #6 doing 6"));
     assert!(!result.iter().any(|line| line.contains("next")));
     assert!(result.last().unwrap().contains("+4 more"));
 }
 
 #[test]
-fn test_window_prefers_feature_24_shape() {
+fn test_window_prefers_in_progress_pending_then_completed_backfill() {
     let mut tasks: Vec<TaskSummary> = (1..=5)
         .map(|i| make_task(&i.to_string(), &format!("done {}", i), TaskState::Completed))
         .collect();
@@ -189,15 +193,15 @@ fn test_window_prefers_feature_24_shape() {
     tasks.push(make_task("7", "pending", TaskState::Pending));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 4);
-    assert_eq!(result.len(), 4); // summary + previous completed + in_progress + fold hint
-    assert!(result[1].contains("✓ #5 done 5"));
-    assert!(result[2].contains("■ #6 doing"));
-    assert!(!result.iter().any(|line| line.contains("pending")));
+    // task_slots_with_fold = 2 → in_progress #6 + pending #7
+    assert_eq!(result.len(), 4); // summary + in_progress + pending + fold hint
+    assert!(result[1].contains("■ #6 doing"));
+    assert!(result[2].contains("□ #7 pending"));
     assert!(result[3].contains("+5 more"));
 }
 
 #[test]
-fn test_recent_completed_before_older() {
+fn test_tight_window_prefers_in_progress_over_completed() {
     let tasks = vec![
         make_task_with_ts("1", "old completed", TaskState::Completed, 100),
         make_task_with_ts("2", "middle completed", TaskState::Completed, 200),
@@ -207,8 +211,9 @@ fn test_recent_completed_before_older() {
     ];
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 3);
-    assert_eq!(result.len(), 3);
-    assert!(result[1].contains("✓ #3 newest completed"));
+    // task_slots_with_fold = 1 → in_progress #4
+    assert_eq!(result.len(), 3); // summary + in_progress + fold
+    assert!(result[1].contains("■ #4 current"));
     assert!(result[2].contains("+4 more"));
 }
 

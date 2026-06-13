@@ -189,15 +189,12 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    if let Some(task) = completed.last() {
-        visible.push(*task);
-    }
-
-    let remaining = max_lines.saturating_sub(visible.len());
-    visible.extend(in_progress.into_iter().take(remaining));
-
+    // Priority: in_progress → pending → completed (newest first backfill)
+    visible.extend(in_progress.into_iter().take(max_lines));
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(pending.into_iter().take(remaining));
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(completed.iter().rev().take(remaining).copied());
     visible
 }
 

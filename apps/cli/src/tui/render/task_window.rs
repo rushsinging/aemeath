@@ -16,8 +16,8 @@ use std::collections::HashMap;
 /// 规则：
 /// 1. 摘要行 `━━ Tasks: completed/total ━━` 反映全量
 /// 2. `summary + task 行数 <= max_lines` 时完整显示所有未删除任务，不折叠
-/// 3. 超出 `max_lines` 时使用窗口策略：最近 completed + 尽量 in_progress + pending
-///    - completed 组内按 updated_at 升序，折叠窗口内取最近完成的一条
+/// 3. 超出 `max_lines` 时使用窗口策略：in_progress → pending → completed（从最新到最旧回填）
+///    - completed 组内按 updated_at 升序，窗口内从最新往最旧回填剩余槽位
 ///    - in_progress 组内按 updated_at 升序（最早开始的在前）
 ///    - pending 组内按 display_number 升序
 /// 4. 最多显示 `max_lines` 条总行数（含 summary 和 fold hint）
@@ -111,15 +111,12 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    if let Some(task) = completed.last() {
-        visible.push(*task);
-    }
-
-    let remaining = max_lines.saturating_sub(visible.len());
-    visible.extend(in_progress.into_iter().take(remaining));
-
+    // Priority: in_progress → pending → completed (newest first backfill)
+    visible.extend(in_progress.into_iter().take(max_lines));
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(pending.into_iter().take(remaining));
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(completed.iter().rev().take(remaining).copied());
     visible
 }
 
