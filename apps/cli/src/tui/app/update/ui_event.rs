@@ -255,12 +255,9 @@ impl App {
             UiEvent::DrainQueuedInput { reply_tx } => {
                 let queued = self.input.drain_queue();
                 if !queued.is_empty() {
-                    // 先清除「排队中」显示块（QueuedUserMessage），再以正式 UserMessage
-                    // 回显，避免「排队块」与「已发送回显」双显示。
+                    // 只清除「排队中」显示块（QueuedUserMessage）。正式 UserMessage
+                    // 由 Runtime 的 MessagesSync 单一真相同步，避免 drain 后双重渲染。
                     self.clear_queued_submission_echo();
-                    for msg in &queued {
-                        self.append_user_echo(msg.clone());
-                    }
                     self.spinner_phase(SpinnerPhase::ThinkingQueued);
                 }
                 let _ = reply_tx.send(queued);
@@ -317,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_ui_drain_queued_input_echoes_original_queued_text() {
+    fn test_update_ui_drain_queued_input_clears_placeholder_without_user_echo() {
         let mut app = test_app();
         app.input.push_queue("a\nb\nc".to_string());
         app.enqueue_submission_echo("[Copied Text 1]");
@@ -328,9 +325,12 @@ mod tests {
         app.update_ui(UiEvent::DrainQueuedInput { reply_tx }, &ui_tx, &spawn_refs);
 
         assert_eq!(reply_rx.try_recv(), Ok(vec!["a\nb\nc".to_string()]));
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")
-        }));
+        assert!(app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")));
         assert!(app
             .model
             .conversation
