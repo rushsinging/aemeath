@@ -2,21 +2,18 @@ use crate::tui::model::conversation::block::{HookNoticeContent, HookNoticeKind};
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 
 pub fn hook_event_notice(event: &sdk::HookEventView) -> Option<HookNoticeContent> {
-    let result = event.result.as_ref();
     match event.status {
         sdk::HookEventStatus::Blocked => Some(HookNoticeContent {
             kind: HookNoticeKind::Blocked,
             title: format!("Hook blocked: {}", event.hook_name),
-            body: hook_body(result, BodyPreference::ReasonStdoutStderr)
-                .unwrap_or_else(|| "Hook returned a block decision.".to_string()),
-            details: hook_details(event, result, DetailMode::Blocked),
+            body: "Hook returned a block decision.".to_string(),
+            details: hook_summary_details(event),
         }),
         sdk::HookEventStatus::Failed => Some(HookNoticeContent {
             kind: HookNoticeKind::Failed,
             title: format!("Hook failed: {}", event.hook_name),
-            body: hook_body(result, BodyPreference::ReasonStderrStdout)
-                .unwrap_or_else(|| "Hook execution failed.".to_string()),
-            details: hook_details(event, result, DetailMode::Failed),
+            body: "Hook execution failed.".to_string(),
+            details: hook_summary_details(event),
         }),
         sdk::HookEventStatus::Running | sdk::HookEventStatus::Succeeded => None,
     }
@@ -39,89 +36,15 @@ pub fn hook_spinner_phase(
     }
 }
 
-#[derive(Clone, Copy)]
-enum BodyPreference {
-    ReasonStdoutStderr,
-    ReasonStderrStdout,
-}
-
-#[derive(Clone, Copy)]
-enum DetailMode {
-    Blocked,
-    Failed,
-}
-
-fn hook_body(
-    result: Option<&sdk::HookExecutionResultView>,
-    preference: BodyPreference,
-) -> Option<String> {
-    let result = result?;
-    match preference {
-        BodyPreference::ReasonStdoutStderr => first_non_empty([
-            result.reason.as_deref(),
-            Some(result.stdout.as_str()),
-            Some(result.stderr.as_str()),
-        ]),
-        BodyPreference::ReasonStderrStdout => first_non_empty([
-            result.reason.as_deref(),
-            Some(result.stderr.as_str()),
-            Some(result.stdout.as_str()),
-        ]),
-    }
-}
-
-fn hook_details(
-    event: &sdk::HookEventView,
-    result: Option<&sdk::HookExecutionResultView>,
-    mode: DetailMode,
-) -> Option<String> {
+fn hook_summary_details(event: &sdk::HookEventView) -> Option<String> {
     let mut lines = Vec::new();
     push_field(&mut lines, "Matcher", event.matcher.as_deref());
     push_field(&mut lines, "Command", event.command.as_deref());
-    if let Some(result) = result {
+    if let Some(result) = event.result.as_ref() {
         if let Some(exit_code) = result.exit_code {
             lines.push(format!("Exit code: {exit_code}"));
         }
         push_field(&mut lines, "Decision", result.decision.as_deref());
-        match mode {
-            DetailMode::Blocked => {
-                if result
-                    .reason
-                    .as_deref()
-                    .is_some_and(|reason| !reason.trim().is_empty())
-                {
-                    push_field(&mut lines, "Reason", result.reason.as_deref());
-                }
-                push_field(
-                    &mut lines,
-                    "Stderr",
-                    non_empty(result.stderr.as_str()).as_deref(),
-                );
-                push_field(
-                    &mut lines,
-                    "Additional context",
-                    result.additional_context.as_deref(),
-                );
-            }
-            DetailMode::Failed => {
-                push_field(&mut lines, "Reason", result.reason.as_deref());
-                push_field(
-                    &mut lines,
-                    "Stdout",
-                    non_empty(result.stdout.as_str()).as_deref(),
-                );
-                push_field(
-                    &mut lines,
-                    "Stderr",
-                    non_empty(result.stderr.as_str()).as_deref(),
-                );
-                push_field(
-                    &mut lines,
-                    "Additional context",
-                    result.additional_context.as_deref(),
-                );
-            }
-        }
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
@@ -152,10 +75,6 @@ fn display_command_name(command: &str) -> String {
         .trim()
         .trim_matches('"')
         .to_string()
-}
-
-fn first_non_empty<const N: usize>(values: [Option<&str>; N]) -> Option<String> {
-    values.into_iter().flatten().find_map(non_empty)
 }
 
 fn push_field(lines: &mut Vec<String>, label: &str, value: Option<&str>) {
@@ -212,18 +131,23 @@ mod tests {
         let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result())).unwrap();
         assert_eq!(notice.kind, HookNoticeKind::Blocked);
         assert_eq!(notice.title, "Hook blocked: Stop");
-        assert_eq!(notice.body, "why");
-        assert!(notice.details.unwrap().contains("Decision: block"));
+        assert_eq!(notice.body, "Hook returned a block decision.");
+        let details = notice.details.unwrap();
+        assert!(details.contains("Decision: block"));
+        assert!(!details.contains("why"));
+        assert!(!details.contains("out"));
+        assert!(!details.contains("err"));
     }
 
     #[test]
-    fn failed_event_prefers_stderr_without_reason() {
+    fn failed_event_uses_summary_without_stderr() {
         let mut result = result();
         result.reason = None;
         let notice = hook_event_notice(&event(sdk::HookEventStatus::Failed, result)).unwrap();
         assert_eq!(notice.kind, HookNoticeKind::Failed);
         assert_eq!(notice.title, "Hook failed: Stop");
-        assert_eq!(notice.body, "err");
+        assert_eq!(notice.body, "Hook execution failed.");
+        assert!(!notice.details.unwrap().contains("err"));
     }
 
     #[test]
@@ -276,10 +200,22 @@ mod tests {
     }
 
     #[test]
-    fn body_strips_system_reminder_envelope() {
+    fn notice_body_does_not_display_system_reminder_payload() {
         let mut result = result();
         result.reason = Some("<system-reminder>\nblocked\n</system-reminder>".to_string());
         let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result)).unwrap();
-        assert_eq!(notice.body, "blocked");
+        assert_eq!(notice.body, "Hook returned a block decision.");
+    }
+
+    #[test]
+    fn blocked_stop_notice_does_not_display_stderr() {
+        let mut result = result();
+        result.reason = None;
+        result.stdout.clear();
+        result.stderr = "stop hook stderr".to_string();
+        let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result)).unwrap();
+
+        assert_eq!(notice.body, "Hook returned a block decision.");
+        assert!(!notice.details.unwrap().contains("Stderr:"));
     }
 }

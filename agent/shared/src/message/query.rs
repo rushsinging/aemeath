@@ -21,6 +21,13 @@ impl Message {
             .join("")
     }
 
+    pub fn source(&self) -> MessageSource {
+        self.metadata
+            .as_ref()
+            .map(|metadata| metadata.source)
+            .unwrap_or_default()
+    }
+
     /// Returns true if this message contains any ToolUse blocks.
     pub fn has_tool_uses(&self) -> bool {
         self.content.iter().any(|b| b.is_tool_use())

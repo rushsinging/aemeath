@@ -56,6 +56,7 @@ fn summary_with_only_assistant_messages() {
         content: vec![ContentBlock::Text {
             text: "assistant says".into(),
         }],
+        metadata: None,
     }];
     let sess = make_session(None, None, msgs);
     // no user message → falls back to project name (extracted from "/tmp")

@@ -37,10 +37,7 @@ pub fn assemble_compacted_with_files(
         }
     }
 
-    compacted.push(Message {
-        role: Role::User,
-        content: vec![ContentBlock::Text { text: summary_text }],
-    });
+    compacted.push(Message::system_generated_user(summary_text));
 
     compacted.push(Message {
         role: Role::Assistant,
@@ -48,6 +45,7 @@ pub fn assemble_compacted_with_files(
             text: "Understood. I have the context from our earlier conversation. Let me continue."
                 .to_string(),
         }],
+        metadata: None,
     });
 
     for msg in recent_messages {
@@ -74,6 +72,7 @@ pub fn fix_role_alternation(messages: &mut Vec<Message>) {
                 content: vec![ContentBlock::Text {
                     text: "(continued)".to_string(),
                 }],
+                metadata: None,
             };
             messages.insert(i, filler);
             i += 1;

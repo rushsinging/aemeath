@@ -26,7 +26,7 @@ pub fn safe_str_slice_by_char(s: &str, from: usize, to: usize) -> &str {
     };
     let byte_start = char_to_byte_clamped(s, range.start);
     let byte_end = char_to_byte_clamped(s, range.end);
-    &s[byte_start..byte_end]
+    &s[byte_start..byte_end] // allow unsafe_text_op: byte_start/byte_end are computed from char_indices boundaries
 }
 
 pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
@@ -49,7 +49,7 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
         width += ch_width;
         end = byte_idx + ch.len_utf8();
     }
-    (&s[..end], width)
+    (&s[..end], width) // allow unsafe_text_op: end is computed from char_indices plus len_utf8
 }
 
 pub fn str_display_width(s: &str) -> usize {
@@ -78,7 +78,7 @@ pub fn safe_byte_prefix(s: &str, offset: usize) -> &str {
     while offset > 0 && !s.is_char_boundary(offset) {
         offset -= 1;
     }
-    &s[..offset]
+    &s[..offset] // allow unsafe_text_op: offset is clamped backward to a char boundary
 }
 
 fn char_display_width(ch: char) -> usize {

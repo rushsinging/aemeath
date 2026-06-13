@@ -103,7 +103,7 @@ impl App {
                     .iter()
                     .skip(old_len)
                     .filter_map(|m| {
-                        if m.role == "user" {
+                        if m.role == "user" && m.source() == sdk::ChatMessageSource::User {
                             let t = m.text_content();
                             if t.is_empty() {
                                 None
@@ -364,5 +364,24 @@ mod tests {
             .blocks
             .iter()
             .all(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. })));
+    }
+
+    #[test]
+    fn test_update_ui_messages_sync_does_not_echo_system_generated_user_message() {
+        let mut app = test_app();
+        app.chat.messages.push(sdk::ChatMessage::user_text("first"));
+        let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
+        let messages = vec![
+            sdk::ChatMessage::user_text("first"),
+            sdk::ChatMessage::system_generated_user_text(reminder),
+        ];
+        let (ui_tx, _ui_rx) = mpsc::channel(1);
+        let spawn_refs = SpawnContextRefs { agent_client: None };
+
+        app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
+
+        assert!(app.model.conversation.blocks.iter().all(|block| {
+            !matches!(block, ConversationBlock::UserMessage { text, .. } if text == reminder)
+        }));
     }
 }

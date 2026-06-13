@@ -592,6 +592,7 @@ mod tests {
             vec![sdk::ChatMessage {
                 role: "user".to_string(),
                 content: serde_json::Value::String("请反思当前会话".to_string()),
+                metadata: None,
             }],
         )
         .await
@@ -627,6 +628,7 @@ mod tests {
             vec![sdk::ChatMessage {
                 role: "user".to_string(),
                 content: serde_json::Value::String("只有一轮也要强制反思".to_string()),
+                metadata: None,
             }],
         )
         .await

@@ -32,7 +32,9 @@ pub use commands::{
 pub use error::SdkError;
 pub use models::ModelSummary;
 pub use project::ProjectContext;
-pub use session::{ChatMessage, SessionSnapshot, SessionSummary};
+pub use session::{
+    ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
+};
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, MemoryConfigView, PasteKind, QueueDrainPort, QueueFuture,

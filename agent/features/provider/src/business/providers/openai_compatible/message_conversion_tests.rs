@@ -42,8 +42,8 @@ fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
                 input: serde_json::json!({"file_path":"/tmp/a"}),
             },
         ],
+        metadata: None,
     }];
-
     let converted = provider.convert_messages(&[], &messages).unwrap();
     let assistant = converted
         .iter()
@@ -70,8 +70,8 @@ fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_di
                 text: "结论".to_string(),
             },
         ],
+        metadata: None,
     }];
-
     let converted = provider.convert_messages(&[], &messages).unwrap();
     let assistant = converted
         .iter()
@@ -95,8 +95,8 @@ fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
             name: "Read".to_string(),
             input: serde_json::json!({"file_path":"/tmp/a"}),
         }],
+        metadata: None,
     }];
-
     let converted = provider.convert_messages(&[], &messages).unwrap();
     let assistant = converted
         .iter()
@@ -115,8 +115,8 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
         content: vec![ContentBlock::Thinking {
             thinking: "只有推理，没有可见内容".to_string(),
         }],
+        metadata: None,
     }];
-
     let converted = provider.convert_messages(&[], &messages).unwrap();
 
     assert!(converted.iter().all(|m| {

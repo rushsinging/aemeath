@@ -387,7 +387,7 @@ where
                     .await
                     {
                         loop_fsm.transition(ChatLoopTransition::StopBlocked);
-                        messages.push(Message::user(format!(
+                        messages.push(Message::system_generated_user(format!(
                             "<system-reminder>\n{outcome}\n</system-reminder>"
                         )));
                         sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
@@ -538,7 +538,7 @@ where
                 )
                 .await
                 {
-                    messages.push(Message::user(format!(
+                    messages.push(Message::system_generated_user(format!(
                         "<system-reminder>\n{outcome}\n</system-reminder>"
                     )));
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
@@ -601,6 +601,7 @@ mod tests {
     use provider::api::{LlmProvider, StreamHandler};
     use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use share::message::{MessageSource, Role};
     use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::AtomicBool;
     use std::sync::Mutex;
@@ -645,6 +646,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct RecordingSink {
         events: Arc<Mutex<Vec<String>>>,
+        messages_syncs: Arc<Mutex<Vec<Vec<Message>>>>,
     }
 
     impl ChatEventSink for RecordingSink {
@@ -665,13 +667,16 @@ mod tests {
     impl RecordingSink {
         fn record(&self, event: RuntimeStreamEvent) {
             let name = match event {
-                RuntimeStreamEvent::MessagesSync(messages) => format!(
-                    "MessagesSync:{}",
-                    messages
-                        .last()
-                        .map(|message| message.text_content())
-                        .unwrap_or_default()
-                ),
+                RuntimeStreamEvent::MessagesSync(messages) => {
+                    self.messages_syncs.lock().unwrap().push(messages.clone());
+                    format!(
+                        "MessagesSync:{}",
+                        messages
+                            .last()
+                            .map(|message| message.text_content())
+                            .unwrap_or_default()
+                    )
+                }
                 RuntimeStreamEvent::DoneWithDuration { .. } => "DoneWithDuration".to_string(),
                 RuntimeStreamEvent::HookEvent(event) => {
                     format!("HookEvent:{}:{:?}", event.hook_name, event.status)
@@ -702,6 +707,10 @@ mod tests {
         fn events(&self) -> Vec<String> {
             self.events.lock().unwrap().clone()
         }
+
+        fn synced_messages(&self) -> Vec<Vec<Message>> {
+            self.messages_syncs.lock().unwrap().clone()
+        }
     }
 
     struct TwoTurnProvider;
@@ -731,6 +740,7 @@ mod tests {
                     content: vec![share::message::ContentBlock::Text {
                         text: text.to_string(),
                     }],
+                    metadata: None,
                 },
                 usage: Usage {
                     input_tokens: 1,
@@ -790,6 +800,7 @@ mod tests {
                 assistant_message: Message {
                     role: share::message::Role::Assistant,
                     content: vec![share::message::ContentBlock::Text { text }],
+                    metadata: None,
                 },
                 usage: Usage {
                     input_tokens: 1,
@@ -927,6 +938,67 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn test_stop_hook_feedback_message_is_marked_system_generated() {
+        let flag_path = std::env::temp_dir().join(format!(
+            "aemeath_stop_hook_metadata_{}.flag",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&flag_path);
+        let sink = RecordingSink::default();
+
+        process_chat_loop(ChatLoopContext {
+            sink: sink.clone(),
+            queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
+            input_events: EmptyInputEvents,
+            client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+                SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
+            ))),
+            registry: Arc::new(ToolRegistry::new()),
+            system_blocks: Vec::new(),
+            system_prompt_text: String::new(),
+            user_context: String::new(),
+            messages: vec![Message::user("hello")],
+            context_size: 200_000,
+            cwd: std::env::current_dir().unwrap(),
+            workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+            session_id: "test-stop-hook-metadata".to_string(),
+            read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            session_reminders: Arc::new(
+                std::sync::Mutex::new(share::tool::SessionReminders::new()),
+            ),
+            agent_runner: None,
+            allow_all: false,
+            interrupted: Arc::new(AtomicBool::new(false)),
+            cancel: CancellationToken::new(),
+            task_store: Arc::new(storage::api::TaskStore::new()),
+            max_tool_concurrency: 1,
+            max_agent_concurrency: 1,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+            hook_runner: blocking_then_success_hook_runner(&flag_path),
+            memory_config: share::config::MemoryConfig::default(),
+        })
+        .await;
+        let _ = std::fs::remove_file(&flag_path);
+
+        let feedback = sink
+            .synced_messages()
+            .into_iter()
+            .flatten()
+            .find(|message| {
+                message
+                    .text_content()
+                    .contains("你 MUST 先满足下面 Stop hook 的要求")
+            })
+            .expect("blocked Stop hook feedback should be synced into messages");
+
+        assert_eq!(feedback.role, Role::User);
+        assert_eq!(feedback.source(), MessageSource::SystemGenerated);
     }
 
     #[tokio::test]

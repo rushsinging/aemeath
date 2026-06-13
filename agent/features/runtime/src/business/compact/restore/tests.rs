@@ -10,6 +10,7 @@ fn text_msg(role: Role, text: &str) -> Message {
         content: vec![ContentBlock::Text {
             text: text.to_string(),
         }],
+        metadata: None,
     }
 }
 
@@ -83,6 +84,7 @@ fn sanitize_tool_pairs_complete_pair_untouched() {
                 name: "Bash".to_string(),
                 input: serde_json::json!({}),
             }],
+            metadata: None,
         },
         Message {
             role: Role::User,
@@ -91,6 +93,7 @@ fn sanitize_tool_pairs_complete_pair_untouched() {
                 content: serde_json::Value::String("ok".to_string()),
                 is_error: false,
             }],
+            metadata: None,
         },
     ];
     sanitize_tool_pairs(&mut msgs);
@@ -106,6 +109,7 @@ fn sanitize_tool_pairs_orphan_tool_result_removed() {
             content: serde_json::Value::String("orphan".to_string()),
             is_error: false,
         }],
+        metadata: None,
     }];
     sanitize_tool_pairs(&mut msgs);
     // orphan removed, then empty message removed
@@ -121,6 +125,7 @@ fn sanitize_tool_pairs_missing_tool_result_gets_placeholder() {
             name: "Bash".to_string(),
             input: serde_json::json!({}),
         }],
+        metadata: None,
     }];
     sanitize_tool_pairs(&mut msgs);
     assert_eq!(msgs.len(), 2);
@@ -153,6 +158,7 @@ fn sanitize_tool_pairs_mixed_partial_results() {
                     input: serde_json::json!({}),
                 },
             ],
+            metadata: None,
         },
         Message {
             role: Role::User,
@@ -161,6 +167,7 @@ fn sanitize_tool_pairs_mixed_partial_results() {
                 content: serde_json::Value::String("result1".to_string()),
                 is_error: false,
             }],
+            metadata: None,
         },
     ];
     sanitize_tool_pairs(&mut msgs);

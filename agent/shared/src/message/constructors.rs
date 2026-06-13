@@ -8,6 +8,17 @@ impl Message {
         Self {
             role: Role::User,
             content: vec![ContentBlock::Text { text: text.into() }],
+            metadata: None,
+        }
+    }
+
+    pub fn system_generated_user(text: impl Into<String>) -> Self {
+        Self {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+            metadata: Some(MessageMetadata {
+                source: MessageSource::SystemGenerated,
+            }),
         }
     }
 
@@ -22,6 +33,7 @@ impl Message {
                 ContentBlock::base64_image(image_base64, media_type),
                 ContentBlock::Text { text: text.into() },
             ],
+            metadata: None,
         }
     }
 
@@ -34,6 +46,7 @@ impl Message {
         Self {
             role: Role::User,
             content,
+            metadata: None,
         }
     }
 
@@ -50,6 +63,7 @@ impl Message {
                     },
                 )
                 .collect(),
+            metadata: None,
         }
     }
 
@@ -102,6 +116,7 @@ impl Message {
                     }
                 })
                 .collect(),
+            metadata: None,
         }
     }
 }

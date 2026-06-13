@@ -87,12 +87,13 @@ pub fn compact_messages(
         early_messages.len(),
         summary
     );
-    compacted.push(Message::user(summary_text));
+    compacted.push(Message::system_generated_user(summary_text));
     compacted.push(Message {
         role: Role::Assistant,
         content: vec![ContentBlock::Text {
             text: "I understand. I'll continue from where we left off.".to_string(),
         }],
+        metadata: None,
     });
     compacted.extend_from_slice(&result[window.split_point..]);
 
@@ -281,12 +282,13 @@ pub async fn compact_messages_with_llm(
         early_messages.len(),
         summary
     );
-    compacted.push(Message::user(summary_text));
+    compacted.push(Message::system_generated_user(summary_text));
     compacted.push(Message {
         role: Role::Assistant,
         content: vec![ContentBlock::Text {
             text: "I understand. I'll continue from where we left off.".to_string(),
         }],
+        metadata: None,
     });
     compacted.extend_from_slice(&result[window.split_point..]);
 

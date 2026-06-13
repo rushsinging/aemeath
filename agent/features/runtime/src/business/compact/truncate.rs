@@ -196,6 +196,7 @@ mod tests {
                 content: serde_json::Value::String("short".to_string()),
                 is_error: false,
             }],
+            metadata: None,
         };
         apply_tool_result_budget(&mut msg);
         match &msg.content[0] {
@@ -216,6 +217,7 @@ mod tests {
                 content: serde_json::Value::String(large_content.clone()),
                 is_error: false,
             }],
+            metadata: None,
         };
         apply_tool_result_budget(&mut msg);
         match &msg.content[0] {

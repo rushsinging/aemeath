@@ -101,6 +101,7 @@ pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
                 let placeholder_msg = Message {
                     role: Role::User,
                     content: placeholder_blocks,
+                    metadata: None,
                 };
                 messages.insert(i + 1, placeholder_msg);
                 i += 2;

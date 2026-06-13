@@ -156,6 +156,7 @@ impl OllamaProviderNonStream for OllamaProvider {
             assistant_message: Message {
                 role: Role::Assistant,
                 content: content_blocks,
+                metadata: None,
             },
             usage: crate::business::types::Usage {
                 input_tokens,

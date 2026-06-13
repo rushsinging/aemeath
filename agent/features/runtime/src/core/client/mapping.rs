@@ -269,6 +269,14 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
             share::message::Role::Assistant => "assistant".to_string(),
         },
         content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
+        metadata: message.metadata.map(|metadata| sdk::ChatMessageMetadata {
+            source: match metadata.source {
+                share::message::MessageSource::User => sdk::ChatMessageSource::User,
+                share::message::MessageSource::SystemGenerated => {
+                    sdk::ChatMessageSource::SystemGenerated
+                }
+            },
+        }),
     }
 }
 
@@ -282,7 +290,21 @@ pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Mes
             text: String::new(),
         }]
     });
-    share::message::Message { role, content }
+    let metadata = message
+        .metadata
+        .map(|metadata| share::message::MessageMetadata {
+            source: match metadata.source {
+                sdk::ChatMessageSource::User => share::message::MessageSource::User,
+                sdk::ChatMessageSource::SystemGenerated => {
+                    share::message::MessageSource::SystemGenerated
+                }
+            },
+        });
+    share::message::Message {
+        role,
+        content,
+        metadata,
+    }
 }
 
 /// 将 runtime CommandResult 映射为 SDK 版本。
