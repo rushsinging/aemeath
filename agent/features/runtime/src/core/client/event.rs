@@ -83,10 +83,7 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
 }
 
 fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
-    ChatEventContext {
-        chat_id: context.chat_id,
-        turn_id: context.turn_id,
-    }
+    ChatEventContext::new(context.chat_id, context.turn_id)
 }
 
 fn tool_call_status_to_sdk(
