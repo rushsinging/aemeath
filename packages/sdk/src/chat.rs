@@ -516,10 +516,12 @@ mod tests {
                 ChatMessage {
                     role: "user".to_string(),
                     content: serde_json::json!([{"type":"text","text":"one"}]),
+                    metadata: None,
                 },
                 ChatMessage {
                     role: "assistant".to_string(),
                     content: serde_json::json!([{"type":"text","text":"two"}]),
+                    metadata: None,
                 },
             ],
             queue_drain: None,
