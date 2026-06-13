@@ -1,4 +1,5 @@
 use crate::business::session::PersistedWorkspaceContext;
+use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
@@ -6,16 +7,13 @@ use std::pin::Pin;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeTurnContext {
-    pub chat_id: String,
-    pub turn_id: String,
+    pub chat_id: ChatId,
+    pub turn_id: ChatTurnId,
 }
 
 impl RuntimeTurnContext {
-    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
-        Self {
-            chat_id: chat_id.into(),
-            turn_id: turn_id.into(),
-        }
+    pub fn new(chat_id: ChatId, turn_id: ChatTurnId) -> Self {
+        Self { chat_id, turn_id }
     }
 }
 
@@ -71,14 +69,14 @@ pub enum RuntimeStreamEvent {
     },
     ToolCallStart {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolCallUpdate {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
@@ -89,7 +87,7 @@ pub enum RuntimeStreamEvent {
     },
     ToolResult {
         context: RuntimeTurnContext,
-        id: String,
+        id: ToolCallId,
         provider_id: String,
         tool_name: String,
         output: String,
@@ -120,7 +118,7 @@ pub enum RuntimeStreamEvent {
     TurnChanged(usize),
     HookEvent(RuntimeHookEvent),
     AskUser {
-        id: String,
+        id: ToolCallId,
         question: String,
         options: Vec<sdk::OptionItem>,
         allow_free_input: bool,
@@ -130,7 +128,7 @@ pub enum RuntimeStreamEvent {
     },
     AgentProgress {
         context: RuntimeTurnContext,
-        tool_id: String,
+        tool_id: ToolCallId,
         event: AgentProgressEvent,
     },
     WorkingDirectoryChanged {
