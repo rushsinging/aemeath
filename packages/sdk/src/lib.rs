@@ -15,6 +15,8 @@ pub mod session;
 pub mod tui;
 pub mod types;
 
+pub mod ids;
+
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
@@ -41,6 +43,7 @@ pub use tui::{
     ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView,
     SkillView, TaskStatusView, TuiLaunchContext,
 };
+pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
     StrSlice, TaskState, TaskSummary,
