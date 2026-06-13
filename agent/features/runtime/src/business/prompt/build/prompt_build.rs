@@ -87,8 +87,10 @@ Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 com
 When the user says "continue", "resume", or similar without specifying a task, call TaskList first to inspect open task batches before choosing work.
 System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 
+Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
+
 BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (missing taskId / no lifecycle ownership)
-GOOD: TaskListCreate(summary) → TaskCreate(3 tasks) → Agent("do task 1", taskId="1") → TaskUpdate(id2, in_progress) → Bash/Edit for task 2 → TaskUpdate(id2, completed) → TaskListComplete()
+GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
 
 # Tone and style
  - Your responses should be short and concise.

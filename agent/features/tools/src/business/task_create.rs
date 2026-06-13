@@ -19,6 +19,11 @@ impl Tool for TaskCreateTool {
            multiple dependent changes, or parallel sub-agent coordination. Do NOT create tasks for simple\n\
            one-step requests such as answering a question, inspecting a file, checking bug status, running a\n\
            single command, or making a tiny localized edit. For simple requests, execute directly.\n\n\
+           IMPORTANT: each task must be a SINGLE, CONCRETE, VERIFIABLE step. BAD tasks lump multiple\n\
+           changes together, such as \"Implement and verify feature\" or \"Fix all related issues\". GOOD tasks\n\
+           are specific: \"Read X.rs to understand current error handling\", \"Add retry logic to Y::send\",\n\
+           \"Add unit test for Z edge case\", \"Run cargo clippy and fix warnings\". When a task involves\n\
+           implementation, split it into per-file or per-function changes plus separate verification steps.\n\n\
            IMPORTANT workflow when task management is actually needed:\n\
            1. First, describe your complete plan as text — list ALL planned tasks so the user can see the full picture\n\
            2. For a new complex multi-step user request, call TaskListCreate before TaskCreate so tasks attach to a request summary\n\
