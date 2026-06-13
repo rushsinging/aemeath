@@ -4,6 +4,21 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+/// Deterministic UUIDv7 from a string (namespace-based, for test stability).
+fn deterministic_uuidv7(s: &str) -> Uuid {
+    let namespace = Uuid::from_bytes([
+        0xa1, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e,
+        0xa1, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e,
+    ]);
+    let base = Uuid::new_v5(&namespace, s.as_bytes());
+    let mut bytes = *base.as_bytes();
+    // Set version to 7 (bits 48-51 of time_hi_and_version)
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    // Set variant to RFC 4122 (bits 6-7 of clock_seq_hi_and_reserved)
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
 /// Error returned when parsing a non-UUIDv7 string as an internal ID.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum IdParseError {
@@ -39,9 +54,10 @@ impl ChatId {
     }
 
     /// Convert from legacy string or generate new UUIDv7.
-    /// Used for historical session migration.
+    /// If the input is a valid UUIDv7, preserves it.
+    /// Otherwise, deterministically generates a UUIDv7 from the input string.
     pub fn from_legacy_or_new(s: &str) -> Self {
-        Self::parse_uuid7(s).unwrap_or_else(|_| Self::new_v7())
+        Self::parse_uuid7(s).unwrap_or_else(|_| Self(deterministic_uuidv7(s)))
     }
 
     /// Get the inner UUID.
@@ -92,7 +108,7 @@ impl ChatTurnId {
     }
 
     pub fn from_legacy_or_new(s: &str) -> Self {
-        Self::parse_uuid7(s).unwrap_or_else(|_| Self::new_v7())
+        Self::parse_uuid7(s).unwrap_or_else(|_| Self(deterministic_uuidv7(s)))
     }
 
     pub fn as_uuid(&self) -> &Uuid {
@@ -140,7 +156,7 @@ impl ToolCallId {
     }
 
     pub fn from_legacy_or_new(s: &str) -> Self {
-        Self::parse_uuid7(s).unwrap_or_else(|_| Self::new_v7())
+        Self::parse_uuid7(s).unwrap_or_else(|_| Self(deterministic_uuidv7(s)))
     }
 
     pub fn as_uuid(&self) -> &Uuid {

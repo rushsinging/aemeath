@@ -360,10 +360,11 @@ mod tests {
         });
         assert_no_runtime_bind_prelude(&mapping);
         let expected_id = sdk::ids::ToolCallId::new("tool-1".to_string());
+        let expected_context = ctx();
         assert!(matches!(
             first_observation(&mapping),
             Some(ConversationIntent::ObserveToolResult { chat_id, turn_id, id, .. })
-                if chat_id.as_ref() == "chat-test" && turn_id.as_ref() == "turn-test" && id == &expected_id
+                if chat_id == &expected_context.chat_id && turn_id == &expected_context.turn_id && id == &expected_id
         ));
     }
 

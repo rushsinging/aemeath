@@ -466,8 +466,8 @@ mod tests {
             UiEvent::AgentProgress {
                 context, tool_id, ..
             } => {
-                assert_eq!(context.chat_id.as_ref(), "chat-progress");
-                assert_eq!(context.turn_id.as_ref(), "turn-progress");
+                assert_eq!(context.chat_id, crate::tui::model::conversation::ids::ChatId::new("chat-progress"));
+                assert_eq!(context.turn_id, crate::tui::model::conversation::ids::ChatTurnId::new("turn-progress"));
                 assert_eq!(tool_id, expected_tool_id);
             }
             other => panic!("unexpected event: {other:?}"),
@@ -591,10 +591,12 @@ mod tests {
             .await
             .expect("Done event should be forwarded")
             .expect("ui channel should receive Done");
+        let expected_chat = crate::tui::model::conversation::ids::ChatId::new("chat-test");
+        let expected_turn = crate::tui::model::conversation::ids::ChatTurnId::new("turn-test");
         assert!(matches!(
             event,
             UiEvent::Done { context }
-                if context.chat_id.as_ref() == "chat-test" && context.turn_id.as_ref() == "turn-test"
+                if context.chat_id == expected_chat && context.turn_id == expected_turn
         ));
 
         let drain_request =

@@ -144,7 +144,7 @@ mod tests {
         model.push(OutputTimelineItem::ToolResult {
             reference: TimelineToolCallRef::new(chat(), turn(), ToolCallId::new("tool-1".to_string())),
         });
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
         model.move_tool_result_after_tool_call(&chat(), &turn(), &ToolCallId::new("tool-1".to_string()));
         assert!(matches!(
             model.items()[0],

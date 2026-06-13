@@ -267,7 +267,8 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
         matches!(&result.kind, OutputBlockKind::ToolResult(_)),
         "子块应为 ToolResult 变体"
     );
-    assert_eq!(result.block_id, "tool-1-result");
+    let expected_tool_id = ToolCallId::new("tool-1".to_string());
+    assert_eq!(result.block_id, format!("{}-result", expected_tool_id.as_ref()));
     assert!(result.children.is_empty(), "ToolResult 为叶子");
     // ToolResult 不应作为顶层 root 出现（必须是 tool_call 的子）。
     assert!(

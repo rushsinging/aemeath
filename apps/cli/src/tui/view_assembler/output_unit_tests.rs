@@ -226,10 +226,11 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
     });
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let expected_id = ToolCallId::new("call_orphaned".to_string());
     let block = vm
         .roots
         .iter()
-        .find(|block| block.block_id.contains("call_orphaned"))
+        .find(|block| block.block_id.contains(&expected_id.to_string()))
         .expect("应有该 ToolResult 对应的块");
     let OutputBlockKind::DiagnosticNotice(text_view) = &block.kind else {
         panic!("应为 DiagnosticNotice");

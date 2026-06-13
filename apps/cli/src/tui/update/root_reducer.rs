@@ -370,10 +370,11 @@ mod tests {
             },
         );
 
+        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
         assert!(model.conversation.blocks.iter().any(|block| matches!(
             block,
             crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
-                if id.as_ref() == "tool-1"
+                if *id == expected_tool_id
         )));
     }
 
@@ -418,6 +419,7 @@ mod tests {
                 .count(),
             1
         );
+        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic".to_string());
         assert!(model
             .conversation
             .timeline
@@ -428,7 +430,7 @@ mod tests {
                 crate::tui::model::output_timeline::OutputTimelineItem::ToolCall { reference }
                     if reference.context.chat_id == chat_id
                         && reference.context.turn_id == turn_id
-                        && reference.tool_call_id.as_ref() == "tool-atomic"
+                        && reference.tool_call_id == expected_tool_id
             )));
     }
 

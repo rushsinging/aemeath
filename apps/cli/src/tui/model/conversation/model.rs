@@ -276,7 +276,14 @@ impl ConversationModel {
             status,
         } = update;
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-        let candidate_ids = [Some(id.to_string()), provider_id.clone()];
+        let mut candidate_ids = vec![Some(id.to_string())];
+        if let Some(ref pid) = provider_id {
+            let pid_as_uuid = ToolCallId::from_legacy_or_new(pid).to_string();
+            if !candidate_ids.contains(&Some(pid_as_uuid.clone())) {
+                candidate_ids.push(Some(pid_as_uuid));
+            }
+            candidate_ids.push(Some(pid.clone()));
+        }
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
         let mut final_summary = summary.clone().unwrap_or_default();

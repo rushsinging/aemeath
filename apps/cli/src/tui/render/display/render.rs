@@ -510,6 +510,7 @@ mod tests {
 
         app.render_history_message(&assistant, Some(&tool_result));
 
+        let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-1".to_string());
         let tool_call = app
             .model
             .conversation
@@ -517,7 +518,7 @@ mod tests {
             .iter()
             .flat_map(|chat| &chat.turns)
             .flat_map(|turn| &turn.tool_calls)
-            .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some("tool-1"))
+            .find(|call| call.id.as_ref() == Some(&expected_tool_id))
             .expect("tool call should be restored");
         assert_eq!(tool_call.status, ToolCallStatus::Success);
         assert_eq!(tool_call.result.as_deref(), Some("done"));
