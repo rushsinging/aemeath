@@ -30,7 +30,7 @@ pub struct ConversationModel {
 struct ToolCallUpdateObservation {
     chat_id: ChatId,
     turn_id: ChatTurnId,
-    id: String,
+    id: ToolCallId,
     provider_id: Option<String>,
     name: String,
     index: usize,
@@ -157,12 +157,12 @@ impl ConversationModel {
 
     fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
-        let chat_id = ChatId::new(format!("chat-{}", self.next_chat_sequence));
+        let chat_id = ChatId::new_v7();
         let chat = Chat::new(chat_id.clone(), submission.clone());
         self.active_chat_id = Some(chat_id.clone());
         self.chats.push(chat);
         let user_block_id = self.next_block_id("user");
-        let turn_id = "turn-1".to_string();
+        let turn_id = ChatTurnId::new_v7();
         self.blocks.push(ConversationBlock::UserMessage {
             id: user_block_id.clone(),
             text: submission.clone(),
@@ -173,11 +173,11 @@ impl ConversationModel {
         });
         vec![
             ConversationChange::ChatStarted {
-                chat_id: chat_id.as_ref().to_string(),
+                chat_id: chat_id.to_string(),
             },
             ConversationChange::ChatTurnStarted {
-                chat_id: chat_id.as_ref().to_string(),
-                turn_id,
+                chat_id: chat_id.to_string(),
+                turn_id: turn_id.to_string(),
             },
             ConversationChange::OutputDirty,
         ]
@@ -234,7 +234,7 @@ impl ConversationModel {
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        id: String,
+        id: ToolCallId,
         _provider_id: Option<String>,
         name: String,
         index: usize,
@@ -243,14 +243,14 @@ impl ConversationModel {
         log::debug!(
             target: "cli::tui::tool_flow",
             "model observe tool_call_start chat_id={} turn_id={} id={} name={} index={} blocks_before={}",
-            chat_id.as_ref(),
-            turn_id.as_ref(),
-            id,
+            chat_id.to_string(),
+            turn_id.to_string(),
+            id.to_string(),
             name,
             index,
             self.blocks.len(),
         );
-        let tool_call_id = ToolCallId::new(id.clone());
+        let tool_call_id = id.clone();
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
         }
@@ -276,7 +276,7 @@ impl ConversationModel {
             status,
         } = update;
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-        let candidate_ids = [Some(id.as_str()), provider_id.as_deref()];
+        let candidate_ids = [Some(id.to_string()), provider_id.clone()];
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
         let mut final_summary = summary.clone().unwrap_or_default();
@@ -287,7 +287,7 @@ impl ConversationModel {
                     turn.update_tool(candidate_id, arguments.clone(), summary.clone(), status)
                 {
                     args_preview = preview;
-                    bound_id = candidate_id.to_string();
+                    bound_id = ToolCallId::from_legacy_or_new(candidate_id);
                     if final_summary.is_empty() {
                         if let Some(call) = turn
                             .tool_calls
@@ -304,44 +304,43 @@ impl ConversationModel {
         }
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-                let tool_call_id = ToolCallId::new(id.clone());
-                turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
-                let _ = turn.update_tool(&id, arguments.clone(), summary.clone(), status);
+                turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
+                let _ = turn.update_tool(&id.to_string(), arguments.clone(), summary.clone(), status);
                 bound_id = id.clone();
                 if let Some(call) = turn
                     .tool_calls
                     .iter()
-                    .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.as_str()))
+                    .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id.to_string().as_str()))
                 {
                     args_preview = call.args_preview.clone();
                     final_summary = call.summary.clone().unwrap_or_default();
                 }
             }
         }
-        self.promote_orphan_tool_result(&chat_id, &turn_id, &bound_id);
+        self.promote_orphan_tool_result(&chat_id, &turn_id, bound_id.as_ref());
         let existing_tool_position = self.blocks.iter().position(|block| {
             matches!(
                 block,
                 ConversationBlock::ToolCall { id: block_id, chat_id: block_chat_id, turn_id: block_turn_id, .. }
-                    if block_chat_id == &chat_id && block_turn_id == &turn_id && block_id.as_ref() == bound_id
+                    if block_chat_id == &chat_id && block_turn_id == &turn_id && block_id == &bound_id
             )
         });
         if existing_tool_position.is_none() {
             self.insert_tool_call_block_before_active_text(
                 chat_id.clone(),
                 turn_id.clone(),
-                ToolCallId::new(bound_id.clone()),
+                bound_id.clone(),
             );
         }
-        self.move_tool_results_after_tool_call(&chat_id, &turn_id, &bound_id);
+        self.move_tool_results_after_tool_call(&chat_id, &turn_id, bound_id.as_ref());
         log::debug!(
             target: "cli::tui::tool_flow",
             "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} summary_len={} has_block={} blocks_after={}",
-            chat_id.as_ref(),
-            turn_id.as_ref(),
-            id,
+            chat_id.to_string(),
+            turn_id.to_string(),
+            id.to_string(),
             provider_id,
-            bound_id,
+            bound_id.to_string(),
             name,
             index,
             status,
@@ -352,7 +351,7 @@ impl ConversationModel {
             self.blocks.len(),
         );
         vec![
-            ConversationChange::ToolCallBound { id: bound_id, name },
+            ConversationChange::ToolCallBound { id: bound_id.to_string(), name },
             ConversationChange::OutputDirty,
         ]
     }
@@ -466,7 +465,7 @@ impl ConversationModel {
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,
-        tool_id: String,
+        tool_id: ToolCallId,
         message: String,
     ) -> Vec<ConversationChange> {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
@@ -475,13 +474,13 @@ impl ConversationModel {
             if let Some(call) = turn
                 .tool_calls
                 .iter_mut()
-                .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id))
+                .find(|c| c.id.as_ref().is_some_and(|id| id.as_ref() == tool_id.to_string()))
             {
                 call.activities.push(message.clone());
             }
         }
         self.agent_progress
-            .push(AgentProgressEntry::new(tool_id.clone(), message.clone()));
+            .push(AgentProgressEntry::new(tool_id.to_string(), message.clone()));
         vec![ConversationChange::OutputDirty]
     }
     fn append_or_extend_text_block(
