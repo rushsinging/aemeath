@@ -246,6 +246,25 @@ fn minimax_provider_keeps_v1_base_url_suffix() {
 }
 
 #[test]
+fn mimo_provider_keeps_v1_base_url_suffix() {
+    let config = OpenAIProviderConfig::from_driver(crate::api::ProviderDriverKind::Mimo, "mimo");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://token-plan-cn.xiaomimimo.com/v1".to_string()),
+        Some("mimo-v2.5-pro".to_string()),
+        8192,
+        true,
+        None,
+    );
+
+    assert_eq!(
+        provider.chat_url(),
+        "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+    );
+}
+
+#[test]
 fn test_mimo_driver_uses_max_completion_tokens() {
     assert_eq!(MimoDriver.max_tokens_field(), "max_completion_tokens");
 }
