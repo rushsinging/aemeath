@@ -3,11 +3,14 @@ pub mod app;
 pub mod effect;
 pub mod model;
 pub mod render;
+pub mod text;
 pub mod update;
 pub mod view_assembler;
 pub mod view_model;
 pub mod view_state;
 
+#[cfg(test)]
+mod architecture_tests;
 #[cfg(test)]
 mod log_scope_tests;
 

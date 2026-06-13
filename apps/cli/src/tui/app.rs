@@ -87,7 +87,9 @@ pub(crate) fn git_branch_for(path: &Path) -> Option<String> {
     }
 }
 
-pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::render::status::WorktreeKind {
+pub(crate) fn worktree_kind_for(
+    path: &Path,
+) -> crate::tui::model::runtime::workspace::WorktreeKind {
     let is_worktree = Command::new("git")
         .args(["rev-parse", "--git-dir", "--git-common-dir"])
         .current_dir(path)
@@ -105,9 +107,9 @@ pub(crate) fn worktree_kind_for(path: &Path) -> crate::tui::render::status::Work
         .unwrap_or(false);
 
     if is_worktree {
-        crate::tui::render::status::WorktreeKind::Worktree
+        crate::tui::model::runtime::workspace::WorktreeKind::LinkedWorktree
     } else {
-        crate::tui::render::status::WorktreeKind::Main
+        crate::tui::model::runtime::workspace::WorktreeKind::MainCheckout
     }
 }
 

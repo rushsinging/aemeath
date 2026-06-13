@@ -8,9 +8,8 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
-use crate::tui::model::runtime::workspace::WorktreeKind;
 use crate::tui::model::runtime_observation::{RuntimeObservation, RuntimeTurnContext};
-use crate::tui::render::display::safe_text::safe_str_slice_by_char;
+use crate::tui::text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
 
 const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
@@ -487,10 +486,7 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
         path_base: Some(update.path_base.clone()),
         working_root: Some(update.working_root.clone()),
         branch: update.branch.clone(),
-        kind: match update.kind {
-            crate::tui::render::status::WorktreeKind::Main => WorktreeKind::MainCheckout,
-            crate::tui::render::status::WorktreeKind::Worktree => WorktreeKind::LinkedWorktree,
-        },
+        kind: update.kind,
     })
 }
 

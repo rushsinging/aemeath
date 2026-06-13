@@ -1,6 +1,6 @@
 use crate::tui::app::event::UiEvent;
 use crate::tui::app::{display_status_path, display_working_dir, status_context_for_paths};
-use crate::tui::render::status::WorktreeKind;
+use crate::tui::model::runtime::workspace::WorktreeKind;
 use std::path::PathBuf;
 
 #[test]
@@ -45,7 +45,7 @@ fn test_working_directory_changed_carries_full_status_context() {
             );
             assert!(ctx.workspace.context_stack.is_empty());
             assert!(ctx.branch.is_none());
-            assert_eq!(ctx.kind, WorktreeKind::Main);
+            assert_eq!(ctx.kind, WorktreeKind::MainCheckout);
         }
         _ => panic!("expected WorkingDirectoryChanged event"),
     }

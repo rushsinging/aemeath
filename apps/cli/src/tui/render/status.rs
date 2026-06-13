@@ -1,3 +1,3 @@
 mod bar;
 
-pub use bar::{StatusBar, StatusBarRow, WorktreeKind};
+pub use bar::{StatusBar, StatusBarRow};

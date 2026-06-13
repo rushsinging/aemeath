@@ -34,14 +34,7 @@ impl App {
                                     path_base: Some(ctx.path_base),
                                     working_root: Some(ctx.working_root),
                                     branch: ctx.branch,
-                                    kind: match ctx.kind {
-                                        crate::tui::render::status::WorktreeKind::Worktree => {
-                                            crate::tui::model::runtime::workspace::WorktreeKind::LinkedWorktree
-                                        }
-                                        crate::tui::render::status::WorktreeKind::Main => {
-                                            crate::tui::model::runtime::workspace::WorktreeKind::MainCheckout
-                                        }
-                                    },
+                                    kind: ctx.kind,
                                 },
                             );
                         }
