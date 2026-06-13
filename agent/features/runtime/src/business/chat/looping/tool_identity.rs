@@ -1,63 +1,58 @@
+use sdk::ids::ToolCallId;
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default)]
 struct ToolIdentityState {
-    by_stream_index: HashMap<usize, String>,
-    by_provider_id: HashMap<String, String>,
+    by_stream_index: HashMap<usize, ToolCallId>,
+    by_provider_id: HashMap<String, ToolCallId>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ToolIdentityRegistry {
-    next_id: Arc<AtomicUsize>,
     state: Arc<Mutex<ToolIdentityState>>,
 }
 
 impl ToolIdentityRegistry {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            state: Arc::new(Mutex::new(ToolIdentityState::default())),
+        }
     }
 
-    pub fn runtime_id_for_stream(&self, index: usize, provider_id: Option<&str>) -> String {
+    pub fn runtime_id_for_stream(&self, index: usize, provider_id: Option<&str>) -> ToolCallId {
         let mut state = self.state.lock().expect("tool identity registry poisoned");
+
         if let Some(provider_id) = provider_id.filter(|id| !id.is_empty()) {
             if let Some(id) = state.by_provider_id.get(provider_id).cloned() {
                 state.by_stream_index.insert(index, id.clone());
                 return id;
             }
-            let id = self.next_runtime_id();
+            let id = ToolCallId::new_v7();
             state.by_stream_index.insert(index, id.clone());
-            state
-                .by_provider_id
-                .insert(provider_id.to_string(), id.clone());
+            state.by_provider_id.insert(provider_id.to_string(), id.clone());
             return id;
         }
+
         if let Some(id) = state.by_stream_index.get(&index).cloned() {
             return id;
         }
-        let id = self.next_runtime_id();
+
+        let id = ToolCallId::new_v7();
         state.by_stream_index.insert(index, id.clone());
         id
     }
 
-    pub fn runtime_id_for_provider(&self, provider_id: &str) -> String {
+    pub fn runtime_id_for_provider(&self, provider_id: &str) -> ToolCallId {
         let mut state = self.state.lock().expect("tool identity registry poisoned");
+
         if let Some(id) = state.by_provider_id.get(provider_id).cloned() {
             return id;
         }
-        let id = self.next_runtime_id();
-        state
-            .by_provider_id
-            .insert(provider_id.to_string(), id.clone());
-        id
-    }
 
-    fn next_runtime_id(&self) -> String {
-        let next = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        format!("tool-{next}")
+        let id = ToolCallId::new_v7();
+        state.by_provider_id.insert(provider_id.to_string(), id.clone());
+        id
     }
 }
 
@@ -66,29 +61,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_runtime_id_for_stream_reuses_provider_mapping() {
+    fn test_same_provider_id_reuses_same_tool_call_id() {
         let registry = ToolIdentityRegistry::new();
-        let first = registry.runtime_id_for_stream(0, Some("provider-a"));
-        let second = registry.runtime_id_for_stream(3, Some("provider-a"));
-
-        assert_eq!(first, second);
+        let id1 = registry.runtime_id_for_provider("provider-a");
+        let id2 = registry.runtime_id_for_provider("provider-a");
+        assert_eq!(id1, id2);
     }
 
     #[test]
-    fn test_runtime_id_for_provider_reuses_stream_mapping() {
+    fn test_different_provider_ids_generate_different_tool_call_ids() {
         let registry = ToolIdentityRegistry::new();
-        let streamed = registry.runtime_id_for_stream(0, Some("provider-a"));
-        let final_id = registry.runtime_id_for_provider("provider-a");
-
-        assert_eq!(streamed, final_id);
+        let id1 = registry.runtime_id_for_provider("provider-a");
+        let id2 = registry.runtime_id_for_provider("provider-b");
+        assert_ne!(id1, id2);
     }
 
     #[test]
-    fn test_runtime_id_for_provider_allocates_unique_ids() {
+    fn test_stream_index_binds_to_provider_id_later() {
         let registry = ToolIdentityRegistry::new();
-        let first = registry.runtime_id_for_provider("provider-a");
-        let second = registry.runtime_id_for_provider("provider-b");
+        let id_by_index = registry.runtime_id_for_stream(0, None);
+        let id_by_provider = registry.runtime_id_for_stream(0, Some("provider-a"));
+        assert_eq!(id_by_index, id_by_provider);
+    }
 
-        assert_ne!(first, second);
+    #[test]
+    fn test_all_ids_are_uuidv7() {
+        let registry = ToolIdentityRegistry::new();
+        let id1 = registry.runtime_id_for_stream(0, None);
+        let id2 = registry.runtime_id_for_provider("provider-a");
+        assert_eq!(id1.as_uuid().get_version_num(), 7);
+        assert_eq!(id2.as_uuid().get_version_num(), 7);
     }
 }
