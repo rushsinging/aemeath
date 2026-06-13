@@ -69,6 +69,7 @@ fn provider_driver_api_key_env_name(driver: ProviderDriverKind) -> Option<&'stat
         ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
         ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
         ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
+        ProviderDriverKind::Mimo => Some("MIMO_API_KEY"),
         ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
         ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
     }
@@ -239,6 +240,16 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_api_key_uses_mimo_provider_env_before_llm_env() {
+        let resolved = resolved_model(ProviderDriverKind::Mimo, "config-key", "", "mimo");
+        let read_env = env_reader(&[("MIMO_API_KEY", "mimo-key"), ("LLM_API_KEY", "llm-key")]);
+
+        let result = resolve_api_key(None, &resolved, Some(&read_env));
+
+        assert_eq!(result, Some("mimo-key".to_string()));
+    }
+
+    #[test]
     fn test_resolve_api_key_uses_config_key_when_env_missing() {
         let resolved = resolved_model(ProviderDriverKind::Zhipu, "config-key", "", "zhipu");
         let read_env = env_reader(&[]);
@@ -404,6 +415,14 @@ mod tests {
         assert_eq!(
             provider_driver_api_key_env_name(ProviderDriverKind::Minimax),
             Some("MINIMAX_API_KEY")
+        );
+    }
+
+    #[test]
+    fn test_provider_driver_api_key_env_name_mimo() {
+        assert_eq!(
+            provider_driver_api_key_env_name(ProviderDriverKind::Mimo),
+            Some("MIMO_API_KEY")
         );
     }
 

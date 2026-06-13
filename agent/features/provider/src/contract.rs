@@ -31,6 +31,7 @@ pub enum ProviderDriverKind {
     LiteLLM,
     Volcengine,
     Minimax,
+    Mimo,
     Ollama,
 }
 
@@ -44,6 +45,7 @@ impl ProviderDriverKind {
             "litellm" => Some(ProviderDriverKind::LiteLLM),
             "volcengine" => Some(ProviderDriverKind::Volcengine),
             "minimax" => Some(ProviderDriverKind::Minimax),
+            "mimo" => Some(ProviderDriverKind::Mimo),
             "ollama" => Some(ProviderDriverKind::Ollama),
             _ => None,
         }
@@ -57,6 +59,7 @@ impl ProviderDriverKind {
             ProviderDriverKind::LiteLLM => "litellm",
             ProviderDriverKind::Volcengine => "volcengine",
             ProviderDriverKind::Minimax => "minimax",
+            ProviderDriverKind::Mimo => "mimo",
             ProviderDriverKind::Ollama => "ollama",
         }
     }
@@ -113,6 +116,15 @@ mod tests {
             Some(ProviderDriverKind::Ollama)
         );
     }
+
+    #[test]
+    fn test_from_str_mimo() {
+        assert_eq!(
+            ProviderDriverKind::parse("mimo"),
+            Some(ProviderDriverKind::Mimo)
+        );
+    }
+
     #[test]
     fn test_as_str_ollama_roundtrip() {
         assert_eq!(ProviderDriverKind::Ollama.as_str(), "ollama");
@@ -151,6 +163,11 @@ mod tests {
     #[test]
     fn test_as_str_minimax() {
         assert_eq!(ProviderDriverKind::Minimax.as_str(), "minimax");
+    }
+
+    #[test]
+    fn test_as_str_mimo() {
+        assert_eq!(ProviderDriverKind::Mimo.as_str(), "mimo");
     }
 
     #[test]
