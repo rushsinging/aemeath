@@ -1,28 +1,42 @@
-use crate::tui::render::output_area::{display, INDENT};
+use crate::tui::render::output_area::INDENT;
 
-use super::common::{file_path, str_arg, truncate_ellipsis, u64_arg};
-use super::{ResultRender, ToolDisplay, ToolDisplayEntry, ToolDisplayMode, TOOL_RESULT_MAX_LINES};
+use super::common::{file_path, str_arg, truncate_ellipsis};
+use super::{
+    DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
+    ToolRenderPolicy,
+};
+
+// ── Bash ─────────────────────────────────────────────────────────
 
 struct BashDisplay;
 impl ToolDisplay for BashDisplay {
     fn name(&self) -> &str {
         "Bash"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "● Bash".to_string()
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let cmd = str_arg(input, "command", "?");
-        let timeout = u64_arg(input, "timeout");
-        let max_cmd_width = 120usize.saturating_sub(INDENT.len() + 2);
-        let truncated = display::truncate_unicode_width(cmd, max_cmd_width);
-        let mut detail = format!("$ {truncated}");
-        if let Some(t) = timeout {
-            if t != 120_000 {
-                detail.push_str(&format!("  (timeout: {}s)", t / 1000));
-            }
+        let max_cmd_width = 80usize;
+        let truncated = if cmd.len() > max_cmd_width {
+            format!("{}...", &cmd[..max_cmd_width.saturating_sub(3)])
+        } else {
+            cmd.to_string()
+        };
+        format!("Bash {truncated}")
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        // command 已在 header 显示，不再需要 details
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: true, // 只显示最后 5 行
+            },
         }
-        vec![detail]
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -30,28 +44,42 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(BashDisplay)
 });
 
+// ── Read ─────────────────────────────────────────────────────────
+
+/// 截断路径，保留尾部（更有辨识度）
+fn truncate_path(path: &str, max_width: usize) -> String {
+    if path.len() <= max_width {
+        return path.to_string();
+    }
+    let suffix_len = max_width.saturating_sub(3); // 3 for "..."
+    let start = path.len() - suffix_len;
+    format!("...{}", &path[start..])
+}
+
 struct ReadDisplay;
 impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
         "Read"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        format!("● Read({path})")
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let Some(offset) = u64_arg(input, "offset") else {
-            return vec![];
-        };
-        let limit = u64_arg(input, "limit");
-        let mut detail = format!("offset: {offset}");
-        if let Some(l) = limit {
-            detail.push_str(&format!(", limit: {l}"));
+        let display_path = truncate_path(&path, 60);
+        // summary 格式：`L{start}-L{end} ({lines} lines)`
+        match summary {
+            Some(s) if !s.is_empty() => format!("Read {display_path} {s}"),
+            _ => format!("Read {display_path}"),
         }
-        vec![detail]
     }
-    fn display_mode(&self) -> ToolDisplayMode {
-        ToolDisplayMode::SingleLine
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        // 行范围信息已在 summary 中，不再需要 details
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden, // 不显示 result 子块
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -59,18 +87,32 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(ReadDisplay)
 });
 
+// ── Write ────────────────────────────────────────────────────────
+
 struct WriteDisplay;
 impl ToolDisplay for WriteDisplay {
     fn name(&self) -> &str {
         "Write"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        format!("● Write({path})")
+        let display_path = truncate_path(&path, 60);
+        // summary 格式：`N bytes`（动态更新）
+        match summary {
+            Some(s) if !s.is_empty() => format!("Write {display_path} {s}"),
+            _ => format!("Write {display_path}"),
+        }
     }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let content = str_arg(input, "content", "");
-        vec![format!("{} bytes", content.len())]
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        // 字节数已在 summary 中，不再需要 details
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden, // 不显示 result 子块
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -78,42 +120,36 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(WriteDisplay)
 });
 
+// ── Edit ─────────────────────────────────────────────────────────
+
 struct EditDisplay;
 impl ToolDisplay for EditDisplay {
     fn name(&self) -> &str {
         "Edit"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        format!("● Edit({path})")
+        let display_path = truncate_path(&path, 60);
+        // summary 格式：`Changed N -> M chars` 或 `Added/Removed N line(s)`
+        match summary {
+            Some(s) if !s.is_empty() => format!("Edit {display_path} {s}"),
+            _ => format!("Edit {display_path}"),
+        }
     }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let old = str_arg(input, "old_string", "");
-        let new = str_arg(input, "new_string", "");
-        let old_lines = old.lines().count();
-        let new_lines = new.lines().count();
-        let detail = if old_lines == new_lines {
-            format!("Changed {} -> {} chars", old.len(), new.len())
-        } else if new_lines > old_lines {
-            format!(
-                "Added {} line(s), {} -> {} chars",
-                new_lines - old_lines,
-                old.len(),
-                new.len()
-            )
-        } else {
-            format!(
-                "Removed {} line(s), {} -> {} chars",
-                old_lines - new_lines,
-                old.len(),
-                new.len()
-            )
-        };
-        vec![detail]
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        // 变更统计已在 summary 中，不再需要 details
+        vec![]
     }
-    fn result_render(&self) -> ResultRender {
-        // Edit 结果含 `---DIFF---` 包裹的 old/new，按 unified diff 渲染。
-        ResultRender::Diff
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: None, // 全部显示
+                render_kind: ResultRender::Diff,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -121,17 +157,30 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(EditDisplay)
 });
 
+// ── Glob ─────────────────────────────────────────────────────────
+
 struct GlobDisplay;
 impl ToolDisplay for GlobDisplay {
     fn name(&self) -> &str {
         "Glob"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let pattern = str_arg(input, "pattern", "?");
-        format!("● Glob({pattern})")
+        format!("Glob {pattern}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -139,18 +188,32 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(GlobDisplay)
 });
 
+// ── Grep ─────────────────────────────────────────────────────────
+
 struct GrepDisplay;
 impl ToolDisplay for GrepDisplay {
     fn name(&self) -> &str {
         "Grep"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let pattern = str_arg(input, "pattern", "?");
-        format!("● Grep /{pattern}/")
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let path = str_arg(input, "path", ".");
-        vec![format!("in {path}")]
+        let display_path = truncate_path(path, 40);
+        format!("Grep /{pattern}/ in {display_path}")
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -158,21 +221,23 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(GrepDisplay)
 });
 
+// ── Agent ────────────────────────────────────────────────────────
+
 struct AgentDisplay;
 impl ToolDisplay for AgentDisplay {
     fn name(&self) -> &str {
         "Agent"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let desc = str_arg(input, "description", "sub-task");
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
-        let mut header = format!("● Agent({desc})");
+        let mut header = format!("Agent {desc}");
         if let Some(r) = role {
-            header.push_str(&format!("  [role: {r}]"));
+            header.push_str(&format!(" [role: {r}]"));
         }
         if let Some(m) = model {
-            header.push_str(&format!("  [model: {m}]"));
+            header.push_str(&format!(" [model: {m}]"));
         }
         header
     }
@@ -186,8 +251,16 @@ impl ToolDisplay for AgentDisplay {
             200usize.saturating_sub(INDENT.len()),
         )]
     }
-    fn result_max_lines(&self) -> usize {
-        TOOL_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Expanded,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -195,26 +268,34 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(AgentDisplay)
 });
 
-const WORKTREE_RESULT_MAX_LINES: usize = 16;
+// ── EnterWorktree ────────────────────────────────────────────────
 
 struct EnterWorktreeDisplay;
 impl ToolDisplay for EnterWorktreeDisplay {
     fn name(&self) -> &str {
         "EnterWorktree"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let target = input
             .get("branch")
             .and_then(|branch| branch.as_str())
             .or_else(|| input.get("path").and_then(|path| path.as_str()))
             .unwrap_or("worktree");
-        format!("● EnterWorktree({target})")
+        format!("EnterWorktree {target}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        WORKTREE_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(16),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -222,19 +303,29 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(EnterWorktreeDisplay)
 });
 
+// ── ExitWorktree ─────────────────────────────────────────────────
+
 struct ExitWorktreeDisplay;
 impl ToolDisplay for ExitWorktreeDisplay {
     fn name(&self) -> &str {
         "ExitWorktree"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "● ExitWorktree".to_string()
+    fn format_header(&self, _input: &serde_json::Value, _summary: Option<&str>) -> String {
+        "ExitWorktree".to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        WORKTREE_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(16),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -242,17 +333,31 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(ExitWorktreeDisplay)
 });
 
+// ── WebFetch ─────────────────────────────────────────────────────
+
 struct WebFetchDisplay;
 impl ToolDisplay for WebFetchDisplay {
     fn name(&self) -> &str {
         "WebFetch"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let url = str_arg(input, "url", "?");
-        format!("● WebFetch({url})")
+        let display_url = truncate_ellipsis(url, 60);
+        format!("WebFetch {display_url}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -260,28 +365,26 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(WebFetchDisplay)
 });
 
+// ── AskUserQuestion ──────────────────────────────────────────────
+
 struct AskUserQuestionDisplay;
 impl ToolDisplay for AskUserQuestionDisplay {
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let question = str_arg(input, "question", "?");
-        let preview = truncate_ellipsis(question, 60usize.saturating_sub(INDENT.len()));
-        format!("● AskUserQuestion({preview})")
+        let preview = truncate_ellipsis(question, 60usize);
+        format!("AskUserQuestion {preview}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        // answer is already echoed via App::append_user_echo; suppress redundant display
-        0
-    }
-    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
-        if is_error {
-            vec!["✗ 回答失败".to_string()]
-        } else {
-            vec!["✓ 已回答".to_string()]
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden, // answer is already echoed via App::append_user_echo
         }
     }
 }
