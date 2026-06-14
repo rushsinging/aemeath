@@ -16,8 +16,10 @@ impl ToolDisplay for BashDisplay {
     fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let cmd = str_arg(input, "command", "?");
         let max_cmd_width = 80usize;
+        // SAFETY: shell 命令为 ASCII，max_cmd_width 已做 saturating 减法
         let truncated = if cmd.len() > max_cmd_width {
-            format!("{}...", &cmd[..max_cmd_width.saturating_sub(3)])
+            let byte_end = max_cmd_width.saturating_sub(3).min(cmd.len());
+            format!("{}...", &cmd[..byte_end]) // allow unsafe_text_op
         } else {
             cmd.to_string()
         };
@@ -51,9 +53,10 @@ fn truncate_path(path: &str, max_width: usize) -> String {
     if path.len() <= max_width {
         return path.to_string();
     }
-    let suffix_len = max_width.saturating_sub(3); // 3 for "..."
+    let suffix_len = max_width.saturating_sub(3).min(path.len()); // 3 for "..."
+    // SAFETY: 文件路径为 ASCII，suffix_len 已做 saturating/min 防护
     let start = path.len() - suffix_len;
-    format!("...{}", &path[start..])
+    format!("...{}", &path[start..]) // allow unsafe_text_op
 }
 
 struct ReadDisplay;

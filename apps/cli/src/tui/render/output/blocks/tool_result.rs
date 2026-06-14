@@ -122,7 +122,8 @@ fn format_result_lines_tail(_tool_name: &str, result: &str, width: u16, max_line
     let all_lines: Vec<&str> = result.lines().collect();
     let start = all_lines.len().saturating_sub(max_lines);
     let mut out: Vec<RenderedLine> = Vec::new();
-    for line in &all_lines[start..] {
+    // SAFETY: start ≤ all_lines.len()（saturating_sub 保证），Vec slice 不会越界
+    for line in &all_lines[start..] { // allow unsafe_text_op
         out.extend(wrap_spans_to_rendered_lines(
             vec![Span::styled(line.to_string(), base)],
             width as usize,
