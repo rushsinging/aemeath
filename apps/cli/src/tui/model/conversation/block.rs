@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn test_conversation_block_returns_tool_id() {
         let block = ConversationBlock::ToolCall {
-            id: ToolCallId::new("tool-1".to_string()),
+            id: ToolCallId::new("tool-1"),
             chat_id: ChatId::new("chat-1"),
             turn_id: ChatTurnId::new("turn-1"),
         };

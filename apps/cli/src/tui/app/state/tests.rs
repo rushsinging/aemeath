@@ -351,13 +351,13 @@ mod tests {
             },
             UiEvent::ToolCallStart {
                 context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1".to_string()),                provider_id: Some("provider-grep-1".to_string()),
+                id: sdk::ids::ToolCallId::new("grep-1"),                provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
             },
             UiEvent::ToolCallUpdate {
                 context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1".to_string()),
+                id: sdk::ids::ToolCallId::new("grep-1"),
                 provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
@@ -367,7 +367,7 @@ mod tests {
                 status: sdk::ToolCallStatusView::Ready,
             },            UiEvent::ToolResult {
                 context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1".to_string()),
+                id: sdk::ids::ToolCallId::new("grep-1"),
                 provider_id: "provider-grep-1".to_string(),
                 tool_name: "Grep".to_string(),
                 output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),

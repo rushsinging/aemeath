@@ -54,8 +54,8 @@ impl ToolFlowProjector {
                 log::debug!(
                     target: "cli::tui::tool_flow",
                     "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
-                    context.chat_id.as_ref(),
-                    context.turn_id.as_ref(),
+                    context.chat_id,
+                    context.turn_id,
                     id,
                     provider_id,
                     name,
@@ -83,8 +83,8 @@ impl ToolFlowProjector {
                 log::debug!(
                     target: "cli::tui::tool_flow",
                     "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} summary_len={}",
-                    context.chat_id.as_ref(),
-                    context.turn_id.as_ref(),
+                    context.chat_id,
+                    context.turn_id,
                     id,
                     provider_id,
                     name,
@@ -122,8 +122,8 @@ impl ToolFlowProjector {
                 log::debug!(
                     target: "cli::tui::tool_flow",
                     "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
-                    context.chat_id.as_ref(),
-                    context.turn_id.as_ref(),
+                    context.chat_id,
+                    context.turn_id,
                     id,
                     provider_id,
                     tool_name,
@@ -317,14 +317,14 @@ mod tests {
             },
             RuntimeObservation::ToolCallStart {
                 context: context.clone(),
-                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
+                id: sdk::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
             },
             RuntimeObservation::ToolCallUpdate {
                 context: context.clone(),
-                id: sdk::ids::ToolCallId::new("tool-1".to_string()),
+                id: sdk::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
@@ -334,7 +334,7 @@ mod tests {
             },
             RuntimeObservation::AgentProgress {
                 context: context.clone(),
-                tool_id: sdk::ids::ToolCallId::new("tool-1".to_string()),
+                tool_id: sdk::ids::ToolCallId::new("tool-1"),
                 message: "running".to_string(),
             },
             RuntimeObservation::Complete {
@@ -350,7 +350,7 @@ mod tests {
     fn test_projector_preserves_tool_result_context() {
         let mapping = ToolFlowProjector::project(&RuntimeObservation::ToolResult {
             context: ctx(),
-            id: sdk::ids::ToolCallId::new("tool-1".to_string()),
+            id: sdk::ids::ToolCallId::new("tool-1"),
             provider_id: "provider-1".to_string(),
             tool_name: "Read".to_string(),
             output: "done".to_string(),
@@ -359,7 +359,7 @@ mod tests {
             image_count: 0,
         });
         assert_no_runtime_bind_prelude(&mapping);
-        let expected_id = sdk::ids::ToolCallId::new("tool-1".to_string());
+        let expected_id = sdk::ids::ToolCallId::new("tool-1");
         let expected_context = ctx();
         assert!(matches!(
             first_observation(&mapping),
