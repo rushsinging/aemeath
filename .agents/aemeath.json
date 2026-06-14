@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/reject-main-edit.sh\"",
+        "timeout": 10
+      },
+      {
+        "matcher": "Write",
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/reject-main-edit.sh\"",
+        "timeout": 10
+      }
+    ],
     "Stop": [
       {
         "matcher": "",
