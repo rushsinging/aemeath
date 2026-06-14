@@ -82,18 +82,16 @@ impl Tool for TaskListTool {
         }
 
         if tasks.is_empty() {
-            return ToolResult::success("No tasks found");
+            return ToolResult::success_json(serde_json::json!({
+                "status": "success",
+                "message": "No tasks found",
+                "data": { "tasks": [], "stats": {} }
+            }));
         }
 
         let stats = self.store.stats().await;
-        let mut output = format!(
-            "Tasks: {} total ({} pending, {} in_progress, {} completed)\n\n",
-            stats.total - stats.deleted,
-            stats.pending,
-            stats.in_progress,
-            stats.completed
-        );
 
+        let mut batches_json = serde_json::json!([]);
         let batches = self.store.list_batches().await;
         for batch in batches {
             let batch_tasks = self
@@ -114,77 +112,76 @@ impl Tool for TaskListTool {
                 .iter()
                 .filter(|task| task.status == TaskStatus::Completed)
                 .count();
-            output.push_str(&format!(
-                "Task list #{} [{:?}] — {}/{} done{}\n",
-                batch.id,
-                batch.status,
-                done,
-                batch_tasks.len(),
-                batch
-                    .summary
-                    .as_deref()
-                    .map(|summary| format!(" — {summary}"))
-                    .unwrap_or_default()
-            ));
+            batches_json.as_array_mut().unwrap().push(serde_json::json!({
+                "id": batch.id,
+                "status": format!("{:?}", batch.status),
+                "done": done,
+                "total": batch_tasks.len(),
+                "summary": batch.summary
+            }));
         }
 
+        let mut tasks_json = serde_json::json!([]);
         for task in &tasks {
             let display_id = self.store.format_display_id(&task.id).await;
-            let icon = match task.status {
-                TaskStatus::Pending => "□",
-                TaskStatus::InProgress => "■",
-                TaskStatus::Completed => "✓",
-                TaskStatus::Deleted => "✗",
-            };
             let status_label = match task.status {
                 TaskStatus::Pending => "pending",
                 TaskStatus::InProgress => "in_progress",
                 TaskStatus::Completed => "completed",
                 TaskStatus::Deleted => "deleted",
             };
-            let priority_label = match task.priority {
-                TaskPriority::Urgent => " [urgent]",
-                TaskPriority::High => " [high]",
-                TaskPriority::Normal => "",
-                TaskPriority::Low => " [low]",
-            };
-            let progress = if task.progress > 0 {
-                format!(" [{}%]", task.progress)
-            } else {
-                "".to_string()
-            };
-            let blocked = if self.store.is_blocked(task).await {
-                " blocked"
-            } else if !task.blocked_by.is_empty() {
-                " waiting"
-            } else {
-                ""
-            };
-            let owner = task
-                .owner
-                .as_deref()
-                .map(|o| format!(" (@{})", o))
-                .unwrap_or_default();
+            let priority_label = task.priority.as_str();
+            let is_blocked = self.store.is_blocked(task).await;
 
-            output.push_str(&format!(
-                "{} #{} {}{}{} [{}]{}{}{}\n   {}\n",
-                icon,
-                display_id,
-                task.subject,
-                priority_label,
-                progress,
-                status_label,
-                owner,
-                blocked,
-                if !task.tags.is_empty() {
-                    format!(" [{}]", task.tags.join(", "))
-                } else {
-                    "".to_string()
-                },
-                task.description
-            ));
+            let mut task_obj = serde_json::json!({
+                "id": display_id,
+                "subject": task.subject,
+                "status": status_label,
+                "priority": priority_label,
+                "progress": task.progress,
+                "tags": task.tags,
+                "description": task.description
+            });
+
+            if let Some(ref owner) = task.owner {
+                task_obj["owner"] = serde_json::Value::String(owner.clone());
+            }
+
+            if !task.blocked_by.is_empty() {
+                let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
+                task_obj["blocked_by"] = serde_json::json!(dep_displays);
+                task_obj["is_blocked"] = serde_json::json!(is_blocked);
+            }
+
+            if !task.blocks.is_empty() {
+                let dep_displays = self.store.to_display_ids(&task.blocks).await;
+                task_obj["blocks"] = serde_json::json!(dep_displays);
+            }
+
+            tasks_json.as_array_mut().unwrap().push(task_obj);
         }
 
-        ToolResult::success(output.trim_end())
+        let msg = format!(
+            "{} tasks ({} pending, {} in_progress, {} completed)",
+            stats.total - stats.deleted,
+            stats.pending,
+            stats.in_progress,
+            stats.completed
+        );
+
+        ToolResult::success_json(serde_json::json!({
+            "status": "success",
+            "message": msg,
+            "data": {
+                "stats": {
+                    "total": stats.total - stats.deleted,
+                    "pending": stats.pending,
+                    "in_progress": stats.in_progress,
+                    "completed": stats.completed
+                },
+                "batches": batches_json,
+                "tasks": tasks_json
+            }
+        }))
     }
 }

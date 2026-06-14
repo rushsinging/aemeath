@@ -89,11 +89,11 @@ impl Tool for ListMcpResourcesTool {
                     let client = c.lock().await;
                     available_servers.push(client.name().to_string());
                 }
-                return ToolResult::error(format!(
-                    "Server '{}' not found. Available servers: {}",
-                    filter,
-                    available_servers.join(", ")
-                ));
+                return ToolResult::error(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Server '{}' not found. Available servers: {}", filter, available_servers.join(", ")),
+                    "data": null
+                }).to_string());
             }
         }
 
@@ -121,11 +121,18 @@ impl Tool for ListMcpResourcesTool {
         }
 
         if resources.is_empty() {
-            ToolResult::success(
-                "No resources found. MCP servers may still provide tools even if they have no resources."
-            )
+            ToolResult::success(serde_json::json!({
+                "status": "success",
+                "message": "No resources found. MCP servers may still provide tools even if they have no resources.",
+                "data": null
+            }).to_string())
         } else {
-            ToolResult::success(serde_json::to_string_pretty(&resources).unwrap_or_default())
+            let data = serde_json::to_value(&resources).unwrap_or_default();
+            ToolResult::success(serde_json::json!({
+                "status": "success",
+                "message": format!("Found {} resource(s)", resources.len()),
+                "data": data
+            }).to_string())
         }
     }
 }

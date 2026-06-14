@@ -39,33 +39,52 @@ impl Tool for TaskStopTool {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
-            return ToolResult::error("Task ID is required");
+            return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "Task ID is required",
+                "data": {}
+            }));
         }
 
         // Resolve display number to global id
         let task_id = match self.store.resolve_display_id(input_id).await {
             Some(global_id) => global_id,
-            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task not found: {}", input_id),
+                    "data": {}
+                }))
+            }
         };
         let display_id = self.store.format_display_id(&task_id).await;
 
         let task = self.store.get(&task_id).await;
 
         if task.is_none() {
-            return ToolResult::error(format!("Task not found: {}", display_id));
+            return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("Task not found: {}", display_id),
+                "data": {}
+            }));
         }
         let task = task.unwrap();
 
         // Check if task can be stopped
         match task.status {
             TaskStatus::Completed => {
-                return ToolResult::error(format!(
-                    "Task #{} is already completed and cannot be stopped",
-                    display_id
-                ));
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task #{} is already completed and cannot be stopped", display_id),
+                    "data": { "task_id": display_id, "status": "completed" }
+                }));
             }
             TaskStatus::Deleted => {
-                return ToolResult::error(format!("Task #{} is already deleted", display_id));
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task #{} is already deleted", display_id),
+                    "data": { "task_id": display_id, "status": "deleted" }
+                }));
             }
             _ => {}
         }
@@ -77,9 +96,10 @@ impl Tool for TaskStopTool {
             })
             .await;
 
-        ToolResult::success(format!(
-            "Task #{} stopped and marked as deleted",
-            display_id
-        ))
+        ToolResult::success_json(serde_json::json!({
+            "status": "success",
+            "message": format!("Task #{} stopped and marked as deleted", display_id),
+            "data": { "task_id": display_id, "new_status": "deleted" }
+        }))
     }
 }

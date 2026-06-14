@@ -90,16 +90,33 @@ impl Tool for McpToolWrapper {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
             log::warn!("MCP tool {} input validation failed: {}", self.tool_name, e);
-            return ToolResult::error(format!("Invalid input for {}: {}", self.tool_name, e));
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("Invalid input for {}: {}", self.tool_name, e),
+                "data": null
+            }).to_string());
         }
 
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
-            Ok(output) => ToolResult::success(crate::business::mcp::limit_tool_response(
-                &output,
-                crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
-            )),
-            Err(e) => ToolResult::error(format!("MCP tool error: {}", e)),
+            Ok(output) => {
+                let limited = crate::business::mcp::limit_tool_response(
+                    &output,
+                    crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
+                );
+                let data = serde_json::from_str::<Value>(&limited)
+                    .unwrap_or(Value::String(limited));
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": "MCP tool call succeeded",
+                    "data": data
+                }).to_string())
+            }
+            Err(e) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("MCP tool error: {}", e),
+                "data": null
+            }).to_string()),
         }
     }
 }

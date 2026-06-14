@@ -69,11 +69,19 @@ impl Tool for TaskCreateTool {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return ToolResult::error("missing required parameter: subject"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: subject",
+                "data": {}
+            }).to_string()),
         };
         let description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d.to_string(),
-            None => return ToolResult::error("missing required parameter: description"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: description",
+                "data": {}
+            }).to_string()),
         };
         let active_form = input
             .get("activeForm")
@@ -116,24 +124,25 @@ impl Tool for TaskCreateTool {
         // Get updated task for response
         let task = match self.store.get(&task.id).await {
             Some(t) => t,
-            None => return ToolResult::error("Failed to retrieve created task"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "Failed to retrieve created task",
+                "data": {}
+            }).to_string()),
         };
 
         let priority_str = task.priority.as_str();
         let display_id = self.store.format_display_id(&task.id).await;
-        let progress_str = if task.progress > 0 {
-            format!(
-                " ({}% - {})",
-                task.progress,
-                task.progress_message.as_deref().unwrap_or("")
-            )
-        } else {
-            String::new()
-        };
 
-        ToolResult::success(format!(
-            "Task #{} created successfully: {} [{}]{progress_str}\nDescription: {}",
-            display_id, task.subject, priority_str, task.description
-        ))
+        ToolResult::success(serde_json::json!({
+            "status": "success",
+            "message": format!("Task #{} created: {}", display_id, task.subject),
+            "data": {
+                "task_id": task.id,
+                "subject": task.subject,
+                "description": task.description,
+                "priority": priority_str
+            }
+        }).to_string())
     }
 }

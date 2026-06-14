@@ -32,7 +32,11 @@ impl Tool for FileEditTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: file_path"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: file_path",
+                "data": null
+            }).to_string()),
         };
 
         // Validate path is within workspace boundary (includes traversal check)
@@ -45,38 +49,64 @@ impl Tool for FileEditTool {
             ctx.allow_all,
         ) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": e.to_string(),
+                "data": null
+            }).to_string()),
         };
         // Check if file was read first
         if let Ok(read_files) = ctx.read_files.lock() {
             let normalized_path = path.to_string_lossy();
             if !read_files.contains(file_path) && !read_files.contains(normalized_path.as_ref()) {
-                return ToolResult::error(format!(
-                    "You must read {file_path} before editing it. Use the Read tool first."
-                ));
+                return ToolResult::error(serde_json::json!({
+                    "status": "error",
+                    "message": format!("You must read {file_path} before editing it. Use the Read tool first."),
+                    "data": null
+                }).to_string());
             }
         }
         let old_string = match input.get("old_string").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => return ToolResult::error("missing required parameter: old_string"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: old_string",
+                "data": null
+            }).to_string()),
         };
         let new_string = match input.get("new_string").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => return ToolResult::error("missing required parameter: new_string"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: new_string",
+                "data": null
+            }).to_string()),
         };
         let replace_all = input
             .get("replace_all")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         if !path.exists() {
-            return ToolResult::error(format!("file not found: {file_path}"));
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("file not found: {file_path}"),
+                "data": null
+            }).to_string());
         }
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("failed to read file: {e}")),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to read file: {e}"),
+                "data": null
+            }).to_string()),
         };
         if old_string == new_string {
-            return ToolResult::error("old_string and new_string are identical");
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "old_string and new_string are identical",
+                "data": null
+            }).to_string());
         }
 
         // Try exact match first, then fuzzy match (normalize leading whitespace)
@@ -131,10 +161,18 @@ impl Tool for FileEditTool {
                 "old_string not found in file. Read the file first to get the exact content."
                     .to_string()
             };
-            return ToolResult::error(hint);
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": hint,
+                "data": null
+            }).to_string());
         }
         if !replace_all && count > 1 {
-            return ToolResult::error(format!("old_string found {count} times. Use replace_all or provide more context to make it unique."));
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("old_string found {count} times. Use replace_all or provide more context to make it unique."),
+                "data": null
+            }).to_string());
         }
 
         // Apply the replacement, adapting new_string indentation if fuzzy matched
@@ -151,20 +189,35 @@ impl Tool for FileEditTool {
         };
         match tokio::fs::write(path, &new_content).await {
             Ok(()) => {
+                let occurrences = if replace_all { count } else { 1 };
                 let fuzzy_note = if is_fuzzy {
                     " (fuzzy matched, indentation adapted)"
                 } else {
                     ""
                 };
-                ToolResult::success(format!(
-                    "replaced {} occurrence(s){} in {file_path}\n---DIFF:LINE:{diff_start_line}---\n{}\n---DIFF:LINE:{diff_start_line}---\n{}",
-                    if replace_all { count } else { 1 },
-                    fuzzy_note,
-                    matched_old,
-                    actual_new,
-                ))
+                let diff_text = format!(
+                    "---DIFF:LINE:{diff_start_line}---\n{}\n---DIFF:LINE:{diff_start_line}---\n{}",
+                    matched_old, actual_new,
+                );
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
+                    "data": {
+                        "file_path": file_path,
+                        "occurrences": occurrences,
+                        "fuzzy_note": fuzzy_note,
+                        "diff_start_line": diff_start_line,
+                        "old_content": matched_old,
+                        "new_content": actual_new,
+                        "diff": diff_text,
+                    }
+                }).to_string())
             }
-            Err(e) => ToolResult::error(format!("failed to write file: {e}")),
+            Err(e) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to write file: {e}"),
+                "data": null
+            }).to_string()),
         }
     }
 }

@@ -39,18 +39,34 @@ impl Tool for TaskGetTool {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
-            return ToolResult::error("Task ID is required");
+            return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "Task ID is required",
+                "data": {}
+            }));
         }
 
         // Resolve display number to global id
         let task_id = match self.store.resolve_display_id(input_id).await {
             Some(global_id) => global_id,
-            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task not found: {}", input_id),
+                    "data": {}
+                }));
+            }
         };
 
         let task = match self.store.get(&task_id).await {
             Some(t) => t,
-            None => return ToolResult::error(format!("Task not found: {}", input_id)),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task not found: {}", input_id),
+                    "data": {}
+                }));
+            }
         };
 
         let display_id = self.store.format_display_id(&task.id).await;
@@ -63,75 +79,59 @@ impl Tool for TaskGetTool {
 
         let priority = task.priority.as_str();
 
-        let mut lines = vec![
-            format!("Task #{}: {}", display_id, task.subject),
-            format!("Status: {}", status),
-            format!("Priority: {}", priority),
-            format!("Description: {}", task.description),
-        ];
+        let mut data = serde_json::json!({
+            "id": display_id,
+            "subject": task.subject.clone(),
+            "status": status,
+            "priority": priority,
+            "description": task.description,
+            "progress": task.progress,
+            "created_at": format_timestamp(task.created_at),
+            "updated_at": format_timestamp(task.updated_at),
+        });
 
-        // Progress
-        if task.progress > 0 {
-            let progress_str = format!("Progress: {}%", task.progress);
-            let msg_str = task
-                .progress_message
-                .as_ref()
-                .map(|m| format!(" - {}", m))
-                .unwrap_or_default();
-            lines.push(format!("{}{}", progress_str, msg_str));
+        if let Some(ref progress_message) = task.progress_message {
+            data["progress_message"] = serde_json::Value::String(progress_message.clone());
         }
-
-        // Owner
-        if let Some(owner) = &task.owner {
-            lines.push(format!("Owner: {}", owner));
+        if let Some(ref owner) = task.owner {
+            data["owner"] = serde_json::Value::String(owner.clone());
         }
-
-        // Active form
-        if let Some(active_form) = &task.active_form {
-            lines.push(format!("Active form: {}", active_form));
+        if let Some(ref active_form) = task.active_form {
+            data["active_form"] = serde_json::Value::String(active_form.clone());
         }
-
-        // Session
-        if let Some(session_id) = &task.session_id {
-            lines.push(format!("Session: {}", session_id));
+        if let Some(ref session_id) = task.session_id {
+            data["session_id"] = serde_json::Value::String(session_id.clone());
         }
-
-        // Tags
         if !task.tags.is_empty() {
-            lines.push(format!("Tags: {}", task.tags.join(", ")));
+            data["tags"] = serde_json::json!(task.tags);
         }
 
         // Dependencies
         if !task.blocked_by.is_empty() {
             let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
-            let blocked_by = dep_displays
+            let blocked_by: Vec<String> = dep_displays
                 .iter()
                 .map(|id| format!("#{}", id))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let blocked_status = if self.store.is_blocked(&task).await {
-                " (currently blocked)"
-            } else {
-                ""
-            };
-            lines.push(format!("Blocked by: {}{}", blocked_by, blocked_status));
+                .collect();
+            let is_blocked = self.store.is_blocked(&task).await;
+            data["blocked_by"] = serde_json::json!(blocked_by);
+            data["is_blocked"] = serde_json::json!(is_blocked);
         }
 
         if !task.blocks.is_empty() {
             let dep_displays = self.store.to_display_ids(&task.blocks).await;
-            let blocks = dep_displays
+            let blocks: Vec<String> = dep_displays
                 .iter()
                 .map(|id| format!("#{}", id))
-                .collect::<Vec<_>>()
-                .join(", ");
-            lines.push(format!("Blocks: {}", blocks));
+                .collect();
+            data["blocks"] = serde_json::json!(blocks);
         }
 
-        // Timestamps
-        lines.push(format!("Created: {}", format_timestamp(task.created_at)));
-        lines.push(format!("Updated: {}", format_timestamp(task.updated_at)));
-
-        ToolResult::success(lines.join("\n"))
+        ToolResult::success_json(serde_json::json!({
+            "status": "success",
+            "message": format!("Task #{}: {}", display_id, task.subject),
+            "data": data
+        }))
     }
 }
 

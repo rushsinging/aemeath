@@ -54,10 +54,14 @@ impl Tool for TaskOutputTool {
             // Get all task outputs
             let tasks = self.store.list().await;
             if tasks.is_empty() {
-                return ToolResult::success("No tasks found");
+                return ToolResult::success_json(serde_json::json!({
+                    "status": "success",
+                    "message": "No tasks found",
+                    "data": { "tasks": [] }
+                }));
             }
 
-            let mut output = String::new();
+            let mut tasks_json = serde_json::json!([]);
             let count = tasks.len().min(limit);
 
             for task in tasks.iter().take(count) {
@@ -69,39 +73,56 @@ impl Tool for TaskOutputTool {
                     storage::api::TaskStatus::Deleted => "deleted",
                 };
 
-                output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
-                output.push_str(&format!("  Description: {}\n", task.description));
+                let mut task_obj = serde_json::json!({
+                    "id": display_id,
+                    "status": status,
+                    "subject": task.subject,
+                    "description": task.description
+                });
 
-                if let Some(owner) = &task.owner {
-                    output.push_str(&format!("  Owner: {}\n", owner));
+                if let Some(ref owner) = task.owner {
+                    task_obj["owner"] = serde_json::Value::String(owner.clone());
                 }
 
                 if !task.blocked_by.is_empty() {
                     let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
-                    output.push_str(&format!("  Blocked by: {}\n", dep_displays.join(", ")));
+                    task_obj["blocked_by"] = serde_json::json!(dep_displays);
                 }
 
                 if !task.blocks.is_empty() {
                     let dep_displays = self.store.to_display_ids(&task.blocks).await;
-                    output.push_str(&format!("  Blocks: {}\n", dep_displays.join(", ")));
+                    task_obj["blocks"] = serde_json::json!(dep_displays);
                 }
 
-                output.push('\n');
+                tasks_json.as_array_mut().unwrap().push(task_obj);
             }
 
-            if tasks.len() > limit {
-                output.push_str(&format!(
-                    "\n... and {} more tasks (use limit parameter to see more)",
-                    tasks.len() - limit
-                ));
-            }
+            let has_more = tasks.len() > limit;
+            let remaining = if has_more { tasks.len() - limit } else { 0 };
 
-            ToolResult::success(output.trim_end())
+            ToolResult::success_json(serde_json::json!({
+                "status": "success",
+                "message": format!("{} tasks found", count),
+                "data": {
+                    "tasks": tasks_json,
+                    "total": tasks.len(),
+                    "returned": count,
+                    "limit": limit,
+                    "has_more": has_more,
+                    "remaining": remaining
+                }
+            }))
         } else if let Some(input_id) = input["task_id"].as_str() {
             // Resolve display number to global id
             let task_id = match self.store.resolve_display_id(input_id).await {
                 Some(global_id) => global_id,
-                None => return ToolResult::error(format!("Task not found: {}", input_id)),
+                None => {
+                    return ToolResult::error_json(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Task not found: {}", input_id),
+                        "data": {}
+                    }))
+                }
             };
             // Get specific task output
             match self.store.get(&task_id).await {
@@ -114,42 +135,55 @@ impl Tool for TaskOutputTool {
                         storage::api::TaskStatus::Deleted => "deleted",
                     };
 
-                    let mut output = String::new();
-                    output.push_str(&format!("Task #{} [{}]\n", display_id, status));
-                    output.push_str(&format!("Subject: {}\n", task.subject));
-                    output.push_str(&format!("Description: {}\n", task.description));
+                    let mut data = serde_json::json!({
+                        "id": display_id,
+                        "subject": task.subject,
+                        "status": status,
+                        "description": task.description
+                    });
 
-                    if let Some(owner) = &task.owner {
-                        output.push_str(&format!("Owner: {}\n", owner));
+                    if let Some(ref owner) = task.owner {
+                        data["owner"] = serde_json::Value::String(owner.clone());
                     }
 
-                    if let Some(active_form) = &task.active_form {
-                        output.push_str(&format!("Active Form: {}\n", active_form));
+                    if let Some(ref active_form) = task.active_form {
+                        data["active_form"] = serde_json::Value::String(active_form.clone());
                     }
 
                     if !task.blocked_by.is_empty() {
                         let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
-                        output.push_str(&format!("Blocked by: {}\n", dep_displays.join(", ")));
+                        data["blocked_by"] = serde_json::json!(dep_displays);
                     }
 
                     if !task.blocks.is_empty() {
                         let dep_displays = self.store.to_display_ids(&task.blocks).await;
-                        output.push_str(&format!("Blocks: {}\n", dep_displays.join(", ")));
+                        data["blocks"] = serde_json::json!(dep_displays);
                     }
 
-                    ToolResult::success(output.trim_end())
+                    ToolResult::success_json(serde_json::json!({
+                        "status": "success",
+                        "message": format!("Task #{}: {}", display_id, task.subject),
+                        "data": data
+                    }))
                 }
-                None => ToolResult::error(format!("Task not found: {}", input_id)),
+                None => ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Task not found: {}", input_id),
+                    "data": {}
+                })),
             }
         } else {
             // No task_id specified, show recent tasks
             let tasks = self.store.list().await;
             if tasks.is_empty() {
-                return ToolResult::success("No tasks found. Use TaskCreate to create a task.");
+                return ToolResult::success_json(serde_json::json!({
+                    "status": "success",
+                    "message": "No tasks found. Use TaskCreate to create a task.",
+                    "data": { "tasks": [] }
+                }));
             }
 
-            let mut output =
-                String::from("Recent tasks (use task_id parameter to get details):\n\n");
+            let mut tasks_json = serde_json::json!([]);
             let count = tasks.len().min(limit);
 
             for task in tasks.iter().take(count) {
@@ -161,14 +195,27 @@ impl Tool for TaskOutputTool {
                     storage::api::TaskStatus::Deleted => "deleted",
                 };
 
-                output.push_str(&format!("#{} [{}] {}\n", display_id, status, task.subject));
+                tasks_json.as_array_mut().unwrap().push(serde_json::json!({
+                    "id": display_id,
+                    "status": status,
+                    "subject": task.subject
+                }));
             }
 
-            if tasks.len() > limit {
-                output.push_str(&format!("\n... and {} more tasks", tasks.len() - limit));
-            }
+            let has_more = tasks.len() > limit;
+            let remaining = if has_more { tasks.len() - limit } else { 0 };
 
-            ToolResult::success(output.trim_end())
+            ToolResult::success_json(serde_json::json!({
+                "status": "success",
+                "message": format!("{} recent tasks (use task_id for details)", count),
+                "data": {
+                    "tasks": tasks_json,
+                    "total": tasks.len(),
+                    "returned": count,
+                    "has_more": has_more,
+                    "remaining": remaining
+                }
+            }))
         }
     }
 }

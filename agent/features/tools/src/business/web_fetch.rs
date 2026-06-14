@@ -145,7 +145,11 @@ impl Tool for WebFetchTool {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let raw_url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,
-            None => return ToolResult::error("missing required parameter: url"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: url",
+                "data": null
+            }).to_string()),
         };
 
         let timeout_ms = input
@@ -156,7 +160,11 @@ impl Tool for WebFetchTool {
         // Validate URL and upgrade http to https
         let mut url = match validate_url(raw_url) {
             Ok(u) => u,
-            Err(e) => return ToolResult::error(format!("URL rejected: {e}")),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("URL rejected: {e}"),
+                "data": { "url": raw_url }
+            }).to_string()),
         };
 
         // Upgrade http to https
@@ -191,22 +199,43 @@ impl Tool for WebFetchTool {
                     let max_chars = 50_000;
                     if body.len() > max_chars {
                         let truncated = safe_truncate(&body, max_chars);
-                        ToolResult::success(format!(
-                            "{}...\n\n[truncated, showing first {} chars of {} total]",
-                            truncated,
-                            truncated.chars().count(),
-                            body.chars().count()
-                        ))
+                        ToolResult::success(serde_json::json!({
+                            "status": "success",
+                            "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),
+                            "data": {
+                                "url": url.as_str(),
+                                "content": format!("{}...\n\n[truncated, showing first {} chars of {} total]", truncated, truncated.chars().count(), body.chars().count())
+                            }
+                        }).to_string())
                     } else {
-                        ToolResult::success(body.to_string())
+                        ToolResult::success(serde_json::json!({
+                            "status": "success",
+                            "message": format!("Fetched {}", url),
+                            "data": {
+                                "url": url.as_str(),
+                                "content": body.to_string()
+                            }
+                        }).to_string())
                     }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    ToolResult::error(format!("fetch failed: {stderr}"))
+                    ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": format!("fetch failed: {stderr}"),
+                        "data": { "url": url.as_str() }
+                    }).to_string())
                 }
             }
-            Ok(Err(e)) => ToolResult::error(format!("failed to execute curl: {e}")),
-            Err(_) => ToolResult::error(format!("request timed out after {timeout_ms}ms")),
+            Ok(Err(e)) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to execute curl: {e}"),
+                "data": { "url": url.as_str() }
+            }).to_string()),
+            Err(_) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("request timed out after {timeout_ms}ms"),
+                "data": { "url": url.as_str() }
+            }).to_string()),
         }
     }
 }

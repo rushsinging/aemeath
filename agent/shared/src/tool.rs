@@ -54,6 +54,12 @@ impl ToolResult {
         self.images.push(ImageData { base64, media_type });
         self
     }
+
+    /// 获取显示文本（从 content 中提取）
+    /// 优先级：display > message > text > 序列化 JSON
+    pub fn display_text(&self) -> String {
+        display_text_from_content(&self.content)
+    }
 }
 
 fn display_text_from_content(content: &serde_json::Value) -> String {

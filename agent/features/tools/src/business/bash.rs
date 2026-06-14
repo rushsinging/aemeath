@@ -52,21 +52,26 @@ impl Tool for BashTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::error("missing required parameter: command"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: command"
+            })),
         };
         if let Some(reason) = check_command_safety(command) {
             if !ctx.allow_all {
-                return ToolResult::error(format!(
-                    "Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."
-                ));
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually.")
+                }));
             }
         }
         // Check for shell injection patterns (skip when allow_all is set)
         if !ctx.allow_all {
             if let Some(reason) = check_shell_injection(command) {
-                return ToolResult::error(format!(
-                    "Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."
-                ));
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead.")
+                }));
             }
         }
         let timeout_ms = input
@@ -87,7 +92,10 @@ impl Tool for BashTool {
             .spawn()
         {
             Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("failed to execute: {e}")),
+            Err(e) => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to execute: {e}")
+            })),
         };
 
         // Take stdout/stderr pipes before spawning readers
@@ -139,7 +147,10 @@ impl Tool for BashTool {
                 let _ = child.kill().await;
                 stdout_handle.abort();
                 stderr_handle.abort();
-                return ToolResult::error("[interrupted by user]".to_string());
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "[interrupted by user]"
+                }));
             }
             result = tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait()) => {
                 result
@@ -155,38 +166,45 @@ impl Tool for BashTool {
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
                     if let Err(e) = ctx.workspace_control().set_cwd(new_path_base) {
-                        return ToolResult::error(e.to_string());
+                        return ToolResult::error_json(serde_json::json!({
+                            "status": "error",
+                            "message": e.to_string()
+                        }));
                     }
                 }
                 let stderr = String::from_utf8_lossy(&stderr);
-                let mut out = String::new();
-                if !stdout.is_empty() {
-                    out.push_str(&stdout);
-                }
+                let exit_code = status.code().unwrap_or(-1);
+                let mut data = serde_json::json!({
+                    "stdout": stdout.to_string(),
+                    "exit_code": exit_code
+                });
                 if !stderr.is_empty() {
-                    if !out.is_empty() {
-                        out.push('\n');
-                    }
-                    out.push_str("stderr:\n");
-                    out.push_str(&stderr);
-                }
-                if out.is_empty() {
-                    out.push_str("(no output)");
+                    data["stderr"] = serde_json::Value::String(stderr.to_string());
                 }
                 if status.success() {
-                    ToolResult::success(out)
+                    ToolResult::success_json(serde_json::json!({
+                        "status": "success",
+                        "message": "Command executed successfully",
+                        "data": data
+                    }))
                 } else {
-                    ToolResult::error(format!(
-                        "exit code: {}\n{}",
-                        status.code().unwrap_or(-1),
-                        out
-                    ))
+                    ToolResult::error_json(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Command failed with exit code {exit_code}"),
+                        "data": data
+                    }))
                 }
             }
-            Ok(Err(e)) => ToolResult::error(format!("failed to execute: {e}")),
+            Ok(Err(e)) => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to execute: {e}")
+            })),
             Err(_) => {
                 let _ = child.kill().await;
-                ToolResult::error(format!("command timed out after {timeout_ms}ms"))
+                ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("command timed out after {timeout_ms}ms")
+                }))
             }
         }
     }

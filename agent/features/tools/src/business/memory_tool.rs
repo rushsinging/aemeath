@@ -47,8 +47,16 @@ impl Tool for MemoryTool {
             "list" => handlers::list_memory(input, ctx),
             "add_reminder" => handlers::add_reminder(input, ctx),
             "complete_reminder" => handlers::complete_reminder(input, ctx),
-            "" => ToolResult::error("缺少必需参数: action"),
-            other => ToolResult::error(format!("未知 memory action: {other}")),
+            "" => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "缺少必需参数: action",
+                "data": {}
+            })),
+            other => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("未知 memory action: {other}"),
+                "data": { "action": other }
+            })),
         }
     }
 }

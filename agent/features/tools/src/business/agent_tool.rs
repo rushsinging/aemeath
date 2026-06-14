@@ -68,12 +68,20 @@ impl Tool for AgentTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: prompt"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: prompt",
+                "data": {}
+            })),
         };
 
         let _description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d,
-            None => return ToolResult::error("missing required parameter: description"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: description",
+                "data": {}
+            })),
         };
 
         // --- Task scope analysis ---
@@ -101,7 +109,11 @@ impl Tool for AgentTool {
             .map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
         let runner = match &ctx.agent_runner {
             Some(r) => r.clone(),
-            None => return ToolResult::error("agent runner not available"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "agent runner not available",
+                "data": {}
+            })),
         };
 
         let cwd_str = cwd.to_string_lossy();
@@ -126,16 +138,21 @@ impl Tool for AgentTool {
         if task_id.is_none() {
             if let Some(active_list) = self.store.active_list().await {
                 if self.store.incomplete_count(active_list.id).await > 0 {
-                    return ToolResult::error(
-                        "Agent tool requires taskId while an active task list has incomplete tasks. \
-                         Pass the taskId from TaskCreate so task status can be tracked.",
-                    );
+                    return ToolResult::error_json(serde_json::json!({
+                        "status": "error",
+                        "message": "Agent tool requires taskId while an active task list has incomplete tasks. Pass the taskId from TaskCreate so task status can be tracked.",
+                        "data": {}
+                    }));
                 }
             }
         }
         if let Some(ref tid) = task_id {
             if self.store.get(tid).await.is_none() {
-                return ToolResult::error(format!("task not found: {tid}"));
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("task not found: {tid}"),
+                    "data": { "task_id": tid }
+                }));
             }
             self.store
                 .update(tid, |t| {
@@ -213,7 +230,14 @@ Instructions:- Complete the task described in the user message
                 .await;
         }
 
-        ToolResult::success(final_output)
+        ToolResult::success_json(serde_json::json!({
+            "status": "success",
+            "message": "子代理执行完成",
+            "data": {
+                "agent_id": task_id,
+                "output": final_output
+            }
+        }))
     }
 }
 

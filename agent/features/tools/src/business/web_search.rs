@@ -43,7 +43,11 @@ impl Tool for WebSearchTool {
         let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
 
         if query.is_empty() {
-            return ToolResult::error("Search query is required");
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "Search query is required",
+                "data": null
+            }).to_string());
         }
 
         let encoded_query = utf8_percent_encode(query, NON_ALPHANUMERIC).to_string();
@@ -55,16 +59,21 @@ impl Tool for WebSearchTool {
             .build()
         {
             Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("Failed to create HTTP client: {}", e)),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to create HTTP client: {}", e),
+                "data": null
+            }).to_string()),
         };
 
         match client.get(&url).send().await {
             Ok(resp) => {
                 if !resp.status().is_success() {
-                    return ToolResult::error(format!(
-                        "Search failed with status: {}",
-                        resp.status()
-                    ));
+                    return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Search failed with status: {}", resp.status()),
+                        "data": null
+                    }).to_string());
                 }
 
                 match resp.text().await {
@@ -75,12 +84,20 @@ impl Tool for WebSearchTool {
                             return search_bing(&client, query, limit).await;
                         }
 
-                        format_search_results(results)
+                        format_search_results(query, results)
                     }
-                    Err(e) => ToolResult::error(format!("Failed to read response: {}", e)),
+                    Err(e) => ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Failed to read response: {}", e),
+                        "data": null
+                    }).to_string()),
                 }
             }
-            Err(e) => ToolResult::error(format!("Search request failed: {}", e)),
+            Err(e) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("Search request failed: {}", e),
+                "data": null
+            }).to_string()),
         }
     }
 }
@@ -92,42 +109,61 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
     match client.get(&url).send().await {
         Ok(resp) => {
             if !resp.status().is_success() {
-                return ToolResult::error(format!(
-                    "Bing fallback failed with status: {}",
-                    resp.status()
-                ));
+                return ToolResult::error(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Bing fallback failed with status: {}", resp.status()),
+                    "data": null
+                }).to_string());
             }
 
             match resp.text().await {
-                Ok(html_content) => format_search_results(parse_bing_html(&html_content, limit)),
-                Err(e) => ToolResult::error(format!("Failed to read Bing response: {}", e)),
+                Ok(html_content) => format_search_results(query, parse_bing_html(&html_content, limit)),
+                Err(e) => ToolResult::error(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to read Bing response: {}", e),
+                    "data": null
+                }).to_string()),
             }
         }
-        Err(e) => ToolResult::error(format!("Bing fallback request failed: {}", e)),
+        Err(e) => ToolResult::error(serde_json::json!({
+            "status": "error",
+            "message": format!("Bing fallback request failed: {}", e),
+            "data": null
+        }).to_string()),
     }
 }
 
-fn format_search_results(results: Vec<SearchResult>) -> ToolResult {
+fn format_search_results(query: &str, results: Vec<SearchResult>) -> ToolResult {
     if results.is_empty() {
-        return ToolResult::success("No search results found");
+        return ToolResult::success(serde_json::json!({
+            "status": "success",
+            "message": "No search results found",
+            "data": {
+                "query": query,
+                "results": []
+            }
+        }).to_string());
     }
 
-    let output = results
+    let results_json: Vec<serde_json::Value> = results
         .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            format!(
-                "{}. {}\n   URL: {}\n   {}\n",
-                i + 1,
-                r.title,
-                r.url,
-                r.snippet
-            )
+        .map(|r| {
+            serde_json::json!({
+                "title": r.title,
+                "url": r.url,
+                "snippet": r.snippet
+            })
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect();
 
-    ToolResult::success(output)
+    ToolResult::success(serde_json::json!({
+        "status": "success",
+        "message": format!("Found {} search results", results_json.len()),
+        "data": {
+            "query": query,
+            "results": results_json
+        }
+    }).to_string())
 }
 
 struct SearchResult {

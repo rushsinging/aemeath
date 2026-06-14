@@ -61,13 +61,21 @@ impl Tool for TaskUpdateTool {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
-            None => return ToolResult::error("missing required parameter: taskId"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: taskId",
+                "data": {}
+            })),
         };
 
         // Resolve display number (batch-local id) to global task id
         let task_id = match self.store.resolve_display_id(&input_id).await {
             Some(global_id) => global_id,
-            None => return ToolResult::error(format!("task not found: {input_id}")),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("task not found: {input_id}"),
+                "data": { "task_id": input_id }
+            })),
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
@@ -168,26 +176,23 @@ impl Tool for TaskUpdateTool {
             Some(task) => {
                 let display_id = self.store.format_display_id(&task.id).await;
 
-                let progress_str = if task.progress > 0 {
-                    format!(
-                        " ({}%{})",
-                        task.progress,
-                        task.progress_message
-                            .as_ref()
-                            .map(|m| format!(" - {}", m))
-                            .unwrap_or_default()
-                    )
-                } else {
-                    "".to_string()
-                };
-                let mut output = format!(
-                    "Updated task #{}: {} [{}]{}\nStatus: {:?}",
-                    display_id,
-                    task.subject,
-                    task.priority.as_str(),
-                    progress_str,
-                    task.status
-                );
+                let mut data = serde_json::json!({
+                    "task_id": display_id,
+                    "subject": task.subject,
+                    "status": format!("{:?}", task.status),
+                    "priority": task.priority.as_str(),
+                    "progress": task.progress,
+                });
+
+                if let Some(ref pm) = task.progress_message {
+                    data["progress_message"] = serde_json::Value::String(pm.clone());
+                }
+                if let Some(ref af) = task.active_form {
+                    data["active_form"] = serde_json::Value::String(af.clone());
+                }
+                if let Some(ref owner) = task.owner {
+                    data["owner"] = serde_json::Value::String(owner.clone());
+                }
 
                 // When a task is completed, show which downstream tasks are now unblocked
                 if task.status == TaskStatus::Completed {
@@ -211,39 +216,41 @@ impl Tool for TaskUpdateTool {
                         })
                         .collect();
 
-                    if !newly_unblocked.is_empty() {
-                        output.push_str("\n\nUnblocked tasks now ready:");
-                        for t in &newly_unblocked {
-                            let t_display = self.store.format_display_id(&t.id).await;
-                            let dep_displays = self.store.to_display_ids(&t.blocked_by).await;
-                            let deps = dep_displays
-                                .iter()
-                                .map(|d| format!("#{d}"))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            output.push_str(&format!(
-                                "\n  → #{} \"{}\" (was blocked by {})",
-                                t_display, t.subject, deps
-                            ));
-                        }
+                    let mut unblocked_list = Vec::new();
+                    for t in &newly_unblocked {
+                        let t_display = self.store.format_display_id(&t.id).await;
+                        let dep_displays = self.store.to_display_ids(&t.blocked_by).await;
+                        let deps: Vec<String> = dep_displays
+                            .iter()
+                            .map(|d| format!("#{d}"))
+                            .collect();
+                        unblocked_list.push(serde_json::json!({
+                            "task_id": t_display,
+                            "subject": t.subject,
+                            "blocked_by": deps
+                        }));
                     }
+                    data["unblocked_tasks"] = serde_json::json!(unblocked_list);
 
-                    // Also show remaining pending tasks count
                     let remaining_pending = all_tasks
                         .iter()
                         .filter(|t| t.status == TaskStatus::Pending)
                         .count();
-                    if remaining_pending > 0 {
-                        output
-                            .push_str(&format!("\n\n{} task(s) still pending.", remaining_pending));
-                    } else {
-                        output.push_str("\n\nAll tasks completed!");
-                    }
+                    data["remaining_pending"] = serde_json::json!(remaining_pending);
                 }
 
-                ToolResult::success(output)
+                let message = format!("Task #{} updated", display_id);
+                ToolResult::success_json(serde_json::json!({
+                    "status": "success",
+                    "message": message,
+                    "data": data
+                }))
             }
-            None => ToolResult::error(format!("task not found: {input_id}")),
+            None => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("task not found: {input_id}"),
+                "data": { "task_id": input_id }
+            })),
         }
     }
 }

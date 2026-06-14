@@ -33,14 +33,22 @@ impl Tool for GlobTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: pattern"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: pattern",
+                "data": {}
+            }).to_string()),
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let path_base = ctx.workspace_read().current_path_base();
         let working_root = ctx.workspace_read().current_root();
         let base_dir = match validate_search_path_from_base(path_str, &path_base, &working_root) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("{e}"),
+                "data": {}
+            }).to_string()),
         };
         let full_pattern = base_dir.join(pattern).to_string_lossy().to_string();
         match glob::glob(&full_pattern) {
@@ -51,12 +59,26 @@ impl Tool for GlobTool {
                     .collect();
                 matches.sort();
                 if matches.is_empty() {
-                    ToolResult::success("no files matched")
+                    ToolResult::success(serde_json::json!({
+                        "status": "success",
+                        "message": "No files matched",
+                        "data": { "files": [], "count": 0 }
+                    }).to_string())
                 } else {
-                    ToolResult::success(matches.join("\n"))
+                    let count = matches.len();
+                    let message = format!("Found {count} files");
+                    ToolResult::success(serde_json::json!({
+                        "status": "success",
+                        "message": message,
+                        "data": { "files": matches, "count": count }
+                    }).to_string())
                 }
             }
-            Err(e) => ToolResult::error(format!("invalid glob pattern: {e}")),
+            Err(e) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("invalid glob pattern: {e}"),
+                "data": {}
+            }).to_string()),
         }
     }
 }
