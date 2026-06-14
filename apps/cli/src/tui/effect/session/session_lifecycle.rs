@@ -90,6 +90,8 @@ impl App {
             crossterm::event::EnableBracketedPaste,
             crossterm::event::EnableMouseCapture,
         )?;
+        // 终端已切到 raw + alternate screen：此后 panic 只落 panic.log，不糊屏。
+        crate::panic_hook::set_tui_active(true);
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
@@ -110,6 +112,8 @@ impl App {
             }
         }
 
+        // 退出 TUI，恢复终端：此后 panic 可正常打印到 stderr。
+        crate::panic_hook::set_tui_active(false);
         disable_raw_mode()?;
         execute!(
             terminal.backend_mut(),

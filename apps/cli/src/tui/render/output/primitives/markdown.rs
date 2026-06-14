@@ -111,7 +111,8 @@ fn strip_blockquote(line: &str) -> Option<(usize, &str)> {
 /// - 有序：`N. ` / `N) ` → 原样保留 `N. `。
 fn strip_list_item(line: &str) -> Option<(String, String, &str)> {
     let indent_len = line.len() - line.trim_start().len();
-    let (indent, rest) = line.split_at(indent_len);
+    // allow unsafe_text_op: indent_len = trim_start 前缀字节长度，恒为 char 边界
+    let (indent, rest) = line.split_at(indent_len); // allow unsafe_text_op
     if let Some(body) = rest
         .strip_prefix("- ")
         .or_else(|| rest.strip_prefix("* "))
@@ -123,7 +124,7 @@ fn strip_list_item(line: &str) -> Option<(String, String, &str)> {
     let digit_len = rest.chars().take_while(|c| c.is_ascii_digit()).count();
     if digit_len > 0 {
         // digit_len 为 ASCII 数字字节数，是合法字符边界。
-        let (digits, after) = rest.split_at(digit_len);
+        let (digits, after) = rest.split_at(digit_len); // allow unsafe_text_op
         for sep in [". ", ") "] {
             if let Some(body) = after.strip_prefix(sep) {
                 return Some((indent.to_string(), format!("{digits}. "), body));

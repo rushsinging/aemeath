@@ -17,6 +17,8 @@ use crate::tui::adapter::agent_event::map_agent_event;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
@@ -265,12 +267,29 @@ impl App {
         );
         let root_count = view_model.roots.len();
         let width = self.output_document_width();
-        let document = self.output_document_renderer.render_model_document(
-            &view_model,
-            width,
-            self.output_area.term_width,
-            self.view_state.animation.spinner_frame,
-        );
+        // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
+        // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
+        // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
+        let document =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.output_document_renderer.render_model_document(
+                    &view_model,
+                    width,
+                    self.output_area.term_width,
+                    self.view_state.animation.spinner_frame,
+                )
+            })) {
+                Ok(document) => document,
+                Err(_) => {
+                    crate::tui::log_warn!(
+                        "tui.output.refresh_document panicked; keeping previous document"
+                    );
+                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                        StatusNotice::warning("渲染失败，已记录 panic.log"),
+                    ));
+                    return;
+                }
+            };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document version={} width={} term_width={} spinner_frame={} roots={} conversation_blocks={} chats={} before_lines={} after_lines={}",
