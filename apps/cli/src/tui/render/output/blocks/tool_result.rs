@@ -41,7 +41,7 @@ pub fn render_tool_result(
             let limit = max_lines.unwrap_or(usize::MAX);
             match render_kind {
                 ResultRender::Diff => {
-                    render_edit_diff(view.summary.as_deref(), &view.result_text, ctx.width)
+                    render_edit_diff(view.args_preview.as_deref(), &view.result_text, ctx.width)
                         .unwrap_or_else(|| {
                             format_result_lines(&view.tool_title, &view.result_text, ctx.width, limit)
                         })
@@ -155,6 +155,7 @@ mod tests {
         ToolResultBlockView {
             key: format!("{tool_title}-result"),
             tool_title: tool_title.into(),
+            args_preview: None,
             summary: None,
             result_text: result_text.into(),
             style: SemanticStyle::Success,
