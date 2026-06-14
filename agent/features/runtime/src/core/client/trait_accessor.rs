@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use sdk::{ChangeSet, CostInfo, ProjectContext, SdkError, SessionSnapshot, TaskStatusView};
 use tokio::sync::watch;
 
@@ -73,7 +71,6 @@ pub(super) fn changes_impl(me: &AgentClientImpl) -> watch::Receiver<ChangeSet> {
 }
 
 pub(super) fn cancel_impl(me: &AgentClientImpl) {
-    me.inner.cancel_token.store(true, Ordering::Release);
     if let Ok(guard) = me.inner.current_cancel.lock() {
         if let Some(token) = guard.as_ref() {
             token.cancel();

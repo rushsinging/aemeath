@@ -1,4 +1,3 @@
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use sdk::{ChangeSet, SdkError};
@@ -226,7 +225,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
-        cancel_token: Arc::new(AtomicBool::new(false)),
         current_cancel: Arc::new(Mutex::new(None)),
         current_messages: Arc::new(Mutex::new(Vec::new())),
         workspace,

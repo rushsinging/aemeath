@@ -14,6 +14,7 @@ use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use share::tool::ImageData;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
 pub(crate) type UiToolResult = (
@@ -36,7 +37,7 @@ pub(crate) async fn execute_tool_round<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
-    interrupted: &Arc<std::sync::atomic::AtomicBool>,
+    cancel: &CancellationToken,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -85,7 +86,7 @@ where
         hook_ui,
         hook_runner,
         max_agent_concurrency,
-        interrupted,
+        cancel,
     )
     .await;
 

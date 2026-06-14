@@ -1,6 +1,5 @@
 //! AgentClientImpl / RuntimeHandle 结构体定义与公共访问器。
 
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use sdk::ChangeSet;
@@ -37,7 +36,6 @@ pub struct RuntimeHandle {
     pub(crate) current_client: std::sync::RwLock<Arc<provider::api::LlmClient>>,
 
     // ─── SDK 状态 ───
-    pub(crate) cancel_token: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
     pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
@@ -58,10 +56,6 @@ impl AgentClientImpl {
     pub fn notify_change(&self, set: ChangeSet) {
         let previous = *self.inner.change_tx.borrow();
         let _ = self.inner.change_tx.send(previous | set);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.inner.cancel_token.load(Ordering::Acquire)
     }
 }
 
