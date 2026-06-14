@@ -62,14 +62,14 @@ pub(crate) fn build_json_logger_tool_call_data(tool_call: &ToolCall) -> serde_js
 }
 
 pub(crate) fn build_json_logger_tool_result_data(
-    id: &str,
+    id: &sdk::ids::ToolCallId,
     output: &str,
     is_error: bool,
     call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
 ) -> serde_json::Value {
     let tool_name = call_info
         .iter()
-        .find(|(k, _)| k.as_ref() == id)
+        .find(|(k, _)| k == &id)
         .map(|(_, (name, _))| name.as_str())
         .unwrap_or("?");
     json!({

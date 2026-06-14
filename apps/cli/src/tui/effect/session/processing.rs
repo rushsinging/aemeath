@@ -318,8 +318,8 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             target: "cli::tui::tool_flow",
             "{} tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
             stage,
-            context.chat_id.as_ref(),
-            context.turn_id.as_ref(),
+            context.chat_id,
+            context.turn_id,
             id,
             provider_id,
             name,
@@ -339,8 +339,8 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             target: "cli::tui::tool_flow",
             "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
             stage,
-            context.chat_id.as_ref(),
-            context.turn_id.as_ref(),
+            context.chat_id,
+            context.turn_id,
             id,
             provider_id,
             name,
@@ -363,8 +363,8 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             target: "cli::tui::tool_flow",
             "{} tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
             stage,
-            context.chat_id.as_ref(),
-            context.turn_id.as_ref(),
+            context.chat_id,
+            context.turn_id,
             id,
             provider_id,
             tool_name,
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_sdk_event_to_ui_event_preserves_agent_progress_context() {
-        let expected_tool_id = sdk::ids::ToolCallId::new("tool-1".to_string());
+        let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
         let event = sdk_event_to_ui_event(sdk::ChatEvent::AgentProgress {
             context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("chat-progress"),

@@ -125,8 +125,8 @@ mod tests {
     #[test]
     fn test_push_tool_call_ref_is_idempotent_for_same_context() {
         let mut model = OutputTimelineModel::default();
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
         assert_eq!(model.items().len(), 1);
     }
 
@@ -136,12 +136,12 @@ mod tests {
         model.push_tool_call_ref(
             chat(),
             ChatTurnId::new("turn-a"),
-            ToolCallId::new("tool-1".to_string()),
+            ToolCallId::new("tool-1"),
         );
         model.push_tool_call_ref(
             chat(),
             ChatTurnId::new("turn-b"),
-            ToolCallId::new("tool-1".to_string()),
+            ToolCallId::new("tool-1"),
         );
         assert_eq!(model.items().len(), 2);
     }
@@ -153,14 +153,14 @@ mod tests {
             reference: TimelineToolCallRef::new(
                 chat(),
                 turn(),
-                ToolCallId::new("tool-1".to_string()),
+                ToolCallId::new("tool-1"),
             ),
         });
-        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1".to_string()));
+        model.push_tool_call_ref(chat(), turn(), ToolCallId::new("tool-1"));
         model.move_tool_result_after_tool_call(
             &chat(),
             &turn(),
-            &ToolCallId::new("tool-1".to_string()),
+            &ToolCallId::new("tool-1"),
         );
         assert!(matches!(
             model.items()[0],

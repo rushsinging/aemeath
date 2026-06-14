@@ -51,8 +51,7 @@ impl<'a> SubAgentRun<'a> {
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
-            let data =
-                build_json_logger_tool_result_data(id.as_ref(), output, *is_error, call_info);
+            let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
             UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Result, data);
         }
         logging::context::set_current_turn(turn_number);

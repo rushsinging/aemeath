@@ -129,7 +129,7 @@ mod tests {
     use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 
     fn pending_call() -> ToolCall {
-        ToolCall::pending(ToolCallId::new("tool-1".to_string()), stream_key())
+        ToolCall::pending(ToolCallId::new("tool-1"), stream_key())
     }
 
     #[test]

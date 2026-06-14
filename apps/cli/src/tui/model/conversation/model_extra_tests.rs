@@ -99,12 +99,12 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let runtime_turn_id = ChatTurnId::new("runtime-turn-1");
     let expected_chat_id = runtime_chat_id.clone();
     let expected_turn_id = runtime_turn_id.clone();
-    let expected_tool_id = ToolCallId::new("tool-1".to_string());
+    let expected_tool_id = ToolCallId::new("tool-1");
     model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
     let changes = model.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
-        id: ToolCallId::new("tool-1".to_string()),
+        id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
@@ -112,7 +112,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     model.apply(ConversationIntent::ObserveToolCallUpdate {
         chat_id: runtime_chat_id,
         turn_id: runtime_turn_id,
-        id: ToolCallId::new("tool-1".to_string()),
+        id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,

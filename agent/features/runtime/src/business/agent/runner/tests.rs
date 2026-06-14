@@ -145,8 +145,7 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     let mut call_info = std::collections::HashMap::new();
     call_info.insert(tool_id.clone(), ("Read".to_string(), "file.rs".to_string()));
 
-    let data =
-        build_json_logger_tool_result_data(tool_id.as_ref(), "完整输出", false, &call_info);
+    let data = build_json_logger_tool_result_data(&tool_id, "完整输出", false, &call_info);
 
     assert_eq!(data["tool_use_id"], tool_id.to_string());
     assert_eq!(data["tool_name"], "Read");
@@ -217,11 +216,7 @@ fn test_tool_call(
     name: &str,
     input: serde_json::Value,
 ) -> crate::business::agent::ToolCall {
-    test_tool_call_with_id(
-        sdk::ids::ToolCallId::parse_uuid7(id).unwrap_or_else(|_| sdk::ids::ToolCallId::new_v7()),
-        name,
-        input,
-    )
+    test_tool_call_with_id(sdk::ids::ToolCallId::from_legacy_or_new(id), name, input)
 }
 
 fn test_tool_call_with_id(
