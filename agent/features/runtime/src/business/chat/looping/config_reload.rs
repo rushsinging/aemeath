@@ -3,7 +3,8 @@
 //! 在每个 turn 开始时，轮询配置/指令/guidance 文件是否有外部修改。
 //! 检测到变更时返回 `ConfigDiff`，由调用方决定如何处理。
 
-use share::config::snapshot::{FileChange, FileChangeKind, SourceSnapshotRegistry};
+use super::snapshot_registry::SourceSnapshotRegistry;
+use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
 use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};

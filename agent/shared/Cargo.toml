@@ -15,7 +15,6 @@ thiserror = { workspace = true }
 tokio-util = { workspace = true }
 uuid = { version = "1", features = ["v7"] }
 log = "0.4"
-sha2 = "0.10"
 unicode-width = "0.2"
 logging = { path = "../../packages/global/logging" }
 

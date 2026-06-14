@@ -10,6 +10,7 @@ mod input_log;
 mod llm_log;
 mod loop_runner;
 mod non_agent;
+mod snapshot_registry;
 mod permissions;
 mod post_batch;
 mod queue;
