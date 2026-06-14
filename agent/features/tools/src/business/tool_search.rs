@@ -74,16 +74,7 @@ impl Tool for ToolSearchTool {
 
         if query.is_empty() {
             // Return all available tools
-            let output = format!(
-                "Available tools ({}):\n{}",
-                all_tools.len(),
-                all_tools
-                    .iter()
-                    .map(|(name, desc)| format!("  - {}: {}", name, desc))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
-            return ToolResult::success(output);
+            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, desc)| serde_json::json!({"name": name, "description": desc})).collect::<Vec<_>>()}}).to_string());
         }
 
         // Search for matching tools
@@ -100,25 +91,10 @@ impl Tool for ToolSearchTool {
             .collect();
 
         if matching_tools.is_empty() {
-            return ToolResult::success(format!(
-                "No tools found matching '{}'\n\nUse ToolSearch with empty query to see all available tools.",
-                query
-            ));
+            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"query": query, "tools": [], "hint": "Use ToolSearch with empty query to see all available tools."}}).to_string());
         }
 
-        // 显示匹配工具的详细信息
-        let output = matching_tools
-            .iter()
-            .map(|(name, desc)| format!("  - {}: {}", name, desc))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        ToolResult::success(format!(
-            "Found {} tool(s) matching '{}':\n{}",
-            matching_tools.len(),
-            query,
-            output
-        ))
+        ToolResult::success(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"query": query, "tools": matching_tools.iter().map(|(name, desc)| serde_json::json!({"name": name, "description": desc})).collect::<Vec<_>>()}}).to_string())
     }
 }
 

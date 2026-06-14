@@ -661,7 +661,6 @@ mod tests {
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use share::message::{MessageSource, Role};
     use std::collections::{HashMap, VecDeque};
-    use std::sync::atomic::AtomicBool;
     use std::sync::Mutex;
     use tokio_util::sync::CancellationToken;
 

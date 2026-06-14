@@ -44,19 +44,39 @@ impl Tool for TaskListCreateTool {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return ToolResult::error("missing required parameter: subject"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: subject",
+                "data": {}
+            })),
         };
         let summary = match input.get("summary").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return ToolResult::error("missing required parameter: summary"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: summary",
+                "data": {}
+            })),
         };
 
         let batch = self.store.create_list(subject.clone(), summary).await;
         let summary_text = batch.summary.as_deref().unwrap_or_default();
-        ToolResult::success(format!(
-            "Task list #{} created successfully.\nSubject: {}\nSummary: {}\n\nNext steps: You can now create tasks with TaskCreate — they will automatically attach to this task list #{}.",
-            batch.id, subject, summary_text, batch.id
-        ))
+        ToolResult::success_json(serde_json::json!({
+            "status": "success",
+            "message": format!(
+                "Task list #{} created. Subject: {}",
+                batch.id, subject
+            ),
+            "data": {
+                "batch_id": batch.id,
+                "subject": subject,
+                "summary": summary_text,
+                "next_steps": format!(
+                    "You can now create tasks with TaskCreate — they will automatically attach to task list #{}.",
+                    batch.id
+                )
+            }
+        }))
     }
 }
 
@@ -100,8 +120,8 @@ mod tests {
             .await;
 
         assert!(!result.is_error);
-        assert!(result.output.contains("Task list #0 created successfully"));
-        assert!(result.output.contains("Subject: 修复 bug"));
+        assert!(result.output.contains("Task list #0 created"));
+        assert!(result.content["data"]["subject"].as_str() == Some("修复 bug"));
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")
@@ -119,6 +139,7 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.output.contains("summary"));
+        assert_eq!(result.content["status"].as_str(), Some("error"));
     }
 
     #[tokio::test]

@@ -60,7 +60,11 @@ impl Tool for AskUserQuestionTool {
         let question = input["question"].as_str().unwrap_or("");
 
         if question.is_empty() {
-            return ToolResult::error("Question is required");
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "Question is required",
+                "data": {}
+            }).to_string());
         }
 
         // 构建提示消息
@@ -98,19 +102,34 @@ impl Tool for AskUserQuestionTool {
 
         // 使用取消令牌来检测是否被中断
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error("Question cancelled by user");
+            return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "Question cancelled by user",
+                "data": {}
+            }).to_string());
         }
 
         // 返回特殊格式的结果，让 CLI 层知道需要用户输入
         // 格式: __ASK_USER__: question
         let response = if !options.is_empty() && !allow_free_input {
-            ToolResult::success(format!(
-                "__ASK_USER_SELECT__: {}\nOptions: {}",
-                question,
-                options.join(",")
-            ))
+            ToolResult::success(serde_json::json!({
+                "status": "success",
+                "message": format!("__ASK_USER_SELECT__: {}", question),
+                "data": {
+                    "type": "select",
+                    "question": question,
+                    "options": options
+                }
+            }).to_string())
         } else {
-            ToolResult::success(format!("__ASK_USER__: {}", question))
+            ToolResult::success(serde_json::json!({
+                "status": "success",
+                "message": format!("__ASK_USER__: {}", question),
+                "data": {
+                    "type": "free_input",
+                    "question": question
+                }
+            }).to_string())
         };
 
         response

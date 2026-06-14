@@ -48,65 +48,94 @@ impl Tool for ConfigTool {
         match action {
             "list" => {
                 // 列出所有可配置项
-                let config_items = [
-                    ("api_key", "Anthropic API key (sensitive)"),
-                    ("model", "Model to use (e.g., claude-sonnet-4-20250514)"),
-                    ("max_tokens", "Maximum tokens per response"),
-                    ("temperature", "Response randomness (0-1)"),
-                    ("system_prompt", "Custom system prompt"),
-                    ("cwd", "Working directory"),
-                    ("mcp_servers", "MCP server configurations"),
-                ];
+                let config_items = serde_json::json!([
+                    { "key": "api_key", "description": "Anthropic API key (sensitive)" },
+                    { "key": "model", "description": "Model to use (e.g., claude-sonnet-4-20250514)" },
+                    { "key": "max_tokens", "description": "Maximum tokens per response" },
+                    { "key": "temperature", "description": "Response randomness (0-1)" },
+                    { "key": "system_prompt", "description": "Custom system prompt" },
+                    { "key": "cwd", "description": "Working directory" },
+                    { "key": "mcp_servers", "description": "MCP server configurations" },
+                ]);
 
-                let output = config_items
-                    .iter()
-                    .map(|(k, d)| format!("{}: {}", k, d))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                ToolResult::success(format!("Available configuration options:\n{}", output))
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": "Available configuration options listed",
+                    "data": {
+                        "options": config_items
+                    }
+                }).to_string())
             }
             "get" => {
                 if key.is_none() {
-                    return ToolResult::error("Key is required for 'get' action");
+                    return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": "Key is required for 'get' action",
+                        "data": {}
+                    }).to_string());
                 }
                 let key = key.unwrap_or("unknown");
-                ToolResult::success(format!(
-                    "Config '{}' - Use environment variables or config file to set this value.",
-                    key
-                ))
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": format!("Config '{}' retrieved", key),
+                    "data": {
+                        "key": key,
+                        "hint": "Use environment variables or config file to set this value"
+                    }
+                }).to_string())
             }
             "set" => {
                 let key = match key {
                     Some(k) => k,
-                    None => return ToolResult::error("Key is required for 'set' action"),
+                    None => return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": "Key is required for 'set' action",
+                        "data": {}
+                    }).to_string()),
                 };
                 if value.is_none() {
-                    return ToolResult::error("Value is required for 'set' action");
+                    return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": "Value is required for 'set' action",
+                        "data": {}
+                    }).to_string());
                 }
 
-                ToolResult::success(format!(
-                    "To set config '{}', update your config file or set environment variable AEMEATH_{}",
-                    key,
-                    key.to_uppercase()
-                ))
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": format!("To set config '{}', update your config file or set environment variable AEMEATH_{}", key, key.to_uppercase()),
+                    "data": {
+                        "key": key,
+                        "env_var": format!("AEMEATH_{}", key.to_uppercase())
+                    }
+                }).to_string())
             }
             "reset" => {
                 let key = match key {
                     Some(k) => k,
-                    None => return ToolResult::error("Key is required for 'reset' action"),
+                    None => return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": "Key is required for 'reset' action",
+                        "data": {}
+                    }).to_string()),
                 };
 
-                ToolResult::success(format!(
-                    "To reset config '{}', remove it from your config file or unset AEMEATH_{}",
-                    key,
-                    key.to_uppercase()
-                ))
+                ToolResult::success(serde_json::json!({
+                    "status": "success",
+                    "message": format!("To reset config '{}', remove it from your config file or unset AEMEATH_{}", key, key.to_uppercase()),
+                    "data": {
+                        "key": key,
+                        "env_var": format!("AEMEATH_{}", key.to_uppercase())
+                    }
+                }).to_string())
             }
-            _ => ToolResult::error(format!(
-                "Unknown action: {}. Valid actions: get, set, list, reset",
-                action
-            )),
+            _ => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("Unknown action: {}", action),
+                "data": {
+                    "valid_actions": ["get", "set", "list", "reset"]
+                }
+            }).to_string()),
         }
     }
 }

@@ -98,7 +98,7 @@ impl Tool for EnterWorktreeTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
+            Err(e) => return ToolResult::error_json(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)})),
         };
 
         let display_target = args.path.clone().unwrap_or_else(|| {
@@ -124,7 +124,7 @@ impl Tool for EnterWorktreeTool {
                     &working_root,
                 ))
             }
-            Err(e) => ToolResult::error(format!("进入 worktree 失败：{}", e)),
+            Err(e) => ToolResult::error_json(serde_json::json!({"status": "error", "message": format!("进入 worktree 失败：{}", e)})),
         }
     }
 
@@ -166,7 +166,7 @@ impl Tool for ExitWorktreeTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
+            Err(e) => return ToolResult::error_json(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)})),
         };
 
         if let Some(path) = args.path {
@@ -184,7 +184,7 @@ impl Tool for ExitWorktreeTool {
                         &working_root,
                     ))
                 }
-                Err(e) => ToolResult::error(format!("切换路径失败：{}", e)),
+                Err(e) => ToolResult::error_json(serde_json::json!({"status": "error", "message": format!("切换路径失败：{}", e)})),
             }
         } else {
             // 恢复上一上下文
@@ -201,7 +201,7 @@ impl Tool for ExitWorktreeTool {
                         &working_root,
                     ))
                 }
-                Err(e) => ToolResult::error(format!("退出 worktree 失败：{}", e)),
+                Err(e) => ToolResult::error_json(serde_json::json!({"status": "error", "message": format!("退出 worktree 失败：{}", e)})),
             }
         }
     }

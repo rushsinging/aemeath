@@ -11,8 +11,36 @@ use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolResultBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
+use serde_json::Value;
 
 const OMITTED_LINE_COUNT_LIMIT: usize = 10_000;
+
+/// 从结构化 JSON content 中提取显示文本。
+/// 优先级：display > message > text > 序列化 JSON
+fn display_text_from_json(content: &Value) -> Option<String> {
+    if let Some(display) = content.get("display").and_then(|v| v.as_str()) {
+        return Some(display.to_string());
+    }
+    if let Some(message) = content.get("message").and_then(|v| v.as_str()) {
+        return Some(message.to_string());
+    }
+    if let Some(text) = content.get("text").and_then(|v| v.as_str()) {
+        return Some(text.to_string());
+    }
+    None
+}
+
+/// 尝试将 result_text 解析为结构化 JSON 并提取显示文本。
+/// 如果解析失败或没有合适的字段，返回原始 result_text。
+fn resolve_display_text(result_text: &str) -> String {
+    // 尝试解析为 JSON
+    if let Ok(content) = serde_json::from_str::<Value>(result_text) {
+        if let Some(display) = display_text_from_json(&content) {
+            return display;
+        }
+    }
+    result_text.to_string()
+}
 
 pub fn render_tool_result(
     block_id: &str,
@@ -20,12 +48,15 @@ pub fn render_tool_result(
     ctx: &RenderCtx,
 ) -> RenderedBlock {
     let policy = result_policy(&view.tool_title);
+    // 解析结构化 JSON，提取显示文本
+    let display_text = resolve_display_text(&view.result_text);
     log::debug!(
         target: "cli::tui::tool_flow",
-        "render tool_result block_id={} tool_title={} result_len={} width={} style={:?} policy={:?}",
+        "render tool_result block_id={} tool_title={} result_len={} display_len={} width={} style={:?} policy={:?}",
         block_id,
         view.tool_title,
         view.result_text.len(),
+        display_text.len(),
         ctx.width,
         view.style,
         policy,
@@ -41,16 +72,16 @@ pub fn render_tool_result(
             let limit = max_lines.unwrap_or(usize::MAX);
             match render_kind {
                 ResultRender::Diff => {
-                    render_edit_diff(view.args_preview.as_deref(), &view.result_text, ctx.width)
+                    render_edit_diff(view.args_preview.as_deref(), &display_text, ctx.width)
                         .unwrap_or_else(|| {
-                            format_result_lines(&view.tool_title, &view.result_text, ctx.width, limit)
+                            format_result_lines(&view.tool_title, &display_text, ctx.width, limit)
                         })
                 }
                 ResultRender::Plain => {
                     if tail_mode {
-                        format_result_lines_tail(&view.tool_title, &view.result_text, ctx.width, limit)
+                        format_result_lines_tail(&view.tool_title, &display_text, ctx.width, limit)
                     } else {
-                        format_result_lines(&view.tool_title, &view.result_text, ctx.width, limit)
+                        format_result_lines(&view.tool_title, &display_text, ctx.width, limit)
                     }
                 }
             }

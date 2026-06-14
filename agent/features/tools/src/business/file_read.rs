@@ -35,7 +35,11 @@ impl Tool for FileReadTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: file_path"),
+            None => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: file_path",
+                "data": {}
+            })),
         };
 
         // Validate path is within workspace boundary
@@ -48,10 +52,18 @@ impl Tool for FileReadTool {
             ctx.allow_all,
         ) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": e,
+                "data": { "file_path": file_path }
+            })),
         };
         if !path.exists() {
-            return ToolResult::error(format!("file not found: {file_path}"));
+            return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("file not found: {file_path}"),
+                "data": { "file_path": file_path }
+            }));
         }
 
         // Check if the file is an image
@@ -83,12 +95,25 @@ impl Tool for FileReadTool {
                     read_files.insert(path.to_string_lossy().to_string());
                 }
                 if numbered.is_empty() {
-                    ToolResult::success("(empty file)")
+                    ToolResult::success_json(serde_json::json!({
+                        "status": "success",
+                        "message": "(empty file)",
+                        "data": { "content": "", "file_path": file_path }
+                    }))
                 } else {
-                    ToolResult::success(numbered)
+                    let line_count = end - start;
+                    ToolResult::success_json(serde_json::json!({
+                        "status": "success",
+                        "message": format!("Read {} lines from {}", line_count, file_path),
+                        "data": { "content": numbered, "file_path": file_path }
+                    }))
                 }
             }
-            Err(e) => ToolResult::error(format!("failed to read file: {e}")),
+            Err(e) => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to read file: {e}"),
+                "data": { "file_path": file_path }
+            })),
         }
     }
 }
@@ -108,11 +133,19 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
 
     let data = match tokio::fs::read(path).await {
         Ok(d) => d,
-        Err(e) => return ToolResult::error(format!("failed to read image: {e}")),
+        Err(e) => return ToolResult::error_json(serde_json::json!({
+            "status": "error",
+            "message": format!("failed to read image: {e}"),
+            "data": { "file_path": file_path }
+        })),
     };
 
     if data.is_empty() {
-        return ToolResult::error("image file is empty");
+        return ToolResult::error_json(serde_json::json!({
+            "status": "error",
+            "message": "image file is empty",
+            "data": { "file_path": file_path }
+        }));
     }
 
     let media_type = detect_media_type(&data, file_path);
@@ -121,15 +154,18 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
 
     // 5MB base64 limit
     if base64.len() > 5 * 1024 * 1024 {
-        return ToolResult::error(format!(
-            "image too large: {} bytes (base64: {} bytes, max: 5MB)",
-            size,
-            base64.len()
-        ));
+        return ToolResult::error_json(serde_json::json!({
+            "status": "error",
+            "message": format!("image too large: {} bytes (base64: {} bytes, max: 5MB)", size, base64.len()),
+            "data": { "file_path": file_path, "size": size, "base64_len": base64.len() }
+        }));
     }
 
-    let description = format!("Image: {} ({} bytes, {})", file_path, size, media_type);
-    ToolResult::success(&description).with_image(base64, media_type)
+    ToolResult::success_json(serde_json::json!({
+        "status": "success",
+        "message": format!("Image: {}", file_path),
+        "data": { "description": format!("Image: {} ({} bytes, {})", file_path, size, media_type), "file_path": file_path }
+    })).with_image(base64, media_type)
 }
 
 fn detect_media_type(data: &[u8], path: &str) -> String {

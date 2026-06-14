@@ -59,12 +59,12 @@ impl Tool for LspTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let operation = match input.get("operation").and_then(|v| v.as_str()) {
             Some(op) => op,
-            None => return ToolResult::error("missing required parameter: operation"),
+            None => return ToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: operation", "data": null}).to_string()),
         };
 
         let file_path = match input.get("filePath").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error("missing required parameter: filePath"),
+            None => return ToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: filePath", "data": null}).to_string()),
         };
 
         let language = input
@@ -82,14 +82,14 @@ impl Tool for LspTool {
             ctx.allow_all,
         ) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return ToolResult::error(serde_json::json!({"status": "error", "message": e, "data": null}).to_string()),
         };
         let file_path = file_path.to_string_lossy().to_string();
 
         match operation {
             "diagnostics" => get_diagnostics(&file_path, &language, &path_base).await,
             "symbols" => get_symbols(&file_path, &language, &path_base).await,
-            _ => ToolResult::error(format!("unsupported operation: {operation}")),
+            _ => ToolResult::error(serde_json::json!({"status": "error", "message": format!("unsupported operation: {operation}"), "data": null}).to_string()),
         }
     }
 }
@@ -142,9 +142,7 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
                 .await
         }
         _ => {
-            return ToolResult::error(format!(
-                "diagnostics not supported for language: {language}"
-            ));
+            return ToolResult::error(serde_json::json!({"status": "error", "message": format!("diagnostics not supported for language: {language}"), "data": null}).to_string());
         }
     };
 
@@ -164,12 +162,12 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
 
             // Truncate very long output
             if combined.len() > 10000 {
-                ToolResult::success(format!("{}...\n[truncated]", safe_slice(&combined, 10000)))
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": {"output": format!("{}...\n[truncated]", safe_slice(&combined, 10000))}}).to_string())
             } else {
-                ToolResult::success(combined)
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": {"output": combined}}).to_string())
             }
         }
-        Err(e) => ToolResult::error(format!("failed to run diagnostics: {e}")),
+        Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to run diagnostics: {e}"), "data": null}).to_string()),
     }
 }
 
@@ -233,11 +231,11 @@ async fn get_symbols(file_path: &str, language: &str, cwd: &std::path::Path) -> 
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if stdout.is_empty() {
-                ToolResult::success("no symbols found")
+                ToolResult::success(serde_json::json!({"status": "success", "message": "no symbols found", "data": {"symbols": []}}).to_string())
             } else {
-                ToolResult::success(stdout.to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Symbols found", "data": {"symbols": stdout.to_string()}}).to_string())
             }
         }
-        Err(e) => ToolResult::error(format!("failed to get symbols: {e}")),
+        Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to get symbols: {e}"), "data": null}).to_string()),
     }
 }

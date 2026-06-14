@@ -48,7 +48,11 @@ impl Tool for SkillTool {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => return ToolResult::error("missing required parameter: skill"),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": "missing required parameter: skill",
+                "data": {}
+            }).to_string()),
         };
 
         let args = input.get("args").and_then(|v| v.as_str()).unwrap_or("");
@@ -58,15 +62,13 @@ impl Tool for SkillTool {
             Some(s) => s.clone(),
             None => {
                 let available: Vec<&str> = skills.keys().map(|s| s.as_str()).collect();
-                return ToolResult::error(format!(
-                    "skill '{}' not found. Available skills: {}",
-                    skill_name,
-                    if available.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        available.join(", ")
+                return ToolResult::error(serde_json::json!({
+                    "status": "error",
+                    "message": format!("skill '{}' not found", skill_name),
+                    "data": {
+                        "available_skills": available
                     }
-                ));
+                }).to_string());
             }
         };
         drop(skills);
@@ -77,6 +79,13 @@ impl Tool for SkillTool {
             content = format!("{content}\n\nArguments: {args}");
         }
 
-        ToolResult::success(format!("Skill '{}' loaded.\n\n{content}", skill.name))
+        ToolResult::success(serde_json::json!({
+            "status": "success",
+            "message": format!("Skill '{}' loaded", skill.name),
+            "data": {
+                "skill": skill.name,
+                "content": content
+            }
+        }).to_string())
     }
 }

@@ -32,8 +32,16 @@ impl Tool for TaskListCompleteTool {
 
     async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         match self.store.complete_list().await {
-            Some(batch) => ToolResult::success(format!("Task list #{} completed", batch.id)),
-            None => ToolResult::error("no active task list"),
+            Some(batch) => ToolResult::success_json(serde_json::json!({
+                "status": "success",
+                "message": format!("Task list #{} completed", batch.id),
+                "data": { "batch_id": batch.id }
+            })),
+            None => ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": "no active task list",
+                "data": {}
+            })),
         }
     }
 }

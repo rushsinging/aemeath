@@ -38,17 +38,25 @@ impl Tool for FileWriteTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error(format!(
-                "missing required parameter: file_path. Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{}]",
-                input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
-            )),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!(
+                    "missing required parameter: file_path. Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{}]",
+                    input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
+                ),
+                "data": {}
+            }).to_string()),
         };
         let content = match input.get("content").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::error(format!(
-                "missing required parameter: content. Write takes both `file_path` and `content` (string). Received keys: [{}]",
-                input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
-            )),
+            None => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!(
+                    "missing required parameter: content. Write takes both `file_path` and `content` (string). Received keys: [{}]",
+                    input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
+                ),
+                "data": {}
+            }).to_string()),
         };
         // Validate path is within workspace boundary
         let path_base = ctx.workspace_read().current_path_base();
@@ -60,7 +68,13 @@ impl Tool for FileWriteTool {
             ctx.allow_all,
         ) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": e,
+                "data": {
+                    "file_path": file_path
+                }
+            }).to_string()),
         };
         // For existing files, require read first
         if path.exists() {
@@ -68,22 +82,45 @@ impl Tool for FileWriteTool {
                 let normalized_path = path.to_string_lossy();
                 if !read_files.contains(file_path) && !read_files.contains(normalized_path.as_ref())
                 {
-                    return ToolResult::error(format!(
-                        "You must read {file_path} before overwriting it. Use the Read tool first."
-                    ));
+                    return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": format!("You must read {file_path} before overwriting it. Use the Read tool first."),
+                        "data": {
+                            "file_path": file_path
+                        }
+                    }).to_string());
                 }
             }
         }
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                    return ToolResult::error(format!("failed to create directory: {e}"));
+                    return ToolResult::error(serde_json::json!({
+                        "status": "error",
+                        "message": format!("failed to create directory: {e}"),
+                        "data": {
+                            "file_path": file_path
+                        }
+                    }).to_string());
                 }
             }
         }
         match tokio::fs::write(path, content).await {
-            Ok(()) => ToolResult::success(format!("wrote {} bytes to {file_path}", content.len())),
-            Err(e) => ToolResult::error(format!("failed to write file: {e}")),
+            Ok(()) => ToolResult::success(serde_json::json!({
+                "status": "success",
+                "message": format!("Wrote {} bytes to {file_path}", content.len()),
+                "data": {
+                    "file_path": file_path,
+                    "bytes_written": content.len()
+                }
+            }).to_string()),
+            Err(e) => ToolResult::error(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to write file: {e}"),
+                "data": {
+                    "file_path": file_path
+                }
+            }).to_string()),
         }
     }
 }
