@@ -3,12 +3,21 @@
 #![allow(dead_code)]
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static CURRENT_TURN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// TUI 是否持有终端（raw mode + alternate screen）。为真时向 stderr 写 panic
+/// 会糊到屏幕上，故此时只落 panic.log，不打印 stderr。
+static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);
+}
+
+/// 进入/退出 TUI（raw + alternate screen）时调用，控制 panic 是否打印到 stderr。
+pub fn set_tui_active(active: bool) {
+    TUI_ACTIVE.store(active, Ordering::SeqCst);
 }
 
 pub fn set_current_turn(turn: usize) {
@@ -63,6 +72,9 @@ pub fn init_panic_hook() {
             }
         }
 
-        eprintln!("[PANIC] {} at {}", payload, location);
+        // TUI 持有终端时写 stderr 会糊屏；此时仅依赖 panic.log。
+        if !TUI_ACTIVE.load(Ordering::SeqCst) {
+            eprintln!("[PANIC] {} at {}", payload, location);
+        }
     }));
 }

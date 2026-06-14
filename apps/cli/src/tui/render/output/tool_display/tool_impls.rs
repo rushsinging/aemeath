@@ -1,6 +1,6 @@
 use crate::tui::render::output_area::INDENT;
 
-use super::common::{file_path, str_arg, truncate_ellipsis};
+use super::common::{file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -15,15 +15,8 @@ impl ToolDisplay for BashDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let cmd = str_arg(input, "command", "?");
-        let max_cmd_width = 80usize;
-        // SAFETY: shell 命令为 ASCII，max_cmd_width 已做 saturating 减法
-        let truncated = if cmd.len() > max_cmd_width {
-            let byte_end = max_cmd_width.saturating_sub(3).min(cmd.len());
-            format!("{}...", &cmd[..byte_end]) // allow unsafe_text_op
-        } else {
-            cmd.to_string()
-        };
-        format!("Bash {truncated}")
+        // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
+        format!("Bash {}", truncate_ellipsis(cmd, 80))
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // command 已在 header 显示，不再需要 details
@@ -48,15 +41,10 @@ inventory::submit!(ToolDisplayEntry {
 
 // ── Read ─────────────────────────────────────────────────────────
 
-/// 截断路径，保留尾部（更有辨识度）
+/// 截断路径，保留尾部（更有辨识度）。路径可含非 ASCII（如中文文件名），
+/// 故委托给 char 边界安全的 `truncate_ellipsis_tail`。
 fn truncate_path(path: &str, max_width: usize) -> String {
-    if path.len() <= max_width {
-        return path.to_string();
-    }
-    let suffix_len = max_width.saturating_sub(3).min(path.len()); // 3 for "..."
-    // SAFETY: 文件路径为 ASCII，suffix_len 已做 saturating/min 防护
-    let start = path.len() - suffix_len;
-    format!("...{}", &path[start..]) // allow unsafe_text_op
+    truncate_ellipsis_tail(path, max_width)
 }
 
 struct ReadDisplay;
@@ -66,7 +54,7 @@ impl ToolDisplay for ReadDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(&path, 60);
+        let display_path = truncate_path(path, 60);
         // summary 格式：`L{start}-L{end} ({lines} lines)`
         match summary {
             Some(s) if !s.is_empty() => format!("Read {display_path} {s}"),
@@ -99,7 +87,7 @@ impl ToolDisplay for WriteDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(&path, 60);
+        let display_path = truncate_path(path, 60);
         // summary 格式：`N bytes`（动态更新）
         match summary {
             Some(s) if !s.is_empty() => format!("Write {display_path} {s}"),
@@ -132,7 +120,7 @@ impl ToolDisplay for EditDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(&path, 60);
+        let display_path = truncate_path(path, 60);
         // summary 格式：`Changed N -> M chars` 或 `Added/Removed N line(s)`
         match summary {
             Some(s) if !s.is_empty() => format!("Edit {display_path} {s}"),

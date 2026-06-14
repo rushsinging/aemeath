@@ -125,7 +125,11 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 
 /// Format a tool call for human-friendly display.
 /// `summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
-pub fn format_tool_call(name: &str, raw_json: &str, summary: Option<&str>) -> (String, Vec<String>) {
+pub fn format_tool_call(
+    name: &str,
+    raw_json: &str,
+    summary: Option<&str>,
+) -> (String, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
@@ -211,10 +215,16 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_update_compact_hides_details() {
-        let (header, details) =
-            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#, None);
+        let (header, details) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"42","status":"completed"}"#,
+            None,
+        );
         assert!(header.contains("42"), "header 应包含 taskId: {header}");
-        assert!(header.contains("completed"), "header 应包含 status: {header}");
+        assert!(
+            header.contains("completed"),
+            "header 应包含 status: {header}"
+        );
         assert!(
             details.is_empty(),
             "Compact 模式不应显示 details: {details:?}"
@@ -263,5 +273,34 @@ mod tests {
             },
             "Bash 的 result 策略应为 tail 模式"
         );
+    }
+
+    #[test]
+    fn test_format_tool_call_bash_long_cjk_command_no_panic() {
+        // 回归 #218：含中文的超长 Bash 命令按字节切片会落在多字节字符内部触发 panic。
+        let cmd = "gh pr create --title 'fix(runtime): 使用人类可读摘要替代 JSON 作为 tool call summary' --body '## 问题'";
+        let raw = serde_json::json!({ "command": cmd }).to_string();
+        let (header, _details) = format_tool_call("Bash", &raw, None);
+        assert!(
+            header.starts_with("Bash "),
+            "header 应以 'Bash ' 开头: {header}"
+        );
+        assert!(
+            header.ends_with("..."),
+            "超长命令应被截断并以 ... 结尾: {header}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_long_cjk_path_no_panic() {
+        // 回归 #218：含中文的超长路径经 truncate_path 尾部截断不应 panic。
+        let path = format!("/项目/{}/数据/报告为准的文件名.rs", "子目录".repeat(20));
+        let raw = serde_json::json!({ "file_path": path }).to_string();
+        let (header, _details) = format_tool_call("Read", &raw, None);
+        assert!(
+            header.starts_with("Read "),
+            "header 应以 'Read ' 开头: {header}"
+        );
+        assert!(header.contains("..."), "超长路径应被截断: {header}");
     }
 }

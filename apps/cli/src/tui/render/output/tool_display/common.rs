@@ -31,6 +31,17 @@ pub(super) fn truncate_ellipsis(text: &str, max_width: usize) -> String {
     }
 }
 
+/// 尾部截断：保留末尾、前缀加 `...`（char 边界安全，与 `truncate_ellipsis` 对称）。
+/// 用于路径等「尾部更有辨识度」的场景。
+pub(super) fn truncate_ellipsis_tail(text: &str, max_width: usize) -> String {
+    if text.len() > max_width {
+        let (suffix, _) = safe_text::truncate_last_unicode_width(text, max_width);
+        format!("...{}", suffix)
+    } else {
+        text.to_string()
+    }
+}
+
 pub(super) fn truncate_json(raw: &str) -> String {
     truncate_ellipsis(raw, 100)
 }

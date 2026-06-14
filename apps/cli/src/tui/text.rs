@@ -52,6 +52,31 @@ pub fn truncate_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
     (s.get(..end).unwrap_or(""), width)
 }
 
+/// 保留 `s` 末尾、显示宽度不超过 `max_cols` 的最长后缀（char 边界安全）。
+/// 返回 (后缀, 后缀显示宽度)。与 `truncate_unicode_width` 对称，用于尾部截断。
+pub fn truncate_last_unicode_width(s: &str, max_cols: usize) -> (&str, usize) {
+    if max_cols == 0 {
+        return ("", 0);
+    }
+
+    let total_width = str_display_width(s);
+    if total_width <= max_cols {
+        return (s, total_width);
+    }
+
+    let mut width = 0usize;
+    let mut start = s.len();
+    for (byte_idx, ch) in s.char_indices().rev() {
+        let ch_width = char_display_width(ch);
+        if width + ch_width > max_cols {
+            break;
+        }
+        width += ch_width;
+        start = byte_idx;
+    }
+    (s.get(start..).unwrap_or(""), width)
+}
+
 pub fn str_display_width(s: &str) -> usize {
     s.chars().map(char_display_width).sum()
 }
@@ -187,6 +212,27 @@ mod tests {
     fn test_truncate_unicode_width_empty_string() {
         assert_eq!(truncate_unicode_width("", 0), ("", 0));
         assert_eq!(truncate_unicode_width("", 3), ("", 0));
+    }
+
+    #[test]
+    fn test_truncate_last_unicode_width_ascii() {
+        assert_eq!(truncate_last_unicode_width("hello", 3), ("llo", 3));
+        assert_eq!(truncate_last_unicode_width("hi", 3), ("hi", 2));
+    }
+
+    #[test]
+    fn test_truncate_last_unicode_width_cjk_and_emoji() {
+        // 中文每字 2 列：max_cols=4 只能容纳末尾两个字，且落在 char 边界。
+        assert_eq!(truncate_last_unicode_width("你好世界", 4), ("世界", 4));
+        // 末字符为 2 列 emoji，max_cols=1 容不下 → 空，不切进字符内部。
+        assert_eq!(truncate_last_unicode_width("a🚀", 1), ("", 0));
+        assert_eq!(truncate_last_unicode_width("a🚀b", 3), ("🚀b", 3));
+    }
+
+    #[test]
+    fn test_truncate_last_unicode_width_zero_and_empty() {
+        assert_eq!(truncate_last_unicode_width("你好", 0), ("", 0));
+        assert_eq!(truncate_last_unicode_width("", 3), ("", 0));
     }
 
     #[test]
