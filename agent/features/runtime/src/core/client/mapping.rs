@@ -189,12 +189,19 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    // Priority: in_progress → pending → completed (newest first backfill)
-    visible.extend(in_progress.into_iter().take(max_lines));
+    // Priority: completed (newest) → in_progress → pending
+    // Reserve at least 1 slot for completed (if any exist)
+    let mut completed_len = max_lines
+        .saturating_sub(in_progress.len())
+        .saturating_sub(pending.len());
+    if !completed.is_empty() {
+        completed_len = completed_len.max(1);
+    }
+    visible.extend(completed.iter().rev().take(completed_len).copied());
+    let remaining = max_lines.saturating_sub(visible.len());
+    visible.extend(in_progress.into_iter().take(remaining));
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(pending.into_iter().take(remaining));
-    let remaining = max_lines.saturating_sub(visible.len());
-    visible.extend(completed.iter().rev().take(remaining).copied());
     visible
 }
 
