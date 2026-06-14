@@ -1,6 +1,7 @@
 mod agent_calls;
 mod ask_user;
 mod compact;
+pub(crate) mod config_reload;
 mod events;
 mod finalize;
 mod hook_ui;
@@ -9,6 +10,7 @@ mod input_log;
 mod llm_log;
 mod loop_runner;
 mod non_agent;
+mod snapshot_registry;
 mod permissions;
 mod post_batch;
 mod queue;

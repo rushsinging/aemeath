@@ -198,6 +198,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             workspace,
         }),
         sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
+        sdk::ChatEvent::ConfigReloaded { changed_keys } => {
+            let keys_str = changed_keys.join(", ");
+            UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
+        }
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }

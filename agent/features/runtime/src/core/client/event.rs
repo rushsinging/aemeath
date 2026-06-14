@@ -320,6 +320,9 @@ pub(crate) fn runtime_event_to_sdk_event(
             let _ = change_tx.send(previous | ChangeSet::TASKS);
             ChatEvent::TasksChanged
         }
+        crate::business::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
+            ChatEvent::ConfigReloaded { changed_keys }
+        }
     }
 }
 

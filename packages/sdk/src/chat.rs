@@ -340,6 +340,10 @@ pub enum ChatEvent {
     },
     /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。
     TasksChanged,
+    /// 配置/指令/guidance 文件变更通知。
+    ConfigReloaded {
+        changed_keys: Vec<String>,
+    },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }

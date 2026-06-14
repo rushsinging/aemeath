@@ -146,7 +146,7 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     call_info.insert(tool_id.clone(), ("Read".to_string(), "file.rs".to_string()));
 
     let data =
-        build_json_logger_tool_result_data(&tool_id.to_string(), "完整输出", false, &call_info);
+        build_json_logger_tool_result_data(tool_id.as_ref(), "完整输出", false, &call_info);
 
     assert_eq!(data["tool_use_id"], tool_id.to_string());
     assert_eq!(data["tool_name"], "Read");
