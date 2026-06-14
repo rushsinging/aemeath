@@ -20,7 +20,6 @@ use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
@@ -48,7 +47,6 @@ where
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
     pub allow_all: bool,
-    pub interrupted: Arc<AtomicBool>,
     pub cancel: CancellationToken,
     pub task_store: Arc<storage::api::TaskStore>,
     pub max_tool_concurrency: usize,
@@ -83,7 +81,6 @@ where
         session_reminders,
         agent_runner,
         allow_all,
-        interrupted,
         cancel,
         task_store,
         max_tool_concurrency,
@@ -210,8 +207,7 @@ where
         let tool_schema_tokens =
             crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
-        if interrupted.load(Ordering::Relaxed) {
-            interrupted.store(false, Ordering::Relaxed);
+        if cancel.is_cancelled() {
             let outcome = drain_and_apply_gate(
                 GateKind::BeforeFinish,
                 &mut pending_input,
@@ -494,7 +490,7 @@ where
                         &hook_ui,
                         &hook_runner,
                         max_agent_concurrency,
-                        &interrupted,
+                        &cancel,
                     )
                     .await;
 
@@ -536,9 +532,7 @@ where
                     // If user cancellation races with provider error reporting, classify
                     // generic abort/network errors as cancellation rather than API errors.
                     || cancel.is_cancelled()
-                    || interrupted.load(Ordering::Relaxed)
                 {
-                    interrupted.store(false, Ordering::Relaxed);
                     messages.truncate(messages_at_start);
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
@@ -960,7 +954,6 @@ mod tests {
             ),
             agent_runner: None,
             allow_all: false,
-            interrupted: Arc::new(AtomicBool::new(false)),
             cancel: CancellationToken::new(),
             task_store: Arc::new(storage::api::TaskStore::new()),
             max_tool_concurrency: 1,
@@ -1039,7 +1032,6 @@ mod tests {
             ),
             agent_runner: None,
             allow_all: false,
-            interrupted: Arc::new(AtomicBool::new(false)),
             cancel: CancellationToken::new(),
             task_store: Arc::new(storage::api::TaskStore::new()),
             max_tool_concurrency: 1,
@@ -1119,7 +1111,6 @@ mod tests {
             ),
             agent_runner: None,
             allow_all: false,
-            interrupted: Arc::new(AtomicBool::new(false)),
             cancel: CancellationToken::new(),
             task_store: Arc::new(storage::api::TaskStore::new()),
             max_tool_concurrency: 1,
@@ -1178,7 +1169,6 @@ mod tests {
             ),
             agent_runner: None,
             allow_all: false,
-            interrupted: Arc::new(AtomicBool::new(false)),
             cancel: CancellationToken::new(),
             task_store: Arc::new(storage::api::TaskStore::new()),
             max_tool_concurrency: 1,

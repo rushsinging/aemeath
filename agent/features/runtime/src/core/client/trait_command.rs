@@ -561,7 +561,6 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             current_client: std::sync::RwLock::new(client),
-            cancel_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             current_cancel: Arc::new(std::sync::Mutex::new(None)),
             current_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),

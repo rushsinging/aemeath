@@ -1,6 +1,5 @@
 //! chat() 方法实际逻辑。
 
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use sdk::{ChatRequest, ChatStream, SdkError};
@@ -13,7 +12,6 @@ pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
-    me.inner.cancel_token.store(false, Ordering::Release);
     let cancel = tokio_util::sync::CancellationToken::new();
     *me.inner
         .current_cancel
@@ -55,7 +53,6 @@ pub(super) async fn chat_impl(
             session_reminders: Arc::new(Mutex::new(Default::default())),
             agent_runner: Some(inner.context.agent_runner.clone()),
             allow_all: inner.context.allow_all,
-            interrupted: inner.cancel_token.clone(),
             cancel,
             task_store: inner.context.task_store.clone(),
             max_tool_concurrency: inner.max_tool_concurrency,

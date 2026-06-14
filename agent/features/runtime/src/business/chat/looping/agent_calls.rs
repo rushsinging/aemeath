@@ -4,8 +4,8 @@ use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_resul
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tools::api::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
@@ -18,7 +18,7 @@ pub(crate) async fn execute_agent_calls<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
-    interrupted: &Arc<AtomicBool>,
+    cancel: &CancellationToken,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -26,7 +26,7 @@ where
     let batch_size = max_agent_concurrency.max(1);
     let mut agent_results = Vec::new();
     for batch in agent_approved.chunks(batch_size) {
-        if interrupted.load(Ordering::Relaxed) {
+        if cancel.is_cancelled() {
             break;
         }
         let agent_futures: Vec<_> = batch
