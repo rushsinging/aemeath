@@ -37,10 +37,10 @@ fn test_window_feature_24_keeps_in_progress_pending_visible_within_total_line_li
     tasks.push(make_task_with_ts("7", "pending", TaskState::Pending, 700));
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 4);
-    // task_slots_with_fold = 2 → in_progress #6 + pending #7
+    // task_slots_with_fold = 2 → 1 completed (reserved) + 1 in_progress
     assert_eq!(result.len(), 4);
-    assert!(result[1].contains("■ #6 doing"));
-    assert!(result[2].contains("□ #7 pending"));
+    assert!(result[1].contains("✓ #5 done 5")); // most recent completed
+    assert!(result[2].contains("■ #6 doing"));
     assert!(result[3].contains("+5 more"));
 }
 
