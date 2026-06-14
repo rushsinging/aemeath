@@ -223,7 +223,10 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         let input_text = &view.chat_input_text;
         let prompt = format!("  ❯ Type something: {input_text}");
-        lines.push(RenderedLine::new(vec![Span::styled(prompt, header_style)]));
+        lines.push(RenderedLine::new(vec![
+            Span::styled(prompt, header_style),
+            Span::styled("▏", header_style),
+        ]));
     }
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
