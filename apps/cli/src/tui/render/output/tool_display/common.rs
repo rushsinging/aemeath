@@ -19,7 +19,7 @@ pub(super) fn bool_arg(input: &serde_json::Value, key: &str, default: bool) -> b
 }
 
 pub(super) fn file_path(input: &serde_json::Value) -> &str {
-    str_arg(input, "file_path", "?")
+    str_arg(input, "file_path", "")
 }
 
 pub(super) fn truncate_ellipsis(text: &str, max_width: usize) -> String {

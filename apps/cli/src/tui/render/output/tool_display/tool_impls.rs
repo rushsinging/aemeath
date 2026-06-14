@@ -14,9 +14,13 @@ impl ToolDisplay for BashDisplay {
         "Bash"
     }
     fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
-        let cmd = str_arg(input, "command", "?");
+        let cmd = str_arg(input, "command", "");
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
-        format!("Bash {}", truncate_ellipsis(cmd, 80))
+        if cmd.is_empty() {
+            "Bash".to_string()
+        } else {
+            format!("Bash {}", truncate_ellipsis(cmd, 80))
+        }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // command 已在 header 显示，不再需要 details
@@ -156,8 +160,12 @@ impl ToolDisplay for GlobDisplay {
         "Glob"
     }
     fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
-        let pattern = str_arg(input, "pattern", "?");
-        format!("Glob {pattern}")
+        let pattern = str_arg(input, "pattern", "");
+        if pattern.is_empty() {
+            "Glob".to_string()
+        } else {
+            format!("Glob {pattern}")
+        }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -187,10 +195,14 @@ impl ToolDisplay for GrepDisplay {
         "Grep"
     }
     fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
-        let pattern = str_arg(input, "pattern", "?");
+        let pattern = str_arg(input, "pattern", "");
         let path = str_arg(input, "path", ".");
         let display_path = truncate_path(path, 40);
-        format!("Grep /{pattern}/ in {display_path}")
+        if pattern.is_empty() {
+            format!("Grep in {display_path}")
+        } else {
+            format!("Grep /{pattern}/ in {display_path}")
+        }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
