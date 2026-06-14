@@ -14,16 +14,6 @@ impl App {
         self.mark_output_dirty();
     }
 
-    pub(crate) fn append_hook_notice(
-        &mut self,
-        content: crate::tui::model::conversation::block::HookNoticeContent,
-    ) {
-        self.model
-            .conversation
-            .apply(ConversationIntent::AppendHookNotice { content });
-        self.mark_output_dirty();
-    }
-
     /// 将一条用户输入回显写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 用于 ask_user 应答、队列输入冲刷等「在已激活回合内回显用户输入」的场景：
