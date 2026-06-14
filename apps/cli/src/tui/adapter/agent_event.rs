@@ -72,10 +72,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::MessagesSync(messages) => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::AskUser { id, question, .. } => diagnostic(DiagnosticIntent::OpenPrompt {
-            id: id.to_string(),
-            question: question.clone(),
-        }),
+        UiEvent::AskUser { .. } => AgentEventMapping::default(),
         UiEvent::AgentProgress {
             context,
             tool_id,
