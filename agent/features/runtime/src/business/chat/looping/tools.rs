@@ -1,3 +1,4 @@
+use crate::business::agent::runner::progress::summarize_tool_input;
 use crate::business::agent::{Agent, ToolCall};
 use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
@@ -54,7 +55,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: Some(call.input.to_string()),
+                summary: Some(summarize_tool_input(&call.name, &call.input)),
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
@@ -130,7 +131,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: Some(call.input.to_string()),
+                summary: Some(summarize_tool_input(&call.name, &call.input)),
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;

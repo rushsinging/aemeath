@@ -64,7 +64,7 @@ pub(crate) fn format_grouped_tool_summaries(tool_calls: &[ToolCall]) -> String {
         .join(" | ")
 }
 
-fn summarize_tool_input(name: &str, input: &serde_json::Value) -> String {
+pub(crate) fn summarize_tool_input(name: &str, input: &serde_json::Value) -> String {
     match name {
         "Read" | "Write" | "Edit" | "LSP" => extract_display_path(input, &["file_path", "path"]),
         "Grep" => {
