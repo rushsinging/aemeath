@@ -70,6 +70,7 @@ impl OutputViewAssembler {
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
                                     key: result_id,
                                     tool_title: tool.title.clone(),
+                                    args_preview: tool.args_preview.clone(),
                                     summary: tool.summary.clone(),
                                     result_text,
                                     style: tool.style,

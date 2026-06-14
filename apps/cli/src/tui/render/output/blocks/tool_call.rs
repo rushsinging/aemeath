@@ -15,9 +15,9 @@ pub fn render_tool_call(
     view: &ToolCallBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let header_input = view.summary.as_deref().or(view.args_preview.as_deref());
+    let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty()).or(view.summary.as_deref());
     let (header_text, detail_lines) = header_input
-        .map(|summary| format_tool_call(&view.title, summary, view.summary.as_deref()))
+        .map(|raw_json| format_tool_call(&view.title, raw_json, view.summary.as_deref()))
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
     log::debug!(
         target: "cli::tui::tool_flow",
@@ -135,6 +135,7 @@ mod tests {
         // 验证参数预览作为 detail 行渲染（取代旧 OutputArea 命令式 push）。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
+        view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
         view.summary = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });

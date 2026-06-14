@@ -28,6 +28,7 @@ mod tests {
         OutputBlockKind::ToolResult(ToolResultBlockView {
             key: "t-result".into(),
             tool_title: "Grep".into(),
+            args_preview: None,
             summary: None,
             result_text: "done".into(),
             style: SemanticStyle::Success,

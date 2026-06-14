@@ -107,12 +107,14 @@ pub struct ToolCallBlockView {
 
 /// 工具结果子块视图：作为 ToolCall 的子节点，独占结果富渲染。
 ///
-/// - `summary`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断），同 `ToolCallBlockView.summary`。
+/// - `args_preview`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断）。
+/// - `summary`：人类可读摘要（如 `"L12-L34 (23 lines)"`）。
 /// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ToolResultBlockView {
     pub key: String,
     pub tool_title: String,
+    pub args_preview: Option<String>,
     pub summary: Option<String>,
     pub result_text: String,
     pub style: SemanticStyle,

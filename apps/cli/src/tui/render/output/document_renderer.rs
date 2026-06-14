@@ -251,6 +251,7 @@ mod tests {
         let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
             key: "tool-result".into(),
             tool_title: "Bash".into(),
+            args_preview: None,
             summary: None,
             result_text: "```\ncode\n```".into(),
             style: SemanticStyle::Success,
