@@ -1,10 +1,13 @@
 use crate::tui::render::output_area::INDENT;
+use crate::tui::render::theme;
 
 use super::common::{file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 // ── Bash ─────────────────────────────────────────────────────────
 
@@ -60,6 +63,18 @@ impl ToolDisplay for ReadDisplay {
             Some(s) if !s.is_empty() => format!("Read {display_path} {s}"),
             _ => format!("Read {display_path}"),
         }
+    }
+    fn format_header_line(&self, input: &serde_json::Value, summary: Option<&str>) -> Line<'static> {
+        let path = file_path(input);
+        let display_path = truncate_path(path, 60);
+        let mut spans = vec![Span::raw(format!("Read {display_path}"))];
+        if let Some(s) = summary {
+            if !s.is_empty() {
+                spans.push(Span::raw(" ".to_string()));
+                spans.push(Span::styled(s.to_string(), Style::default().fg(theme::TEXT_MUTED)));
+            }
+        }
+        Line::from(spans)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 行范围信息已在 summary 中，不再需要 details

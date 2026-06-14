@@ -6,6 +6,7 @@ mod task_impls;
 mod tool_impls;
 
 use common::{format_todowrite_value, truncate_json};
+use ratatui::text::{Line, Span};
 
 // ── ToolRenderPolicy 系统 ──────────────────────────────────────────
 
@@ -71,9 +72,15 @@ pub trait ToolDisplay: Send + Sync {
     /// Tool name as registered in the tool registry.
     fn name(&self) -> &str;
 
-    /// Format the header line.
+    /// Format the header line as plain string.
     /// `input` 是解析后的 JSON，`summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
     fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String;
+
+    /// Format the header line as styled `Line`。默认实现将 `format_header` 包装为单个 raw span。
+    /// 需要对 header 不同部分施加不同颜色的工具（如 Read 的 summary 灰色）可覆写此方法。
+    fn format_header_line(&self, input: &serde_json::Value, summary: Option<&str>) -> Line<'static> {
+        Line::from(Span::raw(self.format_header(input, summary)))
+    }
 
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
@@ -125,30 +132,34 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 
 /// Format a tool call for human-friendly display.
 /// `summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
+/// 返回 `(Line, details)`：Line 已含样式（如 Read 的 summary 灰色），details 为纯文本行。
 pub fn format_tool_call(
     name: &str,
     raw_json: &str,
     summary: Option<&str>,
-) -> (String, Vec<String>) {
+) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if name == "TodoWrite" {
-        return format_todowrite_value(&parsed).unwrap_or_else(|| {
-            let truncated = truncate_json(raw_json);
-            (format!("● {name}"), vec![truncated])
-        });
+        return match format_todowrite_value(&parsed) {
+            Some((header, details)) => (Line::from(Span::raw(header)), details),
+            None => {
+                let truncated = truncate_json(raw_json);
+                (Line::from(Span::raw(format!("● {name}"))), vec![truncated])
+            }
+        };
     }
 
     if name == "TodoRun" {
         return (
-            "● TodoRun".to_string(),
+            Line::from(Span::raw("● TodoRun")),
             vec!["execute all pending todos".to_string()],
         );
     }
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header(&parsed, summary);
+        let header = display.format_header_line(&parsed, summary);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -158,12 +169,17 @@ pub fn format_tool_call(
 
     // Fallback for unknown tools
     let truncated = truncate_json(raw_json);
-    (format!("● {name}"), vec![truncated])
+    (Line::from(Span::raw(format!("● {name}"))), vec![truncated])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 辅助函数：从 Line 中提取纯文本。
+    fn line_to_string(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
 
     #[test]
     fn test_lookup_display_finds_task_list_create() {
@@ -192,9 +208,10 @@ mod tests {
             r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#,
             None,
         );
+        let text = line_to_string(&header);
         assert!(
-            header.contains("修复 bug 84"),
-            "header 应包含 subject: {header}"
+            text.contains("修复 bug 84"),
+            "header 应包含 subject: {text}"
         );
         assert!(
             details.is_empty(),
@@ -209,7 +226,8 @@ mod tests {
             r#"{"subject":"分析","description":"查看结构"}"#,
             None,
         );
-        assert!(header.contains("分析"), "header: {header}");
+        let text = line_to_string(&header);
+        assert!(text.contains("分析"), "header: {text}");
         assert_eq!(details, vec!["查看结构".to_string()]);
     }
 
@@ -220,10 +238,11 @@ mod tests {
             r#"{"taskId":"42","status":"completed"}"#,
             None,
         );
-        assert!(header.contains("42"), "header 应包含 taskId: {header}");
+        let text = line_to_string(&header);
+        assert!(text.contains("42"), "header 应包含 taskId: {text}");
         assert!(
-            header.contains("completed"),
-            "header 应包含 status: {header}"
+            text.contains("completed"),
+            "header 应包含 status: {text}"
         );
         assert!(
             details.is_empty(),
@@ -234,7 +253,8 @@ mod tests {
     #[test]
     fn test_format_tool_call_unknown_tool_uses_fallback() {
         let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None);
-        assert_eq!(header, "● UnknownTool");
+        let text = line_to_string(&header);
+        assert_eq!(text, "● UnknownTool");
         assert!(!details.is_empty(), "fallback 应截断 JSON");
     }
 
@@ -242,7 +262,8 @@ mod tests {
     fn test_format_tool_call_invalid_json_uses_fallback() {
         let (header, _details) = format_tool_call("TaskListCreate", "not json", None);
         // 不应 panic，应 fallback
-        assert!(header.contains("TaskListCreate"));
+        let text = line_to_string(&header);
+        assert!(text.contains("TaskListCreate"));
     }
 
     #[test]
@@ -281,13 +302,14 @@ mod tests {
         let cmd = "gh pr create --title 'fix(runtime): 使用人类可读摘要替代 JSON 作为 tool call summary' --body '## 问题'";
         let raw = serde_json::json!({ "command": cmd }).to_string();
         let (header, _details) = format_tool_call("Bash", &raw, None);
+        let text = line_to_string(&header);
         assert!(
-            header.starts_with("Bash "),
-            "header 应以 'Bash ' 开头: {header}"
+            text.starts_with("Bash "),
+            "header 应以 'Bash ' 开头: {text}"
         );
         assert!(
-            header.ends_with("..."),
-            "超长命令应被截断并以 ... 结尾: {header}"
+            text.ends_with("..."),
+            "超长命令应被截断并以 ... 结尾: {text}"
         );
     }
 
@@ -297,10 +319,11 @@ mod tests {
         let path = format!("/项目/{}/数据/报告为准的文件名.rs", "子目录".repeat(20));
         let raw = serde_json::json!({ "file_path": path }).to_string();
         let (header, _details) = format_tool_call("Read", &raw, None);
+        let text = line_to_string(&header);
         assert!(
-            header.starts_with("Read "),
-            "header 应以 'Read ' 开头: {header}"
+            text.starts_with("Read "),
+            "header 应以 'Read ' 开头: {text}"
         );
-        assert!(header.contains("..."), "超长路径应被截断: {header}");
+        assert!(text.contains("..."), "超长路径应被截断: {text}");
     }
 }
