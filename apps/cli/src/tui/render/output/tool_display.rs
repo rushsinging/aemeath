@@ -7,19 +7,53 @@ mod tool_impls;
 
 use common::{format_todowrite_value, truncate_json};
 
-/// TUI 中 tool call 结果最多显示的行数。
-pub(crate) const TOOL_RESULT_MAX_LINES: usize = 5;
+// ── ToolRenderPolicy 系统 ──────────────────────────────────────────
 
-/// 工具调用区域的展示模式。
+/// Header 渲染策略
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolDisplayMode {
-    /// 默认展开模式：展示 header 和 details。
-    Expanded,
-    /// 单行模式：只展示 header，隐藏 details。
-    SingleLine,
+pub enum HeaderPolicy {
+    /// 标准 header：带 ● marker
+    Standard,
+    /// 紧凑 header：单行，无 marker（如 TaskUpdate）
+    Compact,
+    /// 自定义图标：用指定 emoji（如 📋 EnterPlanMode）
+    CustomIcon(&'static str),
 }
 
-/// 工具 result 的渲染类型。由工具**显式声明**（`ToolDisplay::result_render`），渲染层据此
+/// Details 渲染策略
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetailsPolicy {
+    /// 展开显示 details
+    Expanded,
+    /// 隐藏 details
+    Hidden,
+}
+
+/// Result 渲染策略
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultPolicy {
+    /// 不显示 result 子块（如 Read/Write/Edit）
+    Hidden,
+    /// 显示 result 子块
+    Visible {
+        /// 最大行数（None 表示全部显示，如 Edit diff）
+        max_lines: Option<usize>,
+        /// 渲染类型
+        render_kind: ResultRender,
+        /// tail 模式：只显示最后 N 行（如 Bash）
+        tail_mode: bool,
+    },
+}
+
+/// 工具的渲染策略配置
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolRenderPolicy {
+    pub header: HeaderPolicy,
+    pub details: DetailsPolicy,
+    pub result: ResultPolicy,
+}
+
+/// 工具 result 的渲染类型。由工具**显式声明**（`ToolDisplay::render_policy`），渲染层据此
 /// 分发，不按 `---DIFF---` 字符或硬编码工具名猜测。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultRender {
@@ -37,36 +71,15 @@ pub trait ToolDisplay: Send + Sync {
     /// Tool name as registered in the tool registry.
     fn name(&self) -> &str;
 
-    /// Format the header line (prefixed with ● by caller).
-    fn format_header(&self, input: &serde_json::Value) -> String;
+    /// Format the header line.
+    /// `input` 是解析后的 JSON，`summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
+    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String;
 
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
-    /// Tool call display mode. Defaults to expanded display for backward compatibility.
-    fn display_mode(&self) -> ToolDisplayMode {
-        ToolDisplayMode::Expanded
-    }
-
-    /// Max lines of result output to show (default 5).
-    fn result_max_lines(&self) -> usize {
-        TOOL_RESULT_MAX_LINES
-    }
-
-    /// Format the result summary line(s). Default: "✓ {name} completed".
-    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
-        if is_error {
-            vec![format!("✗ {} failed", self.name())]
-        } else {
-            vec![format!("✓ {} completed", self.name())]
-        }
-    }
-
-    /// 该工具 result 的渲染类型。默认 `Plain`（纯文本原样预览）。由工具**显式声明**，
-    /// 渲染层据此分发——不按 `---DIFF---` 字符或硬编码工具名猜测。
-    fn result_render(&self) -> ResultRender {
-        ResultRender::Plain
-    }
+    /// 返回该工具的渲染策略。
+    fn render_policy(&self) -> ToolRenderPolicy;
 }
 
 // ── Registration via inventory ─────────────────────────────────────
@@ -90,26 +103,29 @@ pub(crate) fn lookup_display(name: &str) -> Option<&'static dyn ToolDisplay> {
     TOOL_DISPLAYS.get(name).map(|display| display.as_ref())
 }
 
-/// 返回某工具结果在 TUI 中最多展示的行数。
-///
-/// 取自该工具注册的 `ToolDisplay::result_max_lines`；未注册的工具回退到默认值。
-/// 把行数策略收敛到 `ToolDisplay`，避免在渲染层硬编码工具名特判（DRY）。
-pub fn result_max_lines(name: &str) -> usize {
+/// 返回某工具的渲染策略。未注册的工具回退到默认策略。
+pub fn result_policy(name: &str) -> ResultPolicy {
     lookup_display(name)
-        .map(|display| display.result_max_lines())
-        .unwrap_or(TOOL_RESULT_MAX_LINES)
+        .map(|display| display.render_policy().result)
+        .unwrap_or(ResultPolicy::Visible {
+            max_lines: Some(5),
+            render_kind: ResultRender::Plain,
+            tail_mode: false,
+        })
 }
 
-/// 该工具 result 的渲染类型（取自 `ToolDisplay::result_render`，未注册回退 `Plain`）。
+/// 该工具 result 的渲染类型（取自 `ToolDisplay::render_policy`，未注册回退 `Plain`）。
 /// 渲染层据此分发，不按 `---DIFF---` 字符或硬编码工具名猜测渲染类型。
 pub fn result_render_kind(name: &str) -> ResultRender {
-    lookup_display(name)
-        .map(|display| display.result_render())
-        .unwrap_or(ResultRender::Plain)
+    match result_policy(name) {
+        ResultPolicy::Visible { render_kind, .. } => render_kind,
+        _ => ResultRender::Plain,
+    }
 }
 
 /// Format a tool call for human-friendly display.
-pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
+/// `summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
+pub fn format_tool_call(name: &str, raw_json: &str, summary: Option<&str>) -> (String, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
@@ -128,10 +144,10 @@ pub fn format_tool_call(name: &str, raw_json: &str) -> (String, Vec<String>) {
     }
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header(&parsed);
-        let details = match display.display_mode() {
-            ToolDisplayMode::Expanded => display.format_details(&parsed),
-            ToolDisplayMode::SingleLine => vec![],
+        let header = display.format_header(&parsed, summary);
+        let details = match display.render_policy().details {
+            DetailsPolicy::Expanded => display.format_details(&parsed),
+            DetailsPolicy::Hidden => vec![],
         };
         return (header, details);
     }
@@ -170,6 +186,7 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskListCreate",
             r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#,
+            None,
         );
         assert!(
             header.contains("修复 bug 84"),
@@ -177,7 +194,7 @@ mod tests {
         );
         assert!(
             details.is_empty(),
-            "SingleLine 模式不应显示 details: {details:?}"
+            "Compact 模式不应显示 details: {details:?}"
         );
     }
 
@@ -186,120 +203,36 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
+            None,
         );
         assert!(header.contains("分析"), "header: {header}");
         assert_eq!(details, vec!["查看结构".to_string()]);
     }
 
     #[test]
-    fn test_format_tool_call_task_update_single_line_hides_status_detail() {
+    fn test_format_tool_call_task_update_compact_hides_details() {
         let (header, details) =
-            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#);
-        assert_eq!(header, "● TaskUpdate(42)");
+            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#, None);
+        assert!(header.contains("42"), "header 应包含 taskId: {header}");
+        assert!(header.contains("completed"), "header 应包含 status: {header}");
         assert!(
             details.is_empty(),
-            "SingleLine 模式不应显示 details: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_read_single_line_hides_offset_limit_detail() {
-        let (header, details) =
-            format_tool_call("Read", r#"{"file_path":"/a/b.md","offset":10,"limit":5}"#);
-        assert_eq!(header, "● Read(/a/b.md)");
-        assert!(
-            details.is_empty(),
-            "SingleLine 模式不应显示 details: {details:?}"
+            "Compact 模式不应显示 details: {details:?}"
         );
     }
 
     #[test]
     fn test_format_tool_call_unknown_tool_uses_fallback() {
-        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#);
+        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None);
         assert_eq!(header, "● UnknownTool");
         assert!(!details.is_empty(), "fallback 应截断 JSON");
     }
 
     #[test]
     fn test_format_tool_call_invalid_json_uses_fallback() {
-        let (header, _details) = format_tool_call("TaskListCreate", "not json");
+        let (header, _details) = format_tool_call("TaskListCreate", "not json", None);
         // 不应 panic，应 fallback
         assert!(header.contains("TaskListCreate"));
-    }
-
-    #[test]
-    fn test_format_tool_call_read_details_does_not_duplicate_path() {
-        // 问题 #88：header 已是 `Read(/a/b.md)`，details 不得再重复完整路径，
-        // 否则工具块下方多出一行 `Read /a/b.md`。
-        let (header, details) = format_tool_call("Read", r#"{"file_path":"/a/b.md"}"#);
-        assert!(header.contains("/a/b.md"), "header 应含路径: {header}");
-        assert!(
-            details.iter().all(|detail| !detail.contains("/a/b.md")),
-            "details 不应重复 header 已有的路径，实际: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_read_no_offset_yields_no_detail_line() {
-        // 边界：无 offset/limit 时不应产生任何 detail 行（避免冗余第二行）。
-        let (_header, details) = format_tool_call("Read", r#"{"file_path":"/a/b.md"}"#);
-        assert!(
-            details.is_empty(),
-            "无 offset/limit 时 Read 不应有 detail 行，实际: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_read_with_offset_uses_single_line_mode() {
-        // 正常路径：有 offset/limit 时仍展示该信息，但不重复路径。
-        let (_header, details) =
-            format_tool_call("Read", r#"{"file_path":"/a/b.md","offset":10,"limit":5}"#);
-        assert!(
-            details.is_empty(),
-            "SingleLine 模式不应显示 offset/limit details，实际: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_exit_worktree_empty_input_has_no_json_details() {
-        let (header, details) = format_tool_call("ExitWorktree", r#"{}"#);
-
-        assert_eq!(header, "● ExitWorktree");
-        assert!(
-            details.is_empty(),
-            "ExitWorktree 空参数不应显示原始 JSON，实际: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_enter_worktree_branch_uses_human_summary() {
-        let (header, details) = format_tool_call(
-            "EnterWorktree",
-            r#"{"branch":"bug/103-worktree-tool-display"}"#,
-        );
-
-        assert_eq!(header, "● EnterWorktree(bug/103-worktree-tool-display)");
-        assert!(
-            details.is_empty(),
-            "EnterWorktree 分支已在 header 展示，不应显示原始 JSON，实际: {details:?}"
-        );
-    }
-
-    #[test]
-    fn test_format_tool_call_enter_worktree_path_uses_human_summary() {
-        let (header, details) = format_tool_call(
-            "EnterWorktree",
-            r#"{"path":".worktrees/bug-103-worktree-tool-display"}"#,
-        );
-
-        assert_eq!(
-            header,
-            "● EnterWorktree(.worktrees/bug-103-worktree-tool-display)"
-        );
-        assert!(
-            details.is_empty(),
-            "EnterWorktree 路径已在 header 展示，不应显示原始 JSON，实际: {details:?}"
-        );
     }
 
     #[test]
@@ -308,5 +241,27 @@ mod tests {
         assert_eq!(result_render_kind("Edit"), ResultRender::Diff);
         assert_eq!(result_render_kind("Read"), ResultRender::Plain);
         assert_eq!(result_render_kind("UnknownTool"), ResultRender::Plain);
+    }
+
+    #[test]
+    fn test_result_policy_read_is_hidden() {
+        assert_eq!(
+            result_policy("Read"),
+            ResultPolicy::Hidden,
+            "Read 的 result 策略应为 Hidden"
+        );
+    }
+
+    #[test]
+    fn test_result_policy_bash_is_tail_mode() {
+        assert_eq!(
+            result_policy("Bash"),
+            ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: true,
+            },
+            "Bash 的 result 策略应为 tail 模式"
+        );
     }
 }

@@ -1,14 +1,19 @@
 use super::common::{bool_arg, str_arg, truncate_ellipsis};
-use super::{ToolDisplay, ToolDisplayEntry, ToolDisplayMode, TOOL_RESULT_MAX_LINES};
+use super::{
+    DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
+    ToolRenderPolicy,
+};
+
+// ── TaskCreate ───────────────────────────────────────────────────
 
 struct TaskCreateDisplay;
 impl ToolDisplay for TaskCreateDisplay {
     fn name(&self) -> &str {
         "TaskCreate"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let subject = str_arg(input, "subject", "?");
-        format!("● TaskCreate({subject})")
+        format!("TaskCreate {subject}")
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let desc = str_arg(input, "description", "");
@@ -17,8 +22,12 @@ impl ToolDisplay for TaskCreateDisplay {
         }
         vec![truncate_ellipsis(desc, 80)]
     }
-    fn result_max_lines(&self) -> usize {
-        TOOL_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Expanded,
+            result: ResultPolicy::Hidden,
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -26,27 +35,31 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskCreateDisplay)
 });
 
+// ── TaskUpdate ───────────────────────────────────────────────────
+
 struct TaskUpdateDisplay;
 impl ToolDisplay for TaskUpdateDisplay {
     fn name(&self) -> &str {
         "TaskUpdate"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let id = str_arg(input, "taskId", "?");
-        format!("● TaskUpdate({id})")
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let status = str_arg(input, "status", "");
         if status.is_empty() {
-            return vec![];
+            format!("TaskUpdate {id}")
+        } else {
+            format!("TaskUpdate {id} → {status}")
         }
-        vec![format!("-> {status}")]
     }
-    fn display_mode(&self) -> ToolDisplayMode {
-        ToolDisplayMode::SingleLine
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        TOOL_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Compact,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden,
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -54,19 +67,29 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskUpdateDisplay)
 });
 
+// ── TaskList ─────────────────────────────────────────────────────
+
 struct TaskListDisplay;
 impl ToolDisplay for TaskListDisplay {
     fn name(&self) -> &str {
         "TaskList"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "● TaskList".to_string()
+    fn format_header(&self, _input: &serde_json::Value, _summary: Option<&str>) -> String {
+        "TaskList".to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        TOOL_RESULT_MAX_LINES
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -74,31 +97,26 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListDisplay)
 });
 
+// ── TaskListCreate ───────────────────────────────────────────────
+
 struct TaskListCreateDisplay;
 impl ToolDisplay for TaskListCreateDisplay {
     fn name(&self) -> &str {
         "TaskListCreate"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let subject = str_arg(input, "subject", "?");
-        format!("● TaskListCreate: {subject}")
+        format!("TaskListCreate: {subject}")
     }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let summary = str_arg(input, "summary", "");
-        if summary.is_empty() {
-            vec![]
-        } else {
-            vec![truncate_ellipsis(summary, 80)]
-        }
-    }
-    fn display_mode(&self) -> ToolDisplayMode {
-        ToolDisplayMode::SingleLine
-    }
-    fn result_max_lines(&self) -> usize {
-        0
-    }
-    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Compact,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden,
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -106,22 +124,25 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListCreateDisplay)
 });
 
+// ── TaskListComplete ─────────────────────────────────────────────
+
 struct TaskListCompleteDisplay;
 impl ToolDisplay for TaskListCompleteDisplay {
     fn name(&self) -> &str {
         "TaskListComplete"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "● TaskListComplete".to_string()
+    fn format_header(&self, _input: &serde_json::Value, _summary: Option<&str>) -> String {
+        "TaskListComplete".to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
-    fn result_max_lines(&self) -> usize {
-        0
-    }
-    fn format_result_summary(&self, _result: &str, _is_error: bool) -> Vec<String> {
-        vec![]
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden,
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -129,17 +150,30 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListCompleteDisplay)
 });
 
+// ── Skill ────────────────────────────────────────────────────────
+
 struct SkillDisplay;
 impl ToolDisplay for SkillDisplay {
     fn name(&self) -> &str {
         "Skill"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let skill = str_arg(input, "skill", "?");
-        format!("● Skill({skill})")
+        format!("Skill {skill}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -147,18 +181,31 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(SkillDisplay)
 });
 
+// ── LSP ──────────────────────────────────────────────────────────
+
 struct LspDisplay;
 impl ToolDisplay for LspDisplay {
     fn name(&self) -> &str {
         "LSP"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let op = str_arg(input, "operation", "?");
         let path = str_arg(input, "filePath", "?");
-        format!("● LSP::{op}({path})")
+        format!("LSP::{op} {path}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -166,17 +213,30 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(LspDisplay)
 });
 
+// ── TaskGet ──────────────────────────────────────────────────────
+
 struct TaskGetDisplay;
 impl ToolDisplay for TaskGetDisplay {
     fn name(&self) -> &str {
         "TaskGet"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let id = str_arg(input, "taskId", "?");
-        format!("● TaskGet({id})")
+        format!("TaskGet {id}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -184,17 +244,26 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskGetDisplay)
 });
 
+// ── TaskStop ─────────────────────────────────────────────────────
+
 struct TaskStopDisplay;
 impl ToolDisplay for TaskStopDisplay {
     fn name(&self) -> &str {
         "TaskStop"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let id = str_arg(input, "taskId", "?");
-        format!("● TaskStop({id})")
+        format!("TaskStop {id}")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden,
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -202,16 +271,29 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskStopDisplay)
 });
 
+// ── TaskOutput ───────────────────────────────────────────────────
+
 struct TaskOutputDisplay;
 impl ToolDisplay for TaskOutputDisplay {
     fn name(&self) -> &str {
         "TaskOutput"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "● TaskOutput".to_string()
+    fn format_header(&self, _input: &serde_json::Value, _summary: Option<&str>) -> String {
+        "TaskOutput".to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -219,12 +301,14 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskOutputDisplay)
 });
 
+// ── EnterPlanMode ────────────────────────────────────────────────
+
 struct EnterPlanModeDisplay;
 impl ToolDisplay for EnterPlanModeDisplay {
     fn name(&self) -> &str {
         "EnterPlanMode"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let reason = str_arg(input, "reason", "");
         if reason.is_empty() {
             "📋 Enter Plan Mode".to_string()
@@ -235,14 +319,11 @@ impl ToolDisplay for EnterPlanModeDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec!["Tool calls will be simulated, not executed.".to_string()]
     }
-    fn result_max_lines(&self) -> usize {
-        0
-    }
-    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
-        if is_error {
-            vec!["✗ Failed to enter plan mode".to_string()]
-        } else {
-            vec![]
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::CustomIcon("📋"),
+            details: DetailsPolicy::Expanded,
+            result: ResultPolicy::Hidden,
         }
     }
 }
@@ -251,12 +332,14 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(EnterPlanModeDisplay)
 });
 
+// ── ExitPlanMode ─────────────────────────────────────────────────
+
 struct ExitPlanModeDisplay;
 impl ToolDisplay for ExitPlanModeDisplay {
     fn name(&self) -> &str {
         "ExitPlanMode"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         if bool_arg(input, "execute", false) {
             "▶ Execute Plan".to_string()
         } else {
@@ -270,14 +353,11 @@ impl ToolDisplay for ExitPlanModeDisplay {
             vec!["Returning to normal execution.".to_string()]
         }
     }
-    fn result_max_lines(&self) -> usize {
-        0
-    }
-    fn format_result_summary(&self, _result: &str, is_error: bool) -> Vec<String> {
-        if is_error {
-            vec!["✗ Failed to exit plan mode".to_string()]
-        } else {
-            vec![]
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::CustomIcon("▶"),
+            details: DetailsPolicy::Expanded,
+            result: ResultPolicy::Hidden,
         }
     }
 }

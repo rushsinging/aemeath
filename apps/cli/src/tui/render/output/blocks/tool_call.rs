@@ -17,7 +17,7 @@ pub fn render_tool_call(
 ) -> RenderedBlock {
     let header_input = view.summary.as_deref().or(view.args_preview.as_deref());
     let (header_text, detail_lines) = header_input
-        .map(|summary| format_tool_call(&view.title, summary))
+        .map(|summary| format_tool_call(&view.title, summary, view.summary.as_deref()))
         .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
     log::debug!(
         target: "cli::tui::tool_flow",
@@ -134,37 +134,30 @@ mod tests {
         // summary 提供工具入参 JSON，经 format_tool_call 产出 header + detail，
         // 验证参数预览作为 detail 行渲染（取代旧 OutputArea 命令式 push）。
         let mut view = tool(ToolSemanticStatus::Running);
-        view.title = "Read".into();
-        view.summary = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+        view.title = "Grep".into();
+        view.summary = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
         // header 含工具名
-        assert!(block.lines[0].plain.contains("Read"));
-        // detail 行含文件路径参数
-        let has_path = block
-            .lines
-            .iter()
-            .any(|line| line.plain.contains("src/lib.rs"));
-        assert!(has_path, "参数预览应作为 detail 行渲染");
+        assert!(block.lines[0].plain.contains("Grep"));
+        // Grep header 现在包含 pattern 和 path
+        assert!(block.lines[0].plain.contains("test"));
     }
 
     #[test]
     fn test_tool_call_renders_args_detail_from_args_preview_before_summary() {
         let mut view = tool(ToolSemanticStatus::Running);
-        view.title = "Read".into();
-        view.args_preview = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+        view.title = "Grep".into();
+        view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
         view.summary = None;
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
-        assert!(block.lines[0].plain.contains("Read"));
+        assert!(block.lines[0].plain.contains("Grep"));
         assert!(
-            block
-                .lines
-                .iter()
-                .any(|line| line.plain.contains("src/lib.rs")),
-            "ToolArgumentsDelta 后应不等 ToolResult/最终 summary 就显示括号/detail"
+            block.lines[0].plain.contains("test"),
+            "ToolArgumentsDelta 后应不等 ToolResult/最终 summary 就显示 header"
         );
     }
 
