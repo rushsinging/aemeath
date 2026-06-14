@@ -136,13 +136,75 @@ where
     let chat_id = ChatId::new_v7();
     // 将 chat_id 同步到日志 context，影响 tool/audit/hook 等共享 sink 的 chat 字段
     logging::context::set_current_chat_id(chat_id.to_string());
+    // 初始化配置变更快照注册表（turn 边界轮询用）
+    let mut config_snapshot = crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
     loop {
         turn_count += 1;
         let turn_id = ChatTurnId::new_v7();
         let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id);
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
-            .await; // Refresh tool schemas each turn so dynamically registered MCP tools
+            .await;
+
+        // ── turn 边界：检测配置/指令/guidance 文件变更 ──
+        {
+            let config_diff = crate::business::chat::looping::config_reload::check_config_changes(
+                &mut config_snapshot,
+            );
+            if config_diff.has_changes() {
+                log::info!(
+                    "[config_reload] turn {} detected changes: {:?}",
+                    turn_count,
+                    config_diff.changed_keys
+                );
+                // 通过 sink 发送 ConfigReloaded 事件通知客户端
+                sink.send_event(RuntimeStreamEvent::ConfigReloaded {
+                    changed_keys: config_diff.changed_keys.clone(),
+                }).await;
+
+                // Guidance 变更处理：按 reload_policy 配置注入通知
+                let has_guidance_change = config_diff
+                    .changed_keys
+                    .iter()
+                    .any(|k| k.starts_with("guidance:"));
+                if has_guidance_change {
+                    let policy = crate::business::chat::looping::config_reload::resolve_guidance_reload_policy();
+                    match policy {
+                        share::config::GuidanceReloadPolicy::Inject => {
+                            // 在下一条消息前注入 guidance 更新提示
+                            let reminder = Message::user(
+                                "[guidance 已更新] guidance 文件已被外部修改，请关注后续 system prompt 中的最新指引。".to_string(),
+                            );
+                            messages.push(reminder);
+                            sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                                .await;
+                            log::info!("[config_reload] guidance inject mode: injected reminder into messages");
+                        }
+                        share::config::GuidanceReloadPolicy::Remind => {
+                            // 发 system-reminder 让 LLM 自行决定是否读取
+                            let reminder = Message::user(
+                                "<system-reminder>guidance 文件已被外部修改，请用 Read 工具重新读取 ~/.agents/guidance/_default.md 与本次匹配的模型前缀文件以获取最新指引。</system-reminder>".to_string(),
+                            );
+                            messages.push(reminder);
+                            log::info!("[config_reload] guidance remind mode: injected system-reminder");
+                        }
+                        share::config::GuidanceReloadPolicy::Confirm => {
+                            // 发 system-reminder + 标记等待用户确认
+                            let reminder = Message::user(
+                                "<system-reminder>guidance 文件已被外部修改，等待用户确认后应用。TUI 状态栏已标记 \"guidance 改动未应用\"。</system-reminder>".to_string(),
+                            );
+                            messages.push(reminder);
+                            sink.send_event(RuntimeStreamEvent::SystemMessage(
+                                "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
+                            )).await;
+                            log::info!("[config_reload] guidance confirm mode: waiting for user confirmation");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Refresh tool schemas each turn so dynamically registered MCP tools
                     // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
         let tool_schema_tokens =
@@ -702,6 +764,7 @@ mod tests {
                     "WorkingDirectoryChanged".to_string()
                 }
                 RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
+                RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
             };
             self.events.lock().unwrap().push(name);
         }

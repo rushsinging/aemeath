@@ -92,7 +92,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CurrentTurnChanged(_)
         | sdk::ChatEvent::HookEvent(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
-        | sdk::ChatEvent::TasksChanged => {}
+        | sdk::ChatEvent::TasksChanged
+        | sdk::ChatEvent::ConfigReloaded { .. } => {}
         sdk::ChatEvent::ToolCallUpdate { name, summary, .. } => {
             if let Some(summary) = summary {
                 eprintln!("[tool:update] {name} {summary}");

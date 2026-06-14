@@ -170,7 +170,7 @@ pub fn render_dialog_vm(vm: &DialogViewModel, area: Rect, buf: &mut Buffer) {
     lines.push(Line::raw(""));
 
     // Actions
-    for (_i, action) in vm.actions.iter().enumerate() {
+    for action in vm.actions.iter() {
         let is_default = vm.default_action.as_ref() == Some(&action.id);
         if is_default {
             lines.push(Line::styled(

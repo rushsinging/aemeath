@@ -137,6 +137,10 @@ pub enum RuntimeStreamEvent {
         workspace: PersistedWorkspaceContext,
     },
     TasksChanged,
+    /// 配置/指令/guidance 文件变更通知。
+    ConfigReloaded {
+        changed_keys: Vec<String>,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

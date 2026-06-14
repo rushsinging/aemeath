@@ -15,6 +15,7 @@ pub mod models;
 pub mod paths;
 pub mod permissions;
 pub mod skills;
+pub mod snapshot;
 pub mod storage;
 pub mod tools;
 pub mod ui;
@@ -27,11 +28,41 @@ pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
+pub use snapshot::{FileChange, FileChangeKind, FileSnapshot, SourceSnapshotRegistry};
 pub use storage::StorageConfig;
 pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};
 pub use ui::{TaskLifecycleConfig, TaskListConfig, UiConfig};
 
 use serde::{Deserialize, Serialize};
+
+/// Guidance 变更重载策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GuidanceReloadPolicy {
+    /// 每 turn 在 system prompt 前置 `[guidance 已更新] <diff head>`。
+    Inject,
+    /// 发 `<system-reminder>` 让 LLM 自行决定是否用 Read 重新读取。
+    #[default]
+    Remind,
+    /// 发 system-reminder + TUI 状态栏标记，等用户确认后注入。
+    Confirm,
+}
+
+/// Guidance 系统配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuidanceConfig {
+    /// guidance 文件变更时的重载策略。
+    #[serde(default)]
+    pub reload_policy: GuidanceReloadPolicy,
+}
+
+impl Default for GuidanceConfig {
+    fn default() -> Self {
+        Self {
+            reload_policy: GuidanceReloadPolicy::Remind,
+        }
+    }
+}
 
 /// Main configuration structure
 ///
@@ -100,6 +131,10 @@ pub struct Config {
     #[serde(default)]
     pub logging: LoggingConfig,
 
+    /// Guidance system configuration
+    #[serde(default)]
+    pub guidance: GuidanceConfig,
+
     /// Language preference for guidance files. Supported values: "en", "zh".
     /// Default: "en". Guidance files are loaded from `{language}/` subdirectory first,
     /// then fallback to root directory files.
@@ -122,6 +157,7 @@ impl Default for Config {
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
             logging: LoggingConfig::default(),
+            guidance: GuidanceConfig::default(),
             language: default_language(),
         }
     }

@@ -16,7 +16,7 @@ use share::config::{
     storage::StorageConfig,
     tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
     ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
-    Config,
+    Config, GuidanceConfig,
 };
 use std::{
     collections::HashMap,
@@ -62,6 +62,8 @@ pub(crate) struct ConfigPatch {
     memory: Option<MemoryConfigPatch>,
     #[serde(default)]
     logging: Option<LoggingConfigPatch>,
+    #[serde(default)]
+    guidance: Option<GuidanceConfigPatch>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -254,6 +256,12 @@ struct SubAgentLogConfigPatch {
     include_request_payload: Option<bool>,
     #[serde(default)]
     max_payload_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct GuidanceConfigPatch {
+    #[serde(default)]
+    reload_policy: Option<String>,
 }
 
 impl ConfigManager {
@@ -520,6 +528,9 @@ impl ConfigManager {
         }
         if let Some(logging) = patch.logging {
             base.logging = Self::apply_logging_patch(base.logging, logging);
+        }
+        if let Some(guidance) = patch.guidance {
+            base.guidance = Self::apply_guidance_patch(base.guidance, guidance);
         }
         base
     }
@@ -809,6 +820,24 @@ impl ConfigManager {
         }
         if let Some(v) = patch.max_payload_bytes {
             base.max_payload_bytes = v;
+        }
+        base
+    }
+
+    fn apply_guidance_patch(
+        mut base: GuidanceConfig,
+        patch: GuidanceConfigPatch,
+    ) -> GuidanceConfig {
+        if let Some(v) = patch.reload_policy {
+            base.reload_policy = match v.as_str() {
+                "inject" => share::config::GuidanceReloadPolicy::Inject,
+                "remind" => share::config::GuidanceReloadPolicy::Remind,
+                "confirm" => share::config::GuidanceReloadPolicy::Confirm,
+                _ => {
+                    log::warn!("[config] unknown guidance.reload_policy '{}', keeping default", v);
+                    base.reload_policy
+                }
+            };
         }
         base
     }
@@ -1120,6 +1149,6 @@ mod tests {
         assert_eq!(loaded.models.providers.len(), 1);
         assert_eq!(loaded.models.default, "MiniMax/MiniMax-M3");
         assert_eq!(provider.api_key, "minimax-key");
-        assert!(loaded.models.providers.get("Minimax").is_none());
+        assert!(!loaded.models.providers.contains_key("Minimax"));
     }
 }
