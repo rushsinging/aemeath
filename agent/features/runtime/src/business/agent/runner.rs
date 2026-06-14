@@ -10,7 +10,7 @@ pub use finalize::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 mod logging;
 mod loop_helpers;
 mod loop_run;
-mod progress;
+pub(crate) mod progress;
 mod setup;
 #[cfg(test)]
 mod tests;
