@@ -42,8 +42,8 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::AssistantMessage(_) => "●",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
         OutputBlockKind::ThinkingMessage(_) => "💭",
-        // └─ 拐角连接到父 ToolCall header，表示这是工具结果子块。
-        OutputBlockKind::ToolResult(_) => "└─",
+        // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
+        OutputBlockKind::ToolResult(_) => "⎿",
         OutputBlockKind::HookNotice(h) => match h.kind {
             HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => "⊘",
             HookNoticeSemanticKind::Info => "ℹ",
@@ -183,7 +183,7 @@ mod tests {
             style: SemanticStyle::Success,
         });
 
-        assert_eq!(marker_glyph(&kind), "└─");
+        assert_eq!(marker_glyph(&kind), "⎿");
         assert_eq!(marker_color(&kind), theme::TEXT_MUTED);
     }
 
