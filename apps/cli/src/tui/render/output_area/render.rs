@@ -94,7 +94,7 @@ impl OutputArea {
             rendered_content.insert(idx, plain);
             let spans = apply_selection_overlay(line, sel_range_for_line(view, line, idx));
             line_fill_styles.push(line.fill_style);
-            display_lines.push(Line::from(spans));
+            display_lines.push(Line::from(spans).style(line.style));
         }
 
         self.screen_line_map = screen_map;

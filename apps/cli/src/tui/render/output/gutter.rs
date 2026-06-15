@@ -104,6 +104,7 @@ pub fn apply_gutter_with_frame(
             let mut spans = vec![Span::styled(gutter_text, Style::default().fg(color))];
             spans.extend(line.spans);
             let mut gutted = RenderedLine::with_plain(spans, line.plain);
+            gutted.style = line.style;
             gutted.gutter_cols = gutter_cols;
             gutted.fill_style = line.fill_style;
             gutted

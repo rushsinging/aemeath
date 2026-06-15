@@ -24,6 +24,8 @@ pub struct RenderCtx {
 pub struct RenderedLine {
     pub spans: Vec<Span<'static>>,
     pub plain: String,
+    /// 行级 base style（对应 ratatui `Line::style`）。span 未显式设置的属性会继承此值。
+    pub style: Style,
     /// 前导 gutter 的显示列数（亦即 spans 首部 gutter 字符数）。无 gutter 时为 0。
     pub gutter_cols: usize,
     /// 整条可见行的填充样式。由最终 buffer render 负责填满行宽，不进入 plain。
@@ -40,6 +42,7 @@ impl RenderedLine {
         Self {
             spans,
             plain,
+            style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
         }
@@ -56,6 +59,7 @@ impl RenderedLine {
         Self {
             spans: vec![Span::raw(plain.clone())],
             plain,
+            style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
         }
@@ -66,9 +70,16 @@ impl RenderedLine {
         Self {
             spans,
             plain,
+            style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
         }
+    }
+
+    /// 设置行级 base style（span 未显式设置的属性会继承此值）。
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
     }
 
     /// 设置整行填充样式。
