@@ -42,6 +42,14 @@ pub enum ReflectionError {
     Memory(#[from] share::memory::MemoryError),
     #[error("failed to apply reflection memory suggestion: {0}")]
     Apply(String),
+    #[error("reflection memory store initialization failed: {0}")]
+    StoreInit(String),
+    #[error("reflection LLM call failed: {0}")]
+    LlmCall(String),
+    #[error("reflection LLM returned empty response")]
+    EmptyResponse,
+    #[error("reflection LLM response could not be parsed as JSON (first 200 chars): {0}")]
+    Unparseable(String),
 }
 
 pub type ReflectionResult<T> = Result<T, ReflectionError>;
