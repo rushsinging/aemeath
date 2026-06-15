@@ -1,15 +1,50 @@
 #!/bin/bash
-# 拒绝在 main 工作区直接使用 Edit/Write 工具修改文件。
+# 拒绝在 main 工作区直接使用 Edit/Write 工具修改项目内代码。
 # 仅在 agent 处于 git worktree 中时允许 Edit/Write。
+# 项目外文件（如 ~/.agents/*.json）不受此 hook 约束，直接放行。
 
 set -euo pipefail
 
+# 读取 Claude Code PreToolUse stdin（JSON 上下文）
+hook_input="$(cat || true)"
+tool_name="$(printf '%s' "$hook_input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+file_path="$(printf '%s' "$hook_input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+
+# 仅对 Edit/Write 生效；其他工具（Read/Bash/...）放行
+case "$tool_name" in
+    Edit|Write) ;;
+    *) exit 0 ;;
+esac
+
+# 解析项目根
+project_root="$(git rev-parse --show-toplevel 2>/dev/null || echo "${AEMEATH_PROJECT_DIR:-}")"
+
+# 项目根解析失败 → fail-open（让上层逻辑兜底）
+if [ -z "$project_root" ]; then
+    exit 0
+fi
+
+# file_path 解析失败 → fail-open
+if [ -z "$file_path" ]; then
+    exit 0
+fi
+
+# 规范化文件绝对路径（允许文件不存在，使用 -m）
+abs_file="$(realpath -m -- "$file_path" 2>/dev/null || echo "$file_path")"
+
+# 项目外文件 → 放行（仅约束项目内代码）
+case "$abs_file" in
+    "$project_root"/*) ;;  # 项目内：继续 worktree 校验
+    *) exit 0 ;;           # 项目外：直接放行
+esac
+
+# 已在 worktree 中 → 放行
 if [ "${AEMEATH_IN_WORKTREE:-0}" = "1" ]; then
     exit 0
 fi
 
 current_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
-project_dir=$(git rev-parse --show-toplevel 2>/dev/null || echo "${AEMEATH_PROJECT_DIR:-$(pwd)}")
+project_dir="$project_root"
 
 cat >&2 <<ERR
 [Hook blocked] Edit/Write rejected.
@@ -28,6 +63,7 @@ How to fix:
 
 Project directory: ${project_dir}
 Current branch:    ${current_branch}
+Target file:       ${abs_file}
 ERR
 
 exit 2
