@@ -3,7 +3,7 @@ use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::HookData;
-use sdk::OptionItem;
+use sdk::{AskUserQuestionItem, OptionItem};
 use share::config::hooks::HookEvent;
 
 pub(crate) async fn ask_user<S>(
@@ -16,11 +16,16 @@ pub(crate) async fn ask_user<S>(
 where
     S: ChatEventSink,
 {
-    let mut ask_user_results = Vec::new();
     let ask_calls: Vec<&ToolCall> = non_agent_calls
         .iter()
         .filter(|c| c.name == "AskUserQuestion")
         .collect();
+
+    if ask_calls.is_empty() {
+        return Vec::new();
+    }
+
+    // 对每个 call 运行 PermissionRequest hook（保持现有逻辑不变）
     for call in &ask_calls {
         let _ = hook_ui
             .run_plain(
@@ -33,66 +38,88 @@ where
                 }),
             )
             .await;
-        let question = call
-            .input
-            .get("question")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let options: Vec<OptionItem> = call
-            .input
-            .get("options")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| {
-                        // 新格式：{ "title": "...", "description": "..." }
-                        if v.is_object() {
-                            let title = v.get("title").and_then(|t| t.as_str())?;
-                            let description = v.get("description").and_then(|d| d.as_str());
-                            Some(OptionItem {
-                                title: title.to_string(),
-                                description: description.map(|d| d.to_string()),
-                            })
-                        } else {
-                            // 兼容旧格式：纯字符串
-                            v.as_str().map(|s| OptionItem::title_only(s.to_string()))
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let allow_free_input = call
-            .input
-            .get("allow_free_input")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        let multi_select = call
-            .input
-            .get("multi_select")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+    }
+
+    // 收集所有问题为 Vec<AskUserQuestionItem>
+    let items: Vec<AskUserQuestionItem> = ask_calls
+        .iter()
+        .map(|call| {
+            let question = call
+                .input
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let options: Vec<OptionItem> = call
+                .input
+                .get("options")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            // 新格式：{ "title": "...", "description": "..." }
+                            if v.is_object() {
+                                let title = v.get("title").and_then(|t| t.as_str())?;
+                                let description = v.get("description").and_then(|d| d.as_str());
+                                Some(OptionItem {
+                                    title: title.to_string(),
+                                    description: description.map(|d| d.to_string()),
+                                })
+                            } else {
+                                // 兼容旧格式：纯字符串
+                                v.as_str().map(|s| OptionItem::title_only(s.to_string()))
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let multi_select = call
+                .input
+                .get("multi_select")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let default = call
+                .input
+                .get("default")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            AskUserQuestionItem {
+                id: call.id.to_string(),
+                question,
+                options,
+                multi_select,
+                default,
+            }
+        })
+        .collect();
+
+    // 创建单个 oneshot channel，发送单个 AskUserBatch 事件
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<Vec<String>>();
+    let _ = sink
+        .send_event(RuntimeStreamEvent::AskUserBatch { items, reply_tx })
+        .await;
+
+    // 等待用户回答所有问题
+    let answers: Vec<String> = match reply_rx.await {
+        Ok(a) => a,
+        Err(_) => Vec::new(),
+    };
+
+    // 收到答案后，逐个 send_tool_result 回传；
+    // 答案数量不匹配时用 default 值填充
+    let mut ask_user_results = Vec::new();
+    for (i, call) in ask_calls.iter().enumerate() {
         let default = call
             .input
             .get("default")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<String>();
-        let _ = sink
-            .send_event(RuntimeStreamEvent::AskUser {
-                id: call.id.clone(),
-                question,
-                options,
-                allow_free_input,
-                multi_select,
-                default: default.clone(),
-                reply_tx,
-            })
-            .await;
-        let answer = match reply_rx.await {
-            Ok(a) if !a.is_empty() => a,
-            _ => default.unwrap_or_default(),
-        };
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let answer = answers
+            .get(i)
+            .cloned()
+            .filter(|a| !a.is_empty())
+            .unwrap_or(default);
         let result = (
             call.id.clone(),
             call.provider_id.clone(),

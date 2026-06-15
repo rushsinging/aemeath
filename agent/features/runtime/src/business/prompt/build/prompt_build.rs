@@ -175,7 +175,9 @@ fn static_system_prompt_for(cwd_str: &str, is_git: bool, lang: &str) -> String {
         "zh" => STATIC_SYSTEM_PROMPT_ZH,
         _ => STATIC_SYSTEM_PROMPT_EN,
     };
-    template.replace("{cwd_str}", cwd_str).replace("{is_git}", &is_git.to_string())
+    template
+        .replace("{cwd_str}", cwd_str)
+        .replace("{is_git}", &is_git.to_string())
 }
 
 #[cfg(test)]
@@ -183,7 +185,11 @@ fn static_system_prompt_for_test(cwd_str: &str, is_git: bool, lang: &str) -> Str
     static_system_prompt_for(cwd_str, is_git, lang)
 }
 
-fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>, lang: &str) -> String {
+fn build_commit_guidance(
+    provider_name: Option<&str>,
+    model_name: Option<&str>,
+    lang: &str,
+) -> String {
     let provider = provider_name
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("unknown");
@@ -194,7 +200,8 @@ fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>, 
         format!("Co-Authored-By: Aemeath ({provider}/{model}) <github:rushsinging/aemeath>");
 
     let template = match lang {
-        "zh" => r#"# Commit Message Guidance
+        "zh" => {
+            r#"# Commit Message Guidance
 创建 git commit message 时：
 - 创建任何 git commit 前，调用内置的 `commit` skill 并遵循其工作流。
 - 首先检查本仓库最近的提交历史，推断其 Commit Style Context。- 优先采样包含 `Co-Authored-By` 的提交，例如：`git log --format=%B --grep='Co-Authored-By' -n 20`。
@@ -202,8 +209,10 @@ fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>, 
 - 分析标题格式、type/scope 用法、正文风格、语言、footer/trailer 约定，以及是否常用 AI co-author trailer。
 - 保持最终 commit message 与本仓库的现有风格一致。
 - 不要编造人类 co-author。
-- 当 AI co-author trailer 适用时，精确使用：`{trailer}`。"#,
-        _ => r#"# Commit Message Guidance
+- 当 AI co-author trailer 适用时，精确使用：`{trailer}`。"#
+        }
+        _ => {
+            r#"# Commit Message Guidance
 When creating a git commit message:
 - Before creating any git commit, invoke the built-in `commit` skill and follow its workflow.
 - First inspect this repository's recent commit history and infer its Commit Style Context.- Prefer sampling commits that contain `Co-Authored-By`, for example: `git log --format=%B --grep='Co-Authored-By' -n 20`.
@@ -211,7 +220,8 @@ When creating a git commit message:
 - Analyze title format, type/scope usage, body style, language, footer/trailer conventions, and whether AI co-author trailers are commonly used.
 - Keep the final commit message consistent with this repository's existing style.
 - Do not invent human co-authors.
-- When an AI co-author trailer is appropriate, use exactly: `{trailer}`."#,
+- When an AI co-author trailer is appropriate, use exactly: `{trailer}`."#
+        }
     };
     template.replace("{trailer}", &trailer)
 }
@@ -314,12 +324,7 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
     // 从 cwd 向上 depth 级祖先目录（含 cwd），每层 CLAUDE.md 优先于 AGENTS.md
     paths::project_instruction_dirs(cwd, depth)
         .into_iter()
-        .flat_map(|dir| {
-            [
-                dir.join(paths::CLAUDE_MD),
-                dir.join(paths::AGENTS_MD),
-            ]
-        })
+        .flat_map(|dir| [dir.join(paths::CLAUDE_MD), dir.join(paths::AGENTS_MD)])
         .collect()
 }
 

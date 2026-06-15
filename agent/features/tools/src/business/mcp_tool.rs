@@ -44,19 +44,25 @@ impl Tool for McpTool {
                     &output,
                     crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
                 );
-                let data = serde_json::from_str::<Value>(&limited)
-                    .unwrap_or(Value::String(limited));
-                ToolResult::success(serde_json::json!({
-                    "status": "success",
-                    "message": "MCP tool call succeeded",
-                    "data": data
-                }).to_string())
+                let data =
+                    serde_json::from_str::<Value>(&limited).unwrap_or(Value::String(limited));
+                ToolResult::success(
+                    serde_json::json!({
+                        "status": "success",
+                        "message": "MCP tool call succeeded",
+                        "data": data
+                    })
+                    .to_string(),
+                )
             }
-            Err(e) => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("MCP tool error: {e}"),
-                "data": null
-            }).to_string()),
+            Err(e) => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("MCP tool error: {e}"),
+                    "data": null
+                })
+                .to_string(),
+            ),
         }
     }
 }

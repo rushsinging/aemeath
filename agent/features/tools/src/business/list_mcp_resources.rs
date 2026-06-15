@@ -128,11 +128,14 @@ impl Tool for ListMcpResourcesTool {
             }).to_string())
         } else {
             let data = serde_json::to_value(&resources).unwrap_or_default();
-            ToolResult::success(serde_json::json!({
-                "status": "success",
-                "message": format!("Found {} resource(s)", resources.len()),
-                "data": data
-            }).to_string())
+            ToolResult::success(
+                serde_json::json!({
+                    "status": "success",
+                    "message": format!("Found {} resource(s)", resources.len()),
+                    "data": data
+                })
+                .to_string(),
+            )
         }
     }
 }

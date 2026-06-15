@@ -44,7 +44,8 @@ where
     S: ChatEventSink,
 {
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
-    let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, language).await;
+    let denied_results =
+        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, language).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -57,7 +58,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                                status: RuntimeToolCallStatus::Ready,
+                status: RuntimeToolCallStatus::Ready,
             })
             .await;
     }
@@ -75,8 +76,16 @@ where
         .collect();
 
     let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_calls).await;
-    let non_agent_results =
-        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_calls, language).await;
+    let non_agent_results = execute_non_agent(
+        context,
+        agent,
+        sink,
+        hook_ui,
+        hook_runner,
+        &non_agent_calls,
+        language,
+    )
+    .await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,

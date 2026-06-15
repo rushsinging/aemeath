@@ -61,21 +61,25 @@ impl Tool for TaskUpdateTool {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: taskId",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: taskId",
+                    "data": {}
+                }))
+            }
         };
 
         // Resolve display number (batch-local id) to global task id
         let task_id = match self.store.resolve_display_id(&input_id).await {
             Some(global_id) => global_id,
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": format!("task not found: {input_id}"),
-                "data": { "task_id": input_id }
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("task not found: {input_id}"),
+                    "data": { "task_id": input_id }
+                }))
+            }
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
@@ -220,10 +224,8 @@ impl Tool for TaskUpdateTool {
                     for t in &newly_unblocked {
                         let t_display = self.store.format_display_id(&t.id).await;
                         let dep_displays = self.store.to_display_ids(&t.blocked_by).await;
-                        let deps: Vec<String> = dep_displays
-                            .iter()
-                            .map(|d| format!("#{d}"))
-                            .collect();
+                        let deps: Vec<String> =
+                            dep_displays.iter().map(|d| format!("#{d}")).collect();
                         unblocked_list.push(serde_json::json!({
                             "task_id": t_display,
                             "subject": t.subject,

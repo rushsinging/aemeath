@@ -145,12 +145,7 @@ impl TaskReminderState {
                 "\nUse TaskList only when the user asks to continue/resume or when a listed task is clearly relevant.",
             ),
         };
-        let text = format!(
-            "{}{}\n{}",
-            preamble,
-            lines.join("\n"),
-            epilogue
-        );
+        let text = format!("{}{}\n{}", preamble, lines.join("\n"), epilogue);
         let reminder = format!("<system-reminder>\n{}\n</system-reminder>", text);
 
         Some(Message::system_generated_user(reminder))

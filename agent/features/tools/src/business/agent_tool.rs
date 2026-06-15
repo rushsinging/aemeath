@@ -69,20 +69,24 @@ impl Tool for AgentTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: prompt",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: prompt",
+                    "data": {}
+                }))
+            }
         };
 
         let _description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d,
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: description",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: description",
+                    "data": {}
+                }))
+            }
         };
 
         // --- Task scope analysis ---
@@ -110,11 +114,13 @@ impl Tool for AgentTool {
             .map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
         let runner = match &ctx.agent_runner {
             Some(r) => r.clone(),
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "agent runner not available",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "agent runner not available",
+                    "data": {}
+                }))
+            }
         };
 
         let cwd_str = cwd.to_string_lossy();

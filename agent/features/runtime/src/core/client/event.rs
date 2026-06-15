@@ -271,23 +271,9 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::HookEvent(event) => {
             ChatEvent::HookEvent(runtime_hook_event_to_sdk(event))
         }
-        crate::business::chat::RuntimeStreamEvent::AskUser {
-            id,
-            question,
-            options,
-            allow_free_input,
-            multi_select,
-            default,
-            reply_tx,
-        } => ChatEvent::AskUser {
-            id: id.to_string(),
-            question,
-            options,
-            allow_free_input,
-            multi_select,
-            default,
-            reply_tx,
-        },
+        crate::business::chat::RuntimeStreamEvent::AskUserBatch { items, reply_tx } => {
+            ChatEvent::AskUserBatch { items, reply_tx }
+        }
         crate::business::chat::RuntimeStreamEvent::AgentProgress {
             context,
             tool_id,

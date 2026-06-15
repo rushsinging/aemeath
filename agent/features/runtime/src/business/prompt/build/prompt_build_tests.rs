@@ -45,8 +45,11 @@ fn test_static_prompt_mentions_memory_tool_without_memory_contents() {
 
 #[test]
 fn test_static_prompt_guides_worktree_relative_paths_without_fixed_workspace_root() {
-    let text =
-        static_system_prompt_for_test("/tmp/project/.worktrees/fix-bug-69-worktree-cwd", true, "en");
+    let text = static_system_prompt_for_test(
+        "/tmp/project/.worktrees/fix-bug-69-worktree-cwd",
+        true,
+        "en",
+    );
 
     assert!(!text.contains("Current workspace root"));
     assert!(text.contains("Prefer relative paths"));

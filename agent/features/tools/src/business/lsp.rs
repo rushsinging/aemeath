@@ -82,7 +82,11 @@ impl Tool for LspTool {
             ctx.allow_all,
         ) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(serde_json::json!({"status": "error", "message": e, "data": null}).to_string()),
+            Err(e) => {
+                return ToolResult::error(
+                    serde_json::json!({"status": "error", "message": e, "data": null}).to_string(),
+                )
+            }
         };
         let file_path = file_path.to_string_lossy().to_string();
 

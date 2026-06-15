@@ -35,11 +35,28 @@ where
         if agent.ctx.cancel.is_cancelled() {
             return vec![cancelled_result(other_calls[0], language)];
         }
-        return execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, other_calls[0], language)
-            .await;
+        return execute_one_non_agent(
+            context,
+            agent,
+            sink,
+            hook_ui,
+            hook_runner,
+            other_calls[0],
+            language,
+        )
+        .await;
     }
 
-    execute_multiple_non_agent(context, agent, sink, hook_ui, hook_runner, &other_calls, language).await
+    execute_multiple_non_agent(
+        context,
+        agent,
+        sink,
+        hook_ui,
+        hook_runner,
+        &other_calls,
+        language,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -75,9 +92,16 @@ where
                         return (pos, Vec::new());
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
-                    let result =
-                        execute_one_non_agent(&context, agent, &sink, &hook_ui, &hook_runner, call, language)
-                            .await;
+                    let result = execute_one_non_agent(
+                        &context,
+                        agent,
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        call,
+                        language,
+                    )
+                    .await;
                     (pos, result)
                 }
             })
@@ -198,10 +222,7 @@ where
             "zh" => "被 PreToolUse hook 阻止",
             _ => "Blocked by PreToolUse hook",
         };
-        let error_detail = blocked_result
-            .error
-            .as_deref()
-            .unwrap_or(default_blocked);
+        let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
         let result = (
             owned_call.id.clone(),
             owned_call.provider_id.clone(),

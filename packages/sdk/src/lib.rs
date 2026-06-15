@@ -20,8 +20,8 @@ pub mod ids;
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
-    ChatEventContext, ChatInput, ChatInputEvent, ChatRequest, ChatResult, ChatStream,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
+    ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatRequest, ChatResult, ChatStream,
     HookEventStatus, HookEventView, HookExecutionResultView, OptionItem, ToolCallStatusView,
     ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };

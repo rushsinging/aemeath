@@ -60,6 +60,21 @@ impl OptionItem {
     }
 }
 
+/// AskUserQuestion 批量事件中的单个问题项。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserQuestionItem {
+    /// 对应的 tool_call_id（用于 TUI 关联 ToolCall 状态）。
+    pub id: String,
+    /// 问题文本。
+    pub question: String,
+    /// 预设选项（LLM 选项，不含内建选项）。
+    pub options: Vec<OptionItem>,
+    /// 是否多选。
+    pub multi_select: bool,
+    /// 默认值（用户跳过时使用）。
+    pub default: Option<String>,
+}
+
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]
 pub struct ChatInput {
@@ -314,15 +329,11 @@ pub enum ChatEvent {
     CurrentTurnChanged(usize),
     /// Hook 事件。
     HookEvent(HookEventView),
-    /// AskUserQuestion 请求。
-    AskUser {
-        id: String,
-        question: String,
-        options: Vec<OptionItem>,
-        allow_free_input: bool,
-        multi_select: bool,
-        default: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<String>,
+    /// AskUserQuestion 批量请求（一次携带多个问题）。
+    AskUserBatch {
+        items: Vec<AskUserQuestionItem>,
+        /// 回传每个问题的答案（顺序与 items 一致）。
+        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
     /// Agent progress 事件投影。
     AgentProgress {
@@ -339,9 +350,7 @@ pub enum ChatEvent {
     /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。
     TasksChanged,
     /// 配置/指令/guidance 文件变更通知。
-    ConfigReloaded {
-        changed_keys: Vec<String>,
-    },
+    ConfigReloaded { changed_keys: Vec<String> },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }

@@ -36,14 +36,17 @@ impl Tool for GrepTool {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error(serde_json::json!({
-                    "status": "error",
-                    "message": "Missing required parameter: pattern",
-                    "data": {
-                        "matches": [],
-                        "match_count": 0
-                    }
-                }).to_string())
+                return ToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": "Missing required parameter: pattern",
+                        "data": {
+                            "matches": [],
+                            "match_count": 0
+                        }
+                    })
+                    .to_string(),
+                )
             }
         };
         let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
@@ -53,14 +56,17 @@ impl Tool for GrepTool {
         {
             Ok(p) => p,
             Err(e) => {
-                return ToolResult::error(serde_json::json!({
-                    "status": "error",
-                    "message": e,
-                    "data": {
-                        "matches": [],
-                        "match_count": 0
-                    }
-                }).to_string())
+                return ToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": e,
+                        "data": {
+                            "matches": [],
+                            "match_count": 0
+                        }
+                    })
+                    .to_string(),
+                )
             }
         };
         let glob_filter = input.get("glob").and_then(|v| v.as_str());
@@ -88,35 +94,44 @@ impl Tool for GrepTool {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 if stdout.is_empty() {
-                    ToolResult::success(serde_json::json!({
-                        "status": "success",
-                        "message": "No matches found",
-                        "data": {
-                            "matches": [],
-                            "match_count": 0
-                        }
-                    }).to_string())
+                    ToolResult::success(
+                        serde_json::json!({
+                            "status": "success",
+                            "message": "No matches found",
+                            "data": {
+                                "matches": [],
+                                "match_count": 0
+                            }
+                        })
+                        .to_string(),
+                    )
                 } else {
                     let lines: Vec<&str> = stdout.lines().take(250).collect();
                     let match_count = lines.len();
-                    ToolResult::success(serde_json::json!({
-                        "status": "success",
-                        "message": format!("Found {} matches", match_count),
-                        "data": {
-                            "matches": lines,
-                            "match_count": match_count
-                        }
-                    }).to_string())
+                    ToolResult::success(
+                        serde_json::json!({
+                            "status": "success",
+                            "message": format!("Found {} matches", match_count),
+                            "data": {
+                                "matches": lines,
+                                "match_count": match_count
+                            }
+                        })
+                        .to_string(),
+                    )
                 }
             }
-            Err(e) => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("Search failed: {e}"),
-                "data": {
-                    "matches": [],
-                    "match_count": 0
-                }
-            }).to_string()),
+            Err(e) => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("Search failed: {e}"),
+                    "data": {
+                        "matches": [],
+                        "match_count": 0
+                    }
+                })
+                .to_string(),
+            ),
         }
     }
 }
