@@ -68,7 +68,8 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
                 calls[0].input,
                 serde_json::json!({"file_path": "/repo/src/lib.rs"})
             );
-            assert_eq!(calls[0].summary, "src/lib.rs");
+            // Read tool 的 summary 为空字符串，TUI 层自己组装
+            assert_eq!(calls[0].summary, "");
             assert_eq!(calls[1].name, "Grep");
             assert_eq!(calls[1].summary, "\"AgentProgress\" in src");
         }
@@ -105,7 +106,8 @@ fn test_format_grouped_tool_summaries_keeps_existing_display_format() {
 
     let summary = format_grouped_tool_summaries(&calls);
 
-    assert_eq!(summary, "Read ×4: a.rs, b.rs, c.rs +1 more");
+    // Read tool 的 summary 为空字符串，不显示详情
+    assert_eq!(summary, "Read ×4");
 }
 
 #[test]

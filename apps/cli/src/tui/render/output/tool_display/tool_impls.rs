@@ -55,29 +55,30 @@ impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
         "Read"
     }
-    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
-        // summary 格式：`L{start}-L{end} ({lines} lines)`
-        match summary {
-            Some(s) if !s.is_empty() => format!("Read {display_path} {s}"),
-            _ => format!("Read {display_path}"),
-        }
+        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let start = offset + 1; // 转为 1-based
+        let end = offset + limit;
+        format!("Read {display_path} L{start}:L{end} ({limit} lines)")
     }
-    fn format_header_line(&self, input: &serde_json::Value, summary: Option<&str>) -> Line<'static> {
+    fn format_header_line(&self, input: &serde_json::Value, _summary: Option<&str>) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
-        let mut spans = vec![Span::raw(format!("Read {display_path}"))];
-        if let Some(s) = summary {
-            if !s.is_empty() {
-                spans.push(Span::raw(" ".to_string()));
-                spans.push(Span::styled(s.to_string(), Style::default().fg(theme::TEXT_MUTED)));
-            }
-        }
-        Line::from(spans)
+        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let start = offset + 1;
+        let end = offset + limit;
+        let range_info = format!("L{start}:L{end} ({limit} lines)");
+        Line::from(vec![
+            Span::raw(format!("Read {display_path} ")),
+            Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
+        ])
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // 行范围信息已在 summary 中，不再需要 details
+        // 行范围信息已在 header 中，不再需要 details
         vec![]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
@@ -100,14 +101,16 @@ impl ToolDisplay for WriteDisplay {
     fn name(&self) -> &str {
         "Write"
     }
-    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
-        // summary 格式：`N bytes`（动态更新）
-        match summary {
-            Some(s) if !s.is_empty() => format!("Write {display_path} {s}"),
-            _ => format!("Write {display_path}"),
-        }
+        // 从 input 的 content 计算字节数
+        let bytes = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        format!("Write {display_path} {bytes} bytes")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 字节数已在 summary 中，不再需要 details
@@ -133,14 +136,21 @@ impl ToolDisplay for EditDisplay {
     fn name(&self) -> &str {
         "Edit"
     }
-    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
-        // summary 格式：`Changed N -> M chars` 或 `Added/Removed N line(s)`
-        match summary {
-            Some(s) if !s.is_empty() => format!("Edit {display_path} {s}"),
-            _ => format!("Edit {display_path}"),
-        }
+        // 从 input 的 old_string/new_string 计算变更统计
+        let old_len = input
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let new_len = input
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        format!("Edit {display_path} Changed {old_len} -> {new_len} chars")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 变更统计已在 summary 中，不再需要 details

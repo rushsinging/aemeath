@@ -66,7 +66,19 @@ pub(crate) fn format_grouped_tool_summaries(tool_calls: &[ToolCall]) -> String {
 
 pub(crate) fn summarize_tool_input(name: &str, input: &serde_json::Value) -> String {
     match name {
-        "Read" | "Write" | "Edit" | "LSP" => extract_display_path(input, &["file_path", "path"]),
+        "Read" => {
+            // TUI 层根据 input 的 offset/limit 自己组装行范围信息
+            String::new()
+        }
+        "Write" => {
+            // TUI 层根据 input 的 content 自己计算字节数
+            String::new()
+        }
+        "Edit" => {
+            // TUI 层根据 input 的 old_string/new_string 自己计算变更统计
+            String::new()
+        }
+        "LSP" => extract_display_path(input, &["file_path", "path"]),
         "Grep" => {
             let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
             let path = extract_display_path(input, &["path"]);
