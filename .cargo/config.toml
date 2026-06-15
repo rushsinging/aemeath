@@ -1,4 +1,3 @@
-# Keep normal cargo commands from creating per-checkout/worktree target directories.
-# This also covers cargo commands launched by hooks from this repository.
-[build]
-target-dir = "/Users/guoyuqi/.cache/aemeath-target"
+# Cargo project-local configuration.
+# target-dir 不再在此固定，改为由 .cargo/set-target.sh 按当前 git 分支动态设置
+# CARGO_TARGET_DIR，避免多个 worktree/分支共享同一份 target 导致相互污染。
