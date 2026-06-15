@@ -71,7 +71,8 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
             // Read tool 的 summary 为空字符串，TUI 层自己组装
             assert_eq!(calls[0].summary, "");
             assert_eq!(calls[1].name, "Grep");
-            assert_eq!(calls[1].summary, "\"AgentProgress\" in src");
+            // 所有 tool 的 summary 为空，TUI 层自己组装
+            assert_eq!(calls[1].summary, "");
         }
         AgentProgressKind::Message { .. } => panic!("expected ToolCalls event"),
     }
@@ -89,7 +90,8 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
 
     match event.kind {
         AgentProgressKind::ToolCalls { calls } => {
-            assert_eq!(calls[0].summary, "cargo check -p aemeath-cli…");
+            // 所有 tool 的 summary 为空
+            assert_eq!(calls[0].summary, "");
         }
         AgentProgressKind::Message { .. } => panic!("expected ToolCalls event"),
     }

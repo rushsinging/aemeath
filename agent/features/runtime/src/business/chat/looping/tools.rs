@@ -1,4 +1,4 @@
-use crate::business::agent::runner::progress::summarize_tool_input;
+// summary 已由 TUI 层从 input 参数组装，runtime 不再生成
 use crate::business::agent::{Agent, ToolCall};
 use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
@@ -56,7 +56,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: Some(summarize_tool_input(&call.name, &call.input)),
+                summary: None,
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
@@ -132,7 +132,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: Some(summarize_tool_input(&call.name, &call.input)),
+                summary: None,
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
