@@ -32,12 +32,11 @@ pub fn render_tool_call(
     );
     // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本。
     // header 文本颜色统一使用 TEXT（与 assistant message 一致），任务状态由 gutter 颜色表示。
-    // format_header_line 返回的 Line 已含样式（如 Read 的 summary 灰色），
-    // 未显式着色的 span 会继承 Line 的 base style（TEXT）。
+    // 通过 RenderedLine 的 line base style 让未显式着色的 span 继承 TEXT 色，
+    // 已有显式颜色的 span（如 Read 的 summary 灰色）保留各自样式。
     let header_line = strip_leading_bullet(header_line);
-    let mut styled_line = header_line;
-    styled_line.style = Style::default().fg(theme::TEXT);
-    let mut lines = vec![RenderedLine::new(styled_line.spans)];
+    let first_line = RenderedLine::new(header_line.spans).with_style(Style::default().fg(theme::TEXT));
+    let mut lines = vec![first_line];
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
             detail,
@@ -99,19 +98,14 @@ mod tests {
     #[test]
     fn test_tool_call_running_applies_text_color_to_title() {
         // marker（●）现由 gutter 注入；header 文本统一使用 TEXT 色（与 assistant message 一致），
-        // 任务状态由 gutter 颜色表示。
+        // 任务状态由 gutter 颜色表示。颜色通过 RenderedLine 的 line base style 传递。
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
             &RenderCtx { width: 80 },
         );
-        let title_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref().contains("Grep"))
-            .unwrap();
-
-        assert_eq!(title_span.style.fg, Some(theme::TEXT));
+        // header 行的 line base style 应为 TEXT
+        assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Grep"));
         // header 行不再自写 marker 字形（gutter.rs 覆盖 marker）。
         assert!(
@@ -126,13 +120,8 @@ mod tests {
         view.style = SemanticStyle::Success;
         view.icon = "✓".into();
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
-        let title_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref().contains("Grep"))
-            .unwrap();
-
-        assert_eq!(title_span.style.fg, Some(theme::TEXT));
+        // header 行的 line base style 应为 TEXT
+        assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Grep"));
         assert!(
             !block.lines[0].plain.starts_with('✓'),
