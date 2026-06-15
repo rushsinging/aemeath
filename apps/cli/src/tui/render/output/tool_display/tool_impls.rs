@@ -19,7 +19,7 @@ impl ToolDisplay for BashDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let cmd = str_arg(input, "command", "?");
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
-        format!("Bash {}", truncate_ellipsis(cmd, 80))
+        format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // command 已在 header 显示，不再需要 details
@@ -62,7 +62,10 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
-        format!("Read {display_path} L{start}:L{end} ({limit} lines)")
+        format!(
+            "{} {display_path} L{start}:L{end} ({limit} lines)",
+            self.display_name()
+        )
     }
     fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
         let path = file_path(input);
@@ -73,7 +76,7 @@ impl ToolDisplay for ReadDisplay {
         let end = offset + limit;
         let range_info = format!("L{start}:L{end} ({limit} lines)");
         Line::from(vec![
-            Span::raw(format!("Read {display_path} ")),
+            Span::raw(format!("{} {display_path} ", self.display_name())),
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }
@@ -110,7 +113,7 @@ impl ToolDisplay for WriteDisplay {
             .and_then(|v| v.as_str())
             .map(|s| s.len())
             .unwrap_or(0);
-        format!("Write {display_path} {bytes} bytes")
+        format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 字节数已在 summary 中，不再需要 details
@@ -150,7 +153,10 @@ impl ToolDisplay for EditDisplay {
             .and_then(|v| v.as_str())
             .map(|s| s.len())
             .unwrap_or(0);
-        format!("Edit {display_path} Changed {old_len} -> {new_len} chars")
+        format!(
+            "{} {display_path} Changed {old_len} -> {new_len} chars",
+            self.display_name()
+        )
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 变更统计已在 summary 中，不再需要 details
@@ -182,7 +188,7 @@ impl ToolDisplay for GlobDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = str_arg(input, "pattern", "?");
-        format!("Glob {pattern}")
+        format!("{} {pattern}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -215,7 +221,7 @@ impl ToolDisplay for GrepDisplay {
         let pattern = str_arg(input, "pattern", "?");
         let path = str_arg(input, "path", ".");
         let display_path = truncate_path(path, 40);
-        format!("Grep /{pattern}/ in {display_path}")
+        format!("{} /{pattern}/ in {display_path}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -248,7 +254,7 @@ impl ToolDisplay for AgentDisplay {
         let desc = str_arg(input, "description", "sub-task");
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
-        let mut header = format!("Agent {desc}");
+        let mut header = format!("{} {desc}", self.display_name());
         if let Some(r) = role {
             header.push_str(&format!(" [role: {r}]"));
         }
@@ -297,7 +303,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
             .and_then(|branch| branch.as_str())
             .or_else(|| input.get("path").and_then(|path| path.as_str()))
             .unwrap_or("worktree");
-        format!("EnterWorktree {target}")
+        format!("{} {target}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -327,7 +333,7 @@ impl ToolDisplay for ExitWorktreeDisplay {
         "ExitWorktree"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "ExitWorktree".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -359,7 +365,7 @@ impl ToolDisplay for WebFetchDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let url = str_arg(input, "url", "?");
         let display_url = truncate_ellipsis(url, 60);
-        format!("WebFetch {display_url}")
+        format!("{} {display_url}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -391,7 +397,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let question = str_arg(input, "question", "?");
         let preview = truncate_ellipsis(question, 60usize);
-        format!("AskUserQuestion {preview}")
+        format!("{} {preview}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

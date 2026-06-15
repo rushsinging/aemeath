@@ -25,7 +25,7 @@ inventory::submit! {
 fn tasks_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     match args.trim().to_lowercase().as_str() {
         "" | "all" => CommandResult::Success(
-            "Task Management:\n\nUse the following tools to manage tasks:\n  - TaskCreate: Create a new task\n  - TaskList: List all tasks\n  - TaskGet: Get task details\n  - TaskUpdate: Update task status\n  - TaskStop: Stop/delete a task\n  - TodoWrite: Create a todo list\n\nExample: Use 'TaskList' tool to see all tasks".to_string()
+            "Task Management:\n\nUse the following tools to manage tasks:\n  - TaskCreate: Create a new task\n  - TaskList: List all tasks\n  - TaskGet: Get task details\n  - TaskUpdate: Update task status\n  - TaskStop: Stop/delete a task\n\nExample: Use 'TaskList' tool to see all tasks".to_string()
         ),
         "active" => CommandResult::Success("Use 'TaskList' tool with status='in_progress' filter".to_string()),
         "completed" => CommandResult::Success("Use 'TaskList' tool with status='completed' filter".to_string()),

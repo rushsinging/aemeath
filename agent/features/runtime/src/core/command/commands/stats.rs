@@ -80,7 +80,7 @@ fn stats_execute(
                      Available tools: 27\n\
                      - File operations: Read, Write, Edit, Glob, Grep\n\
                      - Shell: Bash\n\
-                     - Tasks: TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop, TodoWrite\n\
+                     - Tasks: TaskCreate, TaskUpdate, TaskList, TaskGet, TaskStop\n\
                      - Web: WebFetch, WebSearch\n\
                      - MCP: McpTool, ListMcpResources, ReadMcpResource\n\
                      - Agent: Agent\n\

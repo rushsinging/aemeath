@@ -282,7 +282,9 @@ mod tests {
         assert!(rendered.iter().any(|line| line == "  Aemeath - AI Agent"));
         assert!(rendered.iter().any(|line| line == "💭thinking"));
         // Grep header 现在包含 pattern 和 path
-        assert!(rendered.iter().any(|line| line.contains("Grep /76/") && line.contains("docs/bug/active.md")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.contains("Search /76/") && line.contains("docs/bug/active.md")));
         // Grep details 已隐藏（path 已在 header 中）
         // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(marker 槽) = 4 列前导。
         // 首行 marker 为 ⎿ 圆角连接（连接父 ToolCall），续行为 4 空格。
@@ -294,7 +296,9 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "    ... (1 lines omitted)"));
-        assert!(!rendered.iter().any(|line| line.contains("Grep completed")));
+        assert!(!rendered
+            .iter()
+            .any(|line| line.contains("Search completed")));
         assert!(!rendered.iter().any(|line| line.contains("You:")));
         assert!(!rendered
             .iter()
