@@ -54,6 +54,7 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
+    pub language: String,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -88,6 +89,7 @@ where
         agent_semaphore,
         hook_runner,
         memory_config,
+        language,
     } = ctx;
     let hook_ui = HookUi::new(sink.clone());
 
@@ -304,7 +306,7 @@ where
             }
             // Inject task reminder if conditions are met
             if let Some(reminder) = task_reminder_state
-                .build_reminder(turn_count as u64, &task_store)
+                .build_reminder(turn_count as u64, &task_store, &language)
                 .await
             {
                 api_msgs.push(reminder);
@@ -960,6 +962,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
         let _ = std::fs::remove_file(&flag_path);
@@ -1038,6 +1041,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
         let _ = std::fs::remove_file(&flag_path);
@@ -1120,6 +1124,7 @@ mod tests {
                 path_base.path().display().to_string(),
             ),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
 
@@ -1175,6 +1180,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: test_hook_runner(),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
 

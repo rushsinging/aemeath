@@ -60,6 +60,7 @@ pub(super) async fn chat_impl(
             agent_semaphore: inner.context.agent_semaphore.clone(),
             hook_runner: inner.context.hook_runner.clone(),
             memory_config: inner.context.memory_config.clone(),
+            language: inner.context.language.clone(),
         })
         .await;
         if let Ok(mut guard) = inner.current_cancel.lock() {

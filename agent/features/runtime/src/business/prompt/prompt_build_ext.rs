@@ -32,7 +32,7 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(prompt::api::guidance::UNIVERSAL_EXECUTION_DISCIPLINE);
+    prompt.push_str(prompt::api::guidance::universal_execution_discipline(language));
     append_skills(&mut prompt, &skills_guard);
     append_agent_roles(&mut prompt, config_file);
     if !model_guidance.is_empty() {
