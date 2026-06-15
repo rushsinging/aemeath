@@ -163,8 +163,7 @@ fn format_result_lines_tail(
     let start = all_lines.len().saturating_sub(max_lines);
     let mut out: Vec<RenderedLine> = Vec::new();
     // SAFETY: start ≤ all_lines.len()（saturating_sub 保证），Vec slice 不会越界
-    for line in &all_lines[start..] {
-        // allow unsafe_text_op
+    for line in &all_lines[start..] { // allow unsafe_text_op: start 从 Vec 下标推导，不涉及 str 字节偏移
         out.extend(wrap_spans_to_rendered_lines(
             vec![Span::styled(line.to_string(), base)],
             width as usize,
