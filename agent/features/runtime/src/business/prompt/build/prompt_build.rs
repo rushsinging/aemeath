@@ -79,7 +79,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
 - BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(taskId, status="in_progress")` in the same tool batch or an earlier one.
 - AFTER completing a task yourself: call `TaskUpdate(taskId, status="completed")` before reporting completion.
-- If dispatching a sub-agent for a task: pass `taskId` to the Agent tool and do NOT call TaskUpdate for that task; the dispatcher manages Pending → InProgress → Completed/Pending automatically.
+- If dispatching a sub-agent for a task: optionally pass `taskId` to the Agent tool for automatic status tracking (the dispatcher manages Pending → InProgress → Completed/Pending). For free-form exploration or ad-hoc calls, taskId is NOT required.
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
@@ -89,7 +89,7 @@ System reminders about tasks may refer to older task batches. If a reminder is u
 
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
 
-BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (missing taskId / no lifecycle ownership)
+BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no lifecycle ownership — pass taskId for auto-tracking)
 GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
 
 # Tone and style

@@ -189,7 +189,7 @@ async fn test_agent_tool_task_id_missing_task_errors() {
 }
 
 #[tokio::test]
-async fn test_agent_tool_requires_task_id_when_active_list_has_incomplete_tasks() {
+async fn test_agent_tool_allows_missing_task_id_even_with_active_list() {
     let store = Arc::new(TaskStore::new());
     store
         .create_list("request".to_string(), "complex request".to_string())
@@ -213,10 +213,10 @@ async fn test_agent_tool_requires_task_id_when_active_list_has_incomplete_tasks(
         )
         .await;
 
-    assert!(result.is_error);
-    assert!(result.output.contains("taskId"));
-    assert!(result.output.contains("active task list"));
-    assert_eq!(*runner.run_count.lock().unwrap(), 0);
+    // Free-form agent calls without taskId should succeed even when an active
+    // task list has incomplete tasks.
+    assert!(!result.is_error);
+    assert_eq!(*runner.run_count.lock().unwrap(), 1);
 }
 
 #[tokio::test]
