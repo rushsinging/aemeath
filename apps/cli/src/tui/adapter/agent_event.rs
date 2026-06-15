@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_map_agent_event_tool_call_passes_none_when_arguments_delta_absent() {
+    fn test_map_agent_event_tool_call_fallback_uses_full_arguments_when_delta_absent() {
         let event = UiEvent::ToolCallUpdate {
             context: ctx(),
             id: sdk::ids::ToolCallId::new("tool-1"),
@@ -385,7 +385,8 @@ mod tests {
             Some(ConversationIntent::ObserveToolCallUpdate {
                 arguments, ..
             }) => {
-                assert!(arguments.is_none());
+                // arguments_delta 为 None 时，fallback 到 arguments JSON 字符串
+                assert!(arguments.is_some());
             }
             other => panic!("unexpected mapping: {other:?}"),
         }
