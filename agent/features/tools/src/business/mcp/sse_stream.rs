@@ -16,18 +16,18 @@ impl SseReadStream {
             Some(Ok(chunk)) => {
                 let len = chunk.len();
                 self.buffer.push_str(&String::from_utf8_lossy(&chunk));
-                log::debug!(
+                log::debug!(target: "tools::sse_stream",
                     "[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes",
                     self.buffer.len()
                 );
                 Ok(true)
             }
             Some(Err(e)) => {
-                log::warn!("[MCP:SSE] read_chunk error: {e}");
+                log::warn!(target: "tools::sse_stream", "[MCP:SSE] read_chunk error: {e}");
                 Err(format!("SSE read error: {e}"))
             }
             None => {
-                log::info!("[MCP:SSE] read_chunk: stream EOF");
+                log::info!(target: "tools::sse_stream", "[MCP:SSE] read_chunk: stream EOF");
                 Ok(false)
             }
         }
@@ -51,7 +51,7 @@ impl SseReadStream {
         // Handles servers (e.g. z.ai) that omit the trailing \n\n.
         if !self.buffer.is_empty() && self.buffer.contains("data:") {
             if let Some(event) = try_parse_incomplete_event(&self.buffer) {
-                log::info!(
+                log::info!(target: "tools::sse_stream",
                     "[MCP:SSE] parsed incomplete event (no trailing \\n\\n), data_len={}",
                     event.data.len()
                 );
@@ -122,7 +122,7 @@ pub(super) fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
         .unwrap_or_else(|| "message".to_string());
 
     let data = data_content.to_string();
-    log::info!(
+    log::info!(target: "tools::sse_stream",
         "[MCP:SSE] incomplete-fallback: event={event_type} data_len={}",
         data.len()
     );
