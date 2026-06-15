@@ -18,7 +18,7 @@ fn test_static_prompt_delegates_agent_task_status_to_task_id() {
     let text = static_system_prompt_for_test("/tmp/project", true);
 
     assert!(text.contains("pass `taskId` to the Agent tool"));
-    assert!(text.contains("do NOT call TaskUpdate for that task"));
+    assert!(text.contains("taskId is NOT required"));
     assert!(!text.contains("TaskUpdate(id2, in_progress) → Agent"));
 }
 
