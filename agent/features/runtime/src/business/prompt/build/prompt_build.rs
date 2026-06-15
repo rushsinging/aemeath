@@ -221,20 +221,16 @@ pub fn current_date() -> String {
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let mut current = Some(cwd);
-
-    for _ in 0..=depth {
-        if let Some(dir) = current {
-            paths.push(dir.join(share::config::paths::CLAUDE_MD));
-            paths.push(dir.join(share::config::paths::AGENTS_MD));
-            current = dir.parent();
-        } else {
-            break;
-        }
-    }
-
-    paths
+    // 从 cwd 向上 depth 级祖先目录（含 cwd），每层 CLAUDE.md 优先于 AGENTS.md
+    paths::project_instruction_dirs(cwd, depth)
+        .into_iter()
+        .flat_map(|dir| {
+            [
+                dir.join(paths::CLAUDE_MD),
+                dir.join(paths::AGENTS_MD),
+            ]
+        })
+        .collect()
 }
 
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
@@ -258,7 +254,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
         }
     }
 
-    // Project: walk up/down INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
+    // Project: walk up INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
     for project_path in project_instruction_walk(cwd, INSTRUCTION_SEARCH_DEPTH) {
         if project_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {

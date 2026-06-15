@@ -61,6 +61,26 @@ pub fn project_claude_settings_path(cwd: &Path) -> PathBuf {
     cwd.join(CLAUDE_DIR_NAME).join(SETTINGS_FILE)
 }
 
+/// 从 `cwd` 向上探索 `depth` 级祖先目录（含 `cwd` 自身），返回目录路径列表。
+///
+/// 纯路径拼接，无 fs IO。用于项目指令搜索（`load_agents_md`）与
+/// config reload snapshot 监控共享同一套目录发现逻辑。
+/// 返回顺序：`[cwd, parent, grandparent, ...]`，共 `depth + 1` 个元素。
+pub fn project_instruction_dirs(cwd: &Path, depth: u32) -> Vec<PathBuf> {
+    let mut dirs = Vec::with_capacity(depth as usize + 1);
+    let mut current = Some(cwd);
+    for _ in 0..=depth {
+        match current {
+            Some(dir) => {
+                dirs.push(dir.to_path_buf());
+                current = dir.parent();
+            }
+            None => break,
+        }
+    }
+    dirs
+}
+
 pub fn project_claude_skills_dir(cwd: &Path) -> PathBuf {
     cwd.join(CLAUDE_DIR_NAME).join(SKILLS_DIR_NAME)
 }
@@ -170,6 +190,27 @@ mod tests {
             global_settings_path(),
             PathBuf::from(".agents/settings.json")
         );
+    }
+
+    #[test]
+    fn test_project_instruction_dirs_includes_cwd_and_ancestors() {
+        let cwd = PathBuf::from("/a/b/c/d");
+        let dirs = project_instruction_dirs(&cwd, 2);
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/a/b/c/d"),
+                PathBuf::from("/a/b/c"),
+                PathBuf::from("/a/b"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_project_instruction_dirs_depth_zero_cwd_only() {
+        let cwd = PathBuf::from("/a/b");
+        let dirs = project_instruction_dirs(&cwd, 0);
+        assert_eq!(dirs, vec![PathBuf::from("/a/b")]);
     }
 
     #[test]
